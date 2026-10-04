@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import AppKit
+import Carbon.HIToolbox
 import CoreImage
 
 /// Полноэкранное окно с «замороженным» снимком одного монитора.
@@ -544,51 +545,58 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     /// Вызывается и из keyDown, и из перехватчика клавиш ScreenshotService,
     /// который работает, даже если окно оверлея не стало ключевым.
     func handleKey(_ event: NSEvent) -> Bool {
-        let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        // Только коды клавиш: в русской раскладке ⌘C приходит как «⌘с».
+        let code = Int(event.keyCode)
+        let flags = event.modifierFlags
         // ⌘Z / ⌃Z — отменить, ⇧⌘Z / ⇧⌃Z — повторить.
-        if !event.modifierFlags.intersection([.command, .control]).isEmpty, chars == "z" {
-            if event.modifierFlags.contains(.shift) { redo() } else { undo() }
+        if !flags.intersection([.command, .control]).isEmpty, code == kVK_ANSI_Z {
+            if flags.contains(.shift) { redo() } else { undo() }
             return true
         }
-        if event.modifierFlags.contains(.control) { return false }
-        if event.modifierFlags.contains(.command) {
-            switch chars {
-            case "c":
+        if flags.contains(.control) { return false }
+        if flags.contains(.command) {
+            switch code {
+            case kVK_ANSI_C:
                 if selection != nil { copyResult() }
-            case "s":
+            case kVK_ANSI_S:
                 if selection != nil { saveResult() }
-            case "w":
+            case kVK_ANSI_W:
                 ScreenshotService.shared.close()
             default:
                 return false
             }
             return true
         }
-        switch event.keyCode {
-        case 53: // Esc
+        switch code {
+        case kVK_Escape:
             if selectedIndex != nil {
                 selectedIndex = nil
                 needsDisplay = true
             } else {
                 ScreenshotService.shared.close()
             }
-        case 36, 76: // Return / Enter
+        case kVK_Return, kVK_ANSI_KeypadEnter:
             if selection != nil { confirmResult() }
-        case 51, 117: // Delete / Forward Delete
+        case kVK_Delete, kVK_ForwardDelete:
             deleteSelected()
         default:
-            guard selection != nil, mode == .edit,
-                  let chars = event.charactersIgnoringModifiers?.lowercased() else { return false }
-            if chars == "v" {
+            guard selection != nil, mode == .edit else { return false }
+            if code == kVK_ANSI_V {
                 select(tool: .select)
-            } else if let n = Int(chars), (1...Tool.numbered.count).contains(n) {
-                select(tool: Tool.numbered[n - 1])
+            } else if let n = Self.digitKeys.firstIndex(of: code) ?? Self.keypadDigitKeys.firstIndex(of: code),
+                      n < Tool.numbered.count {
+                select(tool: Tool.numbered[n])
             } else {
                 return false
             }
         }
         return true
     }
+
+    /// Клавиши 1…7 в верхнем ряду и на цифровом блоке.
+    private static let digitKeys = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7]
+    private static let keypadDigitKeys = [kVK_ANSI_Keypad1, kVK_ANSI_Keypad2, kVK_ANSI_Keypad3, kVK_ANSI_Keypad4,
+                                          kVK_ANSI_Keypad5, kVK_ANSI_Keypad6, kVK_ANSI_Keypad7]
 
     // MARK: - Действия панели
 
