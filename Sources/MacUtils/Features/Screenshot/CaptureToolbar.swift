@@ -25,7 +25,7 @@ final class CaptureToolbar: NSVisualEffectView {
         stack.edgeInsets = NSEdgeInsets(top: 5, left: 8, bottom: 5, right: 8)
 
         for (index, tool) in Tool.allCases.enumerated() {
-            let button = makeButton(symbol: tool.symbol, fallback: "\(index + 1)", tip: tool.title,
+            let button = makeButton(symbol: tool.symbol, fallback: String(tool.title.prefix(1)), tip: tool.title,
                                     action: #selector(toolPressed(_:)))
             button.tag = index
             toolButtons[tool] = button
@@ -39,6 +39,8 @@ final class CaptureToolbar: NSVisualEffectView {
         stack.addArrangedSubview(makeButton(symbol: "arrow.uturn.backward", fallback: "↶",
                                             tip: "Отменить (⌘Z)", action: #selector(undoPressed)))
         stack.addArrangedSubview(separator())
+        stack.addArrangedSubview(makeButton(symbol: "scroll", fallback: "⇕",
+                                            tip: "Длинный снимок с прокруткой", action: #selector(scrollPressed)))
         stack.addArrangedSubview(makeButton(symbol: "text.viewfinder", fallback: "OCR",
                                             tip: "Распознать текст", action: #selector(ocrPressed)))
         stack.addArrangedSubview(makeButton(symbol: "square.and.arrow.down", fallback: "S",
@@ -114,4 +116,5 @@ final class CaptureToolbar: NSVisualEffectView {
     @objc private func savePressed() { owner?.saveResult() }
     @objc private func copyPressed() { owner?.copyResult() }
     @objc private func closePressed() { owner?.closeCapture() }
+    @objc private func scrollPressed() { owner?.startScrollCapture() }
 }

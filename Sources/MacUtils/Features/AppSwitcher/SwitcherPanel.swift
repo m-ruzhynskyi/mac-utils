@@ -50,45 +50,89 @@ struct SwitcherView: View {
     @ObservedObject var model: AppSwitcher
     let maxWidth: CGFloat
 
-    private var iconSize: CGFloat {
-        let count = CGFloat(max(model.items.count, 1))
-        let perItem = (maxWidth - 32) / count - 12
-        return min(72, max(32, perItem - 12))
+    @AppStorage(Pref.switcherPreviews) private var showPreviews = true
+
+    private let thumbSize = CGSize(width: 200, height: 125)
+    private let spacing: CGFloat = 8
+
+    private var columns: Int {
+        let cardWidth = (showPreviews ? thumbSize.width : 72) + 16
+        let fit = Int((maxWidth - 40) / (cardWidth + spacing))
+        return max(1, min(model.items.count, fit))
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 6) {
-                ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                    Image(nsImage: item.icon)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: iconSize, height: iconSize)
-                        .padding(6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(index == model.selected ? Color.primary.opacity(0.18) : .clear)
-                        )
-                        .overlay(alignment: .bottom) {
-                            if item.app.isHidden {
-                                Circle().fill(.secondary).frame(width: 5, height: 5).offset(y: 2)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                        .onHover { inside in
-                            if inside { model.selected = index }
-                        }
-                        .onTapGesture { model.choose(index) }
-                }
-            }
-            if model.items.indices.contains(model.selected) {
-                Text(model.items[model.selected].name)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
+        let grid = Array(repeating: GridItem(.fixed((showPreviews ? thumbSize.width : 72) + 16), spacing: spacing),
+                         count: columns)
+        LazyVGrid(columns: grid, spacing: spacing) {
+            ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                card(item, selected: index == model.selected)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { model.selected = index }
+                    }
+                    .onTapGesture { model.choose(index) }
             }
         }
-        .padding(16)
+        .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(6)
+    }
+
+    @ViewBuilder
+    private func card(_ item: SwitcherItem, selected: Bool) -> some View {
+        VStack(spacing: 6) {
+            if showPreviews {
+                ZStack(alignment: .bottomLeading) {
+                    Group {
+                        if let preview = model.previews[item.id] {
+                            Image(nsImage: preview)
+                                .resizable()
+                                .interpolation(.high)
+                                .aspectRatio(contentMode: .fit)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                .shadow(radius: 2)
+                        } else {
+                            Image(nsImage: item.icon)
+                                .resizable()
+                                .frame(width: 72, height: 72)
+                        }
+                    }
+                    .frame(width: thumbSize.width, height: thumbSize.height)
+
+                    if model.previews[item.id] != nil {
+                        Image(nsImage: item.icon)
+                            .resizable()
+                            .frame(width: 34, height: 34)
+                            .shadow(radius: 2)
+                            .offset(x: -4, y: 6)
+                    }
+                }
+            } else {
+                Image(nsImage: item.icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 64, height: 64)
+            }
+            HStack(spacing: 4) {
+                if item.app.isHidden {
+                    Image(systemName: "eye.slash").font(.system(size: 9))
+                }
+                Text(item.name)
+                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: (showPreviews ? thumbSize.width : 72))
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(selected ? Color.accentColor.opacity(0.28) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
     }
 }

@@ -47,7 +47,7 @@ final class ScreenshotService: ObservableObject {
     // MARK: - Захват
 
     func start(_ mode: Mode) {
-        guard windows.isEmpty, !capturing else { return }
+        guard windows.isEmpty, !capturing, ScrollCapture.current == nil else { return }
         guard Permissions.screenRecording else {
             Permissions.requestScreenRecording()
             Toast.show("Разрешите Mac Utils «Запись экрана» в настройках конфиденциальности",
@@ -132,6 +132,39 @@ final class ScreenshotService: ObservableObject {
             Toast.show("Сохранено: \(url.lastPathComponent)", symbol: "square.and.arrow.down.fill", tint: .green)
         } catch {
             Toast.show("Не удалось сохранить: \(error.localizedDescription)",
+                       symbol: "exclamationmark.triangle.fill", tint: .orange)
+        }
+    }
+
+    /// Длинный снимок: закрываем оверлей, пользователь прокручивает, мы склеиваем кадры.
+    func startScrollCapture(rect: NSRect) {
+        close()
+        Task { @MainActor in
+            // Даём оверлею исчезнуть, а фокусу вернуться к прокручиваемому окну.
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            ScrollCapture.start(rect: rect)
+        }
+    }
+
+    /// Длинный снимок готов: в буфер обмена и в папку.
+    func deliverLongImage(_ image: CGImage) {
+        let rep = NSBitmapImageRep(cgImage: image)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setData(png, forType: .png)
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd 'в' HH.mm.ss"
+        let folder = Pref.screenshotDirectory
+        let url = folder.appendingPathComponent("Длинный снимок \(formatter.string(from: Date())).png")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try png.write(to: url)
+            Toast.show("Длинный снимок скопирован и сохранён (\(image.height) px)",
+                       symbol: "scroll.fill", tint: .green)
+        } catch {
+            Toast.show("Скопировано, но не сохранено: \(error.localizedDescription)",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
         }
     }

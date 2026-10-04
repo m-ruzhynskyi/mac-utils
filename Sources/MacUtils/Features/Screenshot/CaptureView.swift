@@ -42,6 +42,21 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     static let palette: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemGreen,
                                      .systemBlue, .systemPurple, .white, .black]
 
+    /// Ручки изменения размера выделения.
+    private enum Handle: CaseIterable {
+        case bottomLeft, bottom, bottomRight, right, topRight, top, topLeft, left
+    }
+
+    /// Что делает текущее перетаскивание мышью.
+    private enum Drag {
+        case none
+        case selecting(start: NSPoint)
+        case drawing
+        case movingAnnotation(index: Int, last: NSPoint)
+        case movingSelection(last: NSPoint)
+        case resizing(handle: Handle, original: NSRect, start: NSPoint)
+    }
+
     private let image: CGImage
     private let baseImage: NSImage
     private lazy var pixelatedImage: NSImage? = makePixelated()
@@ -50,9 +65,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     private var selection: NSRect?
     private var hoverRect: NSRect?
-    private var dragStart: NSPoint?
-    private var isSelecting = false
+    private var drag: Drag = .none
     private var annotations: [Annotation] = []
+    private var undoStack: [[Annotation]] = []
+    private var selectedIndex: Int?
     private var current: Annotation?
     private(set) var tool: Tool = .arrow
     private(set) var color: NSColor = .systemRed
@@ -61,6 +77,11 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var textField: NSTextField?
 
     private var pixelScale: CGFloat { CGFloat(image.width) / max(bounds.width, 1) }
+
+    private var isSelecting: Bool {
+        if case .selecting = drag { return true }
+        return false
+    }
 
     init(frame: NSRect, image: CGImage, snapRects: [CGRect], mode: ScreenshotService.Mode) {
         self.image = image
@@ -77,14 +98,16 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func cursorUpdate(with event: NSEvent) { NSCursor.crosshair.set() }
+    override func cursorUpdate(with event: NSEvent) { updateCursor(at: convert(event.locationInWindow, from: nil)) }
 
     func resetSelection() {
         commitTextField()
         selection = nil
         hoverRect = nil
-        isSelecting = false
+        drag = .none
         annotations.removeAll()
+        undoStack.removeAll()
+        selectedIndex = nil
         current = nil
         toolbar?.removeFromSuperview()
         toolbar = nil
@@ -98,13 +121,38 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         return NSPoint(x: min(max(p.x, 0), bounds.width), y: min(max(p.y, 0), bounds.height))
     }
 
+    private var isEditing: Bool { mode == .edit && selection != nil && toolbar?.isHidden == false }
+
     override func mouseMoved(with event: NSEvent) {
-        guard selection == nil, !isSelecting else { return }
         let p = point(event)
+        updateCursor(at: p)
+        guard selection == nil, !isSelecting else { return }
         let hover = snapRects.first { $0.contains(p) }
         if hover != hoverRect {
             hoverRect = hover
             needsDisplay = true
+        }
+    }
+
+    private func updateCursor(at p: NSPoint) {
+        guard isEditing, let selection else {
+            NSCursor.crosshair.set()
+            return
+        }
+        if let handle = handle(at: p) {
+            switch handle {
+            case .left, .right: NSCursor.resizeLeftRight.set()
+            case .top, .bottom: NSCursor.resizeUpDown.set()
+            default: NSCursor.crosshair.set()
+            }
+        } else if annotationIndex(at: p) != nil {
+            NSCursor.openHand.set()
+        } else if selection.contains(p) && tool == .select {
+            NSCursor.openHand.set()
+        } else if selection.contains(p) && tool == .text {
+            NSCursor.iBeam.set()
+        } else {
+            NSCursor.crosshair.set()
         }
     }
 
@@ -114,63 +162,106 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             commitTextField()
             return
         }
-        if let selection, selection.contains(p), mode == .edit {
-            if event.clickCount == 2 {
-                current = nil
-                copyResult()
+
+        if isEditing, let selection {
+            if let handle = handle(at: p) {
+                drag = .resizing(handle: handle, original: selection, start: p)
                 return
             }
-            switch tool {
-            case .text:
-                beginText(at: p)
-            case .pen, .marker:
-                current = Annotation(tool: tool, color: color, width: lineWidth, points: [p])
-            default:
-                current = Annotation(tool: tool, color: color, width: lineWidth, points: [p, p])
+            if selection.contains(p) {
+                if event.clickCount == 2 && annotationIndex(at: p) == nil {
+                    copyResult()
+                    return
+                }
+                // Клик по нарисованному — выбрать и перетаскивать.
+                if let index = annotationIndex(at: p) {
+                    pushUndo()
+                    selectedIndex = index
+                    drag = .movingAnnotation(index: index, last: p)
+                    NSCursor.closedHand.set()
+                    needsDisplay = true
+                    return
+                }
+                selectedIndex = nil
+                switch tool {
+                case .select:
+                    drag = .movingSelection(last: p)
+                    NSCursor.closedHand.set()
+                case .text:
+                    beginText(at: p)
+                case .counter:
+                    pushUndo()
+                    var marker = Annotation(tool: .counter, color: color, width: lineWidth, points: [p])
+                    marker.number = nextCounterNumber()
+                    annotations.append(marker)
+                    selectedIndex = annotations.count - 1
+                    drag = .movingAnnotation(index: annotations.count - 1, last: p)
+                case .pen, .marker:
+                    current = Annotation(tool: tool, color: color, width: lineWidth, points: [p])
+                    drag = .drawing
+                default:
+                    current = Annotation(tool: tool, color: color, width: lineWidth, points: [p, p])
+                    drag = .drawing
+                }
+                needsDisplay = true
+                return
             }
-            return
         }
+
         // Новое выделение.
         ScreenshotService.shared.selectionBegan(in: self)
         toolbar?.isHidden = true
-        dragStart = p
-        isSelecting = true
+        selectedIndex = nil
+        drag = .selecting(start: p)
         selection = nil
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
         let p = point(event)
-        if isSelecting, let start = dragStart {
-            selection = Annotation.rect(start, p)
-            needsDisplay = true
+        switch drag {
+        case .none:
             return
-        }
-        guard var annotation = current else { return }
-        switch annotation.tool {
-        case .pen, .marker:
-            annotation.points.append(p)
-        default:
-            var end = p
-            // Shift — ровная горизонталь/вертикаль для стрелки и квадрат для фигур.
-            if event.modifierFlags.contains(.shift), let start = annotation.points.first {
-                let dx = p.x - start.x, dy = p.y - start.y
-                if annotation.tool == .arrow {
-                    end = abs(dx) > abs(dy) ? NSPoint(x: p.x, y: start.y) : NSPoint(x: start.x, y: p.y)
-                } else {
-                    let side = max(abs(dx), abs(dy))
-                    end = NSPoint(x: start.x + (dx < 0 ? -side : side), y: start.y + (dy < 0 ? -side : side))
-                }
+
+        case .selecting(let start):
+            selection = Annotation.rect(start, p)
+
+        case .drawing:
+            guard var annotation = current else { return }
+            switch annotation.tool {
+            case .pen, .marker:
+                annotation.points.append(p)
+            default:
+                annotation.points = [annotation.points[0], constrained(p, from: annotation.points[0],
+                                                                       tool: annotation.tool, event: event)]
             }
-            annotation.points = [annotation.points[0], end]
+            current = annotation
+
+        case .movingAnnotation(let index, let last):
+            guard annotations.indices.contains(index) else { return }
+            annotations[index].offset(dx: p.x - last.x, dy: p.y - last.y)
+            drag = .movingAnnotation(index: index, last: p)
+
+        case .movingSelection(let last):
+            guard var rect = selection else { return }
+            rect.origin.x = min(max(0, rect.minX + p.x - last.x), bounds.width - rect.width)
+            rect.origin.y = min(max(0, rect.minY + p.y - last.y), bounds.height - rect.height)
+            selection = rect
+            toolbar?.isHidden = true
+            drag = .movingSelection(last: p)
+
+        case .resizing(let handle, let original, let start):
+            selection = resized(original, handle: handle, dx: p.x - start.x, dy: p.y - start.y)
+            toolbar?.isHidden = true
         }
-        current = annotation
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
-        if isSelecting {
-            isSelecting = false
+        let finished = drag
+        drag = .none
+        switch finished {
+        case .selecting:
             if let rect = selection, rect.width >= 4, rect.height >= 4 {
                 selection = rect.integral.intersection(bounds)
             } else {
@@ -179,13 +270,38 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             }
             hoverRect = nil
             finishSelection()
-            return
-        }
-        if let annotation = current {
+
+        case .drawing:
+            if let annotation = current, annotation.isMeaningful {
+                pushUndo()
+                annotations.append(annotation)
+            }
             current = nil
-            if annotation.isMeaningful { annotations.append(annotation) }
-            needsDisplay = true
+
+        case .movingAnnotation:
+            NSCursor.openHand.set()
+
+        case .movingSelection, .resizing:
+            if let rect = selection {
+                selection = rect.integral.intersection(bounds)
+            }
+            showToolbar()
+
+        case .none:
+            break
         }
+        needsDisplay = true
+    }
+
+    /// Shift — ровная горизонталь/вертикаль для стрелки и квадрат для фигур.
+    private func constrained(_ p: NSPoint, from start: NSPoint, tool: Tool, event: NSEvent) -> NSPoint {
+        guard event.modifierFlags.contains(.shift) else { return p }
+        let dx = p.x - start.x, dy = p.y - start.y
+        if tool == .arrow {
+            return abs(dx) > abs(dy) ? NSPoint(x: p.x, y: start.y) : NSPoint(x: start.x, y: p.y)
+        }
+        let side = max(abs(dx), abs(dy))
+        return NSPoint(x: start.x + (dx < 0 ? -side : side), y: start.y + (dy < 0 ? -side : side))
     }
 
     private func finishSelection() {
@@ -196,6 +312,71 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             return
         }
         showToolbar()
+    }
+
+    // MARK: - Ручки выделения
+
+    private func handlePoint(_ handle: Handle, in rect: NSRect) -> NSPoint {
+        switch handle {
+        case .bottomLeft: return NSPoint(x: rect.minX, y: rect.minY)
+        case .bottom: return NSPoint(x: rect.midX, y: rect.minY)
+        case .bottomRight: return NSPoint(x: rect.maxX, y: rect.minY)
+        case .right: return NSPoint(x: rect.maxX, y: rect.midY)
+        case .topRight: return NSPoint(x: rect.maxX, y: rect.maxY)
+        case .top: return NSPoint(x: rect.midX, y: rect.maxY)
+        case .topLeft: return NSPoint(x: rect.minX, y: rect.maxY)
+        case .left: return NSPoint(x: rect.minX, y: rect.midY)
+        }
+    }
+
+    private func handle(at p: NSPoint) -> Handle? {
+        guard let selection else { return nil }
+        return Handle.allCases.first { handle in
+            let c = handlePoint(handle, in: selection)
+            return abs(c.x - p.x) <= 7 && abs(c.y - p.y) <= 7
+        }
+    }
+
+    private func resized(_ rect: NSRect, handle: Handle, dx: CGFloat, dy: CGFloat) -> NSRect {
+        var minX = rect.minX, maxX = rect.maxX, minY = rect.minY, maxY = rect.maxY
+        switch handle {
+        case .left, .topLeft, .bottomLeft: minX += dx
+        case .right, .topRight, .bottomRight: maxX += dx
+        default: break
+        }
+        switch handle {
+        case .bottom, .bottomLeft, .bottomRight: minY += dy
+        case .top, .topLeft, .topRight: maxY += dy
+        default: break
+        }
+        let a = NSPoint(x: min(max(minX, 0), bounds.width), y: min(max(minY, 0), bounds.height))
+        let b = NSPoint(x: min(max(maxX, 0), bounds.width), y: min(max(maxY, 0), bounds.height))
+        var result = Annotation.rect(a, b)
+        result.size.width = max(result.width, 8)
+        result.size.height = max(result.height, 8)
+        return result
+    }
+
+    // MARK: - Нарисованные элементы
+
+    private func annotationIndex(at p: NSPoint) -> Int? {
+        annotations.indices.reversed().first { annotations[$0].hitTest(p) }
+    }
+
+    private func nextCounterNumber() -> Int {
+        (annotations.filter { $0.tool == .counter }.map(\.number).max() ?? 0) + 1
+    }
+
+    private func pushUndo() {
+        undoStack.append(annotations)
+        if undoStack.count > 100 { undoStack.removeFirst() }
+    }
+
+    private func deleteSelected() {
+        guard let index = selectedIndex, annotations.indices.contains(index) else { return }
+        pushUndo()
+        annotations.remove(at: index)
+        selectedIndex = nil
         needsDisplay = true
     }
 
@@ -204,13 +385,26 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 53: // Esc
-            ScreenshotService.shared.close()
+            if selectedIndex != nil {
+                selectedIndex = nil
+                needsDisplay = true
+            } else {
+                ScreenshotService.shared.close()
+            }
         case 36, 76: // Return / Enter
             if selection != nil { copyResult() }
+        case 51, 117: // Delete / Forward Delete
+            deleteSelected()
         default:
-            if selection != nil, mode == .edit,
-               let chars = event.charactersIgnoringModifiers, let n = Int(chars), (1...Tool.allCases.count).contains(n) {
-                select(tool: Tool.allCases[n - 1])
+            guard selection != nil, mode == .edit,
+                  let chars = event.charactersIgnoringModifiers?.lowercased() else {
+                super.keyDown(with: event)
+                return
+            }
+            if chars == "v" {
+                select(tool: .select)
+            } else if let n = Int(chars), (1...Tool.numbered.count).contains(n) {
+                select(tool: Tool.numbered[n - 1])
             } else {
                 super.keyDown(with: event)
             }
@@ -253,7 +447,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         let index = Self.palette.firstIndex(of: color) ?? 0
         color = Self.palette[(index + 1) % Self.palette.count]
         textField?.textColor = color
+        if let selectedIndex, annotations.indices.contains(selectedIndex) {
+            pushUndo()
+            annotations[selectedIndex].color = color
+        }
         toolbar?.update(tool: tool, color: color)
+        needsDisplay = true
     }
 
     func undo() {
@@ -261,8 +460,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             textField?.removeFromSuperview()
             textField = nil
             window?.makeFirstResponder(self)
-        } else if !annotations.isEmpty {
-            annotations.removeLast()
+        } else if let previous = undoStack.popLast() {
+            annotations = previous
+            selectedIndex = nil
         }
         needsDisplay = true
     }
@@ -282,6 +482,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         ScreenshotService.shared.recognizeText(result)
     }
 
+    func startScrollCapture() {
+        guard let selection, let window else { return }
+        let global = selection.offsetBy(dx: window.frame.minX, dy: window.frame.minY)
+        ScreenshotService.shared.startScrollCapture(rect: global)
+    }
+
     func closeCapture() {
         ScreenshotService.shared.close()
     }
@@ -297,10 +503,11 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         bar.update(tool: tool, color: color)
         let size = bar.frame.size
         let x = min(max(8, selection.midX - size.width / 2), bounds.width - size.width - 8)
-        var y = selection.minY - size.height - 10
-        if y < 8 { y = selection.maxY + 10 }
-        if y + size.height > bounds.height - 8 { y = selection.minY + 10 }
+        var y = selection.minY - size.height - 12
+        if y < 8 { y = selection.maxY + 12 }
+        if y + size.height > bounds.height - 8 { y = selection.minY + 12 }
         bar.setFrameOrigin(NSPoint(x: x, y: y))
+        needsDisplay = true
     }
 
     // MARK: - Текст
@@ -331,7 +538,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                                     points: [NSPoint(x: field.frame.minX + 2, y: field.frame.minY + 3)])
         annotation.text = field.stringValue
         field.removeFromSuperview()
-        if annotation.isMeaningful { annotations.append(annotation) }
+        if annotation.isMeaningful {
+            pushUndo()
+            annotations.append(annotation)
+        }
         window?.makeFirstResponder(self)
         needsDisplay = true
     }
@@ -369,7 +579,31 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         NSColor.white.withAlphaComponent(0.9).setStroke()
         border.stroke()
 
-        if isSelecting { drawSizeLabel(for: selection) }
+        if let selectedIndex, annotations.indices.contains(selectedIndex) {
+            let outline = NSBezierPath(rect: annotations[selectedIndex].bounds.insetBy(dx: -6, dy: -6))
+            outline.lineWidth = 1
+            outline.setLineDash([4, 3], count: 2, phase: 0)
+            NSColor.white.setStroke()
+            outline.stroke()
+        }
+
+        if isEditing {
+            for handle in Handle.allCases {
+                let c = handlePoint(handle, in: selection)
+                let square = NSBezierPath(roundedRect: NSRect(x: c.x - 4, y: c.y - 4, width: 8, height: 8),
+                                          xRadius: 2, yRadius: 2)
+                NSColor.white.setFill()
+                square.fill()
+                NSColor.black.withAlphaComponent(0.4).setStroke()
+                square.lineWidth = 0.5
+                square.stroke()
+            }
+        }
+
+        switch drag {
+        case .selecting, .resizing, .movingSelection: drawSizeLabel(for: selection)
+        default: break
+        }
     }
 
     private func dim(outside rect: NSRect, alpha: CGFloat) {

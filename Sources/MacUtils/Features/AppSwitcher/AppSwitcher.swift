@@ -3,6 +3,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import ScreenCaptureKit
 
 /// Переключатель приложений: удерживайте ⌥ (или ⌘) и нажимайте Tab.
 /// Порядок — по последнему использованию. Пока панель открыта:
@@ -14,6 +15,8 @@ final class AppSwitcher: NSObject, ObservableObject {
     @Published private(set) var items: [SwitcherItem] = []
     @Published var selected = 0
     @Published private(set) var isRunning = false
+    /// Последние снимки главного окна каждого приложения (pid → превью).
+    @Published private(set) var previews: [pid_t: NSImage] = [:]
 
     private enum Key {
         static let tab: Int64 = 48
@@ -84,6 +87,7 @@ final class AppSwitcher: NSObject, ObservableObject {
     @objc private func appTerminated(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         recent.removeAll { $0 == app.processIdentifier }
+        previews[app.processIdentifier] = nil
     }
 
     // MARK: - Клавиши
@@ -153,12 +157,62 @@ final class AppSwitcher: NSObject, ObservableObject {
             selected = startsWithFront ? 1 : 0
         }
         active = true
+        if UserDefaults.standard.bool(forKey: Pref.switcherPreviews) {
+            refreshPreviews()
+        }
 
         // Небольшая задержка: при быстром ⌥Tab панель не мигает.
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 120_000_000)
             if self.active { self.panel.show() }
         }
+    }
+
+    /// Снимает главное окно каждого приложения через ScreenCaptureKit.
+    /// Пока снимки не готовы, показываются прошлые превью или иконки.
+    private func refreshPreviews() {
+        guard Permissions.screenRecording else { return }
+        let pids = items.prefix(16).map(\.id)
+        let frontWindows = Self.frontWindowIDs()
+        Task { @MainActor in
+            guard let content = try? await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true) else { return }
+            for pid in pids {
+                guard self.active else { return }
+                guard let windowID = frontWindows[pid],
+                      let window = content.windows.first(where: { $0.windowID == windowID }) else { continue }
+                let filter = SCContentFilter(desktopIndependentWindow: window)
+                let config = SCStreamConfiguration()
+                let frame = window.frame
+                let scale = min(1, 480 / max(frame.width, frame.height)) * 2
+                config.width = max(1, Int(frame.width * scale))
+                config.height = max(1, Int(frame.height * scale))
+                config.showsCursor = false
+                config.ignoreShadowsSingleWindow = true
+                if let image = try? await SCScreenshotManager.captureImage(contentFilter: filter,
+                                                                          configuration: config) {
+                    self.previews[pid] = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+                }
+            }
+        }
+    }
+
+    /// Самое верхнее обычное окно каждого приложения (по порядку на экране).
+    private static func frontWindowIDs() -> [pid_t: CGWindowID] {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                    kCGNullWindowID) as? [[String: Any]] else { return [:] }
+        var result: [pid_t: CGWindowID] = [:]
+        for info in list {
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  let pid = info[kCGWindowOwnerPID as String] as? Int32,
+                  result[pid] == nil,
+                  let number = info[kCGWindowNumber as String] as? UInt32,
+                  let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
+                  bounds.width > 80, bounds.height > 60 else { continue }
+            result[pid] = number
+        }
+        return result
     }
 
     private func move(_ delta: Int) {

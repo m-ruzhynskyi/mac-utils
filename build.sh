@@ -6,9 +6,8 @@
 #   ./build.sh --universal — универсальная сборка (arm64 + x86_64, нужен Xcode)
 #   ./build.sh --install   — сборка, копирование в /Applications и запуск
 #
-# По умолчанию приложение подписывается ad-hoc. Чтобы macOS не сбрасывала
-# разрешения после каждой пересборки, задайте свой сертификат:
-#   SIGN_IDENTITY="Apple Development: Имя (TEAMID)" ./build.sh
+# Подпись: SIGN_IDENTITY, иначе сертификат «Mac Utils Signing» из связки ключей,
+# иначе ad-hoc (тогда macOS может сбрасывать разрешения после пересборки).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -32,14 +31,27 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/$EXECUTABLE" "$APP/Contents/MacOS/$EXECUTABLE"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-codesign --force --sign "${SIGN_IDENTITY:--}" "$APP"
+# Постоянная подпись «Mac Utils Signing» (см. scripts/make-signing-cert.sh) — тогда
+# macOS не сбрасывает разрешения после пересборки и автообновления.
+IDENTITY="${SIGN_IDENTITY:-}"
+if [[ -z "$IDENTITY" ]] && security find-certificate -c "Mac Utils Signing" >/dev/null 2>&1; then
+    IDENTITY="Mac Utils Signing"
+fi
+if [[ -n "$IDENTITY" ]] && codesign --force --sign "$IDENTITY" "$APP"; then
+    echo "Подписано: $IDENTITY"
+else
+    [[ -n "$IDENTITY" ]] && echo "Не удалось подписать «$IDENTITY», подписываю ad-hoc" >&2
+    codesign --force --sign - "$APP"
+fi
 echo "Готово: $APP"
 
 if (( INSTALL )); then
     pkill -x "$EXECUTABLE" 2>/dev/null || true
     rm -rf "/Applications/$APP_NAME.app"
     cp -R "$APP" "/Applications/"
+    touch "/Applications/$APP_NAME.app"  # обновить иконку в Finder
     open "/Applications/$APP_NAME.app"
     echo "Установлено в /Applications"
 fi

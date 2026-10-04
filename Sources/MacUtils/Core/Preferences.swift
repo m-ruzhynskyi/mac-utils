@@ -16,9 +16,14 @@ enum Pref {
     static let switcher = "appSwitcherEnabled"
     /// "option" — ⌥Tab, "command" — заменить системный ⌘Tab.
     static let switcherModifier = "appSwitcherModifier"
+    static let switcherPreviews = "appSwitcherPreviews"
 
     static let screenshot = "screenshotEnabled"
     static let screenshotFolder = "screenshotFolder"
+
+    static let autoUpdate = "autoUpdateEnabled"
+    static let updateRepo = "updateRepository"
+    static let justUpdatedTo = "justUpdatedTo"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -29,7 +34,9 @@ enum Pref {
             smoothDuration: 0.35,
             switcher: true,
             switcherModifier: "option",
+            switcherPreviews: true,
             screenshot: true,
+            autoUpdate: true,
         ])
     }
 

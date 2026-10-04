@@ -1,20 +1,62 @@
-name: Build
+name: Build & Release
 
+# Каждый пуш в main собирает приложение и публикует релиз vX.Y.<номер сборки>.
+# Установленное приложение находит релиз и обновляется само.
 on:
   push:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15
+    env:
+      SIGNING_P12: ${{ secrets.SIGNING_P12 }}
+      SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set version
+        run: |
+          PLIST=Resources/Info.plist
+          BASE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" | cut -d. -f1,2)
+          VERSION="$BASE.$GITHUB_RUN_NUMBER"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :MUUpdateRepo $GITHUB_REPOSITORY" "$PLIST"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Import signing certificate
+        if: env.SIGNING_P12 != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          echo "$SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          security import "$RUNNER_TEMP/signing.p12" -k "$KEYCHAIN" -P "$SIGNING_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "SIGN_IDENTITY=Mac Utils Signing" >> "$GITHUB_ENV"
+
       - name: Build app
         run: ./build.sh --universal
+
       - name: Zip
         run: cd build && ditto -c -k --keepParent "Mac Utils.app" MacUtils.zip
+
       - uses: actions/upload-artifact@v4
         with:
           name: MacUtils
           path: build/MacUtils.zip
+
+      - name: Publish release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" build/MacUtils.zip \
+            --title "Mac Utils $VERSION" --generate-notes --target "$GITHUB_SHA"

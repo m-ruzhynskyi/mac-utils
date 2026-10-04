@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         syncFeatures()
+        Updater.shared.start()
 
         // Пока нет доступа к «Универсальному доступу», периодически проверяем:
         // как только пользователь выдаст разрешение, утилиты включатся сами.

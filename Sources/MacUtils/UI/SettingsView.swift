@@ -219,6 +219,8 @@ struct GeneralPage: View {
                 }
             }
 
+            UpdatesSection()
+
             Section {
                 Toggle("Открывать при входе в систему", isOn: Binding(
                     get: { permissions.launchAtLogin },
@@ -237,6 +239,46 @@ struct GeneralPage: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Общие")
+    }
+}
+
+// MARK: - Обновления
+
+struct UpdatesSection: View {
+    @ObservedObject private var updater = Updater.shared
+    @AppStorage(Pref.autoUpdate) private var autoUpdate = true
+    @AppStorage(Pref.updateRepo) private var customRepo = ""
+
+    private var statusText: String {
+        switch updater.state {
+        case .idle: return ""
+        case .checking: return "Проверяю…"
+        case .upToDate: return "Установлена последняя версия"
+        case .available(let version): return "Доступна версия \(version)"
+        case .installing(let version): return "Устанавливаю \(version)…"
+        case .failed(let message): return message
+        }
+    }
+
+    var body: some View {
+        Section("Обновления") {
+            LabeledContent("Версия", value: updater.currentVersion)
+            TextField("Репозиторий GitHub", text: $customRepo,
+                      prompt: Text(updater.repository.isEmpty ? "владелец/имя" : updater.repository))
+            Toggle("Обновляться автоматически", isOn: $autoUpdate)
+            HStack {
+                Text(statusText)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if case .available = updater.state {
+                    Button("Установить") { updater.installAvailable() }
+                }
+                Button("Проверить сейчас") { updater.check(install: false, userInitiated: true) }
+            }
+            Text("Новая версия собирается на GitHub при каждом пуше в main. Приложение проверяет релизы раз в 6 часов и само перезапускается после обновления.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -321,6 +363,7 @@ struct SmoothScrollPage: View {
 struct SwitcherPage: View {
     @AppStorage(Pref.switcher) private var enabled = true
     @AppStorage(Pref.switcherModifier) private var modifier = "option"
+    @AppStorage(Pref.switcherPreviews) private var previews = true
     @ObservedObject private var permissions = PermissionsModel.shared
     @ObservedObject private var service = AppSwitcher.shared
 
@@ -335,6 +378,15 @@ struct SwitcherPage: View {
                     Text("⌘ Tab (заменить системный)").tag("command")
                 }
                 .disabled(!enabled)
+                Toggle("Показывать превью окон", isOn: $previews)
+                    .disabled(!enabled)
+                if enabled && previews && !permissions.screenRecording {
+                    StatusLine(ok: false, okText: "", problemText: "Для превью нужно разрешение «Запись экрана»",
+                               action: {
+                                   Permissions.requestScreenRecording()
+                                   Permissions.open(.screenRecording)
+                               })
+                }
                 if enabled {
                     accessibilityStatus(permissions, running: service.isRunning, readyText: "Переключатель работает")
                 }
@@ -394,11 +446,15 @@ struct ScreenshotPage: View {
             }
             Section("В режиме снимка") {
                 Text("Потяните мышью, чтобы выделить область. Клик без перетаскивания снимает окно под курсором (или весь экран).")
-                ShortcutRow(keys: ["1…6"], text: "Стрелка, прямоугольник, карандаш, маркер, текст, размытие.")
+                ShortcutRow(keys: ["1…7"], text: "Стрелка, прямоугольник, карандаш, маркер, текст, нумерация 1 2 3, размытие.")
+                ShortcutRow(keys: ["V"], text: "Выбор: перетаскивайте выделенную область целиком.")
+                Text("Нарисованное можно перетаскивать любым инструментом: наведите и тяните. Delete удаляет выбранный элемент, кнопка цвета перекрашивает его. За белые маркеры по краям меняется размер области.")
+                    .foregroundStyle(.secondary)
+                ShortcutRow(keys: ["⇕"], text: "Длинный снимок: кнопка на панели, затем медленно прокручивайте вниз и нажмите «Готово».")
                 ShortcutRow(keys: ["⇧"], text: "Ровная стрелка / квадрат при рисовании.")
                 ShortcutRow(keys: ["⌘", "C"], text: "Скопировать (также Enter или двойной клик).")
                 ShortcutRow(keys: ["⌘", "S"], text: "Сохранить в папку.")
-                ShortcutRow(keys: ["⌘", "Z"], text: "Отменить последнюю пометку.")
+                ShortcutRow(keys: ["⌘", "Z"], text: "Отменить последнее действие.")
                 ShortcutRow(keys: ["Esc"], text: "Закрыть.")
             }
         }
