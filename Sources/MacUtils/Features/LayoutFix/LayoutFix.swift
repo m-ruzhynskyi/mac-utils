@@ -6,18 +6,20 @@ import Carbon.HIToolbox
 
 /// «Раскладка»: по горячей клавише переводит текст, набранный не в той
 /// раскладке (ghbdtn → привет и обратно). Выделенный текст — целиком,
-/// без выделения — последнее набранное слово. Затем переключает раскладку.
+/// без выделения — последнее набранное слово. По желанию переключает раскладку.
 @MainActor
 final class LayoutFix: ObservableObject {
     static let shared = LayoutFix()
 
     @Published private(set) var isRunning = false
+    /// Горячая клавиша зарегистрирована (не занята другим приложением).
+    @Published private(set) var hotKeyRegistered = false
 
     /// Метка наших синтетических нажатий, чтобы не записывать их в слово.
     private static let marker: Int64 = 0x4D55_4C46
 
     private var tap: EventTap?
-    private var hotKey: LayoutFixHotKey?
+    private var hotKey: LayoutHotKey?
     /// Последнее слово и пробелы после него — как они были набраны.
     private var word = ""
     private var trailing = ""
@@ -34,7 +36,7 @@ final class LayoutFix: ObservableObject {
     func sync() {
         let defaults = UserDefaults.standard
         let wanted = defaults.bool(forKey: Pref.layoutFix) && Permissions.accessibility
-        let key = LayoutFixHotKey(rawValue: defaults.string(forKey: Pref.layoutFixHotKey) ?? "") ?? .optionShiftSpace
+        let key = LayoutHotKey.current
         let center = HotKeyCenter.shared
 
         guard wanted else {
@@ -44,6 +46,7 @@ final class LayoutFix: ObservableObject {
             hotKey = nil
             reset()
             isRunning = false
+            hotKeyRegistered = false
             return
         }
         if tap == nil {
@@ -59,7 +62,19 @@ final class LayoutFix: ObservableObject {
             }
             hotKey = key
         }
-        isRunning = tapOK && center.isRegistered(id: HotKeyID.layoutFix)
+        hotKeyRegistered = center.isRegistered(id: HotKeyID.layoutFix)
+        if !hotKeyRegistered { Log.layout.error("Горячая клавиша \(key.title, privacy: .public) не зарегистрирована") }
+        isRunning = tapOK && hotKeyRegistered
+    }
+
+    /// Пока в настройках записывается новое сочетание, старое не должно срабатывать.
+    func suspendHotKey(_ suspended: Bool) {
+        if suspended {
+            HotKeyCenter.shared.unregister(id: HotKeyID.layoutFix)
+            hotKey = nil
+        } else {
+            sync()
+        }
     }
 
     // MARK: - Последнее слово
@@ -149,7 +164,7 @@ final class LayoutFix: ObservableObject {
         Log.layout.debug("Выделение: \(text.count) симв.")
         type(converted)
         reset()
-        Self.selectInputSource(for: direction)
+        if UserDefaults.standard.bool(forKey: Pref.layoutFixSwitchSource) { Self.selectInputSource(for: direction) }
     }
 
     private func replaceLastWord() {
@@ -163,7 +178,7 @@ final class LayoutFix: ObservableObject {
         // Повторное нажатие вернёт как было.
         word = converted
         trailing = tail
-        Self.selectInputSource(for: direction)
+        if UserDefaults.standard.bool(forKey: Pref.layoutFixSwitchSource) { Self.selectInputSource(for: direction) }
     }
 
     // MARK: - Синтетический ввод
@@ -267,43 +282,102 @@ final class LayoutFix: ObservableObject {
     }
 }
 
-/// Варианты горячей клавиши «Раскладки».
-enum LayoutFixHotKey: String, CaseIterable, Identifiable {
-    case optionShiftSpace, controlOptionSpace, controlShiftSpace
+/// Горячая клавиша «Раскладки»: код клавиши (не символ — работает в любой
+/// раскладке: ⌘] = ⌘Ъ, ⌘P = ⌘З) и модификаторы Carbon.
+struct LayoutHotKey: Equatable {
+    var keyCode: Int
+    var modifiers: Int
 
-    var id: String { rawValue }
+    static let commandBracket = LayoutHotKey(keyCode: kVK_ANSI_RightBracket, modifiers: cmdKey)
+    static let commandP = LayoutHotKey(keyCode: kVK_ANSI_P, modifiers: cmdKey)
+    static let presets: [LayoutHotKey] = [
+        .commandBracket,
+        .commandP,
+        LayoutHotKey(keyCode: kVK_Space, modifiers: optionKey | shiftKey),
+        LayoutHotKey(keyCode: kVK_Space, modifiers: controlKey | optionKey),
+    ]
 
-    var title: String {
-        switch self {
-        case .optionShiftSpace: return "⌥⇧ Пробел"
-        case .controlOptionSpace: return "⌃⌥ Пробел"
-        case .controlShiftSpace: return "⌃⇧ Пробел"
-        }
+    static var current: LayoutHotKey {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: Pref.layoutFixKeyCode) != nil else { return .commandBracket }
+        return LayoutHotKey(keyCode: defaults.integer(forKey: Pref.layoutFixKeyCode),
+                            modifiers: defaults.integer(forKey: Pref.layoutFixModifiers))
     }
 
-    var keys: [String] {
-        switch self {
-        case .optionShiftSpace: return ["⌥", "⇧", "Пробел"]
-        case .controlOptionSpace: return ["⌃", "⌥", "Пробел"]
-        case .controlShiftSpace: return ["⌃", "⇧", "Пробел"]
-        }
+    func save() {
+        UserDefaults.standard.set(keyCode, forKey: Pref.layoutFixKeyCode)
+        UserDefaults.standard.set(modifiers, forKey: Pref.layoutFixModifiers)
     }
 
-    var keyCode: Int { kVK_Space }
+    /// Из нажатия в окне настроек; нужен хотя бы один из ⌘ ⌥ ⌃.
+    init?(event: NSEvent) {
+        let flags = event.modifierFlags
+        var modifiers = 0
+        if flags.contains(.command) { modifiers |= cmdKey }
+        if flags.contains(.option) { modifiers |= optionKey }
+        if flags.contains(.control) { modifiers |= controlKey }
+        guard modifiers != 0 else { return nil }
+        if flags.contains(.shift) { modifiers |= shiftKey }
+        self.init(keyCode: Int(event.keyCode), modifiers: modifiers)
+    }
+
+    init(keyCode: Int, modifiers: Int) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
+    }
 
     var cgFlags: CGEventFlags {
+        var flags: CGEventFlags = []
+        if modifiers & cmdKey != 0 { flags.insert(.maskCommand) }
+        if modifiers & optionKey != 0 { flags.insert(.maskAlternate) }
+        if modifiers & controlKey != 0 { flags.insert(.maskControl) }
+        if modifiers & shiftKey != 0 { flags.insert(.maskShift) }
+        return flags
+    }
+
+    /// Символы для показа: ⌃⌥⇧⌘ + клавиша.
+    var keys: [String] {
+        var result: [String] = []
+        if modifiers & controlKey != 0 { result.append("⌃") }
+        if modifiers & optionKey != 0 { result.append("⌥") }
+        if modifiers & shiftKey != 0 { result.append("⇧") }
+        if modifiers & cmdKey != 0 { result.append("⌘") }
+        result.append(Self.keyName(keyCode))
+        return result
+    }
+
+    var title: String { keys.joined() }
+
+    /// Чьё стандартное сочетание перекрывается.
+    var conflictNote: String? {
         switch self {
-        case .optionShiftSpace: return [.maskAlternate, .maskShift]
-        case .controlOptionSpace: return [.maskControl, .maskAlternate]
-        case .controlShiftSpace: return [.maskControl, .maskShift]
+        case .commandBracket: return "⌘] (⌘Ъ) — это «Вперёд» в Safari и Finder и «сдвинуть вправо» в редакторах кода: пока исправление включено, они работать не будут."
+        case .commandP: return "⌘P (⌘З) заменяет «Печать» во всех приложениях, пока исправление раскладки включено."
+        default: return nil
         }
     }
 
-    var modifiers: Int {
-        switch self {
-        case .optionShiftSpace: return optionKey | shiftKey
-        case .controlOptionSpace: return controlKey | optionKey
-        case .controlShiftSpace: return controlKey | shiftKey
-        }
+    private static func keyName(_ code: Int) -> String {
+        let special: [Int: String] = [
+            kVK_Space: "Пробел", kVK_Return: "↩", kVK_Tab: "⇥", kVK_Escape: "Esc", kVK_Delete: "⌫",
+            kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
+            kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6",
+            kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
+        ]
+        if let name = special[code] { return name }
+        // Буквы и цифры — по английской раскладке (QWERTY).
+        let ansi: [Int: String] = [
+            kVK_ANSI_A: "A", kVK_ANSI_B: "B", kVK_ANSI_C: "C", kVK_ANSI_D: "D", kVK_ANSI_E: "E",
+            kVK_ANSI_F: "F", kVK_ANSI_G: "G", kVK_ANSI_H: "H", kVK_ANSI_I: "I", kVK_ANSI_J: "J",
+            kVK_ANSI_K: "K", kVK_ANSI_L: "L", kVK_ANSI_M: "M", kVK_ANSI_N: "N", kVK_ANSI_O: "O",
+            kVK_ANSI_P: "P (З)", kVK_ANSI_Q: "Q", kVK_ANSI_R: "R", kVK_ANSI_S: "S", kVK_ANSI_T: "T",
+            kVK_ANSI_U: "U", kVK_ANSI_V: "V", kVK_ANSI_W: "W", kVK_ANSI_X: "X", kVK_ANSI_Y: "Y",
+            kVK_ANSI_Z: "Z", kVK_ANSI_0: "0", kVK_ANSI_1: "1", kVK_ANSI_2: "2", kVK_ANSI_3: "3",
+            kVK_ANSI_4: "4", kVK_ANSI_5: "5", kVK_ANSI_6: "6", kVK_ANSI_7: "7", kVK_ANSI_8: "8",
+            kVK_ANSI_9: "9", kVK_ANSI_Minus: "-", kVK_ANSI_Equal: "=", kVK_ANSI_LeftBracket: "[",
+            kVK_ANSI_RightBracket: "] (Ъ)", kVK_ANSI_Semicolon: ";", kVK_ANSI_Quote: "'", kVK_ANSI_Comma: ",",
+            kVK_ANSI_Period: ".", kVK_ANSI_Slash: "/", kVK_ANSI_Backslash: "\\", kVK_ANSI_Grave: "`",
+        ]
+        return ansi[code] ?? "#\(code)"
     }
 }

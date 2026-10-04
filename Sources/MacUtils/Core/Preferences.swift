@@ -24,7 +24,11 @@ enum Pref {
     static let screenshotDestination = "screenshotDestination"
 
     static let layoutFix = "layoutFixEnabled"
-    static let layoutFixHotKey = "layoutFixHotKey"
+    /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
+    static let layoutFixKeyCode = "layoutFixKeyCode"
+    static let layoutFixModifiers = "layoutFixModifiers"
+    /// Переключать раскладку системы после исправления.
+    static let layoutFixSwitchSource = "layoutFixSwitchSource"
 
     static let autoUpdate = "autoUpdateEnabled"
     static let updateRepo = "updateRepository"
@@ -43,7 +47,7 @@ enum Pref {
             screenshot: true,
             screenshotDestination: "clipboard",
             layoutFix: true,
-            layoutFixHotKey: "optionShiftSpace",
+            layoutFixSwitchSource: false,
             autoUpdate: true,
         ])
     }

@@ -414,38 +414,107 @@ struct SwitcherPage: View {
 
 struct LayoutPage: View {
     @AppStorage(Pref.layoutFix) private var enabled = true
-    @AppStorage(Pref.layoutFixHotKey) private var hotKey = LayoutFixHotKey.optionShiftSpace.rawValue
+    @AppStorage(Pref.layoutFixSwitchSource) private var switchSource = false
+    @AppStorage(Pref.layoutFixKeyCode) private var keyCode = LayoutHotKey.commandBracket.keyCode
+    @AppStorage(Pref.layoutFixModifiers) private var modifiers = LayoutHotKey.commandBracket.modifiers
     @ObservedObject private var permissions = PermissionsModel.shared
     @ObservedObject private var service = LayoutFix.shared
 
-    private var current: LayoutFixHotKey { LayoutFixHotKey(rawValue: hotKey) ?? .optionShiftSpace }
+    private var current: LayoutHotKey { LayoutHotKey(keyCode: keyCode, modifiers: modifiers) }
 
     var body: some View {
         Form {
             Section {
                 Toggle("Исправление раскладки", isOn: $enabled)
-                Text("Набрали по-русски в английской раскладке (ghbdtn) или наоборот (руддщ)? Нажмите горячую клавишу — текст переведётся (привет, hello), а раскладка переключится.")
+                Text("Набрали по-русски в английской раскладке (ghbdtn) или наоборот (руддщ)? Нажмите горячую клавишу — текст переведётся (привет, hello).")
                     .foregroundStyle(.secondary)
                 if enabled {
                     accessibilityStatus(permissions, running: service.isRunning, readyText: "Исправление раскладки работает")
                 }
             }
             Section("Горячая клавиша") {
-                Picker("Перевести", selection: $hotKey) {
-                    ForEach(LayoutFixHotKey.allCases) { key in
-                        Text(key.title).tag(key.rawValue)
+                LabeledContent("Перевести") {
+                    ShortcutRecorder(hotKey: current) { $0.save() }
+                }
+                LabeledContent("Готовые варианты") {
+                    HStack {
+                        ForEach(LayoutHotKey.presets, id: \.title) { preset in
+                            Button(preset.title) { preset.save() }
+                                .disabled(preset == current)
+                        }
                     }
                 }
-                .disabled(!enabled)
+                if enabled && !service.hotKeyRegistered && permissions.accessibility {
+                    Label("Сочетание \(current.title) занято системой или другим приложением — выберите другое.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                if let note = current.conflictNote {
+                    Text(note).foregroundStyle(.secondary)
+                }
             }
+            .disabled(!enabled)
             Section("Как пользоваться") {
                 ShortcutRow(keys: current.keys, text: "Без выделения — последнее набранное слово. С выделением — весь выделенный текст.")
                 Text("Повторное нажатие возвращает слово обратно. Клик мышью, стрелки и Enter начинают слово заново. В полях паролей не работает.")
                     .foregroundStyle(.secondary)
+                Toggle("Переключать раскладку после исправления", isOn: $switchSource)
+                    .disabled(!enabled)
             }
         }
         .formStyle(.grouped)
         .navigationTitle("Раскладка")
+    }
+}
+
+/// Запись сочетания: нажмите кнопку, затем нужные клавиши (нужен ⌘, ⌥ или ⌃). Esc — отмена.
+struct ShortcutRecorder: View {
+    let hotKey: LayoutHotKey
+    let onChange: (LayoutHotKey) -> Void
+
+    @State private var recording = false
+    @State private var monitor: Any?
+    @State private var hint = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if hint {
+                Text("Нужен ⌘, ⌥ или ⌃").font(.caption).foregroundStyle(.orange)
+            }
+            Button(recording ? "Нажмите сочетание…" : hotKey.title) {
+                recording ? stop() : start()
+            }
+            .frame(minWidth: 140)
+        }
+        .onDisappear { stop() }
+    }
+
+    private func start() {
+        recording = true
+        hint = false
+        LayoutFix.shared.suspendHotKey(true)
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 { // Esc
+                stop()
+                return nil
+            }
+            guard let key = LayoutHotKey(event: event) else {
+                hint = true
+                return nil
+            }
+            onChange(key)
+            stop()
+            return nil
+        }
+    }
+
+    private func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        if recording {
+            recording = false
+            LayoutFix.shared.suspendHotKey(false)
+        }
     }
 }
 
