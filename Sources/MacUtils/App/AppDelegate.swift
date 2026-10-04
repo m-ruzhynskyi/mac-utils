@@ -80,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SmoothScroll.shared.sync()
         AppSwitcher.shared.sync()
         ScreenshotService.shared.sync()
+        LayoutFix.shared.sync()
     }
 }
 
@@ -87,4 +88,5 @@ enum HotKeyID {
     static let settings: UInt32 = 1
     static let screenshot: UInt32 = 2
     static let screenshotOCR: UInt32 = 3
+    static let layoutFix: UInt32 = 4
 }

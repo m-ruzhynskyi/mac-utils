@@ -23,6 +23,9 @@ enum Pref {
     /// Куда отправлять снимок по Enter / двойному клику: "clipboard", "folder", "both".
     static let screenshotDestination = "screenshotDestination"
 
+    static let layoutFix = "layoutFixEnabled"
+    static let layoutFixHotKey = "layoutFixHotKey"
+
     static let autoUpdate = "autoUpdateEnabled"
     static let updateRepo = "updateRepository"
     static let justUpdatedTo = "justUpdatedTo"
@@ -39,6 +42,8 @@ enum Pref {
             switcherPreviews: true,
             screenshot: true,
             screenshotDestination: "clipboard",
+            layoutFix: true,
+            layoutFixHotKey: "optionShiftSpace",
             autoUpdate: true,
         ])
     }

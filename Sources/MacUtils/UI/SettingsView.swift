@@ -54,7 +54,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, cutPaste, smoothScroll, switcher, screenshot
+    case general, cutPaste, smoothScroll, switcher, screenshot, layout
 
     var id: String { rawValue }
 
@@ -65,6 +65,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .smoothScroll: return "Плавная прокрутка"
         case .switcher: return "Переключатель приложений"
         case .screenshot: return "Снимки экрана"
+        case .layout: return "Раскладка"
         }
     }
 
@@ -75,6 +76,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .smoothScroll: return "computermouse"
         case .switcher: return "rectangle.on.rectangle"
         case .screenshot: return "camera.viewfinder"
+        case .layout: return "keyboard"
         }
     }
 
@@ -85,6 +87,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .smoothScroll: return .green
         case .switcher: return .blue
         case .screenshot: return .purple
+        case .layout: return .teal
         }
     }
 }
@@ -111,6 +114,7 @@ struct SettingsView: View {
             case .smoothScroll: SmoothScrollPage()
             case .switcher: SwitcherPage()
             case .screenshot: ScreenshotPage()
+            case .layout: LayoutPage()
             }
         }
     }
@@ -403,6 +407,45 @@ struct SwitcherPage: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Переключатель приложений")
+    }
+}
+
+// MARK: - Раскладка
+
+struct LayoutPage: View {
+    @AppStorage(Pref.layoutFix) private var enabled = true
+    @AppStorage(Pref.layoutFixHotKey) private var hotKey = LayoutFixHotKey.optionShiftSpace.rawValue
+    @ObservedObject private var permissions = PermissionsModel.shared
+    @ObservedObject private var service = LayoutFix.shared
+
+    private var current: LayoutFixHotKey { LayoutFixHotKey(rawValue: hotKey) ?? .optionShiftSpace }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Исправление раскладки", isOn: $enabled)
+                Text("Набрали по-русски в английской раскладке (ghbdtn) или наоборот (руддщ)? Нажмите горячую клавишу — текст переведётся (привет, hello), а раскладка переключится.")
+                    .foregroundStyle(.secondary)
+                if enabled {
+                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Исправление раскладки работает")
+                }
+            }
+            Section("Горячая клавиша") {
+                Picker("Перевести", selection: $hotKey) {
+                    ForEach(LayoutFixHotKey.allCases) { key in
+                        Text(key.title).tag(key.rawValue)
+                    }
+                }
+                .disabled(!enabled)
+            }
+            Section("Как пользоваться") {
+                ShortcutRow(keys: current.keys, text: "Без выделения — последнее набранное слово. С выделением — весь выделенный текст.")
+                Text("Повторное нажатие возвращает слово обратно. Клик мышью, стрелки и Enter начинают слово заново. В полях паролей не работает.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Раскладка")
     }
 }
 

@@ -7,4 +7,5 @@ enum Log {
     static let scroll = Logger(subsystem: "com.mruzhynskyi.macutils", category: "scroll")
     static let switcher = Logger(subsystem: "com.mruzhynskyi.macutils", category: "switcher")
     static let capture = Logger(subsystem: "com.mruzhynskyi.macutils", category: "capture")
+    static let layout = Logger(subsystem: "com.mruzhynskyi.macutils", category: "layout")
 }
