@@ -137,16 +137,21 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func updateCursor(at p: NSPoint) {
+        // Над панелью инструментов и полем надписи — обычные курсоры, не прицел.
+        if let toolbar, !toolbar.isHidden, toolbar.frame.contains(p) {
+            NSCursor.arrow.set()
+            return
+        }
+        if let textField, textField.frame.contains(p) {
+            NSCursor.iBeam.set()
+            return
+        }
         guard isEditing, let selection else {
             NSCursor.crosshair.set()
             return
         }
         if let handle = handle(at: p) {
-            switch handle {
-            case .left, .right: NSCursor.resizeLeftRight.set()
-            case .top, .bottom: NSCursor.resizeUpDown.set()
-            default: NSCursor.crosshair.set()
-            }
+            Self.cursor(for: handle).set()
         } else if annotationIndex(at: p) != nil {
             NSCursor.openHand.set()
         } else if selection.contains(p) && tool == .select {
@@ -317,6 +322,28 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     // MARK: - Ручки выделения
+
+    private static func cursor(for handle: Handle) -> NSCursor {
+        if #available(macOS 15.0, *) {
+            let position: NSCursor.FrameResizePosition
+            switch handle {
+            case .bottomLeft: position = .bottomLeft
+            case .bottom: position = .bottom
+            case .bottomRight: position = .bottomRight
+            case .right: position = .right
+            case .topRight: position = .topRight
+            case .top: position = .top
+            case .topLeft: position = .topLeft
+            case .left: position = .left
+            }
+            return .frameResize(position: position, directions: .all)
+        }
+        switch handle {
+        case .left, .right: return .resizeLeftRight
+        case .top, .bottom: return .resizeUpDown
+        default: return .crosshair
+        }
+    }
 
     private func handlePoint(_ handle: Handle, in rect: NSRect) -> NSPoint {
         switch handle {

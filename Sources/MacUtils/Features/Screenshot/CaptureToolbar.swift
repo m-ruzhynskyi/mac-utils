@@ -122,4 +122,8 @@ final class CaptureToolbar: NSVisualEffectView {
 /// Кнопка срабатывает с первого клика, даже если окно оверлея не ключевое.
 private final class ToolbarButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .arrow)
+    }
 }
