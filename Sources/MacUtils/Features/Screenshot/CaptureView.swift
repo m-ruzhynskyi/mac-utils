@@ -55,7 +55,18 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         case movingAnnotation(index: Int, last: NSPoint)
         case movingSelection(last: NSPoint)
         case resizing(handle: Handle, original: NSRect, start: NSPoint)
+        case resizingAnnotation(index: Int, handle: ItemHandle, original: Annotation, start: NSPoint)
     }
+
+    /// Ручки выбранного нарисованного элемента: концы стрелки или рамка.
+    private enum ItemHandle {
+        case box(Handle)
+        case start
+        case end
+    }
+
+    /// Отступ рамки выбранного элемента от его содержимого.
+    private static let itemInset: CGFloat = 6
 
     private let image: CGImage
     private let baseImage: NSImage
@@ -150,6 +161,11 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             NSCursor.iBeam.set()
             return
         }
+        if isEditing, let index = selectedIndex, annotations.indices.contains(index),
+           let handle = itemHandle(at: p, of: annotations[index]) {
+            itemCursor(handle, of: annotations[index]).set()
+            return
+        }
         guard isEditing, let selection else {
             NSCursor.crosshair.set()
             return
@@ -175,6 +191,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         }
 
         if isEditing, let selection {
+            if let index = selectedIndex, annotations.indices.contains(index),
+               let handle = itemHandle(at: p, of: annotations[index]) {
+                dragSnapshot = annotations
+                drag = .resizingAnnotation(index: index, handle: handle, original: annotations[index], start: p)
+                return
+            }
             if let handle = handle(at: p) {
                 drag = .resizing(handle: handle, original: selection, start: p)
                 return
@@ -264,6 +286,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         case .resizing(let handle, let original, let start):
             selection = resized(original, handle: handle, dx: p.x - start.x, dy: p.y - start.y)
             toolbar?.isHidden = true
+
+        case .resizingAnnotation(let index, let handle, let original, let start):
+            guard annotations.indices.contains(index) else { return }
+            annotations[index] = resizedAnnotation(original, handle: handle, from: start, to: p, event: event)
         }
         needsDisplay = true
     }
@@ -286,11 +312,16 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             if let annotation = current, annotation.isMeaningful {
                 pushUndo()
                 annotations.append(annotation)
+                // Только что нарисованное сразу выбрано: можно тянуть за ручки.
+                selectedIndex = annotations.count - 1
             }
             current = nil
 
         case .movingAnnotation:
             NSCursor.openHand.set()
+            commitDragSnapshot()
+
+        case .resizingAnnotation:
             commitDragSnapshot()
 
         case .movingSelection, .resizing:
@@ -392,6 +423,73 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     // MARK: - Нарисованные элементы
+
+    private func itemHandles(_ annotation: Annotation) -> [(ItemHandle, NSPoint)] {
+        if annotation.tool == .arrow {
+            guard let a = annotation.points.first, let b = annotation.points.last else { return [] }
+            return [(.start, a), (.end, b)]
+        }
+        let box = annotation.bounds.insetBy(dx: -Self.itemInset, dy: -Self.itemInset)
+        let handles: [Handle] = annotation.scalesUniformly
+            ? [.bottomLeft, .bottomRight, .topRight, .topLeft]
+            : Handle.allCases
+        return handles.map { (.box($0), handlePoint($0, in: box)) }
+    }
+
+    private func itemHandle(at p: NSPoint, of annotation: Annotation) -> ItemHandle? {
+        itemHandles(annotation).first { abs($0.1.x - p.x) <= 7 && abs($0.1.y - p.y) <= 7 }?.0
+    }
+
+    private func itemCursor(_ handle: ItemHandle, of annotation: Annotation) -> NSCursor {
+        switch handle {
+        case .box(let h):
+            return Self.cursor(for: h)
+        case .start, .end:
+            // Курсор по направлению от противоположного конца стрелки.
+            guard let a = annotation.points.first, let b = annotation.points.last else { return .crosshair }
+            let from = { if case .start = handle { return b } else { return a } }()
+            let to = { if case .start = handle { return a } else { return b } }()
+            let angle = atan2(to.y - from.y, to.x - from.x)
+            let octant = Int(((angle + .pi) / (.pi / 4)).rounded()) % 8
+            let order: [Handle] = [.left, .bottomLeft, .bottom, .bottomRight, .right, .topRight, .top, .topLeft]
+            return Self.cursor(for: order[octant])
+        }
+    }
+
+    private static func opposite(_ handle: Handle) -> Handle {
+        switch handle {
+        case .bottomLeft: return .topRight
+        case .bottom: return .top
+        case .bottomRight: return .topLeft
+        case .right: return .left
+        case .topRight: return .bottomLeft
+        case .top: return .bottom
+        case .topLeft: return .bottomRight
+        case .left: return .right
+        }
+    }
+
+    private func resizedAnnotation(_ original: Annotation, handle: ItemHandle, from start: NSPoint,
+                                   to p: NSPoint, event: NSEvent) -> Annotation {
+        var result = original
+        switch handle {
+        case .start:
+            guard let end = original.points.last else { return original }
+            result.points[0] = constrained(p, from: end, tool: .arrow, event: event)
+        case .end:
+            guard let first = original.points.first else { return original }
+            result.points[result.points.count - 1] = constrained(p, from: first, tool: .arrow, event: event)
+        case .box(let h):
+            let inset = Self.itemInset
+            let content = original.bounds
+            let outline = resized(content.insetBy(dx: -inset, dy: -inset), handle: h,
+                                  dx: p.x - start.x, dy: p.y - start.y)
+            let target = NSRect(x: outline.minX + inset, y: outline.minY + inset,
+                                width: max(outline.width - inset * 2, 2), height: max(outline.height - inset * 2, 2))
+            result.fit(from: content, to: target, anchor: handlePoint(Self.opposite(h), in: content))
+        }
+        return result
+    }
 
     private func annotationIndex(at p: NSPoint) -> Int? {
         annotations.indices.reversed().first { annotations[$0].hitTest(p) }
@@ -613,6 +711,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         if annotation.isMeaningful {
             pushUndo()
             annotations.append(annotation)
+            selectedIndex = annotations.count - 1
         }
         window?.makeFirstResponder(self)
         needsDisplay = true
@@ -657,6 +756,16 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             outline.setLineDash([4, 3], count: 2, phase: 0)
             NSColor.white.setStroke()
             outline.stroke()
+            if isEditing {
+                for (_, c) in itemHandles(annotations[selectedIndex]) {
+                    let dot = NSBezierPath(ovalIn: NSRect(x: c.x - 4.5, y: c.y - 4.5, width: 9, height: 9))
+                    NSColor.white.setFill()
+                    dot.fill()
+                    dot.lineWidth = 1.5
+                    NSColor.systemBlue.setStroke()
+                    dot.stroke()
+                }
+            }
         }
 
         if isEditing {
