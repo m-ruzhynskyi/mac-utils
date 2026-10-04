@@ -66,7 +66,7 @@ final class CaptureToolbar: NSVisualEffectView {
     }
 
     private func makeButton(symbol: String?, fallback: String, tip: String, action: Selector) -> NSButton {
-        let button = NSButton(title: fallback, target: self, action: action)
+        let button = ToolbarButton(title: fallback, target: self, action: action)
         if let symbol,
            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)?
                .withSymbolConfiguration(.init(pointSize: 15, weight: .medium)) {
@@ -117,4 +117,9 @@ final class CaptureToolbar: NSVisualEffectView {
     @objc private func copyPressed() { owner?.copyResult() }
     @objc private func closePressed() { owner?.closeCapture() }
     @objc private func scrollPressed() { owner?.startScrollCapture() }
+}
+
+/// Кнопка срабатывает с первого клика, даже если окно оверлея не ключевое.
+private final class ToolbarButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

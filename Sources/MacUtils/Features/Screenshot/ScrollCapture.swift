@@ -22,6 +22,8 @@ final class ScrollCapture: NSObject, ObservableObject {
     private var busy = false
     private var borderPanel: NSPanel?
     private var hudPanel: NSPanel?
+    /// Esc — отмена, Enter — готово; работает без фокуса на панели.
+    private var keyTap: EventTap?
 
     private init(rect: NSRect, screen: NSScreen, filter: SCContentFilter) {
         self.rect = rect
@@ -31,14 +33,24 @@ final class ScrollCapture: NSObject, ObservableObject {
     }
 
     static func start(rect: NSRect) {
-        guard current == nil else { return }
+        Log.capture.info("Длинный снимок: старт, область \(NSStringFromRect(rect), privacy: .public)")
+        guard current == nil else {
+            Log.capture.error("Длинный снимок уже идёт")
+            return
+        }
         let center = NSPoint(x: rect.midX, y: rect.midY)
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(center, $0.frame, false) }) ?? NSScreen.main,
-              let displayID = screen.displayID else { return }
+              let displayID = screen.displayID else {
+            Log.capture.error("Длинный снимок: экран не найден")
+            return
+        }
         Task { @MainActor in
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = content.displays.first(where: { $0.displayID == displayID }) else { return }
+                guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
+                    Log.capture.error("Длинный снимок: дисплей \(displayID) не найден в SCShareableContent")
+                    return
+                }
                 let ownPID = ProcessInfo.processInfo.processIdentifier
                 let own = content.applications.filter { $0.processID == ownPID }
                 let filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
@@ -46,6 +58,7 @@ final class ScrollCapture: NSObject, ObservableObject {
                 current = capture
                 capture.begin()
             } catch {
+                Log.capture.error("Длинный снимок: SCShareableContent: \(error.localizedDescription, privacy: .public)")
                 Toast.show("Не удалось начать длинный снимок: \(error.localizedDescription)",
                            symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
@@ -56,6 +69,7 @@ final class ScrollCapture: NSObject, ObservableObject {
 
     private func begin() {
         showPanels()
+        startKeyTap()
         tick()
         let timer = Timer(timeInterval: 0.15, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
         RunLoop.main.add(timer, forMode: .common)
@@ -64,7 +78,11 @@ final class ScrollCapture: NSObject, ObservableObject {
 
     func finish() {
         stop()
-        guard let image = stitcher.makeImage() else { return }
+        Log.capture.info("Длинный снимок: готово, \(self.stitcher.height) px")
+        guard let image = stitcher.makeImage() else {
+            Toast.show("Длинный снимок пуст: кадры не сняты", symbol: "exclamationmark.triangle.fill", tint: .orange)
+            return
+        }
         ScreenshotService.shared.deliverLongImage(image)
     }
 
@@ -74,6 +92,8 @@ final class ScrollCapture: NSObject, ObservableObject {
     }
 
     private func stop() {
+        keyTap?.stop()
+        keyTap = nil
         timer?.invalidate()
         timer = nil
         borderPanel?.orderOut(nil)
@@ -90,8 +110,18 @@ final class ScrollCapture: NSObject, ObservableObject {
         busy = true
         Task { @MainActor in
             defer { self.busy = false }
-            guard let frame = try? await self.grab(), Self.current === self else { return }
-            switch self.stitcher.add(frame) {
+            let frame: CGImage
+            do {
+                frame = try await self.grab()
+            } catch {
+                Log.capture.error("Длинный снимок: кадр не снят: \(error.localizedDescription, privacy: .public)")
+                return
+            }
+            guard Self.current === self else { return }
+            let before = self.stitcher.height
+            let result = self.stitcher.add(frame)
+            Log.capture.debug("Кадр \(frame.width)×\(frame.height): \(String(describing: result), privacy: .public), +\(self.stitcher.height - before) px")
+            switch result {
             case .appended, .first:
                 self.lostTrack = false
             case .unchanged:
@@ -118,6 +148,22 @@ final class ScrollCapture: NSObject, ObservableObject {
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
     }
 
+    // MARK: - Клавиши
+
+    private func startKeyTap() {
+        let tap = EventTap(types: [.keyDown]) { [weak self] _, event in
+            guard let self else { return true }
+            switch event.getIntegerValueField(.keyboardEventKeycode) {
+            case 53: self.cancel()          // Esc
+            case 36, 76: self.finish()      // Return / Enter
+            default: return true
+            }
+            return false
+        }
+        if !tap.start() { Log.capture.error("Длинный снимок: нет перехвата клавиш") }
+        keyTap = tap
+    }
+
     // MARK: - Панели
 
     private func showPanels() {
@@ -136,9 +182,9 @@ final class ScrollCapture: NSObject, ObservableObject {
         border.orderFrontRegardless()
         borderPanel = border
 
-        let host = NSHostingView(rootView: ScrollCaptureHUD(capture: self))
+        let host = FirstMouseHostingView(rootView: ScrollCaptureHUD(capture: self))
         let size = host.fittingSize
-        let hud = NSPanel(contentRect: NSRect(origin: .zero, size: size),
+        let hud = HUDPanel(contentRect: NSRect(origin: .zero, size: size),
                           styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         hud.isOpaque = false
         hud.backgroundColor = .clear
@@ -157,6 +203,15 @@ final class ScrollCapture: NSObject, ObservableObject {
     }
 }
 
+/// Кнопки HUD должны нажиматься с первого клика: панель не активирует приложение.
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+private final class HUDPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 private struct ScrollCaptureHUD: View {
     @ObservedObject var capture: ScrollCapture
 
@@ -173,7 +228,9 @@ private struct ScrollCaptureHUD: View {
                     .monospacedDigit()
             }
             Button("Отмена") { capture.cancel() }
+                .help("Esc")
             Button("Готово") { capture.finish() }
+                .help("Enter")
                 .buttonStyle(.borderedProminent)
         }
         .padding(.horizontal, 14)
