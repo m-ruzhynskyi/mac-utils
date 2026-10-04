@@ -100,6 +100,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func cursorUpdate(with event: NSEvent) { updateCursor(at: convert(event.locationInWindow, from: nil)) }
 
+    var hasSelection: Bool { selection != nil }
+
     func resetSelection() {
         commitTextField()
         selection = nil
@@ -383,6 +385,40 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     // MARK: - Клавиатура
 
     override func keyDown(with event: NSEvent) {
+        if !handleKey(event) { super.keyDown(with: event) }
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.isKeyWindow == true,
+              event.modifierFlags.contains(.command),
+              !(window?.firstResponder is NSText) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        return handleKey(event) || super.performKeyEquivalent(with: event)
+    }
+
+    /// Идёт ввод текста в поле надписи: клавиши должны попадать в него.
+    var isEditingText: Bool { textField != nil }
+
+    /// Обрабатывает клавишу оверлея; `false` — клавиша не наша.
+    /// Вызывается и из keyDown, и из перехватчика клавиш ScreenshotService,
+    /// который работает, даже если окно оверлея не стало ключевым.
+    func handleKey(_ event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command) {
+            switch event.charactersIgnoringModifiers?.lowercased() ?? "" {
+            case "c":
+                if selection != nil { copyResult() }
+            case "s":
+                if selection != nil { saveResult() }
+            case "z":
+                undo()
+            case "w":
+                ScreenshotService.shared.close()
+            default:
+                return false
+            }
+            return true
+        }
         switch event.keyCode {
         case 53: // Esc
             if selectedIndex != nil {
@@ -397,42 +433,16 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             deleteSelected()
         default:
             guard selection != nil, mode == .edit,
-                  let chars = event.charactersIgnoringModifiers?.lowercased() else {
-                super.keyDown(with: event)
-                return
-            }
+                  let chars = event.charactersIgnoringModifiers?.lowercased() else { return false }
             if chars == "v" {
                 select(tool: .select)
             } else if let n = Int(chars), (1...Tool.numbered.count).contains(n) {
                 select(tool: Tool.numbered[n - 1])
             } else {
-                super.keyDown(with: event)
+                return false
             }
         }
-    }
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard window?.isKeyWindow == true,
-              event.modifierFlags.contains(.command),
-              !(window?.firstResponder is NSText) else {
-            return super.performKeyEquivalent(with: event)
-        }
-        switch event.charactersIgnoringModifiers?.lowercased() ?? "" {
-        case "c":
-            if selection != nil { copyResult() }
-            return true
-        case "s":
-            if selection != nil { saveResult() }
-            return true
-        case "z":
-            undo()
-            return true
-        case "w":
-            ScreenshotService.shared.close()
-            return true
-        default:
-            return super.performKeyEquivalent(with: event)
-        }
+        return true
     }
 
     // MARK: - Действия панели

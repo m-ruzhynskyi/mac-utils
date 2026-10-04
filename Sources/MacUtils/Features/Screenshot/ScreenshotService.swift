@@ -18,6 +18,9 @@ final class ScreenshotService: ObservableObject {
 
     private var windows: [CaptureWindow] = []
     private var capturing = false
+    /// Перехват клавиш на время снимка: оверлей фонового приложения не всегда
+    /// становится ключевым окном, поэтому клавиши ловятся независимо от фокуса.
+    private var keyTap: EventTap?
 
     private init() {}
 
@@ -78,9 +81,38 @@ final class ScreenshotService: ObservableObject {
         }
         if !SettingsWindowController.shared.isVisible { FocusReturn.remember() }
         NSApp.activate()
+        if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
         let keyWindow = windows.first { NSMouseInRect(mouse, $0.frame, false) } ?? windows.first
         keyWindow?.makeKeyAndOrderFront(nil)
         NSCursor.crosshair.set()
+        startKeyTap()
+    }
+
+    private func startKeyTap() {
+        if keyTap == nil {
+            keyTap = EventTap(types: [.keyDown]) { [weak self] _, event in
+                self?.routeKey(event) ?? true
+            }
+        }
+        if keyTap?.start() != true {
+            Log.capture.error("Не удалось создать перехват клавиш для снимка")
+        }
+    }
+
+    /// Возвращает `false`, если клавиша обработана оверлеем и её нужно поглотить.
+    private func routeKey(_ cgEvent: CGEvent) -> Bool {
+        guard let view = activeView, !view.isEditingText,
+              let event = NSEvent(cgEvent: cgEvent) else { return true }
+        return !view.handleKey(event)
+    }
+
+    /// Оверлей, которому адресованы клавиши: ключевой, с выделением или под курсором.
+    private var activeView: CaptureView? {
+        let mouse = NSEvent.mouseLocation
+        return (windows.first { $0.isKeyWindow }
+            ?? windows.first { $0.captureView.hasSelection }
+            ?? windows.first { NSMouseInRect(mouse, $0.frame, false) }
+            ?? windows.first)?.captureView
     }
 
     /// Новое выделение на одном экране сбрасывает выделение на остальных.
@@ -91,6 +123,7 @@ final class ScreenshotService: ObservableObject {
     }
 
     func close() {
+        keyTap?.stop()
         for window in windows {
             window.orderOut(nil)
         }
