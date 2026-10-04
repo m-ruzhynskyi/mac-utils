@@ -81,17 +81,19 @@ struct SwitcherView: View {
 
     @ViewBuilder
     private func card(_ item: SwitcherItem, selected: Bool) -> some View {
+        let preview = item.windowID.flatMap { model.previews[$0] }
         VStack(spacing: 6) {
             if showPreviews {
-                ZStack(alignment: .bottomLeading) {
+                ZStack(alignment: .bottomTrailing) {
                     Group {
-                        if let preview = model.previews[item.id] {
+                        if let preview {
                             Image(nsImage: preview)
                                 .resizable()
                                 .interpolation(.high)
                                 .aspectRatio(contentMode: .fit)
                                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                                 .shadow(radius: 2)
+                                .opacity(item.isMinimized || item.isHidden ? 0.6 : 1)
                         } else {
                             Image(nsImage: item.icon)
                                 .resizable()
@@ -100,12 +102,12 @@ struct SwitcherView: View {
                     }
                     .frame(width: thumbSize.width, height: thumbSize.height)
 
-                    if model.previews[item.id] != nil {
+                    if preview != nil {
                         Image(nsImage: item.icon)
                             .resizable()
                             .frame(width: 34, height: 34)
                             .shadow(radius: 2)
-                            .offset(x: -4, y: 6)
+                            .offset(x: 4, y: 6)
                     }
                 }
             } else {
@@ -115,15 +117,18 @@ struct SwitcherView: View {
                     .frame(width: 64, height: 64)
             }
             HStack(spacing: 4) {
-                if item.app.isHidden {
+                if item.isMinimized {
+                    Image(systemName: "minus.square").font(.system(size: 9))
+                } else if item.isHidden {
                     Image(systemName: "eye.slash").font(.system(size: 9))
                 }
-                Text(item.name)
+                Text(item.label)
                     .font(.system(size: 12, weight: selected ? .semibold : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             .frame(maxWidth: (showPreviews ? thumbSize.width : 72))
+            .help(item.title.isEmpty ? item.appName : "\(item.appName) — \(item.title)")
         }
         .padding(8)
         .background(

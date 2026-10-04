@@ -5,8 +5,9 @@ import ApplicationServices
 import CoreGraphics
 import ScreenCaptureKit
 
-/// Переключатель приложений: удерживайте ⌥ (или ⌘) и нажимайте Tab.
-/// Порядок — по последнему использованию. Пока панель открыта:
+/// Переключатель окон: удерживайте ⌥ (или ⌘) и нажимайте Tab.
+/// Каждое окно — отдельная карточка, как в Mission Control; порядок — по
+/// последнему использованию. Пока панель открыта:
 /// Tab / ⇧Tab / ← → — выбор, Q — завершить, H — скрыть, Esc — отмена.
 @MainActor
 final class AppSwitcher: NSObject, ObservableObject {
@@ -15,8 +16,8 @@ final class AppSwitcher: NSObject, ObservableObject {
     @Published private(set) var items: [SwitcherItem] = []
     @Published var selected = 0
     @Published private(set) var isRunning = false
-    /// Последние снимки главного окна каждого приложения (pid → превью).
-    @Published private(set) var previews: [pid_t: NSImage] = [:]
+    /// Последние снимки окон (CGWindowID → превью).
+    @Published private(set) var previews: [CGWindowID: NSImage] = [:]
 
     private enum Key {
         static let tab: Int64 = 48
@@ -87,7 +88,6 @@ final class AppSwitcher: NSObject, ObservableObject {
     @objc private func appTerminated(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         recent.removeAll { $0 == app.processIdentifier }
-        previews[app.processIdentifier] = nil
     }
 
     // MARK: - Клавиши
@@ -136,19 +136,11 @@ final class AppSwitcher: NSObject, ObservableObject {
     // MARK: - Действия
 
     private func open(reverse: Bool) {
-        let apps = NSWorkspace.shared.runningApplications.filter {
-            $0.activationPolicy == .regular && !$0.isTerminated
-        }
-        guard !apps.isEmpty else { return }
-        let order = Dictionary(uniqueKeysWithValues: recent.enumerated().map { ($1, $0) })
-        let sorted = apps.sorted {
-            (order[$0.processIdentifier] ?? Int.max) < (order[$1.processIdentifier] ?? Int.max)
-        }
-        items = sorted.map(SwitcherItem.init)
-        // Если активное приложение не первое (например, активно что-то без окон) —
-        // всё равно стартуем со «второго», как системный ⌘Tab.
+        items = WindowList.collect(recent: recent)
+        guard !items.isEmpty else { return }
+        // Первое окно — текущее; стартуем со второго, как системный ⌘Tab.
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        let startsWithFront = items.first?.id == frontPID
+        let startsWithFront = items.first?.pid == frontPID
         if items.count == 1 {
             selected = 0
         } else if reverse {
@@ -168,51 +160,33 @@ final class AppSwitcher: NSObject, ObservableObject {
         }
     }
 
-    /// Снимает главное окно каждого приложения через ScreenCaptureKit.
+    /// Снимает окна через ScreenCaptureKit (свёрнутые — если система отдаст кадр).
     /// Пока снимки не готовы, показываются прошлые превью или иконки.
     private func refreshPreviews() {
         guard Permissions.screenRecording else { return }
-        let pids = items.prefix(16).map(\.id)
-        let frontWindows = Self.frontWindowIDs()
+        let ids = items.prefix(24).compactMap(\.windowID)
+        let alive = Set(items.compactMap(\.windowID))
+        previews = previews.filter { alive.contains($0.key) }
         Task { @MainActor in
             guard let content = try? await SCShareableContent.excludingDesktopWindows(
-                false, onScreenWindowsOnly: true) else { return }
-            for pid in pids {
+                true, onScreenWindowsOnly: false) else { return }
+            for windowID in ids {
                 guard self.active else { return }
-                guard let windowID = frontWindows[pid],
-                      let window = content.windows.first(where: { $0.windowID == windowID }) else { continue }
+                guard let window = content.windows.first(where: { $0.windowID == windowID }) else { continue }
                 let filter = SCContentFilter(desktopIndependentWindow: window)
                 let config = SCStreamConfiguration()
                 let frame = window.frame
-                let scale = min(1, 480 / max(frame.width, frame.height)) * 2
+                let scale = min(1, 480 / max(frame.width, frame.height, 1)) * 2
                 config.width = max(1, Int(frame.width * scale))
                 config.height = max(1, Int(frame.height * scale))
                 config.showsCursor = false
                 config.ignoreShadowsSingleWindow = true
                 if let image = try? await SCScreenshotManager.captureImage(contentFilter: filter,
                                                                           configuration: config) {
-                    self.previews[pid] = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+                    self.previews[windowID] = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
                 }
             }
         }
-    }
-
-    /// Самое верхнее обычное окно каждого приложения (по порядку на экране).
-    private static func frontWindowIDs() -> [pid_t: CGWindowID] {
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
-                                                    kCGNullWindowID) as? [[String: Any]] else { return [:] }
-        var result: [pid_t: CGWindowID] = [:]
-        for info in list {
-            guard (info[kCGWindowLayer as String] as? Int) == 0,
-                  let pid = info[kCGWindowOwnerPID as String] as? Int32,
-                  result[pid] == nil,
-                  let number = info[kCGWindowNumber as String] as? UInt32,
-                  let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
-                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
-                  bounds.width > 80, bounds.height > 60 else { continue }
-            result[pid] = number
-        }
-        return result
     }
 
     private func move(_ delta: Int) {
@@ -232,7 +206,7 @@ final class AppSwitcher: NSObject, ObservableObject {
         active = false
         panel.hide()
         if items.indices.contains(selected) {
-            WindowActivation.activate(items[selected].app)
+            WindowActivation.activate(items[selected])
         }
     }
 
@@ -243,8 +217,9 @@ final class AppSwitcher: NSObject, ObservableObject {
 
     private func quitSelected() {
         guard items.indices.contains(selected) else { return }
+        let pid = items[selected].pid
         items[selected].app.terminate()
-        removeSelected()
+        removeItems(of: pid)
     }
 
     private func hideSelected() {
@@ -253,8 +228,10 @@ final class AppSwitcher: NSObject, ObservableObject {
         move(1)
     }
 
-    private func removeSelected() {
-        items.remove(at: selected)
+    private func removeItems(of pid: pid_t) {
+        let before = items[..<selected].filter { $0.pid == pid }.count
+        items.removeAll { $0.pid == pid }
+        selected -= before
         if items.isEmpty {
             cancel()
             return
@@ -277,83 +254,5 @@ final class AppSwitcher: NSObject, ObservableObject {
         _ = setEnabled(1, !disabled) // ⌘Tab
         _ = setEnabled(2, !disabled) // ⌘⇧Tab
         systemSwitcherDisabled = disabled
-    }
-}
-
-struct SwitcherItem: Identifiable {
-    let id: pid_t
-    let app: NSRunningApplication
-    let name: String
-    let icon: NSImage
-
-    init(_ app: NSRunningApplication) {
-        id = app.processIdentifier
-        self.app = app
-        name = app.localizedName ?? app.bundleIdentifier ?? "?"
-        icon = app.icon ?? NSWorkspace.shared.icon(for: .application)
-    }
-}
-
-/// Надёжная активация чужого приложения из фонового процесса.
-@MainActor
-enum WindowActivation {
-    static func activate(_ app: NSRunningApplication) {
-        if app.isHidden { app.unhide() }
-
-        let element = AXUIElementCreateApplication(app.processIdentifier)
-        AXUIElementSetMessagingTimeout(element, 0.3)
-
-        if hasVisibleWindow(pid: app.processIdentifier) {
-            app.activate(options: [.activateAllWindows])
-            AXUIElementSetAttributeValue(element, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-            raiseMainWindow(element)
-        } else if unminimizeFirstWindow(element) {
-            app.activate(options: [.activateAllWindows])
-            AXUIElementSetAttributeValue(element, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-        } else if let url = app.bundleURL {
-            // Нет окон: как клик по иконке в Dock — приложение откроет новое окно.
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = true
-            NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-        } else {
-            app.activate(options: [.activateAllWindows])
-        }
-    }
-
-    private static func hasVisibleWindow(pid: pid_t) -> Bool {
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
-                                                    kCGNullWindowID) as? [[String: Any]] else { return true }
-        return list.contains {
-            ($0[kCGWindowOwnerPID as String] as? Int32) == pid
-                && ($0[kCGWindowLayer as String] as? Int) == 0
-        }
-    }
-
-    private static func windows(of element: AXUIElement) -> [AXUIElement] {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &value) == .success,
-              let windows = value as? [AXUIElement] else { return [] }
-        return windows
-    }
-
-    private static func raiseMainWindow(_ element: AXUIElement) {
-        var value: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXMainWindowAttribute as CFString, &value) == .success,
-           let value, CFGetTypeID(value) == AXUIElementGetTypeID() {
-            AXUIElementPerformAction(value as! AXUIElement, kAXRaiseAction as CFString)
-        }
-    }
-
-    private static func unminimizeFirstWindow(_ element: AXUIElement) -> Bool {
-        for window in windows(of: element) {
-            var minimized: CFTypeRef?
-            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimized) == .success,
-               (minimized as? Bool) == true {
-                AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-                AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-                return true
-            }
-        }
-        return false
     }
 }
