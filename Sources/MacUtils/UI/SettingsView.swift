@@ -230,7 +230,7 @@ struct GeneralPage: View {
 
             Section {
                 HStack {
-                    Text("Версия \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—") · GPL-3.0")
+                    Text("Версия \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—") (сборка \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")) · GPL-3.0")
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Выйти из Mac Utils") { NSApp.terminate(nil) }

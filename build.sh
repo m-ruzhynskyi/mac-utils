@@ -31,6 +31,16 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/$EXECUTABLE" "$APP/Contents/MacOS/$EXECUTABLE"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+
+# Локальная сборка: версия = <major.minor из Info.plist>.<число коммитов>.
+# В CI версию уже проставил workflow (BASE.RUN_NUMBER) — там не трогаем.
+if [[ -z "${GITHUB_ACTIONS:-}" ]] && BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null)"; then
+    PLIST="$APP/Contents/Info.plist"
+    BASE="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" | cut -d. -f1,2)"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BASE.$BUILD_NUMBER" "$PLIST"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
+    echo "Версия: $BASE.$BUILD_NUMBER"
+fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # Постоянная подпись «Mac Utils Signing» (см. scripts/make-signing-cert.sh) — тогда
