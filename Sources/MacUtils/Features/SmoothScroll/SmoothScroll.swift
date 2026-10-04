@@ -5,7 +5,8 @@ import CoreGraphics
 
 /// Плавная прокрутка для обычной мыши: каждый «щелчок» колеса поглощается
 /// и проигрывается заново потоком пиксельных событий с замедлением в конце.
-/// Трекпад и Magic Mouse (непрерывная прокрутка) не затрагиваются.
+/// Трекпад и Magic Mouse (события с фазами) не затрагиваются; непрерывные
+/// события без фаз от драйверов мышей (Logi Options+) тоже сглаживаются.
 @MainActor
 final class SmoothScroll: NSObject, ObservableObject {
     static let shared = SmoothScroll()
@@ -40,6 +41,7 @@ final class SmoothScroll: NSObject, ObservableObject {
                 }
             }
             isRunning = tap?.start() ?? false
+            if !isRunning { Log.scroll.error("Не удалось создать event tap для прокрутки") }
         } else {
             tap?.stop()
             tap = nil
@@ -51,33 +53,49 @@ final class SmoothScroll: NSObject, ObservableObject {
     private func handle(type: CGEventType, event: CGEvent) -> Bool {
         guard type == .scrollWheel else { return true }
         if event.getIntegerValueField(.eventSourceUserData) == Self.marker { return true }
-        // Трекпад, Magic Mouse, инерция — уже плавные.
-        if event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0 { return true }
+        // Трекпад, Magic Mouse и инерция всегда идут с фазами — они уже плавные.
         if event.getIntegerValueField(.scrollWheelEventScrollPhase) != 0
             || event.getIntegerValueField(.scrollWheelEventMomentumPhase) != 0 { return true }
-
-        let dy = Double(event.getIntegerValueField(.scrollWheelEventDeltaAxis1))
-        let dx = Double(event.getIntegerValueField(.scrollWheelEventDeltaAxis2))
-        guard dy != 0 || dx != 0 else { return true }
+        // Непрерывные события без фаз шлют драйверы мышей (Logi Options+ и т. п.).
+        let continuous = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
 
         let defaults = UserDefaults.standard
         let speed = min(max(defaults.double(forKey: Pref.smoothSpeed), 0.3), 4)
 
-        // Быстрое вращение колеса ускоряет прокрутку.
-        let now = ProcessInfo.processInfo.systemUptime
-        streak = (now - lastTick) < 0.12 ? min(streak + 1, 15) : 0
-        lastTick = now
-        let step = 50.0 * speed * (1 + Double(streak) * 0.12)
+        // Сдвиг в пикселях для этого события.
+        let pixelsY: Double
+        let pixelsX: Double
+        if continuous {
+            pixelsY = Self.pointDelta(event, .scrollWheelEventPointDeltaAxis1, .scrollWheelEventFixedPtDeltaAxis1) * speed
+            pixelsX = Self.pointDelta(event, .scrollWheelEventPointDeltaAxis2, .scrollWheelEventFixedPtDeltaAxis2) * speed
+        } else {
+            let dy = Double(event.getIntegerValueField(.scrollWheelEventDeltaAxis1))
+            let dx = Double(event.getIntegerValueField(.scrollWheelEventDeltaAxis2))
+            // Быстрое вращение колеса ускоряет прокрутку.
+            let now = ProcessInfo.processInfo.systemUptime
+            streak = (now - lastTick) < 0.12 ? min(streak + 1, 15) : 0
+            lastTick = now
+            let step = 50.0 * speed * (1 + Double(streak) * 0.12)
+            pixelsY = dy * step
+            pixelsX = dx * step
+        }
+        guard pixelsY != 0 || pixelsX != 0 else { return true }
 
         // Смена направления сразу гасит остаток.
-        if dy != 0, remainingY * dy < 0 { remainingY = 0; carryY = 0 }
-        if dx != 0, remainingX * dx < 0 { remainingX = 0; carryX = 0 }
-        remainingY += dy * step
-        remainingX += dx * step
+        if pixelsY != 0, remainingY * pixelsY < 0 { remainingY = 0; carryY = 0 }
+        if pixelsX != 0, remainingX * pixelsX < 0 { remainingX = 0; carryX = 0 }
+        remainingY += pixelsY
+        remainingX += pixelsX
         flags = event.flags
 
         startGlide()
         return false
+    }
+
+    /// Сдвиг непрерывного события в пикселях (дробные доли — из fixed-point поля).
+    private static func pointDelta(_ event: CGEvent, _ point: CGEventField, _ fixed: CGEventField) -> Double {
+        let pixels = event.getIntegerValueField(point)
+        return pixels != 0 ? Double(pixels) : event.getDoubleValueField(fixed)
     }
 
     private func startGlide() {
