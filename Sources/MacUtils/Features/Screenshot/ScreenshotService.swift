@@ -138,34 +138,34 @@ final class ScreenshotService: ObservableObject {
     // MARK: - Результат
 
     func copy(_ image: CGImage) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        let rep = NSBitmapImageRep(cgImage: image)
-        if let png = rep.representation(using: .png, properties: [:]) {
-            pasteboard.setData(png, forType: .png)
-        }
-        if let tiff = rep.tiffRepresentation {
-            pasteboard.setData(tiff, forType: .tiff)
-        }
         close()
+        guard let png = Self.png(image) else { return }
+        Self.putOnPasteboard(png, image)
         Toast.show("Снимок скопирован", symbol: "doc.on.clipboard.fill", tint: .accentColor)
     }
 
     func save(_ image: CGImage) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd 'в' HH.mm.ss"
-        let folder = Pref.screenshotDirectory
-        let url = folder.appendingPathComponent("Снимок экрана \(formatter.string(from: Date())).png")
-        let rep = NSBitmapImageRep(cgImage: image)
         close()
+        guard let png = Self.png(image) else { return }
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            guard let png = rep.representation(using: .png, properties: [:]) else { return }
-            try png.write(to: url)
+            let url = try Self.writeToFolder(png, prefix: "Снимок экрана")
             Toast.show("Сохранено: \(url.lastPathComponent)", symbol: "square.and.arrow.down.fill", tint: .green)
         } catch {
             Toast.show("Не удалось сохранить: \(error.localizedDescription)",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
+        }
+    }
+
+    /// Основное действие (Enter, двойной клик): куда — по настройке «Куда сохранять».
+    func deliver(_ image: CGImage) {
+        switch Pref.screenshotDestinationValue {
+        case .clipboard:
+            copy(image)
+        case .folder:
+            save(image)
+        case .both:
+            close()
+            deliverBoth(image, prefix: "Снимок экрана", what: "Снимок")
         }
     }
 
@@ -179,27 +179,60 @@ final class ScreenshotService: ObservableObject {
         }
     }
 
-    /// Длинный снимок готов: в буфер обмена и в папку.
+    /// Длинный снимок готов: туда же, куда и обычные снимки.
     func deliverLongImage(_ image: CGImage) {
-        let rep = NSBitmapImageRep(cgImage: image)
-        guard let png = rep.representation(using: .png, properties: [:]) else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setData(png, forType: .png)
+        guard let png = Self.png(image) else { return }
+        let size = "\(image.height) px"
+        switch Pref.screenshotDestinationValue {
+        case .clipboard:
+            Self.putOnPasteboard(png, image)
+            Toast.show("Длинный снимок скопирован (\(size))", symbol: "scroll.fill", tint: .green)
+        case .folder:
+            do {
+                _ = try Self.writeToFolder(png, prefix: "Длинный снимок")
+                Toast.show("Длинный снимок сохранён (\(size))", symbol: "scroll.fill", tint: .green)
+            } catch {
+                Toast.show("Не удалось сохранить: \(error.localizedDescription)",
+                           symbol: "exclamationmark.triangle.fill", tint: .orange)
+            }
+        case .both:
+            deliverBoth(image, prefix: "Длинный снимок", what: "Длинный снимок")
+        }
+    }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd 'в' HH.mm.ss"
-        let folder = Pref.screenshotDirectory
-        let url = folder.appendingPathComponent("Длинный снимок \(formatter.string(from: Date())).png")
+    private func deliverBoth(_ image: CGImage, prefix: String, what: String) {
+        guard let png = Self.png(image) else { return }
+        Self.putOnPasteboard(png, image)
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try png.write(to: url)
-            Toast.show("Длинный снимок скопирован и сохранён (\(image.height) px)",
-                       symbol: "scroll.fill", tint: .green)
+            _ = try Self.writeToFolder(png, prefix: prefix)
+            Toast.show("\(what) скопирован и сохранён", symbol: "checkmark.circle.fill", tint: .green)
         } catch {
             Toast.show("Скопировано, но не сохранено: \(error.localizedDescription)",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
         }
+    }
+
+    private static func png(_ image: CGImage) -> Data? {
+        NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    }
+
+    private static func putOnPasteboard(_ png: Data, _ image: CGImage) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setData(png, forType: .png)
+        if let tiff = NSBitmapImageRep(cgImage: image).tiffRepresentation {
+            pasteboard.setData(tiff, forType: .tiff)
+        }
+    }
+
+    private static func writeToFolder(_ png: Data, prefix: String) throws -> URL {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd 'в' HH.mm.ss"
+        let folder = Pref.screenshotDirectory
+        let url = folder.appendingPathComponent("\(prefix) \(formatter.string(from: Date())).png")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try png.write(to: url)
+        return url
     }
 
     func recognizeText(_ image: CGImage) {

@@ -20,6 +20,8 @@ enum Pref {
 
     static let screenshot = "screenshotEnabled"
     static let screenshotFolder = "screenshotFolder"
+    /// Куда отправлять снимок по Enter / двойному клику: "clipboard", "folder", "both".
+    static let screenshotDestination = "screenshotDestination"
 
     static let autoUpdate = "autoUpdateEnabled"
     static let updateRepo = "updateRepository"
@@ -36,8 +38,17 @@ enum Pref {
             switcherModifier: "option",
             switcherPreviews: true,
             screenshot: true,
+            screenshotDestination: "clipboard",
             autoUpdate: true,
         ])
+    }
+
+    enum ScreenshotDestination: String {
+        case clipboard, folder, both
+    }
+
+    static var screenshotDestinationValue: ScreenshotDestination {
+        ScreenshotDestination(rawValue: UserDefaults.standard.string(forKey: screenshotDestination) ?? "") ?? .clipboard
     }
 
     static var screenshotDirectory: URL {

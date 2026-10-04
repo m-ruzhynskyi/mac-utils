@@ -411,6 +411,7 @@ struct SwitcherPage: View {
 struct ScreenshotPage: View {
     @AppStorage(Pref.screenshot) private var enabled = true
     @AppStorage(Pref.screenshotFolder) private var folder = ""
+    @AppStorage(Pref.screenshotDestination) private var destination = "clipboard"
     @ObservedObject private var permissions = PermissionsModel.shared
 
     var body: some View {
@@ -430,15 +431,24 @@ struct ScreenshotPage: View {
                 }
             }
             Section("Сохранение") {
-                LabeledContent("Папка") {
-                    HStack {
-                        Text(Pref.screenshotDirectory.path)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .foregroundStyle(.secondary)
-                        Button("Выбрать…", action: chooseFolder)
+                Picker("Куда сохранять", selection: $destination) {
+                    Text("В буфер обмена").tag("clipboard")
+                    Text("В папку").tag("folder")
+                    Text("В буфер и в папку").tag("both")
+                }
+                if destination != "clipboard" {
+                    LabeledContent("Папка") {
+                        HStack {
+                            Text(Pref.screenshotDirectory.path)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundStyle(.secondary)
+                            Button("Выбрать…", action: chooseFolder)
+                        }
                     }
                 }
+                Text("Действует для Enter, двойного клика и длинного снимка. Кнопки «Скопировать» (⌘C) и «Сохранить» (⌘S) работают как обычно.")
+                    .foregroundStyle(.secondary)
             }
             Section("Горячие клавиши") {
                 ShortcutRow(keys: ["⌘", "⇧", "X"], text: "Снимок области с разметкой.")
@@ -450,9 +460,10 @@ struct ScreenshotPage: View {
                 ShortcutRow(keys: ["V"], text: "Выбор: перетаскивайте выделенную область целиком.")
                 Text("Нарисованное можно перетаскивать любым инструментом: наведите и тяните. Delete удаляет выбранный элемент, кнопка цвета перекрашивает его. За белые маркеры по краям меняется размер области.")
                     .foregroundStyle(.secondary)
-                ShortcutRow(keys: ["⇕"], text: "Длинный снимок: кнопка на панели, затем медленно прокручивайте вниз и нажмите «Готово».")
+                ShortcutRow(keys: ["⇕"], text: "Длинный снимок: кнопка на панели, затем медленно прокручивайте вниз и нажмите «Готово» (Enter).")
                 ShortcutRow(keys: ["⇧"], text: "Ровная стрелка / квадрат при рисовании.")
-                ShortcutRow(keys: ["⌘", "C"], text: "Скопировать (также Enter или двойной клик).")
+                ShortcutRow(keys: ["Enter"], text: "Готово: в буфер или в папку — по настройке выше (также двойной клик).")
+                ShortcutRow(keys: ["⌘", "C"], text: "Скопировать в буфер обмена.")
                 ShortcutRow(keys: ["⌘", "S"], text: "Сохранить в папку.")
                 ShortcutRow(keys: ["⌘", "Z"], text: "Отменить последнее действие.")
                 ShortcutRow(keys: ["Esc"], text: "Закрыть.")

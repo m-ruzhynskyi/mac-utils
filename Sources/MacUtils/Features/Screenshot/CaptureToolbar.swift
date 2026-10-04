@@ -46,7 +46,7 @@ final class CaptureToolbar: NSVisualEffectView {
         stack.addArrangedSubview(makeButton(symbol: "square.and.arrow.down", fallback: "S",
                                             tip: "Сохранить (⌘S)", action: #selector(savePressed)))
         stack.addArrangedSubview(makeButton(symbol: "doc.on.doc", fallback: "C",
-                                            tip: "Скопировать (⌘C, Enter, двойной клик)", action: #selector(copyPressed)))
+                                            tip: "Скопировать (⌘C)", action: #selector(copyPressed)))
         stack.addArrangedSubview(makeButton(symbol: "xmark", fallback: "×",
                                             tip: "Закрыть (Esc)", action: #selector(closePressed)))
 

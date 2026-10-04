@@ -172,7 +172,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             }
             if selection.contains(p) {
                 if event.clickCount == 2 && annotationIndex(at: p) == nil {
-                    copyResult()
+                    confirmResult()
                     return
                 }
                 // Клик по нарисованному — выбрать и перетаскивать.
@@ -428,7 +428,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 ScreenshotService.shared.close()
             }
         case 36, 76: // Return / Enter
-            if selection != nil { copyResult() }
+            if selection != nil { confirmResult() }
         case 51, 117: // Delete / Forward Delete
             deleteSelected()
         default:
@@ -480,6 +480,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     func copyResult() {
         guard let result = renderSelection() else { return }
         ScreenshotService.shared.copy(result)
+    }
+
+    /// Enter / двойной клик: в буфер, в папку или туда и туда — по настройке.
+    func confirmResult() {
+        guard let result = renderSelection() else { return }
+        ScreenshotService.shared.deliver(result)
     }
 
     func saveResult() {
