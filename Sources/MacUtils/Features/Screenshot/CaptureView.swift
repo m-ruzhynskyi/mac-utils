@@ -68,6 +68,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var drag: Drag = .none
     private var annotations: [Annotation] = []
     private var undoStack: [[Annotation]] = []
+    private var redoStack: [[Annotation]] = []
+    /// Состояние до перетаскивания: в историю попадает, только если что-то изменилось.
+    private var dragSnapshot: [Annotation]?
     private var selectedIndex: Int?
     private var current: Annotation?
     private(set) var tool: Tool = .arrow
@@ -109,6 +112,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         drag = .none
         annotations.removeAll()
         undoStack.removeAll()
+        redoStack.removeAll()
         selectedIndex = nil
         current = nil
         toolbar?.removeFromSuperview()
@@ -182,7 +186,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 }
                 // Клик по нарисованному — выбрать и перетаскивать.
                 if let index = annotationIndex(at: p) {
-                    pushUndo()
+                    dragSnapshot = annotations
                     selectedIndex = index
                     drag = .movingAnnotation(index: index, last: p)
                     NSCursor.closedHand.set()
@@ -287,6 +291,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
         case .movingAnnotation:
             NSCursor.openHand.set()
+            commitDragSnapshot()
 
         case .movingSelection, .resizing:
             if let rect = selection {
@@ -397,8 +402,18 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func pushUndo() {
-        undoStack.append(annotations)
+        pushUndo(annotations)
+    }
+
+    private func pushUndo(_ state: [Annotation]) {
+        undoStack.append(state)
         if undoStack.count > 100 { undoStack.removeFirst() }
+        redoStack.removeAll()
+    }
+
+    private func commitDragSnapshot() {
+        if let snapshot = dragSnapshot, snapshot != annotations { pushUndo(snapshot) }
+        dragSnapshot = nil
     }
 
     private func deleteSelected() {
@@ -431,14 +446,19 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     /// Вызывается и из keyDown, и из перехватчика клавиш ScreenshotService,
     /// который работает, даже если окно оверлея не стало ключевым.
     func handleKey(_ event: NSEvent) -> Bool {
+        let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        // ⌘Z / ⌃Z — отменить, ⇧⌘Z / ⇧⌃Z — повторить.
+        if !event.modifierFlags.intersection([.command, .control]).isEmpty, chars == "z" {
+            if event.modifierFlags.contains(.shift) { redo() } else { undo() }
+            return true
+        }
+        if event.modifierFlags.contains(.control) { return false }
         if event.modifierFlags.contains(.command) {
-            switch event.charactersIgnoringModifiers?.lowercased() ?? "" {
+            switch chars {
             case "c":
                 if selection != nil { copyResult() }
             case "s":
                 if selection != nil { saveResult() }
-            case "z":
-                undo()
             case "w":
                 ScreenshotService.shared.close()
             default:
@@ -498,9 +518,18 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             textField = nil
             window?.makeFirstResponder(self)
         } else if let previous = undoStack.popLast() {
+            redoStack.append(annotations)
             annotations = previous
             selectedIndex = nil
         }
+        needsDisplay = true
+    }
+
+    func redo() {
+        guard textField == nil, let next = redoStack.popLast() else { return }
+        undoStack.append(annotations)
+        annotations = next
+        selectedIndex = nil
         needsDisplay = true
     }
 

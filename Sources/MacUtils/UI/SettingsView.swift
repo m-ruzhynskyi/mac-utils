@@ -465,7 +465,7 @@ struct ScreenshotPage: View {
                 ShortcutRow(keys: ["Enter"], text: "Готово: в буфер или в папку — по настройке выше (также двойной клик).")
                 ShortcutRow(keys: ["⌘", "C"], text: "Скопировать в буфер обмена.")
                 ShortcutRow(keys: ["⌘", "S"], text: "Сохранить в папку.")
-                ShortcutRow(keys: ["⌘", "Z"], text: "Отменить последнее действие.")
+                ShortcutRow(keys: ["⌘", "Z"], text: "Отменить последнее действие (также ⌃Z). ⇧⌘Z или ⇧⌃Z — повторить.")
                 ShortcutRow(keys: ["Esc"], text: "Закрыть.")
             }
         }

@@ -37,7 +37,7 @@ final class CaptureToolbar: NSVisualEffectView {
         colorButton = color
         stack.addArrangedSubview(color)
         stack.addArrangedSubview(makeButton(symbol: "arrow.uturn.backward", fallback: "↶",
-                                            tip: "Отменить (⌘Z)", action: #selector(undoPressed)))
+                                            tip: "Отменить (⌘Z или ⌃Z), повторить — ⇧⌘Z", action: #selector(undoPressed)))
         stack.addArrangedSubview(separator())
         stack.addArrangedSubview(makeButton(symbol: "scroll", fallback: "⇕",
                                             tip: "Длинный снимок с прокруткой", action: #selector(scrollPressed)))

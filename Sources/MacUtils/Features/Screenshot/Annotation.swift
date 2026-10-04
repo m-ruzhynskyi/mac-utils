@@ -35,7 +35,7 @@ enum Tool: CaseIterable {
     static let numbered: [Tool] = [.arrow, .rectangle, .pen, .marker, .text, .counter, .pixelate]
 }
 
-struct Annotation {
+struct Annotation: Equatable {
     var tool: Tool
     var color: NSColor
     var width: CGFloat
@@ -45,8 +45,12 @@ struct Annotation {
     var text = ""
     var fontSize: CGFloat = 22
     var number = 0
+    /// Масштаб кружка с номером (меняется ручками).
+    var counterScale: CGFloat = 1
 
     static let counterRadius: CGFloat = 15
+
+    var counterRadius: CGFloat { Self.counterRadius * counterScale }
 
     var isMeaningful: Bool {
         switch tool {
@@ -66,6 +70,41 @@ struct Annotation {
         points = points.map { NSPoint(x: $0.x + dx, y: $0.y + dy) }
     }
 
+    // MARK: - Изменение размера
+
+    /// Текст и номер масштабируются целиком; остальное — по рамке.
+    var scalesUniformly: Bool { tool == .text || tool == .counter }
+
+    /// Вписывает элемент из рамки `old` (его прежние bounds) в рамку `new`.
+    /// `anchor` — точка, которая остаётся на месте при пропорциональном масштабе.
+    @MainActor
+    mutating func fit(from old: NSRect, to new: NSRect, anchor: NSPoint) {
+        switch tool {
+        case .rectangle, .pixelate:
+            points = [NSPoint(x: new.minX, y: new.minY), NSPoint(x: new.maxX, y: new.maxY)]
+        case .pen, .marker:
+            points = points.map { p in
+                NSPoint(x: old.width < 1 ? p.x + new.midX - old.midX : new.minX + (p.x - old.minX) / old.width * new.width,
+                        y: old.height < 1 ? p.y + new.midY - old.midY : new.minY + (p.y - old.minY) / old.height * new.height)
+            }
+        case .text, .counter:
+            let ratio = max(new.width / max(old.width, 1), new.height / max(old.height, 1))
+            if tool == .text {
+                fontSize = min(max(fontSize * ratio, 8), 200)
+            } else {
+                counterScale = min(max(counterScale * ratio, 0.5), 5)
+            }
+            // Новые bounds держим у неподвижного угла.
+            let size = bounds.size
+            let minX = anchor.x <= old.midX ? anchor.x : anchor.x - size.width
+            let minY = anchor.y <= old.midY ? anchor.y : anchor.y - size.height
+            let current = bounds
+            offset(dx: minX - current.minX, dy: minY - current.minY)
+        case .arrow, .select:
+            break
+        }
+    }
+
     // MARK: - Попадание курсора
 
     @MainActor
@@ -77,7 +116,7 @@ struct Annotation {
             return NSRect(origin: origin, size: size)
         case .counter:
             guard let c = points.first else { return .zero }
-            let r = Self.counterRadius
+            let r = counterRadius
             return NSRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
         default:
             guard !points.isEmpty else { return .zero }
@@ -189,7 +228,7 @@ struct Annotation {
 
     @MainActor
     private func drawCounter(at center: NSPoint) {
-        let r = Self.counterRadius
+        let r = counterRadius
         let circle = NSBezierPath(ovalIn: NSRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow()
@@ -208,7 +247,7 @@ struct Annotation {
         let isYellow = color == .systemYellow
         let textColor: NSColor = (light || isYellow) ? .black : .white
         let label = NSAttributedString(string: "\(number)", attributes: [
-            .font: NSFont.systemFont(ofSize: number > 9 ? 13 : 16, weight: .bold),
+            .font: NSFont.systemFont(ofSize: (number > 9 ? 13 : 16) * counterScale, weight: .bold),
             .foregroundColor: textColor,
         ])
         let size = label.size()
