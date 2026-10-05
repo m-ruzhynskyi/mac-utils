@@ -39,6 +39,8 @@ final class CaptureToolbar: NSVisualEffectView {
         stack.addArrangedSubview(makeButton(symbol: "arrow.uturn.backward", fallback: "↶",
                                             tip: "Отменить (⌘Z или ⌃Z), повторить — ⇧⌘Z", action: #selector(undoPressed)))
         stack.addArrangedSubview(separator())
+        stack.addArrangedSubview(makeButton(symbol: "square.stack.3d.down.right", fallback: "+",
+                                            tip: "Шаг + в коллаж (A)", action: #selector(stepPressed)))
         stack.addArrangedSubview(makeButton(symbol: "scroll", fallback: "⇕",
                                             tip: "Длинный снимок с прокруткой", action: #selector(scrollPressed)))
         stack.addArrangedSubview(makeButton(symbol: "text.viewfinder", fallback: "OCR",
@@ -117,6 +119,7 @@ final class CaptureToolbar: NSVisualEffectView {
     @objc private func copyPressed() { owner?.copyResult() }
     @objc private func closePressed() { owner?.closeCapture() }
     @objc private func scrollPressed() { owner?.startScrollCapture() }
+    @objc private func stepPressed() { owner?.addStep() }
 }
 
 /// Кнопка срабатывает с первого клика, даже если окно оверлея не ключевое.

@@ -524,6 +524,7 @@ struct ScreenshotPage: View {
     @AppStorage(Pref.screenshot) private var enabled = true
     @AppStorage(Pref.screenshotFolder) private var folder = ""
     @AppStorage(Pref.screenshotDestination) private var destination = "clipboard"
+    @AppStorage(Pref.screenshotStepsLayout) private var stepsLayout = StepsLayout.vertical.rawValue
     @ObservedObject private var permissions = PermissionsModel.shared
 
     var body: some View {
@@ -560,6 +561,16 @@ struct ScreenshotPage: View {
                     }
                 }
                 Text("Действует для Enter, двойного клика и длинного снимка. Кнопки «Скопировать» (⌘C) и «Сохранить» (⌘S) работают как обычно.")
+                    .foregroundStyle(.secondary)
+            }
+            Section("Коллаж шагов") {
+                Picker("Расположение", selection: $stepsLayout) {
+                    ForEach(StepsLayout.allCases) { layout in
+                        Text(layout.title).tag(layout.rawValue)
+                    }
+                }
+                ShortcutRow(keys: ["A"], text: "В режиме снимка — «Шаг +»: область с разметкой добавляется в коллаж.")
+                Text("Внизу экрана появится панель: «Ещё шаг» (или ⌘⇧X) — следующий снимок, «Готово» — собрать одну картинку с номерами 1, 2, 3 и сохранить её по настройке «Куда сохранять», «Отмена» — сбросить.")
                     .foregroundStyle(.secondary)
             }
             Section("Горячие клавиши") {

@@ -58,6 +58,7 @@ final class ScreenshotService: ObservableObject {
             return
         }
         capturing = true
+        StepsSession.hideHUD()
         let snapFrames = WindowSnap.visibleWindowFrames()
         Task { @MainActor in
             defer { self.capturing = false }
@@ -66,6 +67,7 @@ final class ScreenshotService: ObservableObject {
                 guard !shots.isEmpty else { return }
                 self.present(shots: shots, snapFrames: snapFrames, mode: mode)
             } catch {
+                StepsSession.showHUD()
                 Toast.show("Не удалось сделать снимок: \(error.localizedDescription)",
                            symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
@@ -129,6 +131,7 @@ final class ScreenshotService: ObservableObject {
         }
         windows.removeAll()
         NSCursor.arrow.set()
+        StepsSession.showHUD()
         // Возвращаем фокус приложению, которое было активно до снимка.
         if !SettingsWindowController.shared.isVisible {
             FocusReturn.restore()

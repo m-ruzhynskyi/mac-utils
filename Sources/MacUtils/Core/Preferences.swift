@@ -22,6 +22,8 @@ enum Pref {
     static let screenshotFolder = "screenshotFolder"
     /// Куда отправлять снимок по Enter / двойному клику: "clipboard", "folder", "both".
     static let screenshotDestination = "screenshotDestination"
+    /// Раскладка коллажа шагов: "vertical", "horizontal", "grid".
+    static let screenshotStepsLayout = "screenshotStepsLayout"
 
     static let layoutFix = "layoutFixEnabled"
     /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
@@ -46,6 +48,7 @@ enum Pref {
             switcherPreviews: true,
             screenshot: true,
             screenshotDestination: "clipboard",
+            screenshotStepsLayout: "vertical",
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,

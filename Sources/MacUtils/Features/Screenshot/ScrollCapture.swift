@@ -205,7 +205,7 @@ final class ScrollCapture: NSObject, ObservableObject {
 
 /// Кнопки HUD должны нажиматься с первого клика: панель не активирует приложение.
 /// Курсор над HUD — обычная стрелка, даже когда приложение неактивно.
-private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func updateTrackingAreas() {
@@ -229,7 +229,7 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
     }
 }
 
-private final class HUDPanel: NSPanel {
+final class HUDPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 

@@ -583,6 +583,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             guard selection != nil, mode == .edit else { return false }
             if code == kVK_ANSI_V {
                 select(tool: .select)
+            } else if code == kVK_ANSI_A {
+                addStep()
             } else if let n = Self.digitKeys.firstIndex(of: code) ?? Self.keypadDigitKeys.firstIndex(of: code),
                       n < Tool.numbered.count {
                 select(tool: Tool.numbered[n])
@@ -648,6 +650,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     func confirmResult() {
         guard let result = renderSelection() else { return }
         ScreenshotService.shared.deliver(result)
+    }
+
+    /// «Шаг +»: снимок уходит в коллаж шагов, оверлей закрывается.
+    func addStep() {
+        guard let result = renderSelection() else { return }
+        StepsSession.add(result)
+        ScreenshotService.shared.close()
     }
 
     func saveResult() {
