@@ -557,7 +557,7 @@ struct ScreenshotPage: View {
     @AppStorage(Pref.screenshot) private var enabled = true
     @AppStorage(Pref.screenshotFolder) private var folder = ""
     @AppStorage(Pref.screenshotDestination) private var destination = "clipboard"
-    @AppStorage(Pref.screenshotStepsLayout) private var stepsLayout = StepsLayout.vertical.rawValue
+    @AppStorage(Pref.screenshotStepsLayout) private var stepsLayout = StepsLayout.auto.rawValue
     @AppStorage(Pref.screenshotStepsEqualSize) private var stepsEqualSize = true
     @AppStorage(Pref.screenshotStepsFrame) private var stepsFrame = true
     @AppStorage(Pref.screenshotStepsTitles) private var stepsTitles = true

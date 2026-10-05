@@ -22,7 +22,7 @@ enum Pref {
     static let screenshotFolder = "screenshotFolder"
     /// Куда отправлять снимок по Enter / двойному клику: "clipboard", "folder", "both".
     static let screenshotDestination = "screenshotDestination"
-    /// Раскладка коллажа шагов: "vertical", "horizontal", "grid".
+    /// Раскладка коллажа шагов: "auto" (по умолчанию), "vertical", "horizontal", "grid".
     static let screenshotStepsLayout = "screenshotStepsLayout"
     static let screenshotStepsEqualSize = "screenshotStepsEqualSize"
     static let screenshotStepsFrame = "screenshotStepsFrame"
@@ -55,7 +55,7 @@ enum Pref {
             switcherPreviews: true,
             screenshot: true,
             screenshotDestination: "clipboard",
-            screenshotStepsLayout: "vertical",
+            screenshotStepsLayout: "auto",
             screenshotStepsEqualSize: true,
             screenshotStepsFrame: true,
             screenshotStepsTitles: true,

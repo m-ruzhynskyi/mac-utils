@@ -62,7 +62,7 @@ final class StepsSession: ObservableObject {
     func finish() {
         let defaults = UserDefaults.standard
         var options = ShotComposer.Options()
-        options.layout = StepsLayout(rawValue: defaults.string(forKey: Pref.screenshotStepsLayout) ?? "") ?? .vertical
+        options.layout = StepsLayout(rawValue: defaults.string(forKey: Pref.screenshotStepsLayout) ?? "") ?? .auto
         options.equalSize = defaults.bool(forKey: Pref.screenshotStepsEqualSize)
         options.windowFrame = defaults.bool(forKey: Pref.screenshotStepsFrame)
         options.titles = defaults.bool(forKey: Pref.screenshotStepsTitles)
@@ -123,15 +123,16 @@ private struct StepsHUD: View {
 // MARK: - Сборка
 
 enum StepsLayout: String, CaseIterable, Identifiable {
-    case vertical, horizontal, grid
+    case auto, vertical, horizontal, grid
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .auto: return "Авто (ближе к квадрату)"
         case .vertical: return "Столбиком"
         case .horizontal: return "В ряд"
-        case .grid: return "Сеткой в 2 колонки"
+        case .grid: return "Сеткой (квадратом)"
         }
     }
 }

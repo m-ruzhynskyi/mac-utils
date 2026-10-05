@@ -48,7 +48,7 @@ extension NSColor {
 @MainActor
 enum ShotComposer {
     struct Options {
-        var layout: StepsLayout = .vertical
+        var layout: StepsLayout = .auto
         var equalSize = false
         var windowFrame = false
         var titles = false
@@ -87,12 +87,7 @@ enum ShotComposer {
         // Отступ вмещает тень и номер, который выступает за угол.
         let gap = (options.windowFrame || options.background != .white ? 48 : 32) * u
             + (options.badges ? badgeRadius * 0.5 : 0)
-        let columns: Int
-        switch options.layout {
-        case .vertical: columns = 1
-        case .horizontal: columns = items.count
-        case .grid: columns = min(2, items.count)
-        }
+        let columns = columnCount(for: items, layout: options.layout)
         let rows = (items.count + columns - 1) / columns
         var columnWidths = [CGFloat](repeating: 0, count: columns)
         var rowHeights = [CGFloat](repeating: 0, count: rows)
@@ -123,14 +118,18 @@ enum ShotComposer {
 
         var top = height - gap
         for row in 0..<rows {
-            var left = gap
+            // Неполный последний ряд — по центру (3 шага в 2×2: третий посередине).
+            let inRow = min(columns, items.count - row * columns)
+            let missing = columnWidths[inRow..<columns].reduce(0, +) + gap * CGFloat(columns - inRow)
+            var left = gap + missing / 2
             for column in 0..<columns {
                 let index = row * columns + column
                 guard index < items.count else { break }
                 let item = items[index]
                 let w = CGFloat(item.width), h = CGFloat(item.height)
-                // В ячейке — по центру по горизонтали и прижато к верху.
-                let rect = CGRect(x: left + (columnWidths[column] - w) / 2, y: top - h, width: w, height: h)
+                // В ячейке — по центру.
+                let rect = CGRect(x: left + (columnWidths[column] - w) / 2, y: top - (rowHeights[row] + h) / 2,
+                                  width: w, height: h)
 
                 context.saveGState()
                 if options.windowFrame {
@@ -162,6 +161,30 @@ enum ShotComposer {
         return context.makeImage()
     }
 
+    // MARK: - Расположение
+
+    private static func columnCount(for items: [CGImage], layout: StepsLayout) -> Int {
+        let n = items.count
+        switch layout {
+        case .vertical: return 1
+        case .horizontal: return n
+        // Сетка — как можно ближе к квадрату: 4 снимка — 2×2, 9 — 3×3.
+        case .grid: return Int(Double(n).squareRoot().rounded(.up))
+        case .auto:
+            if n <= 2 { return n }
+            if n <= 4 { return 2 }
+            // 5+: 2 или 3 колонки — что даёт полотно ближе к квадрату.
+            let w = CGFloat(items.map(\.width).sorted()[n / 2])
+            let h = CGFloat(items.map(\.height).sorted()[n / 2])
+            func squareness(_ columns: Int) -> CGFloat {
+                let rows = (n + columns - 1) / columns
+                let ratio = (w * CGFloat(columns)) / (h * CGFloat(rows))
+                return abs(log(ratio))
+            }
+            return squareness(2) <= squareness(3) ? 2 : 3
+        }
+    }
+
     // MARK: - Одинаковый размер
 
     /// Столбик — общая ширина, ряд — общая высота, сетка — общая ячейка.
@@ -180,7 +203,7 @@ enum ShotComposer {
             switch layout {
             case .vertical: scale = targetWidth / w
             case .horizontal: scale = targetHeight / h
-            case .grid: scale = min(targetWidth / w, targetHeight / h)
+            case .grid, .auto: scale = min(targetWidth / w, targetHeight / h)
             }
             scale = min(scale, 2)
             guard abs(scale - 1) > 0.01 else { return image }
