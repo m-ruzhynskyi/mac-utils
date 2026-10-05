@@ -59,6 +59,8 @@ echo "Готово: $APP"
 
 if (( INSTALL )); then
     pkill -x "$EXECUTABLE" 2>/dev/null || true
+    # Ждём, пока старый процесс завершится: иначе `open` падает с ошибкой -600.
+    for _ in {1..50}; do pgrep -x "$EXECUTABLE" >/dev/null || break; sleep 0.1; done
     rm -rf "/Applications/$APP_NAME.app"
     cp -R "$APP" "/Applications/"
     touch "/Applications/$APP_NAME.app"  # обновить иконку в Finder
