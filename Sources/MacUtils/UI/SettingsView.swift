@@ -410,6 +410,39 @@ struct SwitcherPage: View {
     }
 }
 
+/// Образец фона в настройках снимков.
+private struct BackgroundSwatch: View {
+    let background: ShotBackground
+    let selected: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        ZStack {
+            if background == .transparent {
+                shape.fill(Color.gray.opacity(0.15))
+                Image(systemName: "circle.slash").foregroundStyle(.secondary).font(.system(size: 11))
+            } else {
+                shape.fill(LinearGradient(colors: background.colors.map(Color.init(nsColor:)),
+                                          startPoint: .topLeading, endPoint: .bottomTrailing))
+                // Мини-окно поверх фона.
+                RoundedRectangle(cornerRadius: 2).fill(.white).frame(width: 18, height: 12)
+                    .overlay(alignment: .topLeading) {
+                        HStack(spacing: 1.5) {
+                            Circle().fill(Color.red).frame(width: 2.5)
+                            Circle().fill(Color.yellow).frame(width: 2.5)
+                            Circle().fill(Color.green).frame(width: 2.5)
+                        }
+                        .padding(1.5)
+                    }
+                    .shadow(radius: 1)
+            }
+        }
+        .frame(width: 34, height: 24)
+        .overlay(shape.stroke(selected ? Color.accentColor : Color.primary.opacity(0.15), lineWidth: selected ? 2 : 1))
+        .contentShape(shape)
+    }
+}
+
 // MARK: - Раскладка
 
 struct LayoutPage: View {
@@ -525,6 +558,11 @@ struct ScreenshotPage: View {
     @AppStorage(Pref.screenshotFolder) private var folder = ""
     @AppStorage(Pref.screenshotDestination) private var destination = "clipboard"
     @AppStorage(Pref.screenshotStepsLayout) private var stepsLayout = StepsLayout.vertical.rawValue
+    @AppStorage(Pref.screenshotStepsEqualSize) private var stepsEqualSize = true
+    @AppStorage(Pref.screenshotStepsFrame) private var stepsFrame = true
+    @AppStorage(Pref.screenshotStepsTitles) private var stepsTitles = true
+    @AppStorage(Pref.screenshotFrameDefault) private var frameDefault = false
+    @AppStorage(Pref.screenshotBackground) private var background = ShotBackground.sky.rawValue
     @ObservedObject private var permissions = PermissionsModel.shared
 
     var body: some View {
@@ -563,12 +601,30 @@ struct ScreenshotPage: View {
                 Text("Действует для Enter, двойного клика и длинного снимка. Кнопки «Скопировать» (⌘C) и «Сохранить» (⌘S) работают как обычно.")
                     .foregroundStyle(.secondary)
             }
+            Section("Оформление") {
+                LabeledContent("Фон") {
+                    HStack(spacing: 8) {
+                        ForEach(ShotBackground.allCases) { option in
+                            BackgroundSwatch(background: option, selected: background == option.rawValue)
+                                .onTapGesture { background = option.rawValue }
+                                .help(option.title)
+                        }
+                    }
+                }
+                Toggle("Рамка окна macOS для обычных снимков по умолчанию", isOn: $frameDefault)
+                Text("В режиме снимка рамку включает и выключает кнопка «Рамка» или клавиша F. Снимок кладётся в окно со «светофором», скруглёнными углами и тенью на выбранном фоне.")
+                    .foregroundStyle(.secondary)
+            }
             Section("Коллаж шагов") {
                 Picker("Расположение", selection: $stepsLayout) {
                     ForEach(StepsLayout.allCases) { layout in
                         Text(layout.title).tag(layout.rawValue)
                     }
                 }
+                Toggle("Одинаковый размер", isOn: $stepsEqualSize)
+                Toggle("Рамка окна macOS", isOn: $stepsFrame)
+                Toggle("Подпись «Шаг N» в заголовке окна", isOn: $stepsTitles)
+                    .disabled(!stepsFrame)
                 ShortcutRow(keys: ["A"], text: "В режиме снимка — «Шаг +»: область с разметкой добавляется в коллаж.")
                 Text("Внизу экрана появится панель: «Ещё шаг» (или ⌘⇧X) — следующий снимок, «Готово» — собрать одну картинку с номерами 1, 2, 3 и сохранить её по настройке «Куда сохранять», «Отмена» — сбросить.")
                     .foregroundStyle(.secondary)
@@ -581,6 +637,7 @@ struct ScreenshotPage: View {
                 Text("Потяните мышью, чтобы выделить область. Клик без перетаскивания снимает окно под курсором (или весь экран).")
                 ShortcutRow(keys: ["1…7"], text: "Стрелка, прямоугольник, карандаш, маркер, текст, нумерация 1 2 3, размытие.")
                 ShortcutRow(keys: ["V"], text: "Выбор: перетаскивайте выделенную область целиком.")
+                ShortcutRow(keys: ["F"], text: "Рамка окна macOS вокруг снимка: вкл/выкл.")
                 Text("Нарисованное можно перетаскивать любым инструментом: наведите и тяните. Delete удаляет выбранный элемент, кнопка цвета перекрашивает его, синие ручки меняют размер (у стрелки — концы). За белые маркеры по краям меняется размер области.")
                     .foregroundStyle(.secondary)
                 ShortcutRow(keys: ["⇕"], text: "Длинный снимок: кнопка на панели, затем медленно прокручивайте вниз и нажмите «Готово» (Enter).")

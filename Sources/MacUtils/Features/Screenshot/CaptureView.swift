@@ -89,6 +89,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private(set) var color: NSColor = .systemRed
     private let lineWidth: CGFloat = 4
     private var toolbar: CaptureToolbar?
+    /// Оформить снимок рамкой окна macOS при выдаче (кнопка «Рамка», клавиша F).
+    private(set) var framed = UserDefaults.standard.bool(forKey: Pref.screenshotFrameDefault)
     private var textField: NSTextField?
 
     private var pixelScale: CGFloat { CGFloat(image.width) / max(bounds.width, 1) }
@@ -585,6 +587,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 select(tool: .select)
             } else if code == kVK_ANSI_A {
                 addStep()
+            } else if code == kVK_ANSI_F {
+                toggleFrame()
             } else if let n = Self.digitKeys.firstIndex(of: code) ?? Self.keypadDigitKeys.firstIndex(of: code),
                       n < Tool.numbered.count {
                 select(tool: Tool.numbered[n])
@@ -641,26 +645,38 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
+    /// Итоговая картинка для буфера / файла: с рамкой, если она включена.
+    private func exportImage() -> CGImage? {
+        guard let result = renderSelection() else { return nil }
+        guard framed else { return result }
+        return ShotComposer.framedSingle(result, unit: pixelScale) ?? result
+    }
+
+    func toggleFrame() {
+        framed.toggle()
+        toolbar?.update(framed: framed)
+    }
+
     func copyResult() {
-        guard let result = renderSelection() else { return }
+        guard let result = exportImage() else { return }
         ScreenshotService.shared.copy(result)
     }
 
     /// Enter / двойной клик: в буфер, в папку или туда и туда — по настройке.
     func confirmResult() {
-        guard let result = renderSelection() else { return }
+        guard let result = exportImage() else { return }
         ScreenshotService.shared.deliver(result)
     }
 
     /// «Шаг +»: снимок уходит в коллаж шагов, оверлей закрывается.
     func addStep() {
         guard let result = renderSelection() else { return }
-        StepsSession.add(result)
+        StepsSession.add(result, unit: pixelScale)
         ScreenshotService.shared.close()
     }
 
     func saveResult() {
-        guard let result = renderSelection() else { return }
+        guard let result = exportImage() else { return }
         ScreenshotService.shared.save(result)
     }
 
@@ -688,6 +704,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         }
         bar.isHidden = false
         bar.update(tool: tool, color: color)
+        bar.update(framed: framed)
         let size = bar.frame.size
         let x = min(max(8, selection.midX - size.width / 2), bounds.width - size.width - 8)
         var y = selection.minY - size.height - 12

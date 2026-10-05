@@ -8,6 +8,7 @@ final class CaptureToolbar: NSVisualEffectView {
     private weak var owner: CaptureView?
     private var toolButtons: [Tool: NSButton] = [:]
     private var colorButton: NSButton?
+    private var frameButton: NSButton?
 
     init(owner: CaptureView) {
         self.owner = owner
@@ -39,6 +40,10 @@ final class CaptureToolbar: NSVisualEffectView {
         stack.addArrangedSubview(makeButton(symbol: "arrow.uturn.backward", fallback: "↶",
                                             tip: "Отменить (⌘Z или ⌃Z), повторить — ⇧⌘Z", action: #selector(undoPressed)))
         stack.addArrangedSubview(separator())
+        let frame = makeButton(symbol: "macwindow", fallback: "▭",
+                               tip: "Рамка окна macOS (F)", action: #selector(framePressed))
+        frameButton = frame
+        stack.addArrangedSubview(frame)
         stack.addArrangedSubview(makeButton(symbol: "square.stack.3d.down.right", fallback: "+",
                                             tip: "Шаг + в коллаж (A)", action: #selector(stepPressed)))
         stack.addArrangedSubview(makeButton(symbol: "scroll", fallback: "⇕",
@@ -120,6 +125,11 @@ final class CaptureToolbar: NSVisualEffectView {
     @objc private func closePressed() { owner?.closeCapture() }
     @objc private func scrollPressed() { owner?.startScrollCapture() }
     @objc private func stepPressed() { owner?.addStep() }
+    @objc private func framePressed() { owner?.toggleFrame() }
+
+    func update(framed: Bool) {
+        frameButton?.contentTintColor = framed ? .systemBlue : .white
+    }
 }
 
 /// Кнопка срабатывает с первого клика, даже если окно оверлея не ключевое.

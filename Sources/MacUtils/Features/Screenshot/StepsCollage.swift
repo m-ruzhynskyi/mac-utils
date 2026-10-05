@@ -10,13 +10,16 @@ final class StepsSession: ObservableObject {
     private(set) static var current: StepsSession?
 
     @Published private(set) var images: [CGImage] = []
+    /// Пикселей в точке у снятых шагов (2 на Retina).
+    private var unit: CGFloat = 1
     private var hudPanel: NSPanel?
 
     /// Добавляет шаг; первая же картинка начинает сессию.
-    static func add(_ image: CGImage) {
+    static func add(_ image: CGImage, unit: CGFloat) {
         let session = current ?? StepsSession()
         current = session
         session.images.append(image)
+        session.unit = max(session.unit, unit)
         Log.capture.info("Коллаж: шаг \(session.images.count)")
     }
 
@@ -57,11 +60,19 @@ final class StepsSession: ObservableObject {
     }
 
     func finish() {
-        let layout = StepsLayout(rawValue: UserDefaults.standard.string(forKey: Pref.screenshotStepsLayout) ?? "")
-            ?? .vertical
+        let defaults = UserDefaults.standard
+        var options = ShotComposer.Options()
+        options.layout = StepsLayout(rawValue: defaults.string(forKey: Pref.screenshotStepsLayout) ?? "") ?? .vertical
+        options.equalSize = defaults.bool(forKey: Pref.screenshotStepsEqualSize)
+        options.windowFrame = defaults.bool(forKey: Pref.screenshotStepsFrame)
+        options.titles = defaults.bool(forKey: Pref.screenshotStepsTitles)
+        options.badges = true
+        options.background = .current
+        options.unit = unit
+        options.dark = ShotComposer.systemIsDark
         let images = self.images
         end()
-        guard let collage = StepsComposer.compose(images, layout: layout) else {
+        guard let collage = ShotComposer.compose(images, options: options) else {
             Toast.show("Не удалось собрать коллаж", symbol: "exclamationmark.triangle.fill", tint: .orange)
             return
         }
@@ -122,102 +133,5 @@ enum StepsLayout: String, CaseIterable, Identifiable {
         case .horizontal: return "В ряд"
         case .grid: return "Сеткой в 2 колонки"
         }
-    }
-}
-
-@MainActor
-enum StepsComposer {
-    /// Складывает шаги на белом фоне с отступами и номерами в левом верхнем углу.
-    /// Все размеры — в пикселях исходных снимков (на Retina — уже ×2).
-    static func compose(_ images: [CGImage], layout: StepsLayout) -> CGImage? {
-        guard !images.isEmpty else { return nil }
-        let maxSide = images.map { max($0.width, $0.height) }.max() ?? 0
-        let unit = CGFloat(max(1, min(3, maxSide / 900 + 1)))     // ~1× для мелких, до 3×
-        let gap = 32 * unit
-        let columns: Int
-        switch layout {
-        case .vertical: columns = 1
-        case .horizontal: columns = images.count
-        case .grid: columns = min(2, images.count)
-        }
-        let rows = (images.count + columns - 1) / columns
-
-        // Ширина колонок и высота рядов — по самому большому снимку в них.
-        var columnWidths = [CGFloat](repeating: 0, count: columns)
-        var rowHeights = [CGFloat](repeating: 0, count: rows)
-        for (index, image) in images.enumerated() {
-            columnWidths[index % columns] = max(columnWidths[index % columns], CGFloat(image.width))
-            rowHeights[index / columns] = max(rowHeights[index / columns], CGFloat(image.height))
-        }
-        let width = columnWidths.reduce(0, +) + gap * CGFloat(columns + 1)
-        let height = rowHeights.reduce(0, +) + gap * CGFloat(rows + 1)
-        guard width < 32_000, height < 32_000,
-              let context = CGContext(data: nil, width: Int(width), height: Int(height), bitsPerComponent: 8,
-                                      bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-
-        context.setFillColor(CGColor(gray: 1, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-
-        let graphics = NSGraphicsContext(cgContext: context, flipped: false)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = graphics
-
-        var top = height - gap
-        for row in 0..<rows {
-            var left = gap
-            for column in 0..<columns {
-                let index = row * columns + column
-                guard index < images.count else { break }
-                let image = images[index]
-                let w = CGFloat(image.width), h = CGFloat(image.height)
-                // Внутри ячейки — по центру по горизонтали, прижато к верху.
-                let rect = CGRect(x: left + (columnWidths[column] - w) / 2, y: top - h, width: w, height: h)
-
-                context.saveGState()
-                context.setShadow(offset: CGSize(width: 0, height: -2 * unit), blur: 10 * unit,
-                                  color: CGColor(gray: 0, alpha: 0.25))
-                context.draw(image, in: rect)
-                context.restoreGState()
-                context.setStrokeColor(CGColor(gray: 0, alpha: 0.12))
-                context.setLineWidth(unit)
-                context.stroke(rect.insetBy(dx: -unit / 2, dy: -unit / 2))
-
-                drawBadge(index + 1, in: rect, unit: unit)
-                left += columnWidths[column] + gap
-            }
-            top -= rowHeights[row] + gap
-        }
-
-        NSGraphicsContext.restoreGraphicsState()
-        return context.makeImage()
-    }
-
-    /// Номер шага в стиле инструмента «Нумерация», крупнее.
-    private static func drawBadge(_ number: Int, in rect: CGRect, unit: CGFloat) {
-        let base = min(rect.width, rect.height)
-        let radius = min(max(base * 0.07, 20 * unit), 40 * unit)
-        let center = NSPoint(x: rect.minX + radius + 10 * unit, y: rect.maxY - radius - 10 * unit)
-        let circle = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius,
-                                                 width: radius * 2, height: radius * 2))
-        NSGraphicsContext.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
-        shadow.shadowOffset = NSSize(width: 0, height: -unit)
-        shadow.shadowBlurRadius = 4 * unit
-        shadow.set()
-        NSColor.systemRed.setFill()
-        circle.fill()
-        NSGraphicsContext.restoreGraphicsState()
-        circle.lineWidth = 3 * unit
-        NSColor.white.setStroke()
-        circle.stroke()
-
-        let label = NSAttributedString(string: "\(number)", attributes: [
-            .font: NSFont.systemFont(ofSize: radius * (number > 9 ? 0.9 : 1.15), weight: .bold),
-            .foregroundColor: NSColor.white,
-        ])
-        let size = label.size()
-        label.draw(at: NSPoint(x: center.x - size.width / 2, y: center.y - size.height / 2))
     }
 }

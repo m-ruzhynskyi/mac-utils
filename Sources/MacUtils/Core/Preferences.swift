@@ -24,6 +24,13 @@ enum Pref {
     static let screenshotDestination = "screenshotDestination"
     /// Раскладка коллажа шагов: "vertical", "horizontal", "grid".
     static let screenshotStepsLayout = "screenshotStepsLayout"
+    static let screenshotStepsEqualSize = "screenshotStepsEqualSize"
+    static let screenshotStepsFrame = "screenshotStepsFrame"
+    static let screenshotStepsTitles = "screenshotStepsTitles"
+    /// Рамка окна macOS для обычных снимков включена по умолчанию (кнопка / F в оверлее).
+    static let screenshotFrameDefault = "screenshotFrameDefault"
+    /// Фон под рамкой и коллажем: см. ShotBackground.
+    static let screenshotBackground = "screenshotBackground"
 
     static let layoutFix = "layoutFixEnabled"
     /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
@@ -49,6 +56,11 @@ enum Pref {
             screenshot: true,
             screenshotDestination: "clipboard",
             screenshotStepsLayout: "vertical",
+            screenshotStepsEqualSize: true,
+            screenshotStepsFrame: true,
+            screenshotStepsTitles: true,
+            screenshotFrameDefault: false,
+            screenshotBackground: "sky",
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,
