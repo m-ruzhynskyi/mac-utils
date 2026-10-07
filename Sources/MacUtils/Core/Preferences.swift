@@ -68,6 +68,11 @@ enum Pref {
     static let screenshotLibrarySystem = "screenshotLibrarySystem"
     /// Мгновенный QR (⌃⌥Q).
     static let qr = "qrEnabled"
+    /// Раскладка по программам: включено, запоминать последнюю, правила и запомненное (bundle id → id раскладки).
+    static let appInputSource = "appInputSourceEnabled"
+    static let appInputRemember = "appInputSourceRemember"
+    static let appInputRules = "appInputSourceRules"
+    static let appInputRemembered = "appInputSourceRemembered"
     /// Значок Mac Utils в строке меню (клик — «Инструменты»).
     static let menuBarIcon = "menuBarIconEnabled"
 
@@ -120,6 +125,8 @@ enum Pref {
             screenshotLibrary: true,
             screenshotLibrarySystem: false,
             qr: true,
+            appInputSource: true,
+            appInputRemember: true,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,

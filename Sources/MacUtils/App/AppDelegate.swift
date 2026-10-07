@@ -104,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DownloadsSorter.shared.sync()
         ScreenshotLibrary.shared.sync()
         QRCodeService.shared.sync()
+        AppInputSource.shared.sync()
         AppStatusItem.shared.sync()
     }
 }
