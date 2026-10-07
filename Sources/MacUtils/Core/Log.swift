@@ -8,4 +8,5 @@ enum Log {
     static let switcher = Logger(subsystem: "com.mruzhynskyi.macutils", category: "switcher")
     static let capture = Logger(subsystem: "com.mruzhynskyi.macutils", category: "capture")
     static let layout = Logger(subsystem: "com.mruzhynskyi.macutils", category: "layout")
+    static let window = Logger(subsystem: "com.mruzhynskyi.macutils", category: "window")
 }

@@ -54,7 +54,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, cutPaste, smoothScroll, switcher, screenshot, layout
+    case general, cutPaste, smoothScroll, switcher, screenshot, windows, layout
 
     var id: String { rawValue }
 
@@ -65,6 +65,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .smoothScroll: return "Плавная прокрутка"
         case .switcher: return "Переключатель приложений"
         case .screenshot: return "Снимки экрана"
+        case .windows: return "Окна"
         case .layout: return "Раскладка"
         }
     }
@@ -76,6 +77,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .smoothScroll: return "computermouse"
         case .switcher: return "rectangle.on.rectangle"
         case .screenshot: return "camera.viewfinder"
+        case .windows: return "rectangle.split.2x2"
         case .layout: return "keyboard"
         }
     }
@@ -87,6 +89,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .smoothScroll: return .green
         case .switcher: return .blue
         case .screenshot: return .purple
+        case .windows: return .indigo
         case .layout: return .teal
         }
     }
@@ -114,6 +117,7 @@ struct SettingsView: View {
             case .smoothScroll: SmoothScrollPage()
             case .switcher: SwitcherPage()
             case .screenshot: ScreenshotPage()
+            case .windows: WindowsPage()
             case .layout: LayoutPage()
             }
         }
@@ -407,6 +411,69 @@ struct SwitcherPage: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Переключатель приложений")
+    }
+}
+
+// MARK: - Окна
+
+struct WindowsPage: View {
+    @AppStorage(Pref.windowSnap) private var enabled = true
+    @AppStorage(Pref.windowSnapDrag) private var drag = true
+    @AppStorage(Pref.windowSnapGap) private var gap = 0
+    @AppStorage(Pref.windowSnapModifier) private var modifier = WindowSnapModifier.controlOption.rawValue
+    @ObservedObject private var permissions = PermissionsModel.shared
+    @ObservedObject private var service = WindowTiler.shared
+
+    /// Встроенная в macOS раскладка перетаскиванием (Рабочий стол и Dock).
+    private var systemTiling: Bool {
+        UserDefaults(suiteName: "com.apple.WindowManager")?.object(forKey: "EnableTilingByEdgeDrag") as? Bool ?? true
+    }
+
+    private var symbols: String { (WindowSnapModifier(rawValue: modifier) ?? .controlOption).symbols }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Раскладка окон", isOn: $enabled)
+                Text("Как в Windows: перетащите окно за заголовок к краю экрана — оно займёт половину, к углу — четверть, к верхнему краю — весь экран. Или горячими клавишами.")
+                    .foregroundStyle(.secondary)
+                if enabled {
+                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Раскладка окон работает")
+                }
+            }
+            Section("Настройка") {
+                Toggle("Прилипание при перетаскивании", isOn: $drag)
+                if drag && systemTiling {
+                    Text("В macOS тоже включена раскладка перетаскиванием — подсказки могут дублироваться. Её можно выключить: Системные настройки → Рабочий стол и Dock → «Перетаскивать окна к краям экрана».")
+                        .foregroundStyle(.orange)
+                }
+                Picker("Отступ между окнами", selection: $gap) {
+                    Text("Нет").tag(0)
+                    Text("4 pt").tag(4)
+                    Text("8 pt").tag(8)
+                }
+                Picker("Модификатор клавиш", selection: $modifier) {
+                    ForEach(WindowSnapModifier.allCases) { option in
+                        Text(option.symbols).tag(option.rawValue)
+                    }
+                }
+                if !service.failedHotKeys.isEmpty {
+                    Label("Заняты другим приложением: \(service.failedHotKeys.joined(separator: ", "))",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+            }
+            .disabled(!enabled)
+            Section("Горячие клавиши") {
+                ForEach(WindowTiler.bindings, id: \.label) { binding in
+                    ShortcutRow(keys: Array(symbols).map(String.init) + [binding.label], text: binding.title)
+                }
+                Text("Повторное нажатие той же половины переносит окно на следующий монитор.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Окна")
     }
 }
 

@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppSwitcher.shared.sync()
         ScreenshotService.shared.sync()
         LayoutFix.shared.sync()
+        WindowTiler.shared.sync()
     }
 }
 
@@ -89,4 +90,6 @@ enum HotKeyID {
     static let screenshot: UInt32 = 2
     static let screenshotOCR: UInt32 = 3
     static let layoutFix: UInt32 = 4
+    /// 10…20 — раскладка окон (по одному на сочетание).
+    static let windowSnapBase: UInt32 = 10
 }

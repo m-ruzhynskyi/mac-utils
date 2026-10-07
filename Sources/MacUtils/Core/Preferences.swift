@@ -39,6 +39,13 @@ enum Pref {
     static let recordingAudio = "recordingAudio"
     static let recordingMicrophone = "recordingMicrophone"
 
+    static let windowSnap = "windowSnapEnabled"
+    static let windowSnapDrag = "windowSnapDrag"
+    /// Отступ между окнами: 0, 4 или 8 pt.
+    static let windowSnapGap = "windowSnapGap"
+    /// "controlOption" (⌃⌥, по умолчанию), "controlCommand", "optionCommand".
+    static let windowSnapModifier = "windowSnapModifier"
+
     static let layoutFix = "layoutFixEnabled"
     /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
     static let layoutFixKeyCode = "layoutFixKeyCode"
@@ -73,6 +80,10 @@ enum Pref {
             recordingCursor: true,
             recordingAudio: false,
             recordingMicrophone: false,
+            windowSnap: true,
+            windowSnapDrag: true,
+            windowSnapGap: 0,
+            windowSnapModifier: "controlOption",
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,
