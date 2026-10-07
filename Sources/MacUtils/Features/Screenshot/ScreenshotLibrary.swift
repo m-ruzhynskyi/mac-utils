@@ -54,6 +54,10 @@ enum ShotLibraryRules {
         return media && prefixes.contains { lower.hasPrefix($0) }
     }
 
+    static func isExpired(_ record: ShotRecord, days: Int, now: Date = Date()) -> Bool {
+        days > 0 && now.timeIntervalSince(record.date) > Double(days) * 86_400
+    }
+
     static func isVideo(_ url: URL) -> Bool {
         ["mp4", "mov", "m4v", "gif"].contains(url.pathExtension.lowercased())
     }
@@ -80,6 +84,7 @@ final class ScreenshotLibrary: ObservableObject {
 
     private var watcher: DispatchSourceFileSystemObject?
     private var watchedFolder: URL?
+    private var cleanupTimer: Timer?
 
     private static var indexURL: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -100,6 +105,16 @@ final class ScreenshotLibrary: ObservableObject {
     func sync() {
         watcher?.cancel()
         watcher = nil
+        cleanupTimer?.invalidate()
+        cleanupTimer = nil
+        if enabled, UserDefaults.standard.integer(forKey: Pref.screenshotLibraryTrashDays) > 0 {
+            removeExpired()
+            let timer = Timer(timeInterval: 3600, repeats: true) { _ in
+                MainActor.assumeIsolated { _ = ScreenshotLibrary.shared.removeExpired() }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            cleanupTimer = timer
+        }
         // Один раз забираем то, что лежало в папке до умной папки.
         if enabled, !UserDefaults.standard.bool(forKey: Pref.screenshotLibraryImported) {
             UserDefaults.standard.set(true, forKey: Pref.screenshotLibraryImported)
@@ -205,6 +220,23 @@ final class ScreenshotLibrary: ObservableObject {
             count += 1
         }
         return count
+    }
+
+    /// Снимки и видео старше срока — в Корзину (безвозвратно ничего не удаляется).
+    @discardableResult
+    func removeExpired(now: Date = Date()) -> Int {
+        let days = UserDefaults.standard.integer(forKey: Pref.screenshotLibraryTrashDays)
+        guard days > 0 else { return 0 }
+        let expired = records.filter { ShotLibraryRules.isExpired($0, days: days, now: now) }
+        for record in expired {
+            try? FileManager.default.trashItem(at: record.url, resultingItemURL: nil)
+        }
+        guard !expired.isEmpty else { return 0 }
+        let paths = Set(expired.map(\.path))
+        records.removeAll { paths.contains($0.path) }
+        save()
+        Log.capture.info("Умная папка: в Корзину \(expired.count) старых снимков и видео")
+        return expired.count
     }
 
     func remove(_ record: ShotRecord) {

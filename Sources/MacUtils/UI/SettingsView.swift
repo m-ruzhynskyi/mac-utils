@@ -879,6 +879,8 @@ struct ScreenshotPage: View {
     @AppStorage(Pref.screenshotBackground) private var background = ShotBackground.sky.rawValue
     @AppStorage(Pref.screenshotLibrary) private var library = true
     @AppStorage(Pref.screenshotLibrarySystem) private var librarySystem = false
+    @AppStorage(Pref.screenshotLibraryClipboard) private var libraryClipboard = true
+    @AppStorage(Pref.screenshotLibraryTrashDays) private var libraryTrashDays = 0
     @AppStorage(Pref.recordingFormat) private var recordingFormat = ScreenRecorder.Format.mp4.rawValue
     @AppStorage(Pref.recordingFPS) private var recordingFPS = 30
     @AppStorage(Pref.recordingCursor) private var recordingCursor = true
@@ -937,6 +939,19 @@ struct ScreenshotPage: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Toggle("Забирать и системные снимки (⌘⇧3, ⌘⇧4)", isOn: $librarySystem)
                     .disabled(!library)
+                Toggle("Сохранять и скопированные в буфер", isOn: $libraryClipboard)
+                    .disabled(!library)
+                Picker("Удалять снимки и видео старше", selection: $libraryTrashDays) {
+                    Text("Никогда").tag(0)
+                    Text("7 дней").tag(7)
+                    Text("30 дней").tag(30)
+                    Text("90 дней").tag(90)
+                }
+                .disabled(!library)
+                if libraryTrashDays > 0 {
+                    Text("Старые снимки и видео из умной папки уходят в Корзину — безвозвратно ничего не удаляется.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Button("Разложить уже сохранённые снимки и видео") {
                     let count = ScreenshotLibrary.shared.importExisting()
                     Toast.show("Разложено: \(count)", symbol: "photo.on.rectangle.angled", tint: .green)
