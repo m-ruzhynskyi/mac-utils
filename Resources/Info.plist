@@ -24,6 +24,17 @@
     <string>14.0</string>
     <key>MUUpdateRepo</key>
     <string>m-ruzhynskyi/mac-utils</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.mruzhynskyi.macutils</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>macutils</string>
+            </array>
+        </dict>
+    </array>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>

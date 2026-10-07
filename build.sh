@@ -41,16 +41,27 @@ if BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null)"; then
 fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+# Значок «Инструменты»: маленькое приложение внутри, Mac Utils копирует его в Программы.
+TOOLS="$APP/Contents/Resources/Инструменты.app"
+mkdir -p "$TOOLS/Contents/MacOS" "$TOOLS/Contents/Resources"
+cp "$BIN_DIR/ToolsLauncher" "$TOOLS/Contents/MacOS/ToolsLauncher"
+cp Resources/ToolsLauncher-Info.plist "$TOOLS/Contents/Info.plist"
+cp Resources/ToolsIcon.icns "$TOOLS/Contents/Resources/ToolsIcon.icns"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")" "$TOOLS/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")" "$TOOLS/Contents/Info.plist"
+
 # Постоянная подпись «Mac Utils Signing» (см. scripts/make-signing-cert.sh) — тогда
 # macOS не сбрасывает разрешения после пересборки и автообновления.
 IDENTITY="${SIGN_IDENTITY:-}"
 if [[ -z "$IDENTITY" ]] && security find-certificate -c "Mac Utils Signing" >/dev/null 2>&1; then
     IDENTITY="Mac Utils Signing"
 fi
-if [[ -n "$IDENTITY" ]] && codesign --force --sign "$IDENTITY" "$APP"; then
+# Вложенное приложение подписывается первым, затем внешнее.
+if [[ -n "$IDENTITY" ]] && codesign --force --sign "$IDENTITY" "$TOOLS" && codesign --force --sign "$IDENTITY" "$APP"; then
     echo "Подписано: $IDENTITY"
 else
     [[ -n "$IDENTITY" ]] && echo "Не удалось подписать «$IDENTITY», подписываю ad-hoc" >&2
+    codesign --force --sign - "$TOOLS"
     codesign --force --sign - "$APP"
 fi
 echo "Готово: $APP"

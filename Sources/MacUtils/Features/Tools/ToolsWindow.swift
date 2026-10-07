@@ -38,6 +38,8 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
         if let tab { UserDefaults.standard.set(tab.rawValue, forKey: Pref.toolsTab) }
         let window = self.window ?? make()
         if !window.isVisible { FocusReturn.remember() }
+        // Пока окно открыто, Mac Utils виден в Dock и в ⌘Tab — как обычная программа.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
@@ -59,6 +61,8 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        // Без окна значок в Dock не нужен: Mac Utils снова работает в фоне.
+        NSApp.setActivationPolicy(.accessory)
         if !SettingsWindowController.shared.isVisible { FocusReturn.restore() }
     }
 }
