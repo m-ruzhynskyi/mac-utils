@@ -564,7 +564,16 @@ struct MenuBarPage: View {
                 Button("Открыть настройки строки меню") { MenuBarHider.openSystemSettings() }
                     .buttonStyle(.borderedProminent)
             }
-            Section("Как спрятать значки") {
+            Section {
+                Toggle("Прятать значки в «»", isOn: $enabled)
+                Text("Если значки нужно не убрать совсем, а держать под рукой: перетащенные левее черты значки уходят в системный список «» и открываются по клику на «». Развернуть все сразу — \(hotKey.title). При двух мониторах на неактивном может ненадолго остаться пустое место или спрятанные значки — длина пересчитывается при переходе на него.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if enabled {
+                hiderSections
+            }
+            Section("Убрать значки совсем") {
                 Text("1. Системные настройки → «Строка меню».")
                 Text("2. В списке «Разрешить в строке меню» выключите приложения, значки которых не нужны.")
                 Text("3. Системные значки (микрофон, звук, Wi‑Fi и др.) — там же, в «Элементах управления строки меню»: «Не показывать в строке меню».")
@@ -577,13 +586,8 @@ struct MenuBarPage: View {
         .navigationTitle("Строка меню")
     }
 
-    private var hiderForm: some View {
-        Form {
-            Section {
-                Toggle("Прятать значки в строке меню", isOn: $enabled)
-                Text("Как Hidden Bar: лишние значки прячутся за стрелкой. Пока функция включена, в строке меню появляются два значка Mac Utils — стрелка и тонкая черта-разделитель.")
-                    .foregroundStyle(.secondary)
-            }
+    @ViewBuilder
+    private var hiderSections: some View {
             Section("Как настроить") {
                 MenuBarIllustration()
                 Text("Зажмите ⌘ — появится тонкая черта. Не отпуская ⌘, перетащите значки, которые нужно прятать, левее черты. Всё правее неё остаётся видимым. Стрелка сворачивает и разворачивает спрятанные значки. Если места мало, macOS может показать свою стрелку «»» — за ней системные значки, не поместившиеся в строку.")
@@ -619,6 +623,16 @@ struct MenuBarPage: View {
                 }
             }
             .disabled(!enabled)
+    }
+
+    private var hiderForm: some View {
+        Form {
+            Section {
+                Toggle("Прятать значки в строке меню", isOn: $enabled)
+                Text("Как Hidden Bar: лишние значки прячутся за стрелкой. Пока функция включена, в строке меню появляются два значка Mac Utils — стрелка и тонкая черта-разделитель (видна, пока зажата ⌘).")
+                    .foregroundStyle(.secondary)
+            }
+            hiderSections
         }
         .formStyle(.grouped)
         .navigationTitle("Строка меню")
