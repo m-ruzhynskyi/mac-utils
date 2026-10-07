@@ -78,3 +78,22 @@ final class CleanupCategoryTests: XCTestCase {
         XCTAssertEqual(permanent, [.trash])
     }
 }
+
+@MainActor
+final class TaskManagerSamplingTests: XCTestCase {
+    func testSamplesOwnProcessWithMemoryAndCPU() throws {
+        let model = TaskManagerModel.shared
+        model.sample()
+        // Немного нагрузим процессор между замерами.
+        var x = 0.0
+        let end = Date().addingTimeInterval(0.3)
+        while Date() < end { x += sin(x + 1) }
+        model.sample()
+        let own = try XCTUnwrap(model.rows.first { $0.pid == ProcessInfo.processInfo.processIdentifier })
+        XCTAssertGreaterThan(own.memory, 1_000_000)
+        XCTAssertGreaterThan(own.cpu, 10, "процесс крутился ~0.3 с")
+        XCTAssertGreaterThan(model.rows.count, 50)
+        XCTAssertFalse(own.user.isEmpty)
+        _ = x
+    }
+}
