@@ -540,7 +540,7 @@ struct VolumePage: View {
 struct MenuBarPage: View {
     @AppStorage(Pref.menuBarHider) private var enabled = false
     @AppStorage(Pref.menuBarAutoCollapse) private var autoCollapse = 10
-    @AppStorage(Pref.menuBarHideChevron) private var hideChevron = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26
+    @AppStorage(Pref.menuBarHideChevron) private var hideChevron = false
     @AppStorage(Pref.menuBarKeyCode) private var keyCode = LayoutHotKey.controlOptionM.keyCode
     @AppStorage(Pref.menuBarModifiers) private var modifiers = LayoutHotKey.controlOptionM.modifiers
     @ObservedObject private var hider = MenuBarHider.shared
