@@ -12,8 +12,6 @@ final class MenuBarHider: NSObject, ObservableObject {
 
     @Published private(set) var isCollapsed = false
     @Published private(set) var isRunning = false
-    /// Разделитель оказался правее стрелки — свернуть нельзя, иначе пропадёт и стрелка.
-    @Published private(set) var misplaced = false
 
     private static let separatorLength: CGFloat = 10
     /// Развёрнуто и ⌘ не зажата: черта не видна, остаётся узкий невидимый промежуток.
@@ -156,7 +154,6 @@ final class MenuBarHider: NSObject, ObservableObject {
         separatorItem = nil
         toggleItem = nil
         isCollapsed = false
-        misplaced = false
     }
 
     // MARK: - Свернуть / развернуть
@@ -176,13 +173,8 @@ final class MenuBarHider: NSObject, ObservableObject {
 
     func collapse() {
         guard let separatorItem, !isCollapsed else { return }
-        guard separatorIsLeftOfToggle else {
-            misplaced = true
-            Toast.show("Разделитель стоит правее стрелки — перетащите его левее (с ⌘)",
-                       symbol: "exclamationmark.triangle.fill", tint: .orange)
-            return
-        }
-        misplaced = false
+        // Порядок значков не проверяем: в новых macOS система сообщает условные
+        // координаты, и проверка ошибочно блокировала сворачивание.
         if let window = separatorItem.button?.window, let screen = window.screen {
             rightOffset = screen.frame.maxX - window.frame.maxX
         }
@@ -286,15 +278,6 @@ final class MenuBarHider: NSObject, ObservableObject {
 
     /// Длина разделителя: для проверки и настроек.
     var separatorLengthValue: CGFloat { separatorItem?.length ?? 0 }
-
-    private var separatorIsLeftOfToggle: Bool {
-        guard let separator = separatorItem?.button?.window?.frame,
-              let toggle = toggleItem?.button?.window?.frame else { return true }
-        // В новых macOS окна значков условные и перекрываются (общий правый край) —
-        // тогда порядок неизвестен, и сворачивание не блокируем.
-        if abs(separator.maxX - toggle.maxX) < 1 { return true }
-        return separator.minX <= toggle.minX
-    }
 
     private func scheduleAutoCollapse() {
         collapseTimer?.invalidate()
