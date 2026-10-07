@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import SwiftUI
 import Vision
@@ -11,6 +12,8 @@ struct ShotRecord: Codable, Hashable, Identifiable {
 
     var id: String { path }
     var url: URL { URL(fileURLWithPath: path) }
+    /// Запись экрана (MP4 или GIF), а не снимок.
+    var isVideo: Bool { ShotLibraryRules.isVideo(url) }
 }
 
 /// Раскладка и поиск (без UI и диска — для тестов).
@@ -40,6 +43,10 @@ enum ShotLibraryRules {
         let haystack = (record.text + " " + record.app + " " + formatter.string(from: record.date)
                         + " " + record.url.lastPathComponent).lowercased()
         return words.allSatisfy { haystack.contains($0) }
+    }
+
+    static func isVideo(_ url: URL) -> Bool {
+        ["mp4", "mov", "m4v", "gif"].contains(url.pathExtension.lowercased())
     }
 
     /// Похоже на системный снимок (⌘⇧3/4): «Screenshot …» / «Снимок экрана …».
@@ -126,8 +133,10 @@ final class ScreenshotLibrary: ObservableObject {
         records.insert(record, at: 0)
         save()
         indexing += 1
+        let isVideo = record.isVideo
         Task.detached(priority: .utility) {
-            let cgImage = image ?? NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            // В видео текст не распознаём — ищутся по программе, дате и имени.
+            let cgImage = isVideo ? nil : (image ?? NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil))
             let text = cgImage.map(TextRecognizer.recognize) ?? ""
             await MainActor.run {
                 let library = ScreenshotLibrary.shared
@@ -171,16 +180,28 @@ struct ScreenshotLibraryView: View {
     @ObservedObject var library: ScreenshotLibrary
     var compact = false
     @State private var query = ""
+    @State private var kind = 0
     @AppStorage(Pref.screenshotLibrary) private var enabled = true
 
     private var results: [ShotRecord] {
-        library.records.filter { ShotLibraryRules.matches($0, query: query) }
+        library.records.filter {
+            ShotLibraryRules.matches($0, query: query) && (kind == 0 || (kind == 2) == $0.isVideo)
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 TextField("Поиск по тексту на снимке, программе, дате", text: $query)
+                Picker("", selection: $kind) {
+                    Text("Все").tag(0)
+                    Image(systemName: "photo").tag(1)
+                    Image(systemName: "video").tag(2)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: compact ? 110 : 140)
+                .help("Все / снимки / видео")
                     .textFieldStyle(.roundedBorder)
                 if library.indexing > 0 {
                     ProgressView().controlSize(.small).help("Распознаётся текст…")
@@ -241,6 +262,11 @@ private struct ShotThumbnail: View {
                     Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
+                if record.isVideo {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: compact ? 18 : 24))
+                        .foregroundStyle(.white, .black.opacity(0.45))
+                }
             }
             .frame(height: compact ? 64 : 96)
             Text(record.app).font(.caption2.weight(.semibold)).lineLimit(1)
@@ -249,8 +275,18 @@ private struct ShotThumbnail: View {
         }
         .help(record.text.isEmpty ? record.url.lastPathComponent : String(record.text.prefix(300)))
         .task(id: record.path) {
+            let url = record.url
+            if record.isVideo && url.pathExtension.lowercased() != "gif" {
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+                generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = CGSize(width: 240, height: 240)
+                if let frame = try? await generator.image(at: .zero).image {
+                    image = NSImage(cgImage: frame, size: NSSize(width: frame.width, height: frame.height))
+                }
+                return
+            }
             image = await Task.detached(priority: .utility) {
-                NSImage(contentsOf: record.url).flatMap { Self.thumbnail($0) }
+                NSImage(contentsOf: url).flatMap { Self.thumbnail($0) }
             }.value
         }
     }

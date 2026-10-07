@@ -26,6 +26,15 @@ final class DownloadsRulesTests: XCTestCase {
         XCTAssertEqual(DownloadsRules.uniqueName("notes", existing: ["notes"]), "notes (2)")
     }
 
+    func testFolderNameWithCustomRules() {
+        let custom = ["mdz": "Lab", "pdf": "Papers"]
+        XCTAssertEqual(DownloadsRules.folderName(for: URL(fileURLWithPath: "/d/x.MDZ"), custom: custom), "Lab")
+        XCTAssertEqual(DownloadsRules.folderName(for: URL(fileURLWithPath: "/d/x.pdf"), custom: custom), "Papers", "правило важнее")
+        XCTAssertEqual(DownloadsRules.folderName(for: URL(fileURLWithPath: "/d/x.png"), custom: custom), "Images")
+        XCTAssertNil(DownloadsRules.folderName(for: URL(fileURLWithPath: "/d/x.qqq"), custom: custom))
+        XCTAssertEqual(DownloadsRules.normalizedExtension(" .Sketch "), "sketch")
+    }
+
     func testExpiry() {
         let now = Date()
         let old = now.addingTimeInterval(-40 * 86_400)
@@ -56,16 +65,36 @@ final class DownloadsSorterRunTests: XCTestCase {
         try make("README")                 // без типа
         try manager.createDirectory(at: root.appendingPathComponent("My Folder"), withIntermediateDirectories: true)
         // Уже есть такой файл в категории — получит «(2)».
-        try manager.createDirectory(at: root.appendingPathComponent("Документы"), withIntermediateDirectories: true)
-        try Data("y".utf8).write(to: root.appendingPathComponent("Документы/report.pdf"))
+        try manager.createDirectory(at: root.appendingPathComponent("Documents"), withIntermediateDirectories: true)
+        try Data("y".utf8).write(to: root.appendingPathComponent("Documents/report.pdf"))
 
         let result = DownloadsSorter.shared.run(in: root, trashDays: 0)
         XCTAssertEqual(result.moved, 2)
-        XCTAssertTrue(manager.fileExists(atPath: root.appendingPathComponent("Изображения/photo.png").path))
-        XCTAssertTrue(manager.fileExists(atPath: root.appendingPathComponent("Документы/report (2).pdf").path))
+        XCTAssertTrue(manager.fileExists(atPath: root.appendingPathComponent("Images/photo.png").path))
+        XCTAssertTrue(manager.fileExists(atPath: root.appendingPathComponent("Documents/report (2).pdf").path))
         XCTAssertTrue(manager.fileExists(atPath: root.appendingPathComponent("movie.mp4.crdownload").path))
         XCTAssertTrue(manager.fileExists(atPath: root.appendingPathComponent("fresh.zip").path))
         XCTAssertTrue(manager.fileExists(atPath: root.appendingPathComponent("README").path))
         XCTAssertTrue(manager.fileExists(atPath: root.appendingPathComponent("My Folder").path))
+    }
+
+    func testCustomRulesAndLegacyFolders() throws {
+        let manager = FileManager.default
+        let root = manager.temporaryDirectory.appendingPathComponent("DownloadsSorterTest2-\(UUID().uuidString)")
+        try manager.createDirectory(at: root.appendingPathComponent("Изображения"), withIntermediateDirectories: true)
+        defer { try? manager.removeItem(at: root) }
+        try Data("old".utf8).write(to: root.appendingPathComponent("Изображения/old.png"))
+        let file = root.appendingPathComponent("lab.mdz")
+        try Data("x".utf8).write(to: file)
+        try manager.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: file.path)
+
+        let saved = UserDefaults.standard.dictionary(forKey: Pref.downloadsCustomRules)
+        UserDefaults.standard.set(["mdz": "Lab"], forKey: Pref.downloadsCustomRules)
+        defer { UserDefaults.standard.set(saved, forKey: Pref.downloadsCustomRules) }
+
+        DownloadsSorter.shared.run(in: root, trashDays: 0)
+        XCTAssertTrue(manager.fileExists(atPath: root.appendingPathComponent("Lab/lab.mdz").path), "своё правило")
+        XCTAssertTrue(manager.fileExists(atPath: root.appendingPathComponent("Images/old.png").path), "русская папка переименована")
+        XCTAssertFalse(manager.fileExists(atPath: root.appendingPathComponent("Изображения").path))
     }
 }

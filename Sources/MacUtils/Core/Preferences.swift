@@ -63,6 +63,8 @@ enum Pref {
     /// Автосортировка «Загрузок» (по умолчанию выключена) и срок до Корзины в днях (0 — никогда).
     static let downloadsSort = "downloadsSortEnabled"
     static let downloadsTrashDays = "downloadsTrashDays"
+    /// Свои правила «Загрузок»: расширение (без точки) → папка.
+    static let downloadsCustomRules = "downloadsCustomRules"
     /// Умная папка снимков (по дням и программам, поиск по тексту) и сбор системных снимков ⌘⇧3/4.
     static let screenshotLibrary = "screenshotLibraryEnabled"
     static let screenshotLibrarySystem = "screenshotLibrarySystem"

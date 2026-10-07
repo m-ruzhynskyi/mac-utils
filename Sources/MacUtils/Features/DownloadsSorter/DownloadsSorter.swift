@@ -4,13 +4,40 @@ import SwiftUI
 /// Правила раскладки (без UI — для тестов).
 enum DownloadsRules {
     enum Category: String, CaseIterable {
-        case images = "Изображения"
-        case documents = "Документы"
-        case archives = "Архивы"
-        case installers = "Установщики"
-        case video = "Видео"
-        case audio = "Аудио"
-        case code = "Код"
+        case images = "Images"
+        case documents = "Documents"
+        case archives = "Archives"
+        case installers = "Installers"
+        case video = "Video"
+        case audio = "Audio"
+        case code = "Code"
+
+        /// Старые русские названия папок (до 1.2.88) — их содержимое переносится.
+        var legacyName: String {
+            switch self {
+            case .images: return "Изображения"
+            case .documents: return "Документы"
+            case .archives: return "Архивы"
+            case .installers: return "Установщики"
+            case .video: return "Видео"
+            case .audio: return "Аудио"
+            case .code: return "Код"
+            }
+        }
+    }
+
+    /// Расширение без точки, в нижнем регистре: «.Sketch» → «sketch».
+    static func normalizedExtension(_ ext: String) -> String {
+        ext.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+    }
+
+    /// Папка для файла: своё правило важнее встроенной категории.
+    static func folderName(for url: URL, custom: [String: String]) -> String? {
+        let ext = url.pathExtension.lowercased()
+        if !ext.isEmpty, let folder = custom[ext]?.trimmingCharacters(in: .whitespacesAndNewlines), !folder.isEmpty {
+            return folder.replacingOccurrences(of: "/", with: "-")
+        }
+        return category(for: url)?.rawValue
     }
 
     private static let extensions: [Category: Set<String>] = [
@@ -68,6 +95,58 @@ final class DownloadsSorter: ObservableObject {
 
     @Published private(set) var isRunning = false
     @Published private(set) var lastResult: String?
+    @Published private(set) var customRules: [String: String] = DownloadsSorter.customRules
+
+    /// Свои правила: расширение → папка.
+    nonisolated static var customRules: [String: String] {
+        UserDefaults.standard.dictionary(forKey: Pref.downloadsCustomRules) as? [String: String] ?? [:]
+    }
+
+    func setRule(extension ext: String, folder: String?) {
+        var rules = Self.customRules
+        let key = DownloadsRules.normalizedExtension(ext)
+        guard !key.isEmpty else { return }
+        rules[key] = folder?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if rules[key]?.isEmpty == true { rules[key] = nil }
+        UserDefaults.standard.set(rules, forKey: Pref.downloadsCustomRules)
+        customRules = rules
+    }
+
+    /// Типы файлов в «Загрузках», для которых нет ни категории, ни своего правила.
+    func unknownExtensions() -> [(ext: String, count: Int)] {
+        let custom = Self.customRules
+        var counts: [String: Int] = [:]
+        for url in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil,
+                                                                 options: [.skipsHiddenFiles])) ?? [] {
+            let ext = url.pathExtension.lowercased()
+            guard !ext.isEmpty, !DownloadsRules.isPartial(url),
+                  DownloadsRules.folderName(for: url, custom: custom) == nil else { continue }
+            counts[ext, default: 0] += 1
+        }
+        return counts.map { ($0.key, $0.value) }.sorted { $0.count > $1.count }
+    }
+
+    /// Русские папки прежних версий → английские (содержимое переносится).
+    private static func migrateLegacyFolders(in folder: URL) {
+        let manager = FileManager.default
+        for category in DownloadsRules.Category.allCases {
+            let legacy = folder.appendingPathComponent(category.legacyName, isDirectory: true)
+            guard manager.fileExists(atPath: legacy.path) else { continue }
+            let target = folder.appendingPathComponent(category.rawValue, isDirectory: true)
+            if !manager.fileExists(atPath: target.path) {
+                try? manager.moveItem(at: legacy, to: target)
+                continue
+            }
+            for item in (try? manager.contentsOfDirectory(at: legacy, includingPropertiesForKeys: nil)) ?? [] {
+                let existing = Set((try? manager.contentsOfDirectory(atPath: target.path)) ?? [])
+                let name = DownloadsRules.uniqueName(item.lastPathComponent, existing: existing)
+                try? manager.moveItem(at: item, to: target.appendingPathComponent(name))
+            }
+            if ((try? manager.contentsOfDirectory(atPath: legacy.path)) ?? []).filter({ !$0.hasPrefix(".") }).isEmpty {
+                try? manager.removeItem(at: legacy)
+            }
+        }
+    }
 
     private var source: DispatchSourceFileSystemObject?
     private var timer: Timer?
@@ -120,7 +199,9 @@ final class DownloadsSorter: ObservableObject {
         let folder = root ?? self.folder
         let manager = FileManager.default
         let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey, .contentAccessDateKey, .isPackageKey]
-        let categoryNames = Set(DownloadsRules.Category.allCases.map(\.rawValue))
+        let custom = Self.customRules
+        Self.migrateLegacyFolders(in: folder)
+        let categoryNames = Set(DownloadsRules.Category.allCases.map(\.rawValue)).union(custom.values)
         let now = Date()
         var moved = 0, trashed = 0
 
@@ -134,8 +215,8 @@ final class DownloadsSorter: ObservableObject {
             if categoryNames.contains(url.lastPathComponent) { continue }
             // Ещё пишется — подождём следующего раза.
             if let modified = values?.contentModificationDate, now.timeIntervalSince(modified) < 5 { continue }
-            guard let category = DownloadsRules.category(for: url) else { continue }
-            let target = folder.appendingPathComponent(category.rawValue, isDirectory: true)
+            guard let folderName = DownloadsRules.folderName(for: url, custom: custom) else { continue }
+            let target = folder.appendingPathComponent(folderName, isDirectory: true)
             do {
                 try manager.createDirectory(at: target, withIntermediateDirectories: true)
                 let existing = Set((try? manager.contentsOfDirectory(atPath: target.path)) ?? [])
@@ -149,8 +230,8 @@ final class DownloadsSorter: ObservableObject {
 
         let days = trashDays ?? UserDefaults.standard.integer(forKey: Pref.downloadsTrashDays)
         if days > 0 {
-            for category in DownloadsRules.Category.allCases {
-                let dir = folder.appendingPathComponent(category.rawValue, isDirectory: true)
+            for name in categoryNames {
+                let dir = folder.appendingPathComponent(name, isDirectory: true)
                 for url in (try? manager.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys,
                                                              options: [.skipsHiddenFiles])) ?? [] {
                     let values = try? url.resourceValues(forKeys: Set(keys))
@@ -173,15 +254,54 @@ struct DownloadsPage: View {
     @AppStorage(Pref.downloadsSort) private var enabled = false
     @AppStorage(Pref.downloadsTrashDays) private var days = 0
     @ObservedObject private var sorter = DownloadsSorter.shared
+    @State private var newExtension = ""
+    @State private var newFolder = ""
 
     var body: some View {
         Form {
             Section {
                 Toggle("Раскладывать «Загрузки» по папкам", isOn: $enabled)
-                Text("Новые файлы сами перемещаются в папки по типу: \(DownloadsRules.Category.allCases.map(\.rawValue).joined(separator: ", ")). Недокачанные файлы и ваши папки не трогаются.")
+                Text("Новые файлы сами перемещаются в папки по типу: \(DownloadsRules.Category.allCases.map(\.rawValue).joined(separator: ", ")) — и по вашим правилам ниже. Недокачанные файлы и ваши папки не трогаются.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Section("Свои правила") {
+                Text("Куда класть файлы других типов: расширение → папка в «Загрузках». Правило важнее встроенных категорий.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(sorter.customRules.keys.sorted(), id: \.self) { ext in
+                    HStack {
+                        Text(".\(ext)").monospaced().frame(width: 90, alignment: .leading)
+                        Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        Text(sorter.customRules[ext] ?? "")
+                        Spacer()
+                        Button { sorter.setRule(extension: ext, folder: nil) } label: { Image(systemName: "minus.circle") }
+                            .buttonStyle(.borderless).help("Удалить правило")
+                    }
+                }
+                HStack {
+                    TextField("расширение, напр. mdz", text: $newExtension).frame(width: 150)
+                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                    TextField("папка, напр. Lab", text: $newFolder)
+                    Button("Добавить") {
+                        sorter.setRule(extension: newExtension, folder: newFolder)
+                        newExtension = ""
+                        newFolder = ""
+                    }
+                    .disabled(DownloadsRules.normalizedExtension(newExtension).isEmpty || newFolder.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                let unknown = sorter.unknownExtensions()
+                if !unknown.isEmpty {
+                    HStack(spacing: 6) {
+                        Text("Без правила сейчас:").font(.caption).foregroundStyle(.secondary)
+                        ForEach(unknown.prefix(6), id: \.ext) { item in
+                            Button(".\(item.ext) (\(item.count))") { newExtension = item.ext }
+                                .buttonStyle(.link).font(.caption)
+                        }
+                    }
+                }
+            }
+            .disabled(!enabled)
             Section("Старые файлы") {
                 Picker("Убирать в Корзину", selection: $days) {
                     Text("Никогда").tag(0)
