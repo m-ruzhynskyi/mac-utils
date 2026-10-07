@@ -55,7 +55,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet,
+    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads,
          uninstaller, monitor, tasks, cleanup
 
     var id: String { rawValue }
@@ -72,6 +72,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .layout: return "Раскладка"
         case .shelf: return "Полка"
         case .cheatSheet: return "Шпаргалка"
+        case .downloads: return "Загрузки"
         case .uninstaller: return "Удаление программ"
         case .monitor: return "Монитор системы"
         case .tasks: return "Диспетчер задач"
@@ -91,6 +92,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .layout: return "keyboard"
         case .shelf: return "tray.full"
         case .cheatSheet: return "command"
+        case .downloads: return "arrow.down.circle"
         case .uninstaller: return "trash"
         case .monitor: return "gauge.with.dots.needle.67percent"
         case .tasks: return "list.bullet.rectangle"
@@ -110,6 +112,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .layout: return .teal
         case .shelf: return .orange
         case .cheatSheet: return .gray
+        case .downloads: return .blue
         case .uninstaller: return .red
         case .monitor: return .mint
         case .tasks: return .brown
@@ -145,6 +148,7 @@ struct SettingsView: View {
             case .layout: LayoutPage()
             case .shelf: ShelfPage()
             case .cheatSheet: CheatSheetPage()
+            case .downloads: DownloadsPage()
             case .uninstaller: UninstallerPage()
             case .monitor: SystemMonitorView(model: .shared).navigationTitle("Монитор системы")
             case .tasks: TaskManagerView(model: .shared).navigationTitle("Диспетчер задач")

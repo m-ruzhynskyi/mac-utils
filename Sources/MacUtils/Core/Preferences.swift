@@ -60,6 +60,9 @@ enum Pref {
     /// «Шпаргалка»: удержание ⌘ показывает сочетания клавиш; задержка в секундах.
     static let cheatSheet = "cheatSheetEnabled"
     static let cheatSheetDelay = "cheatSheetDelay"
+    /// Автосортировка «Загрузок» (по умолчанию выключена) и срок до Корзины в днях (0 — никогда).
+    static let downloadsSort = "downloadsSortEnabled"
+    static let downloadsTrashDays = "downloadsTrashDays"
     /// Значок Mac Utils в строке меню (клик — «Инструменты»).
     static let menuBarIcon = "menuBarIconEnabled"
 
@@ -107,6 +110,8 @@ enum Pref {
             dropShelf: true,
             cheatSheet: true,
             cheatSheetDelay: 0.8,
+            downloadsSort: false,
+            downloadsTrashDays: 30,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,
