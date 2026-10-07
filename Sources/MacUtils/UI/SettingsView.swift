@@ -798,6 +798,7 @@ struct LayoutPage: View {
                 }
             }
             .disabled(!enabled)
+            AppInputSourceSection()
             Section("Как пользоваться") {
                 ShortcutRow(keys: current.keys, text: "Без выделения — последнее набранное слово. С выделением — весь выделенный текст.")
                 Text("Повторное нажатие возвращает слово обратно. Клик мышью, стрелки и Enter начинают слово заново. В полях паролей не работает.")
