@@ -33,6 +33,8 @@ final class DownloadsRulesTests: XCTestCase {
         XCTAssertEqual(DownloadsRules.folderName(for: URL(fileURLWithPath: "/d/x.png"), custom: custom), "Images")
         XCTAssertNil(DownloadsRules.folderName(for: URL(fileURLWithPath: "/d/x.qqq"), custom: custom))
         XCTAssertEqual(DownloadsRules.normalizedExtension(" .Sketch "), "sketch")
+        XCTAssertEqual(DownloadsRules.folderName(for: URL(fileURLWithPath: "/d/x.key"), custom: ["key": "/Users/x/Talks"]),
+                       "/Users/x/Talks", "полный путь — любая папка")
     }
 
     func testExpiry() {

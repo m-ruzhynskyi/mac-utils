@@ -35,7 +35,8 @@ enum DownloadsRules {
     static func folderName(for url: URL, custom: [String: String]) -> String? {
         let ext = url.pathExtension.lowercased()
         if !ext.isEmpty, let folder = custom[ext]?.trimmingCharacters(in: .whitespacesAndNewlines), !folder.isEmpty {
-            return folder.replacingOccurrences(of: "/", with: "-")
+            // Полный путь — любая папка на диске; иначе — папка внутри «Загрузок».
+            return folder.hasPrefix("/") ? folder : folder.replacingOccurrences(of: "/", with: "-")
         }
         return category(for: url)?.rawValue
     }
@@ -201,7 +202,8 @@ final class DownloadsSorter: ObservableObject {
         let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey, .contentAccessDateKey, .isPackageKey]
         let custom = Self.customRules
         Self.migrateLegacyFolders(in: folder)
-        let categoryNames = Set(DownloadsRules.Category.allCases.map(\.rawValue)).union(custom.values)
+        let categoryNames = Set(DownloadsRules.Category.allCases.map(\.rawValue))
+            .union(custom.values.filter { !$0.hasPrefix("/") })
         let now = Date()
         var moved = 0, trashed = 0
 
@@ -216,7 +218,9 @@ final class DownloadsSorter: ObservableObject {
             // Ещё пишется — подождём следующего раза.
             if let modified = values?.contentModificationDate, now.timeIntervalSince(modified) < 5 { continue }
             guard let folderName = DownloadsRules.folderName(for: url, custom: custom) else { continue }
-            let target = folder.appendingPathComponent(folderName, isDirectory: true)
+            let target = folderName.hasPrefix("/")
+                ? URL(fileURLWithPath: folderName, isDirectory: true)
+                : folder.appendingPathComponent(folderName, isDirectory: true)
             do {
                 try manager.createDirectory(at: target, withIntermediateDirectories: true)
                 let existing = Set((try? manager.contentsOfDirectory(atPath: target.path)) ?? [])
@@ -257,6 +261,37 @@ struct DownloadsPage: View {
     @State private var newExtension = ""
     @State private var newFolder = ""
 
+    /// «Lab» — папка в «Загрузках»; полный путь показываем как «~/Projects/Lab».
+    static func folderTitle(_ value: String) -> String {
+        guard value.hasPrefix("/") else { return "Загрузки/\(value)" }
+        return (value as NSString).abbreviatingWithTildeInPath
+    }
+
+    static func askFolderName() -> String? {
+        let alert = NSAlert()
+        alert.messageText = "Новая папка в «Загрузках»"
+        alert.informativeText = "Как назвать папку?"
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.placeholderString = "Например, Lab"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Готово")
+        alert.addButton(withTitle: "Отмена")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/", with: "-")
+        return name.isEmpty ? nil : name
+    }
+
+    static func chooseFolder(start: URL) -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Выбрать"
+        panel.directoryURL = start
+        return panel.runModal() == .OK ? panel.url?.path : nil
+    }
+
     var body: some View {
         Form {
             Section {
@@ -266,37 +301,58 @@ struct DownloadsPage: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Section("Свои правила") {
-                Text("Куда класть файлы других типов: расширение → папка в «Загрузках». Правило важнее встроенных категорий.")
+                Text("Куда класть файлы других типов. Правило важнее встроенных категорий.")
                     .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
                 ForEach(sorter.customRules.keys.sorted(), id: \.self) { ext in
-                    HStack {
-                        Text(".\(ext)").monospaced().frame(width: 90, alignment: .leading)
+                    HStack(spacing: 8) {
+                        Text(".\(ext)").monospaced()
                         Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                        Text(sorter.customRules[ext] ?? "")
+                        Label(Self.folderTitle(sorter.customRules[ext] ?? ""), systemImage: "folder")
+                            .lineLimit(1).truncationMode(.middle)
                         Spacer()
-                        Button { sorter.setRule(extension: ext, folder: nil) } label: { Image(systemName: "minus.circle") }
+                        Button { sorter.setRule(extension: ext, folder: nil) } label: { Image(systemName: "trash") }
                             .buttonStyle(.borderless).help("Удалить правило")
                     }
                 }
-                HStack {
-                    TextField("расширение, напр. mdz", text: $newExtension).frame(width: 150)
+                HStack(spacing: 8) {
+                    TextField("", text: $newExtension, prompt: Text("mdz"))
+                        .textFieldStyle(.roundedBorder)
+                        .labelsHidden()
+                        .frame(width: 90)
+                        .help("Расширение файла, без точки")
                     Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                    TextField("папка, напр. Lab", text: $newFolder)
+                    Menu {
+                        ForEach(DownloadsRules.Category.allCases, id: \.self) { category in
+                            Button(category.rawValue) { newFolder = category.rawValue }
+                        }
+                        Divider()
+                        Button("Новая папка в «Загрузках»…") {
+                            if let name = Self.askFolderName() { newFolder = name }
+                        }
+                        Button("Выбрать папку…") {
+                            if let path = Self.chooseFolder(start: sorter.folder) { newFolder = path }
+                        }
+                    } label: {
+                        Label(newFolder.isEmpty ? "Папка…" : Self.folderTitle(newFolder), systemImage: "folder")
+                    }
+                    .frame(maxWidth: 260)
+                    Spacer()
                     Button("Добавить") {
                         sorter.setRule(extension: newExtension, folder: newFolder)
                         newExtension = ""
                         newFolder = ""
                     }
-                    .disabled(DownloadsRules.normalizedExtension(newExtension).isEmpty || newFolder.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(DownloadsRules.normalizedExtension(newExtension).isEmpty || newFolder.isEmpty)
                 }
                 let unknown = sorter.unknownExtensions()
                 if !unknown.isEmpty {
                     HStack(spacing: 6) {
-                        Text("Без правила сейчас:").font(.caption).foregroundStyle(.secondary)
+                        Text("Сейчас без правила:").font(.caption).foregroundStyle(.secondary)
                         ForEach(unknown.prefix(6), id: \.ext) { item in
                             Button(".\(item.ext) (\(item.count))") { newExtension = item.ext }
                                 .buttonStyle(.link).font(.caption)
+                                .help("Подставить в поле")
                         }
                     }
                 }
