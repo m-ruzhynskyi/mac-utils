@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 import AppKit
 
 /// Панель инструментов под выделенной областью.

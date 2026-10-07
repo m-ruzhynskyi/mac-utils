@@ -68,4 +68,6 @@ Sources/MacUtils/
 
 ## Лицензия
 
-GPL-3.0-or-later. Идеи функций взяты из [vorssaint-utils](https://github.com/vorssaint/vorssaint-utils) и [macshot](https://github.com/sw33tLie/macshot) (оба GPL-3.0); код написан заново.
+© 2026 Maksym Ruzhynskyi. Все права защищены. Исходный код открыт только для просмотра: копирование, изменение, распространение и использование кода без письменного разрешения запрещены (см. [LICENSE](LICENSE)).
+
+Идеи функций вдохновлены [vorssaint-utils](https://github.com/vorssaint/vorssaint-utils) и [macshot](https://github.com/sw33tLie/macshot); код написан заново.

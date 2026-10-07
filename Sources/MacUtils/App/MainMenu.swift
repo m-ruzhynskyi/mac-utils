@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 import AppKit
 
 /// Строка меню у LSUIElement-приложения не видна, но главное меню всё равно

@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 import AppKit
 
 /// Фон под оформленным снимком или коллажем.

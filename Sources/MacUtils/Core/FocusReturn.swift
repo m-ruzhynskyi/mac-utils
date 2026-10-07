@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 import AppKit
 
 /// Запоминает активное приложение перед тем, как Mac Utils забирает фокус,

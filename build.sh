@@ -1,6 +1,4 @@
 #!/bin/bash
-# SPDX-License-Identifier: GPL-3.0-or-later
-#
 # Собирает "Mac Utils.app" в ./build.
 #   ./build.sh             — сборка под текущую архитектуру
 #   ./build.sh --universal — универсальная сборка (arm64 + x86_64, нужен Xcode)

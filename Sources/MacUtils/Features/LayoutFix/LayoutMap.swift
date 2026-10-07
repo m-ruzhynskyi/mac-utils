@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 import Foundation
 
 /// Перевод текста, набранного не в той раскладке: QWERTY ↔ ЙЦУКЕН

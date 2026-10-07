@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 import AppKit
 import ServiceManagement
 import SwiftUI
@@ -245,7 +243,7 @@ struct GeneralPage: View {
 
             Section {
                 HStack {
-                    Text("Версия \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—") (сборка \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")) · GPL-3.0")
+                    Text("Версия \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—") (сборка \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")) · © Maksym Ruzhynskyi")
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Выйти из Mac Utils") { NSApp.terminate(nil) }
