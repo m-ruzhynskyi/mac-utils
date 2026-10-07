@@ -58,5 +58,10 @@ final class VolumeMathTests: XCTestCase {
         let restored = VolumeStore(data: store.data)
         XCTAssertEqual(restored, store)
         XCTAssertEqual(VolumeStore(data: Data("garbage".utf8)), VolumeStore())
+
+        var temporary = VolumeStore()
+        temporary.set(.init(percent: 40, muted: false), for: "pid.123")
+        XCTAssertEqual(temporary.entry(for: "pid.123").percent, 40)
+        XCTAssertEqual(VolumeStore(data: temporary.data), VolumeStore(), "pid.* не сохраняется")
     }
 }

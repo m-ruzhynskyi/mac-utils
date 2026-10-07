@@ -56,7 +56,8 @@ struct VolumeStore: Equatable {
         }
     }
 
-    var data: Data? { try? JSONEncoder().encode(entries) }
+    /// Консольные программы без bundle id («pid.123») сохраняются только до перезапуска.
+    var data: Data? { try? JSONEncoder().encode(entries.filter { !$0.key.hasPrefix("pid.") }) }
 
     func entry(for bundleID: String) -> Entry {
         entries[bundleID] ?? Entry(percent: 100, muted: false)

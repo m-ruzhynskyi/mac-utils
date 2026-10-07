@@ -80,11 +80,15 @@ enum AudioProcesses {
             let ownerPID = responsible?(pid) ?? pid
             let owner = NSRunningApplication(processIdentifier: ownerPID > 0 ? ownerPID : pid)
                 ?? NSRunningApplication(processIdentifier: pid)
-            let bundleID = owner?.bundleIdentifier
-                ?? CoreAudioHelper.readString(object, kAudioProcessPropertyBundleID)
+            // Пустой bundle id (у консольных программ) считаем отсутствующим.
+            let ownBundleID = CoreAudioHelper.readString(object, kAudioProcessPropertyBundleID).flatMap { $0.isEmpty ? nil : $0 }
+            let bundleID = owner?.bundleIdentifier.flatMap { $0.isEmpty ? nil : $0 }
+                ?? ownBundleID
                 ?? "pid.\(pid)"
             guard bundleID != Bundle.main.bundleIdentifier else { continue }
-            var group = groups[bundleID] ?? (owner, owner?.localizedName ?? bundleID, [], false)
+            let name = owner?.localizedName.flatMap { $0.isEmpty ? nil : $0 }
+                ?? (bundleID.hasPrefix("pid.") ? (ProcessInfo.processName(pid) ?? bundleID) : bundleID)
+            var group = groups[bundleID] ?? (owner, name, [], false)
             group.objects.append(object)
             group.playing = group.playing || running != 0
             groups[bundleID] = group
@@ -96,5 +100,15 @@ enum AudioProcesses {
                             processObjects: group.objects.sorted(), isPlaying: group.playing)
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+}
+
+extension ProcessInfo {
+    /// Имя процесса по pid (для консольных программ без приложения).
+    static func processName(_ pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 1024)
+        guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        let name = String(cString: buffer)
+        return name.isEmpty ? nil : name
     }
 }
