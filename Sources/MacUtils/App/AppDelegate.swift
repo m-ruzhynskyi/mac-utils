@@ -26,6 +26,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) {
             SettingsWindowController.shared.show()
         }
+        HotKeyCenter.shared.register(
+            id: HotKeyID.tools,
+            keyCode: kVK_ANSI_T,
+            modifiers: cmdKey | optionKey | controlKey
+        ) {
+            ToolsWindowController.shared.show()
+        }
 
         syncFeatures()
         Updater.shared.start()
@@ -90,6 +97,7 @@ enum HotKeyID {
     static let screenshot: UInt32 = 2
     static let screenshotOCR: UInt32 = 3
     static let layoutFix: UInt32 = 4
+    static let tools: UInt32 = 5
     /// 10…20 — раскладка окон (по одному на сочетание).
     static let windowSnapBase: UInt32 = 10
     static let appVolume: UInt32 = 30

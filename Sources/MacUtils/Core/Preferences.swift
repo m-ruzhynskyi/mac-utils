@@ -61,6 +61,9 @@ enum Pref {
     static let menuBarKeyCode = "menuBarKeyCode"
     static let menuBarModifiers = "menuBarModifiers"
 
+    /// Последняя открытая вкладка окна «Инструменты».
+    static let toolsTab = "toolsTab"
+
     static let layoutFix = "layoutFixEnabled"
     /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
     static let layoutFixKeyCode = "layoutFixKeyCode"
