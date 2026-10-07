@@ -245,6 +245,15 @@ final class MenuBarHider: NSObject, ObservableObject {
     /// Ширина меню активного приложения (от левого края экрана), по Accessibility.
     private static func frontmostMenusWidth() -> CGFloat {
         guard let app = NSWorkspace.shared.frontmostApplication else { return 0 }
+        // Свои меню через Accessibility не прочитать — считаем по заголовкам.
+        if app.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+            let font = NSFont.menuBarFont(ofSize: 0)
+            let titles = NSApp.mainMenu?.items.map(\.title) ?? []
+            let text = titles.dropFirst().reduce(CGFloat(0)) {
+                $0 + ($1 as NSString).size(withAttributes: [.font: font]).width + 20
+            }
+            return 52 + text // меню Apple и название приложения жирным — с запасом
+        }
         let element = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(element, 0.2)
         var bar: CFTypeRef?
