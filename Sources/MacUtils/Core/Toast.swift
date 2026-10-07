@@ -9,12 +9,24 @@ enum Toast {
     private static var panel: NSPanel?
     private static var generation = 0
 
-    static func show(_ text: String, symbol: String = "checkmark.circle.fill", tint: Color = .green) {
+    /// Кнопка в уведомлении, например «Показать в Finder».
+    struct Action {
+        let title: String
+        let handler: @MainActor () -> Void
+    }
+
+    static func show(_ text: String, symbol: String = "checkmark.circle.fill", tint: Color = .green,
+                     action: Action? = nil) {
         generation += 1
         let token = generation
         panel?.orderOut(nil)
 
-        let host = NSHostingView(rootView: ToastView(text: text, symbol: symbol, tint: tint))
+        let host = FirstMouseHostingView(rootView: ToastView(text: text, symbol: symbol, tint: tint, action: action.map { action in
+            Action(title: action.title) {
+                panel?.orderOut(nil)
+                action.handler()
+            }
+        }))
         let size = host.fittingSize
         let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                             styleMask: [.borderless, .nonactivatingPanel],
@@ -23,7 +35,7 @@ enum Toast {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.level = .statusBar
-        panel.ignoresMouseEvents = true
+        panel.ignoresMouseEvents = action == nil
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.contentView = host
 
@@ -38,7 +50,8 @@ enum Toast {
         self.panel = panel
 
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            // С кнопкой уведомление висит дольше: на неё нужно успеть нажать.
+            try? await Task.sleep(nanoseconds: action == nil ? 1_800_000_000 : 5_000_000_000)
             guard token == generation else { return }
             // Без runAnimationGroup: в async-контексте Swift выбирает его async-перегрузку.
             panel.animator().alphaValue = 0
@@ -53,11 +66,17 @@ private struct ToastView: View {
     let text: String
     let symbol: String
     let tint: Color
+    let action: Toast.Action?
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: symbol).foregroundStyle(tint)
             Text(text).font(.system(size: 13, weight: .medium))
+            if let action {
+                Button(action.title) { action.handler() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

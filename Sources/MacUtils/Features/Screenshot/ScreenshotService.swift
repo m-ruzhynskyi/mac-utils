@@ -50,6 +50,11 @@ final class ScreenshotService: ObservableObject {
     // MARK: - Захват
 
     func start(_ mode: Mode) {
+        // ⌘⇧X во время записи экрана — остановить её.
+        if let recorder = ScreenRecorder.current {
+            recorder.stop()
+            return
+        }
         guard windows.isEmpty, !capturing, ScrollCapture.current == nil else { return }
         guard Permissions.screenRecording else {
             Permissions.requestScreenRecording()
@@ -169,6 +174,15 @@ final class ScreenshotService: ObservableObject {
         case .both:
             close()
             deliverBoth(image, prefix: "Снимок экрана", what: "Снимок")
+        }
+    }
+
+    /// Запись экрана: оверлей закрывается, область снимается видео.
+    func startRecording(rect: NSRect) {
+        close()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            ScreenRecorder.start(rect: rect)
         }
     }
 

@@ -46,6 +46,8 @@ final class CaptureToolbar: NSVisualEffectView {
         stack.addArrangedSubview(frame)
         stack.addArrangedSubview(makeButton(symbol: "square.stack.3d.down.right", fallback: "+",
                                             tip: "Шаг + в коллаж (A)", action: #selector(stepPressed)))
+        stack.addArrangedSubview(makeButton(symbol: "record.circle", fallback: "●",
+                                            tip: "Запись экрана (R)", action: #selector(recordPressed)))
         stack.addArrangedSubview(makeButton(symbol: "scroll", fallback: "⇕",
                                             tip: "Длинный снимок с прокруткой", action: #selector(scrollPressed)))
         stack.addArrangedSubview(makeButton(symbol: "text.viewfinder", fallback: "OCR",
@@ -126,6 +128,7 @@ final class CaptureToolbar: NSVisualEffectView {
     @objc private func scrollPressed() { owner?.startScrollCapture() }
     @objc private func stepPressed() { owner?.addStep() }
     @objc private func framePressed() { owner?.toggleFrame() }
+    @objc private func recordPressed() { owner?.startRecording() }
 
     func update(framed: Bool) {
         frameButton?.contentTintColor = framed ? .systemBlue : .white

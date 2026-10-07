@@ -589,6 +589,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 addStep()
             } else if code == kVK_ANSI_F {
                 toggleFrame()
+            } else if code == kVK_ANSI_R {
+                startRecording()
             } else if let n = Self.digitKeys.firstIndex(of: code) ?? Self.keypadDigitKeys.firstIndex(of: code),
                       n < Tool.numbered.count {
                 select(tool: Tool.numbered[n])
@@ -689,6 +691,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         guard let selection, let window else { return }
         let global = selection.offsetBy(dx: window.frame.minX, dy: window.frame.minY)
         ScreenshotService.shared.startScrollCapture(rect: global)
+    }
+
+    func startRecording() {
+        guard let selection, let window else { return }
+        let global = selection.offsetBy(dx: window.frame.minX, dy: window.frame.minY)
+        ScreenshotService.shared.startRecording(rect: global)
     }
 
     func closeCapture() {

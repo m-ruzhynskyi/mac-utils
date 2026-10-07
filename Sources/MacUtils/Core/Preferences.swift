@@ -32,6 +32,13 @@ enum Pref {
     /// Фон под рамкой и коллажем: см. ShotBackground.
     static let screenshotBackground = "screenshotBackground"
 
+    /// Запись экрана: "mp4" или "gif", кадров в секунду (MP4), курсор, звук системы, микрофон.
+    static let recordingFormat = "recordingFormat"
+    static let recordingFPS = "recordingFPS"
+    static let recordingCursor = "recordingCursor"
+    static let recordingAudio = "recordingAudio"
+    static let recordingMicrophone = "recordingMicrophone"
+
     static let layoutFix = "layoutFixEnabled"
     /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
     static let layoutFixKeyCode = "layoutFixKeyCode"
@@ -61,6 +68,11 @@ enum Pref {
             screenshotStepsTitles: true,
             screenshotFrameDefault: false,
             screenshotBackground: "sky",
+            recordingFormat: "mp4",
+            recordingFPS: 30,
+            recordingCursor: true,
+            recordingAudio: false,
+            recordingMicrophone: false,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,

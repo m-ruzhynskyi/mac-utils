@@ -563,6 +563,11 @@ struct ScreenshotPage: View {
     @AppStorage(Pref.screenshotStepsTitles) private var stepsTitles = true
     @AppStorage(Pref.screenshotFrameDefault) private var frameDefault = false
     @AppStorage(Pref.screenshotBackground) private var background = ShotBackground.sky.rawValue
+    @AppStorage(Pref.recordingFormat) private var recordingFormat = ScreenRecorder.Format.mp4.rawValue
+    @AppStorage(Pref.recordingFPS) private var recordingFPS = 30
+    @AppStorage(Pref.recordingCursor) private var recordingCursor = true
+    @AppStorage(Pref.recordingAudio) private var recordingAudio = false
+    @AppStorage(Pref.recordingMicrophone) private var recordingMicrophone = false
     @ObservedObject private var permissions = PermissionsModel.shared
 
     var body: some View {
@@ -613,6 +618,30 @@ struct ScreenshotPage: View {
                 }
                 Toggle("Рамка окна macOS для обычных снимков по умолчанию", isOn: $frameDefault)
                 Text("В режиме снимка рамку включает и выключает кнопка «Рамка» или клавиша F. Снимок кладётся в окно со «светофором», скруглёнными углами и тенью на выбранном фоне.")
+                    .foregroundStyle(.secondary)
+            }
+            Section("Запись экрана") {
+                Picker("Формат", selection: $recordingFormat) {
+                    ForEach(ScreenRecorder.Format.allCases) { format in
+                        Text(format.title).tag(format.rawValue)
+                    }
+                }
+                if recordingFormat == ScreenRecorder.Format.mp4.rawValue {
+                    Picker("Кадров в секунду", selection: $recordingFPS) {
+                        Text("30").tag(30)
+                        Text("60").tag(60)
+                    }
+                    Toggle("Звук системы", isOn: $recordingAudio)
+                    if #available(macOS 15.0, *) {
+                        Toggle("Микрофон", isOn: $recordingMicrophone)
+                    }
+                } else {
+                    Text("GIF: 15 кадров в секунду, ширина до 960 px, без звука, повтор по кругу.")
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("Показывать курсор", isOn: $recordingCursor)
+                ShortcutRow(keys: ["R"], text: "В режиме снимка — записать выделенную область. Стоп — кнопкой на панели или ⌘⇧X, Esc — отмена.")
+                Text("Файл сохраняется в папку снимков и копируется в буфер обмена — его можно сразу вставить в чат.")
                     .foregroundStyle(.secondary)
             }
             Section("Коллаж шагов") {
