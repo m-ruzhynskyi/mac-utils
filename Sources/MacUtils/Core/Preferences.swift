@@ -68,6 +68,7 @@ enum Pref {
     /// Умная папка снимков (по дням и программам, поиск по тексту) и сбор системных снимков ⌘⇧3/4.
     static let screenshotLibrary = "screenshotLibraryEnabled"
     static let screenshotLibrarySystem = "screenshotLibrarySystem"
+    static let screenshotLibraryImported = "screenshotLibraryImported"
     /// Мгновенный QR (⌃⌥Q).
     static let qr = "qrEnabled"
     /// Раскладка по программам: включено, запоминать последнюю, правила и запомненное (bundle id → id раскладки).

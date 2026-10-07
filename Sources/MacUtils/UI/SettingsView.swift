@@ -937,6 +937,11 @@ struct ScreenshotPage: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Toggle("Забирать и системные снимки (⌘⇧3, ⌘⇧4)", isOn: $librarySystem)
                     .disabled(!library)
+                Button("Разложить уже сохранённые снимки и видео") {
+                    let count = ScreenshotLibrary.shared.importExisting()
+                    Toast.show("Разложено: \(count)", symbol: "photo.on.rectangle.angled", tint: .green)
+                }
+                .disabled(!library)
             }
             Section("Оформление") {
                 LabeledContent("Фон") {
