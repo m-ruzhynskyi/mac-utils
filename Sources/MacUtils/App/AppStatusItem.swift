@@ -60,9 +60,9 @@ final class AppStatusItem: NSObject {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        let controller = NSHostingController(rootView: ToolsView(inPopover: true).frame(width: 520, height: 560))
+        let controller = NSHostingController(rootView: ToolsView(inPopover: true).frame(width: 380, height: 470))
         popover.contentViewController = controller
-        popover.contentSize = NSSize(width: 520, height: 560)
+        popover.contentSize = NSSize(width: 380, height: 470)
         self.popover = popover
         return popover
     }

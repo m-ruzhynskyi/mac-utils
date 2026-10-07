@@ -503,7 +503,7 @@ struct UninstallerPage: View {
             }
             .padding(10)
             .background(Color.orange.opacity(0.1))
-        } else if permissions.fullDiskAccess == true {
+        } else if permissions.fullDiskAccess == true && !compact {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 Text("Полный доступ к диску есть").foregroundStyle(.secondary)
