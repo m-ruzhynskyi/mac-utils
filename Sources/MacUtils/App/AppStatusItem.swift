@@ -24,8 +24,6 @@ final class AppStatusItem: NSObject {
                 button.action = #selector(clicked)
             }
             self.item = item
-            // Стрелку «Строки меню» пересоздаём, чтобы она оказалась левее значка.
-            MenuBarHider.shared.recreate()
         } else if let item {
             NSStatusBar.system.removeStatusItem(item)
             self.item = nil

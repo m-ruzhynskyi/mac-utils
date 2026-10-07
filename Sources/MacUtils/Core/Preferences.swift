@@ -53,14 +53,6 @@ enum Pref {
     static let appVolumeKeyCode = "appVolumeKeyCode"
     static let appVolumeModifiers = "appVolumeModifiers"
 
-    /// Скрытие значков строки меню (по умолчанию выключено: тогда у нас нет значков).
-    static let menuBarHider = "menuBarHiderEnabled"
-    /// Свернуть через N секунд после разворота: 0 — не сворачивать.
-    static let menuBarAutoCollapse = "menuBarAutoCollapse"
-    static let menuBarHideChevron = "menuBarHideChevron"
-    static let menuBarKeyCode = "menuBarKeyCode"
-    static let menuBarModifiers = "menuBarModifiers"
-
     /// Последняя открытая вкладка окна «Инструменты».
     static let toolsTab = "toolsTab"
     /// Значок Mac Utils в строке меню (клик — «Инструменты»).
@@ -106,11 +98,7 @@ enum Pref {
             windowSnapGap: 0,
             windowSnapModifier: "controlOption",
             appVolume: true,
-            menuBarHider: false,
             menuBarIcon: true,
-            menuBarAutoCollapse: 10,
-            // Своя стрелка видна всегда: по ней разворачивают кликом, без клавиш.
-            menuBarHideChevron: false,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,
