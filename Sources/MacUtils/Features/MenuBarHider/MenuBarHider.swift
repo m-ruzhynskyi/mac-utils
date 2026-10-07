@@ -209,19 +209,23 @@ final class MenuBarHider: NSObject, ObservableObject {
     /// общая для всех строк меню, а не поместившийся значок macOS убирает целиком.
     func applyCollapsedLength() {
         guard let separatorItem, isCollapsed, let rightOffset else { return }
-        // Длина значка одна на все строки меню, поэтому считаем её для экрана,
-        // на котором сейчас работают (с курсором); при переходе — пересчёт.
-        guard let screen = Self.currentScreen else { return }
-        lengthScreen = screen
+        // Длина значка одна на все строки меню. Берём наибольшее свободное место
+        // среди экранов: там, где места меньше, система упирает разделитель в меню
+        // (не убирает его) — и значки левее него прячутся на всех мониторах, без пустот.
         let menusWidth = Self.frontmostMenusWidth()
-        var left = menusWidth
-        if let notch = screen.auxiliaryTopRightArea, notch.width > 0 {
-            left = max(left, notch.minX - screen.frame.minX)
+        var available: CGFloat = 0
+        for screen in NSScreen.screens {
+            var left = menusWidth
+            if let notch = screen.auxiliaryTopRightArea, notch.width > 0 {
+                left = max(left, notch.minX - screen.frame.minX)
+            }
+            available = max(available, screen.frame.width - rightOffset - left)
         }
-        let available = screen.frame.width - rightOffset - left
-        let length = max(Self.separatorLength, available - 6)
+        lengthScreen = Self.currentScreen
+        // С запасом: лишнее система всё равно упирает в меню или «чёлку».
+        let length = max(Self.separatorLength, available + 24)
         separatorItem.length = length
-        Log.window.debug("Строка меню: разделитель \(Int(length)) pt для экрана \(Int(screen.frame.width)) (меню \(Int(menusWidth)), отступ \(Int(rightOffset)))")
+        Log.window.debug("Строка меню: разделитель \(Int(length)) pt (меню \(Int(menusWidth)), отступ \(Int(rightOffset)))")
     }
 
     private static var currentScreen: NSScreen? {
