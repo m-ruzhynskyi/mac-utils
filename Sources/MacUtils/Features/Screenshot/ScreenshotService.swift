@@ -61,6 +61,8 @@ final class ScreenshotService: ObservableObject {
             return
         }
         capturing = true
+        // Запоминаем программу до того, как оверлей заберёт фокус.
+        ScreenshotLibrary.shared.captureApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
         StepsSession.hideHUD()
         let snapFrames = WindowSnap.visibleWindowFrames()
         Task { @MainActor in
@@ -244,9 +246,12 @@ final class ScreenshotService: ObservableObject {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd 'в' HH.mm.ss"
         let folder = Pref.screenshotDirectory
-        let url = folder.appendingPathComponent("\(prefix) \(formatter.string(from: Date())).png")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // Умная папка: «Снимки экрана/день/программа», текст распознаётся для поиска.
+        let library = ScreenshotLibrary.shared
+        let url = library.destination(fileName: "\(prefix) \(formatter.string(from: Date())).png", root: folder)
         try png.write(to: url)
+        library.add(url, image: nil, app: library.captureApp)
         return url
     }
 
