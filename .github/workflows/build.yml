@@ -48,11 +48,24 @@ jobs:
             exit 0
           fi
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
-          echo "$SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          P12="$RUNNER_TEMP/signing.p12"
+          echo "$SIGNING_P12" | base64 --decode > "$P12"
+          # «Связка ключей» в новых macOS шифрует .p12 так, что `security` на раннере его
+          # не читает. Проверяем пароль OpenSSL 3 и перепаковываем в совместимый формат.
+          OPENSSL="$(brew --prefix openssl@3 2>/dev/null)/bin/openssl"
+          [[ -x "$OPENSSL" ]] || OPENSSL=openssl
+          if ! "$OPENSSL" pkcs12 -in "$P12" -passin env:SIGNING_PASSWORD -noout; then
+            echo "::error::SIGNING_PASSWORD не подходит к SIGNING_P12 — загрузите секреты заново."
+            exit 1
+          fi
+          "$OPENSSL" pkcs12 -in "$P12" -passin env:SIGNING_PASSWORD -nodes -out "$RUNNER_TEMP/signing.pem"
+          "$OPENSSL" pkcs12 -export -legacy -in "$RUNNER_TEMP/signing.pem" -out "$RUNNER_TEMP/legacy.p12" \
+            -passout env:SIGNING_PASSWORD -name "Mac Utils Signing"
+          rm -f "$RUNNER_TEMP/signing.pem"
           security create-keychain -p ci "$KEYCHAIN"
           security set-keychain-settings -lut 3600 "$KEYCHAIN"
           security unlock-keychain -p ci "$KEYCHAIN"
-          security import "$RUNNER_TEMP/signing.p12" -k "$KEYCHAIN" -P "$SIGNING_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/legacy.p12" -k "$KEYCHAIN" -P "$SIGNING_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           echo "SIGN_IDENTITY=Mac Utils Signing" >> "$GITHUB_ENV"
