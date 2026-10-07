@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LayoutFix.shared.sync()
         WindowTiler.shared.sync()
         AppVolume.shared.sync()
+        MenuBarHider.shared.sync()
     }
 }
 

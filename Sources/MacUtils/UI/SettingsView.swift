@@ -55,7 +55,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, uninstaller
+    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, menuBar, layout, uninstaller
 
     var id: String { rawValue }
 
@@ -68,6 +68,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .screenshot: return "Снимки экрана"
         case .windows: return "Окна"
         case .volume: return "Громкость"
+        case .menuBar: return "Строка меню"
         case .layout: return "Раскладка"
         case .uninstaller: return "Удаление программ"
         }
@@ -82,6 +83,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .screenshot: return "camera.viewfinder"
         case .windows: return "rectangle.split.2x2"
         case .volume: return "speaker.wave.2"
+        case .menuBar: return "menubar.rectangle"
         case .layout: return "keyboard"
         case .uninstaller: return "trash"
         }
@@ -96,6 +98,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .screenshot: return .purple
         case .windows: return .indigo
         case .volume: return .pink
+        case .menuBar: return .mint
         case .layout: return .teal
         case .uninstaller: return .red
         }
@@ -126,6 +129,7 @@ struct SettingsView: View {
             case .screenshot: ScreenshotPage()
             case .windows: WindowsPage()
             case .volume: VolumePage()
+            case .menuBar: MenuBarPage()
             case .layout: LayoutPage()
             case .uninstaller: UninstallerPage()
             }
@@ -528,6 +532,83 @@ struct VolumePage: View {
         .formStyle(.grouped)
         .navigationTitle("Громкость")
         .onAppear { AppVolume.shared.refresh() }
+    }
+}
+
+// MARK: - Строка меню
+
+struct MenuBarPage: View {
+    @AppStorage(Pref.menuBarHider) private var enabled = false
+    @AppStorage(Pref.menuBarAutoCollapse) private var autoCollapse = 10
+    @AppStorage(Pref.menuBarHideChevron) private var hideChevron = false
+    @AppStorage(Pref.menuBarKeyCode) private var keyCode = LayoutHotKey.controlOptionM.keyCode
+    @AppStorage(Pref.menuBarModifiers) private var modifiers = LayoutHotKey.controlOptionM.modifiers
+    @ObservedObject private var hider = MenuBarHider.shared
+
+    private var hotKey: LayoutHotKey { LayoutHotKey(keyCode: keyCode, modifiers: modifiers) }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Прятать значки в строке меню", isOn: $enabled)
+                Text("Как Hidden Bar: лишние значки прячутся за стрелкой. Пока функция включена, в строке меню появляются два значка Mac Utils — стрелка и тонкая черта-разделитель.")
+                    .foregroundStyle(.secondary)
+            }
+            Section("Как настроить") {
+                MenuBarIllustration()
+                Text("Удерживая ⌘, перетащите значки, которые нужно прятать, левее черты. Всё правее черты остаётся видимым. Стрелка сворачивает и разворачивает спрятанные значки.")
+                    .fixedSize(horizontal: false, vertical: true)
+                if hider.misplaced {
+                    Text("Черта стоит правее стрелки — перетащите её левее (с ⌘), иначе свернуть нельзя.")
+                        .foregroundStyle(.orange)
+                }
+                if enabled {
+                    Button(hider.isCollapsed ? "Показать значки" : "Спрятать значки") { hider.toggle() }
+                }
+            }
+            Section("Настройки") {
+                Picker("Сворачивать снова через", selection: $autoCollapse) {
+                    Text("Не сворачивать").tag(0)
+                    Text("5 секунд").tag(5)
+                    Text("10 секунд").tag(10)
+                    Text("30 секунд").tag(30)
+                }
+                LabeledContent("Свернуть / развернуть") {
+                    ShortcutRecorder(hotKey: hotKey, suspend: { recording in
+                        if recording { HotKeyCenter.shared.unregister(id: HotKeyID.menuBarToggle) } else { MenuBarHider.shared.sync() }
+                    }) { $0.save(codeKey: Pref.menuBarKeyCode, modifiersKey: Pref.menuBarModifiers) }
+                }
+                Toggle("Прятать и стрелку, когда значки свёрнуты", isOn: $hideChevron)
+                if hideChevron {
+                    Text("Тогда развернуть можно только сочетанием \(hotKey.title).").foregroundStyle(.secondary)
+                }
+            }
+            .disabled(!enabled)
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Строка меню")
+    }
+}
+
+/// Схема: [спрятанные значки] | [видимые] ‹
+private struct MenuBarIllustration: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Group {
+                Image(systemName: "cloud")
+                Image(systemName: "bolt.horizontal")
+                Image(systemName: "paperplane")
+            }
+            .opacity(0.45)
+            RoundedRectangle(cornerRadius: 1).frame(width: 2, height: 14).foregroundStyle(.secondary)
+            Image(systemName: "wifi")
+            Image(systemName: "battery.75")
+            Image(systemName: "chevron.right").fontWeight(.semibold)
+            Spacer(minLength: 0)
+            Text("прячутся · черта · видны · стрелка").font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
