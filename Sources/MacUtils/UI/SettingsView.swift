@@ -468,11 +468,12 @@ struct ToolsPage: View {
 struct UninstallerPage: View {
     @ObservedObject private var permissions = PermissionsModel.shared
     @ObservedObject private var model = UninstallerModel.shared
+    var compact = false
 
     var body: some View {
         VStack(spacing: 0) {
             fullDiskAccessBar
-            UninstallerView(model: model)
+            UninstallerView(model: model, compact: compact)
         }
         .navigationTitle("Удаление программ")
         .onAppear {

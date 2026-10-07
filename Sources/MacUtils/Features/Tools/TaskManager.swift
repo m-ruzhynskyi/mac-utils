@@ -172,24 +172,40 @@ final class TaskManagerModel: ObservableObject {
 
 struct TaskManagerView: View {
     @ObservedObject var model: TaskManagerModel
+    var compact = false
     @State private var confirmForce: ProcessRow?
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                TextField("Поиск по имени или PID", text: $model.search)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260)
-                Picker("Сортировка", selection: $model.sort) {
-                    ForEach(ProcessMath.Sort.allCases) { Text($0.title).tag($0) }
+            if compact {
+                VStack(spacing: 6) {
+                    HStack(spacing: 8) {
+                        TextField("Поиск", text: $model.search).textFieldStyle(.roundedBorder)
+                        Toggle("Приложения", isOn: $model.appsOnly).toggleStyle(.checkbox)
+                    }
+                    Picker("Сортировка", selection: $model.sort) {
+                        ForEach(ProcessMath.Sort.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 280)
-                .labelsHidden()
-                Toggle("Только приложения", isOn: $model.appsOnly)
-                Spacer(minLength: 0)
+                .padding(8)
+            } else {
+                HStack(spacing: 10) {
+                    TextField("Поиск по имени или PID", text: $model.search)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 260)
+                    Picker("Сортировка", selection: $model.sort) {
+                        ForEach(ProcessMath.Sort.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 280)
+                    .labelsHidden()
+                    Toggle("Только приложения", isOn: $model.appsOnly)
+                    Spacer(minLength: 0)
+                }
+                .padding(10)
             }
-            .padding(10)
 
             List(selection: $model.selection) {
                 ForEach(model.visible) { row in
@@ -207,7 +223,8 @@ struct TaskManagerView: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                Text("Процессов: \(model.visible.count)").foregroundStyle(.secondary).monospacedDigit()
+                Text(compact ? "\(model.visible.count)" : "Процессов: \(model.visible.count)").foregroundStyle(.secondary).monospacedDigit()
+                    .help("Процессов в списке")
                 Button("Завершить") { if let pid = model.selection { model.quit(pid, force: false) } }
                     .disabled(model.selection == nil)
                 Button("Принудительно") {

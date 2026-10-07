@@ -83,12 +83,13 @@ final class SystemMonitorModel: ObservableObject {
 
 struct SystemMonitorView: View {
     @ObservedObject var model: SystemMonitorModel
+    var compact = false
 
-    private let columns = [GridItem(.adaptive(minimum: 280), spacing: 14)]
+    private var columns: [GridItem] { [GridItem(.adaptive(minimum: compact ? 200 : 280), spacing: compact ? 10 : 14)] }
 
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: 14) {
+            LazyVGrid(columns: columns, spacing: compact ? 10 : 14) {
                 MonitorCard(title: "Процессор", symbol: "cpu", tint: .blue,
                             value: percent(model.cpu),
                             detail: "\(model.cores) \(plural(model.cores, "ядро", "ядра", "ядер"))",
@@ -105,8 +106,9 @@ struct SystemMonitorView: View {
                 diskCard
                 statusCard
             }
-            .padding(16)
+            .padding(compact ? 10 : 16)
         }
+        .environment(\.compactCards, compact)
         .onAppear { model.start() }
         .onDisappear { model.stop() }
     }
@@ -114,7 +116,7 @@ struct SystemMonitorView: View {
     private var diskCard: some View {
         CardShell(title: "Диск", symbol: "internaldrive", tint: .orange) {
             if let disk = model.disk {
-                Text(percent(disk.fraction)).font(.system(size: 26, weight: .semibold)).monospacedDigit()
+                Text(percent(disk.fraction)).font(.system(size: compact ? 20 : 26, weight: .semibold)).monospacedDigit()
                 ProgressView(value: disk.fraction).tint(disk.fraction > 0.9 ? .red : .orange)
                 Text("Свободно \(bytes(UInt64(disk.available))) из \(bytes(UInt64(disk.total)))")
                     .font(.caption).foregroundStyle(.secondary)
@@ -152,26 +154,39 @@ struct SystemMonitorView: View {
     }
 }
 
+private struct CompactCardsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var compactCards: Bool {
+        get { self[CompactCardsKey.self] }
+        set { self[CompactCardsKey.self] = newValue }
+    }
+}
+
 private struct CardShell<Content: View>: View {
+    @Environment(\.compactCards) private var compact
     let title: String
     let symbol: String
     let tint: Color
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: compact ? 5 : 8) {
             Label(title, systemImage: symbol)
-                .font(.headline)
+                .font(compact ? .subheadline.weight(.semibold) : .headline)
                 .foregroundStyle(tint)
             content
         }
-        .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: compact ? 110 : 150, alignment: .topLeading)
+        .padding(compact ? 10 : 14)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
 private struct MonitorCard: View {
+    @Environment(\.compactCards) private var compact
     let title: String
     let symbol: String
     let tint: Color
@@ -184,7 +199,7 @@ private struct MonitorCard: View {
 
     var body: some View {
         CardShell(title: title, symbol: symbol, tint: tint) {
-            Text(value).font(.system(size: 26, weight: .semibold)).monospacedDigit()
+            Text(value).font(.system(size: compact ? 20 : 26, weight: .semibold)).monospacedDigit()
             Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Chart {
                 ForEach(Array(history.enumerated()), id: \.offset) { index, point in
@@ -204,7 +219,7 @@ private struct MonitorCard: View {
             .chartYAxis(.hidden)
             .chartXScale(domain: 0...(SystemMonitorModel.historyLength - 1))
             .chartYScale(domain: 0...yMax)
-            .frame(height: 54)
+            .frame(height: compact ? 36 : 54)
         }
     }
 
