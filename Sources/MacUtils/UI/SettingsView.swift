@@ -910,14 +910,20 @@ struct ScreenshotPage: View {
                     Text("В папку").tag("folder")
                     Text("В буфер и в папку").tag("both")
                 }
-                if destination != "clipboard" {
-                    LabeledContent("Папка") {
-                        HStack {
-                            Text(Pref.screenshotDirectory.path)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .foregroundStyle(.secondary)
-                            Button("Выбрать…", action: chooseFolder)
+                LabeledContent("Папка снимков и видео") {
+                    HStack {
+                        Text(Pref.screenshotDirectory.path)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(.secondary)
+                        Button("Выбрать…", action: chooseFolder)
+                        Button {
+                            NSWorkspace.shared.open(Pref.screenshotDirectory)
+                        } label: { Image(systemName: "folder") }
+                        .help("Показать в Finder")
+                        if !folder.isEmpty {
+                            Button { folder = "" } label: { Image(systemName: "arrow.uturn.backward") }
+                                .help("Вернуть Рабочий стол")
                         }
                     }
                 }
@@ -926,11 +932,16 @@ struct ScreenshotPage: View {
             }
             Section("Умная папка") {
                 Toggle("Раскладывать снимки по дням и программам", isOn: $library)
-                Text("Снимки сохраняются в «Снимки экрана/дата/программа» внутри папки снимков, а текст на них распознаётся — искать можно в «Мои снимки» (раздел слева и панель 🔧).")
+                Text("Снимки и записи экрана сохраняются в «Снимки экрана/дата/программа» внутри папки снимков, текст на снимках распознаётся — искать и смотреть всё можно в «Мои снимки» (раздел слева и вкладка «Снимки» в панели 🔧).")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Toggle("Забирать и системные снимки (⌘⇧3, ⌘⇧4)", isOn: $librarySystem)
                     .disabled(!library)
+                Button("Разложить уже сохранённые снимки и видео") {
+                    let count = ScreenshotLibrary.shared.importExisting()
+                    Toast.show("Разложено: \(count)", symbol: "photo.on.rectangle.angled", tint: .green)
+                }
+                .disabled(!library)
             }
             Section("Оформление") {
                 LabeledContent("Фон") {

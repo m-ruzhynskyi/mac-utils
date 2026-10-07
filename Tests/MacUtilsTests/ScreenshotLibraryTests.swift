@@ -26,4 +26,20 @@ final class ScreenshotLibraryTests: XCTestCase {
         XCTAssertFalse(ShotLibraryRules.isSystemScreenshot("Screenshot notes.txt"))
         XCTAssertFalse(ShotLibraryRules.isSystemScreenshot("photo.png"))
     }
+
+    func testVideosRecognized() {
+        XCTAssertTrue(ShotLibraryRules.isVideo(URL(fileURLWithPath: "/s/Запись экрана.mp4")))
+        XCTAssertTrue(ShotLibraryRules.isVideo(URL(fileURLWithPath: "/s/clip.GIF")))
+        XCTAssertFalse(ShotLibraryRules.isVideo(URL(fileURLWithPath: "/s/shot.png")))
+    }
+}
+
+final class CaptureNameTests: XCTestCase {
+    func testCaptureNames() {
+        XCTAssertTrue(ShotLibraryRules.isCapture("Recording 2026-09-30 at 13-36-32.mp4"))
+        XCTAssertTrue(ShotLibraryRules.isCapture("Запись экрана 2026-10-07 в 14.31.55.mp4"))
+        XCTAssertTrue(ShotLibraryRules.isCapture("Screenshot 2026-10-02 at 15-45-08.png"))
+        XCTAssertFalse(ShotLibraryRules.isCapture("holiday.png"))
+        XCTAssertFalse(ShotLibraryRules.isCapture("Screenshot notes.txt"))
+    }
 }

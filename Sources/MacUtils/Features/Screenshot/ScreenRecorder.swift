@@ -184,14 +184,17 @@ final class ScreenRecorder: NSObject, ObservableObject {
         let base = "Запись экрана \(formatter.string(from: Date()))"
         do {
             let destination: URL
+            // Умная папка: видео тоже по дням и программам и видно в «Мои снимки».
+            let library = ScreenshotLibrary.shared
             if format == .gif {
-                destination = folder.appendingPathComponent(base + ".gif")
+                destination = library.destination(fileName: base + ".gif", root: folder)
                 try await GIFMaker.make(from: temp, to: destination, fps: 15, maxWidth: 960)
                 try? FileManager.default.removeItem(at: temp)
             } else {
-                destination = folder.appendingPathComponent(base + ".mp4")
+                destination = library.destination(fileName: base + ".mp4", root: folder)
                 try FileManager.default.moveItem(at: temp, to: destination)
             }
+            library.add(destination, image: nil, app: library.captureApp)
             // Файлом в буфер обмена: вставляется в чаты и Finder.
             let copy = UserDefaults.standard.bool(forKey: Pref.recordingCopy)
             if copy {

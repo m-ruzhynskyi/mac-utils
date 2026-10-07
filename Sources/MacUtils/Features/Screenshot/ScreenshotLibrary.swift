@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import SwiftUI
 import Vision
@@ -11,6 +12,8 @@ struct ShotRecord: Codable, Hashable, Identifiable {
 
     var id: String { path }
     var url: URL { URL(fileURLWithPath: path) }
+    /// Запись экрана (MP4 или GIF), а не снимок.
+    var isVideo: Bool { ShotLibraryRules.isVideo(url) }
 }
 
 /// Раскладка и поиск (без UI и диска — для тестов).
@@ -40,6 +43,19 @@ enum ShotLibraryRules {
         let haystack = (record.text + " " + record.app + " " + formatter.string(from: record.date)
                         + " " + record.url.lastPathComponent).lowercased()
         return words.allSatisfy { haystack.contains($0) }
+    }
+
+    /// Снимки и записи, которые можно забрать из корня папки: наши и системные.
+    static func isCapture(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        let media = ["png", "jpg", "jpeg", "heic", "gif", "mp4", "mov"].contains((lower as NSString).pathExtension)
+        let prefixes = ["screenshot", "снимок экрана", "знімок екрана", "recording", "screen recording",
+                        "запись экрана", "длинный снимок", "qr "]
+        return media && prefixes.contains { lower.hasPrefix($0) }
+    }
+
+    static func isVideo(_ url: URL) -> Bool {
+        ["mp4", "mov", "m4v", "gif"].contains(url.pathExtension.lowercased())
     }
 
     /// Похоже на системный снимок (⌘⇧3/4): «Screenshot …» / «Снимок экрана …».
@@ -84,6 +100,11 @@ final class ScreenshotLibrary: ObservableObject {
     func sync() {
         watcher?.cancel()
         watcher = nil
+        // Один раз забираем то, что лежало в папке до умной папки.
+        if enabled, !UserDefaults.standard.bool(forKey: Pref.screenshotLibraryImported) {
+            UserDefaults.standard.set(true, forKey: Pref.screenshotLibraryImported)
+            importExisting()
+        }
         guard enabled, UserDefaults.standard.bool(forKey: Pref.screenshotLibrarySystem) else { return }
         let folder = Self.systemScreenshotFolder
         let fd = open(folder.path, O_EVTONLY)
@@ -119,15 +140,18 @@ final class ScreenshotLibrary: ObservableObject {
     }
 
     /// Запомнить снимок и распознать текст в фоне.
-    func add(_ url: URL, image: CGImage?, app: String) {
+    func add(_ url: URL, image: CGImage?, app: String, date: Date = Date()) {
         guard enabled else { return }
-        let record = ShotRecord(path: url.path, date: Date(), app: ShotLibraryRules.sanitized(app), text: "")
+        let record = ShotRecord(path: url.path, date: date, app: ShotLibraryRules.sanitized(app), text: "")
         records.removeAll { $0.path == record.path }
-        records.insert(record, at: 0)
+        records.append(record)
+        records.sort { $0.date > $1.date }
         save()
         indexing += 1
+        let isVideo = record.isVideo
         Task.detached(priority: .utility) {
-            let cgImage = image ?? NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            // В видео текст не распознаём — ищутся по программе, дате и имени.
+            let cgImage = isVideo ? nil : (image ?? NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil))
             let text = cgImage.map(TextRecognizer.recognize) ?? ""
             await MainActor.run {
                 let library = ScreenshotLibrary.shared
@@ -153,6 +177,36 @@ final class ScreenshotLibrary: ObservableObject {
         }
     }
 
+    /// Уже сохранённые снимки и записи из корня папки — в «Снимки экрана/дата/Другое».
+    /// Из папки снимков и из папки видео (если она своя).
+    @discardableResult
+    func importExisting() -> Int {
+        let roots = Set([Pref.screenshotDirectory.standardizedFileURL, Pref.recordingDirectory.standardizedFileURL])
+        return roots.reduce(0) { $0 + importExisting(from: $1) }
+    }
+
+    @discardableResult
+    func importExisting(from root: URL) -> Int {
+        guard enabled else { return 0 }
+        let manager = FileManager.default
+        var count = 0
+        let keys: Set<URLResourceKey> = [.creationDateKey, .isRegularFileKey]
+        for url in (try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: Array(keys))) ?? []
+            where ShotLibraryRules.isCapture(url.lastPathComponent) {
+            let values = try? url.resourceValues(forKeys: keys)
+            guard values?.isRegularFile == true else { continue }
+            let date = values?.creationDate ?? Date()
+            let folder = ShotLibraryRules.folder(root: root, date: date, app: "Другое")
+            try? manager.createDirectory(at: folder, withIntermediateDirectories: true)
+            let existing = Set((try? manager.contentsOfDirectory(atPath: folder.path)) ?? [])
+            let target = folder.appendingPathComponent(DownloadsRules.uniqueName(url.lastPathComponent, existing: existing))
+            guard (try? manager.moveItem(at: url, to: target)) != nil else { continue }
+            add(target, image: nil, app: "Другое", date: date)
+            count += 1
+        }
+        return count
+    }
+
     func remove(_ record: ShotRecord) {
         try? FileManager.default.trashItem(at: record.url, resultingItemURL: nil)
         records.removeAll { $0.path == record.path }
@@ -171,16 +225,28 @@ struct ScreenshotLibraryView: View {
     @ObservedObject var library: ScreenshotLibrary
     var compact = false
     @State private var query = ""
+    @State private var kind = 0
     @AppStorage(Pref.screenshotLibrary) private var enabled = true
 
     private var results: [ShotRecord] {
-        library.records.filter { ShotLibraryRules.matches($0, query: query) }
+        library.records.filter {
+            ShotLibraryRules.matches($0, query: query) && (kind == 0 || (kind == 2) == $0.isVideo)
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 TextField("Поиск по тексту на снимке, программе, дате", text: $query)
+                Picker("", selection: $kind) {
+                    Text("Все").tag(0)
+                    Image(systemName: "photo").tag(1)
+                    Image(systemName: "video").tag(2)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: compact ? 110 : 140)
+                .help("Все / снимки / видео")
                     .textFieldStyle(.roundedBorder)
                 if library.indexing > 0 {
                     ProgressView().controlSize(.small).help("Распознаётся текст…")
@@ -241,6 +307,11 @@ private struct ShotThumbnail: View {
                     Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
+                if record.isVideo {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: compact ? 18 : 24))
+                        .foregroundStyle(.white, .black.opacity(0.45))
+                }
             }
             .frame(height: compact ? 64 : 96)
             Text(record.app).font(.caption2.weight(.semibold)).lineLimit(1)
@@ -249,8 +320,18 @@ private struct ShotThumbnail: View {
         }
         .help(record.text.isEmpty ? record.url.lastPathComponent : String(record.text.prefix(300)))
         .task(id: record.path) {
+            let url = record.url
+            if record.isVideo && url.pathExtension.lowercased() != "gif" {
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+                generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = CGSize(width: 240, height: 240)
+                if let frame = try? await generator.image(at: .zero).image {
+                    image = NSImage(cgImage: frame, size: NSSize(width: frame.width, height: frame.height))
+                }
+                return
+            }
             image = await Task.detached(priority: .utility) {
-                NSImage(contentsOf: record.url).flatMap { Self.thumbnail($0) }
+                NSImage(contentsOf: url).flatMap { Self.thumbnail($0) }
             }.value
         }
     }
