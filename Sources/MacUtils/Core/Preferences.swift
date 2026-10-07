@@ -63,6 +63,8 @@ enum Pref {
 
     /// Последняя открытая вкладка окна «Инструменты».
     static let toolsTab = "toolsTab"
+    /// Значок Mac Utils в строке меню (клик — «Инструменты»).
+    static let menuBarIcon = "menuBarIconEnabled"
 
     static let layoutFix = "layoutFixEnabled"
     /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
@@ -105,6 +107,7 @@ enum Pref {
             windowSnapModifier: "controlOption",
             appVolume: true,
             menuBarHider: false,
+            menuBarIcon: true,
             menuBarAutoCollapse: 10,
             // Своя стрелка видна всегда: по ней разворачивают кликом, без клавиш.
             menuBarHideChevron: false,

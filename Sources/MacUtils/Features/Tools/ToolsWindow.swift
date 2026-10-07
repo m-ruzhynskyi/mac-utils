@@ -38,12 +38,14 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
         if let tab { UserDefaults.standard.set(tab.rawValue, forKey: Pref.toolsTab) }
         let window = self.window ?? make()
         if !window.isVisible { FocusReturn.remember() }
+        // Пока окно открыто, Mac Utils виден в Dock и в ⌘Tab — как обычная программа.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
 
     private func make() -> NSWindow {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 660),
+        let window = ToolsWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 660),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "Инструменты"
@@ -59,7 +61,17 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        // Без окна значок в Dock не нужен: Mac Utils снова работает в фоне.
+        NSApp.setActivationPolicy(.accessory)
         if !SettingsWindowController.shared.isVisible { FocusReturn.restore() }
+    }
+}
+
+/// Заголовок всегда «Инструменты»: вкладки SwiftUI иначе подставляют свой.
+final class ToolsWindow: NSWindow {
+    override var title: String {
+        get { super.title }
+        set { super.title = "Инструменты" }
     }
 }
 

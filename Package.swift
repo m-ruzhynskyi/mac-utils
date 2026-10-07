@@ -9,6 +9,10 @@ let package = Package(
             name: "MacUtils",
             path: "Sources/MacUtils"
         ),
+        .executableTarget(
+            name: "ToolsLauncher",
+            path: "Sources/ToolsLauncher"
+        ),
         .testTarget(
             name: "MacUtilsTests",
             dependencies: ["MacUtils"],

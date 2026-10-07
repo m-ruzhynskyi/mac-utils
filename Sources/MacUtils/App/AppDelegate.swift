@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         syncFeatures()
         Updater.shared.start()
+        ToolsLauncher.installIfNeeded()
 
         // Пока нет доступа к «Универсальному доступу», периодически проверяем:
         // как только пользователь выдаст разрешение, утилиты включатся сами.
@@ -48,6 +49,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !defaults.bool(forKey: Pref.didShowWelcome) || !Permissions.accessibility {
             defaults.set(true, forKey: Pref.didShowWelcome)
             SettingsWindowController.shared.show()
+        }
+    }
+
+    /// macutils://tools — значок «Инструменты»; macutils://settings — настройки.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme == "macutils" {
+            switch url.host {
+            case "tools": ToolsWindowController.shared.show()
+            default: SettingsWindowController.shared.show()
+            }
         }
     }
 
@@ -88,6 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LayoutFix.shared.sync()
         WindowTiler.shared.sync()
         AppVolume.shared.sync()
+        // Новые значки встают левее старых: сначала значок приложения, затем стрелка
+        // «Строки меню» — так значок приложения правее стрелки и не прячется вместе с другими.
+        AppStatusItem.shared.sync()
         MenuBarHider.shared.sync()
     }
 }
