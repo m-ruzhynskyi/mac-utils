@@ -1,11 +1,11 @@
 import AppKit
 
-/// «Строка меню»: прячет лишние значки, как Hidden Bar. Два своих значка:
-/// стрелка (свернуть/развернуть) и разделитель. При сворачивании разделитель
-/// растягивается ровно на свободное место до меню приложения (или до «чёлки»),
-/// и значкам левее него не остаётся места — macOS их прячет. Слишком длинный
-/// разделитель (10 000 pt, как в Hidden Bar) новые macOS просто убирают целиком.
-/// Пока функция выключена, у Mac Utils значков в строке меню нет.
+/// «Строка меню»: прячет лишние значки, как Hidden Bar. Один свой значок —
+/// стрелка. Всё, что левее неё, прячется: при сворачивании значок растягивается
+/// влево ровно на свободное место (до меню приложения или «чёлки»), значкам левее
+/// не остаётся места, и macOS убирает их в свой список «». Стрелка рисуется у
+/// правого края растянутого значка, поэтому её нельзя «перепутать» с разделителем.
+/// Пока функция выключена, у Mac Utils значков для неё в строке меню нет.
 @MainActor
 final class MenuBarHider: NSObject, ObservableObject {
     static let shared = MenuBarHider()
@@ -13,25 +13,17 @@ final class MenuBarHider: NSObject, ObservableObject {
     @Published private(set) var isCollapsed = false
     @Published private(set) var isRunning = false
 
-    private static let separatorLength: CGFloat = 10
-    /// Развёрнуто и ⌘ не зажата: черта не видна, остаётся узкий невидимый промежуток.
-    private static let hiddenSeparatorLength: CGFloat = 2
-    private var flagsMonitors: [Any] = []
-    private var commandHeld = false
-    /// Правый край разделителя от правого края экрана (запоминается при сворачивании).
-    private var rightOffset: CGFloat?
+    private static let chevronLength: CGFloat = 24
 
-    private var toggleItem: NSStatusItem?
-    private var separatorItem: NSStatusItem?
+    /// Правый край значка от правого края экрана (запоминается при сворачивании).
+    private var rightOffset: CGFloat?
+    private var item: NSStatusItem?
     private var collapseTimer: Timer?
     /// Пока свёрнуто: следим, на каком экране работают, и пересчитываем длину под него.
     private var screenTimer: Timer?
     private var lengthScreen: NSScreen?
 
-    /// С macOS 26 строку меню рисует система и умеет прятать значки сама
-    /// (Системные настройки → Строка меню → «Разрешить в строке меню»).
-    /// Там свой способ надёжнее: длина значка общая для всех мониторов,
-    /// и растянутая черта оставляет пустоты и системную стрелку «».
+    /// С macOS 26 строку меню рисует система; см. страницу настроек.
     static var systemManaged: Bool {
         ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26
     }
@@ -65,105 +57,63 @@ final class MenuBarHider: NSObject, ObservableObject {
     // MARK: - Включение
 
     func sync() {
-        let defaults = UserDefaults.standard
-        let enabled = defaults.bool(forKey: Pref.menuBarHider)
+        let enabled = UserDefaults.standard.bool(forKey: Pref.menuBarHider)
         let center = HotKeyCenter.shared
         center.unregister(id: HotKeyID.menuBarToggle)
-
         guard enabled else {
-            removeItems()
+            removeItem()
             isRunning = false
             return
         }
-        createItemsIfNeeded()
+        createItemIfNeeded()
         let key = LayoutHotKey.load(codeKey: Pref.menuBarKeyCode, modifiersKey: Pref.menuBarModifiers,
                                     default: .controlOptionM)
         center.register(id: HotKeyID.menuBarToggle, keyCode: key.keyCode, modifiers: key.modifiers) {
             MenuBarHider.shared.toggle()
         }
         isRunning = true
-        updateChevron()
+        redraw()
     }
 
-    private func createItemsIfNeeded() {
-        guard toggleItem == nil else { return }
-        // Новые значки встают левее старых: сначала стрелка, затем разделитель слева от неё.
-        let toggle = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        toggle.autosaveName = "MacUtilsMenuBarToggle"
-        toggle.behavior = []
-        if let button = toggle.button {
+    /// Пересоздать стрелку (например, чтобы она встала левее нового значка).
+    func recreate() {
+        guard item != nil else { return }
+        removeItem()
+        sync()
+    }
+
+    private func createItemIfNeeded() {
+        guard item == nil else { return }
+        let item = NSStatusBar.system.statusItem(withLength: Self.chevronLength)
+        item.autosaveName = "MacUtilsMenuBarToggle"
+        item.behavior = []
+        if let button = item.button {
             button.target = self
-            button.action = #selector(toggleClicked)
-            button.toolTip = "Mac Utils: показать или спрятать значки"
-        }
-        let separator = NSStatusBar.system.statusItem(withLength: Self.separatorLength)
-        separator.autosaveName = "MacUtilsMenuBarSeparator"
-        separator.behavior = []
-        if let button = separator.button {
-            button.image = Self.separatorImage()
+            button.action = #selector(clicked)
             button.imagePosition = .imageOnly
-            button.toolTip = "Значки левее этой черты прячутся. Перетаскивайте значки с ⌘."
-            button.appearsDisabled = false
-            // Без подсветки при наведении и нажатии: в свёрнутом виде это пустое место.
+            button.imageScaling = .scaleNone
             button.isBordered = false
             (button.cell as? NSButtonCell)?.highlightsBy = []
-            // Клик по пустому месту разворачивает значки, как стрелка.
-            button.target = self
-            button.action = #selector(separatorClicked)
+            button.toolTip = "Mac Utils: значки левее стрелки прячутся. Перетаскивайте их с ⌘."
         }
-        toggleItem = toggle
-        separatorItem = separator
+        self.item = item
         isCollapsed = false
-        // Черта нужна только чтобы перетаскивать значки с ⌘ — показываем её, пока ⌘ зажата.
-        let handler: (NSEvent) -> Void = { event in
-            let held = event.modifierFlags.contains(.command)
-            MainActor.assumeIsolated { MenuBarHider.shared.commandChanged(held) }
-        }
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: handler) {
-            flagsMonitors.append(global)
-        }
-        if let local = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { handler($0); return $0 }) {
-            flagsMonitors.append(local)
-        }
-        updateSeparator()
     }
 
-    private func commandChanged(_ held: Bool) {
-        guard held != commandHeld else { return }
-        commandHeld = held
-        updateSeparator()
-    }
-
-    /// Развёрнутое состояние: черта видна только с зажатой ⌘.
-    private func updateSeparator() {
-        guard let separatorItem, !isCollapsed else { return }
-        separatorItem.length = commandHeld ? Self.separatorLength : Self.hiddenSeparatorLength
-        separatorItem.button?.image = commandHeld ? Self.separatorImage() : nil
-    }
-
-    private func removeItems() {
-        screenTimer?.invalidate()
-        screenTimer = nil
-        for monitor in flagsMonitors { NSEvent.removeMonitor(monitor) }
-        flagsMonitors.removeAll()
-        commandHeld = false
+    private func removeItem() {
         collapseTimer?.invalidate()
         collapseTimer = nil
-        if let separatorItem { NSStatusBar.system.removeStatusItem(separatorItem) }
-        if let toggleItem { NSStatusBar.system.removeStatusItem(toggleItem) }
-        separatorItem = nil
-        toggleItem = nil
+        screenTimer?.invalidate()
+        screenTimer = nil
+        if let item { NSStatusBar.system.removeStatusItem(item) }
+        item = nil
         isCollapsed = false
     }
 
     // MARK: - Свернуть / развернуть
 
-    @objc private func toggleClicked() {
+    @objc private func clicked() {
         toggle()
-    }
-
-    @objc private func separatorClicked() {
-        if isCollapsed { expand() }
     }
 
     func toggle() {
@@ -172,39 +122,30 @@ final class MenuBarHider: NSObject, ObservableObject {
     }
 
     func collapse() {
-        guard let separatorItem, !isCollapsed else { return }
-        // Порядок значков не проверяем: в новых macOS система сообщает условные
-        // координаты, и проверка ошибочно блокировала сворачивание.
-        if let window = separatorItem.button?.window, let screen = window.screen {
+        guard let item, !isCollapsed else { return }
+        if let window = item.button?.window, let screen = window.screen {
             rightOffset = screen.frame.maxX - window.frame.maxX
         }
         isCollapsed = true
-        separatorItem.button?.image = nil
+        collapseTimer?.invalidate()
         applyCollapsedLength()
         startScreenWatch()
-        collapseTimer?.invalidate()
-        updateChevron()
     }
 
     func expand() {
-        guard separatorItem != nil, isCollapsed else { return }
+        guard let item, isCollapsed else { return }
         isCollapsed = false
         screenTimer?.invalidate()
         screenTimer = nil
-        updateSeparator()
-        updateChevron()
+        item.length = Self.chevronLength
+        redraw()
         scheduleAutoCollapse()
     }
 
-    /// Длина «свёрнутого» разделителя: всё место от меню приложения (или «чёлки»)
-    /// до правого края разделителя. Берём самый тесный из экранов: длина значка
-    /// общая для всех строк меню, а не поместившийся значок macOS убирает целиком.
+    /// Длина свёрнутого значка: всё место от меню (или «чёлки») до его правого края
+    /// на экране, где работают. Длина одна на все мониторы; при переходе — пересчёт.
     func applyCollapsedLength() {
-        guard let separatorItem, isCollapsed, let rightOffset else { return }
-        // Длина значка одна на все строки меню, а слишком длинный разделитель
-        // система убирает вместе со своей «» — поэтому считаем под экран, на котором
-        // работают: на встроенном до «чёлки», на внешнем до меню активного приложения.
-        // Небольшой запас система упирает в меню сама. При переходе — пересчёт.
+        guard let item, isCollapsed, let rightOffset else { return }
         guard let screen = Self.currentScreen else { return }
         lengthScreen = screen
         var left = Self.frontmostMenusWidth()
@@ -212,9 +153,11 @@ final class MenuBarHider: NSObject, ObservableObject {
             left = max(left, notch.minX - screen.frame.minX)
         }
         let available = screen.frame.width - rightOffset - left
-        let length = max(Self.separatorLength, available + 24)
-        separatorItem.length = length
-        Log.window.debug("Строка меню: разделитель \(Int(length)) pt для экрана \(Int(screen.frame.width)) (слева \(Int(left)), отступ \(Int(rightOffset)))")
+        // Небольшой запас: лишнее система упирает в меню; слишком большой — убрала бы значок целиком.
+        let length = max(Self.chevronLength, available + 8)
+        item.length = length
+        redraw()
+        Log.window.debug("Строка меню: значок \(Int(length)) pt для экрана \(Int(screen.frame.width)) (слева \(Int(left)), отступ \(Int(rightOffset)))")
     }
 
     private static var currentScreen: NSScreen? {
@@ -273,8 +216,8 @@ final class MenuBarHider: NSObject, ObservableObject {
         return maxX - screenMinX
     }
 
-    /// Длина разделителя: для проверки и настроек.
-    var separatorLengthValue: CGFloat { separatorItem?.length ?? 0 }
+    /// Длина значка: для проверки.
+    var itemLength: CGFloat { item?.length ?? 0 }
 
     private func scheduleAutoCollapse() {
         collapseTimer?.invalidate()
@@ -287,24 +230,23 @@ final class MenuBarHider: NSObject, ObservableObject {
         collapseTimer = timer
     }
 
-    private func updateChevron() {
-        guard let toggleItem else { return }
-        // Свёрнуто — стрелка влево («показать»), развёрнуто — вправо («спрятать»).
+    /// Стрелка у правого края значка: свёрнуто — «‹» (показать), развёрнуто — «›» (спрятать).
+    private func redraw() {
+        guard let item, let button = item.button else { return }
+        let width = max(item.length, Self.chevronLength)
         let symbol = isCollapsed ? "chevron.left" : "chevron.right"
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: isCollapsed ? "Показать значки" : "Спрятать значки")
-        image?.isTemplate = true
-        toggleItem.button?.image = image
-        let hideChevron = UserDefaults.standard.bool(forKey: Pref.menuBarHideChevron)
-        toggleItem.isVisible = !(isCollapsed && hideChevron)
-    }
-
-    private static func separatorImage() -> NSImage {
-        let image = NSImage(size: NSSize(width: 2, height: 16), flipped: false) { rect in
-            NSColor.labelColor.withAlphaComponent(0.45).setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        guard let chevron = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) else { return }
+        let image = NSImage(size: NSSize(width: width - 4, height: 18), flipped: false) { rect in
+            let size = chevron.size
+            chevron.draw(in: NSRect(x: rect.maxX - Self.chevronLength / 2 - size.width / 2 + 2,
+                                    y: (rect.height - size.height) / 2,
+                                    width: size.width, height: size.height))
             return true
         }
         image.isTemplate = true
-        return image
+        image.accessibilityDescription = isCollapsed ? "Показать значки" : "Спрятать значки"
+        button.image = image
     }
 }

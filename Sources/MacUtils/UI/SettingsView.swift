@@ -206,15 +206,19 @@ private func accessibilityStatus(_ model: PermissionsModel, running: Bool, ready
 
 struct GeneralPage: View {
     @ObservedObject private var permissions = PermissionsModel.shared
+    @AppStorage(Pref.menuBarIcon) private var menuBarIcon = true
 
     var body: some View {
         Form {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Mac Utils работает в фоне: без иконки в Dock и в строке меню.")
+                    Text("Mac Utils работает в фоне, без иконки в Dock.")
                     Text("Открыть это окно: запустите приложение ещё раз или нажмите ⌃⌥⌘ ,")
                         .foregroundStyle(.secondary)
                 }
+                Toggle("Значок в строке меню", isOn: $menuBarIcon)
+                Text("Клик — окно «Инструменты» (или ⌃⌥⌘T), правый клик — меню с вкладками и настройками.")
+                    .foregroundStyle(.secondary)
             }
 
             Section("Разрешения") {
@@ -572,7 +576,6 @@ struct VolumePage: View {
 struct MenuBarPage: View {
     @AppStorage(Pref.menuBarHider) private var enabled = false
     @AppStorage(Pref.menuBarAutoCollapse) private var autoCollapse = 10
-    @AppStorage(Pref.menuBarHideChevron) private var hideChevron = false
     @AppStorage(Pref.menuBarKeyCode) private var keyCode = LayoutHotKey.controlOptionM.keyCode
     @AppStorage(Pref.menuBarModifiers) private var modifiers = LayoutHotKey.controlOptionM.modifiers
     @ObservedObject private var hider = MenuBarHider.shared
@@ -598,7 +601,7 @@ struct MenuBarPage: View {
             }
             Section {
                 Toggle("Прятать значки в «»", isOn: $enabled)
-                Text("Если значки нужно не убрать совсем, а держать под рукой: перетащенные левее черты значки уходят в системный список «» и открываются по клику на «». Развернуть все сразу — \(hotKey.title). При двух мониторах на неактивном может ненадолго остаться пустое место или спрятанные значки — длина пересчитывается при переходе на него.")
+                Text("Если значки нужно не убрать совсем, а держать под рукой: значки левее стрелки Mac Utils уходят в системный список «» и открываются по клику на «». Развернуть все сразу — \(hotKey.title). При двух мониторах на неактивном может ненадолго остаться пустое место или спрятанные значки — длина пересчитывается при переходе на него.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -622,7 +625,7 @@ struct MenuBarPage: View {
     private var hiderSections: some View {
             Section("Как настроить") {
                 MenuBarIllustration()
-                Text("Зажмите ⌘ — появится тонкая черта. Не отпуская ⌘, перетащите значки, которые нужно прятать, левее черты. Всё правее неё остаётся видимым. Стрелка сворачивает и разворачивает спрятанные значки. Если места мало, macOS может показать свою стрелку «»» — за ней системные значки, не поместившиеся в строку.")
+                Text("Удерживая ⌘, перетащите значки, которые нужно прятать, левее стрелки Mac Utils. Всё правее неё остаётся видимым. Клик по стрелке (или \(hotKey.title)) прячет и показывает значки; спрятанные видны и по системной кнопке «».")
                     .fixedSize(horizontal: false, vertical: true)
                 Text("Системные значки так не спрятать: оранжевый индикатор микрофона или камеры macOS показывает всегда, пока они используются, а значки Пункта управления (микрофон, звук, Wi‑Fi и т. п.) всегда стоят правее значков приложений. Их отключают в Системных настройках → Пункт управления (или «Строка меню») → «Не показывать в строке меню».")
                     .font(.caption)
@@ -644,11 +647,6 @@ struct MenuBarPage: View {
                         if recording { HotKeyCenter.shared.unregister(id: HotKeyID.menuBarToggle) } else { MenuBarHider.shared.sync() }
                     }) { $0.save(codeKey: Pref.menuBarKeyCode, modifiersKey: Pref.menuBarModifiers) }
                 }
-                Toggle("Прятать и стрелку, когда значки свёрнуты", isOn: $hideChevron)
-                if hideChevron {
-                    Text("Свёрнутые значки видны по системной кнопке «» (macOS показывает её сама), развернуть всё — \(hotKey.title).")
-                        .foregroundStyle(.secondary)
-                }
             }
             .disabled(!enabled)
     }
@@ -657,7 +655,7 @@ struct MenuBarPage: View {
         Form {
             Section {
                 Toggle("Прятать значки в строке меню", isOn: $enabled)
-                Text("Как Hidden Bar: лишние значки прячутся за стрелкой. Пока функция включена, в строке меню появляются два значка Mac Utils — стрелка и тонкая черта-разделитель (видна, пока зажата ⌘).")
+                Text("Как Hidden Bar: лишние значки прячутся за стрелкой. Пока функция включена, в строке меню есть стрелка Mac Utils.")
                     .foregroundStyle(.secondary)
             }
             hiderSections
@@ -677,12 +675,11 @@ private struct MenuBarIllustration: View {
                 Image(systemName: "paperplane")
             }
             .opacity(0.45)
-            RoundedRectangle(cornerRadius: 1).frame(width: 2, height: 14).foregroundStyle(.secondary)
+            Image(systemName: "chevron.right").fontWeight(.semibold).foregroundStyle(Color.accentColor)
             Image(systemName: "wifi")
             Image(systemName: "battery.75")
-            Image(systemName: "chevron.right").fontWeight(.semibold)
             Spacer(minLength: 0)
-            Text("прячутся · черта · видны · стрелка").font(.caption).foregroundStyle(.secondary)
+            Text("прячутся · стрелка · видны").font(.caption).foregroundStyle(.secondary)
         }
         .padding(8)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))

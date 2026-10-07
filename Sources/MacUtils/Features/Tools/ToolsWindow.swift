@@ -45,7 +45,7 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func make() -> NSWindow {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 660),
+        let window = ToolsWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 660),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "Инструменты"
@@ -64,6 +64,14 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
         // Без окна значок в Dock не нужен: Mac Utils снова работает в фоне.
         NSApp.setActivationPolicy(.accessory)
         if !SettingsWindowController.shared.isVisible { FocusReturn.restore() }
+    }
+}
+
+/// Заголовок всегда «Инструменты»: вкладки SwiftUI иначе подставляют свой.
+final class ToolsWindow: NSWindow {
+    override var title: String {
+        get { super.title }
+        set { super.title = "Инструменты" }
     }
 }
 

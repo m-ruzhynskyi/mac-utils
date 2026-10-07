@@ -99,6 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LayoutFix.shared.sync()
         WindowTiler.shared.sync()
         AppVolume.shared.sync()
+        // Новые значки встают левее старых: сначала значок приложения, затем стрелка
+        // «Строки меню» — так значок приложения правее стрелки и не прячется вместе с другими.
+        AppStatusItem.shared.sync()
         MenuBarHider.shared.sync()
     }
 }
