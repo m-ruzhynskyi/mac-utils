@@ -103,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CheatSheet.shared.sync()
         DownloadsSorter.shared.sync()
         ScreenshotLibrary.shared.sync()
+        QRCodeService.shared.sync()
         AppStatusItem.shared.sync()
     }
 }
@@ -114,6 +115,7 @@ enum HotKeyID {
     static let layoutFix: UInt32 = 4
     static let tools: UInt32 = 5
     static let dropShelf: UInt32 = 6
+    static let qr: UInt32 = 7
     /// 10…20 — раскладка окон (по одному на сочетание).
     static let windowSnapBase: UInt32 = 10
     static let appVolume: UInt32 = 30
