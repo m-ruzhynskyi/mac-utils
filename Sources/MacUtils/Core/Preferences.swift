@@ -38,6 +38,9 @@ enum Pref {
     static let recordingCursor = "recordingCursor"
     static let recordingAudio = "recordingAudio"
     static let recordingMicrophone = "recordingMicrophone"
+    /// Папка для видео; пусто — как у снимков.
+    static let recordingFolder = "recordingFolder"
+    static let recordingCopy = "recordingCopy"
 
     static let windowSnap = "windowSnapEnabled"
     static let windowSnapDrag = "windowSnapDrag"
@@ -80,6 +83,7 @@ enum Pref {
             recordingCursor: true,
             recordingAudio: false,
             recordingMicrophone: false,
+            recordingCopy: true,
             windowSnap: true,
             windowSnapDrag: true,
             windowSnapGap: 0,
@@ -96,6 +100,14 @@ enum Pref {
 
     static var screenshotDestinationValue: ScreenshotDestination {
         ScreenshotDestination(rawValue: UserDefaults.standard.string(forKey: screenshotDestination) ?? "") ?? .clipboard
+    }
+
+    /// Папка для записей экрана (по умолчанию — папка снимков).
+    static var recordingDirectory: URL {
+        if let path = UserDefaults.standard.string(forKey: recordingFolder), !path.isEmpty {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return screenshotDirectory
     }
 
     static var screenshotDirectory: URL {

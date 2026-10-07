@@ -182,10 +182,9 @@ final class ScreenRecorder: NSObject, ObservableObject {
     private func deliver(_ temp: URL) async {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd 'в' HH.mm.ss"
-        let folder = Pref.screenshotDirectory
+        let folder = Self.writableFolder()
         let base = "Запись экрана \(formatter.string(from: Date()))"
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let destination: URL
             if format == .gif {
                 destination = folder.appendingPathComponent(base + ".gif")
@@ -196,10 +195,13 @@ final class ScreenRecorder: NSObject, ObservableObject {
                 try FileManager.default.moveItem(at: temp, to: destination)
             }
             // Файлом в буфер обмена: вставляется в чаты и Finder.
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.writeObjects([destination as NSURL])
-            Toast.show("Запись сохранена и скопирована", symbol: "record.circle", tint: .red,
+            let copy = UserDefaults.standard.bool(forKey: Pref.recordingCopy)
+            if copy {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.writeObjects([destination as NSURL])
+            }
+            Toast.show(copy ? "Запись сохранена и скопирована" : "Запись сохранена", symbol: "record.circle", tint: .red,
                        action: Toast.Action(title: "Показать в Finder") {
                            NSWorkspace.shared.activateFileViewerSelecting([destination])
                        })
@@ -207,6 +209,24 @@ final class ScreenRecorder: NSObject, ObservableObject {
             Toast.show("Не удалось сохранить запись: \(error.localizedDescription)",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
         }
+    }
+
+    /// Папка из настроек, если в неё можно писать; иначе — Рабочий стол.
+    private static func writableFolder() -> URL {
+        let manager = FileManager.default
+        let folder = Pref.recordingDirectory
+        try? manager.createDirectory(at: folder, withIntermediateDirectories: true)
+        var isDirectory: ObjCBool = false
+        if manager.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue,
+           manager.isWritableFile(atPath: folder.path) {
+            return folder
+        }
+        let desktop = manager.urls(for: .desktopDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory())
+        Log.capture.error("Запись: папка недоступна: \(folder.path, privacy: .public)")
+        Toast.show("Папка для видео недоступна — сохраняю на Рабочий стол",
+                   symbol: "exclamationmark.triangle.fill", tint: .orange)
+        return desktop
     }
 
     // MARK: - Клавиши и панели

@@ -635,6 +635,8 @@ struct ScreenshotPage: View {
     @AppStorage(Pref.recordingCursor) private var recordingCursor = true
     @AppStorage(Pref.recordingAudio) private var recordingAudio = false
     @AppStorage(Pref.recordingMicrophone) private var recordingMicrophone = false
+    @AppStorage(Pref.recordingFolder) private var recordingFolder = ""
+    @AppStorage(Pref.recordingCopy) private var recordingCopy = true
     @ObservedObject private var permissions = PermissionsModel.shared
 
     var body: some View {
@@ -707,8 +709,33 @@ struct ScreenshotPage: View {
                         .foregroundStyle(.secondary)
                 }
                 Toggle("Показывать курсор", isOn: $recordingCursor)
+                LabeledContent("Папка для видео") {
+                    HStack {
+                        Text(recordingFolder.isEmpty ? "Как у снимков (\(Pref.screenshotDirectory.lastPathComponent))"
+                                                     : Pref.recordingDirectory.path)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(.secondary)
+                        Button("Выбрать…", action: chooseRecordingFolder)
+                        Button {
+                            NSWorkspace.shared.open(Pref.recordingDirectory)
+                        } label: {
+                            Image(systemName: "folder")
+                        }
+                        .help("Показать в Finder")
+                        if !recordingFolder.isEmpty {
+                            Button {
+                                recordingFolder = ""
+                            } label: {
+                                Image(systemName: "arrow.uturn.backward")
+                            }
+                            .help("Как у снимков")
+                        }
+                    }
+                }
+                Toggle("Копировать видео в буфер обмена", isOn: $recordingCopy)
                 ShortcutRow(keys: ["R"], text: "В режиме снимка — записать выделенную область. Стоп — кнопкой на панели или ⌘⇧X, Esc — отмена.")
-                Text("Файл сохраняется в папку снимков и копируется в буфер обмена — его можно сразу вставить в чат.")
+                Text("Файл сохраняется в папку для видео и (если включено) копируется в буфер обмена — его можно сразу вставить в чат.")
                     .foregroundStyle(.secondary)
             }
             Section("Коллаж шагов") {
@@ -747,6 +774,18 @@ struct ScreenshotPage: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Снимки экрана")
+    }
+
+    private func chooseRecordingFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Выбрать"
+        panel.directoryURL = Pref.recordingDirectory
+        if panel.runModal() == .OK, let url = panel.url {
+            recordingFolder = url.path
+        }
     }
 
     private func chooseFolder() {
