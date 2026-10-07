@@ -24,9 +24,6 @@ final class MenuBarHider: NSObject, ObservableObject {
     private var toggleItem: NSStatusItem?
     private var separatorItem: NSStatusItem?
     private var collapseTimer: Timer?
-    /// Пока свёрнуто: следим, на каком экране работают, и пересчитываем длину под него.
-    private var screenTimer: Timer?
-    private var lengthScreen: NSScreen?
 
     /// С macOS 26 строку меню рисует система и умеет прятать значки сама
     /// (Системные настройки → Строка меню → «Разрешить в строке меню»).
@@ -45,10 +42,7 @@ final class MenuBarHider: NSObject, ObservableObject {
 
     private override init() {
         super.init()
-        // Меню нового активного приложения другой ширины — пересчитываем длину.
-        NSWorkspace.shared.notificationCenter.addObserver(
-            self, selector: #selector(environmentChanged),
-            name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        // Сменились мониторы — пересчитываем длину.
         NotificationCenter.default.addObserver(
             self, selector: #selector(environmentChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
@@ -142,8 +136,6 @@ final class MenuBarHider: NSObject, ObservableObject {
     }
 
     private func removeItems() {
-        screenTimer?.invalidate()
-        screenTimer = nil
         for monitor in flagsMonitors { NSEvent.removeMonitor(monitor) }
         flagsMonitors.removeAll()
         commandHeld = false
@@ -181,16 +173,13 @@ final class MenuBarHider: NSObject, ObservableObject {
         isCollapsed = true
         separatorItem.button?.image = nil
         applyCollapsedLength()
-        startScreenWatch()
         collapseTimer?.invalidate()
         updateChevron()
     }
 
     func expand() {
-        guard let separatorItem, isCollapsed else { return }
+        guard separatorItem != nil, isCollapsed else { return }
         isCollapsed = false
-        screenTimer?.invalidate()
-        screenTimer = nil
         updateSeparator()
         updateChevron()
         scheduleAutoCollapse()
@@ -204,76 +193,20 @@ final class MenuBarHider: NSObject, ObservableObject {
         // Длина значка одна на все строки меню. Берём наибольшее свободное место
         // среди экранов: там, где места меньше, система упирает разделитель в меню
         // (не убирает его) — и значки левее него прячутся на всех мониторах, без пустот.
-        let menusWidth = Self.frontmostMenusWidth()
+        // Меню приложения не учитываем: длина постоянная и не прыгает при переключении
+        // программ, а лишнее система сама упирает в меню.
         var available: CGFloat = 0
         for screen in NSScreen.screens {
-            var left = menusWidth
+            var left: CGFloat = 0
             if let notch = screen.auxiliaryTopRightArea, notch.width > 0 {
                 left = max(left, notch.minX - screen.frame.minX)
             }
             available = max(available, screen.frame.width - rightOffset - left)
         }
-        lengthScreen = Self.currentScreen
         // С запасом: лишнее система всё равно упирает в меню или «чёлку».
         let length = max(Self.separatorLength, available + 24)
         separatorItem.length = length
-        Log.window.debug("Строка меню: разделитель \(Int(length)) pt (меню \(Int(menusWidth)), отступ \(Int(rightOffset)))")
-    }
-
-    private static var currentScreen: NSScreen? {
-        let mouse = NSEvent.mouseLocation
-        return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
-    }
-
-    private func startScreenWatch() {
-        screenTimer?.invalidate()
-        let timer = Timer(timeInterval: 1, repeats: true) { _ in
-            MainActor.assumeIsolated {
-                let hider = MenuBarHider.shared
-                guard hider.isCollapsed else { return }
-                if Self.currentScreen != hider.lengthScreen { hider.applyCollapsedLength() }
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        screenTimer = timer
-    }
-
-    /// Ширина меню активного приложения (от левого края экрана), по Accessibility.
-    private static func frontmostMenusWidth() -> CGFloat {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return 0 }
-        // Свои меню через Accessibility не прочитать — считаем по заголовкам.
-        if app.processIdentifier == ProcessInfo.processInfo.processIdentifier {
-            let font = NSFont.menuBarFont(ofSize: 0)
-            let titles = NSApp.mainMenu?.items.map(\.title) ?? []
-            let text = titles.dropFirst().reduce(CGFloat(0)) {
-                $0 + ($1 as NSString).size(withAttributes: [.font: font]).width + 20
-            }
-            return 52 + text // меню Apple и название приложения жирным — с запасом
-        }
-        let element = AXUIElementCreateApplication(app.processIdentifier)
-        AXUIElementSetMessagingTimeout(element, 0.2)
-        var bar: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXMenuBarAttribute as CFString, &bar) == .success,
-              let bar, CFGetTypeID(bar) == AXUIElementGetTypeID() else { return 0 }
-        var children: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(bar as! AXUIElement, kAXChildrenAttribute as CFString, &children) == .success,
-              let items = children as? [AXUIElement] else { return 0 }
-        var minX = CGFloat.greatestFiniteMagnitude, maxX: CGFloat = 0
-        for item in items {
-            var position: CFTypeRef?, size: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(item, kAXPositionAttribute as CFString, &position) == .success,
-                  AXUIElementCopyAttributeValue(item, kAXSizeAttribute as CFString, &size) == .success,
-                  let position, let size else { continue }
-            var origin = CGPoint.zero, extent = CGSize.zero
-            AXValueGetValue(position as! AXValue, .cgPoint, &origin)
-            AXValueGetValue(size as! AXValue, .cgSize, &extent)
-            minX = min(minX, origin.x)
-            maxX = max(maxX, origin.x + extent.width)
-        }
-        // Меню начинаются у левого края своего экрана: ширина = maxX − этот край.
-        guard maxX > 0 else { return 0 }
-        let screenMinX = NSScreen.screens.first { $0.frame.minX <= minX && minX < $0.frame.maxX }?.frame.minX ?? 0
-        return maxX - screenMinX
+        Log.window.debug("Строка меню: разделитель \(Int(length)) pt (отступ \(Int(rightOffset)))")
     }
 
     /// Длина разделителя: для проверки и настроек.
