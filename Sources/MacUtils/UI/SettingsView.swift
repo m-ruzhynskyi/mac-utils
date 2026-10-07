@@ -55,7 +55,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, cutPaste, smoothScroll, switcher, screenshot, windows, layout, uninstaller
+    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, uninstaller
 
     var id: String { rawValue }
 
@@ -67,6 +67,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .switcher: return "Переключатель приложений"
         case .screenshot: return "Снимки экрана"
         case .windows: return "Окна"
+        case .volume: return "Громкость"
         case .layout: return "Раскладка"
         case .uninstaller: return "Удаление программ"
         }
@@ -80,6 +81,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .switcher: return "rectangle.on.rectangle"
         case .screenshot: return "camera.viewfinder"
         case .windows: return "rectangle.split.2x2"
+        case .volume: return "speaker.wave.2"
         case .layout: return "keyboard"
         case .uninstaller: return "trash"
         }
@@ -93,6 +95,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .switcher: return .blue
         case .screenshot: return .purple
         case .windows: return .indigo
+        case .volume: return .pink
         case .layout: return .teal
         case .uninstaller: return .red
         }
@@ -122,6 +125,7 @@ struct SettingsView: View {
             case .switcher: SwitcherPage()
             case .screenshot: ScreenshotPage()
             case .windows: WindowsPage()
+            case .volume: VolumePage()
             case .layout: LayoutPage()
             case .uninstaller: UninstallerPage()
             }
@@ -471,6 +475,62 @@ struct UninstallerPage: View {
     }
 }
 
+// MARK: - Громкость
+
+struct VolumePage: View {
+    @AppStorage(Pref.appVolume) private var enabled = true
+    @AppStorage(Pref.appVolumeKeyCode) private var keyCode = LayoutHotKey.controlOptionV.keyCode
+    @AppStorage(Pref.appVolumeModifiers) private var modifiers = LayoutHotKey.controlOptionV.modifiers
+    @ObservedObject private var model = AppVolume.shared
+
+    private var hotKey: LayoutHotKey { LayoutHotKey(keyCode: keyCode, modifiers: modifiers) }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Громкость для каждого приложения", isOn: $enabled)
+                    .disabled(!AppVolume.isSupported)
+                Text("Своя громкость (0–150 %) и выключение звука для каждой программы. Громкость запоминается. Перехватываются только приложения, у которых она не 100 % — остальные звучат как обычно.")
+                    .foregroundStyle(.secondary)
+                if !AppVolume.isSupported {
+                    Text("Нужна macOS 14.2 или новее.").foregroundStyle(.orange)
+                }
+            }
+            if enabled && AppVolume.isSupported {
+                Section("Сейчас играют") {
+                    AppVolumeList(model: model)
+                    if model.permissionSuspect {
+                        HStack {
+                            Text("Перехват не получает звук — разрешите Mac Utils «Запись системного звука» (Конфиденциальность → Запись экрана и системного звука).")
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button("Открыть настройки") { model.openPrivacySettings() }
+                        }
+                    }
+                    if let error = model.lastError {
+                        Text(error).foregroundStyle(.orange).font(.caption)
+                    }
+                }
+                Section("Панель громкости") {
+                    LabeledContent("Открыть панель") {
+                        ShortcutRecorder(hotKey: hotKey, suspend: { recording in
+                            if recording { HotKeyCenter.shared.unregister(id: HotKeyID.appVolume) } else { AppVolume.shared.sync() }
+                        }) { $0.save(codeKey: Pref.appVolumeKeyCode, modifiersKey: Pref.appVolumeModifiers) }
+                    }
+                    Text("Плавающая панель со списком играющих приложений. Esc или клик мимо — закрыть. Двойной клик по процентам — вернуть 100 %.")
+                        .foregroundStyle(.secondary)
+                    Text("При первом изменении громкости macOS спросит разрешение на запись системного звука — оно нужно, чтобы перехватить звук приложения. Ничего не записывается и не сохраняется.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Громкость")
+        .onAppear { AppVolume.shared.refresh() }
+    }
+}
+
 // MARK: - Окна
 
 struct WindowsPage: View {
@@ -627,6 +687,8 @@ struct LayoutPage: View {
 /// Запись сочетания: нажмите кнопку, затем нужные клавиши (нужен ⌘, ⌥ или ⌃). Esc — отмена.
 struct ShortcutRecorder: View {
     let hotKey: LayoutHotKey
+    /// Пока идёт запись, старое сочетание нужно отключить, чтобы оно не сработало.
+    var suspend: (Bool) -> Void = { LayoutFix.shared.suspendHotKey($0) }
     let onChange: (LayoutHotKey) -> Void
 
     @State private var recording = false
@@ -649,7 +711,7 @@ struct ShortcutRecorder: View {
     private func start() {
         recording = true
         hint = false
-        LayoutFix.shared.suspendHotKey(true)
+        suspend(true)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 { // Esc
                 stop()
@@ -670,7 +732,7 @@ struct ShortcutRecorder: View {
         monitor = nil
         if recording {
             recording = false
-            LayoutFix.shared.suspendHotKey(false)
+            suspend(false)
         }
     }
 }
