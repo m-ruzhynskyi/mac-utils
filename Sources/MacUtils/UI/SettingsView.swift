@@ -12,6 +12,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 
     @Published private(set) var accessibility = Permissions.accessibility
     @Published private(set) var screenRecording = Permissions.screenRecording
+    @Published private(set) var fullDiskAccess = Permissions.fullDiskAccess
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     private var timer: Timer?
@@ -34,6 +35,8 @@ final class PermissionsModel: NSObject, ObservableObject {
         let login = SMAppService.mainApp.status == .enabled
         if ax != accessibility { accessibility = ax }
         if screen != screenRecording { screenRecording = screen }
+        let disk = Permissions.fullDiskAccess
+        if disk != fullDiskAccess { fullDiskAccess = disk }
         if login != launchAtLogin { launchAtLogin = login }
     }
 
@@ -421,38 +424,48 @@ struct SwitcherPage: View {
 // MARK: - Удаление программ
 
 struct UninstallerPage: View {
+    @ObservedObject private var permissions = PermissionsModel.shared
+    @ObservedObject private var model = UninstallerModel.shared
+
     var body: some View {
-        Form {
-            Section {
-                Text("Удаляет приложение вместе с его данными, кэшем, настройками, контейнерами, журналами и автозапуском. Всё перемещается в Корзину — ничего не стирается насовсем.")
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Button("Открыть") { UninstallerWindowController.shared.show() }
-                        .buttonStyle(.borderedProminent)
-                    Text("или перетащите .app в окно удаления").foregroundStyle(.secondary)
-                }
-            }
-            Section("Как ищутся файлы") {
-                Text("Только точные совпадения: идентификатор приложения (bundle id), точное имя папки в данных, кэше и журналах, общие папки разработчика (Team ID) — их галочки сняты по умолчанию. Системные приложения и программы Apple удалить нельзя.")
-                    .foregroundStyle(.secondary)
-                Text("Файлы в /Library требуют пароль администратора — он запрашивается один раз и только если такие файлы отмечены.")
-                    .foregroundStyle(.secondary)
-            }
-            Section("Контейнеры") {
-                HStack {
-                    Text("Чтобы удалять контейнеры приложений из App Store, может понадобиться «Полный доступ к диску».")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Открыть настройки") {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                }
-            }
+        VStack(spacing: 0) {
+            fullDiskAccessBar
+            UninstallerView(model: model)
         }
-        .formStyle(.grouped)
         .navigationTitle("Удаление программ")
+        .onAppear {
+            permissions.refresh()
+            if model.apps.isEmpty { model.reload() }
+        }
+    }
+
+    /// Нужен для контейнеров приложений из App Store и части защищённых папок.
+    @ViewBuilder
+    private var fullDiskAccessBar: some View {
+        if permissions.fullDiskAccess == false {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Нет «Полного доступа к диску» — часть контейнеров может не удалиться.")
+                    Text("Уже включили? Доступ действует после перезапуска Mac Utils. Если и после перезапуска не видно — удалите Mac Utils из списка кнопкой «−» и добавьте снова.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Открыть настройки") { Permissions.openFullDiskAccess() }
+                Button("Перезапустить Mac Utils") { Permissions.relaunch() }
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.1))
+        } else if permissions.fullDiskAccess == true {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Полный доступ к диску есть").foregroundStyle(.secondary)
+                Spacer()
+            }
+            .font(.caption)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+        }
     }
 }
 

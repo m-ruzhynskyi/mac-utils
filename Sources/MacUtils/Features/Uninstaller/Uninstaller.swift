@@ -171,34 +171,7 @@ final class UninstallerModel: ObservableObject {
     }
 }
 
-// MARK: - Окно
-
-@MainActor
-final class UninstallerWindowController: NSObject, NSWindowDelegate {
-    static let shared = UninstallerWindowController()
-    private var window: NSWindow?
-
-    func show() {
-        let window = self.window ?? make()
-        UninstallerModel.shared.reload()
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
-    }
-
-    private func make() -> NSWindow {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 560),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                              backing: .buffered, defer: false)
-        window.title = "Удаление программ"
-        window.contentViewController = NSHostingController(rootView: UninstallerView(model: .shared))
-        window.setContentSize(NSSize(width: 860, height: 560))
-        window.minSize = NSSize(width: 700, height: 420)
-        window.isReleasedWhenClosed = false
-        window.center()
-        self.window = window
-        return window
-    }
-}
+// MARK: - Вид (страница настроек «Удаление программ»)
 
 struct UninstallerView: View {
     @ObservedObject var model: UninstallerModel
@@ -275,11 +248,8 @@ struct UninstallerView: View {
                         HStack {
                             Label("Контейнеры защищены macOS. Дайте Mac Utils «Полный доступ к диску».",
                                   systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                            Button("Открыть настройки") {
-                                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                                    NSWorkspace.shared.open(url)
-                                }
-                            }
+                            Button("Открыть настройки") { Permissions.openFullDiskAccess() }
+                            Button("Перезапустить") { Permissions.relaunch() }
                         }
                     }
                     HStack {
