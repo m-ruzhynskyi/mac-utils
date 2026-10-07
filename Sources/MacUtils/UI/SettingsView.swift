@@ -55,7 +55,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout,
+    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet,
          uninstaller, monitor, tasks, cleanup
 
     var id: String { rawValue }
@@ -70,6 +70,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .windows: return "Окна"
         case .volume: return "Громкость"
         case .layout: return "Раскладка"
+        case .shelf: return "Полка"
+        case .cheatSheet: return "Шпаргалка"
         case .uninstaller: return "Удаление программ"
         case .monitor: return "Монитор системы"
         case .tasks: return "Диспетчер задач"
@@ -87,6 +89,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .windows: return "rectangle.split.2x2"
         case .volume: return "speaker.wave.2"
         case .layout: return "keyboard"
+        case .shelf: return "tray.full"
+        case .cheatSheet: return "command"
         case .uninstaller: return "trash"
         case .monitor: return "gauge.with.dots.needle.67percent"
         case .tasks: return "list.bullet.rectangle"
@@ -104,6 +108,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .windows: return .indigo
         case .volume: return .pink
         case .layout: return .teal
+        case .shelf: return .orange
+        case .cheatSheet: return .gray
         case .uninstaller: return .red
         case .monitor: return .mint
         case .tasks: return .brown
@@ -137,6 +143,8 @@ struct SettingsView: View {
             case .windows: WindowsPage()
             case .volume: VolumePage()
             case .layout: LayoutPage()
+            case .shelf: ShelfPage()
+            case .cheatSheet: CheatSheetPage()
             case .uninstaller: UninstallerPage()
             case .monitor: SystemMonitorView(model: .shared).navigationTitle("Монитор системы")
             case .tasks: TaskManagerView(model: .shared).navigationTitle("Диспетчер задач")
@@ -548,6 +556,65 @@ struct VolumePage: View {
         .formStyle(.grouped)
         .navigationTitle("Громкость")
         .onAppear { AppVolume.shared.refresh() }
+    }
+}
+
+// MARK: - Полка и шпаргалка
+
+struct ShelfPage: View {
+    @AppStorage(Pref.dropShelf) private var enabled = true
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Полка для файлов", isOn: $enabled)
+                Text("Временное место для файлов: положите их на полку, перейдите в нужную папку или программу и вытащите обратно — по одному или все сразу.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Как пользоваться") {
+                ShortcutRow(keys: ["↔︎"], text: "Перетаскивая файлы, встряхните мышь влево-вправо — полка появится рядом с курсором.")
+                ShortcutRow(keys: ["⌃", "⌥", "D"], text: "Показать или скрыть полку.")
+                Text("Вытащенные с полки файлы с неё убираются; чтобы оставить их на полке, держите ⌥. Сами файлы никуда не копируются, пока вы их не перетащите.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .disabled(!enabled)
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Полка")
+    }
+}
+
+struct CheatSheetPage: View {
+    @AppStorage(Pref.cheatSheet) private var enabled = true
+    @AppStorage(Pref.cheatSheetDelay) private var delay = 0.8
+    @ObservedObject private var permissions = PermissionsModel.shared
+    @ObservedObject private var service = CheatSheet.shared
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Шпаргалка сочетаний клавиш", isOn: $enabled)
+                Text("Удерживайте ⌘ — появятся все сочетания клавиш активной программы (из её меню) и Mac Utils. Отпустите ⌘ — шпаргалка исчезнет.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if enabled {
+                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Шпаргалка работает")
+                }
+            }
+            Section("Настройка") {
+                Picker("Держать ⌘", selection: $delay) {
+                    Text("0,5 с").tag(0.5)
+                    Text("0,8 с").tag(0.8)
+                    Text("1,2 с").tag(1.2)
+                    Text("2 с").tag(2.0)
+                }
+            }
+            .disabled(!enabled)
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Шпаргалка")
     }
 }
 
