@@ -103,7 +103,9 @@ enum Pref {
             appVolume: true,
             menuBarHider: false,
             menuBarAutoCollapse: 10,
-            menuBarHideChevron: false,
+            // С macOS 26 у системы своя кнопка «» для не поместившихся значков —
+            // вторая стрелка рядом лишняя, поэтому свою прячем, когда значки свёрнуты.
+            menuBarHideChevron: ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,

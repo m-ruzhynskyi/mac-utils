@@ -540,7 +540,7 @@ struct VolumePage: View {
 struct MenuBarPage: View {
     @AppStorage(Pref.menuBarHider) private var enabled = false
     @AppStorage(Pref.menuBarAutoCollapse) private var autoCollapse = 10
-    @AppStorage(Pref.menuBarHideChevron) private var hideChevron = false
+    @AppStorage(Pref.menuBarHideChevron) private var hideChevron = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26
     @AppStorage(Pref.menuBarKeyCode) private var keyCode = LayoutHotKey.controlOptionM.keyCode
     @AppStorage(Pref.menuBarModifiers) private var modifiers = LayoutHotKey.controlOptionM.modifiers
     @ObservedObject private var hider = MenuBarHider.shared
@@ -557,6 +557,10 @@ struct MenuBarPage: View {
             Section("Как настроить") {
                 MenuBarIllustration()
                 Text("Зажмите ⌘ — появится тонкая черта. Не отпуская ⌘, перетащите значки, которые нужно прятать, левее черты. Всё правее неё остаётся видимым. Стрелка сворачивает и разворачивает спрятанные значки. Если места мало, macOS может показать свою стрелку «»» — за ней системные значки, не поместившиеся в строку.")
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Системные значки так не спрятать: оранжевый индикатор микрофона или камеры macOS показывает всегда, пока они используются, а значки Пункта управления (микрофон, звук, Wi‑Fi и т. п.) всегда стоят правее значков приложений. Их отключают в Системных настройках → Пункт управления (или «Строка меню») → «Не показывать в строке меню».")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if hider.misplaced {
                     Text("Черта стоит правее стрелки — перетащите её левее (с ⌘), иначе свернуть нельзя.")
@@ -580,7 +584,8 @@ struct MenuBarPage: View {
                 }
                 Toggle("Прятать и стрелку, когда значки свёрнуты", isOn: $hideChevron)
                 if hideChevron {
-                    Text("Тогда развернуть можно только сочетанием \(hotKey.title).").foregroundStyle(.secondary)
+                    Text("Свёрнутые значки видны по системной кнопке «» (macOS показывает её сама), развернуть всё — \(hotKey.title).")
+                        .foregroundStyle(.secondary)
                 }
             }
             .disabled(!enabled)
