@@ -178,8 +178,15 @@ final class ScreenshotLibrary: ObservableObject {
     }
 
     /// Уже сохранённые снимки и записи из корня папки — в «Снимки экрана/дата/Другое».
+    /// Из папки снимков и из папки видео (если она своя).
     @discardableResult
-    func importExisting(from root: URL = Pref.screenshotDirectory) -> Int {
+    func importExisting() -> Int {
+        let roots = Set([Pref.screenshotDirectory.standardizedFileURL, Pref.recordingDirectory.standardizedFileURL])
+        return roots.reduce(0) { $0 + importExisting(from: $1) }
+    }
+
+    @discardableResult
+    func importExisting(from root: URL) -> Int {
         guard enabled else { return 0 }
         let manager = FileManager.default
         var count = 0
