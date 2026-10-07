@@ -8,7 +8,7 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
     static let shared = ToolsWindowController()
 
     enum Tab: String, CaseIterable, Identifiable {
-        case uninstaller, monitor, tasks, cleanup
+        case uninstaller, monitor, tasks, cleanup, shots
         var id: String { rawValue }
 
         var title: String {
@@ -17,6 +17,7 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
             case .monitor: return "Монитор системы"
             case .tasks: return "Диспетчер задач"
             case .cleanup: return "Очистка диска"
+            case .shots: return "Мои снимки"
             }
         }
 
@@ -27,6 +28,7 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
             case .monitor: return "Монитор"
             case .tasks: return "Задачи"
             case .cleanup: return "Очистка"
+            case .shots: return "Снимки"
             }
         }
 
@@ -36,6 +38,7 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
             case .monitor: return "gauge.with.dots.needle.67percent"
             case .tasks: return "list.bullet.rectangle"
             case .cleanup: return "externaldrive.badge.minus"
+            case .shots: return "photo.on.rectangle.angled"
             }
         }
     }
@@ -124,6 +127,7 @@ struct ToolsView: View {
         case .monitor: SystemMonitorView(model: .shared, compact: true)
         case .tasks: TaskManagerView(model: .shared, compact: true)
         case .cleanup: DiskCleanupView(model: .shared, compact: true)
+        case .shots: ScreenshotLibraryView(library: .shared, compact: true)
         }
     }
 
@@ -162,6 +166,9 @@ struct ToolsView: View {
             TaskManagerView(model: .shared)
                 .tabItem { Label(ToolsWindowController.Tab.tasks.title, systemImage: ToolsWindowController.Tab.tasks.symbol) }
                 .tag(ToolsWindowController.Tab.tasks.rawValue)
+            ScreenshotLibraryView(library: .shared)
+                .tabItem { Label(ToolsWindowController.Tab.shots.title, systemImage: ToolsWindowController.Tab.shots.symbol) }
+                .tag(ToolsWindowController.Tab.shots.rawValue)
             DiskCleanupView(model: .shared)
                 .tabItem { Label(ToolsWindowController.Tab.cleanup.title, systemImage: ToolsWindowController.Tab.cleanup.symbol) }
                 .tag(ToolsWindowController.Tab.cleanup.rawValue)

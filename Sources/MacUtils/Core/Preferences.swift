@@ -63,6 +63,9 @@ enum Pref {
     /// Автосортировка «Загрузок» (по умолчанию выключена) и срок до Корзины в днях (0 — никогда).
     static let downloadsSort = "downloadsSortEnabled"
     static let downloadsTrashDays = "downloadsTrashDays"
+    /// Умная папка снимков (по дням и программам, поиск по тексту) и сбор системных снимков ⌘⇧3/4.
+    static let screenshotLibrary = "screenshotLibraryEnabled"
+    static let screenshotLibrarySystem = "screenshotLibrarySystem"
     /// Значок Mac Utils в строке меню (клик — «Инструменты»).
     static let menuBarIcon = "menuBarIconEnabled"
 
@@ -112,6 +115,8 @@ enum Pref {
             cheatSheetDelay: 0.8,
             downloadsSort: false,
             downloadsTrashDays: 30,
+            screenshotLibrary: true,
+            screenshotLibrarySystem: false,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,

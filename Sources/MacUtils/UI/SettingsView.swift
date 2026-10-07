@@ -56,7 +56,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads,
-         uninstaller, monitor, tasks, cleanup
+         uninstaller, monitor, tasks, cleanup, shots
 
     var id: String { rawValue }
 
@@ -77,6 +77,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .monitor: return "Монитор системы"
         case .tasks: return "Диспетчер задач"
         case .cleanup: return "Очистка диска"
+        case .shots: return "Мои снимки"
         }
     }
 
@@ -97,6 +98,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .monitor: return "gauge.with.dots.needle.67percent"
         case .tasks: return "list.bullet.rectangle"
         case .cleanup: return "externaldrive.badge.minus"
+        case .shots: return "photo.on.rectangle.angled"
         }
     }
 
@@ -117,6 +119,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .monitor: return .mint
         case .tasks: return .brown
         case .cleanup: return .cyan
+        case .shots: return .purple
         }
     }
 }
@@ -153,6 +156,7 @@ struct SettingsView: View {
             case .monitor: SystemMonitorView(model: .shared).navigationTitle("Монитор системы")
             case .tasks: TaskManagerView(model: .shared).navigationTitle("Диспетчер задач")
             case .cleanup: DiskCleanupView(model: .shared).navigationTitle("Очистка диска")
+            case .shots: ScreenshotLibraryView(library: .shared).navigationTitle("Мои снимки")
             }
         }
     }
@@ -840,6 +844,8 @@ struct ScreenshotPage: View {
     @AppStorage(Pref.screenshotStepsTitles) private var stepsTitles = true
     @AppStorage(Pref.screenshotFrameDefault) private var frameDefault = false
     @AppStorage(Pref.screenshotBackground) private var background = ShotBackground.sky.rawValue
+    @AppStorage(Pref.screenshotLibrary) private var library = true
+    @AppStorage(Pref.screenshotLibrarySystem) private var librarySystem = false
     @AppStorage(Pref.recordingFormat) private var recordingFormat = ScreenRecorder.Format.mp4.rawValue
     @AppStorage(Pref.recordingFPS) private var recordingFPS = 30
     @AppStorage(Pref.recordingCursor) private var recordingCursor = true
@@ -884,6 +890,14 @@ struct ScreenshotPage: View {
                 }
                 Text("Действует для Enter, двойного клика и длинного снимка. Кнопки «Скопировать» (⌘C) и «Сохранить» (⌘S) работают как обычно.")
                     .foregroundStyle(.secondary)
+            }
+            Section("Умная папка") {
+                Toggle("Раскладывать снимки по дням и программам", isOn: $library)
+                Text("Снимки сохраняются в «Снимки экрана/дата/программа» внутри папки снимков, а текст на них распознаётся — искать можно в «Мои снимки» (раздел слева и панель 🔧).")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle("Забирать и системные снимки (⌘⇧3, ⌘⇧4)", isOn: $librarySystem)
+                    .disabled(!library)
             }
             Section("Оформление") {
                 LabeledContent("Фон") {
