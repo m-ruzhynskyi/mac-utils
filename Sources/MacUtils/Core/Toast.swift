@@ -19,12 +19,14 @@ enum Toast {
         let token = generation
         panel?.orderOut(nil)
 
-        let host = FirstMouseHostingView(rootView: ToastView(text: text, symbol: symbol, tint: tint, action: action.map { action in
+        // Кнопка сначала прячет уведомление (Toast.panel — не локальная панель ниже).
+        let wrapped: Action? = action.map { action in
             Action(title: action.title) {
-                panel?.orderOut(nil)
+                Toast.panel?.orderOut(nil)
                 action.handler()
             }
-        }))
+        }
+        let host = FirstMouseHostingView(rootView: ToastView(text: text, symbol: symbol, tint: tint, action: wrapped))
         let size = host.fittingSize
         let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                             styleMask: [.borderless, .nonactivatingPanel],
