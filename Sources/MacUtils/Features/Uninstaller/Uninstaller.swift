@@ -53,6 +53,13 @@ final class UninstallerModel: ObservableObject {
         select(app)
     }
 
+    func clearSelection() {
+        selected = nil
+        leftovers = []
+        checked = []
+        refusal = nil
+    }
+
     func select(_ app: InstalledApp) {
         selected = app
         leftovers = []
@@ -175,36 +182,39 @@ struct UninstallerView: View {
     @ObservedObject var model: UninstallerModel
     @State private var dropTargeted = false
 
+    /// Компактно (панель из строки меню): список и подробности на одном месте, с «Назад».
+    var compact = false
+
     var body: some View {
-        // Колонка списка тянется вместе с окном (220…340), детали занимают остальное.
-        GeometryReader { geometry in
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                TextField("Поиск", text: $model.search)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(8)
-                List(model.filtered, selection: Binding(
-                    get: { model.selected?.url },
-                    set: { url in if let app = model.apps.first(where: { $0.url == url }) { model.select(app) } }
-                )) { app in
-                    HStack(spacing: 8) {
-                        Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
-                            .resizable().frame(width: 22, height: 22)
-                        Text(app.name).lineLimit(1)
-                        Spacer()
-                        Text(byteString(model.appSizes[app.url]))
-                            .foregroundStyle(.secondary).font(.caption).monospacedDigit()
+        Group {
+            if compact {
+                if model.selected != nil {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            model.clearSelection()
+                        } label: {
+                            Label("Все программы", systemImage: "chevron.left")
+                        }
+                        .buttonStyle(.borderless)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 8)
+                        details
                     }
-                    .tag(app.url)
+                } else {
+                    listColumn
+                }
+            } else {
+                // Колонка списка тянется вместе с окном (220…340), детали занимают остальное.
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        listColumn
+                            .frame(width: min(max(geometry.size.width * 0.36, 220), 340))
+                        Divider()
+                        details
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
-            .frame(width: min(max(geometry.size.width * 0.36, 220), 340))
-
-            Divider()
-
-            details
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             guard let provider = providers.first else { return false }
@@ -217,6 +227,28 @@ struct UninstallerView: View {
         .overlay {
             if dropTargeted {
                 RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor, lineWidth: 3).padding(4)
+            }
+        }
+    }
+
+    private var listColumn: some View {
+        VStack(spacing: 0) {
+            TextField("Поиск", text: $model.search)
+                .textFieldStyle(.roundedBorder)
+                .padding(8)
+            List(model.filtered, selection: Binding(
+                get: { model.selected?.url },
+                set: { url in if let app = model.apps.first(where: { $0.url == url }) { model.select(app) } }
+            )) { app in
+                HStack(spacing: 8) {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
+                        .resizable().frame(width: 20, height: 20)
+                    Text(app.name).lineLimit(1)
+                    Spacer()
+                    Text(byteString(model.appSizes[app.url]))
+                        .foregroundStyle(.secondary).font(.caption).monospacedDigit()
+                }
+                .tag(app.url)
             }
         }
     }

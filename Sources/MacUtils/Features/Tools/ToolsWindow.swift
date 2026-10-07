@@ -20,6 +20,16 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
             }
         }
 
+        /// Для панели из строки меню.
+        var shortTitle: String {
+            switch self {
+            case .uninstaller: return "Программы"
+            case .monitor: return "Монитор"
+            case .tasks: return "Задачи"
+            case .cleanup: return "Очистка"
+            }
+        }
+
         var symbol: String {
             switch self {
             case .uninstaller: return "trash"
@@ -79,16 +89,45 @@ struct ToolsView: View {
     var inPopover = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            if inPopover { header }
+        if inPopover {
+            VStack(spacing: 0) {
+                header
+                compactTabs
+                Divider().padding(.top, 8)
+                compactContent
+            }
+        } else {
             tabs
+        }
+    }
+
+    /// Панель из строки меню: короткие вкладки со значками.
+    private var compactTabs: some View {
+        Picker("Вкладка", selection: $tab) {
+            ForEach(ToolsWindowController.Tab.allCases) { item in
+                Label(item.shortTitle, systemImage: item.symbol).tag(item.rawValue)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private var compactContent: some View {
+        switch ToolsWindowController.Tab(rawValue: tab) ?? .uninstaller {
+        case .uninstaller: UninstallerPage(compact: true)
+        case .monitor: SystemMonitorView(model: .shared, compact: true)
+        case .tasks: TaskManagerView(model: .shared, compact: true)
+        case .cleanup: DiskCleanupView(model: .shared)
         }
     }
 
     private var header: some View {
         HStack(spacing: 10) {
             Image(systemName: "wrench.and.screwdriver.fill").foregroundStyle(Color.accentColor)
-            Text("Mac Utils").font(.headline)
+            Text("Mac Utils").font(.subheadline.weight(.semibold))
             Spacer()
             Button {
                 AppStatusItem.shared.closeTools()
@@ -105,7 +144,8 @@ struct ToolsView: View {
             .help("Выйти из Mac Utils")
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 14)
+        .controlSize(.small)
+        .padding(.horizontal, 12)
         .padding(.top, 10)
     }
 
