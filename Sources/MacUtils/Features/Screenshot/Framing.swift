@@ -161,7 +161,7 @@ enum ShotComposer {
 
     // MARK: - Расположение
 
-    private static func columnCount(for items: [CGImage], layout: StepsLayout) -> Int {
+    static func columnCount(for items: [CGImage], layout: StepsLayout) -> Int {
         let n = items.count
         switch layout {
         case .vertical: return 1

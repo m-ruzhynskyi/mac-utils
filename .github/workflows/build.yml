@@ -1,37 +1,52 @@
-name: Build & Release
+name: CI
 
-# Каждый пуш в main собирает приложение и публикует релиз vX.Y.<номер сборки>.
-# Установленное приложение находит релиз и обновляется само.
+# development и pull request'ы — сборка и тесты.
+# main (после слияния из development) — тесты, подписанная универсальная сборка и релиз.
+# Версия везде одна: <major.minor>.<число коммитов> — её считает build.sh.
 on:
   push:
+    branches: [development, main]
   pull_request:
+    branches: [development, main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+
+  release:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-15
     env:
       SIGNING_P12: ${{ secrets.SIGNING_P12 }}
       SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set version
-        run: |
-          PLIST=Resources/Info.plist
-          BASE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" | cut -d. -f1,2)
-          VERSION="$BASE.$GITHUB_RUN_NUMBER"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :MUUpdateRepo $GITHUB_REPOSITORY" "$PLIST"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-
+      # Без постоянной подписи macOS сбросит разрешения после автообновления,
+      # поэтому релиз публикуется только подписанным сертификатом «Mac Utils Signing».
       - name: Import signing certificate
-        if: env.SIGNING_P12 != ''
+        id: sign
         run: |
+          if [[ -z "$SIGNING_P12" ]]; then
+            echo "::warning::Нет секретов SIGNING_P12/SIGNING_PASSWORD — релиз не публикуется."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
           echo "$SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
           security create-keychain -p ci "$KEYCHAIN"
@@ -41,20 +56,27 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           echo "SIGN_IDENTITY=Mac Utils Signing" >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
 
       - name: Build app
         run: ./build.sh --universal
+
+      - name: Version
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "build/Mac Utils.app/Contents/Info.plist")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          codesign -dvv "build/Mac Utils.app" 2>&1 | grep -E "Authority|Signature" || true
 
       - name: Zip
         run: cd build && ditto -c -k --keepParent "Mac Utils.app" MacUtils.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MacUtils
+          name: MacUtils-${{ env.VERSION }}
           path: build/MacUtils.zip
 
       - name: Publish release
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: steps.sign.outputs.signed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

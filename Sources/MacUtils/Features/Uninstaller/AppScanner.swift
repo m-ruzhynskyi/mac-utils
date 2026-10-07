@@ -84,7 +84,7 @@ struct Leftover: Identifiable, Hashable {
 /// Поиск файлов приложения в стандартных папках. Только точные совпадения:
 /// bundle id (и «bundle id.что-то»), точное имя папки, префикс Team ID.
 enum AppScanner {
-    private struct Location {
+    struct Location {
         let path: String
         let group: String
         /// Сравнивать с именем приложения (только для папок данных).
@@ -95,7 +95,7 @@ enum AppScanner {
         var protected = false
     }
 
-    private static var locations: [Location] {
+    static var locations: [Location] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var list: [Location] = [
             Location(path: "\(home)/Library/Application Support", group: "Данные приложения", byName: true),
@@ -127,7 +127,8 @@ enum AppScanner {
     }
 
     /// Другие установленные приложения того же разработчика (для пометки «общее»).
-    static func scan(_ app: InstalledApp, others: [InstalledApp]) -> [Leftover] {
+    /// `locations` — для тестов; по умолчанию стандартные папки.
+    static func scan(_ app: InstalledApp, others: [InstalledApp], locations: [Location]? = nil) -> [Leftover] {
         let manager = FileManager.default
         var result: [Leftover] = [
             Leftover(url: app.url, group: "Приложение", kind: .app, shared: false,
@@ -140,7 +141,7 @@ enum AppScanner {
         let sameTeam = others.contains { $0.bundleID != app.bundleID && $0.teamID != nil && $0.teamID == app.teamID }
         var seen = Set<String>()
 
-        for location in locations {
+        for location in locations ?? Self.locations {
             guard let names = try? manager.contentsOfDirectory(atPath: location.path) else { continue }
             for entry in names {
                 let lower = entry.lowercased()

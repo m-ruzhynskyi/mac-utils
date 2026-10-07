@@ -23,7 +23,7 @@
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>MUUpdateRepo</key>
-    <string></string>
+    <string>m-ruzhynskyi/mac-utils</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>
