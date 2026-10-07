@@ -54,11 +54,12 @@ jobs:
           # не читает. Проверяем пароль OpenSSL 3 и перепаковываем в совместимый формат.
           OPENSSL="$(brew --prefix openssl@3 2>/dev/null)/bin/openssl"
           [[ -x "$OPENSSL" ]] || OPENSSL=openssl
-          if ! "$OPENSSL" pkcs12 -in "$P12" -passin env:SIGNING_PASSWORD -noout; then
+          # -legacy: «Связка ключей» может шифровать старым RC2, его OpenSSL 3 читает только так.
+          if ! "$OPENSSL" pkcs12 -legacy -in "$P12" -passin env:SIGNING_PASSWORD -noout; then
             echo "::error::SIGNING_PASSWORD не подходит к SIGNING_P12 — загрузите секреты заново."
             exit 1
           fi
-          "$OPENSSL" pkcs12 -in "$P12" -passin env:SIGNING_PASSWORD -nodes -out "$RUNNER_TEMP/signing.pem"
+          "$OPENSSL" pkcs12 -legacy -in "$P12" -passin env:SIGNING_PASSWORD -nodes -out "$RUNNER_TEMP/signing.pem"
           "$OPENSSL" pkcs12 -export -legacy -in "$RUNNER_TEMP/signing.pem" -out "$RUNNER_TEMP/legacy.p12" \
             -passout env:SIGNING_PASSWORD -name "Mac Utils Signing"
           rm -f "$RUNNER_TEMP/signing.pem"
