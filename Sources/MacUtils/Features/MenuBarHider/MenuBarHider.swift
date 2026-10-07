@@ -88,6 +88,12 @@ final class MenuBarHider: NSObject, ObservableObject {
             button.imagePosition = .imageOnly
             button.toolTip = "Значки левее этой черты прячутся. Перетаскивайте значки с ⌘."
             button.appearsDisabled = false
+            // Без подсветки при наведении и нажатии: в свёрнутом виде это пустое место.
+            button.isBordered = false
+            (button.cell as? NSButtonCell)?.highlightsBy = []
+            // Клик по пустому месту разворачивает значки, как стрелка.
+            button.target = self
+            button.action = #selector(separatorClicked)
         }
         toggleItem = toggle
         separatorItem = separator
@@ -137,6 +143,10 @@ final class MenuBarHider: NSObject, ObservableObject {
 
     @objc private func toggleClicked() {
         toggle()
+    }
+
+    @objc private func separatorClicked() {
+        if isCollapsed { expand() }
     }
 
     func toggle() {
