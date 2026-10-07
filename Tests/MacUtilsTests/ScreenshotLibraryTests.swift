@@ -43,3 +43,14 @@ final class CaptureNameTests: XCTestCase {
         XCTAssertFalse(ShotLibraryRules.isCapture("Screenshot notes.txt"))
     }
 }
+
+final class ShotExpiryTests: XCTestCase {
+    func testExpiry() {
+        let now = Date()
+        let old = ShotRecord(path: "/s/a.png", date: now.addingTimeInterval(-10 * 86_400), app: "A", text: "")
+        let fresh = ShotRecord(path: "/s/b.png", date: now.addingTimeInterval(-2 * 86_400), app: "A", text: "")
+        XCTAssertTrue(ShotLibraryRules.isExpired(old, days: 7, now: now))
+        XCTAssertFalse(ShotLibraryRules.isExpired(fresh, days: 7, now: now))
+        XCTAssertFalse(ShotLibraryRules.isExpired(old, days: 0, now: now), "0 — никогда")
+    }
+}

@@ -69,6 +69,10 @@ enum Pref {
     static let screenshotLibrary = "screenshotLibraryEnabled"
     static let screenshotLibrarySystem = "screenshotLibrarySystem"
     static let screenshotLibraryImported = "screenshotLibraryImported"
+    /// Сохранять в умную папку и то, что скопировано только в буфер.
+    static let screenshotLibraryClipboard = "screenshotLibraryClipboard"
+    /// Через сколько дней снимки и видео уходят в Корзину (0 — никогда).
+    static let screenshotLibraryTrashDays = "screenshotLibraryTrashDays"
     /// Мгновенный QR (⌃⌥Q).
     static let qr = "qrEnabled"
     /// Раскладка по программам: включено, запоминать последнюю, правила и запомненное (bundle id → id раскладки).
@@ -127,6 +131,8 @@ enum Pref {
             downloadsTrashDays: 30,
             screenshotLibrary: true,
             screenshotLibrarySystem: false,
+            screenshotLibraryClipboard: true,
+            screenshotLibraryTrashDays: 0,
             qr: true,
             appInputSource: true,
             appInputRemember: true,

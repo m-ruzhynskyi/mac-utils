@@ -149,7 +149,15 @@ final class ScreenshotService: ObservableObject {
         close()
         guard let png = Self.png(image) else { return }
         Self.putOnPasteboard(png, image)
+        Self.keepCopy(png, prefix: "Снимок экрана")
         Toast.show("Снимок скопирован", symbol: "doc.on.clipboard.fill", tint: .accentColor)
+    }
+
+    /// Скопированное только в буфер тоже попадает в умную папку и в «Мои снимки».
+    private static func keepCopy(_ png: Data, prefix: String) {
+        guard ScreenshotLibrary.shared.enabled,
+              UserDefaults.standard.bool(forKey: Pref.screenshotLibraryClipboard) else { return }
+        _ = try? writeToFolder(png, prefix: prefix)
     }
 
     func save(_ image: CGImage) {
@@ -203,6 +211,7 @@ final class ScreenshotService: ObservableObject {
         switch Pref.screenshotDestinationValue {
         case .clipboard:
             Self.putOnPasteboard(png, image)
+            Self.keepCopy(png, prefix: "Длинный снимок")
             Toast.show("Длинный снимок скопирован (\(size))", symbol: "scroll.fill", tint: .green)
         case .folder:
             do {
