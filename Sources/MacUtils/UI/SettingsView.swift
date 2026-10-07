@@ -443,16 +443,20 @@ struct UninstallerPage: View {
     @ViewBuilder
     private var fullDiskAccessBar: some View {
         if permissions.fullDiskAccess == false {
-            HStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Нет «Полного доступа к диску» — часть контейнеров может не удалиться.")
+                        .fixedSize(horizontal: false, vertical: true)
                     Text("Уже включили? Доступ действует после перезапуска Mac Utils. Если и после перезапуска не видно — удалите Mac Utils из списка кнопкой «−» и добавьте снова.")
                         .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Открыть настройки") { Permissions.openFullDiskAccess() }
+                        Button("Перезапустить Mac Utils") { Permissions.relaunch() }
+                    }
                 }
-                Spacer()
-                Button("Открыть настройки") { Permissions.openFullDiskAccess() }
-                Button("Перезапустить Mac Utils") { Permissions.relaunch() }
+                Spacer(minLength: 0)
             }
             .padding(10)
             .background(Color.orange.opacity(0.1))

@@ -178,7 +178,9 @@ struct UninstallerView: View {
     @State private var dropTargeted = false
 
     var body: some View {
-        HSplitView {
+        // Колонка списка тянется вместе с окном (220…340), детали занимают остальное.
+        GeometryReader { geometry in
+        HStack(spacing: 0) {
             VStack(spacing: 0) {
                 TextField("Поиск", text: $model.search)
                     .textFieldStyle(.roundedBorder)
@@ -198,10 +200,13 @@ struct UninstallerView: View {
                     .tag(app.url)
                 }
             }
-            .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
+            .frame(width: min(max(geometry.size.width * 0.36, 220), 340))
+
+            Divider()
 
             details
-                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             guard let provider = providers.first else { return false }
@@ -226,9 +231,10 @@ struct UninstallerView: View {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
                         .resizable().frame(width: 48, height: 48)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(app.name).font(.title2.weight(.semibold))
+                        Text(app.name).font(.title2.weight(.semibold)).lineLimit(1).truncationMode(.tail)
                         Text(app.bundleID + (app.teamID.map { " · Team ID \($0)" } ?? ""))
                             .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            .lineLimit(1).truncationMode(.middle)
                     }
                 }
                 if let refusal = model.refusal {
@@ -248,29 +254,51 @@ struct UninstallerView: View {
                         HStack {
                             Label("Контейнеры защищены macOS. Дайте Mac Utils «Полный доступ к диску».",
                                   systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
                             Button("Открыть настройки") { Permissions.openFullDiskAccess() }
                             Button("Перезапустить") { Permissions.relaunch() }
                         }
                     }
-                    HStack {
-                        Text("Выбрано: \(byteString(model.totalChecked))").monospacedDigit()
-                        Spacer()
-                        Button("Переместить в корзину") { model.moveToTrash() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.red)
-                            .disabled(model.working || !model.leftovers.contains { model.checked.contains($0.url) && $0.kind != .receipt })
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            selectedTotal
+                            Spacer()
+                            trashButton
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            selectedTotal
+                            trashButton
+                        }
                     }
                 }
             }
             .padding(14)
         } else {
-            VStack(spacing: 10) {
-                Image(systemName: "trash.circle").font(.system(size: 44)).foregroundStyle(.secondary)
-                Text("Выберите приложение слева или перетащите .app в это окно")
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            emptyState
         }
+    }
+
+    private var selectedTotal: some View {
+        Text("Выбрано: \(byteString(model.totalChecked))").monospacedDigit()
+    }
+
+    private var trashButton: some View {
+        Button("Переместить в корзину") { model.moveToTrash() }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .disabled(model.working || !model.leftovers.contains { model.checked.contains($0.url) && $0.kind != .receipt })
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "trash.circle").font(.system(size: 44)).foregroundStyle(.secondary)
+            Text("Выберите приложение слева или перетащите .app на эту страницу")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var groups: [String] {
@@ -293,7 +321,7 @@ struct UninstallerView: View {
                 .toggleStyle(.checkbox)
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(item.url.lastPathComponent).lineLimit(1)
+                Text(item.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
                 Text(item.url.deletingLastPathComponent().path)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 if item.needsAdmin {

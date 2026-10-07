@@ -26,7 +26,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.title = "Mac Utils"
         window.contentViewController = NSHostingController(rootView: SettingsView())
         window.setContentSize(NSSize(width: 980, height: 620))
-        window.minSize = NSSize(width: 680, height: 460)
+        window.minSize = NSSize(width: 760, height: 520)
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
