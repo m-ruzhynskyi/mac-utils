@@ -101,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppVolume.shared.sync()
         DropShelf.shared.sync()
         CheatSheet.shared.sync()
+        DownloadsSorter.shared.sync()
         AppStatusItem.shared.sync()
     }
 }
