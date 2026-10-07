@@ -55,7 +55,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads,
+    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          uninstaller, monitor, tasks, cleanup, shots
 
     var id: String { rawValue }
@@ -73,6 +73,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shelf: return "Полка"
         case .cheatSheet: return "Шпаргалка"
         case .downloads: return "Загрузки"
+        case .qr: return "QR-коды"
         case .uninstaller: return "Удаление программ"
         case .monitor: return "Монитор системы"
         case .tasks: return "Диспетчер задач"
@@ -94,6 +95,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shelf: return "tray.full"
         case .cheatSheet: return "command"
         case .downloads: return "arrow.down.circle"
+        case .qr: return "qrcode"
         case .uninstaller: return "trash"
         case .monitor: return "gauge.with.dots.needle.67percent"
         case .tasks: return "list.bullet.rectangle"
@@ -115,6 +117,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shelf: return .orange
         case .cheatSheet: return .gray
         case .downloads: return .blue
+        case .qr: return .indigo
         case .uninstaller: return .red
         case .monitor: return .mint
         case .tasks: return .brown
@@ -152,6 +155,7 @@ struct SettingsView: View {
             case .shelf: ShelfPage()
             case .cheatSheet: CheatSheetPage()
             case .downloads: DownloadsPage()
+            case .qr: QRPage()
             case .uninstaller: UninstallerPage()
             case .monitor: SystemMonitorView(model: .shared).navigationTitle("Монитор системы")
             case .tasks: TaskManagerView(model: .shared).navigationTitle("Диспетчер задач")
@@ -564,6 +568,34 @@ struct VolumePage: View {
         .formStyle(.grouped)
         .navigationTitle("Громкость")
         .onAppear { AppVolume.shared.refresh() }
+    }
+}
+
+// MARK: - QR
+
+struct QRPage: View {
+    @AppStorage(Pref.qr) private var enabled = true
+    @ObservedObject private var permissions = PermissionsModel.shared
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Мгновенный QR", isOn: $enabled)
+                Text("Одно сочетание для двух дел: сделать QR-код из выделенного текста или прочитать QR-код с экрана.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Как пользоваться") {
+                ShortcutRow(keys: ["⌃", "⌥", "Q"], text: "Выделен текст — появится его QR-код: скопировать картинку или сохранить.")
+                ShortcutRow(keys: ["⌃", "⌥", "Q"], text: "Ничего не выделено — QR-коды на экране распознаются и копируются; ссылку можно сразу открыть.")
+                if !permissions.screenRecording {
+                    Text("Для чтения QR с экрана нужно разрешение «Запись экрана».").foregroundStyle(.orange)
+                }
+            }
+            .disabled(!enabled)
+        }
+        .formStyle(.grouped)
+        .navigationTitle("QR-коды")
     }
 }
 

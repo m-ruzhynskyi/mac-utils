@@ -66,6 +66,8 @@ enum Pref {
     /// Умная папка снимков (по дням и программам, поиск по тексту) и сбор системных снимков ⌘⇧3/4.
     static let screenshotLibrary = "screenshotLibraryEnabled"
     static let screenshotLibrarySystem = "screenshotLibrarySystem"
+    /// Мгновенный QR (⌃⌥Q).
+    static let qr = "qrEnabled"
     /// Значок Mac Utils в строке меню (клик — «Инструменты»).
     static let menuBarIcon = "menuBarIconEnabled"
 
@@ -117,6 +119,7 @@ enum Pref {
             downloadsTrashDays: 30,
             screenshotLibrary: true,
             screenshotLibrarySystem: false,
+            qr: true,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,

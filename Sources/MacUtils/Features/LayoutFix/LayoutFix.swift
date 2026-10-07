@@ -217,7 +217,7 @@ final class LayoutFix: ObservableObject {
 
     // MARK: - Выделенный текст
 
-    private static func selectedTextViaAX() -> String? {
+    static func selectedTextViaAX() -> String? {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.2)
         var focused: CFTypeRef?
