@@ -55,6 +55,11 @@ enum Pref {
 
     /// Последняя открытая вкладка окна «Инструменты».
     static let toolsTab = "toolsTab"
+    /// «Полка» для файлов (встряхнуть мышь при перетаскивании или ⌃⌥D).
+    static let dropShelf = "dropShelfEnabled"
+    /// «Шпаргалка»: удержание ⌘ показывает сочетания клавиш; задержка в секундах.
+    static let cheatSheet = "cheatSheetEnabled"
+    static let cheatSheetDelay = "cheatSheetDelay"
     /// Значок Mac Utils в строке меню (клик — «Инструменты»).
     static let menuBarIcon = "menuBarIconEnabled"
 
@@ -99,6 +104,9 @@ enum Pref {
             windowSnapModifier: "controlOption",
             appVolume: true,
             menuBarIcon: true,
+            dropShelf: true,
+            cheatSheet: true,
+            cheatSheetDelay: 0.8,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,
