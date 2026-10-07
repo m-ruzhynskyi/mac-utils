@@ -54,7 +54,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, cutPaste, smoothScroll, switcher, screenshot, windows, layout
+    case general, cutPaste, smoothScroll, switcher, screenshot, windows, layout, uninstaller
 
     var id: String { rawValue }
 
@@ -67,6 +67,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .screenshot: return "Снимки экрана"
         case .windows: return "Окна"
         case .layout: return "Раскладка"
+        case .uninstaller: return "Удаление программ"
         }
     }
 
@@ -79,6 +80,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .screenshot: return "camera.viewfinder"
         case .windows: return "rectangle.split.2x2"
         case .layout: return "keyboard"
+        case .uninstaller: return "trash"
         }
     }
 
@@ -91,6 +93,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .screenshot: return .purple
         case .windows: return .indigo
         case .layout: return .teal
+        case .uninstaller: return .red
         }
     }
 }
@@ -119,6 +122,7 @@ struct SettingsView: View {
             case .screenshot: ScreenshotPage()
             case .windows: WindowsPage()
             case .layout: LayoutPage()
+            case .uninstaller: UninstallerPage()
             }
         }
     }
@@ -411,6 +415,44 @@ struct SwitcherPage: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Переключатель приложений")
+    }
+}
+
+// MARK: - Удаление программ
+
+struct UninstallerPage: View {
+    var body: some View {
+        Form {
+            Section {
+                Text("Удаляет приложение вместе с его данными, кэшем, настройками, контейнерами, журналами и автозапуском. Всё перемещается в Корзину — ничего не стирается насовсем.")
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Открыть") { UninstallerWindowController.shared.show() }
+                        .buttonStyle(.borderedProminent)
+                    Text("или перетащите .app в окно удаления").foregroundStyle(.secondary)
+                }
+            }
+            Section("Как ищутся файлы") {
+                Text("Только точные совпадения: идентификатор приложения (bundle id), точное имя папки в данных, кэше и журналах, общие папки разработчика (Team ID) — их галочки сняты по умолчанию. Системные приложения и программы Apple удалить нельзя.")
+                    .foregroundStyle(.secondary)
+                Text("Файлы в /Library требуют пароль администратора — он запрашивается один раз и только если такие файлы отмечены.")
+                    .foregroundStyle(.secondary)
+            }
+            Section("Контейнеры") {
+                HStack {
+                    Text("Чтобы удалять контейнеры приложений из App Store, может понадобиться «Полный доступ к диску».")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Открыть настройки") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Удаление программ")
     }
 }
 

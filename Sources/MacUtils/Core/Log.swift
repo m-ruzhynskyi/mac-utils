@@ -9,4 +9,5 @@ enum Log {
     static let capture = Logger(subsystem: "com.mruzhynskyi.macutils", category: "capture")
     static let layout = Logger(subsystem: "com.mruzhynskyi.macutils", category: "layout")
     static let window = Logger(subsystem: "com.mruzhynskyi.macutils", category: "window")
+    static let uninstall = Logger(subsystem: "com.mruzhynskyi.macutils", category: "uninstall")
 }
