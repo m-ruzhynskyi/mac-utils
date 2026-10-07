@@ -85,7 +85,7 @@ struct SystemMonitorView: View {
     @ObservedObject var model: SystemMonitorModel
     var compact = false
 
-    private var columns: [GridItem] { [GridItem(.adaptive(minimum: compact ? 200 : 280), spacing: compact ? 10 : 14)] }
+    private var columns: [GridItem] { [GridItem(.adaptive(minimum: compact ? 160 : 280), spacing: compact ? 10 : 14)] }
 
     var body: some View {
         ScrollView {
@@ -116,7 +116,7 @@ struct SystemMonitorView: View {
     private var diskCard: some View {
         CardShell(title: "Диск", symbol: "internaldrive", tint: .orange) {
             if let disk = model.disk {
-                Text(percent(disk.fraction)).font(.system(size: compact ? 20 : 26, weight: .semibold)).monospacedDigit()
+                Text(percent(disk.fraction)).font(.system(size: compact ? 17 : 26, weight: .semibold)).monospacedDigit()
                 ProgressView(value: disk.fraction).tint(disk.fraction > 0.9 ? .red : .orange)
                 Text("Свободно \(bytes(UInt64(disk.available))) из \(bytes(UInt64(disk.total)))")
                     .font(.caption).foregroundStyle(.secondary)
@@ -179,7 +179,7 @@ private struct CardShell<Content: View>: View {
                 .foregroundStyle(tint)
             content
         }
-        .frame(maxWidth: .infinity, minHeight: compact ? 110 : 150, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: compact ? 96 : 150, alignment: .topLeading)
         .padding(compact ? 10 : 14)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -199,7 +199,7 @@ private struct MonitorCard: View {
 
     var body: some View {
         CardShell(title: title, symbol: symbol, tint: tint) {
-            Text(value).font(.system(size: compact ? 20 : 26, weight: .semibold)).monospacedDigit()
+            Text(value).font(.system(size: compact ? 17 : 26, weight: .semibold)).monospacedDigit()
             Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Chart {
                 ForEach(Array(history.enumerated()), id: \.offset) { index, point in
@@ -219,7 +219,7 @@ private struct MonitorCard: View {
             .chartYAxis(.hidden)
             .chartXScale(domain: 0...(SystemMonitorModel.historyLength - 1))
             .chartYScale(domain: 0...yMax)
-            .frame(height: compact ? 36 : 54)
+            .frame(height: compact ? 28 : 54)
         }
     }
 

@@ -209,7 +209,7 @@ struct TaskManagerView: View {
 
             List(selection: $model.selection) {
                 ForEach(model.visible) { row in
-                    ProcessLine(row: row).tag(row.pid)
+                    ProcessLine(row: row, compact: compact).tag(row.pid)
                         .contextMenu {
                             Button("Завершить") { model.quit(row.pid, force: false) }
                             Button("Завершить принудительно") { confirmForce = row }
@@ -225,9 +225,10 @@ struct TaskManagerView: View {
                 Spacer()
                 Text(compact ? "\(model.visible.count)" : "Процессов: \(model.visible.count)").foregroundStyle(.secondary).monospacedDigit()
                     .help("Процессов в списке")
-                Button("Завершить") { if let pid = model.selection { model.quit(pid, force: false) } }
+                Button(compact ? "Стоп" : "Завершить") { if let pid = model.selection { model.quit(pid, force: false) } }
+                    .help("Завершить выбранный процесс")
                     .disabled(model.selection == nil)
-                Button("Принудительно") {
+                Button(compact ? "Убить" : "Принудительно") {
                     if let pid = model.selection { confirmForce = model.rows.first { $0.pid == pid } }
                 }
                 .disabled(model.selection == nil)
@@ -247,24 +248,29 @@ struct TaskManagerView: View {
 
 private struct ProcessLine: View {
     let row: ProcessRow
+    var compact = false
 
     var body: some View {
         HStack(spacing: 10) {
             Image(nsImage: NSRunningApplication(processIdentifier: row.pid)?.icon
                   ?? NSWorkspace.shared.icon(for: .unixExecutable))
-                .resizable().frame(width: 20, height: 20)
-            VStack(alignment: .leading, spacing: 0) {
+                .resizable().frame(width: compact ? 16 : 20, height: compact ? 16 : 20)
+            if compact {
                 Text(row.name).lineLimit(1).truncationMode(.tail)
-                Text("PID \(row.pid) · \(row.user)").font(.caption2).foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(row.name).lineLimit(1).truncationMode(.tail)
+                    Text("PID \(row.pid) · \(row.user)").font(.caption2).foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 8)
             Text(String(format: "%.1f %%", row.cpu))
                 .monospacedDigit()
                 .foregroundStyle(row.cpu > 80 ? .red : .primary)
-                .frame(width: 70, alignment: .trailing)
+                .frame(width: compact ? 54 : 70, alignment: .trailing)
             Text(bytes(row.memory))
                 .monospacedDigit()
-                .frame(width: 90, alignment: .trailing)
+                .frame(width: compact ? 68 : 90, alignment: .trailing)
         }
     }
 }

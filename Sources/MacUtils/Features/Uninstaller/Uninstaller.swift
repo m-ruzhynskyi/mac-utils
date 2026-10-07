@@ -235,14 +235,14 @@ struct UninstallerView: View {
         VStack(spacing: 0) {
             TextField("Поиск", text: $model.search)
                 .textFieldStyle(.roundedBorder)
-                .padding(8)
+                .padding(compact ? 6 : 8)
             List(model.filtered, selection: Binding(
                 get: { model.selected?.url },
                 set: { url in if let app = model.apps.first(where: { $0.url == url }) { model.select(app) } }
             )) { app in
                 HStack(spacing: 8) {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
-                        .resizable().frame(width: 20, height: 20)
+                        .resizable().frame(width: compact ? 16 : 20, height: compact ? 16 : 20)
                     Text(app.name).lineLimit(1)
                     Spacer()
                     Text(byteString(model.appSizes[app.url]))
@@ -259,9 +259,9 @@ struct UninstallerView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 12) {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
-                        .resizable().frame(width: 48, height: 48)
+                        .resizable().frame(width: compact ? 32 : 48, height: compact ? 32 : 48)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(app.name).font(.title2.weight(.semibold)).lineLimit(1).truncationMode(.tail)
+                        Text(app.name).font(compact ? .headline : .title2.weight(.semibold)).lineLimit(1).truncationMode(.tail)
                         Text(app.bundleID + (app.teamID.map { " · Team ID \($0)" } ?? ""))
                             .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                             .lineLimit(1).truncationMode(.middle)

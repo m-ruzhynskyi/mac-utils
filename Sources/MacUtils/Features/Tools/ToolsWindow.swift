@@ -95,6 +95,8 @@ struct ToolsView: View {
                 compactTabs
                 Divider().padding(.top, 8)
                 compactContent
+                    .controlSize(.small)
+                    .font(.callout)
             }
         } else {
             tabs
@@ -110,7 +112,8 @@ struct ToolsView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .padding(.horizontal, 12)
+        .controlSize(.small)
+        .padding(.horizontal, 10)
         .padding(.top, 8)
     }
 
@@ -120,31 +123,30 @@ struct ToolsView: View {
         case .uninstaller: UninstallerPage(compact: true)
         case .monitor: SystemMonitorView(model: .shared, compact: true)
         case .tasks: TaskManagerView(model: .shared, compact: true)
-        case .cleanup: DiskCleanupView(model: .shared)
+        case .cleanup: DiskCleanupView(model: .shared, compact: true)
         }
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
             Image(systemName: "wrench.and.screwdriver.fill").foregroundStyle(Color.accentColor)
-            Text("Mac Utils").font(.subheadline.weight(.semibold))
+            Text("Mac Utils").font(.callout.weight(.semibold))
             Spacer()
             Button {
                 AppStatusItem.shared.closeTools()
                 SettingsWindowController.shared.show()
             } label: {
-                Label("Настройки", systemImage: "gearshape")
+                Image(systemName: "gearshape")
             }
             .help("Настройки Mac Utils (⌃⌥⌘,)")
             Button {
                 NSApp.terminate(nil)
             } label: {
-                Label("Выйти", systemImage: "power")
+                Image(systemName: "power")
             }
             .help("Выйти из Mac Utils")
         }
         .buttonStyle(.borderless)
-        .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.top, 10)
     }

@@ -160,6 +160,7 @@ final class DiskCleanupModel: ObservableObject {
 
 struct DiskCleanupView: View {
     @ObservedObject var model: DiskCleanupModel
+    var compact = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -173,14 +174,19 @@ struct DiskCleanupView: View {
                     }
                 }
             }
+            if compact, let result = model.lastResult {
+                Text(result).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10).padding(.top, 6)
+            }
             HStack(spacing: 10) {
-                if let result = model.lastResult {
+                if !compact, let result = model.lastResult {
                     Text(result).font(.caption).foregroundStyle(.secondary)
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 if model.scanning { ProgressView().controlSize(.small) }
-                Button("Пересканировать") { model.scan() }.disabled(model.scanning)
+                Button(compact ? "Обновить" : "Пересканировать") { model.scan() }.disabled(model.scanning)
                 Button("Очистить · \(ByteCountFormatter.string(fromByteCount: model.checkedTotal, countStyle: .file))") {
                     model.clean()
                 }
@@ -201,10 +207,13 @@ struct DiskCleanupView: View {
                 .labelsHidden().toggleStyle(.checkbox).disabled(items.isEmpty)
             Image(systemName: category.symbol).frame(width: 20).foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 1) {
-                Text(category.title).font(.headline)
-                Text(category.detail).font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(category.title).font(compact ? .callout.weight(.semibold) : .headline)
+                if !compact {
+                    Text(category.detail).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .help(category.detail)
             Spacer(minLength: 8)
             Text(model.scanning ? "…" : ByteCountFormatter.string(fromByteCount: model.total(category.kind), countStyle: .file))
                 .monospacedDigit().foregroundStyle(.secondary)
