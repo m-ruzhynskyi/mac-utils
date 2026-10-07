@@ -596,10 +596,6 @@ struct MenuBarPage: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if hider.misplaced {
-                    Text("Черта стоит правее стрелки — перетащите её левее (с ⌘), иначе свернуть нельзя.")
-                        .foregroundStyle(.orange)
-                }
                 if enabled {
                     Button(hider.isCollapsed ? "Показать значки" : "Спрятать значки") { hider.toggle() }
                 }
