@@ -1,8 +1,10 @@
 import AppKit
 
 /// «Строка меню»: прячет лишние значки, как Hidden Bar. Два своих значка:
-/// стрелка (свернуть/развернуть) и разделитель. Всё, что левее разделителя,
-/// при сворачивании уезжает за край экрана: разделитель становится очень длинным.
+/// стрелка (свернуть/развернуть) и разделитель. При сворачивании разделитель
+/// растягивается ровно на свободное место до меню приложения (или до «чёлки»),
+/// и значкам левее него не остаётся места — macOS их прячет. Слишком длинный
+/// разделитель (10 000 pt, как в Hidden Bar) новые macOS просто убирают целиком.
 /// Пока функция выключена, у Mac Utils значков в строке меню нет.
 @MainActor
 final class MenuBarHider: NSObject, ObservableObject {
@@ -13,8 +15,13 @@ final class MenuBarHider: NSObject, ObservableObject {
     /// Разделитель оказался правее стрелки — свернуть нельзя, иначе пропадёт и стрелка.
     @Published private(set) var misplaced = false
 
-    static let collapsedLength: CGFloat = 10_000
     private static let separatorLength: CGFloat = 10
+    /// Развёрнуто и ⌘ не зажата: черта не видна, остаётся узкий невидимый промежуток.
+    private static let hiddenSeparatorLength: CGFloat = 2
+    private var flagsMonitors: [Any] = []
+    private var commandHeld = false
+    /// Правый край разделителя от правого края экрана (запоминается при сворачивании).
+    private var rightOffset: CGFloat?
 
     private var toggleItem: NSStatusItem?
     private var separatorItem: NSStatusItem?
@@ -22,6 +29,21 @@ final class MenuBarHider: NSObject, ObservableObject {
 
     private override init() {
         super.init()
+        // Меню нового активного приложения другой ширины — пересчитываем длину.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(environmentChanged),
+            name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(environmentChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
+    }
+
+    @objc private func environmentChanged() {
+        guard isCollapsed else { return }
+        // Даём строке меню перестроиться под новое приложение.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            MainActor.assumeIsolated { MenuBarHider.shared.applyCollapsedLength() }
+        }
     }
 
     // MARK: - Включение
@@ -70,9 +92,37 @@ final class MenuBarHider: NSObject, ObservableObject {
         toggleItem = toggle
         separatorItem = separator
         isCollapsed = false
+        // Черта нужна только чтобы перетаскивать значки с ⌘ — показываем её, пока ⌘ зажата.
+        let handler: (NSEvent) -> Void = { event in
+            let held = event.modifierFlags.contains(.command)
+            MainActor.assumeIsolated { MenuBarHider.shared.commandChanged(held) }
+        }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: handler) {
+            flagsMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { handler($0); return $0 }) {
+            flagsMonitors.append(local)
+        }
+        updateSeparator()
+    }
+
+    private func commandChanged(_ held: Bool) {
+        guard held != commandHeld else { return }
+        commandHeld = held
+        updateSeparator()
+    }
+
+    /// Развёрнутое состояние: черта видна только с зажатой ⌘.
+    private func updateSeparator() {
+        guard let separatorItem, !isCollapsed else { return }
+        separatorItem.length = commandHeld ? Self.separatorLength : Self.hiddenSeparatorLength
+        separatorItem.button?.image = commandHeld ? Self.separatorImage() : nil
     }
 
     private func removeItems() {
+        for monitor in flagsMonitors { NSEvent.removeMonitor(monitor) }
+        flagsMonitors.removeAll()
+        commandHeld = false
         collapseTimer?.invalidate()
         collapseTimer = nil
         if let separatorItem { NSStatusBar.system.removeStatusItem(separatorItem) }
@@ -103,18 +153,70 @@ final class MenuBarHider: NSObject, ObservableObject {
             return
         }
         misplaced = false
-        separatorItem.length = Self.collapsedLength
+        if let window = separatorItem.button?.window, let screen = window.screen {
+            rightOffset = screen.frame.maxX - window.frame.maxX
+        }
         isCollapsed = true
+        separatorItem.button?.image = nil
+        applyCollapsedLength()
         collapseTimer?.invalidate()
         updateChevron()
     }
 
     func expand() {
         guard let separatorItem, isCollapsed else { return }
-        separatorItem.length = Self.separatorLength
         isCollapsed = false
+        updateSeparator()
         updateChevron()
         scheduleAutoCollapse()
+    }
+
+    /// Длина «свёрнутого» разделителя: всё место от меню приложения (или «чёлки»)
+    /// до правого края разделителя. Берём самый тесный из экранов: длина значка
+    /// общая для всех строк меню, а не поместившийся значок macOS убирает целиком.
+    func applyCollapsedLength() {
+        guard let separatorItem, isCollapsed, let rightOffset else { return }
+        let menusWidth = Self.frontmostMenusWidth()
+        var available = CGFloat.greatestFiniteMagnitude
+        for screen in NSScreen.screens {
+            var left = menusWidth
+            if let notch = screen.auxiliaryTopRightArea, notch.width > 0 {
+                left = max(left, notch.minX - screen.frame.minX)
+            }
+            available = min(available, screen.frame.width - rightOffset - left)
+        }
+        let length = max(Self.separatorLength, available - 6)
+        separatorItem.length = length
+        Log.window.debug("Строка меню: разделитель \(Int(length)) pt (меню \(Int(menusWidth)), отступ \(Int(rightOffset)))")
+    }
+
+    /// Ширина меню активного приложения (от левого края экрана), по Accessibility.
+    private static func frontmostMenusWidth() -> CGFloat {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return 0 }
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(element, 0.2)
+        var bar: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXMenuBarAttribute as CFString, &bar) == .success,
+              let bar, CFGetTypeID(bar) == AXUIElementGetTypeID() else { return 0 }
+        var children: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(bar as! AXUIElement, kAXChildrenAttribute as CFString, &children) == .success,
+              let items = children as? [AXUIElement] else { return 0 }
+        var minX = CGFloat.greatestFiniteMagnitude, maxX: CGFloat = 0
+        for item in items {
+            var position: CFTypeRef?, size: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(item, kAXPositionAttribute as CFString, &position) == .success,
+                  AXUIElementCopyAttributeValue(item, kAXSizeAttribute as CFString, &size) == .success,
+                  let position, let size else { continue }
+            var origin = CGPoint.zero, extent = CGSize.zero
+            AXValueGetValue(position as! AXValue, .cgPoint, &origin)
+            AXValueGetValue(size as! AXValue, .cgSize, &extent)
+            minX = min(minX, origin.x)
+            maxX = max(maxX, origin.x + extent.width)
+        }
+        // Меню начинаются у левого края своего экрана: ширина = maxX − этот край.
+        guard maxX > 0 else { return 0 }
+        let screenMinX = NSScreen.screens.first { $0.frame.minX <= minX && minX < $0.frame.maxX }?.frame.minX ?? 0
+        return maxX - screenMinX
     }
 
     /// Длина разделителя: для проверки и настроек.
@@ -123,6 +225,9 @@ final class MenuBarHider: NSObject, ObservableObject {
     private var separatorIsLeftOfToggle: Bool {
         guard let separator = separatorItem?.button?.window?.frame,
               let toggle = toggleItem?.button?.window?.frame else { return true }
+        // В новых macOS окна значков условные и перекрываются (общий правый край) —
+        // тогда порядок неизвестен, и сворачивание не блокируем.
+        if abs(separator.maxX - toggle.maxX) < 1 { return true }
         return separator.minX <= toggle.minX
     }
 
