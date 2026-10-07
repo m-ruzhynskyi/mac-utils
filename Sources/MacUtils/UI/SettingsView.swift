@@ -70,7 +70,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .volume: return "Громкость"
         case .menuBar: return "Строка меню"
         case .layout: return "Раскладка"
-        case .uninstaller: return "Удаление программ"
+        case .uninstaller: return "Инструменты"
         }
     }
 
@@ -85,7 +85,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .volume: return "speaker.wave.2"
         case .menuBar: return "menubar.rectangle"
         case .layout: return "keyboard"
-        case .uninstaller: return "trash"
+        case .uninstaller: return "wrench.and.screwdriver"
         }
     }
 
@@ -131,7 +131,7 @@ struct SettingsView: View {
             case .volume: VolumePage()
             case .menuBar: MenuBarPage()
             case .layout: LayoutPage()
-            case .uninstaller: UninstallerPage()
+            case .uninstaller: ToolsPage()
             }
         }
     }
@@ -424,6 +424,38 @@ struct SwitcherPage: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Переключатель приложений")
+    }
+}
+
+// MARK: - Инструменты
+
+/// В настройках — только вход в окно «Инструменты».
+struct ToolsPage: View {
+    var body: some View {
+        Form {
+            Section {
+                Text("Удаление программ, монитор системы, диспетчер задач и очистка диска — в отдельном окне, вкладками.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Открыть «Инструменты»") { ToolsWindowController.shared.show() }
+                        .buttonStyle(.borderedProminent)
+                    Text("или ⌃⌥⌘T").foregroundStyle(.secondary)
+                }
+            }
+            Section("Вкладки") {
+                ForEach(ToolsWindowController.Tab.allCases) { tab in
+                    Button {
+                        ToolsWindowController.shared.show(tab)
+                    } label: {
+                        Label(tab.title, systemImage: tab.symbol)
+                    }
+                    .buttonStyle(.link)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Инструменты")
     }
 }
 
