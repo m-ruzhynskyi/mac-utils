@@ -548,6 +548,36 @@ struct MenuBarPage: View {
     private var hotKey: LayoutHotKey { LayoutHotKey(keyCode: keyCode, modifiers: modifiers) }
 
     var body: some View {
+        if MenuBarHider.systemManaged {
+            systemGuide
+        } else {
+            hiderForm
+        }
+    }
+
+    /// macOS 26+: значки прячет сама система — подсказка и кнопка в её настройки.
+    private var systemGuide: some View {
+        Form {
+            Section {
+                Text("В этой версии macOS значки в строке меню прячет сама система — аккуратно, без пустых мест и лишних стрелок, на всех мониторах. Отдельная утилита Mac Utils тут не нужна.")
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Открыть настройки строки меню") { MenuBarHider.openSystemSettings() }
+                    .buttonStyle(.borderedProminent)
+            }
+            Section("Как спрятать значки") {
+                Text("1. Системные настройки → «Строка меню».")
+                Text("2. В списке «Разрешить в строке меню» выключите приложения, значки которых не нужны.")
+                Text("3. Системные значки (микрофон, звук, Wi‑Fi и др.) — там же, в «Элементах управления строки меню»: «Не показывать в строке меню».")
+                Text("Оранжевый индикатор микрофона или камеры macOS показывает всегда, пока они используются, — его не прячет никто.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Строка меню")
+    }
+
+    private var hiderForm: some View {
         Form {
             Section {
                 Toggle("Прятать значки в строке меню", isOn: $enabled)

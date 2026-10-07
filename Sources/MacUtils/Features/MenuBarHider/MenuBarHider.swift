@@ -27,6 +27,21 @@ final class MenuBarHider: NSObject, ObservableObject {
     private var separatorItem: NSStatusItem?
     private var collapseTimer: Timer?
 
+    /// С macOS 26 строку меню рисует система и умеет прятать значки сама
+    /// (Системные настройки → Строка меню → «Разрешить в строке меню»).
+    /// Там свой способ надёжнее: длина значка общая для всех мониторов,
+    /// и растянутая черта оставляет пустоты и системную стрелку «».
+    static var systemManaged: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26
+    }
+
+    /// Раздел «Строка меню» в Системных настройках.
+    static func openSystemSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     private override init() {
         super.init()
         // Меню нового активного приложения другой ширины — пересчитываем длину.
@@ -50,7 +65,7 @@ final class MenuBarHider: NSObject, ObservableObject {
 
     func sync() {
         let defaults = UserDefaults.standard
-        let enabled = defaults.bool(forKey: Pref.menuBarHider)
+        let enabled = defaults.bool(forKey: Pref.menuBarHider) && !Self.systemManaged
         let center = HotKeyCenter.shared
         center.unregister(id: HotKeyID.menuBarToggle)
 
@@ -88,6 +103,12 @@ final class MenuBarHider: NSObject, ObservableObject {
             button.imagePosition = .imageOnly
             button.toolTip = "Значки левее этой черты прячутся. Перетаскивайте значки с ⌘."
             button.appearsDisabled = false
+            // Без подсветки при наведении и нажатии: в свёрнутом виде это пустое место.
+            button.isBordered = false
+            (button.cell as? NSButtonCell)?.highlightsBy = []
+            // Клик по пустому месту разворачивает значки, как стрелка.
+            button.target = self
+            button.action = #selector(separatorClicked)
         }
         toggleItem = toggle
         separatorItem = separator
@@ -137,6 +158,10 @@ final class MenuBarHider: NSObject, ObservableObject {
 
     @objc private func toggleClicked() {
         toggle()
+    }
+
+    @objc private func separatorClicked() {
+        if isCollapsed { expand() }
     }
 
     func toggle() {
