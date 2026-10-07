@@ -55,7 +55,8 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, menuBar, layout, uninstaller
+    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout,
+         uninstaller, monitor, tasks, cleanup
 
     var id: String { rawValue }
 
@@ -68,9 +69,11 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .screenshot: return "Снимки экрана"
         case .windows: return "Окна"
         case .volume: return "Громкость"
-        case .menuBar: return "Строка меню"
         case .layout: return "Раскладка"
-        case .uninstaller: return "Инструменты"
+        case .uninstaller: return "Удаление программ"
+        case .monitor: return "Монитор системы"
+        case .tasks: return "Диспетчер задач"
+        case .cleanup: return "Очистка диска"
         }
     }
 
@@ -83,9 +86,11 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .screenshot: return "camera.viewfinder"
         case .windows: return "rectangle.split.2x2"
         case .volume: return "speaker.wave.2"
-        case .menuBar: return "menubar.rectangle"
         case .layout: return "keyboard"
-        case .uninstaller: return "wrench.and.screwdriver"
+        case .uninstaller: return "trash"
+        case .monitor: return "gauge.with.dots.needle.67percent"
+        case .tasks: return "list.bullet.rectangle"
+        case .cleanup: return "externaldrive.badge.minus"
         }
     }
 
@@ -98,9 +103,11 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .screenshot: return .purple
         case .windows: return .indigo
         case .volume: return .pink
-        case .menuBar: return .mint
         case .layout: return .teal
         case .uninstaller: return .red
+        case .monitor: return .mint
+        case .tasks: return .brown
+        case .cleanup: return .cyan
         }
     }
 }
@@ -129,9 +136,11 @@ struct SettingsView: View {
             case .screenshot: ScreenshotPage()
             case .windows: WindowsPage()
             case .volume: VolumePage()
-            case .menuBar: MenuBarPage()
             case .layout: LayoutPage()
-            case .uninstaller: ToolsPage()
+            case .uninstaller: UninstallerPage()
+            case .monitor: SystemMonitorView(model: .shared).navigationTitle("Монитор системы")
+            case .tasks: TaskManagerView(model: .shared).navigationTitle("Диспетчер задач")
+            case .cleanup: DiskCleanupView(model: .shared).navigationTitle("Очистка диска")
             }
         }
     }
@@ -433,36 +442,6 @@ struct SwitcherPage: View {
 
 // MARK: - Инструменты
 
-/// В настройках — только вход в окно «Инструменты».
-struct ToolsPage: View {
-    var body: some View {
-        Form {
-            Section {
-                Text("Удаление программ, монитор системы, диспетчер задач и очистка диска — в отдельном окне, вкладками.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Button("Открыть «Инструменты»") { ToolsWindowController.shared.show() }
-                        .buttonStyle(.borderedProminent)
-                    Text("или ⌃⌥⌘T").foregroundStyle(.secondary)
-                }
-            }
-            Section("Вкладки") {
-                ForEach(ToolsWindowController.Tab.allCases) { tab in
-                    Button {
-                        ToolsWindowController.shared.show(tab)
-                    } label: {
-                        Label(tab.title, systemImage: tab.symbol)
-                    }
-                    .buttonStyle(.link)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Инструменты")
-    }
-}
-
 // MARK: - Удаление программ
 
 struct UninstallerPage: View {
@@ -569,121 +548,6 @@ struct VolumePage: View {
         .formStyle(.grouped)
         .navigationTitle("Громкость")
         .onAppear { AppVolume.shared.refresh() }
-    }
-}
-
-// MARK: - Строка меню
-
-struct MenuBarPage: View {
-    @AppStorage(Pref.menuBarHider) private var enabled = false
-    @AppStorage(Pref.menuBarAutoCollapse) private var autoCollapse = 10
-    @AppStorage(Pref.menuBarKeyCode) private var keyCode = LayoutHotKey.controlOptionM.keyCode
-    @AppStorage(Pref.menuBarModifiers) private var modifiers = LayoutHotKey.controlOptionM.modifiers
-    @ObservedObject private var hider = MenuBarHider.shared
-
-    private var hotKey: LayoutHotKey { LayoutHotKey(keyCode: keyCode, modifiers: modifiers) }
-
-    var body: some View {
-        if MenuBarHider.systemManaged {
-            systemGuide
-        } else {
-            hiderForm
-        }
-    }
-
-    /// macOS 26+: значки прячет сама система — подсказка и кнопка в её настройки.
-    private var systemGuide: some View {
-        Form {
-            Section {
-                Text("В этой версии macOS значки в строке меню прячет сама система — аккуратно, без пустых мест и лишних стрелок, на всех мониторах. Отдельная утилита Mac Utils тут не нужна.")
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Открыть настройки строки меню") { MenuBarHider.openSystemSettings() }
-                    .buttonStyle(.borderedProminent)
-            }
-            Section {
-                Toggle("Прятать значки в «»", isOn: $enabled)
-                Text("Если значки нужно не убрать совсем, а держать под рукой: значки левее стрелки Mac Utils уходят в системный список «» и открываются по клику на «». Развернуть все сразу — \(hotKey.title). При двух мониторах на неактивном может ненадолго остаться пустое место или спрятанные значки — длина пересчитывается при переходе на него.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if enabled {
-                hiderSections
-            }
-            Section("Убрать значки совсем") {
-                Text("1. Системные настройки → «Строка меню».")
-                Text("2. В списке «Разрешить в строке меню» выключите приложения, значки которых не нужны.")
-                Text("3. Системные значки (микрофон, звук, Wi‑Fi и др.) — там же, в «Элементах управления строки меню»: «Не показывать в строке меню».")
-                Text("Оранжевый индикатор микрофона или камеры macOS показывает всегда, пока они используются, — его не прячет никто.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Строка меню")
-    }
-
-    @ViewBuilder
-    private var hiderSections: some View {
-            Section("Как настроить") {
-                MenuBarIllustration()
-                Text("Удерживая ⌘, перетащите значки, которые нужно прятать, левее стрелки Mac Utils. Всё правее неё остаётся видимым. Клик по стрелке (или \(hotKey.title)) прячет и показывает значки; спрятанные видны и по системной кнопке «».")
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Системные значки так не спрятать: оранжевый индикатор микрофона или камеры macOS показывает всегда, пока они используются, а значки Пункта управления (микрофон, звук, Wi‑Fi и т. п.) всегда стоят правее значков приложений. Их отключают в Системных настройках → Пункт управления (или «Строка меню») → «Не показывать в строке меню».")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if enabled {
-                    Button(hider.isCollapsed ? "Показать значки" : "Спрятать значки") { hider.toggle() }
-                }
-            }
-            Section("Настройки") {
-                Picker("Сворачивать снова через", selection: $autoCollapse) {
-                    Text("Не сворачивать").tag(0)
-                    Text("5 секунд").tag(5)
-                    Text("10 секунд").tag(10)
-                    Text("30 секунд").tag(30)
-                }
-                LabeledContent("Свернуть / развернуть") {
-                    ShortcutRecorder(hotKey: hotKey, suspend: { recording in
-                        if recording { HotKeyCenter.shared.unregister(id: HotKeyID.menuBarToggle) } else { MenuBarHider.shared.sync() }
-                    }) { $0.save(codeKey: Pref.menuBarKeyCode, modifiersKey: Pref.menuBarModifiers) }
-                }
-            }
-            .disabled(!enabled)
-    }
-
-    private var hiderForm: some View {
-        Form {
-            Section {
-                Toggle("Прятать значки в строке меню", isOn: $enabled)
-                Text("Как Hidden Bar: лишние значки прячутся за стрелкой. Пока функция включена, в строке меню есть стрелка Mac Utils.")
-                    .foregroundStyle(.secondary)
-            }
-            hiderSections
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Строка меню")
-    }
-}
-
-/// Схема: [спрятанные значки] | [видимые] ‹
-private struct MenuBarIllustration: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Group {
-                Image(systemName: "cloud")
-                Image(systemName: "bolt.horizontal")
-                Image(systemName: "paperplane")
-            }
-            .opacity(0.45)
-            Image(systemName: "chevron.right").fontWeight(.semibold).foregroundStyle(Color.accentColor)
-            Image(systemName: "wifi")
-            Image(systemName: "battery.75")
-            Spacer(minLength: 0)
-            Text("прячутся · стрелка · видны").font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(8)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 

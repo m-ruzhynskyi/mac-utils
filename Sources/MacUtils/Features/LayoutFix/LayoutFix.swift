@@ -288,7 +288,6 @@ struct LayoutHotKey: Equatable {
 
     static let commandBracket = LayoutHotKey(keyCode: kVK_ANSI_RightBracket, modifiers: cmdKey)
     static let controlOptionV = LayoutHotKey(keyCode: kVK_ANSI_V, modifiers: controlKey | optionKey)
-    static let controlOptionM = LayoutHotKey(keyCode: kVK_ANSI_M, modifiers: controlKey | optionKey)
 
     /// Сочетание из настроек по паре ключей (код клавиши и модификаторы).
     static func load(codeKey: String, modifiersKey: String, default value: LayoutHotKey) -> LayoutHotKey {
