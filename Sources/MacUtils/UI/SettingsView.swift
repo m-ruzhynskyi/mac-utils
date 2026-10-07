@@ -217,7 +217,7 @@ struct GeneralPage: View {
                         .foregroundStyle(.secondary)
                 }
                 Toggle("Значок в строке меню", isOn: $menuBarIcon)
-                Text("Клик — окно «Инструменты» (или ⌃⌥⌘T), правый клик — меню с вкладками и настройками.")
+                Text("Клик — панель «Инструменты» со вкладками прямо под значком (или ⌃⌥⌘T). Настройки и выход — в шапке панели.")
                     .foregroundStyle(.secondary)
             }
 

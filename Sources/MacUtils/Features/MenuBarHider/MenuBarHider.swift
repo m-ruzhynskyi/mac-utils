@@ -158,6 +158,68 @@ final class MenuBarHider: NSObject, ObservableObject {
         item.length = length
         redraw()
         Log.window.debug("Строка меню: значок \(Int(length)) pt для экрана \(Int(screen.frame.width)) (слева \(Int(left)), отступ \(Int(rightOffset)))")
+        verifyPosition(attempt: 0)
+    }
+
+    // MARK: - Самопроверка
+
+    /// Оценка длины — по условным координатам, поэтому после сворачивания значок
+    /// проверяет, где он оказался на самом деле (по Accessibility), и подгоняет длину:
+    /// левый край должен стоять ровно у меню приложения или «чёлки». Залез за границу —
+    /// система убрала бы значок в «»; не дотянулся — осталась бы пустота с значками.
+    private func verifyPosition(attempt: Int) {
+        guard isCollapsed, attempt < 5 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            // Свои значки читаем с фонового потока: главный поток отвечает на запрос.
+            DispatchQueue.global(qos: .userInitiated).async {
+                let frame = Self.ownItemFrame()
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { MenuBarHider.shared.correct(using: frame, attempt: attempt) }
+                }
+            }
+        }
+    }
+
+    private func correct(using frame: CGRect?, attempt: Int) {
+        guard let item, isCollapsed, let frame, frame.width > Self.chevronLength else { return }
+        guard let screen = NSScreen.screens.first(where: { $0.frame.minX <= frame.midX && frame.midX < $0.frame.maxX }) else { return }
+        var boundary = screen.frame.minX + Self.frontmostMenusWidth()
+        if let notch = screen.auxiliaryTopRightArea, notch.width > 0 {
+            boundary = max(boundary, notch.minX)
+        }
+        let delta = frame.minX - (boundary + 4)
+        guard abs(delta) > 3 else { return }
+        let length = max(Self.chevronLength, item.length + delta)
+        Log.window.debug("Строка меню: поправка \(Int(delta)) pt → \(Int(length)) (левый край \(Int(frame.minX)), граница \(Int(boundary)))")
+        item.length = length
+        redraw()
+        verifyPosition(attempt: attempt + 1)
+    }
+
+    /// Рамка своей стрелки в строке меню (координаты экрана, x как в Cocoa).
+    nonisolated private static func ownItemFrame() -> CGRect? {
+        let app = AXUIElementCreateApplication(ProcessInfo.processInfo.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.5)
+        var bar: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, "AXExtrasMenuBar" as CFString, &bar) == .success,
+              let bar, CFGetTypeID(bar) == AXUIElementGetTypeID() else { return nil }
+        var children: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(bar as! AXUIElement, kAXChildrenAttribute as CFString, &children) == .success,
+              let items = children as? [AXUIElement] else { return nil }
+        for item in items {
+            var description: CFTypeRef?
+            AXUIElementCopyAttributeValue(item, kAXDescriptionAttribute as CFString, &description)
+            guard (description as? String) == "Показать значки" else { continue }
+            var position: CFTypeRef?, size: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(item, kAXPositionAttribute as CFString, &position) == .success,
+                  AXUIElementCopyAttributeValue(item, kAXSizeAttribute as CFString, &size) == .success,
+                  let position, let size else { return nil }
+            var origin = CGPoint.zero, extent = CGSize.zero
+            AXValueGetValue(position as! AXValue, .cgPoint, &origin)
+            AXValueGetValue(size as! AXValue, .cgSize, &extent)
+            return CGRect(origin: origin, size: extent)
+        }
+        return nil
     }
 
     private static var currentScreen: NSScreen? {

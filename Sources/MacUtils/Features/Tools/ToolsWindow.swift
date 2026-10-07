@@ -36,10 +36,10 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
 
     func show(_ tab: Tab? = nil) {
         if let tab { UserDefaults.standard.set(tab.rawValue, forKey: Pref.toolsTab) }
+        // Есть значок в строке меню — инструменты выпадают из него панелью со вкладками.
+        if AppStatusItem.shared.showTools() { return }
         let window = self.window ?? make()
         if !window.isVisible { FocusReturn.remember() }
-        // Пока окно открыто, Mac Utils виден в Dock и в ⌘Tab — как обычная программа.
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
@@ -61,8 +61,6 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        // Без окна значок в Dock не нужен: Mac Utils снова работает в фоне.
-        NSApp.setActivationPolicy(.accessory)
         if !SettingsWindowController.shared.isVisible { FocusReturn.restore() }
     }
 }
@@ -77,8 +75,41 @@ final class ToolsWindow: NSWindow {
 
 struct ToolsView: View {
     @AppStorage(Pref.toolsTab) private var tab = ToolsWindowController.Tab.uninstaller.rawValue
+    /// В панели из строки меню — шапка с настройками и выходом.
+    var inPopover = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            if inPopover { header }
+            tabs
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "wrench.and.screwdriver.fill").foregroundStyle(Color.accentColor)
+            Text("Mac Utils").font(.headline)
+            Spacer()
+            Button {
+                AppStatusItem.shared.closeTools()
+                SettingsWindowController.shared.show()
+            } label: {
+                Label("Настройки", systemImage: "gearshape")
+            }
+            .help("Настройки Mac Utils (⌃⌥⌘,)")
+            Button {
+                NSApp.terminate(nil)
+            } label: {
+                Label("Выйти", systemImage: "power")
+            }
+            .help("Выйти из Mac Utils")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+    }
+
+    private var tabs: some View {
         TabView(selection: $tab) {
             UninstallerPage()
                 .tabItem { Label(ToolsWindowController.Tab.uninstaller.title, systemImage: ToolsWindowController.Tab.uninstaller.symbol) }
