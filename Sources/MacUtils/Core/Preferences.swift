@@ -47,6 +47,20 @@ enum Pref {
     /// "controlOption" (⌃⌥, по умолчанию), "controlCommand", "optionCommand".
     static let windowSnapModifier = "windowSnapModifier"
 
+    static let appVolume = "appVolumeEnabled"
+    /// JSON: bundle id → громкость и выключение (только не 100 %).
+    static let appVolumes = "appVolumes"
+    static let appVolumeKeyCode = "appVolumeKeyCode"
+    static let appVolumeModifiers = "appVolumeModifiers"
+
+    /// Скрытие значков строки меню (по умолчанию выключено: тогда у нас нет значков).
+    static let menuBarHider = "menuBarHiderEnabled"
+    /// Свернуть через N секунд после разворота: 0 — не сворачивать.
+    static let menuBarAutoCollapse = "menuBarAutoCollapse"
+    static let menuBarHideChevron = "menuBarHideChevron"
+    static let menuBarKeyCode = "menuBarKeyCode"
+    static let menuBarModifiers = "menuBarModifiers"
+
     static let layoutFix = "layoutFixEnabled"
     /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
     static let layoutFixKeyCode = "layoutFixKeyCode"
@@ -86,6 +100,10 @@ enum Pref {
             windowSnapDrag: true,
             windowSnapGap: 0,
             windowSnapModifier: "controlOption",
+            appVolume: true,
+            menuBarHider: false,
+            menuBarAutoCollapse: 10,
+            menuBarHideChevron: false,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,

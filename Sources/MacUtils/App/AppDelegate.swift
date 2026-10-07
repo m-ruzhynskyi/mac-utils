@@ -80,6 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ScreenshotService.shared.sync()
         LayoutFix.shared.sync()
         WindowTiler.shared.sync()
+        AppVolume.shared.sync()
+        MenuBarHider.shared.sync()
     }
 }
 
@@ -90,4 +92,6 @@ enum HotKeyID {
     static let layoutFix: UInt32 = 4
     /// 10…20 — раскладка окон (по одному на сочетание).
     static let windowSnapBase: UInt32 = 10
+    static let appVolume: UInt32 = 30
+    static let menuBarToggle: UInt32 = 31
 }
