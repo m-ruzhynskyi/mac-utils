@@ -161,6 +161,10 @@ final class DiskCleanupModel: ObservableObject {
 struct DiskCleanupView: View {
     @ObservedObject var model: DiskCleanupModel
     var compact = false
+    @ObservedObject private var advisor = CleanupAdvisor.shared
+    @AppStorage(Pref.ai) private var aiEnabled = true
+    @AppStorage(Pref.aiCleanup) private var aiCleanup = true
+    private var aiOn: Bool { aiEnabled && aiCleanup }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -185,7 +189,26 @@ struct DiskCleanupView: View {
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
-                if model.scanning { ProgressView().controlSize(.small) }
+                if model.scanning || advisor.working { ProgressView().controlSize(.small) }
+                if aiOn {
+                    Button {
+                        advisor.review(model.items)
+                        model.expanded = Set(CleanupCategory.Kind.allCases).subtracting([.trash])
+                    } label: { Label(compact ? "ИИ" : "Разобрать с ИИ", systemImage: "sparkles") }
+                    .disabled(model.scanning || advisor.working || model.items.isEmpty)
+                    .help("Локальная модель подскажет, что безопасно удалять: зелёный — безопасно, оранжевый — осторожно, красный — лучше оставить")
+                    if let progress = advisor.progress {
+                        Text(progress).font(.caption).foregroundStyle(.secondary)
+                    } else if let error = advisor.error {
+                        Text(error).font(.caption).foregroundStyle(.orange).lineLimit(1)
+                    }
+                    if !advisor.advice.isEmpty {
+                        Button(compact ? "Безопасное" : "Отметить безопасное") {
+                            model.checked = Set(model.items.filter { advisor.advice[$0.url]?.verdict == .safe }.map(\.url))
+                        }
+                        .help("Отметить только то, что ИИ считает безопасным")
+                    }
+                }
                 Button(compact ? "Обновить" : "Пересканировать") { model.scan() }.disabled(model.scanning)
                 Button("Очистить · \(ByteCountFormatter.string(fromByteCount: model.checkedTotal, countStyle: .file))") {
                     model.clean()
@@ -235,7 +258,13 @@ struct DiskCleanupView: View {
             Toggle("", isOn: Binding(get: { model.checked.contains(item.url) },
                                      set: { on in if on { model.checked.insert(item.url) } else { model.checked.remove(item.url) } }))
                 .labelsHidden().toggleStyle(.checkbox)
+            if let advice = advisor.advice[item.url] {
+                Circle().fill(advice.verdict == .safe ? Color.green : advice.verdict == .careful ? .orange : .red)
+                    .frame(width: 8, height: 8)
+                    .help(advice.reason)
+            }
             Text(item.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
+                .help(advisor.advice[item.url]?.reason ?? item.url.path)
             Spacer(minLength: 8)
             Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
                 .font(.caption).monospacedDigit().foregroundStyle(.secondary)

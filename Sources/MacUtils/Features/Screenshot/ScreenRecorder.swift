@@ -28,6 +28,30 @@ final class ScreenRecorder: NSObject, ObservableObject {
     private var started = Date()
     private var timer: Timer?
     private var borderPanel: NSPanel?
+    private var filterDisplayID: CGDirectDisplayID?
+
+    /// Заголовок своих окон, которые должны попасть в запись (рисунки поверх экрана).
+    static let recordedWindowTitle = "MacUtils.Recorded"
+
+    /// Свои окна (рамка, HUD, уведомления) в запись не попадают — кроме рисунков поверх экрана.
+    private static func filter(content: SCShareableContent, display: SCDisplay) -> SCContentFilter {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let own = content.applications.filter { $0.processID == ownPID }
+        let shown = content.windows.filter {
+            $0.owningApplication?.processID == ownPID && $0.title == recordedWindowTitle
+        }
+        return SCContentFilter(display: display, excludingApplications: own, exceptingWindows: shown)
+    }
+
+    /// Появились или исчезли рисунки поверх экрана — обновить, что пишем.
+    func refreshFilter() {
+        guard let stream, let displayID = filterDisplayID else { return }
+        Task {
+            guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+                  let display = content.displays.first(where: { $0.displayID == displayID }) else { return }
+            try? await stream.updateContentFilter(Self.filter(content: content, display: display))
+        }
+    }
     private var hudPanel: NSPanel?
     private var keyTap: EventTap?
     private var finishing = false
@@ -68,10 +92,8 @@ final class ScreenRecorder: NSObject, ObservableObject {
         guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
             throw RecordingError.noDisplay
         }
-        // Свои окна (рамка, HUD, уведомления) в запись не попадают.
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        let own = content.applications.filter { $0.processID == ownPID }
-        let filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
+        filterDisplayID = displayID
+        let filter = Self.filter(content: content, display: display)
 
         let scale = screen.backingScaleFactor
         let fps = format == .gif ? 15 : max(15, min(60, defaults.integer(forKey: Pref.recordingFPS)))

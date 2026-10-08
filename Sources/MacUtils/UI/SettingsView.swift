@@ -56,6 +56,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
+         annotate, wellbeing, meetings, ai,
          uninstaller, monitor, tasks, cleanup, shots
 
     var id: String { rawValue }
@@ -74,6 +75,10 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .cheatSheet: return "Шпаргалка"
         case .downloads: return "Загрузки"
         case .qr: return "QR-коды"
+        case .annotate: return "Рисование на экране"
+        case .wellbeing: return "Перерывы и тёплый экран"
+        case .meetings: return "Записи встреч"
+        case .ai: return "ИИ (Ollama)"
         case .uninstaller: return "Удаление программ"
         case .monitor: return "Монитор системы"
         case .tasks: return "Диспетчер задач"
@@ -96,6 +101,10 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .cheatSheet: return "command"
         case .downloads: return "arrow.down.circle"
         case .qr: return "qrcode"
+        case .annotate: return "pencil.tip.crop.circle"
+        case .wellbeing: return "sun.horizon"
+        case .meetings: return "waveform.badge.mic"
+        case .ai: return "sparkles"
         case .uninstaller: return "trash"
         case .monitor: return "gauge.with.dots.needle.67percent"
         case .tasks: return "list.bullet.rectangle"
@@ -118,6 +127,10 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .cheatSheet: return .gray
         case .downloads: return .blue
         case .qr: return .indigo
+        case .annotate: return .red
+        case .wellbeing: return .orange
+        case .meetings: return .green
+        case .ai: return .purple
         case .uninstaller: return .red
         case .monitor: return .mint
         case .tasks: return .brown
@@ -156,6 +169,10 @@ struct SettingsView: View {
             case .cheatSheet: CheatSheetPage()
             case .downloads: DownloadsPage()
             case .qr: QRPage()
+            case .annotate: AnnotatePage()
+            case .wellbeing: WellbeingPage()
+            case .meetings: MeetingsPage()
+            case .ai: AIPage()
             case .uninstaller: UninstallerPage()
             case .monitor: SystemMonitorView(model: .shared).navigationTitle("Монитор системы")
             case .tasks: TaskManagerView(model: .shared).navigationTitle("Диспетчер задач")
@@ -715,6 +732,7 @@ struct WindowsPage: View {
                 Text("Повторное нажатие той же половины переносит окно на следующий монитор.")
                     .foregroundStyle(.secondary)
             }
+            WindowExtrasSections()
         }
         .formStyle(.grouped)
         .navigationTitle("Окна")

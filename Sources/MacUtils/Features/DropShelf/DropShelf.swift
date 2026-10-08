@@ -53,7 +53,39 @@ struct ShakeDetector {
 final class DropShelf: ObservableObject {
     static let shared = DropShelf()
 
-    @Published private(set) var items: [URL] = []
+    @Published private(set) var items: [URL] = [] {
+        didSet {
+            // Новые файлы — обычный список; убранные — убираем и из групп.
+            guard let current = groups else { return }
+            let grouped = Set(current.flatMap(\.files))
+            if items.contains(where: { !grouped.contains($0) }) {
+                groups = nil
+            } else {
+                groups = current.compactMap { group in
+                    var group = group
+                    group.files.removeAll { !items.contains($0) }
+                    return group.files.isEmpty ? nil : group
+                }
+            }
+        }
+    }
+    /// Группы по смыслу от ИИ (nil — обычный список).
+    @Published var groups: [ShelfGroup]?
+    @Published private(set) var grouping = false
+
+    func groupWithAI() {
+        guard !grouping, items.count >= 2 else { return }
+        grouping = true
+        let files = items
+        Task {
+            defer { grouping = false }
+            do {
+                groups = try await ShelfGrouper.group(files)
+            } catch {
+                Toast.show(error.localizedDescription, symbol: "exclamationmark.triangle.fill", tint: .orange)
+            }
+        }
+    }
     @Published private(set) var isRunning = false
 
     private var panel: NSPanel?
@@ -171,6 +203,16 @@ private struct DropShelfView: View {
                     Text("\(shelf.items.count)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 }
                 Spacer()
+                if Ollama.isOn(Pref.aiShelf), shelf.items.count >= 2 {
+                    if shelf.grouping {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button { shelf.groups == nil ? shelf.groupWithAI() : (shelf.groups = nil) } label: {
+                            Image(systemName: shelf.groups == nil ? "sparkles" : "list.bullet")
+                        }
+                        .help(shelf.groups == nil ? "Сгруппировать по смыслу (ИИ)" : "Обычный список")
+                    }
+                }
                 if !shelf.items.isEmpty {
                     Button { shelf.clear() } label: { Image(systemName: "trash") }
                         .help("Очистить полку")
@@ -198,11 +240,32 @@ private struct DropShelfView: View {
                 .frame(height: 26)
                 ScrollView {
                     VStack(spacing: 4) {
-                        ForEach(shelf.items, id: \.self) { url in
-                            DragOutHandle(urls: [url]) { shelf.draggedOut($0) } label: {
-                                ShelfRow(url: url) { shelf.remove(url) }
+                        if let groups = shelf.groups {
+                            ForEach(groups) { group in
+                                DragOutHandle(urls: group.files) { shelf.draggedOut($0) } label: {
+                                    HStack {
+                                        Text(group.title).font(.caption.weight(.semibold)).lineLimit(1)
+                                        Spacer()
+                                        Text("\(group.files.count)").font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 4)
+                                }
+                                .frame(height: 20)
+                                .help("Перетащите подпись — заберёте всю группу")
+                                ForEach(group.files, id: \.self) { url in
+                                    DragOutHandle(urls: [url]) { shelf.draggedOut($0) } label: {
+                                        ShelfRow(url: url) { shelf.remove(url) }
+                                    }
+                                    .frame(height: 30)
+                                }
                             }
-                            .frame(height: 30)
+                        } else {
+                            ForEach(shelf.items, id: \.self) { url in
+                                DragOutHandle(urls: [url]) { shelf.draggedOut($0) } label: {
+                                    ShelfRow(url: url) { shelf.remove(url) }
+                                }
+                                .frame(height: 30)
+                            }
                         }
                     }
                 }

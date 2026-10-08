@@ -83,6 +83,41 @@ enum Pref {
     /// Значок Mac Utils в строке меню (клик — «Инструменты»).
     static let menuBarIcon = "menuBarIconEnabled"
 
+    /// Напоминание о перерыве: каждые N минут, длительность перерыва в секундах.
+    static let breakReminder = "breakReminderEnabled"
+    static let breakInterval = "breakIntervalMinutes"
+    static let breakDuration = "breakDurationSeconds"
+    /// Тёплый экран вечером: сила (0…1) для встроенного и внешних мониторов, часы начала и конца.
+    static let warmScreen = "warmScreenEnabled"
+    static let warmStrength = "warmScreenStrength"
+    static let warmExternalStrength = "warmScreenExternalStrength"
+    static let warmFrom = "warmScreenFromHour"
+    static let warmTo = "warmScreenToHour"
+    /// «Поверх всех» (⌃⌥P) и прозрачность копии; запоминание окон по мониторам.
+    static let windowPin = "windowPinEnabled"
+    static let windowPinOpacity = "windowPinOpacity"
+    static let windowMemory = "windowMemoryEnabled"
+    /// Рисование поверх экрана (⌃⌥A).
+    static let annotate = "annotateEnabled"
+
+    /// ИИ через локальную Ollama: общий выключатель, адрес, модель и отдельные функции.
+    static let ai = "aiEnabled"
+    static let aiURL = "aiURL"
+    static let aiModel = "aiModel"
+    static let aiFixText = "aiFixText"
+    static let aiShotNames = "aiShotNames"
+    static let aiShotSearch = "aiShotSearch"
+    static let aiDownloads = "aiDownloadsSuggest"
+    static let aiDownloadsTags = "aiDownloadsTags"
+    static let aiTasks = "aiTasks"
+    static let aiCleanup = "aiCleanup"
+    static let aiShelf = "aiShelf"
+    /// Записи встреч (⌃⌥M): микрофон, язык расшифровки, отчёт ИИ.
+    static let meetings = "meetingsEnabled"
+    static let meetingsMicrophone = "meetingsMicrophone"
+    static let meetingsLanguage = "meetingsLanguage"
+    static let meetingsReport = "meetingsReport"
+
     static let layoutFix = "layoutFixEnabled"
     /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
     static let layoutFixKeyCode = "layoutFixKeyCode"
@@ -136,6 +171,33 @@ enum Pref {
             qr: true,
             appInputSource: true,
             appInputRemember: true,
+            breakReminder: false,
+            breakInterval: 45,
+            breakDuration: 20,
+            warmScreen: false,
+            warmStrength: 0.5,
+            warmExternalStrength: 0.5,
+            warmFrom: 21,
+            warmTo: 7,
+            annotate: true,
+            windowPin: true,
+            windowPinOpacity: 1.0,
+            windowMemory: true,
+            ai: true,
+            aiURL: "http://localhost:11434",
+            aiModel: "qwen2.5:7b",
+            aiFixText: true,
+            aiShotNames: true,
+            aiShotSearch: true,
+            aiDownloads: true,
+            aiDownloadsTags: true,
+            aiTasks: true,
+            aiCleanup: true,
+            aiShelf: true,
+            meetings: true,
+            meetingsMicrophone: true,
+            meetingsLanguage: "ru_RU",
+            meetingsReport: true,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,

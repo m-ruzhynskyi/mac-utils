@@ -35,7 +35,8 @@ enum DownloadsRules {
     static func folderName(for url: URL, custom: [String: String]) -> String? {
         let ext = url.pathExtension.lowercased()
         if !ext.isEmpty, let folder = custom[ext]?.trimmingCharacters(in: .whitespacesAndNewlines), !folder.isEmpty {
-            return folder.replacingOccurrences(of: "/", with: "-")
+            // Полный путь — любая папка на диске; иначе — папка внутри «Загрузок».
+            return folder.hasPrefix("/") ? folder : folder.replacingOccurrences(of: "/", with: "-")
         }
         return category(for: url)?.rawValue
     }
@@ -201,7 +202,8 @@ final class DownloadsSorter: ObservableObject {
         let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey, .contentAccessDateKey, .isPackageKey]
         let custom = Self.customRules
         Self.migrateLegacyFolders(in: folder)
-        let categoryNames = Set(DownloadsRules.Category.allCases.map(\.rawValue)).union(custom.values)
+        let categoryNames = Set(DownloadsRules.Category.allCases.map(\.rawValue))
+            .union(custom.values.filter { !$0.hasPrefix("/") })
         let now = Date()
         var moved = 0, trashed = 0
 
@@ -216,13 +218,16 @@ final class DownloadsSorter: ObservableObject {
             // Ещё пишется — подождём следующего раза.
             if let modified = values?.contentModificationDate, now.timeIntervalSince(modified) < 5 { continue }
             guard let folderName = DownloadsRules.folderName(for: url, custom: custom) else { continue }
-            let target = folder.appendingPathComponent(folderName, isDirectory: true)
+            let target = folderName.hasPrefix("/")
+                ? URL(fileURLWithPath: folderName, isDirectory: true)
+                : folder.appendingPathComponent(folderName, isDirectory: true)
             do {
                 try manager.createDirectory(at: target, withIntermediateDirectories: true)
                 let existing = Set((try? manager.contentsOfDirectory(atPath: target.path)) ?? [])
                 let name = DownloadsRules.uniqueName(url.lastPathComponent, existing: existing)
                 try manager.moveItem(at: url, to: target.appendingPathComponent(name))
                 moved += 1
+                if root == nil { DocumentTagger.shared.enqueue(target.appendingPathComponent(name)) }
             } catch {
                 Log.window.error("Загрузки: не удалось переместить \(url.lastPathComponent, privacy: .public)")
             }
@@ -256,6 +261,63 @@ struct DownloadsPage: View {
     @ObservedObject private var sorter = DownloadsSorter.shared
     @State private var newExtension = ""
     @State private var newFolder = ""
+    @ObservedObject private var tagger = DocumentTagger.shared
+    @State private var suggesting = false
+    @State private var aiNote: String?
+    @AppStorage(Pref.ai) private var aiEnabled = true
+    @AppStorage(Pref.aiDownloads) private var aiDownloads = true
+
+    private var aiOn: Bool { aiEnabled && aiDownloads }
+
+    private func suggest() {
+        let ext = DownloadsRules.normalizedExtension(newExtension)
+        let samples = ((try? FileManager.default.contentsOfDirectory(atPath: sorter.folder.path)) ?? [])
+            .filter { ($0 as NSString).pathExtension.lowercased() == ext }
+        let existing = DownloadsRules.Category.allCases.map(\.rawValue) + Array(Set(sorter.customRules.values))
+        suggesting = true
+        aiNote = nil
+        Task {
+            defer { suggesting = false }
+            do {
+                newFolder = try await DownloadsAI.suggestFolder(ext: ext, samples: samples.isEmpty ? ["file.\(ext)"] : samples,
+                                                                existing: existing)
+                aiNote = "Предложено ИИ — проверьте и нажмите «Добавить»"
+            } catch {
+                aiNote = error.localizedDescription
+            }
+        }
+    }
+
+    /// «Lab» — папка в «Загрузках»; полный путь показываем как «~/Projects/Lab».
+    static func folderTitle(_ value: String) -> String {
+        guard value.hasPrefix("/") else { return "Загрузки/\(value)" }
+        return (value as NSString).abbreviatingWithTildeInPath
+    }
+
+    static func askFolderName() -> String? {
+        let alert = NSAlert()
+        alert.messageText = "Новая папка в «Загрузках»"
+        alert.informativeText = "Как назвать папку?"
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.placeholderString = "Например, Lab"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Готово")
+        alert.addButton(withTitle: "Отмена")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/", with: "-")
+        return name.isEmpty ? nil : name
+    }
+
+    static func chooseFolder(start: URL) -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Выбрать"
+        panel.directoryURL = start
+        return panel.runModal() == .OK ? panel.url?.path : nil
+    }
 
     var body: some View {
         Form {
@@ -266,42 +328,95 @@ struct DownloadsPage: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Section("Свои правила") {
-                Text("Куда класть файлы других типов: расширение → папка в «Загрузках». Правило важнее встроенных категорий.")
+                Text("Куда класть файлы других типов. Правило важнее встроенных категорий.")
                     .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
                 ForEach(sorter.customRules.keys.sorted(), id: \.self) { ext in
-                    HStack {
-                        Text(".\(ext)").monospaced().frame(width: 90, alignment: .leading)
+                    HStack(spacing: 8) {
+                        Text(".\(ext)").monospaced()
                         Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                        Text(sorter.customRules[ext] ?? "")
+                        Label(Self.folderTitle(sorter.customRules[ext] ?? ""), systemImage: "folder")
+                            .lineLimit(1).truncationMode(.middle)
                         Spacer()
-                        Button { sorter.setRule(extension: ext, folder: nil) } label: { Image(systemName: "minus.circle") }
+                        Button { sorter.setRule(extension: ext, folder: nil) } label: { Image(systemName: "trash") }
                             .buttonStyle(.borderless).help("Удалить правило")
                     }
                 }
-                HStack {
-                    TextField("расширение, напр. mdz", text: $newExtension).frame(width: 150)
+                HStack(spacing: 8) {
+                    TextField("", text: $newExtension, prompt: Text("mdz"))
+                        .textFieldStyle(.roundedBorder)
+                        .labelsHidden()
+                        .frame(width: 90)
+                        .help("Расширение файла, без точки")
                     Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                    TextField("папка, напр. Lab", text: $newFolder)
+                    Menu {
+                        ForEach(DownloadsRules.Category.allCases, id: \.self) { category in
+                            Button(category.rawValue) { newFolder = category.rawValue }
+                        }
+                        Divider()
+                        Button("Новая папка в «Загрузках»…") {
+                            if let name = Self.askFolderName() { newFolder = name }
+                        }
+                        Button("Выбрать папку…") {
+                            if let path = Self.chooseFolder(start: sorter.folder) { newFolder = path }
+                        }
+                    } label: {
+                        Label(newFolder.isEmpty ? "Папка…" : Self.folderTitle(newFolder), systemImage: "folder")
+                    }
+                    .frame(maxWidth: 260)
+                    Spacer()
                     Button("Добавить") {
                         sorter.setRule(extension: newExtension, folder: newFolder)
                         newExtension = ""
                         newFolder = ""
                     }
-                    .disabled(DownloadsRules.normalizedExtension(newExtension).isEmpty || newFolder.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(DownloadsRules.normalizedExtension(newExtension).isEmpty || newFolder.isEmpty)
                 }
                 let unknown = sorter.unknownExtensions()
                 if !unknown.isEmpty {
                     HStack(spacing: 6) {
-                        Text("Без правила сейчас:").font(.caption).foregroundStyle(.secondary)
+                        Text("Сейчас без правила:").font(.caption).foregroundStyle(.secondary)
                         ForEach(unknown.prefix(6), id: \.ext) { item in
                             Button(".\(item.ext) (\(item.count))") { newExtension = item.ext }
                                 .buttonStyle(.link).font(.caption)
+                                .help("Подставить в поле")
+                        }
+                    }
+                }
+                if aiOn {
+                    HStack(spacing: 8) {
+                        Button {
+                            suggest()
+                        } label: {
+                            Label("Предложить папку", systemImage: "sparkles")
+                        }
+                        .disabled(suggesting || DownloadsRules.normalizedExtension(newExtension).isEmpty)
+                        .help("Локальная модель посмотрит на имена таких файлов и предложит папку")
+                        if suggesting { ProgressView().controlSize(.small) }
+                        if let aiNote {
+                            Text(aiNote).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                         }
                     }
                 }
             }
             .disabled(!enabled)
+            if aiEnabled && UserDefaults.standard.bool(forKey: Pref.aiDownloadsTags) {
+                Section("Подписи файлов (ИИ)") {
+                    Text("Каждому новому файлу при сортировке — короткая подпись по-английски в комментарии Spotlight: «📋 Spec — notch app for AI agents», «💿 Installer — Docker Desktop». Видно в ⌘I и в колонке «Комментарии», ищется через ⌘Пробел.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        if tagger.pending > 0 {
+                            ProgressView().controlSize(.small)
+                            Text("Осталось \(tagger.pending), помечено \(tagger.tagged)").foregroundStyle(.secondary)
+                        } else if tagger.tagged > 0 {
+                            Text("Помечено документов: \(tagger.tagged)").foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Подписать уже лежащие") { tagger.tagExisting(in: sorter.folder) }
+                            .disabled(tagger.pending > 0)
+                    }
+                }
+            }
             Section("Старые файлы") {
                 Picker("Убирать в Корзину", selection: $days) {
                     Text("Никогда").tag(0)

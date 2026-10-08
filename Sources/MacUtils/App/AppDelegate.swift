@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         syncFeatures()
+        if Ollama.enabled { Ollama.shared.refresh() }
         Updater.shared.start()
         ToolsLauncher.installIfNeeded()
 
@@ -52,11 +53,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// macutils://tools — значок «Инструменты»; macutils://settings — настройки.
+    /// macutils://tools — значок «Инструменты»; macutils://settings — настройки;
+    /// annotate, pin, fix-text, meeting, break, warm — то же, что горячие клавиши (для «Команд»).
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme == "macutils" {
             switch url.host {
             case "tools": ToolsWindowController.shared.show()
+            case "annotate": ScreenAnnotator.shared.toggle()
+            case "pin": WindowPin.shared.toggleFocused()
+            case "fix-text": TextFixer.shared.fix()
+            case "meeting": MeetingRecorder.shared.toggle()
+            case "meeting-process":
+                // macutils://meeting-process?2026-10-07%2020.30 — заново расшифровать встречу из папки «Встречи».
+                if let name = url.query?.removingPercentEncoding {
+                    let folder = MeetingRecorder.root.appendingPathComponent(name, isDirectory: true)
+                    Task { await MeetingRecorder.shared.process(.init(folder: folder)) }
+                }
+            case "break": BreakReminder.shared.show()
+            case "warm": WarmScreen.shared.preview()
             default: SettingsWindowController.shared.show()
             }
         }
@@ -72,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        WarmScreen.shared.shutdown()
         AppSwitcher.shared.shutdown()
     }
 
@@ -105,6 +120,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ScreenshotLibrary.shared.sync()
         QRCodeService.shared.sync()
         AppInputSource.shared.sync()
+        BreakReminder.shared.sync()
+        WarmScreen.shared.sync()
+        ScreenAnnotator.shared.sync()
+        WindowPin.shared.sync()
+        WindowMemory.shared.sync()
+        TextFixer.shared.sync()
+        MeetingRecorder.shared.sync()
         AppStatusItem.shared.sync()
     }
 }
@@ -116,8 +138,12 @@ enum HotKeyID {
     static let layoutFix: UInt32 = 4
     static let tools: UInt32 = 5
     static let dropShelf: UInt32 = 6
+    static let annotate: UInt32 = 8
+    static let fixText: UInt32 = 9
     static let qr: UInt32 = 7
     /// 10…20 — раскладка окон (по одному на сочетание).
     static let windowSnapBase: UInt32 = 10
     static let appVolume: UInt32 = 30
+    static let windowPin: UInt32 = 31
+    static let meeting: UInt32 = 32
 }
