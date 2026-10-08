@@ -8,5 +8,6 @@ enum Log {
     static let layout = Logger(subsystem: "com.mruzhynskyi.macutils", category: "layout")
     static let window = Logger(subsystem: "com.mruzhynskyi.macutils", category: "window")
     static let uninstall = Logger(subsystem: "com.mruzhynskyi.macutils", category: "uninstall")
+    static let ai = Logger(subsystem: "com.mruzhynskyi.macutils", category: "ai")
     static let audio = Logger(subsystem: "com.mruzhynskyi.macutils", category: "audio")
 }

@@ -160,7 +160,7 @@ final class LayoutFix: ObservableObject {
         let converted = LayoutMap.convert(text, direction)
         guard converted != text else { return }
         Log.layout.debug("Выделение: \(text.count) симв.")
-        type(converted)
+        Self.type(converted)
         reset()
         if UserDefaults.standard.bool(forKey: Pref.layoutFixSwitchSource) { Self.selectInputSource(for: direction) }
     }
@@ -172,7 +172,7 @@ final class LayoutFix: ObservableObject {
         let tail = trailing
         Log.layout.debug("Слово: \(self.word.count) симв.")
         pressBackspace(times: erase)
-        type(converted + tail)
+        Self.type(converted + tail)
         // Повторное нажатие вернёт как было.
         word = converted
         trailing = tail
@@ -195,7 +195,7 @@ final class LayoutFix: ObservableObject {
     }
 
     /// Печатает строку юникодом — не зависит от текущей раскладки.
-    private func type(_ text: String) {
+    static func type(_ text: String) {
         let source = CGEventSource(stateID: .combinedSessionState)
         let units = Array(text.utf16)
         var index = 0
@@ -230,7 +230,7 @@ final class LayoutFix: ObservableObject {
     }
 
     /// Запасной путь для приложений без AX: ⌘C с сохранением и возвратом буфера обмена.
-    private static func selectedTextViaCopy() async -> String? {
+    static func selectedTextViaCopy() async -> String? {
         let pasteboard = NSPasteboard.general
         let saved = pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
             let copy = NSPasteboardItem()

@@ -227,6 +227,7 @@ final class DownloadsSorter: ObservableObject {
                 let name = DownloadsRules.uniqueName(url.lastPathComponent, existing: existing)
                 try manager.moveItem(at: url, to: target.appendingPathComponent(name))
                 moved += 1
+                if root == nil { DocumentTagger.shared.enqueue(target.appendingPathComponent(name)) }
             } catch {
                 Log.window.error("Загрузки: не удалось переместить \(url.lastPathComponent, privacy: .public)")
             }
@@ -260,6 +261,31 @@ struct DownloadsPage: View {
     @ObservedObject private var sorter = DownloadsSorter.shared
     @State private var newExtension = ""
     @State private var newFolder = ""
+    @State private var suggesting = false
+    @State private var aiNote: String?
+    @AppStorage(Pref.ai) private var aiEnabled = true
+    @AppStorage(Pref.aiDownloads) private var aiDownloads = true
+
+    private var aiOn: Bool { aiEnabled && aiDownloads }
+
+    private func suggest() {
+        let ext = DownloadsRules.normalizedExtension(newExtension)
+        let samples = ((try? FileManager.default.contentsOfDirectory(atPath: sorter.folder.path)) ?? [])
+            .filter { ($0 as NSString).pathExtension.lowercased() == ext }
+        let existing = DownloadsRules.Category.allCases.map(\.rawValue) + Array(Set(sorter.customRules.values))
+        suggesting = true
+        aiNote = nil
+        Task {
+            defer { suggesting = false }
+            do {
+                newFolder = try await DownloadsAI.suggestFolder(ext: ext, samples: samples.isEmpty ? ["file.\(ext)"] : samples,
+                                                                existing: existing)
+                aiNote = "Предложено ИИ — проверьте и нажмите «Добавить»"
+            } catch {
+                aiNote = error.localizedDescription
+            }
+        }
+    }
 
     /// «Lab» — папка в «Загрузках»; полный путь показываем как «~/Projects/Lab».
     static func folderTitle(_ value: String) -> String {
@@ -353,6 +379,21 @@ struct DownloadsPage: View {
                             Button(".\(item.ext) (\(item.count))") { newExtension = item.ext }
                                 .buttonStyle(.link).font(.caption)
                                 .help("Подставить в поле")
+                        }
+                    }
+                }
+                if aiOn {
+                    HStack(spacing: 8) {
+                        Button {
+                            suggest()
+                        } label: {
+                            Label("Предложить папку", systemImage: "sparkles")
+                        }
+                        .disabled(suggesting || DownloadsRules.normalizedExtension(newExtension).isEmpty)
+                        .help("Локальная модель посмотрит на имена таких файлов и предложит папку")
+                        if suggesting { ProgressView().controlSize(.small) }
+                        if let aiNote {
+                            Text(aiNote).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                         }
                     }
                 }

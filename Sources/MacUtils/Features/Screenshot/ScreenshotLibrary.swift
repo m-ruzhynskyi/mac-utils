@@ -175,7 +175,21 @@ final class ScreenshotLibrary: ObservableObject {
                 }
                 library.indexing -= 1
                 library.save()
+                library.nameWithAI(record.path, text: text, app: record.app)
             }
+        }
+    }
+
+    /// Умное имя по распознанному тексту (локальная модель); файл переименовывается.
+    func nameWithAI(_ path: String, text: String, app: String) {
+        guard Ollama.isOn(Pref.aiShotNames), text.count >= 12 else { return }
+        Task {
+            guard let name = try? await ShotNamer.name(for: text, app: app),
+                  let index = records.firstIndex(where: { $0.path == path }),
+                  let renamed = ShotNamer.renamed(URL(fileURLWithPath: path), to: name) else { return }
+            records[index].path = renamed.path
+            save()
+            Log.ai.info("Снимок назван: \(renamed.lastPathComponent, privacy: .public)")
         }
     }
 
@@ -260,9 +274,13 @@ struct ScreenshotLibraryView: View {
     @State private var kind = 0
     @AppStorage(Pref.screenshotLibrary) private var enabled = true
 
+    @ObservedObject private var semantic = SemanticShotSearch.shared
+
     private var results: [ShotRecord] {
-        library.records.filter {
-            ShotLibraryRules.matches($0, query: query) && (kind == 0 || (kind == 2) == $0.isVideo)
+        let words = semantic.words(for: query)
+        return library.records.filter {
+            (ShotLibraryRules.matches($0, query: query) || SemanticShotSearch.matches($0, words: words))
+                && (kind == 0 || (kind == 2) == $0.isVideo)
         }
     }
 
@@ -270,6 +288,14 @@ struct ScreenshotLibraryView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 TextField("Поиск по тексту на снимке, программе, дате", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: query) { _, value in semantic.expand(value) }
+                if semantic.thinking {
+                    Image(systemName: "sparkles").foregroundStyle(.purple).help("Ищу по смыслу…")
+                } else if !semantic.words(for: query).isEmpty {
+                    Image(systemName: "sparkles").foregroundStyle(.secondary)
+                        .help("Ищу и по смыслу: " + semantic.words(for: query).joined(separator: ", "))
+                }
                 Picker("", selection: $kind) {
                     Text("Все").tag(0)
                     Image(systemName: "photo").tag(1)
@@ -279,7 +305,6 @@ struct ScreenshotLibraryView: View {
                 .labelsHidden()
                 .frame(width: compact ? 110 : 140)
                 .help("Все / снимки / видео")
-                    .textFieldStyle(.roundedBorder)
                 if library.indexing > 0 {
                     ProgressView().controlSize(.small).help("Распознаётся текст…")
                 }

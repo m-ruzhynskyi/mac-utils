@@ -174,6 +174,16 @@ struct TaskManagerView: View {
     @ObservedObject var model: TaskManagerModel
     var compact = false
     @State private var confirmForce: ProcessRow?
+    @State private var explaining: ProcessRow?
+    @ObservedObject private var ai = ProcessExplainer.shared
+    @AppStorage(Pref.ai) private var aiEnabled = true
+    @AppStorage(Pref.aiTasks) private var aiTasks = true
+    private var aiOn: Bool { aiEnabled && aiTasks }
+
+    private func explain(_ row: ProcessRow) {
+        ai.explain(row)
+        explaining = row
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -209,8 +219,12 @@ struct TaskManagerView: View {
 
             List(selection: $model.selection) {
                 ForEach(model.visible) { row in
-                    ProcessLine(row: row, compact: compact).tag(row.pid)
+                    ProcessLine(row: row, compact: compact, category: aiOn ? ai.categories[row.name] : nil).tag(row.pid)
                         .contextMenu {
+                            if aiOn {
+                                Button("Что это за процесс?") { explain(row) }
+                                Divider()
+                            }
                             Button("Завершить") { model.quit(row.pid, force: false) }
                             Button("Завершить принудительно") { confirmForce = row }
                         }
@@ -223,6 +237,20 @@ struct TaskManagerView: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                if aiOn {
+                    if ai.categorizing { ProgressView().controlSize(.small) }
+                    Button {
+                        if let pid = model.selection, let row = model.rows.first(where: { $0.pid == pid }) {
+                            explain(row)
+                        } else {
+                            ai.categorize(model.visible)
+                        }
+                    } label: { Image(systemName: "sparkles") }
+                    .help("ИИ: выбран процесс — объяснить, что это и можно ли закрыть; не выбран — разложить список по категориям")
+                    .popover(item: $explaining, arrowEdge: .top) { row in
+                        ProcessExplanation(row: row, ai: ai)
+                    }
+                }
                 Text(compact ? "\(model.visible.count)" : "Процессов: \(model.visible.count)").foregroundStyle(.secondary).monospacedDigit()
                     .help("Процессов в списке")
                 Button(compact ? "Стоп" : "Завершить") { if let pid = model.selection { model.quit(pid, force: false) } }
@@ -246,9 +274,39 @@ struct TaskManagerView: View {
     }
 }
 
+private struct ProcessExplanation: View {
+    let row: ProcessRow
+    @ObservedObject var ai: ProcessExplainer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "sparkles").foregroundStyle(.purple)
+                Text(row.name).font(.headline).lineLimit(1)
+            }
+            if let info = ai.infos[row.name] {
+                Text(info.category).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(info.what).fixedSize(horizontal: false, vertical: true)
+                Label(info.safe == "да" ? "Можно завершить" : info.safe == "нет" ? "Лучше не завершать" : "Осторожно",
+                      systemImage: info.safe == "да" ? "checkmark.circle.fill" : info.safe == "нет" ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(info.safe == "да" ? .green : info.safe == "нет" ? .red : .orange)
+                Text(info.why).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Ответ локальной модели — может ошибаться.").font(.caption2).foregroundStyle(.tertiary)
+            } else if let error = ai.error, !ai.busy.contains(row.name) {
+                Text(error).foregroundStyle(.orange)
+            } else {
+                HStack { ProgressView().controlSize(.small); Text("Спрашиваю модель…").foregroundStyle(.secondary) }
+            }
+        }
+        .padding(14)
+        .frame(width: 320)
+    }
+}
+
 private struct ProcessLine: View {
     let row: ProcessRow
     var compact = false
+    var category: String?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -264,6 +322,11 @@ private struct ProcessLine: View {
                 }
             }
             Spacer(minLength: 8)
+            if let category {
+                Text(category).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+            }
             Text(String(format: "%.1f %%", row.cpu))
                 .monospacedDigit()
                 .foregroundStyle(row.cpu > 80 ? .red : .primary)
