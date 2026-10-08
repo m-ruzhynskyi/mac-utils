@@ -224,7 +224,14 @@ final class MeetingRecorder: NSObject, ObservableObject {
         guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        try await export.export(to: target, as: .m4a)
+        if #available(macOS 15.0, *) {
+            try await export.export(to: target, as: .m4a)
+        } else {
+            export.outputURL = target
+            export.outputFileType = .m4a
+            await export.export()
+            if let error = export.error { throw error }
+        }
     }
 
     // MARK: - Расшифровка и отчёт
