@@ -130,6 +130,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
                 showHUD()
                 Toast.show("Записываю встречу. Остановить — ⌃⌥M", symbol: "record.circle", tint: .red)
             } catch {
+                Log.audio.error("Встреча: не началась: \(error.localizedDescription, privacy: .public)")
                 lastError = "Не удалось начать запись: \(error.localizedDescription)"
                 Toast.show("Нет разрешения «Запись экрана» или микрофона", symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
@@ -151,7 +152,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
         config.sampleRate = 48_000
-        config.channelCount = 1
+        config.channelCount = 2
         var mic = false
         if #available(macOS 15.0, *), UserDefaults.standard.bool(forKey: Pref.meetingsMicrophone) {
             config.captureMicrophone = true
@@ -190,6 +191,42 @@ final class MeetingRecorder: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Готовый файл
+
+    /// Расшифровать готовую запись (Zoom, Telegram, диктофон — аудио или видео).
+    func importFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.audio, .movie]
+        panel.prompt = "Расшифровать"
+        panel.message = "Выберите запись встречи — аудио или видео"
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let source = panel.url, state == .idle else { return }
+        lastError = nil
+        state = .processing("Готовлю звук…")
+        Task {
+            do {
+                let folder = Self.root.appendingPathComponent(source.deletingPathExtension().lastPathComponent, isDirectory: true)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try await Self.extractAudio(from: source, to: folder.appendingPathComponent("Собеседники.m4a"))
+                reload()
+                await process(Meeting(folder: folder))
+            } catch {
+                state = .idle
+                lastError = "Не удалось прочитать звук: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Звуковая дорожка в M4A (из видео тоже).
+    nonisolated static func extractAudio(from source: URL, to target: URL) async throws {
+        try? FileManager.default.removeItem(at: target)
+        let asset = AVURLAsset(url: source)
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        try await export.export(to: target, as: .m4a)
+    }
+
     // MARK: - Расшифровка и отчёт
 
     func process(_ meeting: Meeting) async {
@@ -202,6 +239,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
                 state = .processing("Расшифровываю: \(track.speaker.lowercased())…")
                 lines += try await Transcriber.transcribe(url, speaker: track.speaker)
             }
+            Log.audio.info("Встреча: \(lines.count) реплик")
             let transcript = MeetingText.format(MeetingText.merge(lines))
             guard !transcript.isEmpty else {
                 Log.audio.info("Встреча: речи не найдено")
@@ -302,38 +340,61 @@ private struct MeetingHUD: View {
 // MARK: - Файлы дорожек
 
 /// Две дорожки M4A с общей шкалой времени: звук системы и микрофон.
+/// AVAudioFile пишет каждый кусок синхронно — ничего не теряется (AVAssetWriter в реальном
+/// времени пропускал куски, когда был занят, и речь распознавалась обрывками).
 final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "macutils.meeting")
-    private var writers: [SCStreamOutputType: (AVAssetWriter, AVAssetWriterInput)] = [:]
+    private let urls: [SCStreamOutputType: URL]
+    private var files: [SCStreamOutputType: AVAudioFile] = [:]
     private var start: CMTime?
+    private var finished = false
 
     init(folder: URL, microphone: Bool) throws {
+        var urls: [SCStreamOutputType: URL] = [.audio: folder.appendingPathComponent("Собеседники.m4a")]
+        if #available(macOS 15.0, *), microphone { urls[.microphone] = folder.appendingPathComponent("Я.m4a") }
+        self.urls = urls
         super.init()
-        var tracks: [(SCStreamOutputType, String)] = [(.audio, "Собеседники.m4a")]
-        if #available(macOS 15.0, *), microphone { tracks.append((.microphone, "Я.m4a")) }
-        for (type, name) in tracks {
-            let writer = try AVAssetWriter(outputURL: folder.appendingPathComponent(name), fileType: .m4a)
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 48_000,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 64_000,
-            ])
-            input.expectsMediaDataInRealTime = true
-            writer.add(input)
-            guard writer.startWriting() else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
-            writers[type] = (writer, input)
-        }
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard sampleBuffer.isValid, let (writer, input) = writers[type], writer.status == .writing else { return }
-        if start == nil {
-            // Общее начало для обеих дорожек — реплики потом склеиваются по времени.
-            start = sampleBuffer.presentationTimeStamp
-            for (writer, _) in writers.values { writer.startSession(atSourceTime: start!) }
+        guard !finished, sampleBuffer.isValid, let url = urls[type],
+              let description = sampleBuffer.formatDescription,
+              let buffer = Self.pcm(from: sampleBuffer, description: description) else { return }
+        let pts = sampleBuffer.presentationTimeStamp
+        if start == nil { start = pts }
+        do {
+            if files[type] == nil {
+                let format = buffer.format
+                let file = try AVAudioFile(forWriting: url, settings: [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: format.sampleRate,
+                    AVNumberOfChannelsKey: format.channelCount,
+                    AVEncoderBitRateKey: 96_000,
+                ], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+                files[type] = file
+                // Дорожка началась позже другой — дополняем тишиной, чтобы реплики совпадали по времени.
+                let lead = (pts - start!).seconds
+                if lead > 0.05, let silence = AVAudioPCMBuffer(pcmFormat: format,
+                                                               frameCapacity: AVAudioFrameCount(lead * format.sampleRate)) {
+                    silence.frameLength = silence.frameCapacity
+                    try file.write(from: silence)
+                }
+            }
+            try files[type]?.write(from: buffer)
+        } catch {
+            Log.audio.error("Встреча: запись звука: \(error.localizedDescription, privacy: .public)")
         }
-        if input.isReadyForMoreMediaData { input.append(sampleBuffer) }
+    }
+
+    /// CMSampleBuffer → AVAudioPCMBuffer (копия данных).
+    private static func pcm(from sampleBuffer: CMSampleBuffer, description: CMFormatDescription) -> AVAudioPCMBuffer? {
+        let format = AVAudioFormat(cmAudioFormatDescription: description)
+        let frames = AVAudioFrameCount(sampleBuffer.numSamples)
+        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return nil }
+        buffer.frameLength = frames
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(sampleBuffer, at: 0, frameCount: Int32(frames),
+                                                                  into: buffer.mutableAudioBufferList)
+        return status == noErr ? buffer : nil
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
@@ -343,17 +404,10 @@ final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
     func finish() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.async {
-                let group = DispatchGroup()
-                for (writer, input) in self.writers.values {
-                    guard self.start != nil, writer.status == .writing else {
-                        writer.cancelWriting()
-                        continue
-                    }
-                    input.markAsFinished()
-                    group.enter()
-                    writer.finishWriting { group.leave() }
-                }
-                group.notify(queue: self.queue) { continuation.resume() }
+                self.finished = true
+                // AVAudioFile закрывается и дописывает заголовок при освобождении.
+                self.files.removeAll()
+                continuation.resume()
             }
         }
     }

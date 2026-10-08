@@ -153,12 +153,14 @@ struct MeetingsPage: View {
         Form {
             Section {
                 Toggle("Записи встреч", isOn: $enabled)
-                Text("Записывает звук созвона (собеседников и ваш микрофон отдельно), расшифровывает прямо на Mac и делает отчёт локальной моделью: итог, решения, задачи. Ничего не уходит в интернет.")
+                Text("Записывает звук созвона (собеседников и ваш микрофон отдельно), расшифровывает прямо на Mac встроенным распознаванием речи Apple, а локальная модель (Ollama) делает отчёт: итог, решения, задачи. Можно расшифровать и готовую запись. Ничего не уходит в интернет.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     switch recorder.state {
                     case .idle:
                         Button { recorder.start() } label: { Label("Начать запись", systemImage: "record.circle") }
+                        Button { recorder.importFile() } label: { Label("Расшифровать файл…", systemImage: "doc.badge.plus") }
+                            .help("Готовая запись созвона — аудио или видео")
                     case .recording(let since):
                         Button { recorder.stop() } label: { Label("Остановить", systemImage: "stop.fill") }
                         Text(since, style: .timer).monospacedDigit().foregroundStyle(.red)
