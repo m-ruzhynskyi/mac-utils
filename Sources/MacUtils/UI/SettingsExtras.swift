@@ -93,24 +93,27 @@ struct WellbeingPage: View {
                 Toggle("Напоминать о перерыве", isOn: $breaks)
                 Text("Каждые N минут работы — мягкий экран «встаньте, посмотрите вдаль». Если вы сами отошли от компьютера на 5 минут, отсчёт начнётся заново.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Picker("Каждые", selection: $interval) {
-                    ForEach([20, 30, 45, 60, 90], id: \.self) { Text("\($0) мин").tag($0) }
+                Group {
+                    Picker("Каждые", selection: $interval) {
+                        ForEach([20, 30, 45, 60, 90], id: \.self) { Text("\($0) мин").tag($0) }
+                    }
+                    Picker("Длительность", selection: $duration) {
+                        ForEach([20, 30, 60, 120, 300], id: \.self) { Text($0 < 60 ? "\($0) с" : "\($0 / 60) мин").tag($0) }
+                    }
                 }
-                Picker("Длительность", selection: $duration) {
-                    ForEach([20, 30, 60, 120, 300], id: \.self) { Text($0 < 60 ? "\($0) с" : "\($0 / 60) мин").tag($0) }
-                }
+                .disabled(!breaks)
                 HStack {
                     if breaks { Text("Работаете без перерыва: \(reminder.workedMinutes) мин").foregroundStyle(.secondary) }
                     Spacer()
                     Button("Показать сейчас") { reminder.show() }
                 }
             }
-            .disabled(!breaks)
             Section("Тёплый экран вечером") {
                 Toggle("Тёплый экран", isOn: $warm)
                 Text("Свой Night Shift: вечером экран плавно желтеет и синий свет приглушается. Для встроенного экрана и внешних мониторов — своя сила.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Picker("С", selection: $from) { ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) } }
+                Group {
+                    Picker("С", selection: $from) { ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) } }
                 Picker("До", selection: $to) { ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) } }
                 LabeledContent("Встроенный экран") {
                     Slider(value: $strength, in: 0.1...1) { _ in screen.apply() }
@@ -118,8 +121,10 @@ struct WellbeingPage: View {
                 LabeledContent("Внешние мониторы") {
                     Slider(value: $externalStrength, in: 0.1...1) { _ in screen.apply() }
                 }
+                }
+                .disabled(!warm)
                 HStack {
-                    Text(screen.currentLevel > 0 ? "Сейчас включён: \(Int(screen.currentLevel * 100)) %" : "Сейчас выключен (не время)")
+                    Text(!warm ? "Выключен" : screen.currentLevel > 0 ? "Сейчас включён: \(Int(screen.currentLevel * 100)) %" : "Включится в \(String(format: "%02d:00", from))")
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Показать, как будет") { screen.preview() }
@@ -127,7 +132,6 @@ struct WellbeingPage: View {
                 Text("Вход и выход — плавно, в течение часа. Системный Night Shift лучше выключить, чтобы они не складывались.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            .disabled(!warm)
         }
         .formStyle(.grouped)
         .navigationTitle("Перерывы и тёплый экран")
