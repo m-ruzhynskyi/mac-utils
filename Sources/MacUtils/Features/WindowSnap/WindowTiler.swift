@@ -21,6 +21,8 @@ final class WindowTiler: ObservableObject {
     }
 
     private var tap: EventTap?
+    /// Сочетания ловим своим перехватом клавиш: в новых macOS Carbon перестал отдавать ⌃⌥ + стрелки.
+    private var keyTap: EventTap?
     private let preview = SnapPreview()
     /// Прежние рамки окон (в координатах AX) для «вернуть размер».
     private var restoreFrames: [CGWindowID: CGRect] = [:]
@@ -61,21 +63,33 @@ final class WindowTiler: ObservableObject {
     }
 
     private func registerHotKeys(enabled: Bool) {
-        let center = HotKeyCenter.shared
-        let modifier = WindowSnapModifier.current
-        var failed: [String] = []
-        for (index, binding) in Self.bindings.enumerated() {
-            let id = HotKeyID.windowSnapBase + UInt32(index)
-            center.unregister(id: id)
-            guard enabled else { continue }
-            let action = binding.action
-            if !center.register(id: id, keyCode: binding.keyCode, modifiers: modifier.carbon, handler: {
-                WindowTiler.shared.perform(action)
-            }) {
-                failed.append(modifier.symbols + binding.label)
+        // Прежние регистрации Carbon (до этой версии) снимаем.
+        for index in Self.bindings.indices {
+            HotKeyCenter.shared.unregister(id: HotKeyID.windowSnapBase + UInt32(index))
+        }
+        guard enabled else {
+            keyTap?.stop()
+            keyTap = nil
+            failedHotKeys = []
+            return
+        }
+        if keyTap == nil {
+            keyTap = EventTap(types: [.keyDown]) { _, event in
+                WindowTiler.shared.handleKey(event)
             }
         }
-        failedHotKeys = failed
+        failedHotKeys = keyTap?.start() == true ? [] : Self.bindings.map { WindowSnapModifier.current.symbols + $0.label }
+    }
+
+    /// true — пропустить клавишу дальше, false — это наше сочетание, поглощаем.
+    private func handleKey(_ event: CGEvent) -> Bool {
+        let relevant: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
+        guard event.flags.intersection(relevant) == WindowSnapModifier.current.flags else { return true }
+        let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        guard let binding = Self.bindings.first(where: { $0.keyCode == code }) else { return true }
+        // Автоповтор при удержании не переносит окно по мониторам.
+        if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { perform(binding.action) }
+        return false
     }
 
     enum Action {
@@ -348,6 +362,14 @@ enum WindowSnapModifier: String, CaseIterable, Identifiable {
         case .controlOption: return "⌃⌥"
         case .controlCommand: return "⌃⌘"
         case .optionCommand: return "⌥⌘"
+        }
+    }
+
+    var flags: CGEventFlags {
+        switch self {
+        case .controlOption: return [.maskControl, .maskAlternate]
+        case .controlCommand: return [.maskControl, .maskCommand]
+        case .optionCommand: return [.maskAlternate, .maskCommand]
         }
     }
 

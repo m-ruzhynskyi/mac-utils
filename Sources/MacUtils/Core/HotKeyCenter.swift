@@ -41,7 +41,10 @@ final class HotKeyCenter {
         let hotKeyID = EventHotKeyID(signature: OSType(0x4D555449), id: id) // 'MUTI'
         let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID,
                                          GetApplicationEventTarget(), 0, &ref)
-        guard status == noErr, let ref else { return false }
+        guard status == noErr, let ref else {
+            Log.window.error("Горячая клавиша \(id) не зарегистрирована: \(status)")
+            return false
+        }
         refs[id] = ref
         handlers[id] = handler
         return true

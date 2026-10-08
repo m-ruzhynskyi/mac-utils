@@ -54,11 +54,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// macutils://tools — значок «Инструменты»; macutils://settings — настройки;
-    /// annotate, pin, fix-text, meeting, break, warm — то же, что горячие клавиши (для «Команд»).
+    /// annotate, pin, fix-text, meeting, break, warm, snap?left… — то же, что горячие клавиши (для «Команд»).
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme == "macutils" {
             switch url.host {
             case "tools": ToolsWindowController.shared.show()
+            case "snap":
+                // macutils://snap?left — left/right/top/bottom/topLeft/…/maximize/center/restore.
+                let targets: [String: WindowTiler.Target] = [
+                    "left": .left, "right": .right, "top": .top, "bottom": .bottom, "topLeft": .topLeft,
+                    "topRight": .topRight, "bottomLeft": .bottomLeft, "bottomRight": .bottomRight,
+                    "maximize": .maximize, "center": .center,
+                ]
+                if url.query == "restore" { WindowTiler.shared.perform(.restore) }
+                else if let target = targets[url.query ?? ""] { WindowTiler.shared.perform(.snap(target)) }
             case "annotate": ScreenAnnotator.shared.toggle()
             case "pin": WindowPin.shared.toggleFocused()
             case "fix-text": TextFixer.shared.fix()
