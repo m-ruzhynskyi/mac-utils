@@ -108,13 +108,13 @@ final class DocumentTagger: ObservableObject {
         \(text.isEmpty ? "No text content available — judge by the name and extension." : "Content start: \(text)")
         1) Type — exactly one of: \(types.map(\.name).joined(separator: ", ")), or "none". \
         "Spec" = technical specification / requirements.
-        2) Summary — 2 to 5 English words, specific (what or whom it is about), no type word, no period.
+        2) Summary — 1 to 3 English words, the most specific name (product, company, project), no type word, no period.
         Answer JSON: {"type": "...", "summary": "..."}
         """
         let json = try await Ollama.generateJSON(prompt, maxTokens: 60)
         let type = (json["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         var summary = (json["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        // Только латиница и не длиннее 6 слов; иначе — без описания.
+        // Только латиница и не длиннее 3 слов; иначе — без описания.
         if summary.range(of: "\\p{Cyrillic}", options: .regularExpression) != nil { summary = "" }
         // Тип уже стоит впереди — не повторяем его в описании.
         for filler in ["technical specification for ", "technical specification of ", "technical requirements for ",
@@ -122,7 +122,7 @@ final class DocumentTagger: ObservableObject {
             where summary.lowercased().hasPrefix(filler) {
             summary = String(summary.dropFirst(filler.count))
         }
-        summary = summary.split(separator: " ").prefix(6).joined(separator: " ")
+        summary = summary.split(separator: " ").prefix(3).joined(separator: " ")
         return comment(type: types.first { $0.name.lowercased() == type }, summary: summary)
     }
 
