@@ -89,11 +89,34 @@ final class DocumentTagger: ObservableObject {
         return tags.first { $0.lowercased() == tag.lowercased() }
     }
 
+    /// Цвет метки Finder: 1 серый, 2 зелёный, 3 фиолетовый, 4 синий, 5 жёлтый, 6 красный, 7 оранжевый.
+    nonisolated static func color(for tag: String) -> Int {
+        switch tag {
+        case "Счёт", "Чек", "Выписка": return 6
+        case "Договор", "Справка": return 7
+        case "Билет": return 2
+        case "ТЗ", "Отчёт": return 4
+        case "Резюме", "Презентация": return 3
+        case "Инструкция", "Статья": return 5
+        default: return 1
+        }
+    }
+
+    private static let tagsAttribute = "com.apple.metadata:_kMDItemUserTags"
+
+    /// Тег с цветом (через NSURL цвет не задать — пишем атрибут Finder напрямую), прежние теги сохраняются.
     static func addTag(_ tag: String, to url: URL) {
-        var current = (try? url.resourceValues(forKeys: [.tagNamesKey]))?.tagNames ?? []
-        guard !current.contains(tag) else { return }
-        current.append(tag)
-        try? (url as NSURL).setResourceValue(current, forKey: .tagNamesKey)
+        var entries: [String] = []
+        let size = getxattr(url.path, tagsAttribute, nil, 0, 0, 0)
+        if size > 0 {
+            var data = Data(count: size)
+            _ = data.withUnsafeMutableBytes { getxattr(url.path, tagsAttribute, $0.baseAddress, size, 0, 0) }
+            entries = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String] ?? []
+        }
+        entries.removeAll { $0 == tag || $0.hasPrefix(tag + "\n") }
+        entries.append("\(tag)\n\(color(for: tag))")
+        guard let data = try? PropertyListSerialization.data(fromPropertyList: entries, format: .binary, options: 0) else { return }
+        _ = data.withUnsafeBytes { setxattr(url.path, tagsAttribute, $0.baseAddress, data.count, 0, 0) }
         Log.ai.info("Тег «\(tag, privacy: .public)»: \(url.lastPathComponent, privacy: .public)")
     }
 
