@@ -261,6 +261,7 @@ struct DownloadsPage: View {
     @ObservedObject private var sorter = DownloadsSorter.shared
     @State private var newExtension = ""
     @State private var newFolder = ""
+    @ObservedObject private var tagger = DocumentTagger.shared
     @State private var suggesting = false
     @State private var aiNote: String?
     @AppStorage(Pref.ai) private var aiEnabled = true
@@ -399,6 +400,23 @@ struct DownloadsPage: View {
                 }
             }
             .disabled(!enabled)
+            if aiEnabled && UserDefaults.standard.bool(forKey: Pref.aiDownloadsTags) {
+                Section("Теги документов (ИИ)") {
+                    Text("Новым документам теги Finder по типу («Счёт», «Чек», «Договор», «Билет», «ТЗ», «Отчёт», «Инструкция»…) ставятся сами при сортировке. Видно в Finder: цветная метка и поиск по тегу в боковом меню.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        if tagger.pending > 0 {
+                            ProgressView().controlSize(.small)
+                            Text("Осталось \(tagger.pending), помечено \(tagger.tagged)").foregroundStyle(.secondary)
+                        } else if tagger.tagged > 0 {
+                            Text("Помечено документов: \(tagger.tagged)").foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Расставить теги уже лежащим") { tagger.tagExisting(in: sorter.folder) }
+                            .disabled(tagger.pending > 0)
+                    }
+                }
+            }
             Section("Старые файлы") {
                 Picker("Убирать в Корзину", selection: $days) {
                     Text("Никогда").tag(0)

@@ -25,10 +25,15 @@ enum DownloadsAI {
 
 /// Теги Finder для документов в «Загрузках»: «Счёт», «Договор», «Билет»… по имени и тексту.
 @MainActor
-final class DocumentTagger {
+final class DocumentTagger: ObservableObject {
     static let shared = DocumentTagger()
 
-    nonisolated static let tags = ["Счёт", "Чек", "Договор", "Билет", "Выписка", "Резюме", "Справка", "Документ"]
+    /// Сколько документов ещё в очереди и сколько получили тег.
+    @Published private(set) var pending = 0
+    @Published private(set) var tagged = 0
+
+    nonisolated static let tags = ["Счёт", "Чек", "Договор", "Билет", "Выписка", "Резюме", "Справка", "ТЗ",
+                                     "Презентация", "Инструкция", "Отчёт", "Заметки", "Статья"]
     nonisolated static let extensions: Set<String> = ["pdf", "txt", "rtf", "doc", "docx", "pages", "odt", "md"]
 
     private var queue: [URL] = []
@@ -37,7 +42,22 @@ final class DocumentTagger {
     func enqueue(_ url: URL) {
         guard Ollama.isOn(Pref.aiDownloadsTags), Self.extensions.contains(url.pathExtension.lowercased()) else { return }
         queue.append(url)
+        pending = queue.count + (working ? 1 : 0)
         next()
+    }
+
+    /// Уже лежащие документы: «Загрузки» и папка Documents (без тех, у кого тег уже есть).
+    func tagExisting(in downloads: URL) {
+        tagged = 0
+        let manager = FileManager.default
+        for folder in [downloads, downloads.appendingPathComponent(DownloadsRules.Category.documents.rawValue)] {
+            for url in (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.tagNamesKey],
+                                                         options: [.skipsHiddenFiles])) ?? [] {
+                let tags = (try? url.resourceValues(forKeys: [.tagNamesKey]))?.tagNames ?? []
+                guard !url.lastPathComponent.hasPrefix("~$"), !tags.contains(where: Self.tags.contains) else { continue }
+                enqueue(url)
+            }
+        }
     }
 
     private func next() {
@@ -45,8 +65,12 @@ final class DocumentTagger {
         working = true
         let url = queue.removeFirst()
         Task {
-            if let tag = try? await Self.classify(url) { Self.addTag(tag, to: url) }
+            if let tag = try? await Self.classify(url) {
+                Self.addTag(tag, to: url)
+                tagged += 1
+            }
             working = false
+            pending = queue.count
             next()
         }
     }
@@ -56,7 +80,8 @@ final class DocumentTagger {
         let prompt = """
         Файл: «\(url.lastPathComponent)».
         Начало текста: \(text.isEmpty ? "(нет текста)" : text)
-        Что это за документ? Выбери одно: \(tags.joined(separator: ", ")), или «нет», если ничего не подходит.
+        К какому типу относится документ? Варианты: \(tags.joined(separator: ", ")).
+        «ТЗ» — техническое задание или требования к проекту. Если ни один не подходит точно — «нет».
         Ответь JSON: {"tag": "..."}
         """
         let json = try await Ollama.generateJSON(prompt)
