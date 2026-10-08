@@ -288,8 +288,8 @@ struct AIPage: View {
                 }
                 Toggle(isOn: $downloadsTags) {
                     VStack(alignment: .leading) {
-                        Text("Теги для документов в «Загрузках»")
-                        Text("Новым документам при сортировке — теги Finder «Счёт», «Договор», «ТЗ»… по имени и тексту.").font(.caption).foregroundStyle(.secondary)
+                        Text("Описания документов в «Загрузках»")
+                        Text("Новым документам при сортировке — комментарий Spotlight с типом и описанием: «📋 ТЗ — техзадание на нотч-приложение». Виден в ⌘I → «Комментарии», ищется через ⌘Пробел.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 if downloadsTags {
@@ -301,7 +301,7 @@ struct AIPage: View {
                             Text("Помечено документов: \(tagger.tagged)").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Расставить теги уже лежащим") { tagger.tagExisting(in: DownloadsSorter.shared.folder) }
+                        Button("Описать уже лежащие") { tagger.tagExisting(in: DownloadsSorter.shared.folder) }
                             .disabled(tagger.pending > 0)
                     }
                 }

@@ -401,8 +401,8 @@ struct DownloadsPage: View {
             }
             .disabled(!enabled)
             if aiEnabled && UserDefaults.standard.bool(forKey: Pref.aiDownloadsTags) {
-                Section("Теги документов (ИИ)") {
-                    Text("Новым документам теги Finder по типу («Счёт», «Чек», «Договор», «Билет», «ТЗ», «Отчёт», «Инструкция»…) ставятся сами при сортировке. Видно в Finder: цветная метка и поиск по тегу в боковом меню.")
+                Section("Описания документов (ИИ)") {
+                    Text("Новым документам при сортировке — комментарий Spotlight с типом и описанием: «📋 ТЗ — техзадание на нотч-приложение». Виден в ⌘I → «Комментарии», ищется через ⌘Пробел.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     HStack {
                         if tagger.pending > 0 {
@@ -412,7 +412,7 @@ struct DownloadsPage: View {
                             Text("Помечено документов: \(tagger.tagged)").foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Расставить теги уже лежащим") { tagger.tagExisting(in: sorter.folder) }
+                        Button("Описать уже лежащие") { tagger.tagExisting(in: sorter.folder) }
                             .disabled(tagger.pending > 0)
                     }
                 }

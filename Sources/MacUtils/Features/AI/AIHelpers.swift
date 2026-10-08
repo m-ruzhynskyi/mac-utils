@@ -28,12 +28,17 @@ enum DownloadsAI {
 final class DocumentTagger: ObservableObject {
     static let shared = DocumentTagger()
 
-    /// Сколько документов ещё в очереди и сколько получили тег.
+    /// Сколько документов ещё в очереди и сколько получили описание.
     @Published private(set) var pending = 0
     @Published private(set) var tagged = 0
 
-    nonisolated static let tags = ["Счёт", "Чек", "Договор", "Билет", "Выписка", "Резюме", "Справка", "ТЗ",
-                                     "Презентация", "Инструкция", "Отчёт", "Заметки", "Статья"]
+    /// Типы документов и их значки.
+    nonisolated static let types: [(name: String, emoji: String)] = [
+        ("Счёт", "🧾"), ("Чек", "🧾"), ("Договор", "📄"), ("Билет", "🎫"), ("Выписка", "🏦"), ("Резюме", "👤"),
+        ("Справка", "📃"), ("ТЗ", "📋"), ("Презентация", "📊"), ("Инструкция", "📘"), ("Отчёт", "📈"),
+        ("Заметки", "📝"), ("Статья", "📰"),
+    ]
+    nonisolated static let otherEmoji = "📁"
     nonisolated static let extensions: Set<String> = ["pdf", "txt", "rtf", "doc", "docx", "pages", "odt", "md"]
 
     private var queue: [URL] = []
@@ -46,15 +51,14 @@ final class DocumentTagger: ObservableObject {
         next()
     }
 
-    /// Уже лежащие документы: «Загрузки» и папка Documents (без тех, у кого тег уже есть).
+    /// Уже лежащие документы: «Загрузки» и папка Documents (без тех, у кого описание уже есть).
     func tagExisting(in downloads: URL) {
         tagged = 0
         let manager = FileManager.default
         for folder in [downloads, downloads.appendingPathComponent(DownloadsRules.Category.documents.rawValue)] {
-            for url in (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.tagNamesKey],
+            for url in (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil,
                                                          options: [.skipsHiddenFiles])) ?? [] {
-                let tags = (try? url.resourceValues(forKeys: [.tagNamesKey]))?.tagNames ?? []
-                guard !url.lastPathComponent.hasPrefix("~$"), !tags.contains(where: Self.tags.contains) else { continue }
+                guard !url.lastPathComponent.hasPrefix("~$"), !Self.hasDescription(url) else { continue }
                 enqueue(url)
             }
         }
@@ -65,8 +69,8 @@ final class DocumentTagger: ObservableObject {
         working = true
         let url = queue.removeFirst()
         Task {
-            if let tag = try? await Self.classify(url) {
-                Self.addTag(tag, to: url)
+            if let comment = try? await Self.describe(url) {
+                Self.setComment(comment, for: url)
                 tagged += 1
             }
             working = false
@@ -75,49 +79,64 @@ final class DocumentTagger: ObservableObject {
         }
     }
 
-    nonisolated static func classify(_ url: URL) async throws -> String? {
+    /// «📋 ТЗ — Техническое задание на нотч-приложение для агентов».
+    nonisolated static func describe(_ url: URL) async throws -> String? {
         let text = await Task.detached(priority: .utility) { extractText(url, limit: 1500) }.value
+        // Без текста (скан, картинка в PDF) тип не угадать — не выдумываем.
+        guard text.count >= 40 else { return nil }
         let prompt = """
         Файл: «\(url.lastPathComponent)».
         Начало текста: \(text.isEmpty ? "(нет текста)" : text)
-        К какому типу относится документ? Варианты: \(tags.joined(separator: ", ")).
-        «ТЗ» — техническое задание или требования к проекту. Если ни один не подходит точно — «нет».
-        Ответь JSON: {"tag": "..."}
+        1) Тип документа — один из: \(types.map(\.name).joined(separator: ", ")); \
+        «ТЗ» — техническое задание или требования к проекту; если ни один не подходит точно — «нет».
+        2) О чём документ — до 12 слов по-русски, конкретно (кто, что, сумма или дата, если есть).
+        Ответь JSON: {"type": "...", "summary": "..."}
         """
-        let json = try await Ollama.generateJSON(prompt)
-        let tag = (json["tag"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return tags.first { $0.lowercased() == tag.lowercased() }
+        let json = try await Ollama.generateJSON(prompt, maxTokens: 120)
+        let type = (json["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        var summary = (json["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Модель иногда повторяет подсказку вместо описания.
+        if summary.lowercased().contains("требования к проекту") || summary.lowercased().hasPrefix("до 12 слов") { summary = "" }
+        return comment(type: types.first { $0.name.lowercased() == type }, summary: summary)
     }
 
-    /// Цвет метки Finder: 1 серый, 2 зелёный, 3 фиолетовый, 4 синий, 5 жёлтый, 6 красный, 7 оранжевый.
-    nonisolated static func color(for tag: String) -> Int {
-        switch tag {
-        case "Счёт", "Чек", "Выписка": return 6
-        case "Договор", "Справка": return 7
-        case "Билет": return 2
-        case "ТЗ", "Отчёт": return 4
-        case "Резюме", "Презентация": return 3
-        case "Инструкция", "Статья": return 5
-        default: return 1
+    nonisolated static func comment(type: (name: String, emoji: String)?, summary: String) -> String? {
+        let summary = summary.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
+        switch (type, summary.isEmpty) {
+        case let (type?, false): return "\(type.emoji) \(type.name) — \(summary)"
+        case let (type?, true): return "\(type.emoji) \(type.name)"
+        case (nil, false): return "\(otherEmoji) \(summary)"
+        case (nil, true): return nil
         }
     }
 
-    private static let tagsAttribute = "com.apple.metadata:_kMDItemUserTags"
+    nonisolated private static let commentAttribute = "com.apple.metadata:kMDItemFinderComment"
 
-    /// Тег с цветом (через NSURL цвет не задать — пишем атрибут Finder напрямую), прежние теги сохраняются.
-    static func addTag(_ tag: String, to url: URL) {
-        var entries: [String] = []
-        let size = getxattr(url.path, tagsAttribute, nil, 0, 0, 0)
-        if size > 0 {
-            var data = Data(count: size)
-            _ = data.withUnsafeMutableBytes { getxattr(url.path, tagsAttribute, $0.baseAddress, size, 0, 0) }
-            entries = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String] ?? []
+    nonisolated static func comment(of url: URL) -> String? {
+        let size = getxattr(url.path, commentAttribute, nil, 0, 0, 0)
+        guard size > 0 else { return nil }
+        var data = Data(count: size)
+        _ = data.withUnsafeMutableBytes { getxattr(url.path, commentAttribute, $0.baseAddress, size, 0, 0) }
+        return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? String
+    }
+
+    nonisolated static func hasDescription(_ url: URL) -> Bool {
+        guard let comment = comment(of: url) else { return false }
+        return (types.map(\.emoji) + [otherEmoji]).contains { comment.hasPrefix($0) }
+    }
+
+    /// Комментарий Spotlight (⌘I → «Комментарии»): через Finder, чтобы он был виден и в окне свойств;
+    /// если Finder недоступен — напрямую в атрибут, который читает Spotlight.
+    static func setComment(_ comment: String, for url: URL) {
+        let escaped = { (text: String) in text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
+        let script = "tell application \"Finder\" to set comment of (POSIX file \"\(escaped(url.path))\" as alias) to \"\(escaped(comment))\""
+        var error: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&error)
+        if error != nil || Self.comment(of: url) != comment,
+           let data = try? PropertyListSerialization.data(fromPropertyList: comment, format: .binary, options: 0) {
+            _ = data.withUnsafeBytes { setxattr(url.path, commentAttribute, $0.baseAddress, data.count, 0, 0) }
         }
-        entries.removeAll { $0 == tag || $0.hasPrefix(tag + "\n") }
-        entries.append("\(tag)\n\(color(for: tag))")
-        guard let data = try? PropertyListSerialization.data(fromPropertyList: entries, format: .binary, options: 0) else { return }
-        _ = data.withUnsafeBytes { setxattr(url.path, tagsAttribute, $0.baseAddress, data.count, 0, 0) }
-        Log.ai.info("Тег «\(tag, privacy: .public)»: \(url.lastPathComponent, privacy: .public)")
+        Log.ai.info("Описание: \(url.lastPathComponent, privacy: .public)")
     }
 
     /// Текст документа: PDF — первые страницы, остальное — через NSAttributedString.
