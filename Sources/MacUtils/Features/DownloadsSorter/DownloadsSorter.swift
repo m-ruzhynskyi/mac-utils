@@ -401,8 +401,8 @@ struct DownloadsPage: View {
             }
             .disabled(!enabled)
             if aiEnabled && UserDefaults.standard.bool(forKey: Pref.aiDownloadsTags) {
-                Section("Описания документов (ИИ)") {
-                    Text("Новым документам при сортировке — комментарий Spotlight с типом и описанием: «📋 ТЗ — техзадание на нотч-приложение». Виден в ⌘I → «Комментарии», ищется через ⌘Пробел.")
+                Section("Подписи файлов (ИИ)") {
+                    Text("Каждому новому файлу при сортировке — короткая подпись по-английски в комментарии Spotlight: «📋 Spec — notch app for AI agents», «💿 Installer — Docker Desktop». Видно в ⌘I и в колонке «Комментарии», ищется через ⌘Пробел.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     HStack {
                         if tagger.pending > 0 {
@@ -412,7 +412,7 @@ struct DownloadsPage: View {
                             Text("Помечено документов: \(tagger.tagged)").foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Описать уже лежащие") { tagger.tagExisting(in: sorter.folder) }
+                        Button("Подписать уже лежащие") { tagger.tagExisting(in: sorter.folder) }
                             .disabled(tagger.pending > 0)
                     }
                 }

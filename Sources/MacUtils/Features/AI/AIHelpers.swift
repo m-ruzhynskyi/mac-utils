@@ -32,33 +32,43 @@ final class DocumentTagger: ObservableObject {
     @Published private(set) var pending = 0
     @Published private(set) var tagged = 0
 
-    /// Типы документов и их значки.
+    /// Типы файлов и их значки (подписи — по-английски, коротко).
     nonisolated static let types: [(name: String, emoji: String)] = [
-        ("Счёт", "🧾"), ("Чек", "🧾"), ("Договор", "📄"), ("Билет", "🎫"), ("Выписка", "🏦"), ("Резюме", "👤"),
-        ("Справка", "📃"), ("ТЗ", "📋"), ("Презентация", "📊"), ("Инструкция", "📘"), ("Отчёт", "📈"),
-        ("Заметки", "📝"), ("Статья", "📰"),
+        ("Invoice", "🧾"), ("Receipt", "🧾"), ("Contract", "📄"), ("Ticket", "🎫"), ("Statement", "🏦"),
+        ("Resume", "👤"), ("Certificate", "📃"), ("Spec", "📋"), ("Slides", "📊"), ("Manual", "📘"),
+        ("Report", "📈"), ("Notes", "📝"), ("Article", "📰"), ("Screenshot", "📸"), ("Photo", "🖼️"),
+        ("Image", "🖼️"), ("Design", "🎨"), ("Installer", "💿"), ("App", "🧩"), ("Archive", "🗜️"),
+        ("Video", "🎬"), ("Audio", "🎵"), ("Code", "💻"), ("Data", "📑"), ("Font", "🔤"),
     ]
     nonisolated static let otherEmoji = "📁"
-    nonisolated static let extensions: Set<String> = ["pdf", "txt", "rtf", "doc", "docx", "pages", "odt", "md"]
+    nonisolated static let textExtensions: Set<String> = ["pdf", "txt", "rtf", "doc", "docx", "pages", "odt", "md", "csv",
+                                                          "json", "html", "swift", "py", "js", "ts"]
+    nonisolated static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "webp", "tiff", "gif"]
 
     private var queue: [URL] = []
     private var working = false
 
     func enqueue(_ url: URL) {
-        guard Ollama.isOn(Pref.aiDownloadsTags), Self.extensions.contains(url.pathExtension.lowercased()) else { return }
+        guard Ollama.isOn(Pref.aiDownloadsTags), !queue.contains(url) else { return }
         queue.append(url)
         pending = queue.count + (working ? 1 : 0)
         next()
     }
 
-    /// Уже лежащие документы: «Загрузки» и папка Documents (без тех, у кого описание уже есть).
+    /// Всё, что уже лежит: корень «Загрузок», папки категорий и свои папки правил.
+    /// Описанные раньше по-русски — переписываются.
     func tagExisting(in downloads: URL) {
         tagged = 0
         let manager = FileManager.default
-        for folder in [downloads, downloads.appendingPathComponent(DownloadsRules.Category.documents.rawValue)] {
-            for url in (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil,
+        let custom = DownloadsSorter.customRules.values.filter { !$0.hasPrefix("/") }
+        let folders = [downloads] + (DownloadsRules.Category.allCases.map(\.rawValue) + custom)
+            .map { downloads.appendingPathComponent($0, isDirectory: true) }
+        for folder in Set(folders) {
+            for url in (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey],
                                                          options: [.skipsHiddenFiles])) ?? [] {
-                guard !url.lastPathComponent.hasPrefix("~$"), !Self.hasDescription(url) else { continue }
+                let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+                if values?.isDirectory == true, values?.isPackage != true { continue }
+                guard !url.lastPathComponent.hasPrefix("~$"), !DownloadsRules.isPartial(url), !Self.hasDescription(url) else { continue }
                 enqueue(url)
             }
         }
@@ -79,24 +89,40 @@ final class DocumentTagger: ObservableObject {
         }
     }
 
-    /// «📋 ТЗ — Техническое задание на нотч-приложение для агентов».
+    /// «📋 Spec — notch app for AI agents».
     nonisolated static func describe(_ url: URL) async throws -> String? {
-        let text = await Task.detached(priority: .utility) { extractText(url, limit: 1500) }.value
-        // Без текста (скан, картинка в PDF) тип не угадать — не выдумываем.
-        guard text.count >= 40 else { return nil }
+        let ext = url.pathExtension.lowercased()
+        let text = await Task.detached(priority: .utility) { () -> String in
+            if textExtensions.contains(ext) { return extractText(url, limit: 1200) }
+            if imageExtensions.contains(ext),
+               let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 25_000_000,
+               let image = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                return String(TextRecognizer.recognize(image).prefix(800))
+            }
+            return ""
+        }.value
+        // Документ без текста (скан) — тип не угадать, не выдумываем.
+        if textExtensions.contains(ext), text.count < 40 { return nil }
         let prompt = """
-        Файл: «\(url.lastPathComponent)».
-        Начало текста: \(text.isEmpty ? "(нет текста)" : text)
-        1) Тип документа — один из: \(types.map(\.name).joined(separator: ", ")); \
-        «ТЗ» — техническое задание или требования к проекту; если ни один не подходит точно — «нет».
-        2) О чём документ — до 12 слов по-русски, конкретно (кто, что, сумма или дата, если есть).
-        Ответь JSON: {"type": "...", "summary": "..."}
+        File name: "\(url.lastPathComponent)".
+        \(text.isEmpty ? "No text content available — judge by the name and extension." : "Content start: \(text)")
+        1) Type — exactly one of: \(types.map(\.name).joined(separator: ", ")), or "none". \
+        "Spec" = technical specification / requirements.
+        2) Summary — 2 to 5 English words, specific (what or whom it is about), no type word, no period.
+        Answer JSON: {"type": "...", "summary": "..."}
         """
-        let json = try await Ollama.generateJSON(prompt, maxTokens: 120)
+        let json = try await Ollama.generateJSON(prompt, maxTokens: 60)
         let type = (json["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         var summary = (json["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        // Модель иногда повторяет подсказку вместо описания.
-        if summary.lowercased().contains("требования к проекту") || summary.lowercased().hasPrefix("до 12 слов") { summary = "" }
+        // Только латиница и не длиннее 6 слов; иначе — без описания.
+        if summary.range(of: "\\p{Cyrillic}", options: .regularExpression) != nil { summary = "" }
+        // Тип уже стоит впереди — не повторяем его в описании.
+        for filler in ["technical specification for ", "technical specification of ", "technical requirements for ",
+                       "technical specification", "technical requirements", "specification for "]
+            where summary.lowercased().hasPrefix(filler) {
+            summary = String(summary.dropFirst(filler.count))
+        }
+        summary = summary.split(separator: " ").prefix(6).joined(separator: " ")
         return comment(type: types.first { $0.name.lowercased() == type }, summary: summary)
     }
 
@@ -122,7 +148,9 @@ final class DocumentTagger: ObservableObject {
 
     nonisolated static func hasDescription(_ url: URL) -> Bool {
         guard let comment = comment(of: url) else { return false }
+        // Старые русские описания переписываем.
         return (types.map(\.emoji) + [otherEmoji]).contains { comment.hasPrefix($0) }
+            && comment.range(of: "\\p{Cyrillic}", options: .regularExpression) == nil
     }
 
     /// Комментарий Spotlight (⌘I → «Комментарии»): через Finder, чтобы он был виден и в окне свойств;

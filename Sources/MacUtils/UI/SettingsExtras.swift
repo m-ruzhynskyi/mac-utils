@@ -288,8 +288,8 @@ struct AIPage: View {
                 }
                 Toggle(isOn: $downloadsTags) {
                     VStack(alignment: .leading) {
-                        Text("Описания документов в «Загрузках»")
-                        Text("Новым документам при сортировке — комментарий Spotlight с типом и описанием: «📋 ТЗ — техзадание на нотч-приложение». Виден в ⌘I → «Комментарии», ищется через ⌘Пробел.").font(.caption).foregroundStyle(.secondary)
+                        Text("Подписи файлов в «Загрузках»")
+                        Text("Каждому новому файлу при сортировке — короткая подпись по-английски в комментарии Spotlight: «📋 Spec — notch app for AI agents», «💿 Installer — Docker Desktop». Видно в ⌘I и в колонке «Комментарии», ищется через ⌘Пробел.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 if downloadsTags {
@@ -301,7 +301,7 @@ struct AIPage: View {
                             Text("Помечено документов: \(tagger.tagged)").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Описать уже лежащие") { tagger.tagExisting(in: DownloadsSorter.shared.folder) }
+                        Button("Подписать уже лежащие") { tagger.tagExisting(in: DownloadsSorter.shared.folder) }
                             .disabled(tagger.pending > 0)
                     }
                 }
