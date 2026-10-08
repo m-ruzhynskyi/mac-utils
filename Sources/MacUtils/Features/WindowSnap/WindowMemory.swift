@@ -94,7 +94,7 @@ final class WindowMemory: ObservableObject {
         currentSignature = signature
         // Даём системе закончить перестановку, потом ставим окна на свои места.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            MainActor.assumeIsolated { WindowMemory.shared.restore() }
+            MainActor.assumeIsolated { _ = WindowMemory.shared.restore() }
         }
     }
 
