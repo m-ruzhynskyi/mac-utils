@@ -229,6 +229,7 @@ struct AIPage: View {
     @AppStorage(Pref.aiShelf) private var shelf = true
     @AppStorage(Pref.meetingsReport) private var meetings = true
     @ObservedObject private var ollama = Ollama.shared
+    @ObservedObject private var tagger = DocumentTagger.shared
 
     var body: some View {
         Form {
@@ -288,7 +289,20 @@ struct AIPage: View {
                 Toggle(isOn: $downloadsTags) {
                     VStack(alignment: .leading) {
                         Text("Теги для документов в «Загрузках»")
-                        Text("Теги Finder «Счёт», «Договор», «Билет»… по имени и тексту.").font(.caption).foregroundStyle(.secondary)
+                        Text("Новым документам при сортировке — теги Finder «Счёт», «Договор», «ТЗ»… по имени и тексту.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if downloadsTags {
+                    HStack {
+                        if tagger.pending > 0 {
+                            ProgressView().controlSize(.small)
+                            Text("Осталось \(tagger.pending), помечено \(tagger.tagged)").font(.caption).foregroundStyle(.secondary)
+                        } else if tagger.tagged > 0 {
+                            Text("Помечено документов: \(tagger.tagged)").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Расставить теги уже лежащим") { tagger.tagExisting(in: DownloadsSorter.shared.folder) }
+                            .disabled(tagger.pending > 0)
                     }
                 }
                 Toggle(isOn: $tasks) {
