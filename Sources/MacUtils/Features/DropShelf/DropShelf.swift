@@ -171,7 +171,29 @@ final class DropShelf: ObservableObject {
         if items.isEmpty { hide() }
     }
 
+    /// Перетаскивание полки за заголовок (и за пустую полку): SwiftUI сам окно не двигает.
+    private var moveMonitor: Any?
+
+    private func installMoveMonitor() {
+        guard moveMonitor == nil else { return }
+        moveMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            MainActor.assumeIsolated {
+                let shelf = DropShelf.shared
+                guard let panel = shelf.panel, event.window === panel else { return event }
+                let point = event.locationInWindow
+                let height = panel.frame.height
+                // Заголовок — верхние 34 pt без кнопок справа; пустая полка — вся, кроме кнопок.
+                let inHeader = point.y > height - 34 && point.x < panel.frame.width - 90
+                let inEmpty = shelf.items.isEmpty && point.y < height - 34
+                guard inHeader || inEmpty else { return event }
+                panel.performDrag(with: event)
+                return nil
+            }
+        }
+    }
+
     private func make() -> NSPanel {
+        installMoveMonitor()
         let host = FirstMouseHostingView(rootView: DropShelfView(shelf: self))
         let panel = HUDPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 300),
                              styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -221,6 +243,7 @@ private struct DropShelfView: View {
                     .help("Скрыть полку (файлы останутся)")
             }
             .buttonStyle(.borderless)
+            .help("Потяните за заголовок, чтобы передвинуть полку")
 
             if shelf.items.isEmpty {
                 VStack(spacing: 6) {
@@ -381,3 +404,4 @@ final class DragSourceView: NSView, NSDraggingSource {
         ended?(urls)
     }
 }
+
