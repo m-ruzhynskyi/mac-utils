@@ -69,3 +69,26 @@ final class AIAndExtrasTests: XCTestCase {
         XCTAssertEqual(renamed?.lastPathComponent, "Счёт за интернет 20.15.03.png")
     }
 }
+
+final class WhisperOutputTests: XCTestCase {
+    func testParsesSegmentsAndDropsNoise() {
+        let json = """
+        {"result": {"language": "uk"}, "transcription": [
+          {"offsets": {"from": 1500, "to": 3000}, "text": " Розноситься прибуткова накладна."},
+          {"offsets": {"from": 4000, "to": 5000}, "text": " [Музыка]"},
+          {"offsets": {"from": 6000, "to": 7000}, "text": " ..."}
+        ]}
+        """
+        let lines = WhisperOutput.lines(fromJSON: Data(json.utf8), speaker: "Собеседники")
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0].start, 1.5)
+        XCTAssertEqual(lines[0].text, "Розноситься прибуткова накладна.")
+    }
+
+    func testProgressAndLanguage() {
+        XCTAssertEqual(WhisperOutput.progress(in: "whisper_print_progress_callback: progress =  37%"), 37)
+        XCTAssertNil(WhisperOutput.progress(in: "no progress here"))
+        XCTAssertEqual(WhisperOutput.language("uk_UA"), "uk")
+        XCTAssertEqual(WhisperOutput.language("auto"), "auto")
+    }
+}
