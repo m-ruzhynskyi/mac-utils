@@ -29,6 +29,10 @@ enum Pref {
     static let screenshotFrameDefault = "screenshotFrameDefault"
     /// Фон под рамкой и коллажем: см. ShotBackground.
     static let screenshotBackground = "screenshotBackground"
+    /// Наводишь на окно — оно выделяется и снимается кликом; выключено — область только вручную.
+    static let screenshotWindowSnap = "screenshotWindowSnap"
+    /// Подписи под значками на панели снимка.
+    static let screenshotLabels = "screenshotLabels"
 
     /// Запись экрана: "mp4" или "gif", кадров в секунду (MP4), курсор, звук системы, микрофон.
     static let recordingFormat = "recordingFormat"
@@ -55,6 +59,8 @@ enum Pref {
 
     /// Последняя открытая вкладка окна «Инструменты».
     static let toolsTab = "toolsTab"
+    /// Скрытые вкладки панели 🔧 (через запятую).
+    static let toolsHiddenTabs = "toolsHiddenTabs"
     /// «Полка» для файлов (встряхнуть мышь при перетаскивании или ⌃⌥D).
     static let dropShelf = "dropShelfEnabled"
     /// «Шпаргалка»: удержание ⌘ показывает сочетания клавиш; задержка в секундах.
@@ -134,6 +140,11 @@ enum Pref {
     static let autoUpdate = "autoUpdateEnabled"
     static let updateRepo = "updateRepository"
     static let justUpdatedTo = "justUpdatedTo"
+    /// Линейка версий (например, «1.3»), для которой уже показали «Что нового».
+    static let lastSeenChangelog = "lastSeenChangelog"
+    /// Тёплый экран: "schedule" — по времени, "manual" — включается вручную.
+    static let warmMode = "warmScreenMode"
+    static let warmManualOn = "warmScreenManualOn"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -153,6 +164,8 @@ enum Pref {
             screenshotStepsTitles: true,
             screenshotFrameDefault: false,
             screenshotBackground: "sky",
+            screenshotWindowSnap: true,
+            screenshotLabels: true,
             recordingFormat: "mp4",
             recordingFPS: 30,
             recordingCursor: true,
@@ -187,6 +200,8 @@ enum Pref {
             warmExternalStrength: 0.5,
             warmFrom: 21,
             warmTo: 7,
+            warmMode: "schedule",
+            warmManualOn: false,
             annotate: true,
             windowPin: true,
             windowPinOpacity: 1.0,

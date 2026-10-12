@@ -24,6 +24,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     private let screen: NSScreen
     private let format: Format
     private var stream: SCStream?
+    private var echoFree: EchoFreeMicrophone?
     private var writer: RecordingWriter?
     private var started = Date()
     private var timer: Timer?
@@ -110,23 +111,35 @@ final class ScreenRecorder: NSObject, ObservableObject {
         let wantsAudio = format == .mp4 && defaults.bool(forKey: Pref.recordingAudio)
         config.capturesAudio = wantsAudio
         config.excludesCurrentProcessAudio = true
-        var wantsMic = false
-        if #available(macOS 15.0, *), format == .mp4, defaults.bool(forKey: Pref.recordingMicrophone) {
-            config.captureMicrophone = true
-            wantsMic = true
-        }
+        let wantsMic = format == .mp4 && defaults.bool(forKey: Pref.recordingMicrophone)
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("MacUtils-\(UUID().uuidString).mp4")
         let writer = try RecordingWriter(url: url, width: config.width, height: config.height,
                                          audio: wantsAudio, microphone: wantsMic)
+        // Микрофон — с подавлением эха, иначе звук системы из динамиков попадает в него ещё раз.
+        var echoFree: EchoFreeMicrophone?
+        if wantsMic {
+            let candidate = EchoFreeMicrophone { [weak writer] buffer, pts in
+                guard let sample = EchoFreeMicrophone.sampleBuffer(buffer, at: pts) else { return }
+                writer?.queue.async { writer?.appendMicrophone(sample) }
+            }
+            do {
+                try candidate.start()
+                echoFree = candidate
+            } catch {
+                Log.capture.error("Запись: подавление эха недоступно: \(error.localizedDescription, privacy: .public)")
+                if #available(macOS 15.0, *) { config.captureMicrophone = true }
+            }
+        }
         let stream = SCStream(filter: filter, configuration: config, delegate: writer)
         try stream.addStreamOutput(writer, type: .screen, sampleHandlerQueue: writer.queue)
         if wantsAudio { try stream.addStreamOutput(writer, type: .audio, sampleHandlerQueue: writer.queue) }
-        if #available(macOS 15.0, *), wantsMic {
+        if #available(macOS 15.0, *), wantsMic, echoFree == nil {
             try stream.addStreamOutput(writer, type: .microphone, sampleHandlerQueue: writer.queue)
         }
         try await stream.startCapture()
+        self.echoFree = echoFree
         self.writer = writer
         self.stream = stream
         Log.capture.info("Запись: старт \(config.width)×\(config.height) @\(fps) fps, \(self.format.rawValue, privacy: .public)")
@@ -149,6 +162,8 @@ final class ScreenRecorder: NSObject, ObservableObject {
         guard !finishing, let stream, let writer else { return }
         finishing = true
         teardownUI()
+        echoFree?.stop()
+        echoFree = nil
         Task { @MainActor in
             try? await stream.stopCapture()
             let frames = await writer.finish()
@@ -168,6 +183,8 @@ final class ScreenRecorder: NSObject, ObservableObject {
         finishing = true
         teardownUI()
         let stream = self.stream, writer = self.writer
+        echoFree?.stop()
+        echoFree = nil
         Task { @MainActor in
             try? await stream?.stopCapture()
             if let writer {
@@ -372,18 +389,18 @@ final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         guard writer.canAdd(video) else { throw RecordingError.writer }
         writer.add(video)
 
-        func audioInput() -> AVAssetWriterInput {
+        func audioInput(channels: Int = 2) -> AVAssetWriterInput {
             let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: 48_000,
-                AVNumberOfChannelsKey: 2,
+                AVNumberOfChannelsKey: channels,
                 AVEncoderBitRateKey: 128_000,
             ])
             input.expectsMediaDataInRealTime = true
             return input
         }
         audio = wantsAudio ? audioInput() : nil
-        microphone = wantsMic ? audioInput() : nil
+        microphone = wantsMic ? audioInput(channels: 1) : nil
         for input in [audio, microphone].compactMap({ $0 }) where writer.canAdd(input) {
             writer.add(input)
         }
@@ -408,8 +425,14 @@ final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         case .audio:
             if sessionStarted, let audio, audio.isReadyForMoreMediaData { audio.append(sampleBuffer) }
         default:
-            if sessionStarted, let microphone, microphone.isReadyForMoreMediaData { microphone.append(sampleBuffer) }
+            appendMicrophone(sampleBuffer)
         }
+    }
+
+    /// Вызывается на queue.
+    func appendMicrophone(_ sampleBuffer: CMSampleBuffer) {
+        guard !finished, sessionStarted, let microphone, microphone.isReadyForMoreMediaData else { return }
+        microphone.append(sampleBuffer)
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {

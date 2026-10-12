@@ -122,7 +122,12 @@ final class ScreenshotService: ObservableObject {
             ?? windows.first)?.captureView
     }
 
-    /// Новое выделение на одном экране сбрасывает выделение на остальных.
+    /// Перерисовать оверлеи всех экранов (сменился режим выбора окна).
+    func redrawAll() {
+        for window in windows { window.captureView.needsDisplay = true }
+    }
+
+        /// Новое выделение на одном экране сбрасывает выделение на остальных.
     func selectionBegan(in view: CaptureView) {
         for window in windows where window.captureView !== view {
             window.captureView.resetSelection()

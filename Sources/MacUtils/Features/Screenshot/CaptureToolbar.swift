@@ -25,37 +25,37 @@ final class CaptureToolbar: NSVisualEffectView {
 
         for (index, tool) in Tool.allCases.enumerated() {
             let button = makeButton(symbol: tool.symbol, fallback: String(tool.title.prefix(1)), tip: tool.title,
-                                    action: #selector(toolPressed(_:)))
+                                    label: tool.shortTitle, action: #selector(toolPressed(_:)))
             button.tag = index
             toolButtons[tool] = button
             stack.addArrangedSubview(button)
         }
         stack.addArrangedSubview(separator())
 
-        let color = makeButton(symbol: nil, fallback: "●", tip: "Цвет", action: #selector(colorPressed))
+        let color = makeButton(symbol: nil, fallback: "●", tip: "Цвет", label: "Цвет", action: #selector(colorPressed))
         colorButton = color
         stack.addArrangedSubview(color)
         stack.addArrangedSubview(makeButton(symbol: "arrow.uturn.backward", fallback: "↶",
-                                            tip: "Отменить (⌘Z или ⌃Z), повторить — ⇧⌘Z", action: #selector(undoPressed)))
+                                            tip: "Отменить (⌘Z или ⌃Z), повторить — ⇧⌘Z", label: "Отменить", action: #selector(undoPressed)))
         stack.addArrangedSubview(separator())
         let frame = makeButton(symbol: "macwindow", fallback: "▭",
-                               tip: "Рамка окна macOS (F)", action: #selector(framePressed))
+                               tip: "Рамка окна macOS (F)", label: "Окно", action: #selector(framePressed))
         frameButton = frame
         stack.addArrangedSubview(frame)
         stack.addArrangedSubview(makeButton(symbol: "square.stack.3d.down.right", fallback: "+",
-                                            tip: "Шаг + в коллаж (A)", action: #selector(stepPressed)))
+                                            tip: "Шаг + в коллаж (A)", label: "Шаг +", action: #selector(stepPressed)))
         stack.addArrangedSubview(makeButton(symbol: "record.circle", fallback: "●",
-                                            tip: "Запись экрана (R)", action: #selector(recordPressed)))
+                                            tip: "Запись экрана (R)", label: "Запись", action: #selector(recordPressed)))
         stack.addArrangedSubview(makeButton(symbol: "scroll", fallback: "⇕",
-                                            tip: "Длинный снимок с прокруткой", action: #selector(scrollPressed)))
+                                            tip: "Длинный снимок с прокруткой", label: "Длинный", action: #selector(scrollPressed)))
         stack.addArrangedSubview(makeButton(symbol: "text.viewfinder", fallback: "OCR",
-                                            tip: "Распознать текст", action: #selector(ocrPressed)))
+                                            tip: "Распознать текст", label: "OCR", action: #selector(ocrPressed)))
         stack.addArrangedSubview(makeButton(symbol: "square.and.arrow.down", fallback: "S",
-                                            tip: "Сохранить (⌘S)", action: #selector(savePressed)))
+                                            tip: "Сохранить (⌘S)", label: "Сохранить", action: #selector(savePressed)))
         stack.addArrangedSubview(makeButton(symbol: "doc.on.doc", fallback: "C",
-                                            tip: "Скопировать (⌘C)", action: #selector(copyPressed)))
+                                            tip: "Скопировать (⌘C)", label: "Копия", action: #selector(copyPressed)))
         stack.addArrangedSubview(makeButton(symbol: "xmark", fallback: "×",
-                                            tip: "Закрыть (Esc)", action: #selector(closePressed)))
+                                            tip: "Закрыть (Esc)", label: "Закрыть", action: #selector(closePressed)))
 
         let size = stack.fittingSize
         setFrameSize(size)
@@ -72,20 +72,33 @@ final class CaptureToolbar: NSVisualEffectView {
         colorButton?.image = Self.colorDot(color)
     }
 
-    private func makeButton(symbol: String?, fallback: String, tip: String, action: Selector) -> NSButton {
-        let button = ToolbarButton(title: fallback, target: self, action: action)
+    private static var showsLabels: Bool { UserDefaults.standard.bool(forKey: Pref.screenshotLabels) }
+
+    private func makeButton(symbol: String?, fallback: String, tip: String, label: String,
+                            action: Selector) -> NSButton {
+        let labels = Self.showsLabels
+        let button = ToolbarButton(title: labels ? label : fallback, target: self, action: action)
         if let symbol,
            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)?
-               .withSymbolConfiguration(.init(pointSize: 15, weight: .medium)) {
+               .withSymbolConfiguration(.init(pointSize: labels ? 14 : 15, weight: .medium)) {
             button.image = image
-            button.imagePosition = .imageOnly
+            button.imagePosition = labels ? .imageAbove : .imageOnly
+        } else if labels, symbol == nil {
+            button.imagePosition = .imageAbove
         }
         button.isBordered = false
         button.contentTintColor = .white
         button.toolTip = tip
+        if labels {
+            button.font = .systemFont(ofSize: 9, weight: .medium)
+            button.attributedTitle = NSAttributedString(string: label, attributes: [
+                .font: NSFont.systemFont(ofSize: 9, weight: .medium),
+                .foregroundColor: NSColor.white.withAlphaComponent(0.85),
+            ])
+        }
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 30).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        button.widthAnchor.constraint(equalToConstant: labels ? 50 : 30).isActive = true
+        button.heightAnchor.constraint(equalToConstant: labels ? 40 : 28).isActive = true
         return button
     }
 

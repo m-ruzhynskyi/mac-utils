@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             case "break": BreakReminder.shared.show()
             case "warm": WarmScreen.shared.preview()
+            case "warm-toggle": WarmScreen.shared.toggleManual()
             default: SettingsWindowController.shared.show()
             }
         }

@@ -141,11 +141,26 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     private var isEditing: Bool { mode == .edit && selection != nil && toolbar?.isHidden == false }
 
+    /// Окна под курсором выделяются сами (иначе — только своя область).
+    private var autoWindow: Bool { UserDefaults.standard.bool(forKey: Pref.screenshotWindowSnap) }
+
+    /// Переключатель «Окно / Область» вверху экрана, пока ничего не выделено.
+    private var modeSwitchRect: NSRect {
+        let size = NSSize(width: 300, height: 30)
+        return NSRect(x: bounds.midX - size.width / 2, y: bounds.maxY - size.height - 48, width: size.width, height: size.height)
+    }
+
+    func toggleWindowMode() {
+        UserDefaults.standard.set(!autoWindow, forKey: Pref.screenshotWindowSnap)
+        hoverRect = nil
+        ScreenshotService.shared.redrawAll()
+    }
+
     override func mouseMoved(with event: NSEvent) {
         let p = point(event)
         updateCursor(at: p)
         guard selection == nil, !isSelecting else { return }
-        let hover = snapRects.first { $0.contains(p) }
+        let hover = autoWindow && !modeSwitchRect.contains(p) ? snapRects.first { $0.contains(p) } : nil
         if hover != hoverRect {
             hoverRect = hover
             needsDisplay = true
@@ -186,6 +201,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     override func mouseDown(with event: NSEvent) {
         let p = point(event)
+        if selection == nil, !isSelecting, modeSwitchRect.contains(p) {
+            toggleWindowMode()
+            return
+        }
         if textField != nil {
             commitTextField()
             return
@@ -303,7 +322,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             if let rect = selection, rect.width >= 4, rect.height >= 4 {
                 selection = rect.integral.intersection(bounds)
             } else {
-                // Простой клик: снимок окна под курсором или всего экрана.
+                // Простой клик: снимок окна под курсором или всего экрана;
+                // в режиме «Область» клик ничего не снимает — нужно выделить.
+                guard autoWindow else {
+                    selection = nil
+                    needsDisplay = true
+                    return
+                }
                 selection = hoverRect ?? bounds
             }
             hoverRect = nil
@@ -568,6 +593,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             return true
         }
         switch code {
+        case kVK_Tab where selection == nil:
+            toggleWindowMode()
         case kVK_Escape:
             if selectedIndex != nil {
                 selectedIndex = nil
@@ -759,6 +786,30 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     // MARK: - Отрисовка
 
+    /// «Окно (авто) | Область» — клик или Tab переключает.
+    private func drawModeSwitch() {
+        let rect = modeSwitchRect
+        NSColor.black.withAlphaComponent(0.65).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 15, yRadius: 15).fill()
+        let half = rect.width / 2
+        let active = NSRect(x: autoWindow ? rect.minX + 3 : rect.minX + half, y: rect.minY + 3,
+                            width: half - 3, height: rect.height - 6)
+        NSColor.systemBlue.setFill()
+        NSBezierPath(roundedRect: active, xRadius: 12, yRadius: 12).fill()
+        for (index, title) in ["Окно под курсором", "Своя область"].enumerated() {
+            let text = NSAttributedString(string: title, attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white,
+            ])
+            let size = text.size()
+            let x = rect.minX + half * CGFloat(index) + (half - size.width) / 2
+            text.draw(at: NSPoint(x: x, y: rect.midY - size.height / 2))
+        }
+        let hint = NSAttributedString(string: "Tab — переключить", attributes: [
+            .font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.white.withAlphaComponent(0.8),
+        ])
+        hint.draw(at: NSPoint(x: rect.midX - hint.size().width / 2, y: rect.minY - 16))
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         baseImage.draw(in: bounds)
 
@@ -773,6 +824,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 NSColor.black.withAlphaComponent(0.3).setFill()
                 bounds.fill()
             }
+            drawModeSwitch()
             return
         }
 
