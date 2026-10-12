@@ -247,6 +247,14 @@ struct MeetingsPage: View {
                         Spacer()
                         if meeting.hasReport { Button("Отчёт") { NSWorkspace.shared.open(meeting.report) } }
                         if meeting.hasTranscript { Button("Текст") { NSWorkspace.shared.open(meeting.transcript) } }
+                        if meeting.hasTranscript {
+                            Button { Task { await recorder.process(meeting, reportOnly: true) } } label: {
+                                Image(systemName: "doc.text.magnifyingglass")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Сделать отчёт заново (расшифровка останется)")
+                            .disabled(recorder.state != .idle)
+                        }
                         Button { Task { await recorder.process(meeting) } } label: {
                             Image(systemName: meeting.hasReport ? "arrow.clockwise" : "text.badge.plus")
                         }

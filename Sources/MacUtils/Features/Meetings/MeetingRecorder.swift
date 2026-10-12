@@ -258,13 +258,15 @@ final class MeetingRecorder: NSObject, ObservableObject {
 
     // MARK: - Расшифровка и отчёт
 
-    func process(_ meeting: Meeting) async {
+    /// reportOnly — расшифровка уже есть, заново делаем только отчёт.
+    func process(_ meeting: Meeting, reportOnly: Bool = false) async {
         busyFolder = meeting.folder
         defer { busyFolder = nil }
         let tracks: [(file: String, speaker: String)] = [("Собеседники.m4a", "Собеседники"), ("Я.m4a", "Я")]
         do {
             var lines: [TranscriptLine] = []
-            for track in tracks {
+            let existing = reportOnly ? try? String(contentsOf: meeting.transcript, encoding: .utf8) : nil
+            for track in tracks where existing == nil {
                 let url = meeting.folder.appendingPathComponent(track.file)
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
                 let step = "Расшифровываю: \(track.speaker.lowercased())"
@@ -279,7 +281,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
                 }
             }
             Log.audio.info("Встреча: \(lines.count) реплик")
-            let transcript = MeetingText.format(MeetingText.merge(lines))
+            let transcript = existing ?? MeetingText.format(MeetingText.merge(lines))
             guard !transcript.isEmpty else {
                 Log.audio.info("Встреча: речи не найдено")
                 state = .idle
@@ -287,7 +289,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
                 Toast.show("В записи не нашлось речи", symbol: "waveform.slash", tint: .orange)
                 return
             }
-            try transcript.write(to: meeting.transcript, atomically: true, encoding: .utf8)
+            if existing == nil { try transcript.write(to: meeting.transcript, atomically: true, encoding: .utf8) }
             // На пару фраз отчёт не нужен — модель начнёт выдумывать.
             let words = transcript.split(whereSeparator: \.isWhitespace).count
             if words < 40 { try? FileManager.default.removeItem(at: meeting.report) }

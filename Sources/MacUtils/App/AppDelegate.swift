@@ -74,6 +74,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "pin": WindowPin.shared.toggleFocused()
             case "fix-text": TextFixer.shared.fix()
             case "meeting": MeetingRecorder.shared.toggle()
+            case "meeting-report":
+                if let name = url.query?.removingPercentEncoding {
+                    let folder = MeetingRecorder.root.appendingPathComponent(name, isDirectory: true)
+                    Task { await MeetingRecorder.shared.process(.init(folder: folder), reportOnly: true) }
+                }
             case "meeting-process":
                 // macutils://meeting-process?2026-10-07%2020.30 — заново расшифровать встречу из папки «Встречи».
                 if let name = url.query?.removingPercentEncoding {
