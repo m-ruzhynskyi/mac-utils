@@ -79,7 +79,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
         case processing(String)
     }
 
-    @Published private(set) var state: State = .idle
+    @Published fileprivate(set) var state: State = .idle
     @Published private(set) var meetings: [Meeting] = []
     @Published private(set) var lastError: String?
 
@@ -243,8 +243,16 @@ final class MeetingRecorder: NSObject, ObservableObject {
             for track in tracks {
                 let url = meeting.folder.appendingPathComponent(track.file)
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
-                state = .processing("Расшифровываю: \(track.speaker.lowercased())…")
-                lines += try await Transcriber.transcribe(url, speaker: track.speaker)
+                let step = "Расшифровываю: \(track.speaker.lowercased())"
+                state = .processing(step + "…")
+                if Whisper.isReady, UserDefaults.standard.string(forKey: Pref.meetingsEngine) != "apple" {
+                    let language = UserDefaults.standard.string(forKey: Pref.meetingsLanguage) ?? "auto"
+                    lines += try await Whisper.transcribe(url, speaker: track.speaker, language: language) { percent in
+                        Task { @MainActor in MeetingRecorder.shared.state = .processing("\(step)… \(percent) %") }
+                    }
+                } else {
+                    lines += try await Transcriber.transcribe(url, speaker: track.speaker)
+                }
             }
             Log.audio.info("Встреча: \(lines.count) реплик")
             let transcript = MeetingText.format(MeetingText.merge(lines))
@@ -256,9 +264,14 @@ final class MeetingRecorder: NSObject, ObservableObject {
                 return
             }
             try transcript.write(to: meeting.transcript, atomically: true, encoding: .utf8)
-            if Ollama.isOn(Pref.meetingsReport) {
+            // На пару фраз отчёт не нужен — модель начнёт выдумывать.
+            let words = transcript.split(whereSeparator: \.isWhitespace).count
+            if words < 40 { try? FileManager.default.removeItem(at: meeting.report) }
+            if Ollama.isOn(Pref.meetingsReport), words >= 40 {
                 state = .processing("Готовлю отчёт…")
-                let report = try await Self.report(for: transcript)
+                let report = try await Self.report(for: transcript) { step in
+                    Task { @MainActor in MeetingRecorder.shared.state = .processing(step) }
+                }
                 try ("# Встреча \(meeting.title)\n\n" + report).write(to: meeting.report, atomically: true, encoding: .utf8)
             }
             state = .idle
@@ -276,30 +289,42 @@ final class MeetingRecorder: NSObject, ObservableObject {
     }
 
     static let reportSystem = """
-    Ты секретарь встречи. По расшифровке созвона составь отчёт на русском в Markdown строго с разделами:
-    ## Итог — 3–6 предложений о сути.
-    ## Решения — что решили (без галочек, например «- Релиз в пятницу»).
-    ## Задачи — только поручения: «- [ ] кто: что (срок, если назван)».
+    Ты опытный секретарь встреч. Тебе дают расшифровку созвона (речь может быть на украинском, русском \
+    или английском; в расшифровке бывают ошибки распознавания — восстанавливай смысл по контексту).
+    «Я» — владелец записи, «Собеседники» — остальные участники.
+    Составь отчёт строго НА РУССКОМ (украинские и английские фразы переводи) в Markdown с разделами:
+    ## Итог — 4–8 предложений: о чём встреча, ключевые факты, цифры, имена, договорённости.
+    ## Темы — список обсуждённых тем, по одной строке с сутью каждой.
+    ## Решения — что решили, по одному пункту.
+    ## Задачи — поручения в виде «- [ ] исполнитель: действие», срок — только если он прямо назван в расшифровке.
     ## Открытые вопросы — что осталось нерешённым.
-    Пиши только то, что есть в расшифровке; если раздел пуст — «нет». «Я» — владелец записи.
+    Опирайся только на расшифровку, ничего не выдумывай и не добавляй того, чего в ней нет. \
+    Если раздел пуст — «нет».
     """
 
     /// Длинные встречи — сначала конспект по частям, затем общий отчёт.
-    nonisolated static func report(for transcript: String) async throws -> String {
-        let parts = MeetingText.chunks(transcript, limit: 12_000)
+    nonisolated static func report(for transcript: String,
+                                   progress: @escaping @Sendable (String) -> Void = { _ in }) async throws -> String {
+        let parts = MeetingText.chunks(transcript, limit: 9_000)
         if parts.count == 1 {
-            return try await Ollama.generate(transcript, system: reportSystem, temperature: 0.2, timeout: 600, context: 16_384, maxTokens: 1500)
+            progress("Готовлю отчёт…")
+            return try await Ollama.generate(transcript, system: reportSystem, temperature: 0.2, timeout: 900,
+                                             context: 8_192, maxTokens: 1200)
         }
         var notes: [String] = []
         for (index, part) in parts.enumerated() {
+            progress("Отчёт: часть \(index + 1) из \(parts.count)…")
             let note = try await Ollama.generate(
-                part, system: "Кратко законспектируй эту часть созвона (\(index + 1) из \(parts.count)) по-русски: "
-                    + "о чём говорили, решения, задачи с исполнителями и сроками.",
-                temperature: 0.2, timeout: 600, context: 16_384, maxTokens: 1500)
+                part, system: "Это часть \(index + 1) из \(parts.count) расшифровки созвона (речь на украинском, русском "
+                    + "или английском, возможны ошибки распознавания). Сжато законспектируй её строго по-русски списком "
+                    + "до 12 пунктов: темы и ключевые факты (цифры, имена, даты), решения, задачи с исполнителями "
+                    + "и сроками (только если названы), открытые вопросы. Ничего не выдумывай.",
+                temperature: 0.2, timeout: 900, context: 8_192, maxTokens: 500)
             notes.append("Часть \(index + 1):\n\(note)")
         }
+        progress("Отчёт: собираю итог…")
         return try await Ollama.generate(notes.joined(separator: "\n\n"), system: reportSystem,
-                                         temperature: 0.2, timeout: 600, context: 16_384, maxTokens: 1500)
+                                         temperature: 0.2, timeout: 900, context: 8_192, maxTokens: 1200)
     }
 
     // MARK: - Индикатор записи
@@ -428,7 +453,8 @@ enum Transcriber {
     }
 
     static var locale: Locale {
-        Locale(identifier: UserDefaults.standard.string(forKey: Pref.meetingsLanguage) ?? "ru_RU")
+        let setting = UserDefaults.standard.string(forKey: Pref.meetingsLanguage) ?? "auto"
+        return Locale(identifier: setting == "auto" ? "ru_RU" : setting)
     }
 
     /// Расшифровка на устройстве: SpeechAnalyzer (macOS 26+), иначе SFSpeechRecognizer без сети.

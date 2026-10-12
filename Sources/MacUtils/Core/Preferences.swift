@@ -117,6 +117,8 @@ enum Pref {
     static let meetingsMicrophone = "meetingsMicrophone"
     static let meetingsLanguage = "meetingsLanguage"
     static let meetingsReport = "meetingsReport"
+    /// Движок расшифровки: "whisper" (если установлен) или "apple".
+    static let meetingsEngine = "meetingsEngine"
 
     static let layoutFix = "layoutFixEnabled"
     /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
@@ -196,7 +198,8 @@ enum Pref {
             aiShelf: true,
             meetings: true,
             meetingsMicrophone: true,
-            meetingsLanguage: "ru_RU",
+            meetingsLanguage: "auto",
+            meetingsEngine: "whisper",
             meetingsReport: true,
             layoutFix: true,
             layoutFixSwitchSource: false,

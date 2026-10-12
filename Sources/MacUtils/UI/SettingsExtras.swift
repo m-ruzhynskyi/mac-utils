@@ -145,7 +145,9 @@ struct WellbeingPage: View {
 struct MeetingsPage: View {
     @AppStorage(Pref.meetings) private var enabled = true
     @AppStorage(Pref.meetingsMicrophone) private var microphone = true
-    @AppStorage(Pref.meetingsLanguage) private var language = "ru_RU"
+    @AppStorage(Pref.meetingsLanguage) private var language = "auto"
+    @AppStorage(Pref.meetingsEngine) private var engine = "whisper"
+    @ObservedObject private var whisper = Whisper.shared
     @AppStorage(Pref.meetingsReport) private var report = true
     @ObservedObject private var recorder = MeetingRecorder.shared
 
@@ -153,7 +155,7 @@ struct MeetingsPage: View {
         Form {
             Section {
                 Toggle("Записи встреч", isOn: $enabled)
-                Text("Записывает звук созвона (собеседников и ваш микрофон отдельно), расшифровывает прямо на Mac встроенным распознаванием речи Apple, а локальная модель (Ollama) делает отчёт: итог, решения, задачи. Можно расшифровать и готовую запись. Ничего не уходит в интернет.")
+                Text("Записывает звук созвона (собеседников и ваш микрофон отдельно), расшифровывает прямо на Mac (Whisper или распознавание Apple), а локальная модель (Ollama) делает отчёт: итог, решения, задачи. Можно расшифровать и готовую запись. Ничего не уходит в интернет.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     switch recorder.state {
@@ -175,15 +177,41 @@ struct MeetingsPage: View {
                     Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 }
             }
+            Section("Расшифровка") {
+                Picker("Движок", selection: $engine) {
+                    Text("Whisper (лучше, рекомендуется)").tag("whisper")
+                    Text("Apple (встроенный)").tag("apple")
+                }
+                if engine == "whisper" {
+                    if Whisper.isReady {
+                        Label("Whisper готов: large-v3-turbo, украинский, русский, английский", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else if let progress = whisper.downloadProgress {
+                        ProgressView(value: progress) { Text("Скачиваю модель Whisper…") }
+                    } else {
+                        HStack {
+                            Text(whisper.message ?? "Whisper не установлен — пока используется распознавание Apple.")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            if whisper.installing { ProgressView().controlSize(.small) }
+                            Button("Установить Whisper") { whisper.install() }.disabled(whisper.installing)
+                        }
+                        Text("whisper.cpp через Homebrew и модель около 550 МБ. Работает без интернета.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .disabled(!enabled)
             Section("Настройки") {
                 Toggle("Записывать мой микрофон", isOn: $microphone)
                 Picker("Язык встреч", selection: $language) {
+                    Text("Определять сам").tag("auto")
                     Text("Русский").tag("ru_RU")
                     Text("Українська").tag("uk_UA")
                     Text("English").tag("en_US")
                 }
                 Toggle("Отчёт ИИ после расшифровки", isOn: $report)
-                Text("Нужны разрешения «Запись экрана» (звук системы) и «Микрофон». Языковая модель Apple для расшифровки скачивается один раз.")
+                Text("Нужны разрешения «Запись экрана» (звук системы) и «Микрофон». «Определять сам» — Whisper узнаёт язык по каждой дорожке.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .disabled(!enabled)
@@ -198,10 +226,12 @@ struct MeetingsPage: View {
                         Spacer()
                         if meeting.hasReport { Button("Отчёт") { NSWorkspace.shared.open(meeting.report) } }
                         if meeting.hasTranscript { Button("Текст") { NSWorkspace.shared.open(meeting.transcript) } }
-                        if !meeting.hasTranscript || !meeting.hasReport {
-                            Button("Обработать") { Task { await recorder.process(meeting) } }
-                                .disabled(recorder.state != .idle)
+                        Button { Task { await recorder.process(meeting) } } label: {
+                            Image(systemName: meeting.hasReport ? "arrow.clockwise" : "text.badge.plus")
                         }
+                        .buttonStyle(.borderless)
+                        .help(meeting.hasReport ? "Расшифровать и сделать отчёт заново" : "Расшифровать и сделать отчёт")
+                        .disabled(recorder.state != .idle)
                         Button { NSWorkspace.shared.open(meeting.folder) } label: { Image(systemName: "folder") }
                             .buttonStyle(.borderless)
                     }
