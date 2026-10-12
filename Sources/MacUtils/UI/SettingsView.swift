@@ -253,15 +253,17 @@ private func accessibilityStatus(_ model: PermissionsModel, running: Bool, ready
 struct GeneralPage: View {
     @ObservedObject private var permissions = PermissionsModel.shared
     @AppStorage(Pref.menuBarIcon) private var menuBarIcon = true
+    @AppStorage(Pref.showInDock) private var showInDock = false
 
     var body: some View {
         Form {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Mac Utils работает в фоне, без иконки в Dock.")
+                    Text(showInDock ? "Mac Utils показан в Dock: клик по значку открывает настройки." : "Mac Utils работает в фоне, без иконки в Dock.")
                     Text("Открыть это окно: запустите приложение ещё раз или нажмите ⌃⌥⌘ ,")
                         .foregroundStyle(.secondary)
                 }
+                Toggle("Показывать в Dock", isOn: $showInDock)
                 Toggle("Значок в строке меню", isOn: $menuBarIcon)
                 Text("Клик — панель «Инструменты» со вкладками прямо под значком (или ⌃⌥⌘T). Настройки и выход — в шапке панели.")
                     .foregroundStyle(.secondary)
@@ -646,6 +648,7 @@ struct ShelfPage: View {
 struct CheatSheetPage: View {
     @AppStorage(Pref.cheatSheet) private var enabled = true
     @AppStorage(Pref.cheatSheetDelay) private var delay = 0.8
+    @AppStorage(Pref.cheatSheetSticky) private var sticky = false
     @ObservedObject private var permissions = PermissionsModel.shared
     @ObservedObject private var service = CheatSheet.shared
 
@@ -667,6 +670,16 @@ struct CheatSheetPage: View {
                     Text("1,2 с").tag(1.2)
                     Text("2 с").tag(2.0)
                 }
+                Toggle(isOn: $sticky) {
+                    VStack(alignment: .leading) {
+                        Text("Оставлять открытой")
+                        Text(sticky ? "Подержали ⌘ — шпаргалка открылась и остаётся; нажмите ⌘ ещё раз (или Esc), чтобы закрыть."
+                                    : "Шпаргалка видна, только пока ⌘ зажата.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text("Когда сочетаний много, листайте колесом мыши или трекпадом, наведя курсор на шпаргалку.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .disabled(!enabled)
         }

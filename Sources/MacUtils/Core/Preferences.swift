@@ -82,6 +82,10 @@ enum Pref {
     static let appInputRemembered = "appInputSourceRemembered"
     /// Значок Mac Utils в строке меню (клик — «Инструменты»).
     static let menuBarIcon = "menuBarIconEnabled"
+    /// Показывать Mac Utils в Dock (по умолчанию нет — работает в фоне).
+    static let showInDock = "showInDock"
+    /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.
+    static let cheatSheetSticky = "cheatSheetSticky"
 
     /// Напоминание о перерыве: каждые N минут, длительность перерыва в секундах.
     static let breakReminder = "breakReminderEnabled"
@@ -161,6 +165,8 @@ enum Pref {
             windowSnapModifier: "controlOption",
             appVolume: true,
             menuBarIcon: true,
+            showInDock: false,
+            cheatSheetSticky: false,
             dropShelf: true,
             cheatSheet: true,
             cheatSheetDelay: 0.8,

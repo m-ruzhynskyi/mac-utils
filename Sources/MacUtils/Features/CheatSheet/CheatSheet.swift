@@ -87,16 +87,48 @@ final class CheatSheet: ObservableObject {
 
     // MARK: - Удержание ⌘
 
+    /// ⌘ сейчас зажата (чтобы повторное нажатие закрывало закреплённую шпаргалку).
+    private var commandDown = false
+
+    private var isVisible: Bool { panel?.isVisible == true }
+
+    private var sticky: Bool { UserDefaults.standard.bool(forKey: Pref.cheatSheetSticky) }
+
+    /// Курсор над шпаргалкой: прокрутка и клики внутри её не закрывают.
+    private var mouseInside: Bool {
+        guard let panel, panel.isVisible else { return false }
+        return NSMouseInRect(NSEvent.mouseLocation, panel.frame, false)
+    }
+
     private func handle(type: CGEventType, event: CGEvent) {
-        guard type == .flagsChanged else {
-            // Любая клавиша или клик — это не «просто держу ⌘».
+        switch type {
+        case .scrollWheel:
+            // Прокрутка над шпаргалкой листает её; в другом месте — значит, пользователь занят другим.
+            if mouseInside { return }
+            if !isVisible { cancelTimer() } else if !sticky { cancel() }
+            return
+        case .leftMouseDown:
+            if mouseInside { return }
             cancel()
             return
+        case .keyDown:
+            // Любая клавиша — это не «просто держу ⌘».
+            cancel()
+            return
+        default:
+            break
         }
         let relevant: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl, .maskSecondaryFn]
         let flags = event.flags.intersection(relevant)
         if flags == .maskCommand {
-            guard holdTimer == nil, panel?.isVisible != true else { return }
+            defer { commandDown = true }
+            guard !commandDown else { return }
+            if isVisible {
+                // Закреплённая шпаргалка: повторное нажатие ⌘ закрывает.
+                if sticky { cancel() }
+                return
+            }
+            guard holdTimer == nil else { return }
             let delay = max(0.4, UserDefaults.standard.double(forKey: Pref.cheatSheetDelay))
             let timer = Timer(timeInterval: delay, repeats: false) { _ in
                 MainActor.assumeIsolated { CheatSheet.shared.show() }
@@ -104,13 +136,20 @@ final class CheatSheet: ObservableObject {
             RunLoop.main.add(timer, forMode: .common)
             holdTimer = timer
         } else {
-            cancel()
+            commandDown = false
+            cancelTimer()
+            // Отпустили ⌘: обычная шпаргалка закрывается, закреплённая остаётся.
+            if !(sticky && isVisible) { cancel() }
         }
     }
 
-    private func cancel() {
+    private func cancelTimer() {
         holdTimer?.invalidate()
         holdTimer = nil
+    }
+
+    private func cancel() {
+        cancelTimer()
         panel?.orderOut(nil)
     }
 
@@ -164,7 +203,8 @@ final class CheatSheet: ObservableObject {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.level = .statusBar
-        panel.ignoresMouseEvents = true
+        // Колесо мыши над шпаргалкой листает список.
+        panel.ignoresMouseEvents = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.contentView = host
         self.panel = panel
@@ -247,7 +287,10 @@ struct CheatSheetView: View {
                 }
                 Text(sheet.appName).font(.title3.weight(.semibold))
                 Spacer()
-                Text("Отпустите ⌘, чтобы закрыть").font(.caption).foregroundStyle(.secondary)
+                Text(UserDefaults.standard.bool(forKey: Pref.cheatSheetSticky)
+                     ? "Нажмите ⌘ или Esc, чтобы закрыть · колесо мыши — листать"
+                     : "Отпустите ⌘, чтобы закрыть · колесо мыши — листать")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if sheet.loading {
                 ProgressView().frame(maxWidth: .infinity)
