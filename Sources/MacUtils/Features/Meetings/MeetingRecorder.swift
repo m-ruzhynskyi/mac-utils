@@ -85,6 +85,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
 
     private var stream: SCStream?
     private var writer: MeetingWriter?
+    private var echoFree: EchoFreeMicrophone?
     private var folder: URL?
     private var hud: NSPanel?
 
@@ -108,6 +109,12 @@ final class MeetingRecorder: NSObject, ObservableObject {
         let folders = (try? FileManager.default.contentsOfDirectory(at: Self.root, includingPropertiesForKeys: nil,
                                                                     options: [.skipsHiddenFiles])) ?? []
         meetings = folders.filter { $0.hasDirectoryPath }.map(Meeting.init).sorted { $0.title > $1.title }
+    }
+
+    /// Встречу целиком (звук, расшифровка, отчёт) — в Корзину.
+    func delete(_ meeting: Meeting) {
+        try? FileManager.default.trashItem(at: meeting.folder, resultingItemURL: nil)
+        reload()
     }
 
     func toggle() {
@@ -153,24 +160,35 @@ final class MeetingRecorder: NSObject, ObservableObject {
         config.excludesCurrentProcessAudio = true
         config.sampleRate = 48_000
         config.channelCount = 2
-        var mic = false
-        if #available(macOS 15.0, *), UserDefaults.standard.bool(forKey: Pref.meetingsMicrophone) {
-            config.captureMicrophone = true
-            mic = true
-        }
+        let wantsMic = UserDefaults.standard.bool(forKey: Pref.meetingsMicrophone)
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH.mm"
         let folder = Self.root.appendingPathComponent(formatter.string(from: Date()), isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let writer = try MeetingWriter(folder: folder, microphone: mic)
+        let writer = try MeetingWriter(folder: folder, microphone: wantsMic)
+        // Микрофон — с подавлением эха: голоса собеседников из динамиков не попадают в «Я».
+        var echoFree: EchoFreeMicrophone?
+        if wantsMic {
+            let candidate = EchoFreeMicrophone { [weak writer] buffer, pts in
+                writer?.queue.async { writer?.write(buffer, at: pts, track: .microphone) }
+            }
+            do {
+                try candidate.start()
+                echoFree = candidate
+            } catch {
+                Log.audio.error("Встреча: подавление эха недоступно: \(error.localizedDescription, privacy: .public)")
+                if #available(macOS 15.0, *) { config.captureMicrophone = true }
+            }
+        }
         let stream = SCStream(filter: filter, configuration: config, delegate: writer)
         try stream.addStreamOutput(writer, type: .screen, sampleHandlerQueue: writer.queue)
         try stream.addStreamOutput(writer, type: .audio, sampleHandlerQueue: writer.queue)
-        if #available(macOS 15.0, *), mic {
+        if #available(macOS 15.0, *), wantsMic, echoFree == nil {
             try stream.addStreamOutput(writer, type: .microphone, sampleHandlerQueue: writer.queue)
         }
         try await stream.startCapture()
+        self.echoFree = echoFree
         self.stream = stream
         self.writer = writer
         self.folder = folder
@@ -180,6 +198,8 @@ final class MeetingRecorder: NSObject, ObservableObject {
         guard case .recording = state, let stream, let writer, let folder else { return }
         self.stream = nil
         self.writer = nil
+        echoFree?.stop()
+        echoFree = nil
         hud?.orderOut(nil)
         hud = nil
         state = .processing("Сохраняю запись…")
@@ -376,23 +396,29 @@ private struct MeetingHUD: View {
 /// времени пропускал куски, когда был занят, и речь распознавалась обрывками).
 final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "macutils.meeting")
-    private let urls: [SCStreamOutputType: URL]
-    private var files: [SCStreamOutputType: AVAudioFile] = [:]
+    enum Track { case system, microphone }
+
+    private let urls: [Track: URL]
+    private var files: [Track: AVAudioFile] = [:]
     private var start: CMTime?
     private var finished = false
 
     init(folder: URL, microphone: Bool) throws {
-        var urls: [SCStreamOutputType: URL] = [.audio: folder.appendingPathComponent("Собеседники.m4a")]
-        if #available(macOS 15.0, *), microphone { urls[.microphone] = folder.appendingPathComponent("Я.m4a") }
+        var urls: [Track: URL] = [.system: folder.appendingPathComponent("Собеседники.m4a")]
+        if microphone { urls[.microphone] = folder.appendingPathComponent("Я.m4a") }
         self.urls = urls
         super.init()
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard !finished, sampleBuffer.isValid, let url = urls[type],
-              let description = sampleBuffer.formatDescription,
+        guard sampleBuffer.isValid, type != .screen, let description = sampleBuffer.formatDescription,
               let buffer = Self.pcm(from: sampleBuffer, description: description) else { return }
-        let pts = sampleBuffer.presentationTimeStamp
+        write(buffer, at: sampleBuffer.presentationTimeStamp, track: type == .audio ? .system : .microphone)
+    }
+
+    /// Вызывается на queue.
+    func write(_ buffer: AVAudioPCMBuffer, at pts: CMTime, track type: Track) {
+        guard !finished, let url = urls[type] else { return }
         if start == nil { start = pts }
         do {
             if files[type] == nil {

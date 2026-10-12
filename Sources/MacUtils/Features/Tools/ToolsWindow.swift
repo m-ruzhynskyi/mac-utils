@@ -32,6 +32,13 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
             }
         }
 
+        /// Вкладки, которые показываются в панели 🔧 (хотя бы одна).
+        static func visible(hidden: String) -> [Tab] {
+            let hiddenSet = Set(hidden.split(separator: ",").map(String.init))
+            let tabs = allCases.filter { !hiddenSet.contains($0.rawValue) }
+            return tabs.isEmpty ? allCases : tabs
+        }
+
         var symbol: String {
             switch self {
             case .uninstaller: return "trash"
@@ -88,6 +95,15 @@ final class ToolsWindow: NSWindow {
 
 struct ToolsView: View {
     @AppStorage(Pref.toolsTab) private var tab = ToolsWindowController.Tab.uninstaller.rawValue
+    @AppStorage(Pref.toolsHiddenTabs) private var hidden = ""
+
+    private var visibleTabs: [ToolsWindowController.Tab] { ToolsWindowController.Tab.visible(hidden: hidden) }
+
+    /// Выбранная вкладка скрыта — показываем первую видимую.
+    private var currentTab: ToolsWindowController.Tab {
+        let selected = ToolsWindowController.Tab(rawValue: tab) ?? .uninstaller
+        return visibleTabs.contains(selected) ? selected : visibleTabs[0]
+    }
     /// В панели из строки меню — шапка с настройками и выходом.
     var inPopover = false
 
@@ -108,8 +124,8 @@ struct ToolsView: View {
 
     /// Панель из строки меню: короткие вкладки со значками.
     private var compactTabs: some View {
-        Picker("Вкладка", selection: $tab) {
-            ForEach(ToolsWindowController.Tab.allCases) { item in
+        Picker("Вкладка", selection: Binding(get: { currentTab.rawValue }, set: { tab = $0 })) {
+            ForEach(visibleTabs) { item in
                 Label(item.shortTitle, systemImage: item.symbol).tag(item.rawValue)
             }
         }
@@ -122,7 +138,7 @@ struct ToolsView: View {
 
     @ViewBuilder
     private var compactContent: some View {
-        switch ToolsWindowController.Tab(rawValue: tab) ?? .uninstaller {
+        switch currentTab {
         case .uninstaller: UninstallerPage(compact: true)
         case .monitor: SystemMonitorView(model: .shared, compact: true)
         case .tasks: TaskManagerView(model: .shared, compact: true)

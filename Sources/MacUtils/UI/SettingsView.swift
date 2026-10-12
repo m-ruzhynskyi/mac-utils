@@ -254,6 +254,17 @@ struct GeneralPage: View {
     @ObservedObject private var permissions = PermissionsModel.shared
     @AppStorage(Pref.menuBarIcon) private var menuBarIcon = true
     @AppStorage(Pref.showInDock) private var showInDock = false
+    @AppStorage(Pref.toolsHiddenTabs) private var hiddenTabs = ""
+
+    private func tabBinding(_ tab: ToolsWindowController.Tab) -> Binding<Bool> {
+        Binding(get: { !hiddenTabs.split(separator: ",").contains(Substring(tab.rawValue)) }, set: { show in
+            var set = Set(hiddenTabs.split(separator: ",").map(String.init))
+            if show { set.remove(tab.rawValue) } else { set.insert(tab.rawValue) }
+            // Хотя бы одна вкладка остаётся.
+            guard set.count < ToolsWindowController.Tab.allCases.count else { return }
+            hiddenTabs = set.sorted().joined(separator: ",")
+        })
+    }
 
     var body: some View {
         Form {
@@ -265,6 +276,15 @@ struct GeneralPage: View {
                 }
                 Toggle("Показывать в Dock", isOn: $showInDock)
                 Toggle("Значок в строке меню", isOn: $menuBarIcon)
+                if menuBarIcon {
+                    LabeledContent("Вкладки в панели 🔧") {
+                        HStack(spacing: 10) {
+                            ForEach(ToolsWindowController.Tab.allCases) { tab in
+                                Toggle(tab.shortTitle, isOn: tabBinding(tab)).toggleStyle(.checkbox)
+                            }
+                        }
+                    }
+                }
                 Text("Клик — панель «Инструменты» со вкладками прямо под значком (или ⌃⌥⌘T). Настройки и выход — в шапке панели.")
                     .foregroundStyle(.secondary)
             }
@@ -907,6 +927,8 @@ struct ScreenshotPage: View {
     @AppStorage(Pref.screenshotStepsFrame) private var stepsFrame = true
     @AppStorage(Pref.screenshotStepsTitles) private var stepsTitles = true
     @AppStorage(Pref.screenshotFrameDefault) private var frameDefault = false
+    @AppStorage(Pref.screenshotWindowSnap) private var windowSnap = true
+    @AppStorage(Pref.screenshotLabels) private var toolbarLabels = true
     @AppStorage(Pref.screenshotBackground) private var background = ShotBackground.sky.rawValue
     @AppStorage(Pref.screenshotLibrary) private var library = true
     @AppStorage(Pref.screenshotLibrarySystem) private var librarySystem = false
@@ -937,6 +959,16 @@ struct ScreenshotPage: View {
                                })
                 }
             }
+            Section("Выбор области") {
+                Picker("Что снимать", selection: $windowSnap) {
+                    Text("Окно под курсором (клик) или своя область").tag(true)
+                    Text("Только своя область").tag(false)
+                }
+                Text("Переключается и прямо при съёмке: кнопка вверху экрана или Tab.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Подписи под значками на панели", isOn: $toolbarLabels)
+            }
+            .disabled(!enabled)
             Section("Сохранение") {
                 Picker("Куда сохранять", selection: $destination) {
                     Text("В буфер обмена").tag("clipboard")

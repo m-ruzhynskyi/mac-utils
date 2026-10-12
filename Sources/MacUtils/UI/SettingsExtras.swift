@@ -150,6 +150,7 @@ struct MeetingsPage: View {
     @ObservedObject private var whisper = Whisper.shared
     @AppStorage(Pref.meetingsReport) private var report = true
     @ObservedObject private var recorder = MeetingRecorder.shared
+    @State private var deleting: MeetingRecorder.Meeting?
 
     var body: some View {
         Form {
@@ -234,12 +235,26 @@ struct MeetingsPage: View {
                         .disabled(recorder.state != .idle)
                         Button { NSWorkspace.shared.open(meeting.folder) } label: { Image(systemName: "folder") }
                             .buttonStyle(.borderless)
+                        Button { deleting = meeting } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless)
+                            .help("Удалить запись (в Корзину)")
+                            .disabled(recorder.state != .idle)
                     }
                 }
             }
         }
         .formStyle(.grouped)
         .navigationTitle("Записи встреч")
+        .alert("Удалить запись «\(deleting?.title ?? "")»?", isPresented: Binding(
+            get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+            Button("В Корзину", role: .destructive) {
+                if let meeting = deleting { recorder.delete(meeting) }
+                deleting = nil
+            }
+            Button("Отмена", role: .cancel) { deleting = nil }
+        } message: {
+            Text("Звук, расшифровка и отчёт уйдут в Корзину.")
+        }
         .onAppear { recorder.reload() }
     }
 }

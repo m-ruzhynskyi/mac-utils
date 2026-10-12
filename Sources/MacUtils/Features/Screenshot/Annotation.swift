@@ -29,6 +29,20 @@ enum Tool: CaseIterable {
         }
     }
 
+    /// Подпись под значком на панели.
+    var shortTitle: String {
+        switch self {
+        case .select: return "Выбор"
+        case .arrow: return "Стрелка"
+        case .rectangle: return "Прямоуг."
+        case .pen: return "Карандаш"
+        case .marker: return "Маркер"
+        case .text: return "Текст"
+        case .counter: return "Номер"
+        case .pixelate: return "Размытие"
+        }
+    }
+
     /// Клавиша-цифра для инструмента (без «выбора», у него V).
     static let numbered: [Tool] = [.arrow, .rectangle, .pen, .marker, .text, .counter, .pixelate]
 }
