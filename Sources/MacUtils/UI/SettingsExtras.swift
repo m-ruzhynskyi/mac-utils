@@ -257,8 +257,8 @@ struct MeetingsPage: View {
                             .buttonStyle(.borderless)
                         Button { deleting = meeting } label: { Image(systemName: "trash") }
                             .buttonStyle(.borderless)
-                            .help("Удалить запись (в Корзину)")
-                            .disabled(recorder.state != .idle)
+                            .help(recorder.busyFolder == meeting.folder ? "Сейчас расшифровывается" : "Удалить запись (в Корзину)")
+                            .disabled(recorder.busyFolder == meeting.folder)
                     }
                 }
             }
