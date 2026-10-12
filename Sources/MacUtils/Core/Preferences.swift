@@ -31,8 +31,6 @@ enum Pref {
     static let screenshotBackground = "screenshotBackground"
     /// Наводишь на окно — оно выделяется и снимается кликом; выключено — область только вручную.
     static let screenshotWindowSnap = "screenshotWindowSnap"
-    /// Подписи под значками на панели снимка.
-    static let screenshotLabels = "screenshotLabels"
 
     /// Запись экрана: "mp4" или "gif", кадров в секунду (MP4), курсор, звук системы, микрофон.
     static let recordingFormat = "recordingFormat"
@@ -59,8 +57,10 @@ enum Pref {
 
     /// Последняя открытая вкладка окна «Инструменты».
     static let toolsTab = "toolsTab"
-    /// Скрытые вкладки панели 🔧 (через запятую).
+    /// Скрытые вкладки панели 🔧 (через запятую) — прежняя настройка.
     static let toolsHiddenTabs = "toolsHiddenTabs"
+    /// Вкладки панели 🔧: разделы настроек через запятую, в порядке настроек.
+    static let toolsPanelTabs = "toolsPanelTabs"
     /// «Полка» для файлов (встряхнуть мышь при перетаскивании или ⌃⌥D).
     static let dropShelf = "dropShelfEnabled"
     /// «Шпаргалка»: удержание ⌘ показывает сочетания клавиш; задержка в секундах.
@@ -164,8 +164,7 @@ enum Pref {
             screenshotStepsTitles: true,
             screenshotFrameDefault: false,
             screenshotBackground: "sky",
-            screenshotWindowSnap: true,
-            screenshotLabels: true,
+            screenshotWindowSnap: false,
             recordingFormat: "mp4",
             recordingFPS: 30,
             recordingCursor: true,

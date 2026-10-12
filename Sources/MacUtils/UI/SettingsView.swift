@@ -61,6 +61,33 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Короткое имя для вкладки панели 🔧.
+    var panelTitle: String {
+        switch self {
+        case .uninstaller: return "Программы"
+        case .monitor: return "Монитор"
+        case .tasks: return "Задачи"
+        case .cleanup: return "Очистка"
+        case .shots: return "Снимки"
+        case .cutPaste: return "Вырезать"
+        case .smoothScroll: return "Прокрутка"
+        case .switcher: return "Переключатель"
+        case .screenshot: return "Скриншоты"
+        case .windows: return "Окна"
+        case .volume: return "Громкость"
+        case .layout: return "Раскладка"
+        case .shelf: return "Полка"
+        case .cheatSheet: return "Шпаргалка"
+        case .downloads: return "Загрузки"
+        case .qr: return "QR"
+        case .annotate: return "Рисование"
+        case .wellbeing: return "Перерывы"
+        case .meetings: return "Встречи"
+        case .ai: return "ИИ"
+        case .general: return "Общие"
+        }
+    }
+
     var title: String {
         switch self {
         case .general: return "Общие"
@@ -156,7 +183,18 @@ struct SettingsView: View {
             }
             .navigationSplitViewColumnWidth(min: 210, ideal: 230)
         } detail: {
-            switch selection ?? .general {
+            SettingsSectionPage(section: selection ?? .general)
+        }
+    }
+}
+
+/// Страница раздела: в окне настроек и вкладкой в панели 🔧.
+struct SettingsSectionPage: View {
+    let section: SettingsSection
+    var compact = false
+
+    var body: some View {
+        switch section {
             case .general: GeneralPage()
             case .cutPaste: CutPastePage()
             case .smoothScroll: SmoothScrollPage()
@@ -173,12 +211,11 @@ struct SettingsView: View {
             case .wellbeing: WellbeingPage()
             case .meetings: MeetingsPage()
             case .ai: AIPage()
-            case .uninstaller: UninstallerPage()
-            case .monitor: SystemMonitorView(model: .shared).navigationTitle("Монитор системы")
-            case .tasks: TaskManagerView(model: .shared).navigationTitle("Диспетчер задач")
-            case .cleanup: DiskCleanupView(model: .shared).navigationTitle("Очистка диска")
-            case .shots: ScreenshotLibraryView(library: .shared).navigationTitle("Мои снимки")
-            }
+            case .uninstaller: UninstallerPage(compact: compact)
+            case .monitor: SystemMonitorView(model: .shared, compact: compact).navigationTitle("Монитор системы")
+            case .tasks: TaskManagerView(model: .shared, compact: compact).navigationTitle("Диспетчер задач")
+            case .cleanup: DiskCleanupView(model: .shared, compact: compact).navigationTitle("Очистка диска")
+            case .shots: ScreenshotLibraryView(library: .shared, compact: compact).navigationTitle("Мои снимки")
         }
     }
 }
@@ -254,15 +291,15 @@ struct GeneralPage: View {
     @ObservedObject private var permissions = PermissionsModel.shared
     @AppStorage(Pref.menuBarIcon) private var menuBarIcon = true
     @AppStorage(Pref.showInDock) private var showInDock = false
-    @AppStorage(Pref.toolsHiddenTabs) private var hiddenTabs = ""
+    @AppStorage(Pref.toolsPanelTabs) private var panelTabs = PanelTabs.defaultValue
 
-    private func tabBinding(_ tab: ToolsWindowController.Tab) -> Binding<Bool> {
-        Binding(get: { !hiddenTabs.split(separator: ",").contains(Substring(tab.rawValue)) }, set: { show in
-            var set = Set(hiddenTabs.split(separator: ",").map(String.init))
-            if show { set.remove(tab.rawValue) } else { set.insert(tab.rawValue) }
-            // Хотя бы одна вкладка остаётся.
-            guard set.count < ToolsWindowController.Tab.allCases.count else { return }
-            hiddenTabs = set.sorted().joined(separator: ",")
+    private func tabBinding(_ section: SettingsSection) -> Binding<Bool> {
+        Binding(get: { PanelTabs.sections(panelTabs).contains(section) }, set: { show in
+            var list = PanelTabs.sections(panelTabs)
+            if show { list.append(section) } else { list.removeAll { $0 == section } }
+            // Хотя бы одна вкладка остаётся; порядок — как в настройках.
+            guard !list.isEmpty else { return }
+            panelTabs = PanelTabs.value(list)
         })
     }
 
@@ -277,10 +314,16 @@ struct GeneralPage: View {
                 Toggle("Показывать в Dock", isOn: $showInDock)
                 Toggle("Значок в строке меню", isOn: $menuBarIcon)
                 if menuBarIcon {
-                    LabeledContent("Вкладки в панели 🔧") {
-                        HStack(spacing: 10) {
-                            ForEach(ToolsWindowController.Tab.allCases) { tab in
-                                Toggle(tab.shortTitle, isOn: tabBinding(tab)).toggleStyle(.checkbox)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Вкладки в панели 🔧")
+                        Text("Любые возможности Mac Utils — отметьте, что должно быть под рукой в строке меню.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), alignment: .leading)], alignment: .leading, spacing: 6) {
+                            ForEach(PanelTabs.available) { section in
+                                Toggle(isOn: tabBinding(section)) {
+                                    Label(section.title, systemImage: section.symbol)
+                                }
+                                .toggleStyle(.checkbox)
                             }
                         }
                     }
@@ -932,8 +975,7 @@ struct ScreenshotPage: View {
     @AppStorage(Pref.screenshotStepsFrame) private var stepsFrame = true
     @AppStorage(Pref.screenshotStepsTitles) private var stepsTitles = true
     @AppStorage(Pref.screenshotFrameDefault) private var frameDefault = false
-    @AppStorage(Pref.screenshotWindowSnap) private var windowSnap = true
-    @AppStorage(Pref.screenshotLabels) private var toolbarLabels = true
+    @AppStorage(Pref.screenshotWindowSnap) private var windowSnap = false
     @AppStorage(Pref.screenshotBackground) private var background = ShotBackground.sky.rawValue
     @AppStorage(Pref.screenshotLibrary) private var library = true
     @AppStorage(Pref.screenshotLibrarySystem) private var librarySystem = false
@@ -969,9 +1011,8 @@ struct ScreenshotPage: View {
                     Text("Окно под курсором (клик) или своя область").tag(true)
                     Text("Только своя область").tag(false)
                 }
-                Text("Переключается и прямо при съёмке: кнопка вверху экрана или Tab.")
+                Text("Переключается и прямо при съёмке: кнопка вверху экрана или Tab. Названия кнопок панели видны при наведении.")
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle("Подписи под значками на панели", isOn: $toolbarLabels)
             }
             .disabled(!enabled)
             Section("Сохранение") {

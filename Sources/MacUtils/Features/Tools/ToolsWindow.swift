@@ -95,18 +95,18 @@ final class ToolsWindow: NSWindow {
 
 struct ToolsView: View {
     @AppStorage(Pref.toolsTab) private var tab = ToolsWindowController.Tab.uninstaller.rawValue
-    @AppStorage(Pref.toolsHiddenTabs) private var hidden = ""
+    @AppStorage(Pref.toolsPanelTabs) private var panelTabs = PanelTabs.defaultValue
     @AppStorage(Pref.warmScreen) private var warmEnabled = false
     @AppStorage(Pref.warmMode) private var warmMode = "schedule"
     @AppStorage(Pref.warmManualOn) private var warmManualOn = false
     private var warmOn: Bool { warmEnabled && warmMode == "manual" && warmManualOn }
 
-    private var visibleTabs: [ToolsWindowController.Tab] { ToolsWindowController.Tab.visible(hidden: hidden) }
+    private var visibleTabs: [SettingsSection] { PanelTabs.sections(panelTabs) }
 
     /// Выбранная вкладка скрыта — показываем первую видимую.
-    private var currentTab: ToolsWindowController.Tab {
-        let selected = ToolsWindowController.Tab(rawValue: tab) ?? .uninstaller
-        return visibleTabs.contains(selected) ? selected : visibleTabs[0]
+    private var currentTab: SettingsSection {
+        let selected = SettingsSection(rawValue: tab)
+        return selected.flatMap { visibleTabs.contains($0) ? $0 : nil } ?? visibleTabs[0]
     }
     /// В панели из строки меню — шапка с настройками и выходом.
     var inPopover = false
@@ -126,29 +126,35 @@ struct ToolsView: View {
         }
     }
 
-    /// Панель из строки меню: короткие вкладки со значками.
+    /// Панель из строки меню: вкладки — выбранные пользователем разделы (листаются, если их много).
     private var compactTabs: some View {
-        Picker("Вкладка", selection: Binding(get: { currentTab.rawValue }, set: { tab = $0 })) {
-            ForEach(visibleTabs) { item in
-                Label(item.shortTitle, systemImage: item.symbol).tag(item.rawValue)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(visibleTabs) { item in
+                    Button { tab = item.rawValue } label: {
+                        VStack(spacing: 2) {
+                            Image(systemName: item.symbol).font(.system(size: 13))
+                            Text(item.panelTitle).font(.system(size: 10)).lineLimit(1)
+                        }
+                        .frame(minWidth: 58)
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 4)
+                        .foregroundStyle(item == currentTab ? Color.accentColor : .primary)
+                        .background(item == currentTab ? Color.accentColor.opacity(0.15) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 7))
+                    }
+                    .buttonStyle(.plain)
+                    .help(item.title)
+                }
             }
+            .padding(.horizontal, 10)
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.small)
-        .padding(.horizontal, 10)
         .padding(.top, 8)
     }
 
     @ViewBuilder
     private var compactContent: some View {
-        switch currentTab {
-        case .uninstaller: UninstallerPage(compact: true)
-        case .monitor: SystemMonitorView(model: .shared, compact: true)
-        case .tasks: TaskManagerView(model: .shared, compact: true)
-        case .cleanup: DiskCleanupView(model: .shared, compact: true)
-        case .shots: ScreenshotLibraryView(library: .shared, compact: true)
-        }
+        SettingsSectionPage(section: currentTab, compact: true)
     }
 
     private var header: some View {

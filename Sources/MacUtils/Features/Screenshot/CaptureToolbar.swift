@@ -72,34 +72,67 @@ final class CaptureToolbar: NSVisualEffectView {
         colorButton?.image = Self.colorDot(color)
     }
 
-    private static var showsLabels: Bool { UserDefaults.standard.bool(forKey: Pref.screenshotLabels) }
-
     private func makeButton(symbol: String?, fallback: String, tip: String, label: String,
                             action: Selector) -> NSButton {
-        let labels = Self.showsLabels
-        let button = ToolbarButton(title: labels ? label : fallback, target: self, action: action)
+        let button = ToolbarButton(title: fallback, target: self, action: action)
         if let symbol,
            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)?
-               .withSymbolConfiguration(.init(pointSize: labels ? 14 : 15, weight: .medium)) {
+               .withSymbolConfiguration(.init(pointSize: 15, weight: .medium)) {
             button.image = image
-            button.imagePosition = labels ? .imageAbove : .imageOnly
-        } else if labels, symbol == nil {
-            button.imagePosition = .imageAbove
+            button.imagePosition = .imageOnly
         }
         button.isBordered = false
         button.contentTintColor = .white
-        button.toolTip = tip
-        if labels {
-            button.font = .systemFont(ofSize: 9, weight: .medium)
-            button.attributedTitle = NSAttributedString(string: label, attributes: [
-                .font: NSFont.systemFont(ofSize: 9, weight: .medium),
-                .foregroundColor: NSColor.white.withAlphaComponent(0.85),
-            ])
+        // Название — сразу при наведении (подсказка над панелью), без системной задержки.
+        button.hint = tip
+        button.onHover = { [weak self, weak button] inside in
+            guard let self, let button else { return }
+            inside ? self.showHint(tip, over: button) : self.hideHint()
         }
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: labels ? 50 : 30).isActive = true
-        button.heightAnchor.constraint(equalToConstant: labels ? 40 : 28).isActive = true
+        button.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 28).isActive = true
         return button
+    }
+
+    // MARK: - Подсказка при наведении
+
+    private var hintLabel: NSTextField?
+
+    private func showHint(_ text: String, over button: NSView) {
+        guard let host = superview else { return }
+        let label = hintLabel ?? {
+            let field = NSTextField(labelWithString: "")
+            field.font = .systemFont(ofSize: 11, weight: .medium)
+            field.textColor = .white
+            field.alignment = .center
+            field.drawsBackground = true
+            field.backgroundColor = NSColor.black.withAlphaComponent(0.8)
+            field.wantsLayer = true
+            field.layer?.cornerRadius = 5
+            field.layer?.masksToBounds = true
+            hintLabel = field
+            return field
+        }()
+        label.stringValue = "  \(text)  "
+        label.sizeToFit()
+        let buttonFrame = host.convert(button.bounds, from: button)
+        var origin = NSPoint(x: buttonFrame.midX - label.frame.width / 2, y: frame.maxY + 6)
+        // У верхнего края экрана — под панелью.
+        if origin.y + label.frame.height > host.bounds.maxY { origin.y = frame.minY - label.frame.height - 6 }
+        origin.x = min(max(origin.x, host.bounds.minX + 4), host.bounds.maxX - label.frame.width - 4)
+        label.setFrameOrigin(origin)
+        if label.superview !== host { host.addSubview(label) }
+        label.isHidden = false
+    }
+
+    private func hideHint() {
+        hintLabel?.isHidden = true
+    }
+
+    override func removeFromSuperview() {
+        hintLabel?.removeFromSuperview()
+        super.removeFromSuperview()
     }
 
     private func separator() -> NSView {
@@ -148,7 +181,20 @@ final class CaptureToolbar: NSVisualEffectView {
 
 /// Кнопка срабатывает с первого клика, даже если окно оверлея не ключевое.
 private final class ToolbarButton: NSButton {
+    var hint = ""
+    var onHover: ((Bool) -> Void)?
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .arrow)

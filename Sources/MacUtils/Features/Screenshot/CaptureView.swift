@@ -150,6 +150,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         return NSRect(x: bounds.midX - size.width / 2, y: bounds.maxY - size.height - 48, width: size.width, height: size.height)
     }
 
+    private var hoveringModeSwitch = false
+
     func toggleWindowMode() {
         UserDefaults.standard.set(!autoWindow, forKey: Pref.screenshotWindowSnap)
         hoverRect = nil
@@ -160,6 +162,11 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         let p = point(event)
         updateCursor(at: p)
         guard selection == nil, !isSelecting else { return }
+        let overSwitch = modeSwitchRect.contains(p)
+        if overSwitch != hoveringModeSwitch {
+            hoveringModeSwitch = overSwitch
+            needsDisplay = true
+        }
         let hover = autoWindow && !modeSwitchRect.contains(p) ? snapRects.first { $0.contains(p) } : nil
         if hover != hoverRect {
             hoverRect = hover
@@ -804,8 +811,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             let x = rect.minX + half * CGFloat(index) + (half - size.width) / 2
             text.draw(at: NSPoint(x: x, y: rect.midY - size.height / 2))
         }
-        let hint = NSAttributedString(string: "Tab — переключить", attributes: [
-            .font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.white.withAlphaComponent(0.8),
+        // Подсказка — только при наведении на переключатель.
+        guard hoveringModeSwitch else { return }
+        let hint = NSAttributedString(string: "Клик или Tab — переключить режим", attributes: [
+            .font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.white.withAlphaComponent(0.85),
         ])
         hint.draw(at: NSPoint(x: rect.midX - hint.size().width / 2, y: rect.minY - 16))
     }

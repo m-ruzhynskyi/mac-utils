@@ -81,6 +81,8 @@ final class MeetingRecorder: NSObject, ObservableObject {
 
     @Published fileprivate(set) var state: State = .idle
     @Published private(set) var meetings: [Meeting] = []
+    /// Встреча, которая сейчас расшифровывается (её нельзя удалить).
+    @Published private(set) var busyFolder: URL?
     @Published private(set) var lastError: String?
 
     private var stream: SCStream?
@@ -257,6 +259,8 @@ final class MeetingRecorder: NSObject, ObservableObject {
     // MARK: - Расшифровка и отчёт
 
     func process(_ meeting: Meeting) async {
+        busyFolder = meeting.folder
+        defer { busyFolder = nil }
         let tracks: [(file: String, speaker: String)] = [("Собеседники.m4a", "Собеседники"), ("Я.m4a", "Я")]
         do {
             var lines: [TranscriptLine] = []
