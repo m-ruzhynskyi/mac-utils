@@ -137,6 +137,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TextFixer.shared.sync()
         MeetingRecorder.shared.sync()
         AppStatusItem.shared.sync()
+        syncDock()
+    }
+
+    /// В Dock — обычное приложение (клик по значку открывает настройки), иначе — фоновое.
+    private func syncDock() {
+        let policy: NSApplication.ActivationPolicy = UserDefaults.standard.bool(forKey: Pref.showInDock) ? .regular : .accessory
+        guard NSApp.activationPolicy() != policy else { return }
+        NSApp.setActivationPolicy(policy)
+        // Окно настроек не должно пропадать при смене режима.
+        if policy == .accessory, SettingsWindowController.shared.isVisible {
+            DispatchQueue.main.async { SettingsWindowController.shared.show() }
+        }
     }
 }
 

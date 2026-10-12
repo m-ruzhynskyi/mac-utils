@@ -331,7 +331,9 @@ struct ScreenshotLibraryView: View {
                         ForEach(results) { record in
                             ShotThumbnail(record: record, compact: compact)
                                 .onTapGesture(count: 2) { NSWorkspace.shared.open(record.url) }
+                                .onDrag { NSItemProvider(contentsOf: record.url) ?? NSItemProvider() }
                                 .contextMenu {
+                                    Button("Скопировать") { Self.copy(record) }
                                     Button("Открыть") { NSWorkspace.shared.open(record.url) }
                                     Button("Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([record.url]) }
                                     Button("Скопировать текст") {
@@ -351,7 +353,21 @@ struct ScreenshotLibraryView: View {
     }
 }
 
+extension ScreenshotLibraryView {
+    /// В буфер — и файл (вставка в Finder, Telegram, почту), и картинка (вставка в редакторы и чаты).
+    static func copy(_ record: ShotRecord) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        var objects: [NSPasteboardWriting] = [record.url as NSURL]
+        if !record.isVideo, let image = NSImage(contentsOf: record.url) { objects.append(image) }
+        pasteboard.writeObjects(objects)
+        Toast.show("Скопировано", symbol: "doc.on.doc.fill")
+    }
+}
+
 private struct ShotThumbnail: View {
+    @State private var hovering = false
+
     let record: ShotRecord
     let compact: Bool
     @State private var image: NSImage?
@@ -371,6 +387,19 @@ private struct ShotThumbnail: View {
                 }
             }
             .frame(height: compact ? 64 : 96)
+            .overlay(alignment: .topTrailing) {
+                if hovering {
+                    Button { ScreenshotLibraryView.copy(record) } label: {
+                        Image(systemName: "doc.on.doc").font(.caption)
+                            .padding(4)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+                    }
+                    .buttonStyle(.borderless)
+                    .padding(4)
+                    .help("Скопировать (или перетащите снимок куда нужно)")
+                }
+            }
+            .onHover { hovering = $0 }
             Text(record.app).font(.caption2.weight(.semibold)).lineLimit(1)
             Text(record.date, format: .dateTime.day().month().hour().minute())
                 .font(.caption2).foregroundStyle(.secondary)
