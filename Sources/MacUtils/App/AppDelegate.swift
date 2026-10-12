@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Pref.register()
+        PanelTabs.migrate()
         MainMenu.install()
         lastTrusted = Permissions.accessibility
 
