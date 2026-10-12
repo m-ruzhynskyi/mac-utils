@@ -142,6 +142,8 @@ struct ToolsView: View {
                         .foregroundStyle(item == currentTab ? Color.accentColor : .primary)
                         .background(item == currentTab ? Color.accentColor.opacity(0.15) : .clear,
                                     in: RoundedRectangle(cornerRadius: 7))
+                        // Кликается вся плашка, а не только значок и текст.
+                        .contentShape(RoundedRectangle(cornerRadius: 7))
                     }
                     .buttonStyle(.plain)
                     .help(item.title)
