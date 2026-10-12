@@ -7,14 +7,16 @@ enum PanelTabs {
     /// Всё, кроме «Общих» (они в шапке панели — ⚙︎).
     static var available: [SettingsSection] { SettingsSection.allCases.filter { $0 != .general && $0 != .panel } }
 
+    /// В порядке, который выбрал пользователь.
     static func sections(_ value: String) -> [SettingsSection] {
-        let ids = Set(value.split(separator: ",").map(String.init))
-        let list = available.filter { ids.contains($0.rawValue) }
+        var seen = Set<SettingsSection>()
+        let list = value.split(separator: ",").compactMap { SettingsSection(rawValue: String($0)) }
+            .filter { available.contains($0) && seen.insert($0).inserted }
         return list.isEmpty ? [.uninstaller] : list
     }
 
     static func value(_ sections: [SettingsSection]) -> String {
-        available.filter(sections.contains).map(\.rawValue).joined(separator: ",")
+        sections.map(\.rawValue).joined(separator: ",")
     }
 
     /// Перенос прежней настройки (скрытые вкладки инструментов) — один раз.
