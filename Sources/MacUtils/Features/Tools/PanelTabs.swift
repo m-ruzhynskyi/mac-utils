@@ -5,7 +5,7 @@ enum PanelTabs {
     static let defaultValue = "uninstaller,monitor,tasks,cleanup,shots"
 
     /// Всё, кроме «Общих» (они в шапке панели — ⚙︎).
-    static var available: [SettingsSection] { SettingsSection.allCases.filter { $0 != .general } }
+    static var available: [SettingsSection] { SettingsSection.allCases.filter { $0 != .general && $0 != .panel } }
 
     static func sections(_ value: String) -> [SettingsSection] {
         let ids = Set(value.split(separator: ",").map(String.init))

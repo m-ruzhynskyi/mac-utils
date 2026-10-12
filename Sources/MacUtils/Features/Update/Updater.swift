@@ -60,6 +60,13 @@ final class Updater: NSObject, ObservableObject {
 
     @objc private func scheduledCheck() {
         guard UserDefaults.standard.bool(forKey: Pref.autoUpdate) else { return }
+        // Идёт запись или расшифровка — перезапуск всё оборвёт; попробуем через 10 минут.
+        if MeetingRecorder.shared.state != .idle || ScreenRecorder.current != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 600) {
+                MainActor.assumeIsolated { Updater.shared.scheduledCheck() }
+            }
+            return
+        }
         check(install: true, userInitiated: false)
     }
 

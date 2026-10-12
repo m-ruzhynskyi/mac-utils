@@ -55,7 +55,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
+    case general, panel, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
          uninstaller, monitor, tasks, cleanup, shots
 
@@ -85,12 +85,14 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .meetings: return "Встречи"
         case .ai: return "ИИ"
         case .general: return "Общие"
+        case .panel: return "Панель"
         }
     }
 
     var title: String {
         switch self {
         case .general: return "Общие"
+        case .panel: return "Панель в строке меню"
         case .cutPaste: return "Вырезать и вставить"
         case .smoothScroll: return "Плавная прокрутка"
         case .switcher: return "Переключатель приложений"
@@ -117,6 +119,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: return "gearshape"
+        case .panel: return "menubar.rectangle"
         case .cutPaste: return "scissors"
         case .smoothScroll: return "computermouse"
         case .switcher: return "rectangle.on.rectangle"
@@ -143,6 +146,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var tint: Color {
         switch self {
         case .general: return .gray
+        case .panel: return .teal
         case .cutPaste: return .orange
         case .smoothScroll: return .green
         case .switcher: return .blue
@@ -196,6 +200,7 @@ struct SettingsSectionPage: View {
     var body: some View {
         switch section {
             case .general: GeneralPage()
+            case .panel: PanelSettingsPage()
             case .cutPaste: CutPastePage()
             case .smoothScroll: SmoothScrollPage()
             case .switcher: SwitcherPage()
@@ -291,17 +296,6 @@ struct GeneralPage: View {
     @ObservedObject private var permissions = PermissionsModel.shared
     @AppStorage(Pref.menuBarIcon) private var menuBarIcon = true
     @AppStorage(Pref.showInDock) private var showInDock = false
-    @AppStorage(Pref.toolsPanelTabs) private var panelTabs = PanelTabs.defaultValue
-
-    private func tabBinding(_ section: SettingsSection) -> Binding<Bool> {
-        Binding(get: { PanelTabs.sections(panelTabs).contains(section) }, set: { show in
-            var list = PanelTabs.sections(panelTabs)
-            if show { list.append(section) } else { list.removeAll { $0 == section } }
-            // Хотя бы одна вкладка остаётся; порядок — как в настройках.
-            guard !list.isEmpty else { return }
-            panelTabs = PanelTabs.value(list)
-        })
-    }
 
     var body: some View {
         Form {
@@ -314,19 +308,8 @@ struct GeneralPage: View {
                 Toggle("Показывать в Dock", isOn: $showInDock)
                 Toggle("Значок в строке меню", isOn: $menuBarIcon)
                 if menuBarIcon {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Вкладки в панели 🔧")
-                        Text("Любые возможности Mac Utils — отметьте, что должно быть под рукой в строке меню.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), alignment: .leading)], alignment: .leading, spacing: 6) {
-                            ForEach(PanelTabs.available) { section in
-                                Toggle(isOn: tabBinding(section)) {
-                                    Label(section.title, systemImage: section.symbol)
-                                }
-                                .toggleStyle(.checkbox)
-                            }
-                        }
-                    }
+                    Text("Какие вкладки показывать в панели — в разделе «Панель в строке меню».")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Text("Клик — панель «Инструменты» со вкладками прямо под значком (или ⌃⌥⌘T). Настройки и выход — в шапке панели.")
                     .foregroundStyle(.secondary)
@@ -1190,5 +1173,47 @@ struct ScreenshotPage: View {
         if panel.runModal() == .OK, let url = panel.url {
             folder = url.path
         }
+    }
+}
+
+// MARK: - Панель в строке меню
+
+struct PanelSettingsPage: View {
+    @AppStorage(Pref.menuBarIcon) private var menuBarIcon = true
+    @AppStorage(Pref.toolsPanelTabs) private var panelTabs = PanelTabs.defaultValue
+
+    private func tabBinding(_ section: SettingsSection) -> Binding<Bool> {
+        Binding(get: { PanelTabs.sections(panelTabs).contains(section) }, set: { show in
+            var list = PanelTabs.sections(panelTabs)
+            if show { list.append(section) } else { list.removeAll { $0 == section } }
+            // Хотя бы одна вкладка остаётся; порядок — как в настройках.
+            guard !list.isEmpty else { return }
+            panelTabs = PanelTabs.value(list)
+        })
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Значок 🔧 в строке меню", isOn: $menuBarIcon)
+                Text("Клик по значку — панель с вкладками прямо под ним (или ⌃⌥⌘T). Настройки, тёплый экран и выход — в шапке панели.")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Вкладки панели") {
+                Text("Любые возможности Mac Utils — отметьте, что должно быть под рукой. Если вкладок много, их ряд листается вбок.")
+                    .font(.caption).foregroundStyle(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), alignment: .leading)], alignment: .leading, spacing: 8) {
+                    ForEach(PanelTabs.available) { section in
+                        Toggle(isOn: tabBinding(section)) {
+                            Label(section.title, systemImage: section.symbol)
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
+            .disabled(!menuBarIcon)
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Панель в строке меню")
     }
 }
