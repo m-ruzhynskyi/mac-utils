@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         syncFeatures()
+        DispatchQueue.main.async { MoveToApplications.offerIfNeeded() }
         if Ollama.enabled { Ollama.shared.refresh() }
         Updater.shared.start()
         ToolsLauncher.installIfNeeded()
