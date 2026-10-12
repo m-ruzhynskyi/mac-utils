@@ -140,6 +140,11 @@ enum Pref {
     static let autoUpdate = "autoUpdateEnabled"
     static let updateRepo = "updateRepository"
     static let justUpdatedTo = "justUpdatedTo"
+    /// Линейка версий (например, «1.3»), для которой уже показали «Что нового».
+    static let lastSeenChangelog = "lastSeenChangelog"
+    /// Тёплый экран: "schedule" — по времени, "manual" — включается вручную.
+    static let warmMode = "warmScreenMode"
+    static let warmManualOn = "warmScreenManualOn"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -195,6 +200,8 @@ enum Pref {
             warmExternalStrength: 0.5,
             warmFrom: 21,
             warmTo: 7,
+            warmMode: "schedule",
+            warmManualOn: false,
             annotate: true,
             windowPin: true,
             windowPinOpacity: 1.0,

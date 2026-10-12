@@ -44,6 +44,10 @@ final class Updater: NSObject, ObservableObject {
                 Toast.show("Mac Utils обновлён до \(updated)", symbol: "arrow.down.circle.fill", tint: .green)
             }
         }
+        // Новая линейка версий — один раз показываем «Что нового».
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            MainActor.assumeIsolated { WhatsNewWindowController.shared.showIfUpdated() }
+        }
         let timer = Timer(timeInterval: 6 * 3600, target: self, selector: #selector(scheduledCheck),
                           userInfo: nil, repeats: true)
         RunLoop.main.add(timer, forMode: .common)

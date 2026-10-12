@@ -92,3 +92,12 @@ final class WhisperOutputTests: XCTestCase {
         XCTAssertEqual(WhisperOutput.language("auto"), "auto")
     }
 }
+
+final class ChangelogTests: XCTestCase {
+    @MainActor func testFamilyAndOrder() {
+        XCTAssertEqual(Changelog.family("1.3.4"), "1.3")
+        XCTAssertEqual(Changelog.family("1.3"), "1.3")
+        XCTAssertEqual(Changelog.releases.first?.version, "1.3")
+        XCTAssertTrue(Updater.isVersion("1.3.0", newerThan: "1.2.118"))
+    }
+}

@@ -355,7 +355,12 @@ struct UpdatesSection: View {
 
     var body: some View {
         Section("Обновления") {
-            LabeledContent("Версия", value: updater.currentVersion)
+            LabeledContent("Версия") {
+                HStack {
+                    Text(updater.currentVersion)
+                    Button("Что нового и история версий") { WhatsNewWindowController.shared.show() }
+                }
+            }
             TextField("Репозиторий GitHub", text: $customRepo,
                       prompt: Text(updater.repository.isEmpty ? "владелец/имя" : updater.repository))
             Toggle("Обновляться автоматически", isOn: $autoUpdate)

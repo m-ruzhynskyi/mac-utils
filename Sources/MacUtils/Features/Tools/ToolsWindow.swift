@@ -96,6 +96,10 @@ final class ToolsWindow: NSWindow {
 struct ToolsView: View {
     @AppStorage(Pref.toolsTab) private var tab = ToolsWindowController.Tab.uninstaller.rawValue
     @AppStorage(Pref.toolsHiddenTabs) private var hidden = ""
+    @AppStorage(Pref.warmScreen) private var warmEnabled = false
+    @AppStorage(Pref.warmMode) private var warmMode = "schedule"
+    @AppStorage(Pref.warmManualOn) private var warmManualOn = false
+    private var warmOn: Bool { warmEnabled && warmMode == "manual" && warmManualOn }
 
     private var visibleTabs: [ToolsWindowController.Tab] { ToolsWindowController.Tab.visible(hidden: hidden) }
 
@@ -152,6 +156,10 @@ struct ToolsView: View {
             Image(systemName: "wrench.and.screwdriver.fill").foregroundStyle(Color.accentColor)
             Text("Mac Utils").font(.callout.weight(.semibold))
             Spacer()
+            Button { WarmScreen.shared.toggleManual() } label: {
+                Image(systemName: warmOn ? "sun.horizon.fill" : "sun.horizon")
+            }
+            .help("Тёплый экран: включить или выключить вручную")
             Button {
                 AppStatusItem.shared.closeTools()
                 SettingsWindowController.shared.show()

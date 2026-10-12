@@ -72,6 +72,9 @@ final class WarmScreen: ObservableObject {
     private func level(now: Date = Date()) -> Double {
         if let previewUntil, previewUntil > now { return 1 }
         let defaults = UserDefaults.standard
+        if defaults.string(forKey: Pref.warmMode) == "manual" {
+            return defaults.bool(forKey: Pref.warmManualOn) ? 1 : 0
+        }
         let parts = Calendar.current.dateComponents([.hour, .minute], from: now)
         let hour = Double(parts.hour ?? 0) + Double(parts.minute ?? 0) / 60
         return WarmSchedule.level(hour: hour, from: defaults.double(forKey: Pref.warmFrom),
@@ -107,6 +110,19 @@ final class WarmScreen: ObservableObject {
         guard applied else { return }
         CGDisplayRestoreColorSyncSettings()
         applied = false
+    }
+
+    /// Включить или выключить вручную (ручной режим, кнопка в панели 🔧, macutils://warm-toggle).
+    func toggleManual() {
+        let defaults = UserDefaults.standard
+        let on = !(defaults.string(forKey: Pref.warmMode) == "manual" && defaults.bool(forKey: Pref.warmManualOn))
+        defaults.set(true, forKey: Pref.warmScreen)
+        defaults.set("manual", forKey: Pref.warmMode)
+        defaults.set(on, forKey: Pref.warmManualOn)
+        sync()
+        apply()
+        Toast.show(on ? "Тёплый экран включён" : "Тёплый экран выключен", symbol: on ? "sun.horizon.fill" : "sun.max",
+                   tint: on ? .orange : .secondary)
     }
 
     /// При выходе из программы возвращаем цвета.

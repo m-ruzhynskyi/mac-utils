@@ -84,6 +84,8 @@ struct WellbeingPage: View {
     @AppStorage(Pref.warmExternalStrength) private var externalStrength = 0.5
     @AppStorage(Pref.warmFrom) private var from = 21
     @AppStorage(Pref.warmTo) private var to = 7
+    @AppStorage(Pref.warmMode) private var warmMode = "schedule"
+    @AppStorage(Pref.warmManualOn) private var manualOn = false
     @ObservedObject private var reminder = BreakReminder.shared
     @ObservedObject private var screen = WarmScreen.shared
 
@@ -113,8 +115,23 @@ struct WellbeingPage: View {
                 Text("Свой Night Shift: вечером экран плавно желтеет и синий свет приглушается. Для встроенного экрана и внешних мониторов — своя сила.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Group {
-                    Picker("С", selection: $from) { ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) } }
-                Picker("До", selection: $to) { ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) } }
+                    Picker("Когда", selection: $warmMode) {
+                        Text("По расписанию").tag("schedule")
+                        Text("Вручную").tag("manual")
+                    }
+                    .pickerStyle(.segmented)
+                    if warmMode == "manual" {
+                        Toggle("Включён сейчас", isOn: $manualOn)
+                        Text("Быстро: кнопка ☀︎ в шапке панели 🔧 или ссылка macutils://warm-toggle.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!warm)
+                Group {
+                    if warmMode == "schedule" {
+                        Picker("С", selection: $from) { ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) } }
+                        Picker("До", selection: $to) { ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) } }
+                    }
                 LabeledContent("Встроенный экран") {
                     Slider(value: $strength, in: 0.1...1) { _ in screen.apply() }
                 }
@@ -124,7 +141,8 @@ struct WellbeingPage: View {
                 }
                 .disabled(!warm)
                 HStack {
-                    Text(!warm ? "Выключен" : screen.currentLevel > 0 ? "Сейчас включён: \(Int(screen.currentLevel * 100)) %" : "Включится в \(String(format: "%02d:00", from))")
+                    Text(!warm ? "Выключен" : screen.currentLevel > 0 ? "Сейчас включён: \(Int(screen.currentLevel * 100)) %"
+                         : warmMode == "manual" ? "Сейчас выключен" : "Включится в \(String(format: "%02d:00", from))")
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Показать, как будет") { screen.preview() }
@@ -136,6 +154,8 @@ struct WellbeingPage: View {
         .formStyle(.grouped)
         .navigationTitle("Перерывы и тёплый экран")
         .onChange(of: from) { _, _ in screen.apply() }
+        .onChange(of: warmMode) { _, _ in screen.apply() }
+        .onChange(of: manualOn) { _, _ in screen.apply() }
         .onChange(of: to) { _, _ in screen.apply() }
     }
 }
