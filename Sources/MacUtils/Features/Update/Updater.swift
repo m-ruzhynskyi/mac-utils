@@ -165,7 +165,9 @@ final class Updater: NSObject, ObservableObject {
         let target = Bundle.main.bundleURL
         let parent = target.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: parent.path) else {
-            throw UpdateError("Нет прав на запись в \(parent.path)")
+            throw UpdateError(MoveToApplications.isInApplications
+                ? "Нет прав на запись в \(parent.path)"
+                : "Перенесите Mac Utils в «Программы» и запустите оттуда — тогда он сможет обновляться")
         }
 
         let (downloaded, response) = try await URLSession.shared.download(from: release.zipURL)
