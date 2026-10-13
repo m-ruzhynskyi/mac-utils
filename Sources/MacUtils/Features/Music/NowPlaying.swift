@@ -6,7 +6,7 @@ import SwiftUI
 /// Данные MediaRemote с macOS 15.4 доступны только системным процессам, поэтому их читает
 /// помощник MUNowPlaying.dylib, загруженный в /usr/bin/perl.
 @MainActor
-final class NowPlaying: ObservableObject {
+final class NowPlaying: NSObject, ObservableObject {
     static let shared = NowPlaying()
 
     struct Track: Equatable {
@@ -31,6 +31,80 @@ final class NowPlaying: ObservableObject {
     @Published private(set) var track: Track?
     @Published private(set) var artwork: NSImage?
     @Published private(set) var failed = false
+    /// Что играло последним — показываем, когда сейчас тишина.
+    @Published private(set) var last: Track?
+    @Published private(set) var lastArtwork: NSImage?
+
+    private static var lastArtworkURL: URL {
+        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Mac Utils", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("last-artwork.png")
+    }
+
+    override init() {
+        super.init()
+        if let saved = UserDefaults.standard.dictionary(forKey: Pref.musicLast) {
+            var track = Track()
+            track.title = saved["title"] as? String ?? ""
+            track.artist = saved["artist"] as? String ?? ""
+            track.app = saved["app"] as? String ?? ""
+            track.bundle = saved["bundle"] as? String ?? ""
+            if !track.title.isEmpty { last = track }
+        }
+        lastArtwork = NSImage(contentsOf: Self.lastArtworkURL)
+    }
+
+    private func remember(_ track: Track, artwork: NSImage?) {
+        if last?.title != track.title || last?.artist != track.artist {
+            UserDefaults.standard.set(["title": track.title, "artist": track.artist, "app": track.app, "bundle": track.bundle],
+                                      forKey: Pref.musicLast)
+            last = track
+        }
+        if let artwork, artwork !== lastArtwork,
+           let tiff = artwork.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            try? png.write(to: Self.lastArtworkURL)
+            lastArtwork = artwork
+        }
+    }
+
+    /// Продолжить то, что играло: команда «играть» системному плееру; если программы уже нет — открываем её.
+    func resumeLast() {
+        guard let last else { return }
+        if !last.bundle.isEmpty, NSRunningApplication.runningApplications(withBundleIdentifier: last.bundle).isEmpty,
+           let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: last.bundle) {
+            NSWorkspace.shared.openApplication(at: url, configuration: .init())
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                MainActor.assumeIsolated { NowPlaying.shared.send("play") }
+            }
+        } else {
+            send("play")
+        }
+    }
+
+    func openLastApp() {
+        guard let bundle = last?.bundle, !bundle.isEmpty,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: .init())
+    }
+
+    /// Плеер, выбранный в настройках: программа (bundle id) или сайт (https://…).
+    static var preferredPlayer: String { UserDefaults.standard.string(forKey: Pref.musicPlayer) ?? "com.apple.Music" }
+
+    static func playerTitle(_ value: String) -> String {
+        if value.hasPrefix("http") { return URL(string: value)?.host ?? value }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: value) else { return value }
+        return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+    }
+
+    func openPreferredPlayer() {
+        let value = Self.preferredPlayer
+        if value.hasPrefix("http"), let url = URL(string: value) {
+            NSWorkspace.shared.open(url)
+        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: value) {
+            NSWorkspace.shared.openApplication(at: url, configuration: .init())
+        }
+    }
 
     private var process: Process?
     private var input: FileHandle?
@@ -137,10 +211,11 @@ final class NowPlaying: ObservableObject {
                 artwork = NSImage(data: data)
             }
             track = next
+            remember(next, artwork: artwork)
         }
     }
 
-    private func send(_ command: String) {
+    fileprivate func send(_ command: String) {
         guard let input else { return }
         try? input.write(contentsOf: Data((command + "\n").utf8))
     }
@@ -191,19 +266,60 @@ struct NowPlayingView: View {
             if let track = player.track {
                 content(track)
             } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "music.note").font(.system(size: 34)).foregroundStyle(.secondary)
-                    Text(player.failed ? "Не удалось подключиться к системному плееру" : "Сейчас ничего не играет")
-                        .foregroundStyle(.secondary)
-                    Text("Включите музыку или видео в любой программе — здесь появится управление.")
-                        .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
+                idle
             }
         }
         .onAppear { player.attach() }
         .onDisappear { player.detach() }
+    }
+
+    /// Сейчас тишина: что играло последним (продолжить) и быстрый запуск своего плеера.
+    private var idle: some View {
+        VStack(spacing: 14) {
+            if let last = player.last {
+                Text("Играло последним").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                Group {
+                    if let artwork = player.lastArtwork {
+                        Image(nsImage: artwork).resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        ZStack {
+                            LinearGradient(colors: [.purple.opacity(0.4), .blue.opacity(0.4)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                            Image(systemName: "music.note").font(.system(size: 34)).foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                }
+                .frame(width: compact ? 130 : 170, height: compact ? 130 : 170)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .opacity(0.85)
+                VStack(spacing: 2) {
+                    Text(last.title).font(.headline).lineLimit(1)
+                    Text([last.artist, last.app].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .foregroundStyle(.secondary).lineLimit(1)
+                }
+                .padding(.horizontal)
+                HStack(spacing: 10) {
+                    Button { player.resumeLast() } label: { Label("Продолжить", systemImage: "play.fill") }
+                        .buttonStyle(.borderedProminent)
+                    if !last.app.isEmpty {
+                        Button { player.openLastApp() } label: { Label("Открыть \(last.app)", systemImage: "arrow.up.forward.app") }
+                    }
+                }
+            } else {
+                Image(systemName: "music.note").font(.system(size: 34)).foregroundStyle(.secondary)
+                Text(player.failed ? "Не удалось подключиться к системному плееру" : "Сейчас ничего не играет")
+                    .foregroundStyle(.secondary)
+            }
+            Divider().padding(.horizontal, 40)
+            Button { player.openPreferredPlayer() } label: {
+                Label("Открыть \(NowPlaying.playerTitle(NowPlaying.preferredPlayer))", systemImage: "music.note.list")
+            }
+            .buttonStyle(.link)
+            if !compact {
+                PlayerPicker()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 
     private func content(_ track: NowPlaying.Track) -> some View {
@@ -276,5 +392,47 @@ struct NowPlayingView: View {
         }
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Выбор своего плеера: программа или сайт.
+private struct PlayerPicker: View {
+    @AppStorage(Pref.musicPlayer) private var player = "com.apple.Music"
+    @State private var site = ""
+
+    private static let known = ["com.apple.Music", "com.spotify.client", "ru.yandex.desktop.music", "com.apple.podcasts",
+                                "com.tidal.desktop", "com.deezer.deezer-desktop"]
+
+    private var installed: [String] {
+        var list = Self.known.filter { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }
+        if !player.hasPrefix("http"), !list.contains(player) { list.append(player) }
+        return list
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Picker("Плеер по умолчанию", selection: $player) {
+                ForEach(installed, id: \.self) { Text(NowPlaying.playerTitle($0)).tag($0) }
+                if player.hasPrefix("http") { Text(NowPlaying.playerTitle(player)).tag(player) }
+            }
+            .frame(maxWidth: 320)
+            HStack {
+                Button("Другая программа…") {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [.application]
+                    panel.directoryURL = URL(fileURLWithPath: "/Applications")
+                    if panel.runModal() == .OK, let url = panel.url, let id = Bundle(url: url)?.bundleIdentifier { player = id }
+                }
+                TextField("", text: $site, prompt: Text("или сайт: music.youtube.com"))
+                    .textFieldStyle(.roundedBorder).frame(width: 200)
+                    .onSubmit {
+                        let trimmed = site.trimmingCharacters(in: .whitespaces)
+                        guard !trimmed.isEmpty else { return }
+                        player = trimmed.hasPrefix("http") ? trimmed : "https://" + trimmed
+                        site = ""
+                    }
+            }
+            .font(.caption)
+        }
     }
 }
