@@ -55,7 +55,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, panel, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
+    case general, panel, music, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
          uninstaller, monitor, tasks, cleanup, shots
 
@@ -86,6 +86,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .ai: return "ИИ"
         case .general: return "Общие"
         case .panel: return "Панель"
+        case .music: return "Музыка"
         }
     }
 
@@ -93,6 +94,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "Общие"
         case .panel: return "Панель в строке меню"
+        case .music: return "Музыка"
         case .cutPaste: return "Вырезать и вставить"
         case .smoothScroll: return "Плавная прокрутка"
         case .switcher: return "Переключатель приложений"
@@ -120,6 +122,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .panel: return "menubar.rectangle"
+        case .music: return "music.note"
         case .cutPaste: return "scissors"
         case .smoothScroll: return "computermouse"
         case .switcher: return "rectangle.on.rectangle"
@@ -147,6 +150,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return .gray
         case .panel: return .teal
+        case .music: return .pink
         case .cutPaste: return .orange
         case .smoothScroll: return .green
         case .switcher: return .blue
@@ -189,6 +193,9 @@ struct SettingsView: View {
         } detail: {
             SettingsSectionPage(section: selection ?? .general)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openSettingsSection)) { note in
+            if let section = note.object as? SettingsSection { selection = section }
+        }
     }
 }
 
@@ -201,6 +208,7 @@ struct SettingsSectionPage: View {
         switch section {
             case .general: GeneralPage()
             case .panel: PanelSettingsPage()
+            case .music: NowPlayingView(compact: compact).navigationTitle("Музыка")
             case .cutPaste: CutPastePage()
             case .smoothScroll: SmoothScrollPage()
             case .switcher: SwitcherPage()

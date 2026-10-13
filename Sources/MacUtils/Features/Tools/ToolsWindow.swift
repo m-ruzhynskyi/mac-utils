@@ -171,7 +171,7 @@ struct ToolsView: View {
 
     @ViewBuilder
     private var compactContent: some View {
-        SettingsSectionPage(section: currentTab, compact: true)
+        PanelSectionView(section: currentTab)
     }
 
     private var header: some View {

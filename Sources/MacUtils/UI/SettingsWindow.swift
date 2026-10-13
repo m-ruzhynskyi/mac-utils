@@ -9,6 +9,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     var isVisible: Bool { window?.isVisible ?? false }
 
+    /// Открыть настройки сразу на нужном разделе.
+    func show(section: SettingsSection) {
+        show()
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .openSettingsSection, object: section)
+        }
+    }
+
     func show() {
         let window = self.window ?? makeWindow()
         if !window.isVisible { FocusReturn.remember() }
