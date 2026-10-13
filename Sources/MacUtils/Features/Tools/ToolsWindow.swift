@@ -96,6 +96,7 @@ final class ToolsWindow: NSWindow {
 struct ToolsView: View {
     @AppStorage(Pref.toolsTab) private var tab = ToolsWindowController.Tab.uninstaller.rawValue
     @AppStorage(Pref.toolsPanelTabs) private var panelTabs = PanelTabs.defaultValue
+    @State private var hoveredTab: SettingsSection?
     @AppStorage(Pref.warmScreen) private var warmEnabled = false
     @AppStorage(Pref.warmMode) private var warmMode = "schedule"
     @AppStorage(Pref.warmManualOn) private var warmManualOn = false
@@ -129,14 +130,10 @@ struct ToolsView: View {
     /// Панель из строки меню: вкладки — всегда одним рядом на всю ширину.
     /// До 5 — значок и подпись; больше — только значки (подпись — при наведении и под рядом).
     private var compactTabs: some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 4) { tabButtons(stretch: true) }
-            if visibleTabs.count > 5 {
-                Text(currentTab.panelTitle).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.accentColor)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.top, 8)
+        HStack(spacing: 4) { tabButtons(stretch: true) }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .zIndex(1)
     }
 
     @ViewBuilder
@@ -160,7 +157,21 @@ struct ToolsView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
-            .help(item.title)
+            .onHover { inside in hoveredTab = inside ? item : (hoveredTab == item ? nil : hoveredTab) }
+            // Название — сразу при наведении, поверх содержимого (места в ряду не занимает).
+            .overlay(alignment: .bottom) {
+                if visibleTabs.count > 5, hoveredTab == item {
+                    Text(item.panelTitle)
+                        .font(.system(size: 10, weight: .medium))
+                        .fixedSize()
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.regularMaterial, in: Capsule())
+                        .shadow(radius: 2, y: 1)
+                        .offset(y: 20)
+                        .allowsHitTesting(false)
+                }
+            }
+            .zIndex(hoveredTab == item ? 1 : 0)
         }
     }
 
