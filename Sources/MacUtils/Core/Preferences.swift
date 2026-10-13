@@ -90,6 +90,9 @@ enum Pref {
     static let menuBarIcon = "menuBarIconEnabled"
     /// Показывать Mac Utils в Dock (по умолчанию нет — работает в фоне).
     static let showInDock = "showInDock"
+    /// Музыка: что играло последним и плеер по умолчанию (bundle id или https://…).
+    static let musicLast = "musicLast"
+    static let musicPlayer = "musicPlayer"
     /// Адрес ретранслятора трансляции экрана (relay/, Cloudflare Workers).
     static let shareServer = "shareServer"
     static let shareAudio = "shareAudio"
