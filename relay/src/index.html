@@ -19,6 +19,13 @@
   #live { display: none; align-items: center; gap: 8px; font-size: 13px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
   .muted { opacity: .65; font-size: 13px; }
+  #picker { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 10; }
+  #picker .box { background: #1c1c1e; border-radius: 14px; padding: 18px; width: min(900px, 94vw); max-height: 86vh; overflow: auto; }
+  #picker .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 12px 0; }
+  #picker .item { background: #2c2c2e; border-radius: 10px; padding: 8px; cursor: pointer; border: 2px solid transparent; }
+  #picker .item:hover { border-color: #0a84ff; }
+  #picker img { width: 100%; aspect-ratio: 16/9; object-fit: contain; background: #000; border-radius: 6px; }
+  #picker .name { font-size: 13px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
@@ -29,6 +36,12 @@
   <button id="share">Транслировать свой экран</button>
   <span id="live"><span class="dot"></span><span id="liveText"></span><button class="danger" id="stop">Стоп</button></span>
 </header>
+<div id="picker"><div class="box">
+  <b>Что показывать?</b>
+  <div class="grid" id="sources"></div>
+  <label class="muted"><input type="checkbox" id="withAudio" checked> Передавать звук системы</label>
+  <div style="text-align:right; margin-top:10px"><button id="pickerCancel">Отмена</button></div>
+</div></div>
 <div id="stage">
   <img id="screen" alt="">
   <div id="status">Введите код из 6 цифр и нажмите «Смотреть» — или транслируйте свой экран.<br>
@@ -85,9 +98,36 @@ function playPCM(buffer) {
   playAt += chunk.duration;
 }
 
-// ---- Ведущий (браузер: Windows, Linux…) ----
+// ---- Ведущий (браузер или приложение для Windows) ----
+
+// В приложении для Windows (window.mu) — свой выбор экрана и окна с превью.
+function pickSource() {
+  return new Promise(async (resolve) => {
+    let sources;
+    try { sources = await window.mu.sources(); }
+    catch (_) { status("Не удалось получить список экранов — разрешите приложению запись экрана"); return resolve(false); }
+    const grid = $("sources");
+    grid.innerHTML = "";
+    for (const source of sources) {
+      const item = document.createElement("div");
+      item.className = "item";
+      item.innerHTML = `<img src="${source.thumbnail}"><div class="name"></div>`;
+      item.querySelector(".name").textContent = source.name;
+      item.onclick = async () => {
+        $("picker").style.display = "none";
+        await window.mu.choose(source.id, $("withAudio").checked);
+        resolve(true);
+      };
+      grid.appendChild(item);
+    }
+    $("pickerCancel").onclick = () => { $("picker").style.display = "none"; resolve(false); };
+    $("picker").style.display = "flex";
+  });
+}
+
 async function share() {
   stopAll();
+  if (window.mu && !(await pickSource())) return status("Трансляция отменена");
   let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 8 }, audio: true });
@@ -186,6 +226,7 @@ $("watch").onclick = watch;
 $("code").onkeydown = (e) => { if (e.key === "Enter") watch(); };
 $("share").onclick = share;
 $("stop").onclick = () => stopAll("Трансляция остановлена");
+if (window.mu) document.querySelector("header b").textContent = `Mac Utils Share ${window.mu.version}`;
 const fromLink = new URLSearchParams(location.search).get("code");
 if (fromLink) { $("code").value = fromLink; watch(); }
 </script>
