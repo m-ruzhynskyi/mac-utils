@@ -167,6 +167,7 @@ struct ToolsView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(item.title)
             .onHover { inside in
                 withAnimation(.easeOut(duration: 0.15)) {
                     if inside { hoveredTab = item } else if hoveredTab == item { hoveredTab = nil }
