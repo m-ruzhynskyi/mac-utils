@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import ImageIO
 import ScreenCaptureKit
@@ -139,26 +140,22 @@ final class ScreenShare: NSObject, ObservableObject {
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = true
         config.queueDepth = 3
-        let sender = FrameSender { [weak self] data in
-            await self?.send(data) ?? false
-        }
+        // Звук системы: 24 кГц моно — достаточно для речи и музыки фоном, ~48 КБ/с.
+        let wantsAudio = UserDefaults.standard.bool(forKey: Pref.shareAudio)
+        config.capturesAudio = wantsAudio
+        config.excludesCurrentProcessAudio = true
+        config.sampleRate = 24_000
+        config.channelCount = 1
+        guard let socket else { throw CocoaError(.featureUnsupported) }
+        let sender = FrameSender(socket: socket)
         let stream = SCStream(filter: filter, configuration: config, delegate: sender)
         try stream.addStreamOutput(sender, type: .screen, sampleHandlerQueue: sender.queue)
+        if wantsAudio { try stream.addStreamOutput(sender, type: .audio, sampleHandlerQueue: sender.audioQueue) }
         try await stream.startCapture()
         self.stream = stream
         self.sender = sender
     }
 
-    /// Отправка кадра; false — соединения больше нет.
-    private func send(_ data: Data) async -> Bool {
-        guard let socket else { return false }
-        do {
-            try await socket.send(.data(data))
-            return true
-        } catch {
-            return false
-        }
-    }
 
     private func listen(_ socket: URLSessionWebSocketTask) {
         socket.receive { [weak self] result in
@@ -208,8 +205,9 @@ final class ScreenShare: NSObject, ObservableObject {
         guard let screen = NSScreen.withMouse ?? NSScreen.main else { return }
         let host = FirstMouseHostingView(rootView: ShareHUD(share: self))
         let size = host.fittingSize
-        let panel = HUDPanel(contentRect: NSRect(x: screen.visibleFrame.midX - size.width / 2,
-                                                 y: screen.visibleFrame.maxY - size.height - 10,
+        // Правый верхний угол, под строкой меню — не мешает.
+        let panel = HUDPanel(contentRect: NSRect(x: screen.visibleFrame.maxX - size.width - 8,
+                                                 y: screen.visibleFrame.maxY - size.height - 6,
                                                  width: size.width, height: size.height),
                              styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
@@ -224,46 +222,62 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 }
 
-/// Индикатор «Идёт трансляция» поверх экрана (в саму трансляцию не попадает).
+/// Маленький индикатор эфира в углу (в саму трансляцию не попадает): точка и «Эфир»;
+/// при наведении — код, зрители и «Стоп».
 private struct ShareHUD: View {
     @ObservedObject var share: ScreenShare
+    @State private var expanded = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle().fill(.red).frame(width: 9, height: 9)
+        HStack(spacing: 6) {
+            Circle().fill(.red).frame(width: 6, height: 6)
             if case .live(let code, let viewers) = share.state {
-                Text("Трансляция").font(.callout.weight(.semibold))
-                Button { share.copyCode() } label: {
-                    Text(ShareCode.display(code)).font(.callout.monospacedDigit().weight(.bold))
+                if expanded {
+                    Button { share.copyCode() } label: {
+                        Text(ShareCode.display(code)).font(.caption.monospacedDigit().weight(.semibold))
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Скопировать код")
+                    Label("\(viewers)", systemImage: "eye").font(.caption2).foregroundStyle(.secondary)
+                    Button { share.stop() } label: { Image(systemName: "stop.fill").font(.caption2) }
+                        .buttonStyle(.borderless).foregroundStyle(.red).help("Остановить трансляцию")
+                } else {
+                    Text(viewers > 0 ? "Эфир · \(viewers)" : "Эфир").font(.caption2.weight(.medium)).foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderless)
-                .help("Скопировать код")
-                Label("\(viewers)", systemImage: "eye").font(.callout).foregroundStyle(.secondary)
-                    .help("Сколько человек смотрит")
             }
-            Button { share.stop() } label: { Text("Стоп").font(.callout.weight(.semibold)) }
-                .buttonStyle(.borderedProminent).tint(.red).controlSize(.small)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.regularMaterial, in: Capsule())
-        .padding(2)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.thinMaterial, in: Capsule())
+        .opacity(expanded ? 1 : 0.75)
+        .onHover { inside in withAnimation(.easeOut(duration: 0.15)) { expanded = inside } }
+        .fixedSize()
+        .frame(width: 190, height: 26, alignment: .trailing)
     }
 }
 
 /// Кадры ScreenCaptureKit → JPEG → отправка (пока предыдущий кадр не ушёл, новые пропускаем).
 final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "macutils.share")
-    private let send: @Sendable (Data) async -> Bool
+    /// URLSessionWebSocketTask сохраняет порядок отправки — звук не перемешивается.
+    private let socket: URLSessionWebSocketTask
     private let context = CIContext()
     private var inFlight = false
     private var last: Data?
 
-    init(send: @escaping @Sendable (Data) async -> Bool) {
-        self.send = send
+    init(socket: URLSessionWebSocketTask) {
+        self.socket = socket
     }
 
+    let audioQueue = DispatchQueue(label: "macutils.share.audio")
+
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        if type == .audio {
+            if let packet = ShareProtocol.audioPacket(sampleBuffer) {
+                socket.send(.data(packet)) { _ in }
+            }
+            return
+        }
         guard type == .screen, !inFlight, sampleBuffer.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
                 as? [[SCStreamFrameInfo: Any]],
@@ -272,7 +286,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
               let image = context.createCGImage(CIImage(cvPixelBuffer: pixels),
                                                 from: CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(pixels),
                                                              height: CVPixelBufferGetHeight(pixels))),
-              let jpeg = Self.jpeg(image) else { return }
+              let jpeg = Self.jpeg(image).map(ShareProtocol.framePacket) else { return }
         last = jpeg
         transmit(jpeg)
     }
@@ -287,11 +301,9 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     /// Вызывается на queue.
     private func transmit(_ data: Data) {
         inFlight = true
-        let send = self.send
-        Task {
-            let ok = await send(data)
+        socket.send(.data(data)) { error in
             self.queue.async { self.inFlight = false }
-            if !ok {
+            if error != nil {
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         if ScreenShare.shared.isLive { ScreenShare.shared.stop(reason: "Связь с сервером прервалась") }
@@ -331,6 +343,7 @@ final class ShareViewer: ObservableObject {
 
     private var socket: URLSessionWebSocketTask?
     private var window: NSWindow?
+    fileprivate let player = SharePlayer()
 
     func watch(code input: String) {
         guard let code = ShareCode.normalized(input) else {
@@ -378,7 +391,14 @@ final class ShareViewer: ObservableObject {
                     guard viewer.socket === socket else { return }
                     switch result {
                     case .success(.data(let data)):
-                        if let image = NSImage(data: data) { viewer.frame = image }
+                        switch data.first {
+                        case ShareProtocol.frame:
+                            if let image = NSImage(data: data.dropFirst()) { viewer.frame = image }
+                        case ShareProtocol.audio:
+                            viewer.player.play(data.dropFirst())
+                        default:
+                            break
+                        }
                         viewer.receive(socket)
                     case .success(.string(let text)):
                         if text.contains("\"ended\"") {
@@ -401,6 +421,7 @@ final class ShareViewer: ObservableObject {
     func disconnect() {
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil
+        player.stop()
     }
 
     func showWindow() {
@@ -458,6 +479,7 @@ struct ScreenSharePage: View {
     @ObservedObject private var share = ScreenShare.shared
     @ObservedObject private var viewer = ShareViewer.shared
     @AppStorage(Pref.shareServer) private var server = ""
+    @AppStorage(Pref.shareAudio) private var shareAudio = true
     @State private var code = ""
 
     var body: some View {
@@ -500,6 +522,16 @@ struct ScreenSharePage: View {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
             }
+            Section("Звук") {
+                Toggle("Передавать звук системы", isOn: $shareAudio)
+                Text("Зрители слышат то, что играет на Mac (видео, музыку, звонок). Микрофон не передаётся.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Без Mac Utils") {
+                Text("Смотреть или транслировать можно и из браузера — на Windows, Linux, любом компьютере:")
+                    .font(.caption).foregroundStyle(.secondary)
+                Link(server.isEmpty ? "—" : server, destination: URL(string: server.isEmpty ? "about:blank" : server)!)
+            }
             if !compact || server.isEmpty {
                 Section("Сервер") {
                     TextField("Адрес сервера", text: $server, prompt: Text("https://mac-utils-relay….workers.dev"))
@@ -510,5 +542,87 @@ struct ScreenSharePage: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Трансляция экрана")
+    }
+}
+
+// MARK: - Протокол и звук
+
+/// Двоичные сообщения: первый байт — тип. 1 — кадр JPEG, 2 — звук PCM Int16, 24 кГц, моно.
+enum ShareProtocol {
+    static let frame: UInt8 = 1
+    static let audio: UInt8 = 2
+    static let sampleRate = 24_000.0
+
+    static func framePacket(_ jpeg: Data) -> Data {
+        var packet = Data([frame])
+        packet.append(jpeg)
+        return packet
+    }
+
+    static func audioPacket(_ samples: [Float]) -> Data {
+        var packet = Data([audio])
+        packet.reserveCapacity(1 + samples.count * 2)
+        for sample in samples {
+            var value = Int16(max(-1, min(1, sample)) * 32767).littleEndian
+            withUnsafeBytes(of: &value) { packet.append(contentsOf: $0) }
+        }
+        return packet
+    }
+
+    static func samples(_ payload: Data) -> [Float] {
+        let count = payload.count / 2
+        var result = [Float](repeating: 0, count: count)
+        payload.withUnsafeBytes { raw in
+            for index in 0..<count {
+                let value = Int16(littleEndian: raw.loadUnaligned(fromByteOffset: index * 2, as: Int16.self))
+                result[index] = Float(value) / 32768
+            }
+        }
+        return result
+    }
+
+    /// Звук ScreenCaptureKit (Float32) → пакет.
+    static func audioPacket(_ sampleBuffer: CMSampleBuffer) -> Data? {
+        guard sampleBuffer.isValid, let description = sampleBuffer.formatDescription else { return nil }
+        let format = AVAudioFormat(cmAudioFormatDescription: description)
+        let frames = AVAudioFrameCount(sampleBuffer.numSamples)
+        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return nil }
+        buffer.frameLength = frames
+        guard CMSampleBufferCopyPCMDataIntoAudioBufferList(sampleBuffer, at: 0, frameCount: Int32(frames),
+                                                          into: buffer.mutableAudioBufferList) == noErr,
+              let channel = buffer.floatChannelData?[0] else { return nil }
+        return audioPacket(Array(UnsafeBufferPointer(start: channel, count: Int(frames))))
+    }
+}
+
+/// Проигрывание звука трансляции у зрителя.
+final class SharePlayer: @unchecked Sendable {
+    private let engine = AVAudioEngine()
+    private let node = AVAudioPlayerNode()
+    private let format = AVAudioFormat(standardFormatWithSampleRate: ShareProtocol.sampleRate, channels: 1)!
+    private var started = false
+
+    func play(_ payload: Data) {
+        let samples = ShareProtocol.samples(payload)
+        guard !samples.isEmpty,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else { return }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count) }
+        if !started {
+            engine.attach(node)
+            engine.connect(node, to: engine.mainMixerNode, format: format)
+            guard (try? engine.start()) != nil else { return }
+            node.play()
+            started = true
+        }
+        node.scheduleBuffer(buffer)
+    }
+
+    func stop() {
+        guard started else { return }
+        node.stop()
+        engine.stop()
+        engine.detach(node)
+        started = false
     }
 }

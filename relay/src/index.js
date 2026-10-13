@@ -2,6 +2,10 @@
 // Ведущий подключается к /room/<код>?role=host и шлёт кадры (JPEG) двоичными сообщениями,
 // зрители — к /room/<код>?role=viewer и получают их. Комната живёт, пока подключён ведущий.
 // Сервер кадры не хранит и не разбирает — только пересылает.
+// Формат двоичных сообщений: первый байт — тип (1 — кадр JPEG, 2 — звук PCM 16 бит, 24 кГц, моно).
+// «/» — веб-страница: смотреть и транслировать из браузера (Windows, Linux, любой компьютер).
+
+import page from "./index.html";
 
 const MAX_VIEWERS = 10;
 
@@ -9,7 +13,9 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const match = url.pathname.match(/^\/room\/(\d{6})$/);
-    if (!match) return new Response("Mac Utils relay", { status: 200 });
+    if (!match) {
+      return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected WebSocket", { status: 426 });
     }
