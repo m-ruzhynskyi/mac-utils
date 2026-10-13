@@ -97,6 +97,7 @@ struct ToolsView: View {
     @AppStorage(Pref.toolsTab) private var tab = ToolsWindowController.Tab.uninstaller.rawValue
     @AppStorage(Pref.toolsPanelTabs) private var panelTabs = PanelTabs.defaultValue
     @State private var hoveredTab: SettingsSection?
+    @Namespace private var tabNamespace
     @AppStorage(Pref.warmScreen) private var warmEnabled = false
     @AppStorage(Pref.warmMode) private var warmMode = "schedule"
     @AppStorage(Pref.warmManualOn) private var warmManualOn = false
@@ -139,7 +140,9 @@ struct ToolsView: View {
     @ViewBuilder
     private func tabButtons(stretch: Bool) -> some View {
         ForEach(visibleTabs) { item in
-            Button { tab = item.rawValue } label: {
+            Button {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { tab = item.rawValue }
+            } label: {
                 VStack(spacing: 2) {
                     Image(systemName: item.symbol).font(.system(size: visibleTabs.count > 5 ? 15 : 13))
                     if visibleTabs.count <= 5 {
@@ -151,14 +154,25 @@ struct ToolsView: View {
                 .padding(.vertical, 4)
                 .padding(.horizontal, 4)
                 .foregroundStyle(item == currentTab ? Color.accentColor : .primary)
-                .background(item == currentTab ? Color.accentColor.opacity(0.15) : .clear,
-                            in: RoundedRectangle(cornerRadius: 7))
+                // Подсветка выбранной вкладки плавно переезжает к новой.
+                .background {
+                    if item == currentTab {
+                        RoundedRectangle(cornerRadius: 7).fill(Color.accentColor.opacity(0.15))
+                            .matchedGeometryEffect(id: "selectedTab", in: tabNamespace)
+                    } else if hoveredTab == item {
+                        RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.06))
+                    }
+                }
                 // Кликается вся плашка, а не только значок и текст.
                 .contentShape(RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
-            .onHover { inside in hoveredTab = inside ? item : (hoveredTab == item ? nil : hoveredTab) }
-            // Название — сразу при наведении, поверх содержимого (места в ряду не занимает).
+            .onHover { inside in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    if inside { hoveredTab = item } else if hoveredTab == item { hoveredTab = nil }
+                }
+            }
+            // Название — при наведении, поверх содержимого (места в ряду не занимает).
             .overlay(alignment: .bottom) {
                 if visibleTabs.count > 5, hoveredTab == item {
                     Text(item.panelTitle)
@@ -169,15 +183,22 @@ struct ToolsView: View {
                         .shadow(radius: 2, y: 1)
                         .offset(y: 20)
                         .allowsHitTesting(false)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
                 }
             }
-            .zIndex(hoveredTab == item ? 1 : 0)
         }
     }
 
     @ViewBuilder
     private var compactContent: some View {
-        PanelSectionView(section: currentTab)
+        // Содержимое вкладки сменяется мягким переходом, без рывка.
+        ZStack {
+            PanelSectionView(section: currentTab)
+                .id(currentTab)
+                .transition(.opacity.combined(with: .offset(y: 4)))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.2), value: currentTab)
     }
 
     private var header: some View {
