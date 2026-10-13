@@ -573,6 +573,8 @@ private struct ShareViewerView: View {
 // MARK: - Страница
 
 struct ScreenSharePage: View {
+    static let windowsLink = "https://github.com/m-ruzhynskyi/mac-utils/releases/download/windows-latest/MacUtilsShare-Setup.exe"
+
     var compact = false
     @ObservedObject private var share = ScreenShare.shared
     @ObservedObject private var viewer = ShareViewer.shared
@@ -630,11 +632,17 @@ struct ScreenSharePage: View {
                     MutedAppsList()
                 }
             }
-            Section("Windows") {
-                Text("На Windows смотрят и транслируют в приложении Mac Utils Share (в браузере трансляции недоступны).")
-                    .font(.caption).foregroundStyle(.secondary)
-                Link("Скачать Mac Utils Share для Windows",
-                     destination: URL(string: "https://github.com/m-ruzhynskyi/mac-utils/releases/download/windows-latest/MacUtilsShare-Setup.exe")!)
+            Section("Для собеседника на Windows") {
+                HStack {
+                    Text("На Windows смотрят и транслируют в приложении Mac Utils Share. Отправьте ссылку на него собеседнику.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(Self.windowsLink, forType: .string)
+                        Toast.show("Ссылка для Windows скопирована", symbol: "link")
+                    } label: { Label("Скопировать ссылку", systemImage: "link") }
+                }
             }
             if !compact || server.isEmpty {
                 Section("Сервер") {
