@@ -103,7 +103,9 @@ function playPCM(buffer) {
 // В приложении для Windows (window.mu) — свой выбор экрана и окна с превью.
 function pickSource() {
   return new Promise(async (resolve) => {
-    const sources = await window.mu.sources();
+    let sources;
+    try { sources = await window.mu.sources(); }
+    catch (_) { status("Не удалось получить список экранов — разрешите приложению запись экрана"); return resolve(false); }
     const grid = $("sources");
     grid.innerHTML = "";
     for (const source of sources) {

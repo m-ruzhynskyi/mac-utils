@@ -36,6 +36,8 @@ app.whenReady().then(() => {
     callback({ video: chosen.source, audio: chosen.audio ? "loopback" : undefined });
   });
 
+  ipcMain.on("version", (event) => { event.returnValue = app.getVersion(); });
+
   ipcMain.handle("sources", async () => {
     const sources = await desktopCapturer.getSources({
       types: ["screen", "window"],
