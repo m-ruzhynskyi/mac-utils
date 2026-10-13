@@ -53,6 +53,11 @@ if BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null)"; then
 fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+# Помощник «Сейчас играет» (грузится в системный perl — см. Helpers/NowPlaying.m).
+clang -fobjc-arc -dynamiclib -arch arm64 -arch x86_64 -mmacosx-version-min=14.0 \
+    -framework Foundation -framework AppKit Helpers/NowPlaying.m \
+    -o "$APP/Contents/Resources/MUNowPlaying.dylib"
+
 # Значок «Инструменты»: маленькое приложение внутри, Mac Utils копирует его в Программы.
 TOOLS="$APP/Contents/Resources/Инструменты.app"
 mkdir -p "$TOOLS/Contents/MacOS" "$TOOLS/Contents/Resources"
@@ -69,10 +74,12 @@ if [[ -z "$IDENTITY" ]] && security find-certificate -c "Mac Utils Signing" >/de
     IDENTITY="Mac Utils Signing"
 fi
 # Вложенное приложение подписывается первым, затем внешнее.
-if [[ -n "$IDENTITY" ]] && codesign --force --sign "$IDENTITY" "$TOOLS" && codesign --force --sign "$IDENTITY" "$APP"; then
+if [[ -n "$IDENTITY" ]] && codesign --force --sign "$IDENTITY" "$APP/Contents/Resources/MUNowPlaying.dylib" \
+    && codesign --force --sign "$IDENTITY" "$TOOLS" && codesign --force --sign "$IDENTITY" "$APP"; then
     echo "Подписано: $IDENTITY"
 else
     [[ -n "$IDENTITY" ]] && echo "Не удалось подписать «$IDENTITY», подписываю ad-hoc" >&2
+    codesign --force --sign - "$APP/Contents/Resources/MUNowPlaying.dylib"
     codesign --force --sign - "$TOOLS"
     codesign --force --sign - "$APP"
 fi
