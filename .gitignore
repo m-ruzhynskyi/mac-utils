@@ -8,3 +8,5 @@ xcuserdata/
 .claude/settings.local.json
 relay/node_modules/
 relay/.wrangler/
+windows/node_modules/
+windows/dist/

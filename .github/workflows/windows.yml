@@ -1,0 +1,46 @@
+name: Windows
+
+# Ветка windows: сборка Mac Utils Share для Windows на Windows-машине GitHub
+# и обновление релиза «windows-latest» (pre-release — Mac Utils его не трогает).
+# Версия: 1.0.<номер запуска>; приложение само подхватывает её через latest.yml.
+on:
+  push:
+    branches: [windows]
+    paths: ["windows/**", ".github/workflows/windows.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+      - run: npm ci
+      - name: Версия
+        shell: bash
+        run: npm version "1.0.${{ github.run_number }}" --no-git-tag-version
+      - name: Сборка установщика
+        run: npx electron-builder --win nsis --publish never
+      - name: Релиз windows-latest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="1.0.${{ github.run_number }}"
+          NOTES="Mac Utils Share для Windows $VERSION — трансляция экрана по коду и просмотр. Скачайте MacUtilsShare-Setup.exe; дальше приложение обновляется само."
+          if gh release view windows-latest >/dev/null 2>&1; then
+            gh release edit windows-latest --title "Mac Utils Share для Windows $VERSION" --notes "$NOTES" --prerelease
+          else
+            gh release create windows-latest --title "Mac Utils Share для Windows $VERSION" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
+          fi
+          gh release upload windows-latest dist/MacUtilsShare-Setup.exe dist/MacUtilsShare-Setup.exe.blockmap dist/latest.yml --clobber

@@ -1,0 +1,40 @@
+{
+  "name": "mac-utils-share",
+  "productName": "Mac Utils Share",
+  "version": "1.0.0",
+  "description": "Трансляция экрана Mac Utils для Windows",
+  "author": "Maksym Ruzhynskyi",
+  "license": "SEE LICENSE IN ../LICENSE",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.mruzhynskyi.macutils.share",
+    "productName": "Mac Utils Share",
+    "files": ["main.js", "preload.js", "offline.html", "package.json"],
+    "win": {
+      "target": "nsis",
+      "artifactName": "MacUtilsShare-Setup.exe"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Mac Utils Share"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://github.com/m-ruzhynskyi/mac-utils/releases/download/windows-latest/"
+      }
+    ]
+  }
+}
