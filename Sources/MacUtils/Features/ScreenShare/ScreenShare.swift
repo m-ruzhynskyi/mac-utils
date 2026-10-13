@@ -49,6 +49,8 @@ final class ScreenShare: NSObject, ObservableObject {
 
     private var socket: URLSessionWebSocketTask?
     private var stream: SCStream?
+    private var audioStream: SCStream?
+    private var audioRefresh: Timer?
     private var sender: FrameSender?
     private var hud: NSPanel?
 
@@ -61,7 +63,8 @@ final class ScreenShare: NSObject, ObservableObject {
 
     // MARK: - Ведущий
 
-    func start() {
+    /// screen — сразу весь экран под курсором, без окна выбора (для «Команд»: macutils://share?screen).
+    func start(screen: Bool = false) {
         guard state == .idle || isFailed else { return }
         guard !Self.server.isEmpty else {
             state = .failed("Сервер трансляции не настроен")
@@ -73,6 +76,21 @@ final class ScreenShare: NSObject, ObservableObject {
         }
         // Сначала — что показывать: системное окно выбора (экран, окно или программа).
         state = .connecting
+        if screen {
+            Task {
+                guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+                      let display = content.displays.first(where: { $0.displayID == (NSScreen.withMouse ?? NSScreen.main)?.displayID })
+                        ?? content.displays.first else {
+                    state = .failed("Не удалось начать захват экрана")
+                    return
+                }
+                let ownPID = ProcessInfo.processInfo.processIdentifier
+                connect(filter: SCContentFilter(display: display,
+                                                excludingApplications: content.applications.filter { $0.processID == ownPID },
+                                                exceptingWindows: []))
+            }
+            return
+        }
         Picker.shared.choose { [weak self] filter in
             guard let self else { return }
             guard let filter else {
@@ -134,6 +152,47 @@ final class ScreenShare: NSObject, ObservableObject {
         }
     }
 
+    /// Весь звук системы, кроме Mac Utils и программ, которые пользователь заглушил для трансляции.
+    private static func audioFilter() async throws -> SCContentFilter {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard let display = content.displays.first else { throw CocoaError(.featureUnsupported) }
+        let muted = Set(UserDefaults.standard.stringArray(forKey: Pref.shareMutedApps) ?? [])
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let excluded = content.applications.filter { $0.processID == ownPID || muted.contains($0.bundleIdentifier) }
+        return SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
+    }
+
+    private static func audioConfiguration() -> SCStreamConfiguration {
+        let config = SCStreamConfiguration()
+        // Картинка из этого потока не нужна — минимальный кадр раз в секунду.
+        config.width = 2
+        config.height = 2
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        // 24 кГц моно — достаточно для речи и музыки фоном, ~48 КБ/с.
+        config.capturesAudio = true
+        config.excludesCurrentProcessAudio = true
+        config.sampleRate = 24_000
+        config.channelCount = 1
+        return config
+    }
+
+    /// Список заглушённых изменился или запустилась новая программа — обновляем фильтр звука.
+    func refreshAudioFilter() {
+        guard let audioStream else { return }
+        Task {
+            if let filter = try? await Self.audioFilter() { try? await audioStream.updateContentFilter(filter) }
+        }
+    }
+
+    private func startAudioRefresh() {
+        audioRefresh?.invalidate()
+        let timer = Timer(timeInterval: 10, repeats: true) { _ in
+            MainActor.assumeIsolated { ScreenShare.shared.refreshAudioFilter() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        audioRefresh = timer
+    }
+
     private static func configure(_ config: SCStreamConfiguration, for filter: SCContentFilter) {
         // До 1600 точек по ширине — читаемо и не тяжело для сети.
         let pixels = CGSize(width: filter.contentRect.width * CGFloat(filter.pointPixelScale),
@@ -154,11 +213,6 @@ final class ScreenShare: NSObject, ObservableObject {
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.showsCursor = true
             config.queueDepth = 3
-            let wantsAudio = UserDefaults.standard.bool(forKey: Pref.shareAudio)
-            config.capturesAudio = wantsAudio
-            config.excludesCurrentProcessAudio = true
-            config.sampleRate = 24_000
-            config.channelCount = 1
             Task {
                 try? await stream.updateContentFilter(filter)
                 try? await stream.updateConfiguration(config)
@@ -173,17 +227,18 @@ final class ScreenShare: NSObject, ObservableObject {
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = true
         config.queueDepth = 3
-        // Звук системы: 24 кГц моно — достаточно для речи и музыки фоном, ~48 КБ/с.
-        let wantsAudio = UserDefaults.standard.bool(forKey: Pref.shareAudio)
-        config.capturesAudio = wantsAudio
-        config.excludesCurrentProcessAudio = true
-        config.sampleRate = 24_000
-        config.channelCount = 1
         guard let socket else { throw CocoaError(.featureUnsupported) }
         let sender = FrameSender(socket: socket)
         let stream = SCStream(filter: filter, configuration: config, delegate: sender)
         try stream.addStreamOutput(sender, type: .screen, sampleHandlerQueue: sender.queue)
-        if wantsAudio { try stream.addStreamOutput(sender, type: .audio, sampleHandlerQueue: sender.audioQueue) }
+        // Звук — отдельным потоком: из него можно убрать выбранные программы (чтобы не дублировать лишнее).
+        if UserDefaults.standard.bool(forKey: Pref.shareAudio) {
+            let audioStream = SCStream(filter: try await Self.audioFilter(), configuration: Self.audioConfiguration(), delegate: sender)
+            try audioStream.addStreamOutput(sender, type: .audio, sampleHandlerQueue: sender.audioQueue)
+            try await audioStream.startCapture()
+            self.audioStream = audioStream
+            startAudioRefresh()
+        }
         try await stream.startCapture()
         self.stream = stream
         self.sender = sender
@@ -218,7 +273,12 @@ final class ScreenShare: NSObject, ObservableObject {
     func stop(reason: String? = nil) {
         Picker.shared.reset()
         let stream = self.stream
+        let audioStream = self.audioStream
         self.stream = nil
+        self.audioStream = nil
+        audioRefresh?.invalidate()
+        audioRefresh = nil
+        Task { try? await audioStream?.stopCapture() }
         sender = nil
         Task { try? await stream?.stopCapture() }
         socket?.cancel(with: .normalClosure, reason: nil)
@@ -559,6 +619,9 @@ struct ScreenSharePage: View {
                 Toggle("Передавать звук системы", isOn: $shareAudio)
                 Text("Зрители слышат то, что играет на Mac (видео, музыку, звонок). Микрофон не передаётся.")
                     .font(.caption).foregroundStyle(.secondary)
+                if shareAudio {
+                    MutedAppsList()
+                }
             }
             Section("Без Mac Utils") {
                 Text("Смотреть или транслировать можно и из браузера — на Windows, Linux, любом компьютере:")
@@ -705,5 +768,53 @@ private final class Picker: NSObject, SCContentSharingPickerObserver {
 
     nonisolated func contentSharingPickerStartDidFailWithError(_ error: Error) {
         DispatchQueue.main.async { MainActor.assumeIsolated { Picker.shared.finish(nil) } }
+    }
+}
+
+/// «Не передавать звук этих программ» — например, созвон, чтобы собеседники не слышали себя дважды.
+private struct MutedAppsList: View {
+    @State private var muted: Set<String> = []
+    @State private var apps: [(id: String, name: String, icon: NSImage)] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Не передавать звук программ:").font(.callout)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), alignment: .leading)], alignment: .leading, spacing: 4) {
+                ForEach(apps, id: \.id) { app in
+                    Toggle(isOn: Binding(get: { muted.contains(app.id) }, set: { on in
+                        if on { muted.insert(app.id) } else { muted.remove(app.id) }
+                        UserDefaults.standard.set(Array(muted).sorted(), forKey: Pref.shareMutedApps)
+                        ScreenShare.shared.refreshAudioFilter()
+                    })) {
+                        HStack(spacing: 4) {
+                            Image(nsImage: app.icon).resizable().frame(width: 16, height: 16)
+                            Text(app.name).lineLimit(1)
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                }
+            }
+            Text("Заглушённые программы зрители не слышат; у вас звук остаётся. Меняется и во время трансляции.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear(perform: load)
+    }
+
+    private func load() {
+        muted = Set(UserDefaults.standard.stringArray(forKey: Pref.shareMutedApps) ?? [])
+        var seen = Set<String>()
+        var list: [(id: String, name: String, icon: NSImage)] = []
+        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+            guard let id = app.bundleIdentifier, id != Bundle.main.bundleIdentifier, seen.insert(id).inserted else { continue }
+            list.append((id, app.localizedName ?? id, app.icon ?? NSImage()))
+        }
+        // Заглушённые, но сейчас не запущенные — тоже в списке, чтобы можно было снять галочку.
+        for id in muted where !seen.contains(id) {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+                list.append((id, FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: ""),
+                             NSWorkspace.shared.icon(forFile: url.path)))
+            }
+        }
+        apps = list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }

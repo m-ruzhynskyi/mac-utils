@@ -93,6 +93,8 @@ enum Pref {
     /// Адрес ретранслятора трансляции экрана (relay/, Cloudflare Workers).
     static let shareServer = "shareServer"
     static let shareAudio = "shareAudio"
+    /// Программы, чей звук не идёт в трансляцию (bundle id).
+    static let shareMutedApps = "shareMutedApps"
     /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.
     static let cheatSheetSticky = "cheatSheetSticky"
 
