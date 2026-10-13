@@ -32,18 +32,15 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 # Версия = <major.minor из Info.plist>.<число коммитов> — одинаково локально и в CI
 # (в CI нужен checkout с полной историей), чтобы автообновление сравнивало верно.
-# Начиная с 1.3: <major.minor>.<номер>, где номер считается от коммита, в котором major.minor
-# появилась в Info.plist (по первому родителю). Мерж в main — 1.3.0, следующий — 1.3.1 и т. д.
+# <major.minor>.<номер>: номер — число всех коммитов с того, где major.minor появилась в Info.plist.
+# Одинаково считается в development и в main (main = те же коммиты + мержи), поэтому
+# номер только растёт и локальная сборка не бывает «старее» релиза.
 if BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null)"; then
     PLIST="$APP/Contents/Info.plist"
     BASE="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" | cut -d. -f1,2)"
     SINCE="$(git log -1 --format=%H -S "<string>$BASE.0</string>" -- Resources/Info.plist 2>/dev/null)"
     if [ -n "$SINCE" ]; then
-        PATCH="$(git rev-list --count --first-parent "$SINCE..HEAD")"
-        # Мерж-коммит (релиз из main) не добавляет номер: первый релиз ветки — .0.
-        if [ "$(git rev-list --parents -n1 HEAD | wc -w)" -gt 2 ] && [ "$PATCH" -gt 0 ]; then
-            PATCH=$((PATCH - 1))
-        fi
+        PATCH="$(git rev-list --count "$SINCE..HEAD")"
     else
         PATCH="$BUILD_NUMBER"
     fi
