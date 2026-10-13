@@ -364,23 +364,8 @@ final class ShareViewer: ObservableObject {
         socket.maximumMessageSize = 4 << 20
         self.socket = socket
         socket.resume()
-        socket.sendPing { error in
-            let status = (socket.response as? HTTPURLResponse)?.statusCode
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    let viewer = ShareViewer.shared
-                    guard viewer.socket === socket else { return }
-                    if error != nil {
-                        viewer.state = .ended(status == 404 ? "Трансляции с таким кодом нет"
-                                              : status == 429 ? "Слишком много зрителей" : "Нет связи с сервером")
-                        viewer.disconnect()
-                    } else {
-                        viewer.state = .watching
-                        viewer.receive(socket)
-                    }
-                }
-            }
-        }
+        // Сразу читаем: пока не забираем входящие кадры, ответ на ping может не прийти.
+        receive(socket)
     }
 
     private func receive(_ socket: URLSessionWebSocketTask) {
@@ -389,6 +374,7 @@ final class ShareViewer: ObservableObject {
                 MainActor.assumeIsolated {
                     let viewer = ShareViewer.shared
                     guard viewer.socket === socket else { return }
+                    if case .success = result, viewer.state == .connecting { viewer.state = .watching }
                     switch result {
                     case .success(.data(let data)):
                         switch data.first {
@@ -408,7 +394,16 @@ final class ShareViewer: ObservableObject {
                             viewer.receive(socket)
                         }
                     case .failure:
-                        if viewer.state == .watching { viewer.state = .ended("Трансляция завершена") }
+                        let status = (socket.response as? HTTPURLResponse)?.statusCode
+                        switch viewer.state {
+                        case .connecting:
+                            viewer.state = .ended(status == 404 ? "Трансляции с таким кодом нет"
+                                                  : status == 429 ? "Слишком много зрителей" : "Нет связи с сервером")
+                        case .watching:
+                            viewer.state = .ended("Трансляция завершена")
+                        default:
+                            break
+                        }
                         viewer.disconnect()
                     @unknown default:
                         viewer.receive(socket)
