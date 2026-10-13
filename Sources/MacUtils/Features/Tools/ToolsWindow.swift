@@ -126,32 +126,47 @@ struct ToolsView: View {
         }
     }
 
-    /// Панель из строки меню: вкладки — выбранные пользователем разделы (листаются, если их много).
+    /// Панель из строки меню: вкладки — выбранные пользователем разделы. Если помещаются —
+    /// делят ширину поровну (без пустого места справа), если нет — ряд листается вбок.
     private var compactTabs: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(visibleTabs) { item in
-                    Button { tab = item.rawValue } label: {
-                        VStack(spacing: 2) {
-                            Image(systemName: item.symbol).font(.system(size: 13))
-                            Text(item.panelTitle).font(.system(size: 10)).lineLimit(1)
-                        }
-                        .frame(minWidth: 58)
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 4)
-                        .foregroundStyle(item == currentTab ? Color.accentColor : .primary)
-                        .background(item == currentTab ? Color.accentColor.opacity(0.15) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 7))
-                        // Кликается вся плашка, а не только значок и текст.
-                        .contentShape(RoundedRectangle(cornerRadius: 7))
+        GeometryReader { proxy in
+            let fits = CGFloat(visibleTabs.count) * 66 <= proxy.size.width - 20
+            Group {
+                if fits {
+                    HStack(spacing: 4) { tabButtons(stretch: true) }
+                        .padding(.horizontal, 10)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) { tabButtons(stretch: false) }
+                            .padding(.horizontal, 10)
                     }
-                    .buttonStyle(.plain)
-                    .help(item.title)
                 }
             }
-            .padding(.horizontal, 10)
         }
+        .frame(height: 46)
         .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private func tabButtons(stretch: Bool) -> some View {
+        ForEach(visibleTabs) { item in
+            Button { tab = item.rawValue } label: {
+                VStack(spacing: 2) {
+                    Image(systemName: item.symbol).font(.system(size: 13))
+                    Text(item.panelTitle).font(.system(size: 10)).lineLimit(1)
+                }
+                .frame(minWidth: 58, maxWidth: stretch ? .infinity : nil)
+                .padding(.vertical, 4)
+                .padding(.horizontal, 4)
+                .foregroundStyle(item == currentTab ? Color.accentColor : .primary)
+                .background(item == currentTab ? Color.accentColor.opacity(0.15) : .clear,
+                            in: RoundedRectangle(cornerRadius: 7))
+                // Кликается вся плашка, а не только значок и текст.
+                .contentShape(RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .help(item.title)
+        }
     }
 
     @ViewBuilder
