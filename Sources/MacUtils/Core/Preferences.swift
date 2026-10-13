@@ -90,6 +90,8 @@ enum Pref {
     static let menuBarIcon = "menuBarIconEnabled"
     /// Показывать Mac Utils в Dock (по умолчанию нет — работает в фоне).
     static let showInDock = "showInDock"
+    /// Адрес ретранслятора трансляции экрана (relay/, Cloudflare Workers).
+    static let shareServer = "shareServer"
     /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.
     static let cheatSheetSticky = "cheatSheetSticky"
 

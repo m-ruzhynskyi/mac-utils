@@ -6,3 +6,5 @@ build/
 xcuserdata/
 *.xcodeproj/
 .claude/settings.local.json
+relay/node_modules/
+relay/.wrangler/

@@ -101,3 +101,16 @@ final class ChangelogTests: XCTestCase {
         XCTAssertTrue(Updater.isVersion("1.3.0", newerThan: "1.2.118"))
     }
 }
+
+final class ShareCodeTests: XCTestCase {
+    func testCodeAndURL() {
+        XCTAssertEqual(ShareCode.random().count, 6)
+        XCTAssertEqual(ShareCode.normalized("123 456"), "123456")
+        XCTAssertNil(ShareCode.normalized("12345"))
+        XCTAssertEqual(ShareCode.display("123456"), "123 456")
+        XCTAssertEqual(ShareCode.url(server: "https://relay.example.dev/", code: "123456", role: "host")?.absoluteString,
+                       "wss://relay.example.dev/room/123456?role=host")
+        XCTAssertEqual(ShareCode.url(server: "http://127.0.0.1:8787", code: "000001", role: "viewer")?.absoluteString,
+                       "ws://127.0.0.1:8787/room/000001?role=viewer")
+    }
+}

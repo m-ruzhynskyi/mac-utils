@@ -70,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ]
                 if url.query == "restore" { WindowTiler.shared.perform(.restore) }
                 else if let target = targets[url.query ?? ""] { WindowTiler.shared.perform(.snap(target)) }
+            case "share": ScreenShare.shared.isLive ? ScreenShare.shared.stop() : ScreenShare.shared.start()
+            case "watch": if let code = url.query { ShareViewer.shared.watch(code: code) }
             case "annotate": ScreenAnnotator.shared.toggle()
             case "pin": WindowPin.shared.toggleFocused()
             case "fix-text": TextFixer.shared.fix()
