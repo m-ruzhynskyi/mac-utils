@@ -55,7 +55,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, panel, music, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
+    case general, panel, music, share, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
          uninstaller, monitor, tasks, cleanup, shots
 
@@ -87,6 +87,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: return "Общие"
         case .panel: return "Панель"
         case .music: return "Музыка"
+        case .share: return "Трансляция"
         }
     }
 
@@ -95,6 +96,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: return "Общие"
         case .panel: return "Панель в строке меню"
         case .music: return "Музыка"
+        case .share: return "Трансляция экрана"
         case .cutPaste: return "Вырезать и вставить"
         case .smoothScroll: return "Плавная прокрутка"
         case .switcher: return "Переключатель приложений"
@@ -123,6 +125,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: return "gearshape"
         case .panel: return "menubar.rectangle"
         case .music: return "music.note"
+        case .share: return "dot.radiowaves.left.and.right"
         case .cutPaste: return "scissors"
         case .smoothScroll: return "computermouse"
         case .switcher: return "rectangle.on.rectangle"
@@ -151,6 +154,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: return .gray
         case .panel: return .teal
         case .music: return .pink
+        case .share: return .red
         case .cutPaste: return .orange
         case .smoothScroll: return .green
         case .switcher: return .blue
@@ -209,6 +213,7 @@ struct SettingsSectionPage: View {
             case .general: GeneralPage()
             case .panel: PanelSettingsPage()
             case .music: NowPlayingView(compact: compact).navigationTitle("Музыка")
+            case .share: ScreenSharePage(compact: compact)
             case .cutPaste: CutPastePage()
             case .smoothScroll: SmoothScrollPage()
             case .switcher: SwitcherPage()

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mac Utils — трансляция экрана</title>
+<style>
+  :root { color-scheme: light dark; --accent: #e5484d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; background: #111; color: #eee; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 14px; background: #1c1c1e; flex-wrap: wrap; }
+  header b { margin-right: auto; }
+  input { font: inherit; width: 9em; padding: 6px 10px; border-radius: 8px; border: 1px solid #444; background: #222; color: inherit; letter-spacing: 2px; }
+  button { font: inherit; padding: 6px 14px; border-radius: 8px; border: 0; background: #3a3a3c; color: inherit; cursor: pointer; }
+  button.primary { background: #0a84ff; } button.danger { background: var(--accent); }
+  #stage { position: fixed; inset: 52px 0 0 0; display: flex; align-items: center; justify-content: center; }
+  #screen { max-width: 100%; max-height: 100%; object-fit: contain; }
+  #status { position: absolute; padding: 10px 16px; border-radius: 10px; background: rgba(0,0,0,.6); }
+  #live { display: none; align-items: center; gap: 8px; font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .muted { opacity: .65; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <b>Mac Utils · трансляция экрана</b>
+  <input id="code" inputmode="numeric" maxlength="7" placeholder="Код">
+  <button class="primary" id="watch">Смотреть</button>
+  <button id="share">Транслировать свой экран</button>
+  <span id="live"><span class="dot"></span><span id="liveText"></span><button class="danger" id="stop">Стоп</button></span>
+</header>
+<div id="stage">
+  <img id="screen" alt="">
+  <div id="status">Введите код из 6 цифр и нажмите «Смотреть» — или транслируйте свой экран.</div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const wsBase = location.origin.replace(/^http/, "ws");
+let socket = null, audio = null, playAt = 0, lastUrl = null, capture = null;
+
+function status(text) { $("status").textContent = text; $("status").style.display = text ? "" : "none"; }
+function digits(text) { const d = text.replace(/\D/g, ""); return d.length === 6 ? d : null; }
+
+// ---- Зритель ----
+function watch() {
+  const code = digits($("code").value);
+  if (!code) return status("Код — 6 цифр");
+  stopAll();
+  status("Подключаюсь…");
+  socket = new WebSocket(`${wsBase}/room/${code}?role=viewer`);
+  socket.binaryType = "arraybuffer";
+  socket.onopen = () => status("Жду картинку…");
+  socket.onmessage = (event) => {
+    if (typeof event.data === "string") {
+      if (event.data.includes('"ended"')) { status("Трансляция завершена"); socket.close(); }
+      return;
+    }
+    const bytes = new Uint8Array(event.data);
+    if (bytes[0] === 1) {
+      const url = URL.createObjectURL(new Blob([bytes.subarray(1)], { type: "image/jpeg" }));
+      $("screen").src = url;
+      if (lastUrl) URL.revokeObjectURL(lastUrl);
+      lastUrl = url;
+      status("");
+    } else if (bytes[0] === 2) {
+      playPCM(event.data.slice(1));
+    }
+  };
+  socket.onclose = (event) => { if (event.code !== 1000) status("Трансляции с таким кодом нет или связь прервалась"); };
+}
+
+function playPCM(buffer) {
+  if (!audio) { audio = new AudioContext({ sampleRate: 24000 }); playAt = 0; }
+  const ints = new Int16Array(buffer);
+  const chunk = audio.createBuffer(1, ints.length, 24000);
+  const data = chunk.getChannelData(0);
+  for (let i = 0; i < ints.length; i++) data[i] = ints[i] / 32768;
+  const source = audio.createBufferSource();
+  source.buffer = chunk;
+  source.connect(audio.destination);
+  // Небольшой запас против рывков; если отстали — догоняем.
+  if (playAt < audio.currentTime || playAt > audio.currentTime + 1) playAt = audio.currentTime + 0.15;
+  source.start(playAt);
+  playAt += chunk.duration;
+}
+
+// ---- Ведущий (браузер: Windows, Linux…) ----
+async function share() {
+  stopAll();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 8 }, audio: true });
+  } catch (_) { return status("Трансляция отменена"); }
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const code = String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
+    const ok = await openHost(code);
+    if (ok) return startCapture(stream, code);
+  }
+  stream.getTracks().forEach((t) => t.stop());
+  status("Не удалось получить код — попробуйте ещё раз");
+}
+
+function openHost(code) {
+  return new Promise((resolve) => {
+    const ws = new WebSocket(`${wsBase}/room/${code}?role=host`);
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => { socket = ws; resolve(true); };
+    ws.onerror = () => resolve(false);
+  });
+}
+
+function startCapture(stream, code) {
+  const video = document.createElement("video");
+  video.srcObject = stream;
+  video.muted = true;
+  video.play();
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  $("live").style.display = "flex";
+  $("liveText").textContent = `Код ${code.slice(0, 3)} ${code.slice(3)} · зрителей: 0`;
+  status(`Вы транслируете экран. Код: ${code.slice(0, 3)} ${code.slice(3)}`);
+  socket.onmessage = (event) => {
+    if (typeof event.data !== "string") return;
+    const msg = JSON.parse(event.data);
+    if (msg.type === "viewers") $("liveText").textContent = `Код ${code.slice(0, 3)} ${code.slice(3)} · зрителей: ${msg.count}`;
+  };
+  socket.onclose = () => stopAll("Связь с сервером прервалась");
+  const timer = setInterval(() => {
+    if (!socket || socket.readyState !== 1 || socket.bufferedAmount > 1e6 || !video.videoWidth) return;
+    const scale = Math.min(1, 1600 / video.videoWidth);
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(async (blob) => {
+      if (!blob || !socket || socket.readyState !== 1) return;
+      const body = new Uint8Array(await blob.arrayBuffer());
+      const packet = new Uint8Array(body.length + 1);
+      packet[0] = 1; packet.set(body, 1);
+      socket.send(packet);
+    }, "image/jpeg", 0.55);
+  }, 125);
+  let audioContext = null;
+  if (stream.getAudioTracks().length) {
+    audioContext = new AudioContext({ sampleRate: 24000 });
+    const source = audioContext.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
+    const processor = audioContext.createScriptProcessor(2048, 1, 1);
+    processor.onaudioprocess = (event) => {
+      if (!socket || socket.readyState !== 1) return;
+      const input = event.inputBuffer.getChannelData(0);
+      const packet = new DataView(new ArrayBuffer(input.length * 2 + 1));
+      packet.setUint8(0, 2);
+      for (let i = 0; i < input.length; i++) packet.setInt16(1 + i * 2, Math.max(-1, Math.min(1, input[i])) * 32767, true);
+      socket.send(packet.buffer);
+    };
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+  }
+  stream.getVideoTracks()[0].onended = () => stopAll("Трансляция остановлена");
+  capture = { stream, timer, audioContext };
+}
+
+function stopAll(message) {
+  if (capture) {
+    clearInterval(capture.timer);
+    capture.stream.getTracks().forEach((t) => t.stop());
+    capture.audioContext?.close();
+    capture = null;
+  }
+  if (socket) { socket.onclose = null; socket.close(1000); socket = null; }
+  $("live").style.display = "none";
+  if (message) status(message);
+}
+
+$("watch").onclick = watch;
+$("code").onkeydown = (e) => { if (e.key === "Enter") watch(); };
+$("share").onclick = share;
+$("stop").onclick = () => stopAll("Трансляция остановлена");
+const fromLink = new URLSearchParams(location.search).get("code");
+if (fromLink) { $("code").value = fromLink; watch(); }
+</script>
+</body>
+</html>

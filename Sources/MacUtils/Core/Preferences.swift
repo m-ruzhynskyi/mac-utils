@@ -90,6 +90,9 @@ enum Pref {
     static let menuBarIcon = "menuBarIconEnabled"
     /// Показывать Mac Utils в Dock (по умолчанию нет — работает в фоне).
     static let showInDock = "showInDock"
+    /// Адрес ретранслятора трансляции экрана (relay/, Cloudflare Workers).
+    static let shareServer = "shareServer"
+    static let shareAudio = "shareAudio"
     /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.
     static let cheatSheetSticky = "cheatSheetSticky"
 
@@ -178,6 +181,8 @@ enum Pref {
             appVolume: true,
             menuBarIcon: true,
             showInDock: false,
+            shareAudio: true,
+            shareServer: "https://mac-utils-relay.mako-62d.workers.dev",
             cheatSheetSticky: false,
             dropShelf: true,
             cheatSheet: true,
