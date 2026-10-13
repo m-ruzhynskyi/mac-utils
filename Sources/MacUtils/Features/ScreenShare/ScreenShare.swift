@@ -71,7 +71,19 @@ final class ScreenShare: NSObject, ObservableObject {
             state = .failed("Нужно разрешение «Запись экрана»")
             return
         }
+        // Сначала — что показывать: системное окно выбора (экран, окно или программа).
         state = .connecting
+        Picker.shared.choose { [weak self] filter in
+            guard let self else { return }
+            guard let filter else {
+                self.state = .idle
+                return
+            }
+            self.connect(filter: filter)
+        }
+    }
+
+    private func connect(filter: SCContentFilter) {
         Task {
             // Код может быть занят — пробуем несколько.
             for _ in 0..<4 {
@@ -88,7 +100,7 @@ final class ScreenShare: NSObject, ObservableObject {
                 }
                 self.socket = socket
                 do {
-                    try await beginCapture()
+                    try await beginCapture(filter: filter)
                 } catch {
                     socket.cancel(with: .goingAway, reason: nil)
                     self.socket = nil
@@ -122,20 +134,41 @@ final class ScreenShare: NSObject, ObservableObject {
         }
     }
 
-    private func beginCapture() async throws {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        let mouseScreen = NSScreen.withMouse ?? NSScreen.main
-        guard let display = content.displays.first(where: { $0.displayID == mouseScreen?.displayID }) ?? content.displays.first
-        else { throw CocoaError(.featureUnsupported) }
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        let filter = SCContentFilter(display: display,
-                                     excludingApplications: content.applications.filter { $0.processID == ownPID },
-                                     exceptingWindows: [])
+    private static func configure(_ config: SCStreamConfiguration, for filter: SCContentFilter) {
+        // До 1600 точек по ширине — читаемо и не тяжело для сети.
+        let pixels = CGSize(width: filter.contentRect.width * CGFloat(filter.pointPixelScale),
+                            height: filter.contentRect.height * CGFloat(filter.pointPixelScale))
+        let scale = min(1, 1600 / max(pixels.width, 1))
+        config.width = max(2, Int(pixels.width * scale) / 2 * 2)
+        config.height = max(2, Int(pixels.height * scale) / 2 * 2)
+    }
+
+    /// Сменить, что показываем, не прерывая трансляцию.
+    func changeSource() {
+        guard isLive, let stream else { return }
+        Picker.shared.choose(for: stream) { filter in
+            guard let filter else { return }
+            let config = SCStreamConfiguration()
+            Self.configure(config, for: filter)
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 8)
+            config.pixelFormat = kCVPixelFormatType_32BGRA
+            config.showsCursor = true
+            config.queueDepth = 3
+            let wantsAudio = UserDefaults.standard.bool(forKey: Pref.shareAudio)
+            config.capturesAudio = wantsAudio
+            config.excludesCurrentProcessAudio = true
+            config.sampleRate = 24_000
+            config.channelCount = 1
+            Task {
+                try? await stream.updateContentFilter(filter)
+                try? await stream.updateConfiguration(config)
+            }
+        }
+    }
+
+    private func beginCapture(filter: SCContentFilter) async throws {
         let config = SCStreamConfiguration()
-        // До 1600 точек по ширине и 8 кадров в секунду — читаемо и не тяжело для сети.
-        let scale = min(1, 1600 / CGFloat(display.width))
-        config.width = Int(CGFloat(display.width) * scale) / 2 * 2
-        config.height = Int(CGFloat(display.height) * scale) / 2 * 2
+        Self.configure(config, for: filter)
         config.minimumFrameInterval = CMTime(value: 1, timescale: 8)
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = true
@@ -183,6 +216,7 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     func stop(reason: String? = nil) {
+        Picker.shared.reset()
         let stream = self.stream
         self.stream = nil
         sender = nil
@@ -239,6 +273,8 @@ private struct ShareHUD: View {
                     .buttonStyle(.borderless)
                     .help("Скопировать код")
                     Label("\(viewers)", systemImage: "eye").font(.caption2).foregroundStyle(.secondary)
+                    Button { share.changeSource() } label: { Image(systemName: "rectangle.on.rectangle").font(.caption2) }
+                        .buttonStyle(.borderless).help("Показать другой экран или окно")
                     Button { share.stop() } label: { Image(systemName: "stop.fill").font(.caption2) }
                         .buttonStyle(.borderless).foregroundStyle(.red).help("Остановить трансляцию")
                 } else {
@@ -482,7 +518,8 @@ struct ScreenSharePage: View {
             Section("Показать свой экран") {
                 switch share.state {
                 case .idle, .failed:
-                    Button { share.start() } label: { Label("Начать трансляцию", systemImage: "dot.radiowaves.left.and.right") }
+                    Button { share.start() } label: { Label("Начать трансляцию…", systemImage: "dot.radiowaves.left.and.right") }
+                        .help("Откроется выбор: весь экран, окно или программа")
                         .buttonStyle(.borderedProminent)
                         .disabled(server.isEmpty)
                     if case .failed(let message) = share.state {
@@ -498,9 +535,10 @@ struct ScreenSharePage: View {
                             .buttonStyle(.borderless).help("Скопировать код")
                         Spacer()
                         Label("\(viewers)", systemImage: "eye").foregroundStyle(.secondary)
+                        Button("Сменить экран…") { share.changeSource() }
                         Button("Стоп") { share.stop() }.tint(.red)
                     }
-                    Text("Сообщите код тому, кто будет смотреть. Он видит только экран, управлять не может.")
+                    Text("Сообщите код тому, кто будет смотреть. Он видит только выбранный экран или окно, управлять не может.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -619,5 +657,53 @@ final class SharePlayer: @unchecked Sendable {
         engine.stop()
         engine.detach(node)
         started = false
+    }
+}
+
+// MARK: - Выбор, что показывать
+
+/// Системное окно выбора ScreenCaptureKit: экран, окно или программа.
+@MainActor
+private final class Picker: NSObject, SCContentSharingPickerObserver {
+    static let shared = Picker()
+    private var completion: ((SCContentFilter?) -> Void)?
+    private var observing = false
+
+    func choose(for stream: SCStream? = nil, completion: @escaping (SCContentFilter?) -> Void) {
+        let picker = SCContentSharingPicker.shared
+        if !observing {
+            picker.add(self)
+            observing = true
+        }
+        var configuration = SCContentSharingPickerConfiguration()
+        configuration.allowedPickerModes = [.singleDisplay, .singleWindow, .singleApplication]
+        configuration.excludedBundleIDs = [Bundle.main.bundleIdentifier ?? ""]
+        picker.defaultConfiguration = configuration
+        picker.isActive = true
+        self.completion = completion
+        if let stream { picker.present(for: stream) } else { picker.present() }
+    }
+
+    func reset() {
+        completion = nil
+        SCContentSharingPicker.shared.isActive = false
+    }
+
+    private func finish(_ filter: SCContentFilter?) {
+        let completion = self.completion
+        self.completion = nil
+        completion?(filter)
+    }
+
+    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
+        DispatchQueue.main.async { MainActor.assumeIsolated { Picker.shared.finish(filter) } }
+    }
+
+    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
+        DispatchQueue.main.async { MainActor.assumeIsolated { Picker.shared.finish(nil) } }
+    }
+
+    nonisolated func contentSharingPickerStartDidFailWithError(_ error: Error) {
+        DispatchQueue.main.async { MainActor.assumeIsolated { Picker.shared.finish(nil) } }
     }
 }

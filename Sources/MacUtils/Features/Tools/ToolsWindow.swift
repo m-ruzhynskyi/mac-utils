@@ -126,24 +126,14 @@ struct ToolsView: View {
         }
     }
 
-    /// Панель из строки меню: вкладки — выбранные пользователем разделы. Если помещаются —
-    /// делят ширину поровну (без пустого места справа), если нет — ряд листается вбок.
+    /// Панель из строки меню: вкладки — выбранные пользователем разделы.
+    /// До 5 — одним рядом на всю ширину; больше — переносятся на следующие ряды (не уезжают вбок).
     private var compactTabs: some View {
-        GeometryReader { proxy in
-            let fits = CGFloat(visibleTabs.count) * 66 <= proxy.size.width - 20
-            Group {
-                if fits {
-                    HStack(spacing: 4) { tabButtons(stretch: true) }
-                        .padding(.horizontal, 10)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) { tabButtons(stretch: false) }
-                            .padding(.horizontal, 10)
-                    }
-                }
-            }
+        let perRow = min(5, visibleTabs.count)
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: max(1, perRow)), spacing: 4) {
+            tabButtons(stretch: true)
         }
-        .frame(height: 46)
+        .padding(.horizontal, 10)
         .padding(.top, 8)
     }
 

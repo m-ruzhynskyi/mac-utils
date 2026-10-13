@@ -137,7 +137,8 @@ final class Updater: NSObject, ObservableObject {
     }
 
     private static func fetchLatest(repo: String) async throws -> ReleaseInfo {
-        guard let url = URL(string: "https://api.github.com/repos/\(repo)/releases/latest") else {
+        // Список, а не /latest: в том же репозитории есть релизы Windows-версии — берём только Mac-релиз.
+        guard let url = URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=20") else {
             throw UpdateError("Неверное имя репозитория")
         }
         var request = URLRequest(url: url)
@@ -150,9 +151,12 @@ final class Updater: NSObject, ObservableObject {
             throw UpdateError("Релизы не найдены (репозиторий приватный или релизов ещё нет)")
         }
         guard status == 200 else { throw UpdateError("GitHub ответил \(status)") }
-        let release = try JSONDecoder().decode(ReleaseDTO.self, from: data)
-        guard let asset = release.assets.first(where: { $0.name == assetName }) else {
-            throw UpdateError("В релизе нет файла \(assetName)")
+        let releases = try JSONDecoder().decode([ReleaseDTO].self, from: data)
+        guard let release = releases.first(where: { release in
+            !release.draft && !release.prerelease && release.tagName.hasPrefix("v")
+                && release.assets.contains { $0.name == assetName }
+        }), let asset = release.assets.first(where: { $0.name == assetName }) else {
+            throw UpdateError("Релиз Mac Utils не найден")
         }
         let version = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
         return ReleaseInfo(version: version, zipURL: asset.browserDownloadURL)
