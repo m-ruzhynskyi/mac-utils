@@ -6,6 +6,16 @@
 // «/» — веб-страница: смотреть и транслировать из браузера (Windows, Linux, любой компьютер).
 
 import page from "./index.html";
+import landing from "./landing.html";
+
+// Смотреть и транслировать можно только из приложений Mac Utils (Mac) и Mac Utils Share (Windows):
+// они добавляют этот заголовок к каждому запросу. В обычном браузере — страница со ссылками на приложения.
+const CLIENT_HEADER = "x-macutils-client";
+const CLIENT_TOKEN = "mu-share-1";
+
+function isClient(request) {
+  return request.headers.get(CLIENT_HEADER) === CLIENT_TOKEN;
+}
 
 const MAX_VIEWERS = 10;
 
@@ -14,8 +24,11 @@ export default {
     const url = new URL(request.url);
     const match = url.pathname.match(/^\/room\/(\d{6})$/);
     if (!match) {
-      return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
+      return new Response(isClient(request) ? page : landing, {
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+      });
     }
+    if (!isClient(request)) return new Response("Use the Mac Utils app", { status: 403 });
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected WebSocket", { status: 426 });
     }
