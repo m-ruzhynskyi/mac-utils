@@ -30,6 +30,16 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Ретранслятор пускает только приложения Mac Utils — добавляем их метку ко всем запросам к нему
+  // (и к странице, и к WebSocket). В обычном браузере трансляции недоступны.
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ["https://mac-utils-relay.mako-62d.workers.dev/*", "wss://mac-utils-relay.mako-62d.workers.dev/*"] },
+    (details, callback) => {
+      details.requestHeaders["X-MacUtils-Client"] = "mu-share-1";
+      callback({ requestHeaders: details.requestHeaders });
+    }
+  );
+
   // getDisplayMedia на странице получает то, что пользователь выбрал в нашем окне выбора.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     if (!chosen) return callback({});
