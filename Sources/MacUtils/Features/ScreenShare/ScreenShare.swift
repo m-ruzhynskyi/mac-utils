@@ -17,6 +17,13 @@ enum ShareCode {
         return digits.count == 6 ? digits : nil
     }
 
+    /// Ретранслятор пускает только приложения Mac Utils — по этому заголовку.
+    static func request(_ url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue("mu-share-1", forHTTPHeaderField: "X-MacUtils-Client")
+        return request
+    }
+
     static func display(_ code: String) -> String {
         code.count == 6 ? "\(code.prefix(3)) \(code.suffix(3))" : code
     }
@@ -107,7 +114,7 @@ final class ScreenShare: NSObject, ObservableObject {
             for _ in 0..<4 {
                 let code = ShareCode.random()
                 guard let url = ShareCode.url(server: Self.server, code: code, role: "host") else { break }
-                let socket = URLSession.shared.webSocketTask(with: url)
+                let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url))
                 socket.maximumMessageSize = 4 << 20
                 socket.resume()
                 let status = await Self.handshake(socket)
@@ -456,7 +463,7 @@ final class ShareViewer: ObservableObject {
         frame = nil
         state = .connecting
         showWindow()
-        let socket = URLSession.shared.webSocketTask(with: url)
+        let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url))
         socket.maximumMessageSize = 4 << 20
         self.socket = socket
         socket.resume()
@@ -623,10 +630,11 @@ struct ScreenSharePage: View {
                     MutedAppsList()
                 }
             }
-            Section("Без Mac Utils") {
-                Text("Смотреть или транслировать можно и из браузера — на Windows, Linux, любом компьютере:")
+            Section("Windows") {
+                Text("На Windows смотрят и транслируют в приложении Mac Utils Share (в браузере трансляции недоступны).")
                     .font(.caption).foregroundStyle(.secondary)
-                Link(server.isEmpty ? "—" : server, destination: URL(string: server.isEmpty ? "about:blank" : server)!)
+                Link("Скачать Mac Utils Share для Windows",
+                     destination: URL(string: "https://github.com/m-ruzhynskyi/mac-utils/releases/download/windows-latest/MacUtilsShare-Setup.exe")!)
             }
             if !compact || server.isEmpty {
                 Section("Сервер") {
