@@ -31,23 +31,47 @@
   #picker .item { background: #2c2c2e; border-radius: 10px; padding: 8px; cursor: pointer; border: 2px solid transparent; }
   #picker .item:hover { border-color: #0a84ff; }
   #picker img { width: 100%; aspect-ratio: 16/9; object-fit: contain; background: #000; border-radius: 6px; }
+  #request, #historyPanel { position: fixed; display: none; z-index: 11; }
+  #request { inset: 0; background: rgba(0,0,0,.6); align-items: center; justify-content: center; }
+  #request .box { background: #1c1c1e; border-radius: 14px; padding: 20px; width: min(440px, 92vw); }
+  #request .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+  #historyPanel { top: 52px; right: 0; bottom: 0; width: min(360px, 100vw); background: #1c1c1e; overflow: auto; padding: 12px; border-left: 1px solid #333; }
+  .entry { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; }
+  .entry:hover { background: #2c2c2e; }
+  .entry .live { width: 8px; height: 8px; border-radius: 50%; background: #555; flex: none; }
+  .entry .live.on { background: #30d158; }
+  .entry .text { flex: 1; min-width: 0; } .entry .text div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .entry button { padding: 4px 8px; font-size: 13px; }
+  #myId { font-weight: 700; letter-spacing: 1px; cursor: pointer; }
   #picker .name { font-size: 13px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
 <header>
-  <b>Mac Utils · трансляция экрана</b>
-  <input id="code" inputmode="numeric" maxlength="7" placeholder="Код">
+  <b>Mac Utils · трансляция</b>
+  <span class="muted">Мой ID:</span> <span id="myId" title="Скопировать"></span>
+  <input id="code" inputmode="numeric" maxlength="13" placeholder="ID собеседника" style="width:11em">
   <button class="primary" id="watch">Смотреть</button>
   <button id="share">Транслировать свой экран</button>
   <span id="live"><span class="dot"></span><span id="liveText"></span><button class="danger" id="stop">Стоп</button></span>
+  <button id="historyButton">История</button>
 </header>
 <div id="picker"><div class="box">
   <b>Что показывать?</b>
   <div class="grid" id="sources"></div>
-  <label class="muted"><input type="checkbox" id="withAudio" checked> Передавать звук системы</label>
+  <label class="muted"><input type="checkbox" id="withAudio" checked style="width:auto"> Передавать звук системы</label>
   <div style="text-align:right; margin-top:10px"><button id="pickerCancel">Отмена</button></div>
 </div></div>
+<div id="request"><div class="box">
+  <b id="requestTitle"></b>
+  <p class="muted" id="requestText"></p>
+  <div class="row">
+    <button id="decline">Отклонить</button>
+    <button id="always">Всегда разрешать</button>
+    <button class="primary" id="allow">Разрешить</button>
+  </div>
+</div></div>
+<div id="historyPanel"><b>История</b><p class="muted">Зелёная точка — сейчас в эфире.</p><div id="historyList"></div></div>
 <div id="stage">
   <img id="screen" alt="">
   <canvas id="marks"></canvas>
@@ -61,16 +85,66 @@
     <span class="color" data-color="blue" style="background:#0a84ff"></span>
     <span class="color" data-color="white" style="background:#fff"></span>
   </div>
-  <div id="status">Введите код из 6 цифр и нажмите «Смотреть» — или транслируйте свой экран.<br>
-  <span class="muted">Windows: в окне выбора экрана отметьте «Поделиться звуком системы», чтобы зрители слышали звук. Лучше всего — Chrome или Edge.</span></div>
+  <div id="status">Введите ID собеседника и нажмите «Смотреть» — или транслируйте свой экран.<br>
+  <span class="muted">Свой ID сообщите тому, кто будет смотреть вас. Каждого зрителя вы сначала разрешаете.</span></div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
 const wsBase = location.origin.replace(/^http/, "ws");
-let socket = null, audio = null, playAt = 0, lastUrl = null, capture = null;
+// Две независимые связи: смотреть кого-то и транслировать себя можно одновременно (смотреть друг друга).
+let viewSocket = null, hostSocket = null, watchingId = null, audio = null, playAt = 0, lastUrl = null, capture = null;
+let watching = false;
 
-function status(text) { $("status").textContent = text; $("status").style.display = text ? "" : "none"; }
-function digits(text) { const d = text.replace(/\D/g, ""); return d.length === 6 ? d : null; }
+function status(text) { $("status").innerHTML = text; $("status").style.display = text ? "" : "none"; }
+function digits(text) { const d = text.replace(/\D/g, ""); return d.length === 10 || d.length === 6 ? d : null; }
+function display(id) { return id.length === 10 ? `${id.slice(0, 3)} ${id.slice(3, 6)} ${id.slice(6)}` : id; }
+
+// ---- Свой ID (постоянный, как в AnyDesk) ----
+const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (_) { return d; } },
+                set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} } };
+let myId = store.get("mu-id", null);
+if (!myId) { myId = String(1 + Math.floor(Math.random() * 9)) + Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)).join(""); store.set("mu-id", myId); }
+const myName = (window.mu && window.mu.hostname) || "Windows";
+$("myId").textContent = display(myId);
+$("myId").onclick = () => navigator.clipboard?.writeText(myId);
+
+// ---- История и доверенные ----
+function history() { return store.get("mu-history", []); }
+function saveHistory(list) { store.set("mu-history", list); renderHistory(); }
+function visited(id, name) {
+  const list = history(); let entry = list.find((e) => e.id === id);
+  if (!entry) { entry = { id, name: "", label: "" }; list.push(entry); }
+  if (name) entry.name = name; entry.last = Date.now(); saveHistory(list);
+}
+function trusted() { return store.get("mu-trusted", []); }
+let live = new Set();
+
+function renderHistory() {
+  const list = history().sort((a, b) => (b.last || 0) - (a.last || 0));
+  const box = $("historyList"); box.innerHTML = list.length ? "" : '<p class="muted">Здесь появятся те, к кому вы подключались.</p>';
+  for (const e of list) {
+    const row = document.createElement("div"); row.className = "entry";
+    row.innerHTML = `<span class="live ${live.has(e.id) ? "on" : ""}"></span><div class="text"><div></div><div class="muted"></div></div>
+      <button data-a="watch">Смотреть</button><button data-a="rename">✎</button><button data-a="del">✕</button>`;
+    row.querySelector(".text div").textContent = e.label || e.name || display(e.id);
+    row.querySelector(".text .muted").textContent = `${display(e.id)} · ${new Date(e.last || 0).toLocaleString()}${live.has(e.id) ? " · в эфире" : ""}`;
+    row.querySelector('[data-a="watch"]').onclick = () => { $("code").value = e.id; watch(); };
+    row.querySelector('[data-a="rename"]').onclick = () => {
+      const label = prompt("Подпись", e.label || e.name || ""); if (label === null) return;
+      const all = history(); all.find((x) => x.id === e.id).label = label.trim(); saveHistory(all);
+    };
+    row.querySelector('[data-a="del"]').onclick = () => saveHistory(history().filter((x) => x.id !== e.id));
+    box.appendChild(row);
+  }
+}
+
+async function refreshLive() {
+  const ids = history().map((e) => e.id); if (!ids.length) return;
+  try { const json = await (await fetch(`/status?ids=${ids.join(",")}`)).json(); live = new Set(Object.keys(json).filter((k) => json[k])); renderHistory(); } catch (_) {}
+}
+$("historyButton").onclick = () => { const p = $("historyPanel"); p.style.display = p.style.display === "block" ? "none" : "block"; refreshLive(); };
+setInterval(refreshLive, 10000);
+renderHistory(); refreshLive();
 
 // ---- Метки и рисунки (как пинг в League of Legends) ----
 // Координаты — доли кадра 0…1. Свои — рисуем сразу и шлём; чужие приходят текстом.
@@ -141,7 +215,7 @@ function framePoint(event) {
 
 function sendMark(mark) {
   addMark(mark);
-  if (socket && socket.readyState === 1) socket.send(JSON.stringify(mark));
+  if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify(mark));
 }
 
 $("marks").onpointerdown = (e) => {
@@ -167,21 +241,25 @@ document.querySelectorAll("#tools .color").forEach((b) => b.onclick = () => {
   color = b.dataset.color;
   document.querySelectorAll("#tools .color").forEach((x) => x.classList.toggle("on", x === b));
 });
-let watching = false;
 
-// ---- Зритель ----
+// ---- Смотреть ----
 function watch() {
-  const code = digits($("code").value);
-  if (!code) return status("Код — 6 цифр");
-  stopAll();
+  const id = digits($("code").value);
+  if (!id) return status("ID — 10 цифр");
+  if (id === myId) return status("Это ваш собственный ID");
+  stopWatch();
   status("Подключаюсь…");
-  socket = new WebSocket(`${wsBase}/room/${code}?role=viewer`);
-  socket.binaryType = "arraybuffer";
-  socket.onopen = () => { status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; };
-  socket.onmessage = (event) => {
+  watchingId = id;
+  viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}`);
+  viewSocket.binaryType = "arraybuffer";
+  viewSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
-      if (event.data.includes('"ended"')) { status("Трансляция завершена"); socket.close(); return; }
-      try { const m = JSON.parse(event.data); if (m.type === "ping" || m.type === "stroke") addMark(m); } catch (_) {}
+      let m; try { m = JSON.parse(event.data); } catch (_) { return; }
+      if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
+      else if (m.type === "accepted") { visited(id, m.name); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; }
+      else if (m.type === "declined") { status("Вам не разрешили подключиться"); stopWatch(true); }
+      else if (m.type === "ended") { status("Трансляция завершена"); stopWatch(true); }
+      else if (m.type === "ping" || m.type === "stroke") addMark(m);
       return;
     }
     const bytes = new Uint8Array(event.data);
@@ -195,7 +273,13 @@ function watch() {
       playPCM(event.data.slice(1));
     }
   };
-  socket.onclose = (event) => { if (event.code !== 1000) status("Трансляции с таким кодом нет или связь прервалась"); };
+  viewSocket.onclose = (event) => { if (event.code !== 1000 && viewSocket) status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); };
+}
+
+function stopWatch(keepStatus) {
+  if (viewSocket) { viewSocket.onclose = null; viewSocket.close(1000); viewSocket = null; }
+  watching = false; $("tools").style.display = "none";
+  if (!keepStatus) { $("screen").removeAttribute("src"); }
 }
 
 function playPCM(buffer) {
@@ -213,8 +297,7 @@ function playPCM(buffer) {
   playAt += chunk.duration;
 }
 
-// ---- Ведущий (браузер или приложение для Windows) ----
-
+// ---- Транслировать (приложение для Windows или браузер) ----
 // В приложении для Windows (window.mu) — свой выбор экрана и окна с превью.
 function pickSource() {
   return new Promise(async (resolve) => {
@@ -241,29 +324,45 @@ function pickSource() {
 }
 
 async function share() {
-  stopAll();
+  stopHost();
   if (window.mu && !(await pickSource())) return status("Трансляция отменена");
   let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 8 }, audio: true });
   } catch (_) { return status("Трансляция отменена"); }
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const code = String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
-    const ok = await openHost(code);
-    if (ok) return startCapture(stream, code);
-  }
-  stream.getTracks().forEach((t) => t.stop());
-  status("Не удалось получить код — попробуйте ещё раз");
+  const ok = await openHost(myId);
+  if (!ok) { stream.getTracks().forEach((t) => t.stop()); return status("С вашим ID уже идёт трансляция или нет связи с сервером"); }
+  startCapture(stream, myId);
 }
 
-function openHost(code) {
+function openHost(id) {
   return new Promise((resolve) => {
-    const ws = new WebSocket(`${wsBase}/room/${code}?role=host`);
+    const ws = new WebSocket(`${wsBase}/room/${id}?role=host`);
     ws.binaryType = "arraybuffer";
-    ws.onopen = () => { socket = ws; resolve(true); };
+    ws.onopen = () => { hostSocket = ws; resolve(true); };
     ws.onerror = () => resolve(false);
   });
 }
+
+// Зритель просится: доверенных пускаем сразу, остальных — по вопросу.
+const requests = [];
+function onRequest(viewer, name) {
+  if (trusted().includes(viewer)) return answer(viewer, true);
+  requests.push({ viewer, name }); showRequest();
+}
+function showRequest() {
+  const r = requests[0]; if (!r) { $("request").style.display = "none"; return; }
+  $("requestTitle").textContent = `${r.name} хочет посмотреть ваш экран`;
+  $("requestText").textContent = `ID ${display(r.viewer)}. Зритель только смотрит и может ставить метки — управлять компьютером он не может.`;
+  $("request").style.display = "flex";
+  if (window.mu && window.mu.attention) window.mu.attention();
+}
+function answer(viewer, accept) {
+  if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify({ type: accept ? "accept" : "decline", viewer, name: myName }));
+}
+$("allow").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, true); showRequest(); };
+$("always").onclick = () => { const r = requests.shift(); if (r) { store.set("mu-trusted", [...new Set([...trusted(), r.viewer])]); answer(r.viewer, true); } showRequest(); };
+$("decline").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, false); showRequest(); };
 
 function startCapture(stream, code) {
   const video = document.createElement("video");
@@ -273,28 +372,31 @@ function startCapture(stream, code) {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
   $("live").style.display = "flex";
-  $("liveText").textContent = `Код ${code.slice(0, 3)} ${code.slice(3)} · зрителей: 0`;
-  status(`Вы транслируете экран. Код: ${code.slice(0, 3)} ${code.slice(3)}`);
-  socket.onmessage = (event) => {
+  $("liveText").textContent = "В эфире · никто не смотрит";
+  status(`Вы в эфире. Ваш ID: ${display(code)}`);
+  hostSocket.onmessage = (event) => {
     if (typeof event.data !== "string") return;
     const msg = JSON.parse(event.data);
     // Метка или рисунок зрителя — на экран ведущего (в приложении для Windows — поверх всего).
     if ((msg.type === "ping" || msg.type === "stroke") && window.mu && window.mu.mark) window.mu.mark(msg);
-    if (msg.type === "viewers") $("liveText").textContent = `Код ${code.slice(0, 3)} ${code.slice(3)} · зрителей: ${msg.count}`;
+    if (msg.type === "request") onRequest(msg.viewer, msg.name);
+    if (msg.type === "cancelled") { const i = requests.findIndex((r) => r.viewer === msg.viewer); if (i >= 0) { requests.splice(i, 1); showRequest(); } }
+    if (msg.type === "viewers") $("liveText").textContent = msg.count ? `В эфире · смотрят: ${(msg.list || []).map((v) => v.name).join(", ")}` : "В эфире · никто не смотрит";
   };
-  socket.onclose = () => stopAll("Связь с сервером прервалась");
+  hostSocket.onclose = () => stopHost("Связь с сервером прервалась");
+  $("share").style.display = "none";
   const timer = setInterval(() => {
-    if (!socket || socket.readyState !== 1 || socket.bufferedAmount > 1e6 || !video.videoWidth) return;
+    if (!hostSocket || hostSocket.readyState !== 1 || hostSocket.bufferedAmount > 1e6 || !video.videoWidth) return;
     const scale = Math.min(1, 1600 / video.videoWidth);
     canvas.width = Math.round(video.videoWidth * scale);
     canvas.height = Math.round(video.videoHeight * scale);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(async (blob) => {
-      if (!blob || !socket || socket.readyState !== 1) return;
+      if (!blob || !hostSocket || hostSocket.readyState !== 1) return;
       const body = new Uint8Array(await blob.arrayBuffer());
       const packet = new Uint8Array(body.length + 1);
       packet[0] = 1; packet.set(body, 1);
-      socket.send(packet);
+      hostSocket.send(packet);
     }, "image/jpeg", 0.55);
   }, 125);
   let audioContext = null;
@@ -305,7 +407,7 @@ function startCapture(stream, code) {
     const processor = audioContext.createScriptProcessor(4096, 2, 1);
     const ratio = audioContext.sampleRate / 24000;
     processor.onaudioprocess = (event) => {
-      if (!socket || socket.readyState !== 1) return;
+      if (!hostSocket || hostSocket.readyState !== 1) return;
       const left = event.inputBuffer.getChannelData(0);
       const right = event.inputBuffer.numberOfChannels > 1 ? event.inputBuffer.getChannelData(1) : left;
       const count = Math.floor(left.length / ratio);
@@ -318,25 +420,26 @@ function startCapture(stream, code) {
         const value = Math.max(-1, Math.min(1, sum / (to - from)));
         packet.setInt16(1 + i * 2, value * 32767, true);
       }
-      socket.send(packet.buffer);
+      hostSocket.send(packet.buffer);
     };
     source.connect(processor);
     processor.connect(audioContext.destination);
   }
-  stream.getVideoTracks()[0].onended = () => stopAll("Трансляция остановлена");
+  stream.getVideoTracks()[0].onended = () => stopHost("Трансляция остановлена");
   capture = { stream, timer, audioContext };
 }
 
-function stopAll(message) {
+function stopHost(message) {
   if (capture) {
     clearInterval(capture.timer);
     capture.stream.getTracks().forEach((t) => t.stop());
     capture.audioContext?.close();
     capture = null;
   }
-  if (socket) { socket.onclose = null; socket.close(1000); socket = null; }
+  if (hostSocket) { hostSocket.onclose = null; hostSocket.close(1000); hostSocket = null; }
+  requests.length = 0; showRequest();
   $("live").style.display = "none";
-  watching = false; $("tools").style.display = "none";
+  $("share").style.display = "";
   if (window.mu && window.mu.stopped) window.mu.stopped();
   if (message) status(message);
 }
@@ -344,7 +447,7 @@ function stopAll(message) {
 $("watch").onclick = watch;
 $("code").onkeydown = (e) => { if (e.key === "Enter") watch(); };
 $("share").onclick = share;
-$("stop").onclick = () => stopAll("Трансляция остановлена");
+$("stop").onclick = () => stopHost("Трансляция остановлена");
 if (window.mu) document.querySelector("header b").textContent = `Mac Utils Share ${window.mu.version}`;
 const fromLink = new URLSearchParams(location.search).get("code");
 if (fromLink) { $("code").value = fromLink; watch(); }

@@ -11,10 +11,21 @@ enum ShareCode {
         String(format: "%06d", Int.random(in: 0...999_999))
     }
 
-    /// «123 456» → «123456»; nil — не 6 цифр.
+    /// Постоянный 10-значный ID этого Mac (как в AnyDesk): по нему к вам подключаются.
+    static var myID: String {
+        if let saved = UserDefaults.standard.string(forKey: Pref.shareID), saved.count == 10 { return saved }
+        let id = String(Int.random(in: 1...9)) + (0..<9).map { _ in String(Int.random(in: 0...9)) }.joined()
+        UserDefaults.standard.set(id, forKey: Pref.shareID)
+        return id
+    }
+
+    /// Имя компьютера — его видит ведущий в запросе на подключение.
+    static var myName: String { Host.current().localizedName ?? "Mac" }
+
+    /// «123 456 7890» → «1234567890»; nil — не 10 (или старые 6) цифр.
     static func normalized(_ text: String) -> String? {
         let digits = text.filter(\.isNumber)
-        return digits.count == 6 ? digits : nil
+        return digits.count == 10 || digits.count == 6 ? digits : nil
     }
 
     /// Ретранслятор пускает только приложения Mac Utils — по этому заголовку.
@@ -25,7 +36,11 @@ enum ShareCode {
     }
 
     static func display(_ code: String) -> String {
-        code.count == 6 ? "\(code.prefix(3)) \(code.suffix(3))" : code
+        if code.count == 10 {
+            let chars = Array(code)
+            return "\(String(chars[0..<3])) \(String(chars[3..<6])) \(String(chars[6..<10]))"
+        }
+        return code.count == 6 ? "\(code.prefix(3)) \(code.suffix(3))" : code
     }
 
     /// https://relay.example.dev → wss://relay.example.dev/room/123456?role=host
@@ -35,7 +50,22 @@ enum ShareCode {
         if base.hasPrefix("https://") { base = "wss://" + base.dropFirst(8) }
         if base.hasPrefix("http://") { base = "ws://" + base.dropFirst(7) }
         if !base.hasPrefix("ws://") && !base.hasPrefix("wss://") { base = "wss://" + base }
-        return URL(string: "\(base)/room/\(code)?role=\(role)")
+        var components = URLComponents(string: "\(base)/room/\(code)")
+        var query = [URLQueryItem(name: "role", value: role)]
+        if role == "viewer" {
+            query += [URLQueryItem(name: "viewer", value: myID), URLQueryItem(name: "name", value: myName)]
+        }
+        components?.queryItems = query
+        return components?.url
+    }
+
+    /// https://relay… → https://relay…/status?ids=…
+    static func statusURL(server: String, ids: [String]) -> URL? {
+        var base = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        while base.hasSuffix("/") { base.removeLast() }
+        if base.hasPrefix("wss://") { base = "https://" + base.dropFirst(6) }
+        if base.hasPrefix("ws://") { base = "http://" + base.dropFirst(5) }
+        return URL(string: "\(base)/status?ids=\(ids.joined(separator: ","))")
     }
 }
 
@@ -110,15 +140,18 @@ final class ScreenShare: NSObject, ObservableObject {
 
     private func connect(filter: SCContentFilter) {
         Task {
-            // Код может быть занят — пробуем несколько.
-            for _ in 0..<4 {
-                let code = ShareCode.random()
+            // Комната — свой постоянный ID; занята — значит, трансляция с этим ID уже идёт.
+            for _ in 0..<1 {
+                let code = ShareCode.myID
                 guard let url = ShareCode.url(server: Self.server, code: code, role: "host") else { break }
                 let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url))
                 socket.maximumMessageSize = 4 << 20
                 socket.resume()
                 let status = await Self.handshake(socket)
-                if status == 409 { continue }
+                if status == 409 {
+                    state = .failed("С вашим ID уже идёт трансляция (может, в другом окне)")
+                    return
+                }
                 guard status == nil else {
                     state = .failed(status == 0 ? "Нет связи с сервером трансляции" : "Сервер ответил \(status!)")
                     return
@@ -138,7 +171,7 @@ final class ScreenShare: NSObject, ObservableObject {
                 showHUD()
                 return
             }
-            state = .failed("Не удалось получить код — попробуйте ещё раз")
+            state = .failed("Не удалось начать трансляцию")
         }
     }
 
@@ -263,6 +296,19 @@ final class ScreenShare: NSObject, ObservableObject {
                     case .success(.string(let text)):
                         // Метка или рисунок зрителя — на экран ведущего.
                         if let mark = ShareMark.parse(text) { ShareMarksOverlay.shared.show(mark) }
+                        if let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] {
+                            switch json["type"] as? String {
+                            case "request":
+                                self.request(viewer: json["viewer"] as? String ?? "", name: json["name"] as? String ?? "")
+                            case "cancelled":
+                                self.pendingRequests.remove(json["viewer"] as? String ?? "")
+                            case "viewers":
+                                let list = (json["list"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+                                self.watchers = list
+                            default:
+                                break
+                            }
+                        }
                         if let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
                            json["type"] as? String == "viewers", let count = json["count"] as? Int,
                            case .live(let code, _) = self.state {
@@ -281,7 +327,46 @@ final class ScreenShare: NSObject, ObservableObject {
         }
     }
 
+    /// Кто сейчас смотрит (имена компьютеров).
+    @Published private(set) var watchers: [String] = []
+    private var pendingRequests: Set<String> = []
+
+    /// Зритель просится посмотреть: доверенных пускаем сразу, остальных — по вопросу.
+    private func request(viewer: String, name: String) {
+        if ShareHistory.shared.isTrusted(viewer) {
+            answer(viewer: viewer, accept: true)
+            return
+        }
+        guard !pendingRequests.contains(viewer) else { return }
+        pendingRequests.insert(viewer)
+        let alert = NSAlert()
+        alert.messageText = "\(name) хочет посмотреть ваш экран"
+        alert.informativeText = "ID \(ShareCode.display(viewer)). Зритель только смотрит и может ставить метки — управлять вашим Mac он не может."
+        alert.addButton(withTitle: "Разрешить")
+        alert.addButton(withTitle: "Всегда разрешать")
+        alert.addButton(withTitle: "Отклонить")
+        NSApp.activate()
+        let response = alert.runModal()
+        guard pendingRequests.remove(viewer) != nil, isLive else { return }
+        switch response {
+        case .alertFirstButtonReturn: answer(viewer: viewer, accept: true)
+        case .alertSecondButtonReturn:
+            ShareHistory.shared.trust(viewer, name: name)
+            answer(viewer: viewer, accept: true)
+        default: answer(viewer: viewer, accept: false)
+        }
+    }
+
+    private func answer(viewer: String, accept: Bool) {
+        let message = String(format: #"{"type":"%@","viewer":"%@","name":"%@"}"#,
+                             accept ? "accept" : "decline", viewer, ShareCode.myName.replacingOccurrences(of: "\"", with: "'"))
+        socket?.send(.string(message)) { _ in }
+        if accept { sender?.resendLast() }
+    }
+
     func stop(reason: String? = nil) {
+        watchers = []
+        pendingRequests = []
         Picker.shared.reset()
         ShareMarksOverlay.shared.detach()
         let stream = self.stream
@@ -442,7 +527,7 @@ final class ShareViewer: ObservableObject {
     static let shared = ShareViewer()
 
     enum State: Equatable {
-        case idle, connecting, watching, ended(String)
+        case idle, connecting, waiting, watching, ended(String)
     }
 
     @Published private(set) var state: State = .idle
@@ -475,7 +560,7 @@ final class ShareViewer: ObservableObject {
 
     func watch(code input: String) {
         guard let code = ShareCode.normalized(input) else {
-            state = .ended("Код — 6 цифр")
+            state = .ended("ID — 10 цифр")
             return
         }
         guard !ScreenShare.server.isEmpty,
@@ -502,9 +587,9 @@ final class ShareViewer: ObservableObject {
                 MainActor.assumeIsolated {
                     let viewer = ShareViewer.shared
                     guard viewer.socket === socket else { return }
-                    if case .success = result, viewer.state == .connecting { viewer.state = .watching }
                     switch result {
                     case .success(.data(let data)):
+                        if viewer.state != .watching { viewer.state = .watching }
                         switch data.first {
                         case ShareProtocol.frame:
                             if let image = NSImage(data: data.dropFirst()) { viewer.frame = image }
@@ -515,10 +600,22 @@ final class ShareViewer: ObservableObject {
                         }
                         viewer.receive(socket)
                     case .success(.string(let text)):
+                        let json = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
+                        let type = json?["type"] as? String
                         if let mark = ShareMark.parse(text) {
                             viewer.marks.add(mark)
                             viewer.receive(socket)
-                        } else if text.contains("\"ended\"") {
+                        } else if type == "waiting" {
+                            viewer.state = .waiting
+                            viewer.receive(socket)
+                        } else if type == "accepted" {
+                            viewer.state = .watching
+                            ShareHistory.shared.visited(viewer.code, name: json?["name"] as? String ?? "")
+                            viewer.receive(socket)
+                        } else if type == "declined" {
+                            viewer.state = .ended("Вам не разрешили подключиться")
+                            viewer.disconnect()
+                        } else if type == "ended" {
                             viewer.state = .ended("Трансляция завершена")
                             viewer.disconnect()
                         } else {
@@ -527,8 +624,8 @@ final class ShareViewer: ObservableObject {
                     case .failure:
                         let status = (socket.response as? HTTPURLResponse)?.statusCode
                         switch viewer.state {
-                        case .connecting:
-                            viewer.state = .ended(status == 404 ? "Трансляции с таким кодом нет"
+                        case .connecting, .waiting:
+                            viewer.state = .ended(status == 404 ? "Сейчас этот ID ничего не транслирует"
                                                   : status == 429 ? "Слишком много зрителей" : "Нет связи с сервером")
                         case .watching:
                             viewer.state = .ended("Трансляция завершена")
@@ -574,7 +671,8 @@ final class ShareViewer: ObservableObject {
             self.window = window
             return window
         }()
-        window.title = code.isEmpty ? "Трансляция экрана" : "Трансляция \(ShareCode.display(code))"
+        let label = ShareHistory.shared.label(for: code)
+        window.title = code.isEmpty ? "Трансляция экрана" : "Трансляция · \(label ?? ShareCode.display(code))"
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
@@ -651,6 +749,11 @@ private struct ShareViewerView: View {
             VStack(spacing: 8) { ProgressView(); Text("Подключаюсь…").foregroundStyle(.white) }
         case .watching where viewer.frame == nil:
             VStack(spacing: 8) { ProgressView(); Text("Жду картинку…").foregroundStyle(.white) }
+        case .waiting:
+            VStack(spacing: 8) {
+                ProgressView()
+                Text("Ждём, пока \(ShareCode.display(viewer.code)) разрешит подключение…").foregroundStyle(.white)
+            }
         case .ended(let message):
             Text(message).font(.title3).foregroundStyle(.white)
                 .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
@@ -701,38 +804,47 @@ struct ScreenSharePage: View {
 
     var body: some View {
         Form {
-            Section("Показать свой экран") {
-                switch share.state {
-                case .idle, .failed:
-                    Button { share.start() } label: { Label("Начать трансляцию…", systemImage: "dot.radiowaves.left.and.right") }
-                        .help("Откроется выбор: весь экран, окно или программа")
-                        .buttonStyle(.borderedProminent)
-                        .disabled(server.isEmpty)
-                    if case .failed(let message) = share.state {
-                        Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    }
-                case .connecting:
-                    HStack { ProgressView().controlSize(.small); Text("Подключаюсь…") }
-                case .live(let code, let viewers):
-                    HStack {
-                        Text(ShareCode.display(code)).font(.system(size: 28, weight: .bold).monospacedDigit())
-                            .textSelection(.enabled)
-                        Button { share.copyCode() } label: { Image(systemName: "doc.on.doc") }
-                            .buttonStyle(.borderless).help("Скопировать код")
-                        Spacer()
-                        Label("\(viewers)", systemImage: "eye").foregroundStyle(.secondary)
+            Section("Мой ID") {
+                HStack {
+                    Text(ShareCode.display(ShareCode.myID)).font(.system(size: 26, weight: .bold).monospacedDigit())
+                        .textSelection(.enabled)
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(ShareCode.myID, forType: .string)
+                        Toast.show("ID скопирован", symbol: "doc.on.doc.fill")
+                    } label: { Image(systemName: "doc.on.doc") }
+                    .buttonStyle(.borderless).help("Скопировать ID")
+                    Spacer()
+                    switch share.state {
+                    case .idle, .failed:
+                        Button { share.start() } label: { Label("Начать трансляцию…", systemImage: "dot.radiowaves.left.and.right") }
+                            .help("Откроется выбор: весь экран, окно или программа")
+                            .buttonStyle(.borderedProminent)
+                            .disabled(server.isEmpty)
+                    case .connecting:
+                        ProgressView().controlSize(.small)
+                    case .live:
+                        Circle().fill(.red).frame(width: 8, height: 8)
+                        Text("В эфире").foregroundStyle(.red)
                         Button("Сменить экран…") { share.changeSource() }
                         Button("Стоп") { share.stop() }.tint(.red)
                     }
-                    Text("Сообщите код тому, кто будет смотреть. Он видит только выбранный экран или окно, управлять не может.")
+                }
+                if case .failed(let message) = share.state {
+                    Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                if case .live = share.state {
+                    Text(share.watchers.isEmpty ? "Пока никто не смотрит." : "Смотрят: " + share.watchers.joined(separator: ", "))
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Text("Этот ID постоянный — по нему к вам подключаются. Каждого зрителя вы сначала разрешаете (или отмечаете «Всегда разрешать»). Управлять вашим Mac зритель не может.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Смотреть чужой экран") {
+            Section("Подключиться") {
                 HStack {
-                    TextField("", text: $code, prompt: Text("Код из 6 цифр"))
+                    TextField("", text: $code, prompt: Text("ID собеседника, 10 цифр"))
                         .textFieldStyle(.roundedBorder).labelsHidden()
-                        .frame(width: 140)
+                        .frame(width: 200)
                         .onSubmit { viewer.watch(code: code) }
                     Button("Смотреть") { viewer.watch(code: code) }
                         .disabled(ShareCode.normalized(code) == nil || server.isEmpty)
@@ -740,6 +852,14 @@ struct ScreenSharePage: View {
                 if case .ended(let message) = viewer.state {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
+                Text("Смотреть друг друга: оба начинают трансляцию и подключаются по ID друг к другу.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("История") {
+                ShareHistoryList()
+            }
+            if !compact {
+                TrustedList()
             }
             Section("Метки зрителей") {
                 Toggle("Разрешить зрителям ставить метки и рисовать", isOn: $allowMarks)
@@ -776,6 +896,27 @@ struct ScreenSharePage: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Трансляция экрана")
+    }
+}
+
+/// Доверенные — их пускаем без вопроса.
+private struct TrustedList: View {
+    @ObservedObject private var history = ShareHistory.shared
+
+    var body: some View {
+        if !history.trustedEntries.isEmpty {
+            Section("Пускать без вопроса") {
+                ForEach(history.trustedEntries) { entry in
+                    HStack {
+                        Image(systemName: "checkmark.shield").foregroundStyle(.green)
+                        Text(entry.title)
+                        Text(ShareCode.display(entry.id)).font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Убрать") { history.untrust(entry.id) }
+                    }
+                }
+            }
+        }
     }
 }
 
