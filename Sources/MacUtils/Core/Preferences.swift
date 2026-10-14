@@ -90,6 +90,10 @@ enum Pref {
     static let menuBarIcon = "menuBarIconEnabled"
     /// Показывать Mac Utils в Dock (по умолчанию нет — работает в фоне).
     static let showInDock = "showInDock"
+    /// Режим «Фокус»: размытие всего позади программы (⌃⌥F).
+    static let focus = "focusEnabled"
+    static let focusFollow = "focusFollow"
+    static let focusStrength = "focusStrength"
     /// Музыка: что играло последним и плеер по умолчанию (bundle id или https://…).
     static let musicLast = "musicLast"
     static let musicPlayer = "musicPlayer"
@@ -191,6 +195,9 @@ enum Pref {
             appVolume: true,
             menuBarIcon: true,
             showInDock: false,
+            focus: true,
+            focusFollow: false,
+            focusStrength: 0.6,
             shareAudio: true,
             shareAllowMarks: true,
             shareServer: "https://mac-utils-relay.mako-62d.workers.dev",

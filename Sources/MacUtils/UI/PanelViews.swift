@@ -12,7 +12,7 @@ struct PanelSectionView: View {
 
     var body: some View {
         switch section {
-        case .music, .share, .textInput, .uninstaller, .monitor, .tasks, .cleanup, .shots:
+        case .music, .share, .textInput, .focus, .uninstaller, .monitor, .tasks, .cleanup, .shots:
             SettingsSectionPage(section: section, compact: true)
         default:
             ScrollView {
