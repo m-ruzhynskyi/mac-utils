@@ -66,7 +66,7 @@ export class Room {
     if (role === "host" && hosts.length > 0) return new Response("Room is busy", { status: 409 });
     if (role !== "host") {
       if (hosts.length === 0) return new Response("No broadcast with this ID", { status: 404 });
-      if (this.state.getWebSockets("viewer").length >= MAX_VIEWERS) {
+      if (this.activeViewers().length >= MAX_VIEWERS) {
         return new Response("Too many viewers", { status: 429 });
       }
     }
@@ -114,8 +114,13 @@ export class Room {
     }
   }
 
+  activeViewers() {
+    return this.state.getWebSockets("viewer").filter((s) =>
+      s.readyState === 1 && !s.deserializeAttachment()?.ended);
+  }
+
   approvedViewers() {
-    return this.state.getWebSockets("viewer").filter((s) => s.deserializeAttachment()?.approved);
+    return this.activeViewers().filter((s) => s.deserializeAttachment()?.approved);
   }
 
   toHost(message) {
@@ -137,7 +142,8 @@ export class Room {
     }
     // Зритель: метки и рисунки (короткий JSON) — только от пущенных, ведущему и остальным пущенным.
     if (typeof message !== "string" || message.length > 32768) return;
-    if (!socket.deserializeAttachment()?.approved) return;
+    const info = socket.deserializeAttachment();
+    if (socket.readyState !== 1 || !info?.approved || info.ended) return;
     for (const other of [...this.activeHosts(), ...this.approvedViewers()]) {
       if (other !== socket) {
         try { other.send(message); } catch (_) {}
@@ -149,7 +155,7 @@ export class Room {
     let command;
     try { command = JSON.parse(text); } catch (_) { return; }
     if (command.type === "heartbeat") return;
-    for (const viewer of this.state.getWebSockets("viewer")) {
+    for (const viewer of this.activeViewers()) {
       const info = viewer.deserializeAttachment() || {};
       if (info.id !== command.viewer || info.approved) continue;
       if (command.type === "accept") {
@@ -157,6 +163,7 @@ export class Room {
         viewer.send(JSON.stringify({ type: "accepted", name: command.name || "" }));
       } else if (command.type === "decline") {
         try {
+          viewer.serializeAttachment({ ...info, ended: true });
           viewer.send(JSON.stringify({ type: "declined" }));
           viewer.close(1000, "Declined");
         } catch (_) {}
@@ -180,12 +187,15 @@ export class Room {
       socket.serializeAttachment({ ...info, ended: true });
       for (const viewer of this.state.getWebSockets("viewer")) {
         try {
+          viewer.serializeAttachment({ ...viewer.deserializeAttachment(), ended: true });
           viewer.send(JSON.stringify({ type: "ended" }));
           viewer.close(1000, "Broadcast ended");
         } catch (_) {}
       }
     } else {
       const info = socket.deserializeAttachment() || {};
+      if (info.ended) return;
+      socket.serializeAttachment({ ...info, ended: true });
       if (!info.approved) this.toHost({ type: "cancelled", viewer: info.id });
       this.notifyHost(socket);
     }
@@ -193,10 +203,16 @@ export class Room {
 
   notifyHost(leaving) {
     const watching = this.approvedViewers().filter((s) => s !== leaving);
+    // Count viewer devices, not overlapping sockets after a reconnect.
+    // Anonymous legacy viewers remain separate rather than sharing an empty ID.
+    const people = [...new Map(watching.map((s) => {
+      const info = s.deserializeAttachment();
+      return [info.id || s, { id: info.id, name: info.name }];
+    })).values()];
     this.toHost({
       type: "viewers",
-      count: watching.length,
-      list: watching.map((s) => s.deserializeAttachment()).map((i) => ({ id: i.id, name: i.name })),
+      count: people.length,
+      list: people,
     });
   }
 }

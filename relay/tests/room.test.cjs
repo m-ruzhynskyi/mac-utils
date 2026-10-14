@@ -73,3 +73,41 @@ test('closing socket does not block ID and normal close is idempotent', () => {
   f.room.webSocketError(host);
   assert.equal(viewer.messages.length, 1);
 });
+test('closed viewer never reappears in count on periodic updates', async () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000 });
+  const viewer = f.socket('viewer', { id: '1234567890', approved: true });
+  f.room.notifyHost();
+  assert.equal(host.messages.at(-1).count, 1);
+  f.room.webSocketClose(viewer);
+  assert.equal(host.messages.at(-1).count, 0);
+  // Simulate runtime retaining the socket, even with an OPEN readyState.
+  await f.room.alarm();
+  assert.equal(host.messages.at(-1).count, 0);
+  assert.equal(f.room.approvedViewers().length, 0);
+});
+test('same viewer ID counts once; different IDs and anonymous viewers count separately', () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000 });
+  f.socket('viewer', { id: '1234567890', name: 'Alice', approved: true });
+  const duplicate = f.socket('viewer', { id: '1234567890', name: 'Alice', approved: true });
+  f.socket('viewer', { id: '9876543210', name: 'Bob', approved: true });
+  f.socket('viewer', { id: '', approved: true });
+  f.socket('viewer', { id: '', approved: true });
+  f.room.notifyHost();
+  assert.equal(host.messages.at(-1).count, 4);
+  assert.equal(host.messages.at(-1).list.length, 4);
+  f.room.webSocketClose(duplicate);
+  assert.equal(host.messages.at(-1).count, 4);
+});
+test('closing and errored viewers are excluded from counts and approval', () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000 });
+  const closing = f.socket('viewer', { id: '1234567890', approved: true });
+  closing.readyState = 2;
+  const errored = f.socket('viewer', { id: '9876543210', approved: true });
+  f.room.webSocketError(errored);
+  f.room.notifyHost();
+  assert.equal(host.messages.at(-1).count, 0);
+  const pending = f.socket('viewer', { id: '1111111111', approved: false });
+  f.room.webSocketClose(pending);
+  f.room.hostCommand('{"type":"accept","viewer":"1111111111"}');
+  assert.equal(pending.info.approved, false);
+});
