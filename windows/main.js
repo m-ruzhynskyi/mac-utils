@@ -1,13 +1,39 @@
 // Mac Utils Share для Windows: трансляция экрана по коду и просмотр чужих трансляций.
 // Интерфейс — страница ретранслятора (та же, что в браузере), приложение добавляет:
 // выбор экрана или окна с превью, системный звук (loopback) и автообновление.
-const { app, BrowserWindow, desktopCapturer, ipcMain, session, dialog, shell } = require("electron");
+const { app, BrowserWindow, desktopCapturer, ipcMain, session, dialog, shell, screen } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 
 const RELAY = "https://mac-utils-relay.mako-62d.workers.dev/";
 let window = null;
 let chosen = null; // { source, audio }
+let overlay = null; // прозрачное окно поверх экрана ведущего: метки и рисунки зрителей
+
+// Окно для меток: на весь экран, который транслируется (для окна — основной экран), сквозь него кликается.
+function showOverlay() {
+  const displays = screen.getAllDisplays();
+  const display = displays.find((d) => String(d.id) === String(chosen?.source?.display_id)) || screen.getPrimaryDisplay();
+  if (!overlay || overlay.isDestroyed()) {
+    overlay = new BrowserWindow({
+      ...display.bounds,
+      transparent: true, frame: false, resizable: false, movable: false, focusable: false,
+      skipTaskbar: true, hasShadow: false, alwaysOnTop: true,
+      webPreferences: { contextIsolation: true, preload: path.join(__dirname, "overlay-preload.js") },
+    });
+    overlay.setAlwaysOnTop(true, "screen-saver");
+    overlay.setIgnoreMouseEvents(true);
+    overlay.loadFile(path.join(__dirname, "overlay.html"));
+  } else {
+    overlay.setBounds(display.bounds);
+  }
+  overlay.showInactive();
+}
+
+function hideOverlay() {
+  if (overlay && !overlay.isDestroyed()) overlay.close();
+  overlay = null;
+}
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -47,6 +73,11 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on("version", (event) => { event.returnValue = app.getVersion(); });
+  ipcMain.on("mark", (_event, mark) => {
+    if (!overlay || overlay.isDestroyed()) showOverlay();
+    overlay.webContents.send("mark", mark);
+  });
+  ipcMain.on("stopped", () => hideOverlay());
 
   ipcMain.handle("sources", async () => {
     const sources = await desktopCapturer.getSources({

@@ -20,7 +20,7 @@
   "build": {
     "appId": "com.mruzhynskyi.macutils.share",
     "productName": "Mac Utils Share",
-    "files": ["main.js", "preload.js", "offline.html", "package.json"],
+    "files": ["main.js", "preload.js", "overlay.html", "overlay-preload.js", "offline.html", "package.json"],
     "win": {
       "target": "nsis",
       "artifactName": "MacUtilsShare-Setup.exe"

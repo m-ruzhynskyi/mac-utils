@@ -59,9 +59,18 @@ export class Room {
   }
 
   webSocketMessage(socket, message) {
-    if (!this.state.getTags(socket).includes("host")) return;
-    for (const viewer of this.state.getWebSockets("viewer")) {
-      try { viewer.send(message); } catch (_) { /* зритель отвалился */ }
+    if (this.state.getTags(socket).includes("host")) {
+      for (const viewer of this.state.getWebSockets("viewer")) {
+        try { viewer.send(message); } catch (_) { /* зритель отвалился */ }
+      }
+      return;
+    }
+    // Зритель: метки и рисунки (короткий JSON) — ведущему и остальным зрителям.
+    if (typeof message !== "string" || message.length > 32768) return;
+    for (const other of this.state.getWebSockets()) {
+      if (other !== socket) {
+        try { other.send(message); } catch (_) {}
+      }
     }
   }
 

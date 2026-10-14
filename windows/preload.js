@@ -6,4 +6,7 @@ contextBridge.exposeInMainWorld("mu", {
   version: ipcRenderer.sendSync("version"),
   sources: () => ipcRenderer.invoke("sources"),
   choose: (id, audio) => ipcRenderer.invoke("choose", id, audio),
+  // Метки зрителей — на экран ведущего; трансляция закончилась — убрать окно меток.
+  mark: (mark) => ipcRenderer.send("mark", mark),
+  stopped: () => ipcRenderer.send("stopped"),
 });
