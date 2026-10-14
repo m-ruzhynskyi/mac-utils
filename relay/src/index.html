@@ -255,7 +255,10 @@ function watch() {
   viewSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
       let m; try { m = JSON.parse(event.data); } catch (_) { return; }
-      if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
+      if (m.type === "heartbeat") {
+        if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify({ type: "heartbeat" }));
+      }
+      else if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
       else if (m.type === "accepted") { visited(id, m.name); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; }
       else if (m.type === "declined") { status("Вам не разрешили подключиться"); stopWatch(true); }
       else if (m.type === "ended") { status("Трансляция завершена"); stopWatch(true); }

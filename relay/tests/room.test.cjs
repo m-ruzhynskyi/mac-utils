@@ -111,3 +111,41 @@ test('closing and errored viewers are excluded from counts and approval', () => 
   f.room.hostCommand('{"type":"accept","viewer":"1111111111"}');
   assert.equal(pending.info.approved, false);
 });
+test('two silent OPEN ghost viewers expire while one real viewer remains alive', async () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000 });
+  const ghosts = ['1111111111', '2222222222'].map(id => f.socket('viewer', { id, approved: true, lastSeen: 1_000_000 }));
+  const real = f.socket('viewer', { id: '3333333333', approved: true, lastSeen: 1_000_000 });
+  f.room.notifyHost();
+  assert.equal(host.messages.at(-1).count, 3);
+  for (let i = 0; i < 4; i++) {
+    f.advance(30_000);
+    f.room.webSocketMessage(host, '{"type":"heartbeat"}');
+    f.room.webSocketMessage(real, '{"type":"heartbeat"}');
+    await f.room.alarm();
+  }
+  assert.equal(host.messages.at(-1).count, 1);
+  assert.ok(ghosts.every(s => s.info.ended && s.closes.length === 1));
+  assert.equal(real.info.ended, undefined);
+  assert.equal(real.messages.at(-1).type, 'heartbeat');
+  f.room.webSocketClose(real);
+  await f.room.alarm();
+  assert.equal(host.messages.at(-1).count, 0);
+});
+test('waiting viewers answer heartbeat without approval or forwarding', async () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000 });
+  const pending = f.socket('viewer', { id: '1111111111', approved: false, lastSeen: 1_000_000 });
+  f.advance(100_000);
+  f.room.webSocketMessage(pending, '{"type":"heartbeat"}');
+  assert.equal(pending.info.lastSeen, 1_100_000);
+  assert.equal(pending.info.approved, false);
+  assert.equal(host.messages.length, 0);
+});
+test('legacy viewer attachments get one persisted grace period', async () => {
+  const f = fixture();
+  f.socket('host', { lastSeen: 1_000_000 });
+  const viewer = f.socket('viewer', { id: '1111111111', approved: true });
+  f.room.expireViewers();
+  f.advance(120_000);
+  f.room.expireViewers();
+  assert.equal(viewer.info.ended, true);
+});
