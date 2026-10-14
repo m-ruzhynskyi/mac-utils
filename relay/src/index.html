@@ -257,7 +257,8 @@ function watch() {
   stopWatch();
   status("Подключаюсь…");
   watchingId = id;
-  viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}`);
+  const h264 = typeof VideoDecoder !== "undefined" ? "&h264=1" : "";
+  viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}${h264}`);
   viewSocket.binaryType = "arraybuffer";
   viewSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
