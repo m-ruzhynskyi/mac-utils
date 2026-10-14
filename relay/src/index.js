@@ -17,6 +17,8 @@ const CLIENT_HEADER = "x-macutils-client";
 const CLIENT_TOKEN = "mu-share-1";
 const MAX_VIEWERS = 10;
 const HOST_TIMEOUT_MS = 120_000;
+// Связь с ведущим оборвалась не по «Стоп» — ждём, пока он переподключится, зрители не отключаются.
+const HOST_GRACE_MS = 45_000;
 const HOST_CHECK_MS = 30_000;
 const VIEWER_TIMEOUT_MS = 120_000;
 const ID = /^\d{6}$|^\d{10}$/;
@@ -78,12 +80,21 @@ export class Room {
     if (role === "host") {
       this.state.acceptWebSocket(server, ["host"]);
       server.serializeAttachment({ lastSeen: Date.now() });
+      if (this.hostLostAt ?? (await this.state.storage.get("hostLostAt"))) {
+        this.hostLostAt = null;
+        await this.state.storage.delete("hostLostAt");
+        for (const viewer of this.activeViewers()) {
+          try { viewer.send(JSON.stringify({ type: "resumed" })); } catch (_) {}
+        }
+      }
       await this.ensureAlarm();
     } else {
       const viewer = (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
       const name = (url.searchParams.get("name") || "Без имени").slice(0, 60);
       this.state.acceptWebSocket(server, ["viewer"]);
-      server.serializeAttachment({ id: viewer, name, approved: false, lastSeen: Date.now() });
+      // h264=1 — зритель понимает видео H.264; старые версии понимают только кадры JPEG.
+      const h264 = url.searchParams.get("h264") === "1";
+      server.serializeAttachment({ id: viewer, name, h264, approved: false, lastSeen: Date.now() });
       server.send(JSON.stringify({ type: "waiting" }));
       this.toHost({ type: "request", viewer, name });
     }
@@ -111,6 +122,18 @@ export class Room {
   }
 
   async alarm() {
+    // После выгрузки объекта из памяти отметка обрыва берётся из хранилища.
+    if (this.hostLostAt == null) this.hostLostAt = (await this.state.storage.get("hostLostAt")) ?? null;
+    if (!this.activeHosts().length && this.hostLostAt) {
+      if (Date.now() - this.hostLostAt >= HOST_GRACE_MS) {
+        this.hostLostAt = null;
+        await this.state.storage.delete("hostLostAt");
+        this.endViewers();
+      } else {
+        await this.state.storage.setAlarm(this.hostLostAt + HOST_GRACE_MS + 1000);
+      }
+      return;
+    }
     if (this.activeHosts().length) {
       this.expireViewers();
       for (const viewer of this.activeViewers()) {
@@ -203,26 +226,43 @@ export class Room {
     this.notifyHost();
   }
 
-  webSocketClose(socket) {
-    this.closed(socket);
+  webSocketClose(socket, code) {
+    // 1000 — ведущий сам нажал «Стоп»: заканчиваем сразу. Иначе — обрыв, даём время переподключиться.
+    this.closed(socket, code === 1000);
   }
 
   webSocketError(socket) {
     this.closed(socket);
   }
 
-  closed(socket) {
+  endViewers() {
+    for (const viewer of this.state.getWebSockets("viewer")) {
+      try {
+        viewer.serializeAttachment({ ...viewer.deserializeAttachment(), ended: true });
+        viewer.send(JSON.stringify({ type: "ended" }));
+        viewer.close(1000, "Broadcast ended");
+      } catch (_) {}
+    }
+  }
+
+  closed(socket, explicit = false) {
     if (this.state.getTags(socket).includes("host")) {
       const info = socket.deserializeAttachment() || {};
       if (info.ended) return;
       socket.serializeAttachment({ ...info, ended: true });
-      for (const viewer of this.state.getWebSockets("viewer")) {
-        try {
-          viewer.serializeAttachment({ ...viewer.deserializeAttachment(), ended: true });
-          viewer.send(JSON.stringify({ type: "ended" }));
-          viewer.close(1000, "Broadcast ended");
-        } catch (_) {}
+      if (explicit) {
+        this.hostLostAt = null;
+        this.state.storage.delete("hostLostAt");
+        this.endViewers();
+        return;
       }
+      // Обрыв: зрители остаются и видят «переподключение»; не вернётся за HOST_GRACE_MS — конец.
+      this.hostLostAt = Date.now();
+      this.state.storage.put("hostLostAt", this.hostLostAt);
+      for (const viewer of this.activeViewers()) {
+        try { viewer.send(JSON.stringify({ type: "reconnecting" })); } catch (_) {}
+      }
+      this.state.storage.setAlarm(Date.now() + HOST_GRACE_MS + 1000);
     } else {
       const info = socket.deserializeAttachment() || {};
       if (info.ended) return;
@@ -238,7 +278,7 @@ export class Room {
     // Anonymous legacy viewers remain separate rather than sharing an empty ID.
     const people = [...new Map(watching.map((s) => {
       const info = s.deserializeAttachment();
-      return [info.id || s, { id: info.id, name: info.name }];
+      return [info.id || s, { id: info.id, name: info.name, h264: !!info.h264 }];
     })).values()];
     this.toHost({
       type: "viewers",

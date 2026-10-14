@@ -82,7 +82,7 @@ final class Ollama: ObservableObject {
         warmedModel = Self.model
         var request = URLRequest(url: Self.base.appendingPathComponent("api/generate"))
         request.httpMethod = "POST"
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["model": Self.model, "keep_alive": "30m"])
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["model": Self.model, "keep_alive": "5m"])
         URLSession.shared.dataTask(with: request).resume()
     }
 
@@ -95,7 +95,6 @@ final class Ollama: ObservableObject {
                 let names = (json?["models"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }.sorted()
                 models = names
                 status = Self.has(Self.model, in: names) ? .ready : .noModel
-                if status == .ready { warmUp() }
             } catch {
                 models = []
                 status = .noServer
@@ -158,7 +157,7 @@ final class Ollama: ObservableObject {
                                      context: Int? = nil, maxTokens: Int = 600) async throws -> String {
         let (base, model) = await MainActor.run { (Self.base, Self.model) }
         var body: [String: Any] = [
-            "model": model, "prompt": prompt, "stream": false, "keep_alive": "30m",
+            "model": model, "prompt": prompt, "stream": false, "keep_alive": "5m",
             "options": context.map { ["temperature": temperature, "num_ctx": $0, "num_predict": maxTokens] }
                 ?? ["temperature": temperature, "num_predict": maxTokens],
         ]
