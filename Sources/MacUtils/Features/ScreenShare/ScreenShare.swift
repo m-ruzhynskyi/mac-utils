@@ -88,6 +88,7 @@ final class ScreenShare: NSObject, ObservableObject {
     private var stream: SCStream?
     private var audioStream: SCStream?
     private var audioRefresh: Timer?
+    private var heartbeat: Timer?
     private var sender: FrameSender?
     private var hud: NSPanel?
 
@@ -165,6 +166,7 @@ final class ScreenShare: NSObject, ObservableObject {
                     state = .failed("Не удалось начать захват экрана")
                     return
                 }
+                startHeartbeat(socket)
                 state = .live(code: code, viewers: 0)
                 ShareMarksOverlay.shared.attach(to: filter)
                 listen(socket)
@@ -287,6 +289,23 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
 
+    private func startHeartbeat(_ socket: URLSessionWebSocketTask) {
+        heartbeat?.invalidate()
+        let timer = Timer(timeInterval: 20, repeats: true) { [weak self] _ in
+            socket.send(.string(#"{"type":"heartbeat"}"#)) { error in
+                guard error != nil else { return }
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard let self, self.socket === socket else { return }
+                        self.stop(reason: "Связь с сервером прервалась")
+                    }
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        heartbeat = timer
+    }
+
     private func listen(_ socket: URLSessionWebSocketTask) {
         socket.receive { [weak self] result in
             DispatchQueue.main.async {
@@ -375,6 +394,8 @@ final class ScreenShare: NSObject, ObservableObject {
         self.audioStream = nil
         audioRefresh?.invalidate()
         audioRefresh = nil
+        heartbeat?.invalidate()
+        heartbeat = nil
         Task { try? await audioStream?.stopCapture() }
         sender = nil
         Task { try? await stream?.stopCapture() }
@@ -604,6 +625,9 @@ final class ShareViewer: ObservableObject {
                         let type = json?["type"] as? String
                         if let mark = ShareMark.parse(text) {
                             viewer.marks.add(mark)
+                            viewer.receive(socket)
+                        } else if type == "heartbeat" {
+                            socket.send(.string(#"{"type":"heartbeat"}"#)) { _ in }
                             viewer.receive(socket)
                         } else if type == "waiting" {
                             viewer.state = .waiting
