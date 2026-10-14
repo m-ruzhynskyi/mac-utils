@@ -550,7 +550,12 @@ final class ShareViewer: ObservableObject {
         player.stop()
     }
 
+    /// Окно просмотра открыто — Mac Utils виден в Dock и в ⌘Tab.
+    private(set) var isWindowOpen = false
+
     func showWindow() {
+        isWindowOpen = true
+        AppDelegate.syncDock()
         let window = self.window ?? {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 600),
                                   styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
@@ -562,6 +567,8 @@ final class ShareViewer: ObservableObject {
                 MainActor.assumeIsolated {
                     ShareViewer.shared.disconnect()
                     ShareViewer.shared.state = .idle
+                    ShareViewer.shared.isWindowOpen = false
+                    AppDelegate.syncDock()
                 }
             }
             self.window = window

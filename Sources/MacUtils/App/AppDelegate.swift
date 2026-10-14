@@ -96,6 +96,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Клик по значку в Dock во время просмотра — к окну трансляции.
+        if ShareViewer.shared.isWindowOpen {
+            ShareViewer.shared.showWindow()
+            return false
+        }
         SettingsWindowController.shared.show()
         return false
     }
@@ -151,8 +156,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// В Dock — обычное приложение (клик по значку открывает настройки), иначе — фоновое.
-    private func syncDock() {
-        let policy: NSApplication.ActivationPolicy = UserDefaults.standard.bool(forKey: Pref.showInDock) ? .regular : .accessory
+    private func syncDock() { Self.syncDock() }
+
+    /// В Dock — если так выбрано в настройках или открыт просмотр трансляции (чтобы окно было легко найти).
+    static func syncDock() {
+        let visible = UserDefaults.standard.bool(forKey: Pref.showInDock) || ShareViewer.shared.isWindowOpen
+        let policy: NSApplication.ActivationPolicy = visible ? .regular : .accessory
         guard NSApp.activationPolicy() != policy else { return }
         NSApp.setActivationPolicy(policy)
         // Окно настроек не должно пропадать при смене режима.
