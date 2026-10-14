@@ -8,9 +8,14 @@ const source = fs.readFileSync(`${__dirname}/../src/index.js`, 'utf8')
   .replace('export class Room', 'class Room');
 function fixture() {
   let now = 1_000_000, alarm = null;
+  const store = new Map();
   const sockets = [];
   const state = {
-    storage: { getAlarm: async () => alarm, setAlarm: async (value) => { alarm = value; } },
+    storage: {
+      getAlarm: async () => alarm, setAlarm: async (value) => { alarm = value; },
+      get: async (key) => store.get(key), put: async (key, value) => { store.set(key, value); },
+      delete: async (key) => { store.delete(key); },
+    },
     getWebSockets: (tag) => sockets.filter((s) => s.tag === tag),
     getTags: (s) => [s.tag],
   };
@@ -28,14 +33,14 @@ function fixture() {
   }
   return { room, socket, advance(ms) { now += ms; }, get alarm() { return alarm; } };
 }
-test('stale host releases ID and ends viewers; late close cannot end new session', async () => {
+test('stale host releases ID and tells viewers it is reconnecting; late close cannot end new session', async () => {
   const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000 });
   const viewer = f.socket('viewer', { approved: true });
   f.advance(120_000);
   const status = await f.room.fetch(new Request('https://room/live'));
   assert.equal(await status.text(), '0');
   assert.equal(host.closes.length, 1);
-  assert.equal(viewer.messages[0].type, 'ended');
+  assert.equal(viewer.messages[0].type, 'reconnecting');
   const next = f.socket('viewer', { approved: true });
   f.socket('host', { lastSeen: 1_120_000 });
   f.room.webSocketClose(host);
@@ -148,4 +153,27 @@ test('legacy viewer attachments get one persisted grace period', async () => {
   f.advance(120_000);
   f.room.expireViewers();
   assert.equal(viewer.info.ended, true);
+});
+test('host drop (not code 1000) keeps viewers for 45 s, then ends them', async () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000 });
+  const viewer = f.socket('viewer', { id: '1111111111', approved: true, lastSeen: 1_000_000 });
+  f.room.webSocketClose(host, 1006);
+  assert.equal(viewer.messages.at(-1).type, 'reconnecting');
+  assert.equal(viewer.closes.length, 0);
+  f.advance(30_000);
+  viewer.info.lastSeen = 1_030_000;
+  await f.room.alarm();
+  assert.equal(viewer.closes.length, 0);
+  f.advance(16_000);
+  viewer.info.lastSeen = 1_046_000;
+  await f.room.alarm();
+  assert.equal(viewer.messages.at(-1).type, 'ended');
+  assert.equal(viewer.closes.length, 1);
+});
+test('host stop (code 1000) ends viewers immediately', () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000 });
+  const viewer = f.socket('viewer', { id: '1111111111', approved: true, lastSeen: 1_000_000 });
+  f.room.webSocketClose(host, 1000);
+  assert.equal(viewer.messages.at(-1).type, 'ended');
+  assert.equal(viewer.closes.length, 1);
 });
