@@ -37,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         syncFeatures()
         DispatchQueue.main.async { MoveToApplications.offerIfNeeded() }
-        if Ollama.enabled { Ollama.shared.refresh() }
+        // Модель не грузим заранее: она держит ~5 ГБ памяти; загрузится при первом запросе.
         Updater.shared.start()
         ToolsLauncher.installIfNeeded()
 

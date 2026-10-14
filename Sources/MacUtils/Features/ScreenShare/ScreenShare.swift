@@ -6,6 +6,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Код комнаты и адрес (без сети — для тестов).
+@_silgen_name("responsibility_get_pid_responsible_for_pid")
+private func responsibility_get_pid_responsible_for_pid(_ pid: pid_t) -> pid_t
+
 enum ShareCode {
     static func random() -> String {
         String(format: "%06d", Int.random(in: 0...999_999))
@@ -201,7 +204,16 @@ final class ScreenShare: NSObject, ObservableObject {
         guard let display = content.displays.first else { throw CocoaError(.featureUnsupported) }
         let muted = Set(UserDefaults.standard.stringArray(forKey: Pref.shareMutedApps) ?? [])
         let ownPID = ProcessInfo.processInfo.processIdentifier
-        let excluded = content.applications.filter { $0.processID == ownPID || muted.contains($0.bundleIdentifier) }
+        // Звук часто играет не сама программа, а её помощник (Discord Helper, WebKit у Safari):
+        // глушим и процессы с тем же началом bundle id, и те, за которые программа отвечает.
+        let mutedPIDs = Set(NSWorkspace.shared.runningApplications
+            .filter { app in muted.contains { app.bundleIdentifier?.hasPrefix($0) == true } }
+            .map(\.processIdentifier))
+        let excluded = content.applications.filter { app in
+            app.processID == ownPID
+                || muted.contains { app.bundleIdentifier == $0 || app.bundleIdentifier.hasPrefix($0 + ".") }
+                || mutedPIDs.contains(responsibility_get_pid_responsible_for_pid(app.processID))
+        }
         return SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
     }
 
