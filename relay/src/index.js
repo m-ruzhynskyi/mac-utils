@@ -33,11 +33,13 @@ export default {
       if (!isClient(request)) return new Response("Use the Mac Utils app", { status: 403 });
       const ids = (url.searchParams.get("ids") || "").split(",").filter((id) => ID.test(id)).slice(0, 50);
       const result = {};
+      const revisions = new Set();
       await Promise.all(ids.map(async (id) => {
         const response = await env.ROOMS.get(env.ROOMS.idFromName(id)).fetch("https://room/live");
+        revisions.add(response.headers.get("x-relay-revision") || "legacy");
         result[id] = (await response.text()) === "1";
       }));
-      return Response.json(result, { headers: { "cache-control": "no-store" } });
+      return Response.json(result, { headers: { "cache-control": "no-store", "x-relay-room-revision": [...revisions].join(",") } });
     }
     if (!room || !ID.test(room[1])) {
       return new Response(isClient(request) ? page : landing, {
@@ -62,7 +64,7 @@ export class Room {
     this.expireViewers();
     const hosts = this.activeHosts();
     if (hosts.length) await this.ensureAlarm();
-    if (url.pathname === "/live") return new Response(hosts.length > 0 ? "1" : "0");
+    if (url.pathname === "/live") return new Response(hosts.length > 0 ? "1" : "0", { headers: { "x-relay-revision": "viewer-heartbeat-1" } });
 
     const role = url.searchParams.get("role");
     if (role === "host" && hosts.length > 0) return new Response("Room is busy", { status: 409 });
