@@ -56,7 +56,8 @@ enum ShareCode {
         var components = URLComponents(string: "\(base)/room/\(code)")
         var query = [URLQueryItem(name: "role", value: role)]
         if role == "viewer" {
-            query += [URLQueryItem(name: "viewer", value: myID), URLQueryItem(name: "name", value: myName)]
+            query += [URLQueryItem(name: "viewer", value: myID), URLQueryItem(name: "name", value: myName),
+                      URLQueryItem(name: "h264", value: "1")]
         }
         components?.queryItems = query
         return components?.url
@@ -336,8 +337,10 @@ final class ScreenShare: NSObject, ObservableObject {
                             case "cancelled":
                                 self.pendingRequests.remove(json["viewer"] as? String ?? "")
                             case "viewers":
-                                let list = (json["list"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
-                                self.watchers = list
+                                let raw = json["list"] as? [[String: Any]] ?? []
+                                self.watchers = raw.compactMap { $0["name"] as? String }
+                                // Смотрит старая версия (без H.264) — дополнительно шлём ей кадры JPEG.
+                                self.sender?.legacyFrames = raw.contains { ($0["h264"] as? Bool) != true }
                             default:
                                 break
                             }
@@ -557,6 +560,10 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     /// и потом начинаем с ключевого (иначе картинка рассыпается).
     private var pendingBytes = 0
     private var skipping = false
+    /// Для зрителей старых версий: раз в ~0.25 с ещё и кадр JPEG.
+    var legacyFrames = false
+    private var lastLegacy = Date.distantPast
+    private let context = CIContext()
     private lazy var encoder = H264Encoder { [weak self] data, key in
         self?.queue.async { self?.sendVideo(data, key: key) }
     }
@@ -580,6 +587,16 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
               let raw = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
               let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         encoder.encode(pixels, at: sampleBuffer.presentationTimeStamp)
+        if legacyFrames, Date().timeIntervalSince(lastLegacy) > 0.25, pendingBytes < 1_500_000,
+           let image = context.createCGImage(CIImage(cvPixelBuffer: pixels),
+                                             from: CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(pixels), height: CVPixelBufferGetHeight(pixels))),
+           let jpeg = Self.jpeg(image) {
+            lastLegacy = Date()
+            let packet = ShareProtocol.framePacket(jpeg)
+            pendingBytes += packet.count
+            let size = packet.count
+            socket.send(.data(packet)) { _ in self.queue.async { self.pendingBytes = max(0, self.pendingBytes - size) } }
+        }
     }
 
     /// Новый зритель или переподключение — следующий кадр ключевой, чтобы картинка появилась сразу.

@@ -92,7 +92,9 @@ export class Room {
       const viewer = (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
       const name = (url.searchParams.get("name") || "Без имени").slice(0, 60);
       this.state.acceptWebSocket(server, ["viewer"]);
-      server.serializeAttachment({ id: viewer, name, approved: false, lastSeen: Date.now() });
+      // h264=1 — зритель понимает видео H.264; старые версии понимают только кадры JPEG.
+      const h264 = url.searchParams.get("h264") === "1";
+      server.serializeAttachment({ id: viewer, name, h264, approved: false, lastSeen: Date.now() });
       server.send(JSON.stringify({ type: "waiting" }));
       this.toHost({ type: "request", viewer, name });
     }
@@ -276,7 +278,7 @@ export class Room {
     // Anonymous legacy viewers remain separate rather than sharing an empty ID.
     const people = [...new Map(watching.map((s) => {
       const info = s.deserializeAttachment();
-      return [info.id || s, { id: info.id, name: info.name }];
+      return [info.id || s, { id: info.id, name: info.name, h264: !!info.h264 }];
     })).values()];
     this.toHost({
       type: "viewers",
