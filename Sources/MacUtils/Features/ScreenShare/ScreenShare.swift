@@ -293,7 +293,8 @@ final class ScreenShare: NSObject, ObservableObject {
         heartbeat?.invalidate()
         let timer = Timer(timeInterval: 20, repeats: true) { [weak self] _ in
             socket.send(.string(#"{"type":"heartbeat"}"#)) { error in
-                guard error != nil else { return }
+                guard let error else { return }
+                Log.capture.error("Трансляция: heartbeat не ушёл: \(error.localizedDescription, privacy: .public) close=\(socket.closeCode.rawValue)")
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard let self, self.socket === socket else { return }
@@ -338,7 +339,8 @@ final class ScreenShare: NSObject, ObservableObject {
                         self.listen(socket)
                     case .success:
                         self.listen(socket)
-                    case .failure:
+                    case .failure(let error):
+                        Log.capture.error("Трансляция: приём оборвался: \(error.localizedDescription, privacy: .public) close=\(socket.closeCode.rawValue) reason=\(String(data: socket.closeReason ?? Data(), encoding: .utf8) ?? "", privacy: .public)")
                         self.stop(reason: "Связь с сервером прервалась")
                     }
                 }
@@ -517,7 +519,8 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         inFlight = true
         socket.send(.data(data)) { error in
             self.queue.async { self.inFlight = false }
-            if error != nil {
+            if let error {
+                Log.capture.error("Трансляция: кадр не ушёл (\(data.count) Б): \(error.localizedDescription, privacy: .public)")
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         if ScreenShare.shared.isLive { ScreenShare.shared.stop(reason: "Связь с сервером прервалась") }
