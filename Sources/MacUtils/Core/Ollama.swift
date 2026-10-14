@@ -154,10 +154,13 @@ final class Ollama: ObservableObject {
     /// Один ответ модели. json — просить строго JSON (format: "json").
     nonisolated static func generate(_ prompt: String, system: String? = nil, json: Bool = false,
                                      temperature: Double = 0.2, timeout: TimeInterval = 90,
-                                     context: Int? = nil, maxTokens: Int = 600) async throws -> String {
+                                     context: Int? = nil, maxTokens: Int = 600,
+                                     background: Bool = false) async throws -> String {
         let (base, model) = await MainActor.run { (Self.base, Self.model) }
         var body: [String: Any] = [
-            "model": model, "prompt": prompt, "stream": false, "keep_alive": "5m",
+            "model": model, "prompt": prompt, "stream": false,
+            // Фоновые задачи (имена снимков, подписи файлов) выгружают модель сразу — она занимает ~5 ГБ.
+            "keep_alive": background ? "0" : "5m",
             "options": context.map { ["temperature": temperature, "num_ctx": $0, "num_predict": maxTokens] }
                 ?? ["temperature": temperature, "num_predict": maxTokens],
         ]
@@ -184,8 +187,8 @@ final class Ollama: ObservableObject {
 
     /// Ответ-JSON, разобранный в словарь.
     nonisolated static func generateJSON(_ prompt: String, system: String? = nil,
-                                         maxTokens: Int = 600) async throws -> [String: Any] {
-        let text = try await generate(prompt, system: system, json: true, maxTokens: maxTokens)
+                                         maxTokens: Int = 600, background: Bool = false) async throws -> [String: Any] {
+        let text = try await generate(prompt, system: system, json: true, maxTokens: maxTokens, background: background)
         guard let object = AIParsing.jsonObject(in: text) else { throw Failure(errorDescription: "Модель ответила не JSON") }
         return object
     }
