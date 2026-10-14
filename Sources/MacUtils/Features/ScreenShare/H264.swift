@@ -85,6 +85,22 @@ final class H264Encoder: @unchecked Sendable {
 
     func requestKeyFrame() { forceKey = true }
 
+    /// Скорость потока, бит/с: подстраивается под сеть (см. FrameSender).
+    private(set) var bitrate = 3_000_000
+
+    func setBitrate(_ value: Int) {
+        guard value != bitrate else { return }
+        bitrate = value
+        if let session { Self.applyBitrate(value, to: session) }
+    }
+
+    private static func applyBitrate(_ value: Int, to session: VTCompressionSession) {
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: value as CFTypeRef)
+        // Жёсткий предел на секунду: без всплесков, которые забивают сеть и копят задержку.
+        let limit = [value * 3 / 2 / 8, 1] as CFArray
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: limit)
+    }
+
     func encode(_ pixels: CVPixelBuffer, at time: CMTime) {
         let width = Int32(CVPixelBufferGetWidth(pixels)), height = Int32(CVPixelBufferGetHeight(pixels))
         if session == nil || size != (width, height) { makeSession(width: width, height: height) }
@@ -110,12 +126,15 @@ final class H264Encoder: @unchecked Sendable {
             kVTCompressionPropertyKey_RealTime: true,
             kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_Main_AutoLevel,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
-            kVTCompressionPropertyKey_AverageBitRate: 2_500_000,
-            kVTCompressionPropertyKey_ExpectedFrameRate: 15,
-            kVTCompressionPropertyKey_MaxKeyFrameInterval: 60,
+            kVTCompressionPropertyKey_ExpectedFrameRate: 30,
+            kVTCompressionPropertyKey_MaxKeyFrameInterval: 120,
             kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: 4,
+            // Кадр уходит сразу, без очереди внутри кодека.
+            kVTCompressionPropertyKey_MaxFrameDelayCount: 0,
+            kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality: true,
         ]
         for (key, value) in properties { VTSessionSetProperty(created, key: key, value: value as CFTypeRef) }
+        Self.applyBitrate(bitrate, to: created)
         VTCompressionSessionPrepareToEncodeFrames(created)
         session = created
         size = (width, height)

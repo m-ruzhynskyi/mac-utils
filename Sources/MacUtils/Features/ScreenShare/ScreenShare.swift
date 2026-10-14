@@ -265,7 +265,7 @@ final class ScreenShare: NSObject, ObservableObject {
             guard let filter else { return }
             let config = SCStreamConfiguration()
             Self.configure(config, for: filter)
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 15)
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
             config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
             config.showsCursor = true
             config.queueDepth = 3
@@ -280,8 +280,8 @@ final class ScreenShare: NSObject, ObservableObject {
     private func beginCapture(filter: SCContentFilter) async throws {
         let config = SCStreamConfiguration()
         Self.configure(config, for: filter)
-        // H.264 (аппаратно): 15 кадров в секунду и формат, который кодек берёт без пересчёта.
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 15)
+        // H.264 (аппаратно): 30 кадров в секунду и формат, который кодек берёт без пересчёта.
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         config.showsCursor = true
         config.queueDepth = 3
@@ -553,7 +553,25 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         lock.unlock()
         queue.async {
             self.pendingBytes = 0
+            self.encoder.setBitrate(Self.startBitrate)
             self.encoder.requestKeyFrame()
+        }
+    }
+
+    // Скорость под сеть, как в Discord: очередь растёт — снижаем, свободно — поднимаем.
+    static let minBitrate = 700_000, maxBitrate = 6_000_000, startBitrate = 3_000_000
+    private var lastAdapt = Date()
+
+    /// Вызывается на queue.
+    private func adaptBitrate() {
+        let now = Date()
+        let current = encoder.bitrate
+        if pendingBytes > 250_000, now.timeIntervalSince(lastAdapt) > 0.5 {
+            encoder.setBitrate(max(Self.minBitrate, current * 7 / 10))
+            lastAdapt = now
+        } else if pendingBytes < 60_000, now.timeIntervalSince(lastAdapt) > 2, current < Self.maxBitrate {
+            encoder.setBitrate(min(Self.maxBitrate, current * 23 / 20))
+            lastAdapt = now
         }
     }
     /// Сколько байт видео ушло в сокет и ещё не подтверждено: сеть не успевает — пропускаем кадры
@@ -606,7 +624,9 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
 
     /// Вызывается на queue.
     private func sendVideo(_ data: Data, key: Bool) {
-        if pendingBytes > 3_000_000 {
+        adaptBitrate()
+        // Больше ~1 с в очереди — старые кадры уже не нужны: пропускаем до ключевого, чтобы не копить задержку.
+        if pendingBytes > max(400_000, encoder.bitrate / 8) {
             skipping = true
             encoder.requestKeyFrame()
             return
