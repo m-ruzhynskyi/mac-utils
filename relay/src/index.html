@@ -14,7 +14,8 @@
   button { font: inherit; padding: 6px 14px; border-radius: 8px; border: 0; background: #3a3a3c; color: inherit; cursor: pointer; }
   button.primary { background: #0a84ff; } button.danger { background: var(--accent); }
   #stage { position: fixed; inset: 52px 0 0 0; display: flex; align-items: center; justify-content: center; }
-  #screen { max-width: 100%; max-height: 100%; object-fit: contain; }
+  #screen, #video { max-width: 100%; max-height: 100%; object-fit: contain; }
+  #video { display: none; }
   #marks { position: absolute; inset: 0; width: 100%; height: 100%; }
   #tools { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: none; gap: 6px; align-items: center;
            background: rgba(30,30,32,.85); padding: 6px 10px; border-radius: 999px; }
@@ -74,6 +75,7 @@
 <div id="historyPanel"><b>История</b><p class="muted">Зелёная точка — сейчас в эфире.</p><div id="historyList"></div></div>
 <div id="stage">
   <img id="screen" alt="">
+  <canvas id="video"></canvas>
   <canvas id="marks"></canvas>
   <div id="tools">
     <button data-tool="ping" class="on" title="Клик — метка «сюда!» на экране ведущего">◎ Метка</button>
@@ -94,6 +96,7 @@ const wsBase = location.origin.replace(/^http/, "ws");
 // Две независимые связи: смотреть кого-то и транслировать себя можно одновременно (смотреть друг друга).
 let viewSocket = null, hostSocket = null, watchingId = null, audio = null, playAt = 0, lastUrl = null, capture = null;
 let watching = false;
+let forceKey = true;
 
 function status(text) { $("status").innerHTML = text; $("status").style.display = text ? "" : "none"; }
 function digits(text) { const d = text.replace(/\D/g, ""); return d.length === 10 || d.length === 6 ? d : null; }
@@ -155,10 +158,14 @@ let tool = "ping", color = "red", drawing = null;
 function addMark(mark) { mark.born = performance.now(); marks.push(mark); if (marks.length === 1) requestAnimationFrame(renderMarks); }
 
 function imageRect() {
-  const img = $("screen"), stage = $("stage").getBoundingClientRect(), box = img.getBoundingClientRect();
-  if (!img.naturalWidth) return null;
-  const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
-  const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+  // Видео H.264 (холст) или картинка JPEG от старых версий.
+  const useVideo = $("video").style.display === "block";
+  const el = useVideo ? $("video") : $("screen");
+  const nw = useVideo ? el.width : el.naturalWidth, nh = useVideo ? el.height : el.naturalHeight;
+  const stage = $("stage").getBoundingClientRect(), box = el.getBoundingClientRect();
+  if (!nw) return null;
+  const scale = Math.min(box.width / nw, box.height / nh);
+  const w = nw * scale, h = nh * scale;
   return { x: box.left - stage.left + (box.width - w) / 2, y: box.top - stage.top + (box.height - h) / 2, w, h };
 }
 
@@ -276,12 +283,53 @@ function watch() {
       status("");
     } else if (bytes[0] === 2) {
       playPCM(event.data.slice(1));
+    } else if (bytes[0] === 3) {
+      playH264(bytes.subarray(1));
     }
   };
   viewSocket.onclose = (event) => { if (event.code !== 1000 && viewSocket) status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); };
 }
 
+// ---- Видео H.264: аппаратное декодирование WebCodecs ----
+let decoder = null;
+function nalUnits(data) {
+  const units = []; let start = -1;
+  for (let i = 0; i + 3 <= data.length; i++) {
+    if (data[i] === 0 && data[i + 1] === 0 && (data[i + 2] === 1 || (data[i + 2] === 0 && data[i + 3] === 1))) {
+      if (start >= 0) units.push(data.subarray(start, i));
+      i += data[i + 2] === 1 ? 2 : 3; start = i + 1;
+    }
+  }
+  if (start >= 0) units.push(data.subarray(start));
+  return units;
+}
+function playH264(bytes) {
+  const key = bytes[0] === 1, data = bytes.subarray(1);
+  if (!decoder || decoder.state === "closed") {
+    if (!key || typeof VideoDecoder === "undefined") return;
+    const sps = nalUnits(data).find((u) => (u[0] & 0x1f) === 7);
+    if (!sps) return;
+    const hex = (n) => n.toString(16).padStart(2, "0");
+    const canvas = $("video"), ctx = canvas.getContext("2d");
+    decoder = new VideoDecoder({
+      output: (frame) => {
+        if (canvas.width !== frame.displayWidth) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
+        ctx.drawImage(frame, 0, 0); frame.close();
+        if (canvas.style.display !== "block") { canvas.style.display = "block"; $("screen").style.display = "none"; status(""); }
+      },
+      error: () => { decoder = null; },
+    });
+    decoder.configure({ codec: `avc1.${hex(sps[1])}${hex(sps[2])}${hex(sps[3])}`, optimizeForLatency: true });
+  }
+  // Очередь растёт — компьютер не успевает: пропускаем до следующего ключевого кадра.
+  if (decoder.decodeQueueSize > 10 && !key) return;
+  decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: Math.round(performance.now() * 1000), data }));
+}
+
 function stopWatch(keepStatus) {
+  if (decoder && decoder.state !== "closed") { try { decoder.close(); } catch (_) {} }
+  decoder = null;
+  $("video").style.display = "none"; $("screen").style.display = "";
   if (viewSocket) { viewSocket.onclose = null; viewSocket.close(1000); viewSocket = null; }
   watching = false; $("tools").style.display = "none";
   if (!keepStatus) { $("screen").removeAttribute("src"); }
@@ -385,17 +433,46 @@ function startCapture(stream, code) {
     // Метка или рисунок зрителя — на экран ведущего (в приложении для Windows — поверх всего).
     if ((msg.type === "ping" || msg.type === "stroke") && window.mu && window.mu.mark) window.mu.mark(msg);
     if (msg.type === "request") onRequest(msg.viewer, msg.name);
+    if (msg.type === "viewers") forceKey = true; // новый зритель — сразу ключевой кадр
     if (msg.type === "cancelled") { const i = requests.findIndex((r) => r.viewer === msg.viewer); if (i >= 0) { requests.splice(i, 1); showRequest(); } }
     if (msg.type === "viewers") $("liveText").textContent = msg.count ? `В эфире · смотрят: ${(msg.list || []).map((v) => v.name).join(", ")}` : "В эфире · никто не смотрит";
   };
   hostSocket.onclose = () => reconnectHost(code);
   $("share").style.display = "none";
+  // Видео H.264 через аппаратный кодек (WebCodecs), как в Discord; нет кодека — кадры JPEG.
+  let encoder = null, frameIndex = 0, encodedSize = "";
+  forceKey = true;
+  const canEncode = typeof VideoEncoder !== "undefined";
   const timer = setInterval(() => {
-    if (!hostSocket || hostSocket.readyState !== 1 || hostSocket.bufferedAmount > 1e6 || !video.videoWidth) return;
+    if (!hostSocket || hostSocket.readyState !== 1 || hostSocket.bufferedAmount > 2e6 || !video.videoWidth) { forceKey = true; return; }
     const scale = Math.min(1, 1600 / video.videoWidth);
-    canvas.width = Math.round(video.videoWidth * scale);
-    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.width = Math.round(video.videoWidth * scale / 2) * 2;
+    canvas.height = Math.round(video.videoHeight * scale / 2) * 2;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    if (canEncode) {
+      const size = `${canvas.width}x${canvas.height}`;
+      if (!encoder || encoder.state === "closed" || size !== encodedSize) {
+        try { encoder?.close(); } catch (_) {}
+        encodedSize = size; forceKey = true;
+        encoder = new VideoEncoder({
+          output: (chunk) => {
+            if (!hostSocket || hostSocket.readyState !== 1) return;
+            const packet = new Uint8Array(chunk.byteLength + 2);
+            packet[0] = 3; packet[1] = chunk.type === "key" ? 1 : 0;
+            chunk.copyTo(packet.subarray(2));
+            hostSocket.send(packet);
+          },
+          error: () => { encoder = null; },
+        });
+        encoder.configure({ codec: "avc1.4D4028", width: canvas.width, height: canvas.height, bitrate: 2_500_000, framerate: 15,
+                            latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: "prefer-hardware" });
+      }
+      if (encoder.encodeQueueSize > 2) return;
+      const frame = new VideoFrame(canvas, { timestamp: Math.round(performance.now() * 1000) });
+      encoder.encode(frame, { keyFrame: forceKey || frameIndex % 60 === 0 });
+      frame.close(); forceKey = false; frameIndex++;
+      return;
+    }
     canvas.toBlob(async (blob) => {
       if (!blob || !hostSocket || hostSocket.readyState !== 1) return;
       const body = new Uint8Array(await blob.arrayBuffer());
@@ -403,7 +480,7 @@ function startCapture(stream, code) {
       packet[0] = 1; packet.set(body, 1);
       hostSocket.send(packet);
     }, "image/jpeg", 0.55);
-  }, 125);
+  }, canEncode ? 66 : 125);
   let audioContext = null;
   if (stream.getAudioTracks().length) {
     // Частота — как у системы (48 кГц и т. п.); в 24 кГц пересчитываем сами: так работает во всех браузерах.
