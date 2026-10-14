@@ -98,6 +98,9 @@ enum Pref {
     static let shareAudio = "shareAudio"
     /// Зрители могут ставить метки и рисовать поверх экрана ведущего.
     static let shareAllowMarks = "shareAllowMarks"
+    /// Свой постоянный 10-значный ID и история подключений (JSON).
+    static let shareID = "shareID"
+    static let shareHistory = "shareHistory"
     /// Программы, чей звук не идёт в трансляцию (bundle id).
     static let shareMutedApps = "shareMutedApps"
     /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.

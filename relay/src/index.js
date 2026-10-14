@@ -1,9 +1,12 @@
-// Ретранслятор трансляции экрана Mac Utils.
-// Ведущий подключается к /room/<код>?role=host и шлёт кадры (JPEG) двоичными сообщениями,
-// зрители — к /room/<код>?role=viewer и получают их. Комната живёт, пока подключён ведущий.
-// Сервер кадры не хранит и не разбирает — только пересылает.
-// Формат двоичных сообщений: первый байт — тип (1 — кадр JPEG, 2 — звук PCM 16 бит, 24 кГц, моно).
-// «/» — веб-страница: смотреть и транслировать из браузера (Windows, Linux, любой компьютер).
+// Ретранслятор трансляции экрана Mac Utils (по принципу AnyDesk).
+// У каждого пользователя постоянный 10-значный ID — это и есть его «комната».
+// Ведущий: /room/<ID>?role=host. Зритель: /room/<ID>?role=viewer&viewer=<свой ID>&name=<имя компьютера>.
+// Зритель ждёт, пока ведущий его пустит: ведущему приходит {"type":"request"}, он отвечает
+// {"type":"accept"|"decline","viewer":"…","name":"<имя ведущего>"}. Кадры и звук идут только пущенным зрителям.
+// Двоичные сообщения: первый байт — тип (1 — кадр JPEG, 2 — звук PCM 16 бит, 24 кГц, моно).
+// Текст от пущенных зрителей (метки {"type":"ping"|"stroke"}) — ведущему и остальным зрителям.
+// /status?ids=a,b,c — кто из них сейчас в эфире (для отметок в истории).
+// Сервер ничего не хранит и не разбирает — только пересылает.
 
 import page from "./index.html";
 import landing from "./landing.html";
@@ -12,18 +15,28 @@ import landing from "./landing.html";
 // они добавляют этот заголовок к каждому запросу. В обычном браузере — страница со ссылками на приложения.
 const CLIENT_HEADER = "x-macutils-client";
 const CLIENT_TOKEN = "mu-share-1";
+const MAX_VIEWERS = 10;
+const ID = /^\d{6}$|^\d{10}$/;
 
 function isClient(request) {
   return request.headers.get(CLIENT_HEADER) === CLIENT_TOKEN;
 }
 
-const MAX_VIEWERS = 10;
-
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const match = url.pathname.match(/^\/room\/(\d{6})$/);
-    if (!match) {
+    const room = url.pathname.match(/^\/room\/(\d+)$/);
+    if (url.pathname === "/status") {
+      if (!isClient(request)) return new Response("Use the Mac Utils app", { status: 403 });
+      const ids = (url.searchParams.get("ids") || "").split(",").filter((id) => ID.test(id)).slice(0, 50);
+      const result = {};
+      await Promise.all(ids.map(async (id) => {
+        const response = await env.ROOMS.get(env.ROOMS.idFromName(id)).fetch("https://room/live");
+        result[id] = (await response.text()) === "1";
+      }));
+      return Response.json(result, { headers: { "cache-control": "no-store" } });
+    }
+    if (!room || !ID.test(room[1])) {
       return new Response(isClient(request) ? page : landing, {
         headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
       });
@@ -32,8 +45,7 @@ export default {
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected WebSocket", { status: 426 });
     }
-    const room = env.ROOMS.get(env.ROOMS.idFromName(match[1]));
-    return room.fetch(request);
+    return env.ROOMS.get(env.ROOMS.idFromName(room[1])).fetch(request);
   },
 };
 
@@ -43,35 +55,77 @@ export class Room {
   }
 
   async fetch(request) {
-    const role = new URL(request.url).searchParams.get("role");
+    const url = new URL(request.url);
+    if (url.pathname === "/live") return new Response(this.state.getWebSockets("host").length > 0 ? "1" : "0");
+
+    const role = url.searchParams.get("role");
     const hosts = this.state.getWebSockets("host");
     if (role === "host" && hosts.length > 0) return new Response("Room is busy", { status: 409 });
     if (role !== "host") {
-      if (hosts.length === 0) return new Response("No broadcast with this code", { status: 404 });
+      if (hosts.length === 0) return new Response("No broadcast with this ID", { status: 404 });
       if (this.state.getWebSockets("viewer").length >= MAX_VIEWERS) {
         return new Response("Too many viewers", { status: 429 });
       }
     }
     const [client, server] = Object.values(new WebSocketPair());
-    this.state.acceptWebSocket(server, [role === "host" ? "host" : "viewer"]);
-    if (role !== "host") this.notifyHost();
+    if (role === "host") {
+      this.state.acceptWebSocket(server, ["host"]);
+    } else {
+      const viewer = (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
+      const name = (url.searchParams.get("name") || "Без имени").slice(0, 60);
+      this.state.acceptWebSocket(server, ["viewer"]);
+      server.serializeAttachment({ id: viewer, name, approved: false });
+      server.send(JSON.stringify({ type: "waiting" }));
+      this.toHost({ type: "request", viewer, name });
+    }
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  approvedViewers() {
+    return this.state.getWebSockets("viewer").filter((s) => s.deserializeAttachment()?.approved);
+  }
+
+  toHost(message) {
+    for (const host of this.state.getWebSockets("host")) {
+      try { host.send(JSON.stringify(message)); } catch (_) {}
+    }
   }
 
   webSocketMessage(socket, message) {
     if (this.state.getTags(socket).includes("host")) {
-      for (const viewer of this.state.getWebSockets("viewer")) {
+      if (typeof message === "string") return this.hostCommand(message);
+      for (const viewer of this.approvedViewers()) {
         try { viewer.send(message); } catch (_) { /* зритель отвалился */ }
       }
       return;
     }
-    // Зритель: метки и рисунки (короткий JSON) — ведущему и остальным зрителям.
+    // Зритель: метки и рисунки (короткий JSON) — только от пущенных, ведущему и остальным пущенным.
     if (typeof message !== "string" || message.length > 32768) return;
-    for (const other of this.state.getWebSockets()) {
+    if (!socket.deserializeAttachment()?.approved) return;
+    for (const other of [...this.state.getWebSockets("host"), ...this.approvedViewers()]) {
       if (other !== socket) {
         try { other.send(message); } catch (_) {}
       }
     }
+  }
+
+  hostCommand(text) {
+    let command;
+    try { command = JSON.parse(text); } catch (_) { return; }
+    for (const viewer of this.state.getWebSockets("viewer")) {
+      const info = viewer.deserializeAttachment() || {};
+      if (info.id !== command.viewer || info.approved) continue;
+      if (command.type === "accept") {
+        viewer.serializeAttachment({ ...info, approved: true });
+        viewer.send(JSON.stringify({ type: "accepted", name: command.name || "" }));
+      } else if (command.type === "decline") {
+        try {
+          viewer.send(JSON.stringify({ type: "declined" }));
+          viewer.close(1000, "Declined");
+        } catch (_) {}
+      }
+    }
+    this.notifyHost();
   }
 
   webSocketClose(socket) {
@@ -91,14 +145,18 @@ export class Room {
         } catch (_) {}
       }
     } else {
+      const info = socket.deserializeAttachment() || {};
+      if (!info.approved) this.toHost({ type: "cancelled", viewer: info.id });
       this.notifyHost(socket);
     }
   }
 
   notifyHost(leaving) {
-    const count = this.state.getWebSockets("viewer").filter((s) => s !== leaving).length;
-    for (const host of this.state.getWebSockets("host")) {
-      try { host.send(JSON.stringify({ type: "viewers", count })); } catch (_) {}
-    }
+    const watching = this.approvedViewers().filter((s) => s !== leaving);
+    this.toHost({
+      type: "viewers",
+      count: watching.length,
+      list: watching.map((s) => s.deserializeAttachment()).map((i) => ({ id: i.id, name: i.name })),
+    });
   }
 }

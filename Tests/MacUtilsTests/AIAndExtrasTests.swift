@@ -110,7 +110,10 @@ final class ShareCodeTests: XCTestCase {
         XCTAssertEqual(ShareCode.display("123456"), "123 456")
         XCTAssertEqual(ShareCode.url(server: "https://relay.example.dev/", code: "123456", role: "host")?.absoluteString,
                        "wss://relay.example.dev/room/123456?role=host")
-        XCTAssertEqual(ShareCode.url(server: "http://127.0.0.1:8787", code: "000001", role: "viewer")?.absoluteString,
-                       "ws://127.0.0.1:8787/room/000001?role=viewer")
+        let viewer = ShareCode.url(server: "http://127.0.0.1:8787", code: "1234567890", role: "viewer")?.absoluteString ?? ""
+        XCTAssertTrue(viewer.hasPrefix("ws://127.0.0.1:8787/room/1234567890?role=viewer&viewer="))
+        XCTAssertEqual(ShareCode.display("1234567890"), "123 456 7890")
+        XCTAssertEqual(ShareCode.normalized("123 456 7890"), "1234567890")
+        XCTAssertEqual(ShareCode.statusURL(server: "https://relay.dev/", ids: ["1", "2"])?.absoluteString, "https://relay.dev/status?ids=1,2")
     }
 }
