@@ -18,6 +18,7 @@ const CLIENT_TOKEN = "mu-share-1";
 const MAX_VIEWERS = 10;
 const HOST_TIMEOUT_MS = 120_000;
 const HOST_CHECK_MS = 30_000;
+const VIEWER_TIMEOUT_MS = 120_000;
 const ID = /^\d{6}$|^\d{10}$/;
 
 function isClient(request) {
@@ -58,6 +59,7 @@ export class Room {
 
   async fetch(request) {
     const url = new URL(request.url);
+    this.expireViewers();
     const hosts = this.activeHosts();
     if (hosts.length) await this.ensureAlarm();
     if (url.pathname === "/live") return new Response(hosts.length > 0 ? "1" : "0");
@@ -79,7 +81,7 @@ export class Room {
       const viewer = (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
       const name = (url.searchParams.get("name") || "Без имени").slice(0, 60);
       this.state.acceptWebSocket(server, ["viewer"]);
-      server.serializeAttachment({ id: viewer, name, approved: false });
+      server.serializeAttachment({ id: viewer, name, approved: false, lastSeen: Date.now() });
       server.send(JSON.stringify({ type: "waiting" }));
       this.toHost({ type: "request", viewer, name });
     }
@@ -108,15 +110,34 @@ export class Room {
 
   async alarm() {
     if (this.activeHosts().length) {
+      this.expireViewers();
+      for (const viewer of this.activeViewers()) {
+        try { viewer.send(JSON.stringify({ type: "heartbeat" })); }
+        catch (_) { this.closed(viewer); }
+      }
       // Older clients resend their last frame on a viewers update, even on a static screen.
       this.notifyHost();
       await this.state.storage.setAlarm(Date.now() + HOST_CHECK_MS);
     }
   }
 
+  expireViewers() {
+    const now = Date.now();
+    for (const socket of this.state.getWebSockets("viewer")) {
+      const info = socket.deserializeAttachment() || {};
+      if (info.ended) continue;
+      // One grace period for connections created before heartbeat support.
+      if (info.lastSeen == null) socket.serializeAttachment({ ...info, lastSeen: now });
+      if (socket.readyState === 1 && now - (info.lastSeen ?? now) < VIEWER_TIMEOUT_MS) continue;
+      this.closed(socket);
+      try { socket.close(1001, "Viewer timed out"); } catch (_) {}
+    }
+  }
+
   activeViewers() {
     return this.state.getWebSockets("viewer").filter((s) =>
-      s.readyState === 1 && !s.deserializeAttachment()?.ended);
+      s.readyState === 1 && !s.deserializeAttachment()?.ended &&
+      Date.now() - (s.deserializeAttachment()?.lastSeen ?? Date.now()) < VIEWER_TIMEOUT_MS);
   }
 
   approvedViewers() {
@@ -143,7 +164,15 @@ export class Room {
     // Зритель: метки и рисунки (короткий JSON) — только от пущенных, ведущему и остальным пущенным.
     if (typeof message !== "string" || message.length > 32768) return;
     const info = socket.deserializeAttachment();
-    if (socket.readyState !== 1 || !info?.approved || info.ended) return;
+    if (socket.readyState !== 1 || !info || info.ended) return;
+    let command;
+    try { command = JSON.parse(message); } catch (_) { return; }
+    if (command.type === "heartbeat") {
+      socket.serializeAttachment({ ...info, lastSeen: Date.now() });
+      return;
+    }
+    if (!info.approved) return;
+    socket.serializeAttachment({ ...info, lastSeen: Date.now() });
     for (const other of [...this.activeHosts(), ...this.approvedViewers()]) {
       if (other !== socket) {
         try { other.send(message); } catch (_) {}

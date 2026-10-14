@@ -626,6 +626,9 @@ final class ShareViewer: ObservableObject {
                         if let mark = ShareMark.parse(text) {
                             viewer.marks.add(mark)
                             viewer.receive(socket)
+                        } else if type == "heartbeat" {
+                            socket.send(.string(#"{"type":"heartbeat"}"#)) { _ in }
+                            viewer.receive(socket)
                         } else if type == "waiting" {
                             viewer.state = .waiting
                             viewer.receive(socket)
