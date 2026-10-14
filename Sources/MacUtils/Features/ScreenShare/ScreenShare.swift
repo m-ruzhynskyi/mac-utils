@@ -133,6 +133,7 @@ final class ScreenShare: NSObject, ObservableObject {
                     return
                 }
                 state = .live(code: code, viewers: 0)
+                ShareMarksOverlay.shared.attach(to: filter)
                 listen(socket)
                 showHUD()
                 return
@@ -220,6 +221,7 @@ final class ScreenShare: NSObject, ObservableObject {
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.showsCursor = true
             config.queueDepth = 3
+            ShareMarksOverlay.shared.attach(to: filter)
             Task {
                 try? await stream.updateContentFilter(filter)
                 try? await stream.updateConfiguration(config)
@@ -259,6 +261,8 @@ final class ScreenShare: NSObject, ObservableObject {
                     guard let self, self.socket === socket else { return }
                     switch result {
                     case .success(.string(let text)):
+                        // Метка или рисунок зрителя — на экран ведущего.
+                        if let mark = ShareMark.parse(text) { ShareMarksOverlay.shared.show(mark) }
                         if let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
                            json["type"] as? String == "viewers", let count = json["count"] as? Int,
                            case .live(let code, _) = self.state {
@@ -279,6 +283,7 @@ final class ScreenShare: NSObject, ObservableObject {
 
     func stop(reason: String? = nil) {
         Picker.shared.reset()
+        ShareMarksOverlay.shared.detach()
         let stream = self.stream
         let audioStream = self.audioStream
         self.stream = nil
@@ -447,6 +452,26 @@ final class ShareViewer: ObservableObject {
     private var socket: URLSessionWebSocketTask?
     private var window: NSWindow?
     fileprivate let player = SharePlayer()
+    /// Метки зрителей (свои и чужие) поверх картинки.
+    let marks = ShareMarkStore()
+
+    enum Tool: String { case ping, draw, off }
+    @Published var tool: Tool = .ping
+    @Published var color = "red"
+
+    /// Своя метка: показываем сразу и отправляем ведущему и остальным зрителям.
+    func sendPing(_ point: CGPoint) {
+        guard let mark = ShareMark.parse(ShareMark.message(ping: point, color: color)) else { return }
+        marks.add(mark)
+        socket?.send(.string(ShareMark.message(ping: point, color: color))) { _ in }
+    }
+
+    func sendStroke(_ points: [CGPoint]) {
+        let message = ShareMark.message(stroke: points, color: color)
+        guard let mark = ShareMark.parse(message) else { return }
+        marks.add(mark)
+        socket?.send(.string(message)) { _ in }
+    }
 
     func watch(code input: String) {
         guard let code = ShareCode.normalized(input) else {
@@ -490,7 +515,10 @@ final class ShareViewer: ObservableObject {
                         }
                         viewer.receive(socket)
                     case .success(.string(let text)):
-                        if text.contains("\"ended\"") {
+                        if let mark = ShareMark.parse(text) {
+                            viewer.marks.add(mark)
+                            viewer.receive(socket)
+                        } else if text.contains("\"ended\"") {
                             viewer.state = .ended("Трансляция завершена")
                             viewer.disconnect()
                         } else {
@@ -547,26 +575,107 @@ final class ShareViewer: ObservableObject {
 
 private struct ShareViewerView: View {
     @ObservedObject var viewer: ShareViewer
+    @State private var stroke: [CGPoint] = []
 
     var body: some View {
-        ZStack {
-            Color.black
-            if let frame = viewer.frame {
-                Image(nsImage: frame).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+        GeometryReader { proxy in
+            let rect = imageRect(in: proxy.size)
+            ZStack {
+                Color.black
+                if let frame = viewer.frame {
+                    Image(nsImage: frame).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                }
+                ShareMarksLayer(store: viewer.marks, rect: rect)
+                // Свой рисунок, пока ведёте мышью.
+                if stroke.count > 1 {
+                    Path { $0.addLines(stroke.map { CGPoint(x: rect.minX + $0.x * rect.width, y: rect.minY + $0.y * rect.height) }) }
+                        .stroke(ShareMark.color(named: viewer.color), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                }
+                status
             }
-            switch viewer.state {
-            case .connecting:
-                VStack(spacing: 8) { ProgressView(); Text("Подключаюсь…").foregroundStyle(.white) }
-            case .watching where viewer.frame == nil:
-                VStack(spacing: 8) { ProgressView(); Text("Жду картинку…").foregroundStyle(.white) }
-            case .ended(let message):
-                Text(message).font(.title3).foregroundStyle(.white)
-                    .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
-            default:
-                EmptyView()
-            }
+            .contentShape(Rectangle())
+            .gesture(drawGesture(rect: rect))
+            .overlay(alignment: .bottom) { toolbar.padding(10) }
         }
         .frame(minWidth: 480, minHeight: 300)
+    }
+
+    /// Где картинка внутри окна (вписана с сохранением пропорций).
+    private func imageRect(in size: CGSize) -> CGRect {
+        guard let frame = viewer.frame, frame.size.width > 0, frame.size.height > 0 else { return CGRect(origin: .zero, size: size) }
+        let scale = min(size.width / frame.size.width, size.height / frame.size.height)
+        let fitted = CGSize(width: frame.size.width * scale, height: frame.size.height * scale)
+        return CGRect(x: (size.width - fitted.width) / 2, y: (size.height - fitted.height) / 2,
+                      width: fitted.width, height: fitted.height)
+    }
+
+    private func normalized(_ point: CGPoint, in rect: CGRect) -> CGPoint? {
+        guard rect.width > 0, rect.height > 0, rect.contains(point) else { return nil }
+        return CGPoint(x: (point.x - rect.minX) / rect.width, y: (point.y - rect.minY) / rect.height)
+    }
+
+    private func drawGesture(rect: CGRect) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard viewer.tool == .draw, viewer.state == .watching,
+                      let point = normalized(value.location, in: rect) else { return }
+                stroke.append(point)
+            }
+            .onEnded { value in
+                guard viewer.state == .watching else { return }
+                switch viewer.tool {
+                case .ping:
+                    if let point = normalized(value.location, in: rect) { viewer.sendPing(point) }
+                case .draw:
+                    // Длинную линию упрощаем: не больше ~300 точек.
+                    let step = max(1, stroke.count / 300)
+                    let points = stride(from: 0, to: stroke.count, by: step).map { stroke[$0] }
+                    if points.count > 1 { viewer.sendStroke(points) }
+                    stroke = []
+                case .off:
+                    break
+                }
+            }
+    }
+
+    @ViewBuilder private var status: some View {
+        switch viewer.state {
+        case .connecting:
+            VStack(spacing: 8) { ProgressView(); Text("Подключаюсь…").foregroundStyle(.white) }
+        case .watching where viewer.frame == nil:
+            VStack(spacing: 8) { ProgressView(); Text("Жду картинку…").foregroundStyle(.white) }
+        case .ended(let message):
+            Text(message).font(.title3).foregroundStyle(.white)
+                .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+        default:
+            EmptyView()
+        }
+    }
+
+    /// Метка (клик), рисование (вести мышью), цвет.
+    @ViewBuilder private var toolbar: some View {
+        if viewer.state == .watching {
+            HStack(spacing: 10) {
+                SwiftUI.Picker("", selection: $viewer.tool) {
+                    Label("Метка", systemImage: "scope").tag(ShareViewer.Tool.ping)
+                    Label("Рисовать", systemImage: "pencil.tip").tag(ShareViewer.Tool.draw)
+                    Label("Выкл", systemImage: "hand.raised.slash").tag(ShareViewer.Tool.off)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 260)
+                ForEach(ShareMark.palette, id: \.name) { item in
+                    Button { viewer.color = item.name } label: {
+                        Circle().fill(item.color).frame(width: 14, height: 14)
+                            .overlay(Circle().strokeBorder(.white, lineWidth: viewer.color == item.name ? 2 : 0))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(.regularMaterial, in: Capsule())
+            .help("Клик — метка «сюда!» на экране ведущего; «Рисовать» — ведите мышью. Всё исчезает само через пару секунд.")
+        }
     }
 }
 
@@ -580,6 +689,7 @@ struct ScreenSharePage: View {
     @ObservedObject private var viewer = ShareViewer.shared
     @AppStorage(Pref.shareServer) private var server = ""
     @AppStorage(Pref.shareAudio) private var shareAudio = true
+    @AppStorage(Pref.shareAllowMarks) private var allowMarks = true
     @State private var code = ""
 
     var body: some View {
@@ -623,6 +733,11 @@ struct ScreenSharePage: View {
                 if case .ended(let message) = viewer.state {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            Section("Метки зрителей") {
+                Toggle("Разрешить зрителям ставить метки и рисовать", isOn: $allowMarks)
+                Text("Зритель кликает или рисует по картинке — у вас на экране появляется метка «сюда!» или линия, и через пару секунд исчезает. Управлять вашим Mac зритель не может.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Звук") {
                 Toggle("Передавать звук системы", isOn: $shareAudio)

@@ -15,6 +15,12 @@
   button.primary { background: #0a84ff; } button.danger { background: var(--accent); }
   #stage { position: fixed; inset: 52px 0 0 0; display: flex; align-items: center; justify-content: center; }
   #screen { max-width: 100%; max-height: 100%; object-fit: contain; }
+  #marks { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #tools { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: none; gap: 6px; align-items: center;
+           background: rgba(30,30,32,.85); padding: 6px 10px; border-radius: 999px; }
+  #tools button.on { background: #0a84ff; }
+  #tools .color { width: 16px; height: 16px; border-radius: 50%; padding: 0; border: 2px solid transparent; }
+  #tools .color.on { border-color: #fff; }
   #status { position: absolute; padding: 10px 16px; border-radius: 10px; background: rgba(0,0,0,.6); }
   #live { display: none; align-items: center; gap: 8px; font-size: 13px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
@@ -44,6 +50,17 @@
 </div></div>
 <div id="stage">
   <img id="screen" alt="">
+  <canvas id="marks"></canvas>
+  <div id="tools">
+    <button data-tool="ping" class="on" title="Клик — метка «сюда!» на экране ведущего">◎ Метка</button>
+    <button data-tool="draw" title="Ведите мышью — линия на экране ведущего">✎ Рисовать</button>
+    <button data-tool="off">Выкл</button>
+    <span class="color on" data-color="red" style="background:#ff453a"></span>
+    <span class="color" data-color="yellow" style="background:#ffd60a"></span>
+    <span class="color" data-color="green" style="background:#30d158"></span>
+    <span class="color" data-color="blue" style="background:#0a84ff"></span>
+    <span class="color" data-color="white" style="background:#fff"></span>
+  </div>
   <div id="status">Введите код из 6 цифр и нажмите «Смотреть» — или транслируйте свой экран.<br>
   <span class="muted">Windows: в окне выбора экрана отметьте «Поделиться звуком системы», чтобы зрители слышали звук. Лучше всего — Chrome или Edge.</span></div>
 </div>
@@ -55,6 +72,103 @@ let socket = null, audio = null, playAt = 0, lastUrl = null, capture = null;
 function status(text) { $("status").textContent = text; $("status").style.display = text ? "" : "none"; }
 function digits(text) { const d = text.replace(/\D/g, ""); return d.length === 6 ? d : null; }
 
+// ---- Метки и рисунки (как пинг в League of Legends) ----
+// Координаты — доли кадра 0…1. Свои — рисуем сразу и шлём; чужие приходят текстом.
+const COLORS = { red: "#ff453a", yellow: "#ffd60a", green: "#30d158", blue: "#0a84ff", white: "#ffffff" };
+const marks = [];
+let tool = "ping", color = "red", drawing = null;
+
+function addMark(mark) { mark.born = performance.now(); marks.push(mark); if (marks.length === 1) requestAnimationFrame(renderMarks); }
+
+function imageRect() {
+  const img = $("screen"), stage = $("stage").getBoundingClientRect(), box = img.getBoundingClientRect();
+  if (!img.naturalWidth) return null;
+  const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
+  const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+  return { x: box.left - stage.left + (box.width - w) / 2, y: box.top - stage.top + (box.height - h) / 2, w, h };
+}
+
+function renderMarks() {
+  const canvas = $("marks"), ctx = canvas.getContext("2d");
+  const dpr = devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const rect = imageRect(), now = performance.now();
+  for (let i = marks.length - 1; i >= 0; i--) {
+    const m = marks[i], age = (now - m.born) / 1000, life = m.type === "ping" ? 1.6 : 5;
+    if (age > life) { marks.splice(i, 1); continue; }
+    if (rect) drawMark(ctx, m, age, life, (p) => [rect.x + p[0] * rect.w, rect.y + p[1] * rect.h]);
+  }
+  if (drawing && rect && drawing.length > 1) drawStroke(ctx, drawing, COLORS[color], 1, (p) => [rect.x + p[0] * rect.w, rect.y + p[1] * rect.h]);
+  if (marks.length || drawing) requestAnimationFrame(renderMarks);
+}
+
+function drawMark(ctx, m, age, life, map) {
+  const c = COLORS[m.color] || COLORS.red;
+  if (m.type === "ping") {
+    const [x, y] = map([m.x, m.y]);
+    for (let wave = 0; wave < 3; wave++) {
+      const t = age - wave * 0.25;
+      if (t <= 0 || t >= 1) continue;
+      ctx.globalAlpha = 1 - t; ctx.strokeStyle = c; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y, 10 + 46 * t, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalAlpha = Math.max(0, 1 - Math.max(0, age - 1.1) / 0.5);
+    ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
+  } else {
+    drawStroke(ctx, m.points, c, age < life - 1 ? 1 : Math.max(0, life - age), map);
+  }
+}
+
+function drawStroke(ctx, points, c, alpha, map) {
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (const [width, style, a] of [[7, "#000", 0.35], [4, c, 1]]) {
+    ctx.globalAlpha = alpha * a; ctx.strokeStyle = style; ctx.lineWidth = width; ctx.beginPath();
+    points.forEach((p, i) => { const [x, y] = map(p); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function framePoint(event) {
+  const rect = imageRect(), stage = $("stage").getBoundingClientRect();
+  if (!rect) return null;
+  const x = (event.clientX - stage.left - rect.x) / rect.w, y = (event.clientY - stage.top - rect.y) / rect.h;
+  return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? [x, y] : null;
+}
+
+function sendMark(mark) {
+  addMark(mark);
+  if (socket && socket.readyState === 1) socket.send(JSON.stringify(mark));
+}
+
+$("marks").onpointerdown = (e) => {
+  if (!watching || tool === "off") return;
+  const p = framePoint(e); if (!p) return;
+  if (tool === "ping") return sendMark({ type: "ping", x: p[0], y: p[1], color });
+  drawing = [p]; requestAnimationFrame(renderMarks);
+};
+$("marks").onpointermove = (e) => { if (drawing) { const p = framePoint(e); if (p) drawing.push(p); } };
+window.onpointerup = () => {
+  if (!drawing) return;
+  const step = Math.max(1, Math.floor(drawing.length / 300));
+  const points = drawing.filter((_, i) => i % step === 0);
+  drawing = null;
+  if (points.length > 1) sendMark({ type: "stroke", points, color });
+};
+document.querySelectorAll("#tools [data-tool]").forEach((b) => b.onclick = () => {
+  tool = b.dataset.tool;
+  document.querySelectorAll("#tools [data-tool]").forEach((x) => x.classList.toggle("on", x === b));
+  $("marks").style.cursor = tool === "off" ? "default" : "crosshair";
+});
+document.querySelectorAll("#tools .color").forEach((b) => b.onclick = () => {
+  color = b.dataset.color;
+  document.querySelectorAll("#tools .color").forEach((x) => x.classList.toggle("on", x === b));
+});
+let watching = false;
+
 // ---- Зритель ----
 function watch() {
   const code = digits($("code").value);
@@ -63,10 +177,11 @@ function watch() {
   status("Подключаюсь…");
   socket = new WebSocket(`${wsBase}/room/${code}?role=viewer`);
   socket.binaryType = "arraybuffer";
-  socket.onopen = () => status("Жду картинку…");
+  socket.onopen = () => { status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; };
   socket.onmessage = (event) => {
     if (typeof event.data === "string") {
-      if (event.data.includes('"ended"')) { status("Трансляция завершена"); socket.close(); }
+      if (event.data.includes('"ended"')) { status("Трансляция завершена"); socket.close(); return; }
+      try { const m = JSON.parse(event.data); if (m.type === "ping" || m.type === "stroke") addMark(m); } catch (_) {}
       return;
     }
     const bytes = new Uint8Array(event.data);
@@ -163,6 +278,8 @@ function startCapture(stream, code) {
   socket.onmessage = (event) => {
     if (typeof event.data !== "string") return;
     const msg = JSON.parse(event.data);
+    // Метка или рисунок зрителя — на экран ведущего (в приложении для Windows — поверх всего).
+    if ((msg.type === "ping" || msg.type === "stroke") && window.mu && window.mu.mark) window.mu.mark(msg);
     if (msg.type === "viewers") $("liveText").textContent = `Код ${code.slice(0, 3)} ${code.slice(3)} · зрителей: ${msg.count}`;
   };
   socket.onclose = () => stopAll("Связь с сервером прервалась");
@@ -219,6 +336,8 @@ function stopAll(message) {
   }
   if (socket) { socket.onclose = null; socket.close(1000); socket = null; }
   $("live").style.display = "none";
+  watching = false; $("tools").style.display = "none";
+  if (window.mu && window.mu.stopped) window.mu.stopped();
   if (message) status(message);
 }
 

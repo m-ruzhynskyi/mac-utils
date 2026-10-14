@@ -96,6 +96,8 @@ enum Pref {
     /// Адрес ретранслятора трансляции экрана (relay/, Cloudflare Workers).
     static let shareServer = "shareServer"
     static let shareAudio = "shareAudio"
+    /// Зрители могут ставить метки и рисовать поверх экрана ведущего.
+    static let shareAllowMarks = "shareAllowMarks"
     /// Программы, чей звук не идёт в трансляцию (bundle id).
     static let shareMutedApps = "shareMutedApps"
     /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.
@@ -187,6 +189,7 @@ enum Pref {
             menuBarIcon: true,
             showInDock: false,
             shareAudio: true,
+            shareAllowMarks: true,
             shareServer: "https://mac-utils-relay.mako-62d.workers.dev",
             cheatSheetSticky: false,
             dropShelf: true,
