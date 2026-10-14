@@ -297,8 +297,8 @@ final class ScreenShare: NSObject, ObservableObject {
                 Log.capture.error("Трансляция: heartbeat не ушёл: \(error.localizedDescription, privacy: .public) close=\(socket.closeCode.rawValue)")
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
-                        guard let self, self.socket === socket else { return }
-                        self.stop(reason: "Связь с сервером прервалась")
+                        guard let self else { return }
+                        self.connectionLost(socket)
                     }
                 }
             }
@@ -341,7 +341,7 @@ final class ScreenShare: NSObject, ObservableObject {
                         self.listen(socket)
                     case .failure(let error):
                         Log.capture.error("Трансляция: приём оборвался: \(error.localizedDescription, privacy: .public) close=\(socket.closeCode.rawValue) reason=\(String(data: socket.closeReason ?? Data(), encoding: .utf8) ?? "", privacy: .public)")
-                        self.stop(reason: "Связь с сервером прервалась")
+                        self.connectionLost(socket)
                     }
                 }
             }
@@ -385,7 +385,52 @@ final class ScreenShare: NSObject, ObservableObject {
         if accept { sender?.resendLast() }
     }
 
+    /// Идёт переподключение к серверу (трансляция не остановлена).
+    @Published private(set) var reconnecting = false
+
+    /// Связь оборвалась: захват не останавливаем, переподключаемся с тем же ID.
+    /// Зрители остаются на месте — сервер ждёт ведущего до 45 секунд.
+    func connectionLost(_ socket: URLSessionWebSocketTask) {
+        guard isLive, self.socket === socket, !reconnecting else { return }
+        reconnecting = true
+        heartbeat?.invalidate()
+        heartbeat = nil
+        socket.cancel(with: .goingAway, reason: nil)
+        self.socket = nil
+        Log.capture.info("Трансляция: переподключаюсь")
+        Task {
+            for delay in [1, 2, 3, 5, 8, 10, 15] as [UInt64] {
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                guard isLive, reconnecting,
+                      let url = ShareCode.url(server: Self.server, code: ShareCode.myID, role: "host") else { return }
+                let fresh = URLSession.shared.webSocketTask(with: ShareCode.request(url))
+                fresh.maximumMessageSize = 4 << 20
+                fresh.resume()
+                guard await Self.handshake(fresh) == nil else {
+                    fresh.cancel(with: .goingAway, reason: nil)
+                    continue
+                }
+                self.socket = fresh
+                sender?.replace(fresh)
+                listen(fresh)
+                startHeartbeat(fresh)
+                sender?.resendLast()
+                reconnecting = false
+                Log.capture.info("Трансляция: переподключено")
+                return
+            }
+            reconnecting = false
+            stop(reason: "Связь с сервером прервалась")
+        }
+    }
+
+    /// Для проверки: оборвать связь, как при сбое сети (macutils://share-drop).
+    func simulateDrop() {
+        socket?.cancel(with: .goingAway, reason: nil)
+    }
+
     func stop(reason: String? = nil) {
+        reconnecting = false
         watchers = []
         pendingRequests = []
         Picker.shared.reset()
@@ -458,7 +503,8 @@ private struct ShareHUD: View {
                     Button { share.stop() } label: { Image(systemName: "stop.fill").font(.caption2) }
                         .buttonStyle(.borderless).foregroundStyle(.red).help("Остановить трансляцию")
                 } else {
-                    Text(viewers > 0 ? "Эфир · \(viewers)" : "Эфир").font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                    Text(share.reconnecting ? "Переподключаюсь…" : viewers > 0 ? "Эфир · \(viewers)" : "Эфир")
+                        .font(.caption2.weight(.medium)).foregroundStyle(share.reconnecting ? .orange : .secondary)
                 }
             }
         }
@@ -476,13 +522,26 @@ private struct ShareHUD: View {
 final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "macutils.share")
     /// URLSessionWebSocketTask сохраняет порядок отправки — звук не перемешивается.
-    private let socket: URLSessionWebSocketTask
+    /// При переподключении сокет подменяется, захват экрана не прерывается.
+    private var currentSocket: URLSessionWebSocketTask
+    private let lock = NSLock()
+    private var socket: URLSessionWebSocketTask {
+        lock.lock(); defer { lock.unlock() }
+        return currentSocket
+    }
+
+    func replace(_ socket: URLSessionWebSocketTask) {
+        lock.lock()
+        currentSocket = socket
+        lock.unlock()
+        queue.async { self.inFlight = false }
+    }
     private let context = CIContext()
     private var inFlight = false
     private var last: Data?
 
     init(socket: URLSessionWebSocketTask) {
-        self.socket = socket
+        currentSocket = socket
     }
 
     let audioQueue = DispatchQueue(label: "macutils.share.audio")
@@ -517,13 +576,14 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     /// Вызывается на queue.
     private func transmit(_ data: Data) {
         inFlight = true
+        let socket = self.socket
         socket.send(.data(data)) { error in
             self.queue.async { self.inFlight = false }
             if let error {
                 Log.capture.error("Трансляция: кадр не ушёл (\(data.count) Б): \(error.localizedDescription, privacy: .public)")
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
-                        if ScreenShare.shared.isLive { ScreenShare.shared.stop(reason: "Связь с сервером прервалась") }
+                        ScreenShare.shared.connectionLost(socket)
                     }
                 }
             }
@@ -561,6 +621,8 @@ final class ShareViewer: ObservableObject {
     private var socket: URLSessionWebSocketTask?
     private var window: NSWindow?
     fileprivate let player = SharePlayer()
+    /// Ведущий потерял связь и переподключается — показываем последний кадр с подписью.
+    @Published var hostReconnecting = false
     /// Метки зрителей (свои и чужие) поверх картинки.
     let marks = ShareMarkStore()
 
@@ -631,6 +693,12 @@ final class ShareViewer: ObservableObject {
                             viewer.receive(socket)
                         } else if type == "heartbeat" {
                             socket.send(.string(#"{"type":"heartbeat"}"#)) { _ in }
+                            viewer.receive(socket)
+                        } else if type == "reconnecting" {
+                            viewer.hostReconnecting = true
+                            viewer.receive(socket)
+                        } else if type == "resumed" {
+                            viewer.hostReconnecting = false
                             viewer.receive(socket)
                         } else if type == "waiting" {
                             viewer.state = .waiting
@@ -776,6 +844,9 @@ private struct ShareViewerView: View {
             VStack(spacing: 8) { ProgressView(); Text("Подключаюсь…").foregroundStyle(.white) }
         case .watching where viewer.frame == nil:
             VStack(spacing: 8) { ProgressView(); Text("Жду картинку…").foregroundStyle(.white) }
+        case .watching where viewer.hostReconnecting:
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Ведущий переподключается…").foregroundStyle(.white) }
+                .padding(10).background(.black.opacity(0.6), in: Capsule())
         case .waiting:
             VStack(spacing: 8) {
                 ProgressView()
