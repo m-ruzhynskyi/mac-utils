@@ -255,10 +255,15 @@ function watch() {
   viewSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
       let m; try { m = JSON.parse(event.data); } catch (_) { return; }
-      if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
+      if (m.type === "heartbeat") {
+        if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify({ type: "heartbeat" }));
+      }
+      else if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
       else if (m.type === "accepted") { visited(id, m.name); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; }
       else if (m.type === "declined") { status("Вам не разрешили подключиться"); stopWatch(true); }
       else if (m.type === "ended") { status("Трансляция завершена"); stopWatch(true); }
+      else if (m.type === "reconnecting") status("Ведущий переподключается…");
+      else if (m.type === "resumed") status("");
       else if (m.type === "ping" || m.type === "stroke") addMark(m);
       return;
     }
@@ -383,7 +388,7 @@ function startCapture(stream, code) {
     if (msg.type === "cancelled") { const i = requests.findIndex((r) => r.viewer === msg.viewer); if (i >= 0) { requests.splice(i, 1); showRequest(); } }
     if (msg.type === "viewers") $("liveText").textContent = msg.count ? `В эфире · смотрят: ${(msg.list || []).map((v) => v.name).join(", ")}` : "В эфире · никто не смотрит";
   };
-  hostSocket.onclose = () => stopHost("Связь с сервером прервалась");
+  hostSocket.onclose = () => reconnectHost(code);
   $("share").style.display = "none";
   const timer = setInterval(() => {
     if (!hostSocket || hostSocket.readyState !== 1 || hostSocket.bufferedAmount > 1e6 || !video.videoWidth) return;
@@ -427,6 +432,25 @@ function startCapture(stream, code) {
   }
   stream.getVideoTracks()[0].onended = () => stopHost("Трансляция остановлена");
   capture = { stream, timer, audioContext };
+}
+
+// Связь оборвалась — захват не останавливаем, переподключаемся с тем же ID (зрители ждут до 45 с).
+async function reconnectHost(code) {
+  if (!capture) return;
+  const handlers = { onmessage: hostSocket?.onmessage };
+  hostSocket = null;
+  $("liveText").textContent = "Переподключаюсь…";
+  for (const delay of [1, 2, 3, 5, 8, 10, 15]) {
+    await new Promise((r) => setTimeout(r, delay * 1000));
+    if (!capture) return;
+    if (await openHost(code)) {
+      hostSocket.onmessage = handlers.onmessage;
+      hostSocket.onclose = () => reconnectHost(code);
+      $("liveText").textContent = "В эфире";
+      return;
+    }
+  }
+  stopHost("Связь с сервером прервалась");
 }
 
 function stopHost(message) {
