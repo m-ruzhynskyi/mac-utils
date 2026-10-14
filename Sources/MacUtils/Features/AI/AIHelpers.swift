@@ -111,7 +111,7 @@ final class DocumentTagger: ObservableObject {
         2) Summary — 1 to 3 English words, the most specific name (product, company, project), no type word, no period.
         Answer JSON: {"type": "...", "summary": "..."}
         """
-        let json = try await Ollama.generateJSON(prompt, maxTokens: 60)
+        let json = try await Ollama.generateJSON(prompt, maxTokens: 60, background: true)
         let type = (json["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         var summary = (json["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // Только латиница и не длиннее 3 слов; иначе — без описания.
@@ -195,7 +195,7 @@ enum ShotNamer {
         Придумай короткое понятное имя файла для этого снимка: 2–5 обычных слов через пробел,         на языке текста, без даты, расширения и подчёркиваний. Например: «Счёт за интернет», «Ошибка сборки Xcode».
         Ответь JSON: {"name": "..."}
         """
-        let json = try await Ollama.generateJSON(prompt, maxTokens: 60)
+        let json = try await Ollama.generateJSON(prompt, maxTokens: 60, background: true)
         return (json["name"] as? String).flatMap { AIParsing.fileName(from: AIParsing.spaced($0), maxLength: 50) }
     }
 
