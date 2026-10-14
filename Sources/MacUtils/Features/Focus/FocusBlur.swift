@@ -101,6 +101,8 @@ final class FocusBlur: ObservableObject {
         }
         if overlays.count != NSScreen.screens.count { buildOverlays() }
         for overlay in overlays {
+            // Сначала окно должно быть на экране, тогда его можно поставить под чужое окно.
+            if !overlay.isVisible { overlay.orderFrontRegardless() }
             overlay.order(.below, relativeTo: below)
         }
         fade(in: true)
