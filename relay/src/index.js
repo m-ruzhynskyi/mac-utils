@@ -16,6 +16,8 @@ import landing from "./landing.html";
 const CLIENT_HEADER = "x-macutils-client";
 const CLIENT_TOKEN = "mu-share-1";
 const MAX_VIEWERS = 10;
+const HOST_TIMEOUT_MS = 120_000;
+const HOST_CHECK_MS = 30_000;
 const ID = /^\d{6}$|^\d{10}$/;
 
 function isClient(request) {
@@ -56,10 +58,11 @@ export class Room {
 
   async fetch(request) {
     const url = new URL(request.url);
-    if (url.pathname === "/live") return new Response(this.state.getWebSockets("host").length > 0 ? "1" : "0");
+    const hosts = this.activeHosts();
+    if (hosts.length) await this.ensureAlarm();
+    if (url.pathname === "/live") return new Response(hosts.length > 0 ? "1" : "0");
 
     const role = url.searchParams.get("role");
-    const hosts = this.state.getWebSockets("host");
     if (role === "host" && hosts.length > 0) return new Response("Room is busy", { status: 409 });
     if (role !== "host") {
       if (hosts.length === 0) return new Response("No broadcast with this ID", { status: 404 });
@@ -70,6 +73,8 @@ export class Room {
     const [client, server] = Object.values(new WebSocketPair());
     if (role === "host") {
       this.state.acceptWebSocket(server, ["host"]);
+      server.serializeAttachment({ lastSeen: Date.now() });
+      await this.ensureAlarm();
     } else {
       const viewer = (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
       const name = (url.searchParams.get("name") || "Без имени").slice(0, 60);
@@ -81,18 +86,49 @@ export class Room {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  activeHosts() {
+    const now = Date.now();
+    return this.state.getWebSockets("host").filter((socket) => {
+      const info = socket.deserializeAttachment() || {};
+      if (info.ended) return false;
+      // Existing connections get one grace period when upgraded.
+      if (info.lastSeen == null) socket.serializeAttachment({ ...info, lastSeen: now });
+      if (socket.readyState === 1 && now - (info.lastSeen ?? now) < HOST_TIMEOUT_MS) return true;
+      this.closed(socket);
+      try { socket.close(1001, "Broadcast timed out"); } catch (_) {}
+      return false;
+    });
+  }
+
+  async ensureAlarm() {
+    if (await this.state.storage.getAlarm() == null) {
+      await this.state.storage.setAlarm(Date.now() + HOST_CHECK_MS);
+    }
+  }
+
+  async alarm() {
+    if (this.activeHosts().length) {
+      // Older clients resend their last frame on a viewers update, even on a static screen.
+      this.notifyHost();
+      await this.state.storage.setAlarm(Date.now() + HOST_CHECK_MS);
+    }
+  }
+
   approvedViewers() {
     return this.state.getWebSockets("viewer").filter((s) => s.deserializeAttachment()?.approved);
   }
 
   toHost(message) {
-    for (const host of this.state.getWebSockets("host")) {
+    for (const host of this.activeHosts()) {
       try { host.send(JSON.stringify(message)); } catch (_) {}
     }
   }
 
   webSocketMessage(socket, message) {
     if (this.state.getTags(socket).includes("host")) {
+      const info = socket.deserializeAttachment() || {};
+      if (info.ended) return;
+      socket.serializeAttachment({ ...info, lastSeen: Date.now() });
       if (typeof message === "string") return this.hostCommand(message);
       for (const viewer of this.approvedViewers()) {
         try { viewer.send(message); } catch (_) { /* зритель отвалился */ }
@@ -102,7 +138,7 @@ export class Room {
     // Зритель: метки и рисунки (короткий JSON) — только от пущенных, ведущему и остальным пущенным.
     if (typeof message !== "string" || message.length > 32768) return;
     if (!socket.deserializeAttachment()?.approved) return;
-    for (const other of [...this.state.getWebSockets("host"), ...this.approvedViewers()]) {
+    for (const other of [...this.activeHosts(), ...this.approvedViewers()]) {
       if (other !== socket) {
         try { other.send(message); } catch (_) {}
       }
@@ -112,6 +148,7 @@ export class Room {
   hostCommand(text) {
     let command;
     try { command = JSON.parse(text); } catch (_) { return; }
+    if (command.type === "heartbeat") return;
     for (const viewer of this.state.getWebSockets("viewer")) {
       const info = viewer.deserializeAttachment() || {};
       if (info.id !== command.viewer || info.approved) continue;
@@ -138,6 +175,9 @@ export class Room {
 
   closed(socket) {
     if (this.state.getTags(socket).includes("host")) {
+      const info = socket.deserializeAttachment() || {};
+      if (info.ended) return;
+      socket.serializeAttachment({ ...info, ended: true });
       for (const viewer of this.state.getWebSockets("viewer")) {
         try {
           viewer.send(JSON.stringify({ type: "ended" }));
