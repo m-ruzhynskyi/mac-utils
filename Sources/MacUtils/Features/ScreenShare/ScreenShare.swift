@@ -252,8 +252,8 @@ final class ScreenShare: NSObject, ObservableObject {
             guard let filter else { return }
             let config = SCStreamConfiguration()
             Self.configure(config, for: filter)
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 8)
-            config.pixelFormat = kCVPixelFormatType_32BGRA
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 15)
+            config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
             config.showsCursor = true
             config.queueDepth = 3
             ShareMarksOverlay.shared.attach(to: filter)
@@ -267,8 +267,9 @@ final class ScreenShare: NSObject, ObservableObject {
     private func beginCapture(filter: SCContentFilter) async throws {
         let config = SCStreamConfiguration()
         Self.configure(config, for: filter)
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 8)
-        config.pixelFormat = kCVPixelFormatType_32BGRA
+        // H.264 (аппаратно): 15 кадров в секунду и формат, который кодек берёт без пересчёта.
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 15)
+        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         config.showsCursor = true
         config.queueDepth = 3
         guard let socket else { throw CocoaError(.featureUnsupported) }
@@ -354,7 +355,8 @@ final class ScreenShare: NSObject, ObservableObject {
 
     /// Зритель просится посмотреть: доверенных пускаем сразу, остальных — по вопросу.
     private func request(viewer: String, name: String) {
-        if ShareHistory.shared.isTrusted(viewer) {
+        // Свой же ID (второе окно на этом Mac) и доверенные — без вопроса.
+        if viewer == ShareCode.myID || ShareHistory.shared.isTrusted(viewer) {
             answer(viewer: viewer, accept: true)
             return
         }
@@ -534,11 +536,18 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         lock.lock()
         currentSocket = socket
         lock.unlock()
-        queue.async { self.inFlight = false }
+        queue.async {
+            self.pendingBytes = 0
+            self.encoder.requestKeyFrame()
+        }
     }
-    private let context = CIContext()
-    private var inFlight = false
-    private var last: Data?
+    /// Сколько байт видео ушло в сокет и ещё не подтверждено: сеть не успевает — пропускаем кадры
+    /// и потом начинаем с ключевого (иначе картинка рассыпается).
+    private var pendingBytes = 0
+    private var skipping = false
+    private lazy var encoder = H264Encoder { [weak self] data, key in
+        self?.queue.async { self?.sendVideo(data, key: key) }
+    }
 
     init(socket: URLSessionWebSocketTask) {
         currentSocket = socket
@@ -553,38 +562,41 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
             }
             return
         }
-        guard type == .screen, !inFlight, sampleBuffer.isValid,
+        guard type == .screen, sampleBuffer.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
                 as? [[SCStreamFrameInfo: Any]],
               let raw = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
-              let pixels = CMSampleBufferGetImageBuffer(sampleBuffer),
-              let image = context.createCGImage(CIImage(cvPixelBuffer: pixels),
-                                                from: CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(pixels),
-                                                             height: CVPixelBufferGetHeight(pixels))),
-              let jpeg = Self.jpeg(image).map(ShareProtocol.framePacket) else { return }
-        last = jpeg
-        transmit(jpeg)
+              let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        encoder.encode(pixels, at: sampleBuffer.presentationTimeStamp)
     }
 
+    /// Новый зритель или переподключение — следующий кадр ключевой, чтобы картинка появилась сразу.
     func resendLast() {
-        queue.async {
-            guard let last = self.last, !self.inFlight else { return }
-            self.transmit(last)
-        }
+        encoder.requestKeyFrame()
     }
 
     /// Вызывается на queue.
-    private func transmit(_ data: Data) {
-        inFlight = true
+    private func sendVideo(_ data: Data, key: Bool) {
+        if pendingBytes > 3_000_000 {
+            skipping = true
+            encoder.requestKeyFrame()
+            return
+        }
+        if skipping {
+            guard key else { return }
+            skipping = false
+        }
+        var packet = Data([H264Packet.type, key ? 1 : 0])
+        packet.append(data)
+        pendingBytes += packet.count
         let socket = self.socket
-        socket.send(.data(data)) { error in
-            self.queue.async { self.inFlight = false }
+        let size = packet.count
+        socket.send(.data(packet)) { error in
+            self.queue.async { self.pendingBytes = max(0, self.pendingBytes - size) }
             if let error {
-                Log.capture.error("Трансляция: кадр не ушёл (\(data.count) Б): \(error.localizedDescription, privacy: .public)")
+                Log.capture.error("Трансляция: кадр не ушёл (\(size) Б): \(error.localizedDescription, privacy: .public)")
                 DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        ScreenShare.shared.connectionLost(socket)
-                    }
+                    MainActor.assumeIsolated { ScreenShare.shared.connectionLost(socket) }
                 }
             }
         }
@@ -621,6 +633,8 @@ final class ShareViewer: ObservableObject {
     private var socket: URLSessionWebSocketTask?
     private var window: NSWindow?
     fileprivate let player = SharePlayer()
+    /// Видео H.264 (новые версии) — аппаратное декодирование.
+    let video = H264Player()
     /// Ведущий потерял связь и переподключается — показываем последний кадр с подписью.
     @Published var hostReconnecting = false
     /// Метки зрителей (свои и чужие) поверх картинки.
@@ -657,6 +671,7 @@ final class ShareViewer: ObservableObject {
         disconnect()
         self.code = code
         frame = nil
+        video.reset()
         state = .connecting
         showWindow()
         let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url))
@@ -679,6 +694,8 @@ final class ShareViewer: ObservableObject {
                         switch data.first {
                         case ShareProtocol.frame:
                             if let image = NSImage(data: data.dropFirst()) { viewer.frame = image }
+                        case H264Packet.type:
+                            viewer.video.play(data.dropFirst())
                         case ShareProtocol.audio:
                             viewer.player.play(data.dropFirst())
                         default:
@@ -775,14 +792,20 @@ final class ShareViewer: ObservableObject {
 
 private struct ShareViewerView: View {
     @ObservedObject var viewer: ShareViewer
+    @ObservedObject private var video = ShareViewer.shared.video
     @State private var stroke: [CGPoint] = []
+
+    /// Размер кадра: видео H.264 или картинка (старые версии ведущего).
+    private var frameSize: CGSize? { video.size ?? viewer.frame?.size }
 
     var body: some View {
         GeometryReader { proxy in
             let rect = imageRect(in: proxy.size)
             ZStack {
                 Color.black
-                if let frame = viewer.frame {
+                H264View(player: video)
+                    .opacity(video.size == nil ? 0 : 1)
+                if video.size == nil, let frame = viewer.frame {
                     Image(nsImage: frame).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
                 }
                 ShareMarksLayer(store: viewer.marks, rect: rect)
@@ -802,9 +825,9 @@ private struct ShareViewerView: View {
 
     /// Где картинка внутри окна (вписана с сохранением пропорций).
     private func imageRect(in size: CGSize) -> CGRect {
-        guard let frame = viewer.frame, frame.size.width > 0, frame.size.height > 0 else { return CGRect(origin: .zero, size: size) }
-        let scale = min(size.width / frame.size.width, size.height / frame.size.height)
-        let fitted = CGSize(width: frame.size.width * scale, height: frame.size.height * scale)
+        guard let frame = frameSize, frame.width > 0, frame.height > 0 else { return CGRect(origin: .zero, size: size) }
+        let scale = min(size.width / frame.width, size.height / frame.height)
+        let fitted = CGSize(width: frame.width * scale, height: frame.height * scale)
         return CGRect(x: (size.width - fitted.width) / 2, y: (size.height - fitted.height) / 2,
                       width: fitted.width, height: fitted.height)
     }
@@ -842,7 +865,7 @@ private struct ShareViewerView: View {
         switch viewer.state {
         case .connecting:
             VStack(spacing: 8) { ProgressView(); Text("Подключаюсь…").foregroundStyle(.white) }
-        case .watching where viewer.frame == nil:
+        case .watching where viewer.frame == nil && video.size == nil:
             VStack(spacing: 8) { ProgressView(); Text("Жду картинку…").foregroundStyle(.white) }
         case .watching where viewer.hostReconnecting:
             HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Ведущий переподключается…").foregroundStyle(.white) }
