@@ -90,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "break": BreakReminder.shared.show()
             case "warm": WarmScreen.shared.preview()
             case "warm-toggle": WarmScreen.shared.toggleManual()
+            case "focus": FocusBlur.shared.toggle()
             default: SettingsWindowController.shared.show()
             }
         }
@@ -151,6 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         WindowMemory.shared.sync()
         TextFixer.shared.sync()
         MeetingRecorder.shared.sync()
+        FocusBlur.shared.sync()
         AppStatusItem.shared.sync()
         syncDock()
     }
@@ -186,4 +188,5 @@ enum HotKeyID {
     static let appVolume: UInt32 = 30
     static let windowPin: UInt32 = 31
     static let meeting: UInt32 = 32
+    static let focus: UInt32 = 33
 }

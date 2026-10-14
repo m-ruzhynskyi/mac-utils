@@ -55,7 +55,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, panel, music, share, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
+    case general, panel, music, share, focus, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
          uninstaller, monitor, tasks, cleanup, shots
 
@@ -89,6 +89,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .music: return "Музыка"
         case .share: return "Трансляция"
         case .textInput: return "Ввод"
+        case .focus: return "Фокус"
         }
     }
 
@@ -99,6 +100,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .music: return "Музыка"
         case .share: return "Трансляция экрана"
         case .textInput: return "Ввод текста"
+        case .focus: return "Фокус"
         case .cutPaste: return "Вырезать и вставить"
         case .smoothScroll: return "Плавная прокрутка"
         case .switcher: return "Переключатель приложений"
@@ -129,6 +131,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .music: return "music.note"
         case .share: return "dot.radiowaves.left.and.right"
         case .textInput: return "character.cursor.ibeam"
+        case .focus: return "scope"
         case .cutPaste: return "scissors"
         case .smoothScroll: return "computermouse"
         case .switcher: return "rectangle.on.rectangle"
@@ -159,6 +162,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .music: return .pink
         case .share: return .red
         case .textInput: return .gray
+        case .focus: return .indigo
         case .cutPaste: return .orange
         case .smoothScroll: return .green
         case .switcher: return .blue
@@ -219,6 +223,7 @@ struct SettingsSectionPage: View {
             case .music: NowPlayingView(compact: compact).navigationTitle("Музыка")
             case .share: ScreenSharePage(compact: compact)
             case .textInput: TextInputPage()
+            case .focus: FocusPage()
             case .cutPaste: CutPastePage()
             case .smoothScroll: SmoothScrollPage()
             case .switcher: SwitcherPage()

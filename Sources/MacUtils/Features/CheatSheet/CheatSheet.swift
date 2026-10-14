@@ -264,6 +264,7 @@ final class CheatSheet: ObservableObject {
             CheatItem(title: "Окно поверх всех", shortcut: "⌃⌥P"),
             CheatItem(title: "Исправить текст (ИИ)", shortcut: "⌃⌥E"),
             CheatItem(title: "Запись встречи", shortcut: "⌃⌥M"),
+            CheatItem(title: "Фокус (размыть фон)", shortcut: "⌃⌥F"),
             CheatItem(title: "Громкость приложений", shortcut: "⌃⌥V"),
             CheatItem(title: "Исправить раскладку", shortcut: layout),
             CheatItem(title: "Окно влево / вправо", shortcut: "⌃⌥← / →"),
