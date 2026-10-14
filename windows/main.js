@@ -73,6 +73,14 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on("version", (event) => { event.returnValue = app.getVersion(); });
+  ipcMain.on("hostname", (event) => { event.returnValue = require("os").hostname(); });
+  // Кто-то просится смотреть — привлекаем внимание (мигание на панели задач).
+  ipcMain.on("attention", () => {
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    window.flashFrame(true);
+    window.show();
+  });
   ipcMain.on("mark", (_event, mark) => {
     if (!overlay || overlay.isDestroyed()) showOverlay();
     overlay.webContents.send("mark", mark);
