@@ -107,7 +107,9 @@ app.whenReady().then(() => {
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     if (!chosen) return callback({});
     // Звук без выбранных программ идёт через помощник (mu-audio.exe), а не через общий loopback.
-    callback({ video: chosen.source, audio: chosen.audio && !chosen.muted.length ? "loopback" : undefined });
+    // Звук отдаём, только если страница его просила, — иначе Chromium отменяет захват.
+    const audio = chosen.audio && !(chosen.muted || []).length && request.audioRequested;
+    callback(audio ? { video: chosen.source, audio: "loopback" } : { video: chosen.source });
   });
 
   ipcMain.on("version", (event) => { event.returnValue = app.getVersion(); });
