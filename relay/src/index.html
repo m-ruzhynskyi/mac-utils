@@ -24,6 +24,17 @@
   #tools .color.on { border-color: #fff; }
   #status { position: absolute; padding: 10px 16px; border-radius: 10px; background: rgba(0,0,0,.6); }
   #live { display: none; align-items: center; gap: 8px; font-size: 13px; }
+  #game { position: fixed; right: 16px; bottom: 16px; z-index: 12; display: none; background: #1c1c1e; border-radius: 14px;
+          padding: 14px; width: 270px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  #game .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+  #game .head button { padding: 2px 8px; }
+  #game .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
+  #game .cell { aspect-ratio: 1; font-size: 34px; font-weight: 700; padding: 0; background: #2c2c2e; transition: background .2s, transform .15s; }
+  #game .cell:not(:disabled):hover { background: #3a3a3c; transform: scale(1.03); }
+  #game .cell:disabled { cursor: default; }
+  #game .cell.win { background: rgba(48,209,88,.3); }
+  #game .x { color: #0a84ff; } #game .o { color: #ff9f0a; }
+  #game .row2 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
   .muted { opacity: .65; font-size: 13px; }
   #picker { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 10; }
@@ -54,7 +65,7 @@
   <input id="code" inputmode="numeric" maxlength="13" placeholder="ID собеседника" style="width:11em">
   <button class="primary" id="watch">Смотреть</button>
   <button id="share">Транслировать свой экран</button>
-  <span id="live"><span class="dot"></span><span id="liveText"></span><button class="danger" id="stop">Стоп</button></span>
+  <span id="live"><span class="dot"></span><span id="liveText"></span><button id="gameButton" style="display:none" title="Крестики-нолики со зрителем">＃ Сыграть</button><button class="danger" id="stop">Стоп</button></span>
   <button id="historyButton">История</button>
 </header>
 <div id="picker"><div class="box">
@@ -74,6 +85,7 @@
     <button class="primary" id="allow">Разрешить</button>
   </div>
 </div></div>
+<div id="game"></div>
 <div id="historyPanel"><b>История</b><p class="muted">Зелёная точка — сейчас в эфире.</p><div id="historyList"></div></div>
 <div id="stage">
   <img id="screen" alt="">
@@ -88,6 +100,7 @@
     <span class="color" data-color="green" style="background:#30d158"></span>
     <span class="color" data-color="blue" style="background:#0a84ff"></span>
     <span class="color" data-color="white" style="background:#fff"></span>
+    <button id="gameInvite" title="Крестики-нолики с ведущим">＃ Сыграть</button>
   </div>
   <div id="status">Введите ID собеседника и нажмите «Смотреть» — или транслируйте свой экран.<br>
   <span class="muted">Свой ID сообщите тому, кто будет смотреть вас. Каждого зрителя вы сначала разрешаете.</span></div>
@@ -269,7 +282,8 @@ function watch() {
         if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify({ type: "heartbeat" }));
       }
       else if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
-      else if (m.type === "accepted") { visited(id, m.name); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; }
+      else if (m.type === "game") gameReceive(m, "host", hostName || display(id), viewGameSend);
+      else if (m.type === "accepted") { hostName = m.name || ""; visited(id, m.name); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; }
       else if (m.type === "declined") { status("Вам не разрешили подключиться"); stopWatch(true); }
       else if (m.type === "ended") { status("Трансляция завершена"); stopWatch(true); }
       else if (m.type === "reconnecting") status("Ведущий переподключается…");
@@ -332,6 +346,7 @@ function playH264(bytes) {
 }
 
 function stopWatch(keepStatus) {
+  if (game.peer === "host") gamePeerGone("host");
   if (decoder && decoder.state !== "closed") { try { decoder.close(); } catch (_) {} }
   decoder = null;
   $("video").style.display = "none"; $("screen").style.display = "";
@@ -354,6 +369,104 @@ function playPCM(buffer) {
   source.start(playAt);
   playAt += chunk.duration;
 }
+
+// ---- Крестики-нолики: ведущий и один зритель ----
+// Сообщения {"type":"game","action":"invite|accept|decline|move|again|quit"} — ретранслятор передаёт только сопернику.
+// Пригласивший начинает крестиками, дальше партии начинают по очереди (как в приложении для Mac).
+const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
+const game = { phase: "none", cells: Array(9).fill(null), round: 0, peer: "", name: "", inviter: false, send: null, me: 0, them: 0, message: "" };
+let audience = [], hostName = "";
+const gTurn = () => (game.cells.filter(Boolean).length % 2 ? "o" : "x");
+const gWinLine = () => LINES.find(([a, b, c]) => game.cells[a] && game.cells[a] === game.cells[b] && game.cells[a] === game.cells[c]);
+const gOver = () => !!gWinLine() || !game.cells.includes(null);
+const gMine = () => ((game.round % 2 === 0) === game.inviter ? "x" : "o");
+const gMyTurn = () => game.phase === "playing" && !gOver() && gTurn() === gMine();
+const gActive = () => ["inviting", "invited", "playing"].includes(game.phase);
+const gSymbol = (m) => (m === "x" ? "✕" : "◯");
+const gEsc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function gSend(fields) { if (game.send) game.send({ type: "game", ...fields }); }
+function viewGameSend(fields) { if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify(fields)); }
+function hostGameSend(to) {
+  return (fields) => { if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify({ ...fields, to, name: myName })); };
+}
+function gBegin(peer, name, send, inviter) {
+  if (game.peer !== peer) { game.me = 0; game.them = 0; }
+  Object.assign(game, { peer, name: name || "Собеседник", send, inviter, cells: Array(9).fill(null), round: 0, message: "" });
+}
+function gameInvite(peer, name, send) {
+  if (gActive()) gameQuit();
+  gBegin(peer, name, send, true);
+  game.phase = "inviting"; gSend({ action: "invite" }); renderGame();
+}
+function gPlay(cell) {
+  if (!Number.isInteger(cell) || cell < 0 || cell > 8 || game.cells[cell] || gOver()) return false;
+  game.cells[cell] = gTurn();
+  const line = gWinLine();
+  if (line) { if (game.cells[line[0]] === gMine()) game.me++; else game.them++; }
+  return true;
+}
+function gameReceive(msg, peer, name, send) {
+  const action = msg.action;
+  // Уже играем с другим — новому отказываем, остальное от него не наше.
+  if (gActive() && peer !== game.peer) { if (action === "invite") send({ type: "game", action: "decline", busy: true }); return; }
+  if (action === "invite") { gBegin(peer, name, send, false); game.phase = "invited"; if (window.mu && window.mu.attention) window.mu.attention(); }
+  else if (action === "accept" && game.phase === "inviting") game.phase = "playing";
+  else if (action === "decline" && game.phase === "inviting") { game.phase = "ended"; game.message = msg.busy ? `${game.name} уже играет с другим` : `${game.name} не хочет играть`; }
+  else if (action === "move" && game.phase === "playing") { if (msg.round === game.round && gTurn() !== gMine()) gPlay(msg.cell); }
+  else if (action === "again" && game.phase === "playing") { if (msg.round > game.round) { game.round = msg.round; game.cells = Array(9).fill(null); } }
+  else if (action === "quit" && gActive()) { game.phase = "ended"; game.message = `${game.name} вышел из игры`; }
+  else return;
+  renderGame();
+}
+function gameQuit() {
+  if (gActive()) gSend({ action: "quit" });
+  game.phase = "none"; game.send = null; renderGame();
+}
+function gamePeerGone(peer) {
+  if (!gActive() || (peer !== undefined && peer !== game.peer)) return;
+  game.phase = "ended"; game.message = `Игра закончилась: ${game.name} больше не в трансляции`; game.send = null; renderGame();
+}
+function renderGame() {
+  const box = $("game");
+  if (game.phase === "none") { box.style.display = "none"; return; }
+  box.style.display = "block";
+  const title = game.phase === "pick" ? "С кем сыграть?" : `Крестики-нолики · ${gEsc(game.name)}`;
+  let html = `<div class="head"><b>${title}</b><button data-g="close" title="Закрыть">✕</button></div>`;
+  if (game.phase === "pick") {
+    html += audience.length ? audience.map((v) => `<button style="display:block;width:100%;margin:4px 0" data-g="with" data-id="${gEsc(v.id)}">${gEsc(v.name || display(v.id))}</button>`).join("")
+                            : `<p class="muted">Сейчас никто не смотрит.</p>`;
+  } else if (game.phase === "inviting") {
+    html += `<p class="muted">Ждём, пока ${gEsc(game.name)} согласится…</p><div class="row2"><span></span><button data-g="close">Отменить</button></div>`;
+  } else if (game.phase === "invited") {
+    html += `<p>${gEsc(game.name)} зовёт сыграть в крестики-нолики</p><div class="row2"><button data-g="decline">Отказаться</button><button class="primary" data-g="accept">Играть</button></div>`;
+  } else if (game.phase === "playing") {
+    const line = gWinLine() || [], winner = line.length ? game.cells[line[0]] : null;
+    const text = winner ? (winner === gMine() ? "Вы выиграли! 🎉" : `Победа: ${gEsc(game.name)}`)
+               : gOver() ? "Ничья" : gMyTurn() ? `Ваш ход (${gSymbol(gMine())})` : `Ходит ${gEsc(game.name)}…`;
+    html += `<b>${text}</b><div class="board">` + game.cells.map((m, i) =>
+      `<button class="cell ${m || ""} ${line.includes(i) ? "win" : ""}" data-g="cell" data-i="${i}" ${!gMyTurn() || m ? "disabled" : ""}>${m ? gSymbol(m) : ""}</button>`).join("") +
+      `</div><div class="row2"><span class="muted">Вы ${game.me} : ${game.them} ${gEsc(game.name)}</span>${gOver() ? `<button class="primary" data-g="again">Ещё раз</button>` : ""}</div>`;
+  } else if (game.phase === "ended") {
+    html += `<p class="muted">${gEsc(game.message)}</p><div class="row2"><span></span><button data-g="close">Закрыть</button></div>`;
+  }
+  box.innerHTML = html;
+}
+$("game").onclick = (event) => {
+  const target = event.target.closest("[data-g]"); if (!target) return;
+  const what = target.dataset.g;
+  if (what === "close") { if (game.phase === "invited") gSend({ action: "decline" }); gameQuit(); }
+  else if (what === "with") { const v = audience.find((a) => a.id === target.dataset.id); if (v) gameInvite(v.id, v.name || display(v.id), hostGameSend(v.id)); }
+  else if (what === "accept" && game.phase === "invited") { game.phase = "playing"; gSend({ action: "accept" }); renderGame(); }
+  else if (what === "decline" && game.phase === "invited") { gSend({ action: "decline" }); game.phase = "none"; renderGame(); }
+  else if (what === "cell") { const cell = Number(target.dataset.i); if (gMyTurn() && gPlay(cell)) { gSend({ action: "move", cell, round: game.round }); renderGame(); } }
+  else if (what === "again" && game.phase === "playing") { game.round++; game.cells = Array(9).fill(null); gSend({ action: "again", round: game.round }); renderGame(); }
+};
+$("gameButton").onclick = () => {
+  if (audience.length === 1) { const v = audience[0]; return gameInvite(v.id, v.name || display(v.id), hostGameSend(v.id)); }
+  if (gActive()) gameQuit();
+  game.phase = "pick"; renderGame();
+};
+$("gameInvite").onclick = () => gameInvite("host", hostName || display(watchingId || ""), viewGameSend);
 
 // ---- Транслировать (приложение для Windows или браузер) ----
 // Звук без выбранных программ (Discord и т. п.) — через помощник приложения для Windows.
@@ -463,6 +576,13 @@ function startCapture(stream, code) {
     // Метка или рисунок зрителя — на экран ведущего (в приложении для Windows — поверх всего).
     if ((msg.type === "ping" || msg.type === "stroke") && window.mu && window.mu.mark) window.mu.mark(msg);
     if (msg.type === "request") onRequest(msg.viewer, msg.name);
+    if (msg.type === "game") gameReceive(msg, msg.from, msg.name, hostGameSend(msg.from));
+    if (msg.type === "viewers") {
+      audience = (msg.list || []).filter((v) => v.id);
+      $("gameButton").style.display = audience.length ? "" : "none";
+      if (game.peer !== "host" && !audience.some((v) => v.id === game.peer)) gamePeerGone(game.peer);
+      if (game.phase === "pick") renderGame();
+    }
     if (msg.type === "viewers") forceKey = true; // новый зритель — сразу ключевой кадр
     if (msg.type === "cancelled") { const i = requests.findIndex((r) => r.viewer === msg.viewer); if (i >= 0) { requests.splice(i, 1); showRequest(); } }
     if (msg.type === "viewers") $("liveText").textContent = msg.count ? `В эфире · смотрят: ${(msg.list || []).map((v) => v.name).join(", ")}` : "В эфире · никто не смотрит";
@@ -583,6 +703,8 @@ async function reconnectHost(code) {
 }
 
 function stopHost(message) {
+  audience = []; $("gameButton").style.display = "none";
+  if (game.peer !== "host") gamePeerGone();
   if (capture) {
     clearInterval(capture.timer);
     capture.stream.getTracks().forEach((t) => t.stop());
