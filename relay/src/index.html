@@ -84,6 +84,7 @@
 <div id="request"><div class="box">
   <b id="requestTitle"></b>
   <p class="muted" id="requestText"></p>
+  <p class="muted" id="requestMore" style="display:none"></p>
   <div class="row">
     <button id="decline">Отклонить</button>
     <button id="always">Всегда разрешать</button>
@@ -124,25 +125,92 @@ let forceKey = true;
 function status(text) { $("status").innerHTML = text; $("status").style.display = text ? "" : "none"; }
 function digits(text) { const d = text.replace(/\D/g, ""); return d.length === 10 || d.length === 6 ? d : null; }
 function display(id) { return id.length === 10 ? `${id.slice(0, 3)} ${id.slice(3, 6)} ${id.slice(6)}` : id; }
+function esc(text) { const d = document.createElement("div"); d.textContent = String(text ?? ""); return d.innerHTML; }
 
 // ---- Свой ID (постоянный, как в AnyDesk) ----
 const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (_) { return d; } },
                 set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} } };
-let myId = store.get("mu-id", null);
-if (!myId) { myId = String(1 + Math.floor(Math.random() * 9)) + Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)).join(""); store.set("mu-id", myId); }
+function generateId() { return String(1 + Math.floor(Math.random() * 9)) + Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)).join(""); }
+// Приложение с ключом (W1) хранит ID у себя: `mu.myId` — строка или синхронная функция. Иначе — localStorage, как раньше.
+const mainId = window.mu && (typeof window.mu.myId === "function" ? window.mu.myId() : window.mu.myId);
+const idFromApp = typeof mainId === "string" && /^\d{10}$/.test(mainId);
+let myId = idFromApp ? mainId : store.get("mu-id", null);
+if (!myId) { myId = generateId(); store.set("mu-id", myId); }
 const myName = (window.mu && window.mu.hostname) || "Windows";
 $("myId").textContent = display(myId);
 $("myId").onclick = () => navigator.clipboard?.writeText(myId);
 
+// ---- Протокол v2: ключ устройства (.audit/auth-design.md §2.3, §4) ----
+// Ключ есть только в приложении для Windows с `mu.identity` и `mu.sign*`. v2 включается не здесь, а relay:
+// пришёл `challenge` — подписываем; не пришёл (старое приложение, AUTH_MODE=off) — всё как раньше.
+const B64U_KEY = /^[A-Za-z0-9_-]{43}$/;
+function canSign(fn) { return !!(window.mu && typeof window.mu.identity === "function" && typeof window.mu[fn] === "function"); }
+async function myIdentity() {
+  const identity = await window.mu.identity();
+  if (!identity || !B64U_KEY.test(identity.pub)) throw new Error("no key");
+  return identity;
+}
+async function sendAuth(ws, signer, args) {
+  try {
+    const { pub } = await myIdentity();
+    const sig = await window.mu[signer](...args);
+    if (typeof sig !== "string" || ws.readyState !== 1) return false;
+    ws.send(JSON.stringify({ type: "auth", v: 2, alg: "ed25519", pub, sig }));
+    return true;
+  } catch (_) { return false; }
+}
+const AUTH_ERRORS = {
+  "bad-signature": "Ключ этого устройства не прошёл проверку на сервере.",
+  "id-claimed": "Этот ID занят другим устройством. Получите новый ID: вернуть старый нельзя.",
+  "id-format": "Сервер не принял этот ID.",
+  "auth-timeout": "Сервер не дождался подтверждения ключа. Попробуйте ещё раз.",
+  "replaced": "Трансляция с вашим ID продолжена в другом окне или на другом устройстве с этим же ключом.",
+  "rate-limited": "Слишком много подключений. Подождите минуту и попробуйте снова.",
+  "upgrade-required": "Сервер требует новую версию приложения — обновите Mac Utils Share.",
+  "no-key": "Сервер проверяет ключ устройства, а эта версия приложения так не умеет — обновите Mac Utils Share.",
+};
+const CLOSE_CODES = { 4400: "id-format", 4401: "bad-signature", 4403: "id-claimed", 4408: "auth-timeout",
+                      4409: "replaced", 4426: "upgrade-required", 4429: "rate-limited" };
+// Текст для статуса (HTML): свои сообщения — как есть, сообщение relay — экранированным.
+function authError(code, relayMessage) { return AUTH_ERRORS[code] || esc(relayMessage || "Сервер разорвал соединение"); }
+
 // ---- История и доверенные ----
 function history() { return store.get("mu-history", []); }
 function saveHistory(list) { store.set("mu-history", list); renderHistory(); }
-function visited(id, name) {
+function visited(id, name, hostKey) {
   const list = history(); let entry = list.find((e) => e.id === id);
   if (!entry) { entry = { id, name: "", label: "" }; list.push(entry); }
-  if (name) entry.name = name; entry.last = Date.now(); saveHistory(list);
+  if (name) entry.name = name; entry.last = Date.now();
+  // Ключ ведущего (pinning §4.3): при следующем подключении другой ключ — предупреждение.
+  if (typeof hostKey === "string" && B64U_KEY.test(hostKey)) entry.hostKey = hostKey;
+  saveHistory(list);
 }
-function trusted() { return store.get("mu-trusted", []); }
+// Доверенные — `mu-trusted-v2`: [{id, pub, fp}]. pub null — доверие только по ID (старые зрители и ведущий без ключа);
+// на первый запрос этого ID с ключом — подтверждение, без автоприёма (§3.2, §3.3).
+function trustedList() {
+  let list = store.get("mu-trusted-v2", null);
+  if (!Array.isArray(list)) {
+    const old = store.get("mu-trusted", []);
+    list = (Array.isArray(old) ? old : []).filter((id) => typeof id === "string").map((id) => ({ id, pub: null, fp: null }));
+    saveTrusted(list);
+  }
+  return list.filter((e) => e && typeof e.id === "string" && canTrust(e.id)).map((e) => {
+    const pub = typeof e.pub === "string" && B64U_KEY.test(e.pub) ? e.pub : null;
+    return { id: e.id, pub, fp: pub && typeof e.fp === "string" ? e.fp.slice(0, 19) : null };
+  });
+}
+function saveTrusted(list) {
+  store.set("mu-trusted-v2", list);
+  // Старый список тоже ведём: если relay откатят на прежнюю страницу, доверие по ID останется как было.
+  store.set("mu-trusted", [...new Set(list.map((e) => e.id))]);
+}
+function trust(id, pub, fp) {
+  if (!canTrust(id)) return;
+  const list = trustedList(), old = list.find((e) => e.id === id);
+  // Без нового ключа прежний ключ не теряется.
+  const entry = pub ? { id, pub, fp: fp || null } : { id, pub: old?.pub || null, fp: old?.fp || null };
+  saveTrusted([...list.filter((e) => e.id !== id), entry]);
+}
 let live = new Set();
 
 function renderHistory() {
@@ -164,9 +232,30 @@ function renderHistory() {
   }
 }
 
+// Подписанный POST /status (§6) — только с ключом; relay его не понял (404/405, ответ не про эти ID) — дальше GET.
+let signedStatus = true;
+async function fetchLive(ids) {
+  if (signedStatus && canSign("signStatus")) {
+    try {
+      const { pub } = await myIdentity(), ts = Date.now();
+      const sig = await window.mu.signStatus(myId, ts, ids.join(","));
+      const response = await fetch("/status", { method: "POST", headers: { "content-type": "application/json" },
+                                                 body: JSON.stringify({ v: 2, id: myId, pub, ts, ids, sig }) });
+      if (response.status === 404 || response.status === 405) signedStatus = false;
+      if (response.ok) {
+        const json = await response.json();
+        if (ids.every((id) => typeof json[id] === "boolean")) return json;
+        signedStatus = false;
+      }
+    } catch (_) {}
+  }
+  return (await fetch(`/status?ids=${ids.join(",")}`)).json();
+}
 async function refreshLive() {
-  const ids = history().map((e) => e.id); if (!ids.length) return;
-  try { const json = await (await fetch(`/status?ids=${ids.join(",")}`)).json(); live = new Set(Object.keys(json).filter((k) => json[k])); renderHistory(); } catch (_) {}
+  // Relay опрашивает только 10-значные ID, не больше 20 — берём самые свежие.
+  const ids = history().filter((e) => /^\d{10}$/.test(e.id)).sort((a, b) => (b.last || 0) - (a.last || 0)).slice(0, 20).map((e) => e.id);
+  if (!ids.length) return;
+  try { const json = await fetchLive(ids); live = new Set(ids.filter((id) => json[id] === true)); renderHistory(); } catch (_) {}
 }
 $("historyButton").onclick = () => { const p = $("historyPanel"); p.style.display = p.style.display === "block" ? "none" : "block"; refreshLive(); };
 setInterval(refreshLive, 10000);
@@ -280,19 +369,22 @@ function watch() {
   stopWatch();
   status("Подключаюсь…");
   watchingId = id;
+  viewHostKey = null; viewError = null;
   $("leave").style.display = "";
   const h264 = typeof VideoDecoder !== "undefined" ? "&h264=1" : "";
-  viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}${h264}`);
+  const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}${h264}`);
   viewSocket.binaryType = "arraybuffer";
   viewSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
       let m; try { m = JSON.parse(event.data); } catch (_) { return; }
-      if (m.type === "heartbeat") {
+      if (m.type === "challenge") viewerChallenge(ws, id, m);
+      else if (m.type === "error") viewError = m;
+      else if (m.type === "heartbeat") {
         if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify({ type: "heartbeat" }));
       }
       else if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
       else if (m.type === "game") gameReceive(m, "host", hostName || display(id), viewGameSend);
-      else if (m.type === "accepted") { hostName = m.name || ""; visited(id, m.name); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; }
+      else if (m.type === "accepted") { hostName = m.name || ""; visited(id, m.name, viewHostKey); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; }
       else if (m.type === "declined") { status("Вам не разрешили подключиться"); stopWatch(true); }
       else if (m.type === "ended") { status("Трансляция завершена"); stopWatch(true); }
       else if (m.type === "reconnecting") status("Ведущий переподключается…");
@@ -313,7 +405,28 @@ function watch() {
       playH264(bytes.subarray(1));
     }
   };
-  viewSocket.onclose = (event) => { if (event.code !== 1000 && viewSocket) status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); };
+  viewSocket.onclose = (event) => {
+    if (event.code === 1000 || !viewSocket) return;
+    const code = CLOSE_CODES[event.code];
+    status(code ? authError(code, viewError?.message) : "Сейчас этот ID ничего не транслирует (или связь прервалась)");
+  };
+}
+
+// Зритель v2: relay прислал challenge — подписываем; ключ ведущего сверяем с запомненным.
+let viewHostKey = null, viewError = null;
+async function viewerChallenge(ws, id, m) {
+  if (ws !== viewSocket) return;
+  if (!canSign("signViewer") || typeof m.nonce !== "string" || typeof m.rid !== "string") { status(AUTH_ERRORS["no-key"]); return stopWatch(true); }
+  const hostKey = typeof m.hostKey === "string" && B64U_KEY.test(m.hostKey) ? m.hostKey : null;
+  const known = history().find((e) => e.id === id)?.hostKey;
+  if (hostKey && known && known !== hostKey &&
+      !confirm(`Ключ компьютера ${display(id)} изменился (новый отпечаток ${m.hostFp || "неизвестен"}). Так бывает после переустановки или смены ID, но так же выглядит и подмена. Подключиться и запомнить новый ключ?`)) {
+    if (ws === viewSocket) { status("Подключение отменено: ключ ведущего изменился"); stopWatch(true); }
+    return;
+  }
+  if (ws !== viewSocket) return;
+  viewHostKey = hostKey;
+  if (!(await sendAuth(ws, "signViewer", [id, myId, m.rid, m.nonce])) && ws === viewSocket) { status(AUTH_ERRORS["no-key"]); stopWatch(true); }
 }
 
 // ---- Видео H.264: аппаратное декодирование WebCodecs ----
@@ -578,31 +691,101 @@ async function share() {
   startCapture(stream, myId);
 }
 
+// hostAuth: null — relay не спрашивал ключ (legacy); {keyed, fp} после `authed` (keyed false при AUTH_MODE=off).
+let hostAuth = null, hostError = null;
 function openHost(id) {
   return new Promise((resolve) => {
     const ws = new WebSocket(`${wsBase}/room/${id}?role=host`);
     ws.binaryType = "arraybuffer";
-    ws.onopen = () => { hostSocket = ws; resolve(true); };
+    ws.onmessage = (event) => { if (ws === hostSocket) onHostMessage(ws, event); };
+    ws.onopen = () => { hostSocket = ws; hostAuth = null; hostError = null; resolve(true); };
     ws.onerror = () => resolve(false);
   });
+}
+
+async function hostChallenge(ws, msg) {
+  if (!canSign("signHost") || typeof msg.nonce !== "string") return stopHost(AUTH_ERRORS["no-key"]);
+  $("liveText").textContent = "Проверяю ключ устройства…";
+  if (!(await sendAuth(ws, "signHost", [myId, msg.nonce])) && ws === hostSocket) stopHost(AUTH_ERRORS["no-key"]);
+}
+
+// Закрытие сокета ведущего: ошибки ключа — конец трансляции с объяснением, остальное — переподключение.
+function hostClosed(code, event) {
+  const reason = CLOSE_CODES[event?.code];
+  if (reason && reason !== "auth-timeout" && reason !== "rate-limited") {
+    // Ведущего без ключа вытеснил владелец ID с ключом: это не «другое окно», а чужое (или новое своё) устройство.
+    const keyless = reason === "replaced" && !hostAuth?.keyed;
+    stopHost(keyless ? "К этому ID подключилось устройство с ключом владельца, трансляция остановлена. Если это не вы — получите новый ID."
+                     : authError(reason, hostError?.message));
+    if (reason === "id-claimed" || keyless) offerNewId();
+    return;
+  }
+  reconnectHost(code);
+}
+
+function offerNewId() {
+  if (idFromApp && !(window.mu && typeof window.mu.resetId === "function")) return;
+  $("status").insertAdjacentHTML("beforeend", '<br><button id="newId" style="margin-top:8px">Получить новый ID</button>');
+  $("newId").onclick = async () => {
+    let next = null;
+    if (window.mu && typeof window.mu.resetId === "function") { try { next = await window.mu.resetId(); } catch (_) {} }
+    if (typeof next !== "string" || !/^\d{10}$/.test(next)) {
+      if (idFromApp) return status("Не удалось получить новый ID");
+      next = generateId();
+    }
+    myId = next; store.set("mu-id", myId); $("myId").textContent = display(myId);
+    status(`Новый ID: ${display(myId)}. Сообщите его зрителям и начните трансляцию снова.`);
+  };
 }
 
 // Зритель просится: доверенных пускаем сразу, остальных — по вопросу.
 const requests = [];
 // Доверять можно только чужому ID из 10 цифр: свой и пустой/кривой ID подделывает любой зритель.
 function canTrust(id) { return id !== myId && /^\d{10}$/.test(id); }
-function onRequest(viewer, name, rid) {
-  if (canTrust(viewer) && trusted().includes(viewer)) return answer(viewer, true, rid);
-  requests.push({ viewer, name, rid }); showRequest();
+// Вид запроса: "key" — зритель подписал ключом; "none" — старый зритель у ведущего с ключом;
+// "legacy" — ведущий без ключа (relay не спрашивал): доверие по ID, ровно как раньше.
+function requestKind(msg) {
+  if (msg.auth === "key" || msg.auth === "none") return msg.auth;
+  return hostAuth?.keyed ? "none" : "legacy";
+}
+function onRequest(msg) {
+  const viewer = typeof msg.viewer === "string" ? msg.viewer : "", name = String(msg.name ?? ""), rid = msg.rid;
+  if (typeof rid === "string" && requests.some((r) => r.rid === rid)) return;
+  const kind = requestKind(msg);
+  const pub = kind === "key" && typeof msg.pub === "string" && B64U_KEY.test(msg.pub) ? msg.pub : null;
+  const entry = canTrust(viewer) ? trustedList().find((e) => e.id === viewer) : null;
+  if (kind === "legacy" && entry) return answer(viewer, true, rid);
+  // Окно «сам себе»: relay сверил ключ зрителя с ключом владельца этого ID.
+  if (kind === "key" && pub && msg.self === true && hostAuth?.keyed) return answer(viewer, true, rid);
+  if (kind === "key" && pub && entry && entry.pub === pub) return answer(viewer, true, rid);
+  requests.push({ viewer, name, rid, kind, pub, entry, idVerified: msg.idVerified,
+                  fp: typeof msg.fp === "string" ? msg.fp.slice(0, 19) : null });
+  showRequest();
 }
 function showRequest() {
   const r = requests[0]; if (!r) { $("request").style.display = "none"; return; }
   $("requestTitle").textContent = `${r.name} хочет посмотреть ваш экран`;
   let text = `ID ${display(r.viewer)}. Зритель только смотрит и может ставить метки — управлять компьютером он не может.`;
+  const canAlways = canTrust(r.viewer) && (r.kind === "legacy" || (r.kind === "key" && !!r.pub && r.idVerified !== false));
+  const confirmKey = canAlways && r.kind === "key" && r.entry && !r.entry.pub;
+  if (r.kind === "key") {
+    if (confirmKey) text = `${r.name} — в доверенных. Теперь проверяется ключ устройства: подтвердите один раз. Отпечаток ${r.fp || "—"}.`;
+    else {
+      text += ` Отпечаток ключа: ${r.fp || "—"}.`;
+      if (r.entry?.pub && r.entry.pub !== r.pub) text += ` Ключ изменился: раньше был ${r.entry.fp || "другой"} — проверьте у зрителя.`;
+    }
+    if (r.idVerified === false) text += " ID не подтверждён: этот ID принадлежит другому ключу.";
+  } else if (r.kind === "none") {
+    text += " Старая версия приложения: личность зрителя не проверена, «Всегда разрешать» недоступно.";
+  }
   if (r.viewer === myId) text += " Запрос с вашим собственным ID — это может быть не вы.";
   else if (!canTrust(r.viewer)) text += " У запроса нет корректного ID, «Всегда разрешать» недоступно.";
   $("requestText").textContent = text;
-  $("always").style.display = canTrust(r.viewer) ? "" : "none";
+  $("requestMore").textContent = requests.length > 1 ? `В очереди ещё ${requests.length - 1}` : "";
+  $("requestMore").style.display = requests.length > 1 ? "" : "none";
+  $("always").style.display = canAlways ? "" : "none";
+  $("always").textContent = confirmKey ? "Разрешить и запомнить ключ" : "Всегда разрешать";
+  $("allow").style.display = confirmKey ? "none" : "";
   $("request").style.display = "flex";
   if (window.mu && window.mu.attention) window.mu.attention();
 }
@@ -612,7 +795,7 @@ function answer(viewer, accept, rid) {
   if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify(reply));
 }
 $("allow").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, true, r.rid); showRequest(); };
-$("always").onclick = () => { const r = requests.shift(); if (r) { if (canTrust(r.viewer)) store.set("mu-trusted", [...new Set([...trusted(), r.viewer])]); answer(r.viewer, true, r.rid); } showRequest(); };
+$("always").onclick = () => { const r = requests.shift(); if (r) { trust(r.viewer, r.kind === "key" ? r.pub : null, r.fp); answer(r.viewer, true, r.rid); } showRequest(); };
 $("decline").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, false, r.rid); showRequest(); };
 
 function startCapture(stream, code) {
@@ -626,24 +809,7 @@ function startCapture(stream, code) {
   $("liveText").textContent = "В эфире · никто не смотрит";
   // Что вы в эфире, видно в шапке (точка, «Стоп»); посередине ничего не держим — там чужая трансляция или пусто.
   if (!watching) status("");
-  hostSocket.onmessage = (event) => {
-    if (typeof event.data !== "string") return;
-    const msg = JSON.parse(event.data);
-    // Метка или рисунок зрителя — на экран ведущего (в приложении для Windows — поверх всего).
-    if ((msg.type === "ping" || msg.type === "stroke") && window.mu && window.mu.mark) window.mu.mark(msg);
-    if (msg.type === "request") onRequest(msg.viewer, msg.name, msg.rid);
-    if (msg.type === "game") gameReceive(msg, msg.from, msg.name, hostGameSend(msg.from));
-    if (msg.type === "viewers") {
-      audience = (msg.list || []).filter((v) => v.id);
-      $("gameButton").style.display = audience.length ? "" : "none";
-      if (game.peer !== "host" && !audience.some((v) => v.id === game.peer)) gamePeerGone(game.peer);
-      if (game.phase === "pick") renderGame();
-    }
-    if (msg.type === "viewers") forceKey = true; // новый зритель — сразу ключевой кадр
-    if (msg.type === "cancelled") { const i = requests.findIndex((r) => typeof msg.rid === "string" ? r.rid === msg.rid : r.viewer === msg.viewer); if (i >= 0) { requests.splice(i, 1); showRequest(); } }
-    if (msg.type === "viewers") $("liveText").textContent = msg.count ? `В эфире · смотрят: ${(msg.list || []).map((v) => v.name).join(", ")}` : "В эфире · никто не смотрит";
-  };
-  hostSocket.onclose = () => reconnectHost(code);
+  hostSocket.onclose = (event) => hostClosed(code, event);
   $("share").style.display = "none";
   // Видео H.264 через аппаратный кодек (WebCodecs), как в Discord; нет кодека — кадры JPEG.
   let encoder = null, frameIndex = 0, encodedSize = "";
@@ -740,18 +906,45 @@ function startCapture(stream, code) {
   capture = { stream, timer, audioContext };
 }
 
+function onHostMessage(ws, event) {
+  if (typeof event.data !== "string") return;
+  let msg; try { msg = JSON.parse(event.data); } catch (_) { return; }
+  if (msg.type === "challenge") return hostChallenge(ws, msg);
+  if (msg.type === "error") { hostError = msg; return; }
+  if (msg.type === "authed") {
+    hostAuth = { keyed: msg.mode !== "off", fp: typeof msg.fp === "string" ? msg.fp : null };
+    if (capture) $("liveText").textContent = "В эфире · никто не смотрит";
+    $("live").title = hostAuth.fp ? `Ключ устройства: ${hostAuth.fp}` : "";
+    return;
+  }
+  // Метка или рисунок зрителя — на экран ведущего (в приложении для Windows — поверх всего).
+  if ((msg.type === "ping" || msg.type === "stroke") && window.mu && window.mu.mark) window.mu.mark(msg);
+  if (msg.type === "request") onRequest(msg);
+  if (msg.type === "game") gameReceive(msg, msg.from, msg.name, hostGameSend(msg.from));
+  if (msg.type === "viewers") {
+    audience = (msg.list || []).filter((v) => v.id);
+    $("gameButton").style.display = audience.length ? "" : "none";
+    if (game.peer !== "host" && !audience.some((v) => v.id === game.peer)) gamePeerGone(game.peer);
+    if (game.phase === "pick") renderGame();
+  }
+  if (msg.type === "viewers") forceKey = true; // новый зритель — сразу ключевой кадр
+  if (msg.type === "cancelled") { const i = requests.findIndex((r) => typeof msg.rid === "string" ? r.rid === msg.rid : r.viewer === msg.viewer); if (i >= 0) { requests.splice(i, 1); showRequest(); } }
+  if (msg.type === "viewers") {
+    $("liveText").textContent = msg.count ? `В эфире · смотрят: ${(msg.list || []).map((v) => v.name).join(", ")}` : "В эфире · никто не смотрит";
+    $("liveText").title = (msg.list || []).map((v) => v.fp ? `${v.name}: ключ ${v.fp}` : v.name).join("\n");
+  }
+}
+
 // Связь оборвалась — захват не останавливаем, переподключаемся с тем же ID (зрители ждут до 45 с).
 async function reconnectHost(code) {
   if (!capture) return;
-  const handlers = { onmessage: hostSocket?.onmessage };
   hostSocket = null;
   $("liveText").textContent = "Переподключаюсь…";
   for (const delay of [1, 2, 3, 5, 8, 10, 15]) {
     await new Promise((r) => setTimeout(r, delay * 1000));
     if (!capture) return;
     if (await openHost(code)) {
-      hostSocket.onmessage = handlers.onmessage;
-      hostSocket.onclose = () => reconnectHost(code);
+      hostSocket.onclose = (event) => hostClosed(code, event);
       $("liveText").textContent = "В эфире";
       return;
     }
