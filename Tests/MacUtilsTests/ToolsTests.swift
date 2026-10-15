@@ -84,14 +84,23 @@ final class TaskManagerSamplingTests: XCTestCase {
     func testSamplesOwnProcessWithMemoryAndCPU() throws {
         let model = TaskManagerModel.shared
         model.sample()
+        let wall0 = DispatchTime.now().uptimeNanoseconds
+        let cpu0 = clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID)
         // Немного нагрузим процессор между замерами.
         var x = 0.0
         let end = Date().addingTimeInterval(0.3)
         while Date() < end { x += sin(x + 1) }
+        let wall1 = DispatchTime.now().uptimeNanoseconds
+        let cpu1 = clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID)
         model.sample()
         let own = try XCTUnwrap(model.rows.first { $0.pid == ProcessInfo.processInfo.processIdentifier })
         XCTAssertGreaterThan(own.memory, 1_000_000)
-        XCTAssertGreaterThan(own.cpu, 10, "процесс крутился ~0.3 с")
+        // Эталон — CPU самого процесса по ядру ОС, а не константа: не зависит от нагрузки раннера,
+        // но ловит потерянный пересчёт timebase (на Apple Silicon 125/3, то есть занижение примерно в 41 раз).
+        let expected = Double(cpu1 - cpu0) / Double(wall1 - wall0) * 100
+        XCTAssertGreaterThan(expected, 1, "эталон должен быть заметным, иначе проверка ничего не значит")
+        XCTAssertGreaterThanOrEqual(own.cpu, expected * 0.5, "ожидалось ≈\(expected) %")
+        XCTAssertLessThanOrEqual(own.cpu, expected * 2 + 5, "ожидалось ≈\(expected) %")
         XCTAssertGreaterThan(model.rows.count, 50)
         XCTAssertFalse(own.user.isEmpty)
         _ = x

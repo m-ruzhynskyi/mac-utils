@@ -2,7 +2,8 @@ name: CI
 
 # development и pull request'ы — сборка и тесты.
 # main (после слияния из development) — тесты, подписанная универсальная сборка и релиз.
-# Версия везде одна: <major.minor>.<число коммитов> — её считает build.sh.
+# Версия: MAJOR.MINOR из Resources/Info.plist, PATCH = наибольший тег линии + 1 (scripts/version.sh, docs/VERSIONING.md).
+# Тег vX.Y.Z создаёт только задача release.
 on:
   push:
     branches: [development, main]
@@ -11,11 +12,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,18 +25,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Version script tests
+        run: ./scripts/test-version.sh
       - name: Relay regression tests
         run: npm test --prefix relay
       - name: Build
         run: swift build
       - name: Test
         run: swift test
+      # Ad-hoc сборка без секретов: ловит поломки build.sh и подписи в pull request'ах.
+      - name: Build app (ad-hoc)
+        run: |
+          env -u SIGN_IDENTITY ./build.sh
+          codesign --verify --deep --strict "build/Mac Utils.app"
 
   release:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-15
+    timeout-minutes: 45
+    # Два push в main подряд не должны считать версию одновременно.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    permissions:
+      contents: write
     env:
+      # SHA-1 листового сертификата «Mac Utils Signing»: на нём держится designated requirement автообновления.
+      EXPECTED_LEAF_SHA1: b05f5c70f24685c18a6d61e2fb9b1ec60d9f713f
       SIGNING_P12: ${{ secrets.SIGNING_P12 }}
       SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
     steps:
@@ -78,13 +96,71 @@ jobs:
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
       - name: Build app
+        env:
+          MU_RELEASE: "1"
         run: ./build.sh --universal
 
       - name: Version
         run: |
-          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "build/Mac Utils.app/Contents/Info.plist")
+          PLIST="build/Mac Utils.app/Contents/Info.plist"
+          pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$PLIST"; }
+          VERSION=$(pb CFBundleShortVersionString)
+          if [[ ! "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::Версия «$VERSION» не вида MAJOR.MINOR.PATCH"; exit 1
+          fi
+          EXPECTED_BUILD=$(( BASH_REMATCH[1] * 1000000 + BASH_REMATCH[2] * 1000 + BASH_REMATCH[3] ))
+          if [[ "$(pb CFBundleVersion)" != "$EXPECTED_BUILD" ]]; then
+            echo "::error::CFBundleVersion $(pb CFBundleVersion) ≠ $EXPECTED_BUILD"; exit 1
+          fi
+          # Без канала release Updater у всех пользователей молча перестанет ставить обновления.
+          if [[ "$(pb MUReleaseChannel)" != "release" ]]; then
+            echo "::error::MUReleaseChannel=$(pb MUReleaseChannel), ожидалось release"; exit 1
+          fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           codesign -dvv "build/Mac Utils.app" 2>&1 | grep -E "Authority|Signature" || true
+
+      # Тег не переиспользуется: он уже на этом коммите (перезапуск) или его ещё нет.
+      - name: Check tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v$VERSION"
+          # Пока этот запуск ждал очереди, в main мог уйти более новый коммит: его релиз выйдет сам, а этот был бы откатом.
+          REMOTE_MAIN="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [[ -n "$REMOTE_MAIN" && "$REMOTE_MAIN" != "$GITHUB_SHA" ]]; then
+            echo "::notice::main уже ушёл вперёд ($REMOTE_MAIN), релиз $TAG для $GITHUB_SHA пропускаю."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1 \
+             && ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Тег $TAG есть в origin, но не получен локально (неполный fetch)"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            if [[ "$(git rev-parse "refs/tags/$TAG^{commit}")" != "$(git rev-parse HEAD)" ]]; then
+              echo "::error::Тег $TAG уже стоит на другом коммите — версия не переиспользуется"
+              exit 1
+            fi
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "::notice::Релиз $TAG уже опубликован для этого коммита — пропускаю."
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+
+      - name: Verify signature
+        if: steps.sign.outputs.signed == 'true'
+        run: |
+          APP="build/Mac Utils.app"
+          codesign --verify --deep --strict "$APP"
+          if ! codesign -dr - "$APP" 2>&1 | grep -q "certificate leaf = H\"$EXPECTED_LEAF_SHA1\""; then
+            echo "::error::Релиз не подписан сертификатом «Mac Utils Signing» ($EXPECTED_LEAF_SHA1)"
+            codesign -dr - "$APP" 2>&1 || true
+            exit 1
+          fi
 
       - name: Zip
         run: cd build && ditto -c -k --keepParent "Mac Utils.app" MacUtils.zip
@@ -95,7 +171,7 @@ jobs:
           path: build/MacUtils.zip
 
       - name: Publish release
-        if: steps.sign.outputs.signed == 'true'
+        if: steps.sign.outputs.signed == 'true' && steps.tag.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

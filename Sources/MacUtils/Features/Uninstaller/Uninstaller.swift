@@ -152,26 +152,83 @@ final class UninstallerModel: ObservableObject {
         }
     }
 
-    /// Один запрос пароля администратора: mv в Корзину пользователя.
+    /// Один запрос пароля администратора. Root переносит файлы не в `~/.Trash` (его контролирует пользователь:
+    /// заранее созданный symlink увёл бы root-`mv` куда угодно), а в свежий каталог в sticky `/private/var/tmp`
+    /// и отдаёт его пользователю; в Корзину содержимое переносится уже без root.
     private static func trashWithAdmin(_ urls: [URL]) -> Bool {
-        let trash = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash").path
-        let stamp = Int(Date().timeIntervalSince1970)
-        let commands = urls.map { url -> String in
-            let target = "\(trash)/\(url.lastPathComponent) \(stamp)"
-            return "/bin/mv -f \(shellQuote(url.path)) \(shellQuote(target))"
-        }.joined(separator: " && ")
+        let staging = "/private/var/tmp/MacUtilsTrash.\(UUID().uuidString)"
+        let commands = adminStagingScript(urls, staging: staging)
         let script = "do shell script \(appleScriptQuote(commands)) with administrator privileges"
         var error: NSDictionary?
         NSAppleScript(source: script)?.executeAndReturnError(&error)
+        var ok = error == nil
         if let error { Log.uninstall.error("Админ-перемещение: \(error.description, privacy: .public)") }
-        return error == nil
+        // Даже при частичном сбое то, что уже перенесено, не должно остаться в staging.
+        if !finishStaging(URL(fileURLWithPath: staging)) { ok = false }
+        return ok
     }
 
-    private static func shellQuote(_ s: String) -> String {
+    /// Скрипт для root: создать `staging` (mkdir падает, если путь уже занят, в том числе symlink'ом),
+    /// перенести файлы и отдать каталог пользователю ВСЕГДА, даже если часть переносов не удалась
+    /// (иначе уже перенесённые файлы останутся запертыми в каталоге root). Любой сбой — ненулевой код выхода.
+    static func adminStagingScript(_ urls: [URL], staging: String, owner: String = NSUserName()) -> String {
+        let moves = urls.isEmpty ? ":" : adminTrashCommands(urls, trash: staging, stamp: nil, owner: owner)
+        return "/bin/mkdir -m 700 \(shellQuote(staging)) && { \(moves); rc=$?; "
+            + "/usr/sbin/chown -hR \(shellQuote(owner)) \(shellQuote(staging)); exit $rc; }"
+    }
+
+    /// Без root: содержимое staging — в Корзину, затем сам каталог удаляется. false при любой ошибке
+    /// (нельзя прочитать каталог, не перенеслось, не удалился): тогда файлы остаются в staging, путь — в журнале.
+    static func finishStaging(_ staging: URL) -> Bool {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: staging.path) else { return true }
+        let items: [URL]
+        do {
+            items = try manager.contentsOfDirectory(at: staging, includingPropertiesForKeys: nil)
+        } catch {
+            Log.uninstall.error("Не удалось прочитать \(staging.path, privacy: .public), файлы могут остаться в нём: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        var ok = true
+        for item in items {
+            do { try manager.trashItem(at: item, resultingItemURL: nil) } catch {
+                Log.uninstall.error("Не удалось в Корзину: \(item.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                ok = false
+            }
+        }
+        // Если что-то осталось, каталог не трогаем: файлы остаются доступны пользователю.
+        guard ok else { return false }
+        do { try manager.removeItem(at: staging) } catch {
+            Log.uninstall.error("Не удалось удалить \(staging.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        return true
+    }
+
+    /// Команды sh, переносящие каждый файл в каталог `trash` (вынесено для тестов).
+    /// Одноимённые файлы получают разные цели («имя stamp», «имя stamp-1»…; без stamp — «имя», «имя-1»…). Занятая цель или файл, который после
+    /// `mv -n` остался на месте, — ошибка (`mv -n` сам возвращает 0, ничего не сделав). После переноса владелец — `owner`.
+    static func adminTrashCommands(_ urls: [URL], trash: String, stamp: Int?, owner: String = NSUserName()) -> String {
+        var used: [String: Int] = [:]
+        return urls.map { url -> String in
+            let name = url.lastPathComponent
+            let index = used[name, default: 0]
+            used[name] = index + 1
+            let path = "\(trash)/\(name)" + (stamp.map { " \($0)" } ?? "") + (index == 0 ? "" : "-\(index)")
+            let target = shellQuote(path)
+            let source = shellQuote(url.path)
+            let move = "/bin/mv -n \(source) \(target) || exit 1"
+            return "(if [ -e \(target) ] || [ -L \(target) ]; then exit 1; fi; \(move); "
+                + "if [ -e \(source) ] || [ -L \(source) ]; then exit 1; fi; "
+                + "/usr/sbin/chown -hR \(shellQuote(owner)) \(target))"
+        }.joined(separator: " && ")
+    }
+
+    static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    private static func appleScriptQuote(_ s: String) -> String {
+    static func appleScriptQuote(_ s: String) -> String {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 }

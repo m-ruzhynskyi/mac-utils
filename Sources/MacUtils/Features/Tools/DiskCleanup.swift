@@ -124,6 +124,25 @@ final class DiskCleanupModel: ObservableObject {
         }
     }
 
+    /// Убирает отмеченное: Корзина очищается насовсем, остальное уходит в Корзину.
+    /// `trash` и `remove` подменяются в тестах, чтобы не трогать настоящую Корзину.
+    nonisolated static func perform(
+        _ items: [CleanupItem],
+        trash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) },
+        remove: (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }
+    ) -> (freed: Int64, failed: Int) {
+        var freed: Int64 = 0, failed = 0
+        for item in items {
+            do {
+                if item.category == .trash { try remove(item.url) } else { try trash(item.url) }
+                freed += item.size
+            } catch {
+                failed += 1
+            }
+        }
+        return (freed, failed)
+    }
+
     /// В Корзину (или безвозвратно — для самой Корзины).
     func clean() {
         let selected = items.filter { checked.contains($0.url) }
@@ -137,19 +156,7 @@ final class DiskCleanupModel: ObservableObject {
             alert.alertStyle = .warning
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
-        var freed: Int64 = 0, failed = 0
-        for item in selected {
-            do {
-                if item.category == .trash {
-                    try FileManager.default.removeItem(at: item.url)
-                } else {
-                    try FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
-                }
-                freed += item.size
-            } catch {
-                failed += 1
-            }
-        }
+        let (freed, failed) = Self.perform(selected)
         let freedText = ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)
         lastResult = failed == 0
             ? "Освобождено \(freedText). Кроме Корзины, всё перемещено в Корзину — место освободится после её очистки."

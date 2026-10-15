@@ -23,6 +23,65 @@ const HOST_CHECK_MS = 30_000;
 const VIEWER_TIMEOUT_MS = 120_000;
 const ID = /^\d{6}$|^\d{10}$/;
 
+const MARK_COLORS = new Set(["red", "yellow", "green", "blue", "white"]);
+const MAX_STROKE_POINTS = 2000;
+const unit = (value) => (typeof value === "number" && Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : null);
+
+// Метка зрителя: пересобирается из проверенных полей, остальное отбрасывается.
+function sanitizeMark(command) {
+  if (!command || typeof command !== "object") return null;
+  const color = MARK_COLORS.has(command.color) ? command.color : "red";
+  if (command.type === "ping") {
+    const x = unit(command.x), y = unit(command.y);
+    return x === null || y === null ? null : { type: "ping", x, y, color };
+  }
+  if (command.type === "stroke") {
+    if (!Array.isArray(command.points)) return null;
+    const points = [];
+    for (const point of command.points.slice(0, MAX_STROKE_POINTS)) {
+      if (!Array.isArray(point) || point.length !== 2) continue;
+      const x = unit(point[0]), y = unit(point[1]);
+      if (x !== null && y !== null) points.push([x, y]);
+    }
+    return points.length >= 2 ? { type: "stroke", points, color } : null;
+  }
+  return null;
+}
+
+const GAME_ACTIONS = new Set(["invite", "accept", "decline", "move", "again", "quit"]);
+const MAX_ROUND = 1_000_000;
+
+// Сообщение игры от зрителя: только известные поля с проверенными значениями.
+function sanitizeGame(command) {
+  if (!command || typeof command !== "object" || !GAME_ACTIONS.has(command.action)) return null;
+  const game = { type: "game", action: command.action };
+  // Поле есть, но значение негодное — сообщение отбрасывается целиком; нет поля — хост сам решит.
+  if (command.cell !== undefined) {
+    if (!Number.isInteger(command.cell) || command.cell < 0 || command.cell > 8) return null;
+    game.cell = command.cell;
+  }
+  if (command.round !== undefined) {
+    if (!Number.isInteger(command.round) || command.round < 0 || command.round > MAX_ROUND) return null;
+    game.round = command.round;
+  }
+  if (typeof command.busy === "boolean") game.busy = command.busy;
+  return game;
+}
+
+// Token bucket на сокет зрителя: RATE сообщений/с, всплеск BURST.
+const RATE_PER_SECOND = 20;
+const RATE_BURST = 40;
+const buckets = new WeakMap();
+function takeToken(socket, now = Date.now()) {
+  const bucket = buckets.get(socket) || { tokens: RATE_BURST, at: now };
+  bucket.tokens = Math.min(RATE_BURST, bucket.tokens + ((now - bucket.at) / 1000) * RATE_PER_SECOND);
+  bucket.at = now;
+  buckets.set(socket, bucket);
+  if (bucket.tokens < 1) return false;
+  bucket.tokens -= 1;
+  return true;
+}
+
 function isClient(request) {
   return request.headers.get(CLIENT_HEADER) === CLIENT_TOKEN;
 }
@@ -89,14 +148,18 @@ export class Room {
       }
       await this.ensureAlarm();
     } else {
-      const viewer = (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
+      let viewer = (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
+      // ID комнаты как ID зрителя — подделка (его знает любой, у кого есть код): старые Mac-хосты 1.3.x
+      // принимали такого «себя» без вопроса. Отдаём хосту пустой ID, он покажет обычный запрос.
+      if (viewer === (url.pathname.match(/^\/room\/(\d+)$/) || [])[1]) viewer = "";
       const name = (url.searchParams.get("name") || "Без имени").slice(0, 60);
       this.state.acceptWebSocket(server, ["viewer"]);
       // h264=1 — зритель понимает видео H.264; старые версии понимают только кадры JPEG.
       const h264 = url.searchParams.get("h264") === "1";
-      server.serializeAttachment({ id: viewer, name, h264, approved: false, lastSeen: Date.now() });
+      const rid = crypto.randomUUID();
+      server.serializeAttachment({ id: viewer, name, h264, rid, approved: false, lastSeen: Date.now() });
       server.send(JSON.stringify({ type: "waiting" }));
-      this.toHost({ type: "request", viewer, name });
+      this.toHost({ type: "request", viewer, name, rid });
     }
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -198,17 +261,24 @@ export class Room {
     }
     if (!info.approved) return;
     socket.serializeAttachment({ ...info, lastSeen: Date.now() });
+    if (!takeToken(socket)) return;
     // Игра (крестики-нолики) — только ведущему, с ID и именем зрителя, которым нельзя подменить.
     if (command.type === "game") {
-      const game = JSON.stringify({ ...command, type: "game", from: info.id || "", name: info.name || "" });
+      const fields = sanitizeGame(command);
+      if (!fields) return;
+      const game = JSON.stringify({ ...fields, from: info.id || "", name: info.name || "" });
       for (const host of this.activeHosts()) {
         try { host.send(game); } catch (_) {}
       }
       return;
     }
+    // Дальше — только метки; служебные типы (viewers, request, ended…) зритель слать не может.
+    const mark = sanitizeMark(command);
+    if (!mark) return;
+    const text = JSON.stringify(mark);
     for (const other of [...this.activeHosts(), ...this.approvedViewers()]) {
       if (other !== socket) {
-        try { other.send(message); } catch (_) {}
+        try { other.send(text); } catch (_) {}
       }
     }
   }
@@ -227,9 +297,17 @@ export class Room {
       }
       return;
     }
-    for (const viewer of this.activeViewers()) {
+    if (command.type !== "accept" && command.type !== "decline") return;
+    // Отвечаем одному ожидающему сокету: по rid, если ведущий его вернул, иначе самому раннему с этим id.
+    const target = this.activeViewers().find((viewer) => {
       const info = viewer.deserializeAttachment() || {};
-      if (info.id !== command.viewer || info.approved) continue;
+      if (info.approved || info.id !== command.viewer) return false;
+      // rid есть, но не строка — не совпадение; fallback на самый ранний сокет только для команд без rid.
+      if (command.rid === undefined) return true;
+      return typeof command.rid === "string" && info.rid === command.rid;
+    });
+    for (const viewer of target ? [target] : []) {
+      const info = viewer.deserializeAttachment() || {};
       if (command.type === "accept") {
         viewer.serializeAttachment({ ...info, approved: true });
         viewer.send(JSON.stringify({ type: "accepted", name: command.name || "" }));
@@ -285,7 +363,7 @@ export class Room {
       const info = socket.deserializeAttachment() || {};
       if (info.ended) return;
       socket.serializeAttachment({ ...info, ended: true });
-      if (!info.approved) this.toHost({ type: "cancelled", viewer: info.id });
+      if (!info.approved) this.toHost({ type: "cancelled", viewer: info.id, rid: info.rid });
       this.notifyHost(socket);
     }
   }
