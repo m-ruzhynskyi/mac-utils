@@ -4,13 +4,22 @@
 const { app, BrowserWindow, desktopCapturer, ipcMain, session, dialog, shell, screen } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
+const { spawn, execFile } = require("child_process");
+const fs = require("fs");
 
 const RELAY = "https://mac-utils-relay.mako-62d.workers.dev/";
 let window = null;
 let chosen = null; // { source, audio }
 let overlay = null; // прозрачное окно поверх экрана ведущего: метки и рисунки зрителей
+let tracker = null; // следит, где транслируемое окно, — метки ложатся точно на него
+let audioHelper = null; // звук программ без выбранных (mu-audio.exe capture …)
 
-// Окно для меток: на весь экран, который транслируется (для окна — основной экран), сквозь него кликается.
+// Помощник mu-audio.exe (native/mu-audio.cpp): звук отдельных программ и положение окон.
+const HELPER = app.isPackaged ? path.join(process.resourcesPath, "mu-audio.exe") : path.join(__dirname, "bin", "mu-audio.exe");
+const hasHelper = () => fs.existsSync(HELPER);
+
+// Окно для меток: поверх того, что транслируется (экран или окно), сквозь него кликается.
+// В саму трансляцию оно не попадает — иначе зритель видел бы свою метку дважды (свою и в видео).
 function showOverlay() {
   const displays = screen.getAllDisplays();
   const display = displays.find((d) => String(d.id) === String(chosen?.source?.display_id)) || screen.getPrimaryDisplay();
@@ -23,16 +32,44 @@ function showOverlay() {
     });
     overlay.setAlwaysOnTop(true, "screen-saver");
     overlay.setIgnoreMouseEvents(true);
+    overlay.setContentProtection(true);
     overlay.loadFile(path.join(__dirname, "overlay.html"));
   } else {
     overlay.setBounds(display.bounds);
   }
   overlay.showInactive();
+  trackWindow();
+}
+
+// Транслируется окно — держим метки ровно над ним (id источника: «window:<HWND>:0»).
+function trackWindow() {
+  const match = /^window:(\d+):/.exec(chosen?.source?.id || "");
+  if (!match || tracker || !hasHelper()) return;
+  tracker = spawn(HELPER, ["track", match[1]], { windowsHide: true });
+  let rest = "";
+  tracker.stdout.on("data", (chunk) => {
+    const lines = (rest + chunk.toString()).split("\n");
+    rest = lines.pop();
+    for (const line of lines) {
+      if (!overlay || overlay.isDestroyed()) return;
+      const [x, y, width, height] = line.trim().split(" ").map(Number);
+      if (line.startsWith("hidden") || line.startsWith("gone")) { overlay.hide(); continue; }
+      if (!width || !height) continue;
+      overlay.setBounds(screen.screenToDipRect(null, { x, y, width, height }));
+      overlay.showInactive();
+    }
+  });
+  tracker.on("exit", () => { tracker = null; });
 }
 
 function hideOverlay() {
+  if (tracker) { tracker.kill(); tracker = null; }
   if (overlay && !overlay.isDestroyed()) overlay.close();
   overlay = null;
+}
+
+function stopAudio() {
+  if (audioHelper) { audioHelper.kill(); audioHelper = null; }
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -69,7 +106,8 @@ app.whenReady().then(() => {
   // getDisplayMedia на странице получает то, что пользователь выбрал в нашем окне выбора.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     if (!chosen) return callback({});
-    callback({ video: chosen.source, audio: chosen.audio ? "loopback" : undefined });
+    // Звук без выбранных программ идёт через помощник (mu-audio.exe), а не через общий loopback.
+    callback({ video: chosen.source, audio: chosen.audio && !chosen.muted.length ? "loopback" : undefined });
   });
 
   ipcMain.on("version", (event) => { event.returnValue = app.getVersion(); });
@@ -85,7 +123,31 @@ app.whenReady().then(() => {
     if (!overlay || overlay.isDestroyed()) showOverlay();
     overlay.webContents.send("mark", mark);
   });
-  ipcMain.on("stopped", () => hideOverlay());
+  ipcMain.on("stopped", () => { hideOverlay(); stopAudio(); });
+
+  // Программы, у которых сейчас есть звук, — для списка «Не передавать звук программ».
+  ipcMain.handle("audioApps", () => new Promise((resolve) => {
+    if (!hasHelper()) return resolve(null);
+    execFile(HELPER, ["list"], { windowsHide: true, timeout: 5000 }, (error, stdout) => {
+      try { resolve(error ? null : JSON.parse(stdout).map((a) => a.name).filter(Boolean)); } catch (_) { resolve(null); }
+    });
+  }));
+
+  // Звук всех программ, кроме выбранных: PCM 24 кГц моно — странице, она отправляет зрителям.
+  ipcMain.on("startAudio", (event) => {
+    stopAudio();
+    if (!chosen?.audio || !chosen.muted.length || !hasHelper()) return;
+    const sender = event.sender;
+    audioHelper = spawn(HELPER, ["capture", ...chosen.muted], { windowsHide: true });
+    let odd = null;
+    audioHelper.stdout.on("data", (chunk) => {
+      let data = odd ? Buffer.concat([odd, chunk]) : chunk;
+      odd = data.length % 2 ? data.subarray(data.length - 1) : null;
+      if (odd) data = data.subarray(0, data.length - 1);
+      if (data.length && !sender.isDestroyed()) sender.send("audio", data);
+    });
+    audioHelper.on("exit", () => { audioHelper = null; });
+  });
 
   ipcMain.handle("sources", async () => {
     const sources = await desktopCapturer.getSources({
@@ -95,10 +157,11 @@ app.whenReady().then(() => {
     return sources.map((s) => ({ id: s.id, name: s.name, thumbnail: s.thumbnail.toDataURL() }));
   });
 
-  ipcMain.handle("choose", async (_event, id, audio) => {
+  ipcMain.handle("choose", async (_event, id, audio, muted) => {
     const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
     const source = sources.find((s) => s.id === id);
-    chosen = source ? { source, audio: !!audio } : null;
+    const list = Array.isArray(muted) && hasHelper() ? muted.filter((m) => typeof m === "string" && /^[^"\\/]{1,120}$/.test(m)) : [];
+    chosen = source ? { source, audio: !!audio, muted: list } : null;
     return !!source;
   });
 
@@ -115,6 +178,7 @@ app.on("second-instance", () => {
 });
 
 app.on("window-all-closed", () => app.quit());
+app.on("will-quit", () => { stopAudio(); hideOverlay(); });
 
 // Автообновление: новые версии публикуются в релизе «windows-latest» репозитория.
 function checkForUpdates() {

@@ -26,6 +26,12 @@ jobs:
           cache: npm
           cache-dependency-path: windows/package-lock.json
       - run: npm ci
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Помощник mu-audio.exe (звук программ, положение окон)
+        shell: cmd
+        run: |
+          mkdir bin
+          cl /nologo /O2 /EHsc /std:c++17 /W3 /DUNICODE /D_UNICODE native\mu-audio.cpp /Fe:bin\mu-audio.exe /Fo:bin\
       - name: Версия
         shell: bash
         run: npm version "1.0.${{ github.run_number }}" --no-git-tag-version
