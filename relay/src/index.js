@@ -198,6 +198,14 @@ export class Room {
     }
     if (!info.approved) return;
     socket.serializeAttachment({ ...info, lastSeen: Date.now() });
+    // Игра (крестики-нолики) — только ведущему, с ID и именем зрителя, которым нельзя подменить.
+    if (command.type === "game") {
+      const game = JSON.stringify({ ...command, type: "game", from: info.id || "", name: info.name || "" });
+      for (const host of this.activeHosts()) {
+        try { host.send(game); } catch (_) {}
+      }
+      return;
+    }
     for (const other of [...this.activeHosts(), ...this.approvedViewers()]) {
       if (other !== socket) {
         try { other.send(message); } catch (_) {}
@@ -209,6 +217,16 @@ export class Room {
     let command;
     try { command = JSON.parse(text); } catch (_) { return; }
     if (command.type === "heartbeat") return;
+    // Игра ведущего — только выбранному зрителю (все его подключения).
+    if (command.type === "game") {
+      const { to, ...rest } = command;
+      const game = JSON.stringify({ ...rest, from: "host" });
+      for (const viewer of this.approvedViewers()) {
+        const info = viewer.deserializeAttachment() || {};
+        if (info.id && info.id === to) { try { viewer.send(game); } catch (_) {} }
+      }
+      return;
+    }
     for (const viewer of this.activeViewers()) {
       const info = viewer.deserializeAttachment() || {};
       if (info.id !== command.viewer || info.approved) continue;

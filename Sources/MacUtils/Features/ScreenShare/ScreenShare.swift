@@ -336,9 +336,22 @@ final class ScreenShare: NSObject, ObservableObject {
                                 self.request(viewer: json["viewer"] as? String ?? "", name: json["name"] as? String ?? "")
                             case "cancelled":
                                 self.pendingRequests.remove(json["viewer"] as? String ?? "")
+                            case "game":
+                                let viewer = json["from"] as? String ?? ""
+                                ShareGame.shared.receive(json, peer: viewer, name: json["name"] as? String ?? "",
+                                                         transport: self.gameTransport(to: viewer))
                             case "viewers":
                                 let raw = json["list"] as? [[String: Any]] ?? []
                                 self.watchers = raw.compactMap { $0["name"] as? String }
+                                self.audience = raw.compactMap { item in
+                                    guard let id = item["id"] as? String, !id.isEmpty else { return nil }
+                                    return Watcher(id: id, name: item["name"] as? String ?? "")
+                                }
+                                // Соперник по игре ушёл из трансляции — партия закончена.
+                                let game = ShareGame.shared
+                                if game.isActive, game.peer != "host", !self.audience.contains(where: { $0.id == game.peer }) {
+                                    game.peerGone(game.peer)
+                                }
                                 // Смотрит старая версия (без H.264) — дополнительно шлём ей кадры JPEG.
                                 self.sender?.legacyFrames = raw.contains { ($0["h264"] as? Bool) != true }
                             default:
@@ -366,6 +379,25 @@ final class ScreenShare: NSObject, ObservableObject {
 
     /// Кто сейчас смотрит (имена компьютеров).
     @Published private(set) var watchers: [String] = []
+    struct Watcher: Identifiable, Equatable { let id: String; let name: String }
+    /// Зрители с ID — для приглашения в игру.
+    @Published private(set) var audience: [Watcher] = []
+
+    /// Сыграть в крестики-нолики с этим зрителем.
+    func playGame(with watcher: Watcher) {
+        ShareGame.shared.invite(peer: watcher.id, name: watcher.name, transport: gameTransport(to: watcher.id))
+    }
+
+    /// Сообщения игры ведущего — ретранслятор доставит только этому зрителю.
+    func gameTransport(to viewer: String) -> ([String: Any]) -> Void {
+        { [weak self] fields in
+            var fields = fields
+            fields["to"] = viewer
+            fields["name"] = ShareCode.myName
+            guard let text = ShareGame.text(fields) else { return }
+            self?.socket?.send(.string(text)) { _ in }
+        }
+    }
     private var pendingRequests: Set<String> = []
 
     /// Зритель просится посмотреть: доверенных пускаем сразу, остальных — по вопросу.
@@ -449,6 +481,8 @@ final class ScreenShare: NSObject, ObservableObject {
     func stop(reason: String? = nil) {
         reconnecting = false
         watchers = []
+        audience = []
+        if ShareGame.shared.peer != "host" { ShareGame.shared.peerGone() }
         pendingRequests = []
         Picker.shared.reset()
         ShareMarksOverlay.shared.detach()
@@ -769,8 +803,13 @@ final class ShareViewer: ObservableObject {
                         } else if type == "waiting" {
                             viewer.state = .waiting
                             viewer.receive(socket)
+                        } else if type == "game" {
+                            ShareGame.shared.receive(json ?? [:], peer: "host", name: viewer.hostName,
+                                                     transport: viewer.gameTransport)
+                            viewer.receive(socket)
                         } else if type == "accepted" {
                             viewer.state = .watching
+                            viewer.hostName = json?["name"] as? String ?? ""
                             ShareHistory.shared.visited(viewer.code, name: json?["name"] as? String ?? "")
                             viewer.receive(socket)
                         } else if type == "declined" {
@@ -802,7 +841,23 @@ final class ShareViewer: ObservableObject {
         }
     }
 
+    /// Имя компьютера ведущего (для игры).
+    var hostName = ""
+
+    /// Сыграть с ведущим в крестики-нолики.
+    func playGame() {
+        ShareGame.shared.invite(peer: "host", name: hostName.isEmpty ? ShareCode.display(code) : hostName, transport: gameTransport)
+    }
+
+    var gameTransport: ([String: Any]) -> Void {
+        { [weak self] fields in
+            guard let text = ShareGame.text(fields) else { return }
+            self?.socket?.send(.string(text)) { _ in }
+        }
+    }
+
     func disconnect() {
+        if ShareGame.shared.peer == "host" { ShareGame.shared.peerGone("host") }
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil
         player.stop()
@@ -951,6 +1006,10 @@ private struct ShareViewerView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                Divider().frame(height: 16)
+                Button { viewer.playGame() } label: { Label("Сыграть", systemImage: "number") }
+                    .buttonStyle(.plain)
+                    .help("Крестики-нолики с ведущим")
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(.regularMaterial, in: Capsule())
@@ -1006,6 +1065,13 @@ struct ScreenSharePage: View {
                 if case .live = share.state {
                     Text(share.watchers.isEmpty ? "Пока никто не смотрит." : "Смотрят: " + share.watchers.joined(separator: ", "))
                         .font(.caption).foregroundStyle(.secondary)
+                    ForEach(share.audience) { watcher in
+                        HStack {
+                            Label(watcher.name.isEmpty ? ShareCode.display(watcher.id) : watcher.name, systemImage: "eye")
+                            Spacer()
+                            Button("Сыграть в крестики-нолики") { share.playGame(with: watcher) }
+                        }
+                    }
                 }
                 Text("Этот ID постоянный — по нему к вам подключаются. Каждого зрителя вы сначала разрешаете (или отмечаете «Всегда разрешать»). Управлять вашим Mac зритель не может.")
                     .font(.caption).foregroundStyle(.secondary)

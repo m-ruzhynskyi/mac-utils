@@ -177,3 +177,14 @@ test('host stop (code 1000) ends viewers immediately', () => {
   assert.equal(viewer.messages.at(-1).type, 'ended');
   assert.equal(viewer.closes.length, 1);
 });
+test('game messages reach only the opponent, with the viewer ID stamped by the relay', () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000 });
+  const alice = f.socket('viewer', { id: '1111111111', name: 'Alice', approved: true });
+  const bob = f.socket('viewer', { id: '2222222222', name: 'Bob', approved: true });
+  f.room.webSocketMessage(alice, JSON.stringify({ type: 'game', action: 'invite', from: '2222222222' }));
+  assert.deepEqual(host.messages.at(-1), { type: 'game', action: 'invite', from: '1111111111', name: 'Alice' });
+  assert.equal(bob.messages.length, 0);
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'game', action: 'accept', to: '1111111111', name: 'Mac' }));
+  assert.deepEqual(alice.messages.at(-1), { type: 'game', action: 'accept', name: 'Mac', from: 'host' });
+  assert.equal(bob.messages.length, 0);
+});
