@@ -28,8 +28,18 @@ final class ShareHistory: ObservableObject {
     init() {
         if let data = UserDefaults.standard.data(forKey: Pref.shareHistory),
            let saved = try? JSONDecoder().decode([Entry].self, from: data) {
-            entries = saved
+            // Свой и невалидный ID доверенными быть не могут (иначе «всегда разрешать» возвращает автопринятие).
+            entries = saved.map { entry in
+                var entry = entry
+                if entry.trusted, !Self.canTrust(entry.id) { entry.trusted = false }
+                return entry
+            }
         }
+    }
+
+    /// Доверять можно только чужому ID из 10 ASCII-цифр (как принимает relay): свой и пустой/кривой ID подделывает любой зритель.
+    static func canTrust(_ id: String, myID: String = ShareCode.myID) -> Bool {
+        id != myID && id.utf8.count == 10 && id.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 }
     }
 
     var visitedEntries: [Entry] { entries.filter { !$0.incomingOnly }.sorted { $0.lastSeen > $1.lastSeen } }
@@ -44,6 +54,7 @@ final class ShareHistory: ObservableObject {
     }
 
     func trust(_ id: String, name: String) {
+        guard Self.canTrust(id) else { return }
         update(id) { entry in
             entry.trusted = true
             if entry.name.isEmpty { entry.name = name }
@@ -56,7 +67,7 @@ final class ShareHistory: ObservableObject {
         save()
     }
 
-    func isTrusted(_ id: String) -> Bool { entries.contains { $0.id == id && $0.trusted } }
+    func isTrusted(_ id: String) -> Bool { Self.canTrust(id) && entries.contains { $0.id == id && $0.trusted } }
 
     func label(for id: String) -> String? { entries.first { $0.id == id }.map(\.title) }
 

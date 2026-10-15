@@ -18,8 +18,18 @@ function fixture() {
     },
     getWebSockets: (tag) => sockets.filter((s) => s.tag === tag),
     getTags: (s) => [s.tag],
+    acceptWebSocket: (s, tags) => { s.tag = tags[0]; sockets.push(s); },
   };
-  const context = vm.createContext({ Date: { now: () => now }, Response, URL });
+  // Response из Node не принимает статус 101, поэтому в песочнице — простой двойник.
+  class FakeResponse {
+    constructor(body, init = {}) { this.body = body; this.status = init.status ?? 200; this.webSocket = init.webSocket; this.headers = new Map(Object.entries(init.headers || {})); }
+    async text() { return String(this.body); }
+  }
+  class FakePair { constructor() { const mk = () => ({ readyState: 1, info: null, messages: [], closes: [],
+      deserializeAttachment() { return this.info; }, serializeAttachment(v) { this.info = v; },
+      send(v) { this.messages.push(JSON.parse(v)); }, close(...a) { this.closes.push(a); this.readyState = 2; } });
+    this[0] = mk(); this[1] = mk(); } }
+  const context = vm.createContext({ Date: { now: () => now }, Response: FakeResponse, URL, WebSocketPair: FakePair, crypto: globalThis.crypto });
   vm.runInContext(`${source}\nthis.Room = Room;`, context);
   const room = new context.Room(state);
   function socket(tag, info) {
@@ -31,7 +41,7 @@ function fixture() {
     };
     sockets.push(s); return s;
   }
-  return { room, socket, advance(ms) { now += ms; }, get alarm() { return alarm; } };
+  return { room, socket, all: () => sockets, advance(ms) { now += ms; }, get alarm() { return alarm; } };
 }
 test('stale host releases ID and tells viewers it is reconnecting; late close cannot end new session', async () => {
   const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000 });
@@ -187,4 +197,235 @@ test('game messages reach only the opponent, with the viewer ID stamped by the r
   f.room.webSocketMessage(host, JSON.stringify({ type: 'game', action: 'accept', to: '1111111111', name: 'Mac' }));
   assert.deepEqual(alice.messages.at(-1), { type: 'game', action: 'accept', name: 'Mac', from: 'host' });
   assert.equal(bob.messages.length, 0);
+});
+
+// ---- Спуфинг и сообщения зрителей (аудит C1, H1, H3, H2) ----
+const hostLive = (f) => f.socket('host', { lastSeen: 1_000_000 });
+test('C1: viewer with viewer=<roomID> is not approved or sent "accepted" without an explicit host accept', async () => {
+  const f = fixture(), host = hostLive(f);
+  const res = await f.room.fetch(new Request('https://room/1234567890?role=viewer&viewer=1234567890&name=x'));
+  assert.equal(res.status, 101);
+  const spoof = f.socket('viewer', { id: '1234567890', name: 'x', approved: false, lastSeen: 1_000_000 });
+  assert.equal(host.messages.at(-1).type, 'request');
+  assert.equal(host.messages.at(-1).viewer, '1234567890');
+  f.room.webSocketMessage(spoof, JSON.stringify({ type: 'ping', x: 0.5, y: 0.5 }));
+  f.room.webSocketMessage(spoof, JSON.stringify({ type: 'accept', viewer: '1234567890' }));
+  assert.equal(spoof.info.approved, false);
+  assert.equal(spoof.messages.some((m) => m.type === 'accepted'), false);
+  assert.equal(host.messages.filter((m) => m.type === 'ping').length, 0);
+  f.room.webSocketMessage(host, new ArrayBuffer(4));
+  assert.equal(spoof.messages.some((m) => !m.type), false);
+});
+for (const type of ['viewers', 'request', 'cancelled', 'ended', 'accepted', 'declined', 'reconnecting', 'resumed']) {
+  test(`H3: approved viewer's {"type":"${type}"} reaches neither the host nor other viewers`, () => {
+    const f = fixture(), host = hostLive(f);
+    const evil = f.socket('viewer', { id: '1111111111', name: 'Evil', approved: true });
+    const other = f.socket('viewer', { id: '2222222222', name: 'Bob', approved: true });
+    f.room.webSocketMessage(evil, JSON.stringify({ type, viewer: '2222222222', count: 0, list: [], name: 'Apple Support' }));
+    assert.equal(host.messages.length, 0);
+    assert.equal(other.messages.length, 0);
+  });
+}
+for (const type of ['ping', 'stroke']) {
+  test(`H3: approved viewer's ${type} reaches the host and other approved viewers, not back to the sender`, () => {
+    const f = fixture(), host = hostLive(f);
+    const a = f.socket('viewer', { id: '1111111111', approved: true });
+    const b = f.socket('viewer', { id: '2222222222', approved: true });
+    const waiting = f.socket('viewer', { id: '3333333333', approved: false });
+    const msg = JSON.stringify(type === 'ping' ? { type, x: 0.1, y: 0.2, color: 'red' } : { type, points: [[0, 0], [1, 1]], color: 'blue' });
+    f.room.webSocketMessage(a, msg);
+    assert.equal(host.messages.at(-1).type, type);
+    assert.equal(b.messages.at(-1).type, type);
+    assert.equal(a.messages.length, 0);
+    assert.equal(waiting.messages.length, 0);
+  });
+}
+test('H3: unapproved viewer cannot send ping/stroke', () => {
+  const f = fixture(), host = hostLive(f);
+  const w = f.socket('viewer', { id: '1111111111', approved: false });
+  f.room.webSocketMessage(w, '{"type":"ping","x":0,"y":0}');
+  assert.equal(host.messages.length, 0);
+});
+test('H1: host accept for an id with two waiting sockets approves only one of them', () => {
+  const f = fixture(), host = hostLive(f);
+  const real = f.socket('viewer', { id: '1111111111', name: 'Real', approved: false, lastSeen: 1_000_000 });
+  const twin = f.socket('viewer', { id: '1111111111', name: 'Twin', approved: false, lastSeen: 1_000_000 });
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'accept', viewer: '1111111111', name: 'Mac' }));
+  const approved = [real, twin].filter((s) => s.info.approved);
+  assert.equal(approved.length, 1);
+});
+test('host accept still approves a single waiting viewer and decline closes it', () => {
+  const f = fixture(), host = hostLive(f);
+  const v = f.socket('viewer', { id: '1111111111', approved: false, lastSeen: 1_000_000 });
+  const d = f.socket('viewer', { id: '2222222222', approved: false, lastSeen: 1_000_000 });
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'accept', viewer: '1111111111', name: 'Mac' }));
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'decline', viewer: '2222222222' }));
+  assert.equal(v.info.approved, true);
+  assert.equal(v.messages.at(-1).type, 'accepted');
+  assert.equal(d.messages.at(-1).type, 'declined');
+  assert.equal(d.closes.length, 1);
+});
+test('host drop: current behaviour — any client can take the host role during the 45 s grace period', async () => {
+  const f = fixture(), host = hostLive(f);
+  const viewer = f.socket('viewer', { id: '1111111111', approved: true, lastSeen: 1_000_000 });
+  f.room.webSocketClose(host, 1006);
+  f.advance(10_000);
+  const res = await f.room.fetch(new Request('https://room/1234567890?role=host'));
+  assert.equal(res.status, 101);
+  assert.equal(viewer.messages.at(-1).type, 'resumed');
+});
+test('H2, ждёт аутентификации: чужой хост не должен занимать комнату в grace-период', { skip: 'H2, ждёт аутентификации' }, async () => {
+  const f = fixture(), host = hostLive(f);
+  f.socket('viewer', { id: '1111111111', approved: true, lastSeen: 1_000_000 });
+  f.room.webSocketClose(host, 1006);
+  const res = await f.room.fetch(new Request('https://room/1234567890?role=host'));
+  assert.notEqual(res.status, 101);
+});
+
+// ---- Волна 1c: S3 (rid), S5 (частота и поля game) ----
+test('S3: "cancelled" for a waiting viewer carries its rid', () => {
+  const f = fixture(), host = hostLive(f);
+  const waiting = f.socket('viewer', { id: '1111111111', rid: 'rid-1', approved: false, lastSeen: 1_000_000 });
+  f.room.webSocketClose(waiting, 1001);
+  const cancelled = host.messages.find((m) => m.type === 'cancelled');
+  assert.ok(cancelled, 'host must get cancelled');
+  assert.equal(cancelled.viewer, '1111111111');
+  assert.equal(cancelled.rid, 'rid-1');
+});
+test('S3: accept with rid approves exactly the socket with that rid, even if it is not the earliest', () => {
+  const f = fixture(), host = hostLive(f);
+  const first = f.socket('viewer', { id: '1111111111', rid: 'r1', approved: false, lastSeen: 1_000_000 });
+  const second = f.socket('viewer', { id: '1111111111', rid: 'r2', approved: false, lastSeen: 1_000_000 });
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'accept', viewer: '1111111111', rid: 'r2', name: 'Mac' }));
+  assert.equal(first.info.approved, false);
+  assert.equal(second.info.approved, true);
+  assert.equal(second.messages.at(-1).type, 'accepted');
+});
+for (const rid of [123, null, {}, ['r1'], true]) {
+  test(`S3: accept with non-string rid ${JSON.stringify(rid)} approves nothing`, () => {
+    const f = fixture(), host = hostLive(f);
+    const a = f.socket('viewer', { id: '1111111111', rid: 'r1', approved: false, lastSeen: 1_000_000 });
+    const b = f.socket('viewer', { id: '1111111111', rid: 'r2', approved: false, lastSeen: 1_000_000 });
+    f.room.webSocketMessage(host, JSON.stringify({ type: 'accept', viewer: '1111111111', rid, name: 'Mac' }));
+    assert.equal(a.info.approved, false);
+    assert.equal(b.info.approved, false);
+    assert.equal(a.messages.length + b.messages.length, 0);
+  });
+}
+test('S3: accept with an unknown rid approves nothing', () => {
+  const f = fixture(), host = hostLive(f);
+  const a = f.socket('viewer', { id: '1111111111', rid: 'r1', approved: false, lastSeen: 1_000_000 });
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'accept', viewer: '1111111111', rid: 'nope', name: 'Mac' }));
+  assert.equal(a.info.approved, false);
+});
+test('S3: accept without a rid field falls back to the earliest waiting socket with that id', () => {
+  const f = fixture(), host = hostLive(f);
+  const first = f.socket('viewer', { id: '1111111111', rid: 'r1', approved: false, lastSeen: 1_000_000 });
+  const second = f.socket('viewer', { id: '1111111111', rid: 'r2', approved: false, lastSeen: 1_000_000 });
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'accept', viewer: '1111111111', name: 'Mac' }));
+  assert.equal(first.info.approved, true);
+  assert.equal(second.info.approved, false);
+});
+test('S3: decline with rid closes only that socket', () => {
+  const f = fixture(), host = hostLive(f);
+  const a = f.socket('viewer', { id: '1111111111', rid: 'r1', approved: false, lastSeen: 1_000_000 });
+  const b = f.socket('viewer', { id: '1111111111', rid: 'r2', approved: false, lastSeen: 1_000_000 });
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'decline', viewer: '1111111111', rid: 'r2' }));
+  assert.equal(a.closes.length, 0);
+  assert.equal(b.closes.length, 1);
+});
+
+test('S5: a burst of more than 40 marks from one viewer is partly dropped, and it recovers later', () => {
+  const f = fixture(), host = hostLive(f);
+  const v = f.socket('viewer', { id: '1111111111', approved: true, lastSeen: 1_000_000 });
+  const ping = JSON.stringify({ type: 'ping', x: 0.5, y: 0.5, color: 'red' });
+  for (let i = 0; i < 200; i++) f.room.webSocketMessage(v, ping);
+  const got = host.messages.filter((m) => m.type === 'ping').length;
+  assert.ok(got > 0, 'normal marks still pass');
+  assert.ok(got < 200, `burst must be limited, host got ${got}`);
+  assert.ok(got <= 60, `burst limit should be around 40, host got ${got}`);
+  f.advance(5_000);
+  const before = host.messages.length;
+  f.room.webSocketMessage(v, ping);
+  assert.equal(host.messages.length, before + 1, 'after a pause the viewer can send again');
+});
+test('S5: one noisy viewer does not limit another viewer', () => {
+  const f = fixture(), host = hostLive(f);
+  const noisy = f.socket('viewer', { id: '1111111111', approved: true, lastSeen: 1_000_000 });
+  const calm = f.socket('viewer', { id: '2222222222', approved: true, lastSeen: 1_000_000 });
+  const ping = JSON.stringify({ type: 'ping', x: 0.1, y: 0.1 });
+  for (let i = 0; i < 200; i++) f.room.webSocketMessage(noisy, ping);
+  const before = host.messages.length;
+  f.room.webSocketMessage(calm, ping);
+  assert.equal(host.messages.length, before + 1);
+});
+test('S5: game from a viewer is forwarded with only type/action/cell/round/busy plus relay-stamped from/name', () => {
+  const f = fixture(), host = hostLive(f);
+  const v = f.socket('viewer', { id: '1111111111', name: 'Alice', approved: true, lastSeen: 1_000_000 });
+  f.room.webSocketMessage(v, JSON.stringify({ type: 'game', action: 'move', cell: 4, round: 2, busy: true,
+    evil: 'x'.repeat(5000), nested: { a: 1 }, from: '9999999999', name: 'Apple Support' }));
+  const game = host.messages.at(-1);
+  assert.deepEqual(game, { type: 'game', action: 'move', cell: 4, round: 2, busy: true, from: '1111111111', name: 'Alice' });
+});
+test('S5: game with an unknown action is dropped', () => {
+  const f = fixture(), host = hostLive(f);
+  const v = f.socket('viewer', { id: '1111111111', name: 'Alice', approved: true, lastSeen: 1_000_000 });
+  for (const action of ['hack', '', 7, null, { a: 1 }, 'MOVE']) {
+    f.room.webSocketMessage(v, JSON.stringify({ type: 'game', action }));
+  }
+  f.room.webSocketMessage(v, JSON.stringify({ type: 'game' }));
+  assert.equal(host.messages.length, 0);
+});
+test('S5: every valid game action passes', () => {
+  const f = fixture(), host = hostLive(f);
+  const v = f.socket('viewer', { id: '1111111111', name: 'Alice', approved: true, lastSeen: 1_000_000 });
+  for (const action of ['invite', 'accept', 'decline', 'move', 'again', 'quit']) {
+    f.room.webSocketMessage(v, JSON.stringify({ type: 'game', action }));
+  }
+  assert.equal(host.messages.length, 6);
+});
+test('S5: game move with a cell outside 0..8 or non-integer is dropped', () => {
+  const f = fixture(), host = hostLive(f);
+  const v = f.socket('viewer', { id: '1111111111', name: 'Alice', approved: true, lastSeen: 1_000_000 });
+  for (const cell of [-1, 9, 1.5, '4', null, 1e999]) {
+    f.room.webSocketMessage(v, JSON.stringify({ type: 'game', action: 'move', cell }));
+  }
+  assert.equal(host.messages.length, 0);
+});
+test('S5: host game messages keep working for the chosen viewer (regression)', () => {
+  const f = fixture(), host = hostLive(f);
+  const v = f.socket('viewer', { id: '1111111111', approved: true, lastSeen: 1_000_000 });
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'game', action: 'invite', to: '1111111111', name: 'Mac' }));
+  assert.equal(v.messages.at(-1).action, 'invite');
+  assert.equal(v.messages.at(-1).from, 'host');
+});
+
+// ---- Волна 1d: S2 ----
+test('S2: viewer=<roomId> is reported to the host with an empty viewer id (old hosts then show a normal prompt)', async () => {
+  const f = fixture(), host = hostLive(f);
+  const res = await f.room.fetch(new Request('https://relay.example/room/1234567890?role=viewer&viewer=1234567890&name=x'));
+  assert.equal(res.status, 101);
+  const request = host.messages.find((m) => m.type === 'request');
+  assert.ok(request, 'host must get a request');
+  assert.equal(request.viewer, '');
+  assert.equal(request.name, 'x');
+  assert.equal(typeof request.rid, 'string');
+});
+test('S2: viewer=<roomId> with formatting characters is still recognised as the room id', async () => {
+  const f = fixture(), host = hostLive(f);
+  await f.room.fetch(new Request('https://relay.example/room/1234567890?role=viewer&viewer=123-456%20789-0&name=x'));
+  assert.equal(host.messages.find((m) => m.type === 'request').viewer, '');
+});
+test('S2: a different viewer id is passed to the host unchanged', async () => {
+  const f = fixture(), host = hostLive(f);
+  await f.room.fetch(new Request('https://relay.example/room/1234567890?role=viewer&viewer=2222222222&name=Bob'));
+  assert.equal(host.messages.find((m) => m.type === 'request').viewer, '2222222222');
+});
+test('S2: a viewer that claimed the room id cannot be matched by an accept for the room id', async () => {
+  const f = fixture(), host = hostLive(f);
+  await f.room.fetch(new Request('https://relay.example/room/1234567890?role=viewer&viewer=1234567890&name=x'));
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'accept', viewer: '1234567890', name: 'Mac' }));
+  const viewers = f.all().filter((s) => s.tag === 'viewer');
+  assert.equal(viewers.length, 1);
+  assert.equal(viewers[0].info.approved, false);
 });

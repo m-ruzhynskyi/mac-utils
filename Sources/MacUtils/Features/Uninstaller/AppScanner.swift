@@ -74,11 +74,13 @@ struct Leftover: Identifiable, Hashable {
     /// Найдено по совпадению Team ID (общая папка разработчика) — по умолчанию не отмечено.
     let shared: Bool
     let needsAdmin: Bool
+    /// Найдено только по имени папки, без bundle id — по умолчанию не отмечено.
+    var nameOnly = false
     /// Размер не считаем (контейнеры других приложений защищены macOS).
     let sizeUnknown: Bool
 
     var id: URL { url }
-    var checkedByDefault: Bool { kind != .receipt && !shared }
+    var checkedByDefault: Bool { kind != .receipt && !shared && !nameOnly }
 }
 
 /// Поиск файлов приложения в стандартных папках. Только точные совпадения:
@@ -126,6 +128,15 @@ enum AppScanner {
         return list
     }
 
+    /// Папки данных, которые принадлежат системе или общим службам: по одному имени их не связываем с приложением.
+    static let systemNames: Set<String> = [
+        "apple", "google", "microsoft", "adobe", "mozilla", "addressbook", "knowledge", "callhistorydb",
+        "callhistorytransactions", "cloudstorage", "com.apple", "crashreporter", "diagnosticreports",
+        "dock", "icloud", "mobilesync", "networkserviceproxy", "notes", "safari", "syncservices",
+        "accounts", "assistant", "caches", "containers", "cookies", "keychains", "logs", "preferences",
+        "saved application state", "webkit", "fontcollections", "colorpickers", "input methods",
+    ]
+
     /// Другие установленные приложения того же разработчика (для пометки «общее»).
     /// `locations` — для тестов; по умолчанию стандартные папки.
     static func scan(_ app: InstalledApp, others: [InstalledApp], locations: [Location]? = nil) -> [Leftover] {
@@ -147,8 +158,13 @@ enum AppScanner {
                 let lower = entry.lowercased()
                 var matched = lower == id || lower.hasPrefix(id + ".") || lower.hasPrefix(id + "_")
                 var shared = false
-                // Точное имя папки — только для папок данных и не короче 3 символов.
-                if !matched, location.byName, name.count >= 3, lower == name { matched = true }
+                var nameOnly = false
+                // Точное имя папки — только для папок данных и не короче 3 символов; не системные имена.
+                // Показываем, но не отмечаем: совпадение по имени не доказывает, что папка принадлежит этому приложению.
+                if !matched, location.byName, name.count >= 3, lower == name, !Self.systemNames.contains(lower) {
+                    matched = true
+                    nameOnly = true
+                }
                 // Общая папка разработчика: «TEAMID.…».
                 // Только если в имени есть bundle id или его «семейство» (без последней части,
                 // не короче трёх частей: com.parallels.desktop) — иначе это чужие продукты разработчика.
@@ -175,6 +191,7 @@ enum AppScanner {
                                        kind: location.receipts ? .receipt : .file,
                                        shared: shared,
                                        needsAdmin: !location.receipts && !manager.isDeletableFile(atPath: url.path),
+                                       nameOnly: nameOnly,
                                        sizeUnknown: location.protected))
             }
         }

@@ -11,11 +11,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,12 +30,22 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      # Ad-hoc сборка без секретов: ловит поломки build.sh и подписи в pull request'ах.
+      - name: Build app (ad-hoc)
+        run: |
+          env -u SIGN_IDENTITY ./build.sh
+          codesign --verify --deep --strict "build/Mac Utils.app"
 
   release:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
     env:
+      # SHA-1 листового сертификата «Mac Utils Signing»: на нём держится designated requirement автообновления.
+      EXPECTED_LEAF_SHA1: b05f5c70f24685c18a6d61e2fb9b1ec60d9f713f
       SIGNING_P12: ${{ secrets.SIGNING_P12 }}
       SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
     steps:
@@ -85,6 +96,17 @@ jobs:
           VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "build/Mac Utils.app/Contents/Info.plist")
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           codesign -dvv "build/Mac Utils.app" 2>&1 | grep -E "Authority|Signature" || true
+
+      - name: Verify signature
+        if: steps.sign.outputs.signed == 'true'
+        run: |
+          APP="build/Mac Utils.app"
+          codesign --verify --deep --strict "$APP"
+          if ! codesign -dr - "$APP" 2>&1 | grep -q "certificate leaf = H\"$EXPECTED_LEAF_SHA1\""; then
+            echo "::error::Релиз не подписан сертификатом «Mac Utils Signing» ($EXPECTED_LEAF_SHA1)"
+            codesign -dr - "$APP" 2>&1 || true
+            exit 1
+          fi
 
       - name: Zip
         run: cd build && ditto -c -k --keepParent "Mac Utils.app" MacUtils.zip

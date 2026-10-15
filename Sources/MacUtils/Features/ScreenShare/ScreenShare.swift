@@ -1,7 +1,7 @@
 import AVFoundation
 import AppKit
 import ImageIO
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -374,7 +374,8 @@ final class ScreenShare: NSObject, ObservableObject {
                         if let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] {
                             switch json["type"] as? String {
                             case "request":
-                                self.request(viewer: json["viewer"] as? String ?? "", name: json["name"] as? String ?? "")
+                                self.request(viewer: json["viewer"] as? String ?? "", name: json["name"] as? String ?? "",
+                                             rid: json["rid"] as? String)
                             case "cancelled":
                                 self.pendingRequests.remove(json["viewer"] as? String ?? "")
                             case "game":
@@ -442,37 +443,53 @@ final class ScreenShare: NSObject, ObservableObject {
     private var pendingRequests: Set<String> = []
 
     /// Зритель просится посмотреть: доверенных пускаем сразу, остальных — по вопросу.
-    private func request(viewer: String, name: String) {
-        // Свой же ID (второе окно на этом Mac) и доверенные — без вопроса.
-        if viewer == ShareCode.myID || ShareHistory.shared.isTrusted(viewer) {
-            answer(viewer: viewer, accept: true)
+    private func request(viewer: String, name: String, rid: String? = nil) {
+        // Без вопроса — только доверенные. ID приходит от зрителя и им же задаётся, поэтому
+        // «свой» ID (viewer == myID) автоматически не принимается: это знает любой, у кого есть код.
+        if ShareHistory.shared.isTrusted(viewer) {
+            answer(viewer: viewer, accept: true, rid: rid)
             return
         }
         guard !pendingRequests.contains(viewer) else { return }
         pendingRequests.insert(viewer)
+        let canTrust = ShareHistory.canTrust(viewer)
         let alert = NSAlert()
         alert.messageText = "\(name) хочет посмотреть ваш экран"
-        alert.informativeText = "ID \(ShareCode.display(viewer)). Зритель только смотрит и может ставить метки — управлять вашим Mac он не может."
+        var text = "ID \(ShareCode.display(viewer)). Зритель только смотрит и может ставить метки — управлять вашим Mac он не может."
+        if viewer == ShareCode.myID {
+            text += "\n\nЗапрос с вашим собственным ID — это может быть не вы."
+        } else if !canTrust {
+            text += "\n\nУ запроса нет корректного ID, «Всегда разрешать» недоступно."
+        }
+        alert.informativeText = text
         alert.addButton(withTitle: "Разрешить")
-        alert.addButton(withTitle: "Всегда разрешать")
+        if canTrust { alert.addButton(withTitle: "Всегда разрешать") }
         alert.addButton(withTitle: "Отклонить")
         NSApp.activate()
         let response = alert.runModal()
         guard pendingRequests.remove(viewer) != nil, isLive else { return }
         switch response {
-        case .alertFirstButtonReturn: answer(viewer: viewer, accept: true)
-        case .alertSecondButtonReturn:
+        case .alertFirstButtonReturn: answer(viewer: viewer, accept: true, rid: rid)
+        case .alertSecondButtonReturn where canTrust:
             ShareHistory.shared.trust(viewer, name: name)
-            answer(viewer: viewer, accept: true)
-        default: answer(viewer: viewer, accept: false)
+            answer(viewer: viewer, accept: true, rid: rid)
+        default: answer(viewer: viewer, accept: false, rid: rid)
         }
     }
 
-    private func answer(viewer: String, accept: Bool) {
-        let message = String(format: #"{"type":"%@","viewer":"%@","name":"%@"}"#,
-                             accept ? "accept" : "decline", viewer, ShareCode.myName.replacingOccurrences(of: "\"", with: "'"))
-        socket?.send(.string(message)) { _ in }
+    private func answer(viewer: String, accept: Bool, rid: String? = nil) {
+        if let message = Self.answerMessage(viewer: viewer, accept: accept, rid: rid) {
+            socket?.send(.string(message)) { _ in }
+        }
         if accept { sender?.resendLast() }
+    }
+
+    /// JSON ответа ведущего; значения экранирует JSONSerialization, а не подстановка в строку.
+    static func answerMessage(viewer: String, accept: Bool, rid: String? = nil) -> String? {
+        var object: [String: Any] = ["type": accept ? "accept" : "decline", "viewer": viewer, "name": ShareCode.myName]
+        if let rid { object["rid"] = rid }
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     /// Идёт переподключение к серверу (трансляция не остановлена).
