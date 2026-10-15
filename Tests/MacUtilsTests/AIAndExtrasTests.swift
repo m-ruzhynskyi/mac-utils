@@ -94,10 +94,52 @@ final class WhisperOutputTests: XCTestCase {
 }
 
 final class ChangelogTests: XCTestCase {
-    @MainActor func testFamilyAndOrder() {
+    /// Info.plist — единственный источник MAJOR.MINOR (docs/VERSIONING.md): PATCH в файле всегда 0,
+    /// а для линии есть запись в Changelog (иначе «Что нового» не покажется).
+    private func infoPlist() throws -> [String: Any] {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources/Info.plist")
+        let data = try Data(contentsOf: url)
+        return try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+    }
+
+    func testInfoPlistVersionIsMajorMinorZero() throws {
+        let short = try XCTUnwrap(infoPlist()["CFBundleShortVersionString"] as? String)
+        let parts = short.split(separator: ".", omittingEmptySubsequences: false)
+        XCTAssertEqual(parts.count, 3, "ожидается MAJOR.MINOR.PATCH, а в файле \(short)")
+        XCTAssertTrue(parts.allSatisfy { !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }, "только цифры: \(short)")
+        XCTAssertEqual(parts.last.map(String.init), "0", "PATCH в Info.plist всегда 0, его считает сборка: \(short)")
+        if parts.count == 3, let minor = Int(parts[1]) { XCTAssertLessThanOrEqual(minor, 999) }
+    }
+
+    @MainActor func testChangelogHasEntryForInfoPlistLine() throws {
+        let short = try XCTUnwrap(infoPlist()["CFBundleShortVersionString"] as? String)
+        let line = Changelog.family(short)
+        XCTAssertTrue(Changelog.releases.contains { $0.version == line },
+                      "нет записи Release(version: \"\(line)\") в Changelog.releases — «Что нового» не откроется")
+    }
+
+    @MainActor func testChangelogVersionsAreMajorMinorAndUnique() {
+        let versions = Changelog.releases.map(\.version)
+        XCTAssertEqual(Set(versions).count, versions.count)
+        for version in versions {
+            XCTAssertEqual(version.split(separator: ".").count, 2, "запись Changelog — только MAJOR.MINOR: \(version)")
+        }
+    }
+
+    @MainActor func testChangelogIsNewestFirst() {
+        let numbers = Changelog.releases.map { $0.version.split(separator: ".").compactMap { Int($0) } }
+        for (newer, older) in zip(numbers, numbers.dropFirst()) {
+            XCTAssertTrue(older.lexicographicallyPrecedes(newer), "\(newer) должна идти раньше \(older)")
+        }
+    }
+
+    @MainActor func testFamilyAndOrder() throws {
         XCTAssertEqual(Changelog.family("1.3.4"), "1.3")
         XCTAssertEqual(Changelog.family("1.3"), "1.3")
-        XCTAssertEqual(Changelog.releases.first?.version, "1.3")
+        let short = try XCTUnwrap(infoPlist()["CFBundleShortVersionString"] as? String)
+        XCTAssertEqual(Changelog.releases.first?.version, Changelog.family(short))
         XCTAssertTrue(Updater.isVersion("1.3.0", newerThan: "1.2.118"))
     }
 }

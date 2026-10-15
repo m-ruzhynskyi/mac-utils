@@ -27,6 +27,41 @@ final class Updater: NSObject, ObservableObject {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
+    /// Канал сборки. Ключ `MUReleaseChannel` прописывает `build.sh`: `release` при `MU_RELEASE=1`, иначе `dev`.
+    /// Нет ключа (запуск без бандла, чужая сборка) — `dev`: сам ничего не ставит.
+    enum Channel: Equatable {
+        case release, dev
+
+        init(infoValue: Any?) {
+            self = (infoValue as? String) == "release" ? .release : .dev
+        }
+
+        /// Только релизные сборки ставят обновления без нажатия кнопки.
+        var installsAutomatically: Bool { self == .release }
+    }
+
+    var releaseChannel: Channel {
+        Channel(infoValue: Bundle.main.object(forInfoDictionaryKey: "MUReleaseChannel"))
+    }
+
+    /// Версия для интерфейса: `1.4.3` у релиза, `1.4.3 · dev abc1234+12` у dev-сборки (см. docs/VERSIONING.md).
+    var displayVersion: String {
+        let info = Bundle.main
+        return Self.displayVersion(short: currentVersion, channel: releaseChannel,
+                                   commit: info.object(forInfoDictionaryKey: "MUGitCommit") as? String,
+                                   since: info.object(forInfoDictionaryKey: "MUCommitsSinceRelease") as? String)
+    }
+
+    nonisolated static func displayVersion(short: String, channel: Channel, commit: String?, since: String?) -> String {
+        guard channel == .dev else { return short }
+        var text = "\(short) · dev"
+        if let commit, !commit.isEmpty, commit != "unknown" {
+            text += " \(commit)"
+            if let since, !since.isEmpty, since != "?" { text += "+\(since)" }
+        }
+        return text
+    }
+
     /// Репозиторий «владелец/имя»: из настроек или из Info.plist (его прописывает сборка на GitHub).
     var repository: String {
         let custom = UserDefaults.standard.string(forKey: Pref.updateRepo)?
@@ -71,7 +106,7 @@ final class Updater: NSObject, ObservableObject {
             }
             return
         }
-        check(install: true, userInitiated: false)
+        check(install: releaseChannel.installsAutomatically, userInitiated: false)
     }
 
     // MARK: - Проверка
@@ -158,17 +193,32 @@ final class Updater: NSObject, ObservableObject {
         return try parseRelease(data)
     }
 
-    /// Первый подходящий Mac-релиз из ответа GitHub (список релизов).
+    /// Компоненты версии из тега строго вида `v<цифры>.<цифры>.<цифры>`; всё остальное
+    /// (`windows-latest`, `v1.4.0-beta.1`, `v1.4`, `v1.4.0.1`) — nil.
+    nonisolated static func strictVersion(tag: String) -> [Int]? {
+        guard tag.hasPrefix("v") else { return nil }
+        let parts = tag.dropFirst().split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        var numbers: [Int] = []
+        for part in parts {
+            guard !part.isEmpty, part.count == 1 || part.first != "0", part.utf8.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }), let n = Int(part) else { return nil }
+            numbers.append(n)
+        }
+        return numbers
+    }
+
+    /// Самый новый Mac-релиз из ответа GitHub (список релизов), независимо от порядка в списке.
     static func parseRelease(_ data: Data) throws -> ReleaseInfo {
         let releases = try JSONDecoder().decode([ReleaseDTO].self, from: data)
-        guard let release = releases.first(where: { release in
-            !release.draft && !release.prerelease && release.tagName.hasPrefix("v")
-                && release.assets.contains { $0.name == assetName }
-        }), let asset = release.assets.first(where: { $0.name == assetName }) else {
-            throw UpdateError("Релиз Mac Utils не найден")
+        var best: (numbers: [Int], tag: String, url: URL)?
+        for release in releases where !release.draft && !release.prerelease {
+            guard let numbers = strictVersion(tag: release.tagName),
+                  let asset = release.assets.first(where: { $0.name == assetName }) else { continue }
+            if let current = best, numbers.lexicographicallyPrecedes(current.numbers) { continue }
+            best = (numbers, release.tagName, asset.browserDownloadURL)
         }
-        let version = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
-        return ReleaseInfo(version: version, zipURL: asset.browserDownloadURL)
+        guard let best else { throw UpdateError("Релиз Mac Utils не найден") }
+        return ReleaseInfo(version: String(best.tag.dropFirst()), zipURL: best.url)
     }
 
     nonisolated static func isVersion(_ candidate: String, newerThan current: String) -> Bool {
