@@ -668,7 +668,7 @@ final class UpdaterChannelTests: XCTestCase {
         XCTAssertEqual(Updater.strictVersion(tag: "v1.4.3"), [1, 4, 3])
         XCTAssertEqual(Updater.strictVersion(tag: "v1.3.100"), [1, 3, 100])
         XCTAssertEqual(Updater.strictVersion(tag: "v0.0.0"), [0, 0, 0])
-        for bad in ["1.4.3", "windows-latest", "v1.4", "v1.4.0.1", "v1.4.0-beta.1", "v1.4.x", "v1..3", "v1.4.", "v", "", "V1.4.3", "v1.4.3 ", "v+1.4.3", "v1.-4.3", "v١.٤.٣"] {
+        for bad in ["1.4.3", "windows-latest", "v1.4", "v1.4.0.1", "v1.4.0-beta.1", "v1.4.x", "v1..3", "v1.4.", "v", "", "V1.4.3", "v1.4.3 ", "v+1.4.3", "v1.-4.3", "v١.٤.٣", "v1.04.0", "v01.4.0", "v1.4.00", "v1.4.07"] {
             XCTAssertNil(Updater.strictVersion(tag: bad), bad)
         }
     }

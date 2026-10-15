@@ -275,6 +275,32 @@ git -C "$d" checkout -q development
 run "$d"; expect SHORT 1.4.1
 
 # ---------------------------------------------------------------------------
+CASE="M1: старый коммит после нового тега — release ошибка, dev работает"
+d="$(new_repo 1.4.0)"
+git -C "$d" tag v1.4.0; commit "$d"; old="$(git -C "$d" rev-parse HEAD)"
+commit "$d"; git -C "$d" tag v1.4.1
+git -C "$d" checkout -q "$old"; commit "$d"
+run "$d" release; expect_error
+run "$d"; expect_success; expect SHORT 1.4.1
+
+CASE="M1: потомок последнего тега выпускается"
+d="$(new_repo 1.4.0)"
+git -C "$d" tag v1.4.0; commit "$d"
+run "$d" release; expect_success; expect SHORT 1.4.1
+
+CASE="N1: тег с ведущим нулём на HEAD не считается релизным"
+d="$(new_repo 1.4.0)"
+git -C "$d" tag v1.4.0; commit "$d"; git -C "$d" tag v1.4.07
+run "$d" release; expect_success; expect SHORT 1.4.1
+d="$(new_repo 1.4.0)"; git -C "$d" tag v1.4.08
+run "$d" release; expect_success; expect SHORT 1.4.0
+
+CASE="N2: shallow-репозиторий — release ошибка"
+src="$(new_repo 1.4.0)"; commit "$src"; commit "$src"
+d="$WORK/shallow"; git clone -q --depth 1 "file://$src" "$d"
+run "$d" release; expect_error
+
+# ---------------------------------------------------------------------------
 CASE="без git (архив исходников): BASE.0, dev, COMMIT=unknown"
 d="$(mktemp -d "$WORK/nogit.XXXXXX")"
 mkdir -p "$d/scripts" "$d/Resources"

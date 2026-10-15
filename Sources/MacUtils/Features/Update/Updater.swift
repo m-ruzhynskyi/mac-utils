@@ -201,7 +201,7 @@ final class Updater: NSObject, ObservableObject {
         guard parts.count == 3 else { return nil }
         var numbers: [Int] = []
         for part in parts {
-            guard !part.isEmpty, part.utf8.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }), let n = Int(part) else { return nil }
+            guard !part.isEmpty, part.count == 1 || part.first != "0", part.utf8.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }), let n = Int(part) else { return nil }
             numbers.append(n)
         }
         return numbers

@@ -47,6 +47,7 @@ fi
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null)" || COMMIT="unknown"
 
 if (( RELEASE )); then
+    [[ "$(git rev-parse --is-shallow-repository)" == "false" ]] || die "неполная история (shallow): нужен checkout с fetch-depth: 0, иначе теги могут быть не видны"
     [[ -z "$(git status --porcelain)" ]] || die "MU_RELEASE=1 на грязном дереве: закоммитьте или уберите правки"
     # Номер линии не может быть ниже уже выпущенной: клиенты берут самый свежий релиз.
     if [[ -n "$STRICT_TAGS" ]]; then
@@ -57,7 +58,11 @@ if (( RELEASE )); then
         fi
     fi
     # Перезапуск job на уже помеченном коммите — тот же тег.
-    AT_HEAD="$(git tag --points-at HEAD | grep -E "^v${BASE//./\\.}\.[0-9]+\$" || true)"
+    AT_HEAD="$(git tag --points-at HEAD | grep -E "^v${BASE//./\\.}\.${NUM}\$" || true)"
+    # HEAD без тега должен содержать последний релиз: иначе старый коммит получил бы номер новее уже выпущенного.
+    if [[ -z "$AT_HEAD" && -n "${TOP:-}" ]]; then
+        git merge-base --is-ancestor "v$TOP" HEAD || die "HEAD не содержит последний релиз v$TOP (старый коммит не публикуется)"
+    fi
     if [[ -n "$AT_HEAD" ]]; then
         PATCH="$(printf '%s\n' "$AT_HEAD" | sed 's/^v[0-9]*\.[0-9]*\.//' | sort -n | tail -1)"
     elif [[ -n "$LAST_PATCH" ]]; then
