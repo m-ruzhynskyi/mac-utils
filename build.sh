@@ -67,6 +67,8 @@ cp Resources/ToolsIcon.icns "$TOOLS/Contents/Resources/ToolsIcon.icns"
 # Постоянная подпись «Mac Utils Signing» (см. scripts/make-signing-cert.sh) — тогда
 # macOS не сбрасывает разрешения после пересборки и автообновления.
 IDENTITY="${SIGN_IDENTITY:-}"
+EXPLICIT_IDENTITY=0
+[[ -n "$IDENTITY" ]] && EXPLICIT_IDENTITY=1
 if [[ -z "$IDENTITY" ]] && security find-certificate -c "Mac Utils Signing" >/dev/null 2>&1; then
     IDENTITY="Mac Utils Signing"
 fi
@@ -75,6 +77,11 @@ if [[ -n "$IDENTITY" ]] && codesign --force --sign "$IDENTITY" "$APP/Contents/Re
     && codesign --force --sign "$IDENTITY" "$TOOLS" && codesign --force --sign "$IDENTITY" "$APP"; then
     echo "Подписано: $IDENTITY"
 else
+    # SIGN_IDENTITY задан явно (релиз) — молчаливый ad-hoc оставил бы пользователей без автообновления.
+    if (( EXPLICIT_IDENTITY )); then
+        echo "Не удалось подписать «$IDENTITY» (SIGN_IDENTITY задан явно), ad-hoc не подставляю" >&2
+        exit 1
+    fi
     [[ -n "$IDENTITY" ]] && echo "Не удалось подписать «$IDENTITY», подписываю ad-hoc" >&2
     codesign --force --sign - "$APP/Contents/Resources/MUNowPlaying.dylib"
     codesign --force --sign - "$TOOLS"

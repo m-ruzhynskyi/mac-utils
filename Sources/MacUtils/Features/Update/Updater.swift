@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Security
 
 /// Автообновление из GitHub Releases: раз в несколько часов смотрит последний
 /// релиз репозитория, скачивает MacUtils.zip, подменяет приложение и перезапускает его.
@@ -42,6 +43,9 @@ final class Updater: NSObject, ObservableObject {
             defaults.removeObject(forKey: Pref.justUpdatedTo)
             if updated == currentVersion {
                 Toast.show("Mac Utils обновлён до \(updated)", symbol: "arrow.down.circle.fill", tint: .green)
+            } else {
+                // Скрипт замены не отработал (процесс не вышел вовремя, нет прав): остались на старой версии.
+                Toast.show("Обновление до \(updated) не установилось", symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
         }
         // Новая линейка версий — один раз показываем «Что нового».
@@ -151,6 +155,11 @@ final class Updater: NSObject, ObservableObject {
             throw UpdateError("Релизы не найдены (репозиторий приватный или релизов ещё нет)")
         }
         guard status == 200 else { throw UpdateError("GitHub ответил \(status)") }
+        return try parseRelease(data)
+    }
+
+    /// Первый подходящий Mac-релиз из ответа GitHub (список релизов).
+    static func parseRelease(_ data: Data) throws -> ReleaseInfo {
         let releases = try JSONDecoder().decode([ReleaseDTO].self, from: data)
         guard let release = releases.first(where: { release in
             !release.draft && !release.prerelease && release.tagName.hasPrefix("v")
@@ -162,7 +171,7 @@ final class Updater: NSObject, ObservableObject {
         return ReleaseInfo(version: version, zipURL: asset.browserDownloadURL)
     }
 
-    static func isVersion(_ candidate: String, newerThan current: String) -> Bool {
+    nonisolated static func isVersion(_ candidate: String, newerThan current: String) -> Bool {
         let a = candidate.split(separator: ".").map { Int($0) ?? 0 }
         let b = current.split(separator: ".").map { Int($0) ?? 0 }
         for i in 0..<max(a.count, b.count) {
@@ -190,60 +199,180 @@ final class Updater: NSObject, ObservableObject {
             throw UpdateError("Не удалось скачать обновление")
         }
         let bundleID = Bundle.main.bundleIdentifier
-        let newApp = try await Task.detached(priority: .userInitiated) { () -> URL in
-            let fm = FileManager.default
-            let work = fm.temporaryDirectory.appendingPathComponent("MacUtilsUpdate-\(UUID().uuidString)")
-            try fm.createDirectory(at: work, withIntermediateDirectories: true)
-            let zip = work.appendingPathComponent("update.zip")
-            try fm.moveItem(at: downloaded, to: zip)
-            try Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, work.path])
-            guard let app = try fm.contentsOfDirectory(at: work, includingPropertiesForKeys: nil)
-                .first(where: { $0.pathExtension == "app" }) else {
-                throw UpdateError("В архиве нет приложения")
-            }
-            guard Bundle(url: app)?.bundleIdentifier == bundleID else {
-                throw UpdateError("Архив содержит другое приложение")
-            }
-            try Self.run("/usr/bin/codesign", ["--verify", "--deep", app.path])
-            return app
-        }.value
+        let staged = target.appendingPathExtension("new")
+        let currentShort = currentVersion
+        let currentBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        do {
+            // Требование — из запущенного кода, а не из бандла на диске, который мог измениться.
+            let requirement = try Self.currentRequirement()
+            let work = try await Task.detached(priority: .userInitiated) { () -> URL in
+                let fm = FileManager.default
+                let work = fm.temporaryDirectory.appendingPathComponent("MacUtilsUpdate-\(UUID().uuidString)")
+                try fm.createDirectory(at: work, withIntermediateDirectories: true)
+                let zip = work.appendingPathComponent("update.zip")
+                try fm.moveItem(at: downloaded, to: zip)
+                let unpacked = work.appendingPathComponent("unpacked")
+                try fm.createDirectory(at: unpacked, withIntermediateDirectories: true)
+                try Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
+                guard let app = try fm.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: [.isSymbolicLinkKey])
+                    .first(where: { $0.pathExtension == "app" }) else {
+                    throw UpdateError("В архиве нет приложения")
+                }
+                if (try? app.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
+                    throw UpdateError("В архиве символическая ссылка вместо приложения")
+                }
+                guard let bundle = Bundle(url: app), bundle.bundleIdentifier == bundleID else {
+                    throw UpdateError("Архив содержит другое приложение")
+                }
+                // Версия внутри бандла должна совпасть с релизом и быть новее: иначе подсунут старую подписанную сборку.
+                try Self.checkVersions(bundleShort: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                                       bundleBuild: bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+                                       release: release.version, currentShort: currentShort, currentBuild: currentBuild)
+                try Self.verifySignature(of: app, requirement: requirement)
+                // Рядом с целью, чтобы последующая замена была переименованием на одном томе.
+                try? fm.removeItem(at: staged)
+                try Self.run("/usr/bin/ditto", [app.path, staged.path])
+                // Карантин снимаем только у проверенной сборки, и копию, которая встанет на место, проверяем ещё раз.
+                try? Self.run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", staged.path])
+                try Self.verifySignature(of: staged, requirement: requirement)
+                return work
+            }.value
 
-        // Скрипт ждёт выхода текущего процесса, заменяет бандл и запускает новую версию.
-        let pid = ProcessInfo.processInfo.processIdentifier
-        let script = """
-        while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.2; done
-        /bin/rm -rf \(Self.quote(target.path))
-        /usr/bin/ditto \(Self.quote(newApp.path)) \(Self.quote(target.path))
-        /usr/bin/xattr -dr com.apple.quarantine \(Self.quote(target.path)) 2>/dev/null
-        /usr/bin/touch \(Self.quote(target.path))
-        /usr/bin/open \(Self.quote(target.path))
-        /bin/rm -rf \(Self.quote(newApp.deletingLastPathComponent().path))
-        """
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", script]
-        try process.run()
+            // Скрипт ждёт выхода текущего процесса, меняет бандлы местами с откатом и запускает новую версию.
+            let script = Self.installScript(pid: ProcessInfo.processInfo.processIdentifier,
+                                            target: target, staged: staged, work: work)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", script]
+            try process.run()
+        } catch {
+            try? FileManager.default.removeItem(at: staged)
+            throw error
+        }
 
         UserDefaults.standard.set(release.version, forKey: Pref.justUpdatedTo)
         AppSwitcher.shared.shutdown()
         NSApp.terminate(nil)
     }
 
-    nonisolated private static func run(_ tool: String, _ arguments: [String]) throws {
+    /// Версия внутри скачанного бандла: совпадает с релизом, новее текущей, номер сборки больше текущего.
+    nonisolated static func checkVersions(bundleShort: String?, bundleBuild: String?, release: String,
+                                          currentShort: String, currentBuild: String?) throws {
+        guard bundleShort == release else {
+            throw UpdateError("Версия в архиве (\(bundleShort ?? "нет")) не совпадает с релизом \(release)")
+        }
+        guard isVersion(release, newerThan: currentShort) else {
+            throw UpdateError("Версия \(release) не новее установленной \(currentShort)")
+        }
+        guard let bundleBuild, isVersion(bundleBuild, newerThan: currentBuild ?? "0") else {
+            throw UpdateError("Номер сборки в архиве (\(bundleBuild ?? "нет")) не больше текущего (\(currentBuild ?? "0"))")
+        }
+    }
+
+    /// Скрипт замены: `target` → `target.old`, `staged` → `target`; если второй `mv` не удался, старая версия возвращается.
+    /// Ждёт выхода процесса не дольше `waitSeconds`: иначе убирает `staged` и ничего не меняет.
+    nonisolated static func installScript(pid: Int32, target: URL, staged: URL, work: URL, waitSeconds: Int = 60) -> String {
+        let old = quote(target.path + ".old")
+        let target = quote(target.path)
+        let staged = quote(staged.path)
+        return """
+        waited=0
+        while /bin/kill -0 \(pid) 2>/dev/null; do
+          /bin/sleep 0.2
+          waited=$((waited + 1))
+          if [ "$waited" -ge \(waitSeconds * 5) ]; then
+            /bin/rm -rf \(staged) \(quote(work.path))
+            exit 1
+          fi
+        done
+        /bin/rm -rf \(old)
+        if /bin/mv \(target) \(old); then
+          if /bin/mv \(staged) \(target); then
+            /bin/rm -rf \(old)
+          else
+            /bin/mv \(old) \(target)
+            /bin/rm -rf \(staged)
+          fi
+        else
+          /bin/rm -rf \(staged)
+        fi
+        /usr/bin/touch \(target)
+        /usr/bin/open \(target)
+        /bin/rm -rf \(quote(work.path))
+        """
+    }
+
+    /// Designated requirement запущенного приложения. Ad-hoc сборка требует точного cdhash,
+    /// поэтому проверить издателя обновления по ней нельзя — отказываем.
+    nonisolated static func currentRequirement() throws -> SecRequirement {
+        var selfCode: SecCode?
+        var staticCode: SecStaticCode?
+        var requirement: SecRequirement?
+        guard SecCodeCopySelf([], &selfCode) == errSecSuccess, let selfCode,
+              SecCodeCopyStaticCode(selfCode, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopyDesignatedRequirement(staticCode, [], &requirement) == errSecSuccess,
+              let requirement else {
+            throw UpdateError("Не удалось прочитать подпись текущей версии")
+        }
+        var text: CFString?
+        if SecRequirementCopyString(requirement, [], &text) == errSecSuccess, let text,
+           (text as String).hasPrefix("cdhash") {
+            throw UpdateError("Текущая сборка подписана ad-hoc: проверить издателя обновления нельзя")
+        }
+        return requirement
+    }
+
+    /// То же по требованию бандла на диске (для тестов; в установке требование берётся из запущенного кода).
+    nonisolated static func verifySignature(of app: URL, matchingBundleAt current: URL) throws {
+        var code: SecStaticCode?
+        var requirement: SecRequirement?
+        guard SecStaticCodeCreateWithPath(current as CFURL, [], &code) == errSecSuccess, let code,
+              SecCodeCopyDesignatedRequirement(code, [], &requirement) == errSecSuccess, let requirement else {
+            throw UpdateError("Не удалось прочитать подпись текущей версии")
+        }
+        var text: CFString?
+        if SecRequirementCopyString(requirement, [], &text) == errSecSuccess, let text,
+           (text as String).hasPrefix("cdhash") {
+            throw UpdateError("Текущая сборка подписана ad-hoc: проверить издателя обновления нельзя")
+        }
+        try verifySignature(of: app, requirement: requirement)
+    }
+
+    /// Бандл целостный и подписан по `requirement` (тот же издатель), без символических ссылок внутри.
+    nonisolated static func verifySignature(of app: URL, requirement: SecRequirement) throws {
+        var newCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(app as CFURL, [], &newCode) == errSecSuccess, let newCode else {
+            throw UpdateError("Не удалось прочитать подпись обновления")
+        }
+        let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate
+                               | kSecCSCheckNestedCode | kSecCSRestrictSymlinks | kSecCSRestrictToAppLike)
+        var failure: Unmanaged<CFError>?
+        guard SecStaticCodeCheckValidityWithErrors(newCode, flags, requirement, &failure) == errSecSuccess else {
+            let reason = failure?.takeRetainedValue().localizedDescription ?? "подпись не совпадает"
+            throw UpdateError("Обновление подписано другим издателем или повреждено (\(reason))")
+        }
+    }
+
+    nonisolated static func run(_ tool: String, _ arguments: [String], timeout: TimeInterval = 120) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
         try process.run()
-        process.waitUntilExit()
+        if finished.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            throw UpdateError("\((tool as NSString).lastPathComponent) не ответил за \(Int(timeout)) с")
+        }
         guard process.terminationStatus == 0 else {
             throw UpdateError("\((tool as NSString).lastPathComponent) завершился с ошибкой \(process.terminationStatus)")
         }
     }
 
     /// Экранирование для sh: 'путь с пробелами'.
-    nonisolated private static func quote(_ path: String) -> String {
+    nonisolated static func quote(_ path: String) -> String {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
