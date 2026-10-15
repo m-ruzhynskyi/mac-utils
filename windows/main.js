@@ -106,6 +106,8 @@ function createWindow() {
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true },
   });
+  // Закрыли главное окно — выходим совсем (окно меток не должно держать приложение без окна).
+  window.on("closed", () => { window = null; app.quit(); });
   window.loadURL(RELAY).catch(() => window.loadFile(path.join(__dirname, "offline.html")));
   window.webContents.on("did-fail-load", () => window.loadFile(path.join(__dirname, "offline.html")));
   // Внешние ссылки — в браузере.
@@ -147,7 +149,7 @@ app.whenReady().then(() => {
   ipcMain.on("hostname", (event) => { event.returnValue = require("os").hostname(); });
   // Кто-то просится смотреть — привлекаем внимание (мигание на панели задач).
   ipcMain.on("attention", () => {
-    if (!window) return;
+    if (!window || window.isDestroyed()) return;
     if (window.isMinimized()) window.restore();
     window.flashFrame(true);
     window.show();
@@ -212,10 +214,10 @@ app.whenReady().then(() => {
 });
 
 app.on("second-instance", () => {
-  if (window) {
-    if (window.isMinimized()) window.restore();
-    window.focus();
-  }
+  if (!window || window.isDestroyed()) return app.isReady() && createWindow();
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
 });
 
 app.on("window-all-closed", () => app.quit());
@@ -228,7 +230,8 @@ function checkForUpdates() {
 }
 
 autoUpdater.on("update-downloaded", async (info) => {
-  const { response } = await dialog.showMessageBox(window, {
+  const parent = window && !window.isDestroyed() ? window : undefined;
+  const { response } = await dialog.showMessageBox(parent, {
     type: "info",
     buttons: ["Перезапустить сейчас", "Позже"],
     defaultId: 0,
