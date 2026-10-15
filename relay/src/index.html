@@ -616,7 +616,8 @@ function startCapture(stream, code) {
   const ctx = canvas.getContext("2d");
   $("live").style.display = "flex";
   $("liveText").textContent = "В эфире · никто не смотрит";
-  status(`Вы в эфире. Ваш ID: ${display(code)}`);
+  // Что вы в эфире, видно в шапке (точка, «Стоп»); посередине ничего не держим — там чужая трансляция или пусто.
+  if (!watching) status("");
   hostSocket.onmessage = (event) => {
     if (typeof event.data !== "string") return;
     const msg = JSON.parse(event.data);
