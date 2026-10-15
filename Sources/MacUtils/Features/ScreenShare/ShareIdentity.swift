@@ -62,7 +62,22 @@ final class ShareIdentity: @unchecked Sendable {
     private let lock = NSLock()
     private var cached: Curve25519.Signing.PrivateKey?
     /// false: Keychain недоступен, ключ живёт только в памяти до выхода из приложения.
-    private(set) var isPersistent = true
+    private var persistent = true
+
+    /// Явное состояние хранилища ключа. Читать его можно до первой подписи: ключ при этом загружается.
+    enum Availability: Equatable { case persistent, keychainUnavailable }
+
+    /// Текст для пользователя, когда ключ сохранить нельзя и проверка ключом выключена.
+    static let keychainUnavailableMessage = "Нет доступа к Связке ключей, проверка ключа выключена"
+
+    var availability: Availability {
+        _ = key()
+        lock.lock(); defer { lock.unlock() }
+        return persistent ? .persistent : .keychainUnavailable
+    }
+
+    /// false — Keychain недоступен: временный ключ нельзя показывать relay (он закрепил бы ID за выброшенным ключом).
+    var isPersistent: Bool { availability == .persistent }
 
     init(store: ShareKeyStore) { self.store = store }
 
@@ -90,7 +105,7 @@ final class ShareIdentity: @unchecked Sendable {
         } catch {
             // Отказ в доступе или заблокированная связка: не затираем существующий ключ, работаем с временным.
             Self.log.error("Не удалось сохранить ключ трансляции: \(String(describing: error), privacy: .public)")
-            isPersistent = false
+            persistent = false
             return Curve25519.Signing.PrivateKey()
         }
     }
@@ -101,11 +116,11 @@ final class ShareIdentity: @unchecked Sendable {
         do { try store.delete() } catch {
             Self.log.error("Не удалось удалить ключ трансляции: \(String(describing: error), privacy: .public)")
         }
-        isPersistent = true
+        persistent = true
         let key = Curve25519.Signing.PrivateKey()
         do { try store.save(key.rawRepresentation) } catch {
             Self.log.error("Не удалось сохранить новый ключ трансляции: \(String(describing: error), privacy: .public)")
-            isPersistent = false
+            persistent = false
         }
         cached = key
     }

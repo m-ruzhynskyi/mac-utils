@@ -33,17 +33,28 @@ final class ShareHistory: ObservableObject {
     private var users = 0
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: Pref.shareHistory),
-           let saved = try? JSONDecoder().decode([Entry].self, from: data) {
-            // Свой и невалидный ID доверенными быть не могут (иначе «всегда разрешать» возвращает автопринятие).
-            // Ключи не того формата отбрасываются: с ними не совпадёт ни один настоящий ключ.
-            entries = saved.map { entry in
-                var entry = entry
-                if entry.trusted, !Self.canTrust(entry.id) { entry.trusted = false }
-                if let key = entry.key, !Self.isPublicKey(key) { entry.key = nil; entry.keyConfirmedAt = nil }
-                if let key = entry.hostKey, !Self.isPublicKey(key) { entry.hostKey = nil }
-                return entry
-            }
+        if let data = UserDefaults.standard.data(forKey: Pref.shareHistory) {
+            entries = Self.decodeEntries(data)
+        }
+    }
+
+    /// Элемент массива, который не прочитался, не должен обнулять всю историю: он пропускается, остальные сохраняются.
+    private struct Lossy: Decodable {
+        let entry: Entry?
+        init(from decoder: Decoder) throws { entry = try? Entry(from: decoder) }
+    }
+
+    /// История из сохранённых данных: поэлементно, с очисткой небезопасных полей. Не массив — пусто.
+    static func decodeEntries(_ data: Data) -> [Entry] {
+        guard let saved = try? JSONDecoder().decode([Lossy].self, from: data) else { return [] }
+        // Свой и невалидный ID доверенными быть не могут (иначе «всегда разрешать» возвращает автопринятие).
+        // Ключи не того формата отбрасываются: с ними не совпадёт ни один настоящий ключ.
+        return saved.compactMap(\.entry).map { entry in
+            var entry = entry
+            if entry.trusted, !canTrust(entry.id) { entry.trusted = false }
+            if let key = entry.key, !isPublicKey(key) { entry.key = nil; entry.keyConfirmedAt = nil }
+            if let key = entry.hostKey, !isPublicKey(key) { entry.hostKey = nil }
+            return entry
         }
     }
 
@@ -96,7 +107,9 @@ final class ShareHistory: ObservableObject {
     /// Снимает доверие вместе с ключом: следующее «Всегда разрешать» запомнит ключ заново.
     func untrust(_ id: String) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        if entries[index].incomingOnly {
+        // Запись без визитов (создана только «Всегда разрешать») удаляется целиком, но не вместе с запомненным
+        // ключом ведущего: иначе «Снять доверие» стирает pinning (§4.3), и смена ключа ведущего пройдёт незамеченной.
+        if entries[index].incomingOnly && entries[index].hostKey == nil {
             entries.remove(at: index)
         } else {
             entries[index].trusted = false
@@ -119,7 +132,7 @@ final class ShareHistory: ObservableObject {
         Self.canTrust(id) && entries.contains { $0.id == id && $0.trusted && $0.key == nil }
     }
 
-    /// Запомнить ключ ведущего, к которому подключались (§4.3).
+    /// Запомнить ключ ведущего, к которому подключались (§4.3). Зритель вызывает `visited()` раньше: запись уже «посещённая».
     func pinHost(id: String, key: String) {
         guard Self.isValidID(id), Self.isPublicKey(key) else { return }
         update(id) { $0.hostKey = key }
@@ -179,6 +192,30 @@ final class ShareHistory: ObservableObject {
     /// Сервер, который не понял `POST /status` (старый или сторонний relay): до смены сервера только `GET`.
     private var signedStatusUnsupported: String?
 
+    /// Что делать с ответом на подписанный `POST /status` (N3).
+    enum SignedStatusAction: Equatable {
+        /// 200 и ответ про все ID — берём его.
+        case use
+        /// Сервер не понял или не принял `POST` надолго (200 без карты, 403, 404, 405): дальше только `GET`.
+        case rememberUnsupportedThenGet
+        /// 429: лимит — не добавлять к нему ещё и `GET`, пропустить тик.
+        case skipTick
+        /// Разовая ошибка (подпись, 5xx, нет связи): один `GET` в этом тике.
+        case getOnce
+    }
+
+    static func signedStatusAction(status: Int, parsed: Bool) -> SignedStatusAction {
+        switch status {
+        case 200: return parsed ? .use : .rememberUnsupportedThenGet
+        case 403, 404, 405: return .rememberUnsupportedThenGet
+        case 429: return .skipTick
+        default: return .getOnce
+        }
+    }
+
+    /// Признак «этот сервер для этого ID не понимает подписанный запрос»: смена сервера или ID (новый ключ) даёт новую попытку.
+    static func signedStatusKey(server: String, myID: String) -> String { "\(server)|\(myID)" }
+
     /// Кого опрашивать: только 10-значные ID, не больше 20 самых свежих (лимит relay, §6).
     static func statusIDs(_ entries: [Entry]) -> [String] {
         Array(entries.sorted { $0.lastSeen > $1.lastSeen }.map(\.id).filter(isValidID).prefix(20))
@@ -215,19 +252,26 @@ final class ShareHistory: ObservableObject {
         let ids = Self.statusIDs(visitedEntries)
         let server = ScreenShare.server
         guard !ids.isEmpty, let url = ShareCode.statusURL(server: server, ids: ids) else { return }
+        let memo = Self.signedStatusKey(server: server, myID: ShareCode.myID)
         var signed: URLRequest?
-        if signedStatusUnsupported != server, let identity = Self.statusIdentity {
+        if signedStatusUnsupported != memo, let identity = Self.statusIdentity, identity.isPersistent {
             signed = Self.statusRequest(server: server, myID: ShareCode.myID, ids: ids, identity: identity)
         }
         Task {
             if let signed, let (data, response) = try? await URLSession.shared.data(for: signed) {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                if status == 200, let result = Self.parseLive(data, ids: ids, complete: true) {
-                    live = result
+                let parsed = status == 200 ? Self.parseLive(data, ids: ids, complete: true) : nil
+                switch Self.signedStatusAction(status: status, parsed: parsed != nil) {
+                case .use:
+                    live = parsed ?? []
                     return
+                case .skipTick:
+                    return
+                case .rememberUnsupportedThenGet:
+                    signedStatusUnsupported = memo
+                case .getOnce:
+                    break
                 }
-                // Не понял `POST` — больше не пробуем. Прочие ошибки (лимит, подпись) — разовый откат на `GET`.
-                if status == 200 || status == 404 || status == 405 { signedStatusUnsupported = server }
             }
             guard let (data, _) = try? await URLSession.shared.data(for: ShareCode.request(url)),
                   let result = Self.parseLive(data, ids: ids) else { return }

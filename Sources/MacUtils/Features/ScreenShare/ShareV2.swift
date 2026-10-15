@@ -201,7 +201,7 @@ enum ShareRules {
 
     /// Подпись принятия: ведущий подтверждает зрителю, что пустил его именно он (проверяется по hostKey).
     static func hostSignature(for request: ShareRequest, roomId: String, identity: ShareIdentity) -> String? {
-        guard request.auth == .key, let pub = request.pub, let rid = request.rid else { return nil }
+        guard identity.isPersistent, request.auth == .key, let pub = request.pub, let rid = request.rid else { return nil }
         return identity.sign(accept: roomId, viewerPub: pub, rid: rid)
     }
 }
@@ -240,13 +240,21 @@ enum ShareHandshake {
         case failed(status: Int)
     }
 
+    /// Можно ли говорить с relay по mu-share-2: он объявил протокол, и ключ лежит в Keychain.
+    /// Временный ключ relay не показываем никогда: он закрепил бы ID за ключом, которого после перезапуска не будет.
+    static func useKeys(capability: ShareRelay.Capability?, identity: ShareIdentity) -> Bool {
+        capability == .keyed && identity.isPersistent
+    }
+
     static func hostAuthMessage(identity: ShareIdentity, roomId: String, nonce: String) -> String? {
-        json(["type": "auth", "v": 2, "alg": "ed25519", "pub": identity.publicKey,
+        guard identity.isPersistent else { return nil }
+        return json(["type": "auth", "v": 2, "alg": "ed25519", "pub": identity.publicKey,
               "sig": identity.sign(host: roomId, nonce: nonce)])
     }
 
     static func viewerAuthMessage(identity: ShareIdentity, roomId: String, viewerId: String, rid: String, nonce: String) -> String? {
-        json(["type": "auth", "v": 2, "alg": "ed25519", "pub": identity.publicKey,
+        guard identity.isPersistent else { return nil }
+        return json(["type": "auth", "v": 2, "alg": "ed25519", "pub": identity.publicKey,
               "sig": identity.sign(viewer: roomId, viewerId: viewerId, rid: rid, nonce: nonce)])
     }
 

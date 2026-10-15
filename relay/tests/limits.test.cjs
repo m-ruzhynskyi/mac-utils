@@ -7,12 +7,15 @@ const source = fs.readFileSync(`${__dirname}/../src/limits.js`, 'utf8')
   .replace(/^import .*;$/gm, '')
   .replace(/^export /gm, '');
 assert.doesNotMatch(fs.readFileSync(`${__dirname}/../src/limits.js`, 'utf8'), /^import /m, 'limits.js не должен ничего импортировать');
-const names = ['windowHit', 'pendingAllowed', 'declineCooldown', 'noteDecline',
-  'MAX_PENDING', 'AUTH_TIMEOUT_MS', 'DECLINE_BASE_MS', 'DECLINE_LONG_MS', 'CLAIM_PER_IP_PER_DAY'];
+const names = ['windowHit', 'pendingAllowed', 'declineCooldown', 'noteDecline', 'ipKey',
+  'MAX_PENDING', 'MAX_PENDING_PER_IP', 'MAX_UNAUTH', 'MAX_UNAUTH_PER_IP', 'AUTH_TIMEOUT_MS', 'DECLINE_BASE_MS', 'DECLINE_LONG_MS', 'CLAIM_PER_IP_PER_DAY'];
 const L = vm.runInNewContext(`${source}\n({ ${names.join(', ')} })`);
 
 test('константы по контракту', () => {
-  assert.equal(L.MAX_PENDING, 3);
+  assert.equal(L.MAX_PENDING, 10);
+  assert.equal(L.MAX_PENDING_PER_IP, 4);
+  assert.equal(L.MAX_UNAUTH, 5);
+  assert.equal(L.MAX_UNAUTH_PER_IP, 1);
   assert.equal(L.AUTH_TIMEOUT_MS, 10_000);
   assert.equal(L.DECLINE_BASE_MS, 60_000);
   assert.equal(L.DECLINE_LONG_MS, 600_000);
@@ -96,4 +99,27 @@ test('decline: серия сбрасывается после долгой ти�
   const until = 120_000 + 600_000;
   L.noteDecline(map, 'k', until + 600_001);
   assert.equal(L.declineCooldown(map, 'k', until + 600_001), 60_000);
+});
+
+test('pendingAllowed: filter отбирает, какие ожидающие считать', () => {
+  const list = [{ approved: false, ip: 'a', auth: 'pending' }, { approved: false, ip: 'a', auth: 'none' }];
+  assert.equal(L.pendingAllowed(list, 'a', 10, 1), false);
+  assert.equal(L.pendingAllowed(list, 'a', 10, 2, (info) => info.auth !== 'pending'), true);
+});
+
+test('ipKey: IPv4 целиком, IPv6 по /64, IPv4-mapped как IPv4, идемпотентность', () => {
+  const cases = [
+    ['1.2.3.4', '1.2.3.4'], [' 1.2.3.4 ', '1.2.3.4'], ['', ''], [undefined, ''],
+    ['2001:db8:1:2:3:4:5:6', '2001:db8:1:2::/64'], ['2001:DB8:1:2::9', '2001:db8:1:2::/64'],
+    ['2001:0db8:0001:0002:ffff::1', '2001:db8:1:2::/64'], ['2001:db8::1', '2001:db8:0:0::/64'],
+    ['::1', '0:0:0:0::/64'], ['::ffff:1.2.3.4', '1.2.3.4'], ['fe80::1%eth0', 'fe80:0:0:0::/64'],
+    ['[2001:db8:1:2::1]', '2001:db8:1:2::/64'], ['2001:db8:1:2:3:4:1.2.3.4', '2001:db8:1:2::/64'],
+  ];
+  for (const [ip, key] of cases) {
+    assert.equal(L.ipKey(ip), key, String(ip));
+    assert.equal(L.ipKey(L.ipKey(ip)), key, `повторно: ${ip}`);
+  }
+  assert.equal(L.ipKey('2001:db8:1:2::1'), L.ipKey('2001:db8:1:2:ffff:ffff:ffff:ffff'), 'один /64');
+  assert.notEqual(L.ipKey('2001:db8:1:2::1'), L.ipKey('2001:db8:1:3::1'), 'разные /64');
+  assert.equal(L.ipKey('not:::an:ip'), 'not:::an:ip', 'мусор не ломается');
 });

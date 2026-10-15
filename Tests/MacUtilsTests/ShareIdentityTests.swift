@@ -163,6 +163,35 @@ final class ShareIdentityTests: XCTestCase {
         XCTAssertFalse(second.isPersistent)
     }
 
+    func testAvailabilityIsExplicitAndReadableBeforeFirstSignature() {
+        let healthy = MemoryStore()
+        XCTAssertEqual(ShareIdentity(store: healthy).availability, .persistent)
+        XCTAssertEqual(healthy.saves, 1, "чтение состояния создаёт и сохраняет ключ")
+
+        let locked = MemoryStore()
+        locked.failLoad = true
+        let identity = ShareIdentity(store: locked)
+        XCTAssertEqual(identity.availability, .keychainUnavailable, "состояние известно без единой подписи")
+        XCTAssertFalse(identity.isPersistent)
+        XCTAssertEqual(identity.availability, .keychainUnavailable, "и не меняется при повторном чтении")
+        XCTAssertEqual(locked.saves, 0, "во временный режим ключ в Keychain не пишется")
+        XCTAssertEqual(ShareIdentity.keychainUnavailableMessage, "Нет доступа к Связке ключей, проверка ключа выключена")
+    }
+
+    func testResetRestoresPersistenceWhenKeychainWorksAgain() {
+        let store = MemoryStore()
+        store.failSave = true
+        let identity = ShareIdentity(store: store)
+        XCTAssertEqual(identity.availability, .keychainUnavailable)
+        store.failSave = false
+        identity.reset()
+        XCTAssertEqual(identity.availability, .persistent)
+        XCTAssertNotNil(store.data)
+        store.failSave = true
+        identity.reset()
+        XCTAssertEqual(identity.availability, .keychainUnavailable, "сбой записи при сбросе снова даёт временный режим")
+    }
+
     func testFingerprintFormat() {
         let fp = ShareIdentity.fingerprint(ofPublicKey: Data(repeating: 7, count: 32))
         XCTAssertNotNil(fp.range(of: "^[0-9a-f]{4}(-[0-9a-f]{4}){3}$", options: .regularExpression))

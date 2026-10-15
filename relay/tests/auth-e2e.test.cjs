@@ -3,8 +3,8 @@
 // дальше в Room (отдельная «комната» на каждый ID, как Durable Objects) и между комнатами (/claim, /quota, /live).
 // Обвязка — копия из room.test.cjs (он не экспортирует свою фикстуру, а require исполнил бы его тесты второй раз).
 //
-// Тесты с пометкой `BUG-N` описывают найденные дефекты relay: они объявлены как `todo` — падают, но не краснят прогон.
-// Когда дефект исправят, снять `todo` (или удалить опцию), тест станет обычным.
+// Тесты с пометкой `BUG-N` описывают найденные дефекты relay (исправлены, .audit/plan-auth-fix.md); R-A…R-F — сценарии
+// security-ревью (.audit/review-auth-b.md).
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -27,7 +27,8 @@ function fixture(env) {
     storage: {
       getAlarm: async () => alarm, setAlarm: async (value) => { alarm = value; },
       get: async (key) => store.get(key), put: async (key, value) => { store.set(key, value); },
-      delete: async (key) => { store.delete(key); },
+      delete: async (key) => { for (const k of Array.isArray(key) ? key : [key]) store.delete(k); },
+      list: async ({ prefix = '' } = {}) => new Map([...store].filter(([k]) => k.startsWith(prefix))),
     },
     getWebSockets: (tag) => sockets.filter((s) => s.tag === tag),
     getTags: (s) => [s.tag],
@@ -46,7 +47,7 @@ function fixture(env) {
   const context = vm.createContext({ Date: { now: () => now }, Response: FakeResponse, URL, WebSocketPair: FakePair, crypto: globalThis.crypto,
     TextEncoder, Headers, Request, page: 'PAGE', landing: 'LANDING' });
   vm.runInContext(`${source}\nthis.Room = Room; this.worker = worker;`, context);
-  const room = new context.Room(state, env);
+  let room = new context.Room(state, env);
   function socket(tag, info) {
     const s = { tag, readyState: 1, info, messages: [], closes: [],
       deserializeAttachment() { return this.info; },
@@ -56,7 +57,9 @@ function fixture(env) {
     };
     sockets.push(s); return s;
   }
-  return { room, worker: context.worker, store, socket, all: () => sockets, advance(ms) { now += ms; }, get now() { return now; } };
+  return { get room() { return room; }, worker: context.worker, store, socket, all: () => sockets, advance(ms) { now += ms; }, get now() { return now; },
+    // Выгрузка Durable Object: память (Map в объекте) пропадает, storage и сокеты остаются.
+    reload() { room = new context.Room(state, env); } };
 }
 
 // ---------- ключи, канонические строки ----------
@@ -217,7 +220,7 @@ test('спуфинг служебных сообщений: одобренный
 test('grace: после обрыва хоста чужой ключ получает id-claimed, зрители остаются в «переподключении»; владелец возвращает комнату', async () => {
   const w = world(), f = w.f(ROOM);
   const host = await hostLogin(w);
-  const viewer = f.socket('viewer', { id: VIEWER, approved: true, lastSeen: w.now });
+  const viewer = f.socket('viewer', { id: VIEWER, approved: true, approvedBy: OWNER.pub, lastSeen: w.now });
   f.room.webSocketClose(host, 1006);
   assert.equal(viewer.messages.at(-1).type, 'reconnecting');
   w.advance(10_000);
@@ -480,32 +483,68 @@ test('auth-timeout: будильник ставится при подключе�
 // =====================================================================================================
 // 8. pending-лимиты
 // =====================================================================================================
-test('pending: не больше 3 ожидающих в комнате и не больше 1 с одного IP (v2); одобренные слот освобождают', async () => {
+test('pending (B1): ожидающих ответа — не больше 10 в комнате и 4 с одного IP, для v2 после ключа и для legacy; одобренный освобождает место', async () => {
   const w = world();
   const host = await hostLogin(w);
-  const a = await viewerLogin(w, keypair(11), ROOM, { viewer: '5550000001', ip: '1.1.1.1' });
-  const sameIp = await connect(w, 'viewer', ROOM, { viewer: '5550000002', ip: '1.1.1.1' });
-  assert.equal(sameIp.res.status, 429, '1 с IP');
-  assert.equal(await sameIp.res.text(), 'rate-limited');
-  await viewerLogin(w, keypair(12), ROOM, { viewer: '5550000003', ip: '2.2.2.2' });
-  await viewerLogin(w, keypair(13), ROOM, { viewer: '5550000004', ip: '3.3.3.3' });
-  assert.equal((await connect(w, 'viewer', ROOM, { viewer: '5550000005', ip: '4.4.4.4' })).res.status, 429, '4-й в комнате');
-  assert.equal((await connect(w, 'viewer', ROOM, { token: V1, viewer: '5550000006', ip: '5.5.5.5' })).res.status, 429, 'и legacy тоже');
-  await accept(w, host, a);
-  assert.equal((await connect(w, 'viewer', ROOM, { viewer: '5550000005', ip: '4.4.4.4' })).res.status, 101, 'место освободилось');
+  const office = [];
+  for (let i = 0; i < 4; i++) office.push(await viewerLogin(w, keypair(11 + i), ROOM, { viewer: `555000000${i}`, ip: '1.1.1.1' }));
+  assert.ok(office.every((v) => v.info.auth === 'key' && !v.info.ended), '4 зрителя из одного офиса');
+  const fifth = await connect(w, 'viewer', ROOM, { viewer: '5550000009', ip: '1.1.1.1' });
+  assert.equal(fifth.res.status, 429, '5-й с того же IP');
+  assert.equal(await fifth.res.text(), 'rate-limited');
+  assert.equal((await connect(w, 'viewer', ROOM, { token: V1, viewer: '5550000008', ip: '1.1.1.1' })).res.status, 429, 'и legacy тоже');
+  for (let i = 0; i < 6; i++) {
+    const res = (await connect(w, 'viewer', ROOM, { token: V1, viewer: `666000000${i}`, ip: `2.2.2.${i}` })).res;
+    assert.equal(res.status, 101, `legacy ${i}`);
+  }
+  assert.equal((await connect(w, 'viewer', ROOM, { token: V1, viewer: '7770000000', ip: '3.3.3.3' })).res.status, 429, '11-й в комнате');
+  assert.equal((await connect(w, 'viewer', ROOM, { viewer: '7770000001', ip: '3.3.3.4' })).res.status, 429, '11-й v2 тоже');
+  await accept(w, host, office[0]);
+  assert.equal((await connect(w, 'viewer', ROOM, { token: V1, viewer: '7770000000', ip: '3.3.3.3' })).res.status, 101, 'место освободилось');
 });
 
-test('pending: сокеты до auth тоже занимают место, а auth-timeout их освобождает', async () => {
+test('pending (B1): 3 legacy-зрителя с одного IP одновременно → 101; два зрителя 1.4.0 из одного офиса (R-B) не получают 429', async () => {
+  const w = world();
+  const host = await hostLogin(w);
+  const results = [];
+  for (let i = 0; i < 3; i++) results.push((await connect(w, 'viewer', ROOM, { token: V1, viewer: `800000000${i}`, ip: '10.0.0.1' })).res.status);
+  assert.deepEqual(results, [101, 101, 101]);
+  assert.equal(msgsOf(host, 'request').length, 3, 'все три запроса дошли до ведущего сразу');
+});
+
+test('до проверки ключа (M1): с одного IP — один сокет (429), в комнате не больше 5 — новый вытесняет самого старого (4429)', async () => {
   const w = world(), f = w.f(ROOM);
   await hostLogin(w);
-  for (const ip of ['1.1.1.1', '2.2.2.2', '3.3.3.3']) assert.equal((await connect(w, 'viewer', ROOM, { ip })).res.status, 101);
-  assert.equal((await connect(w, 'viewer', ROOM, { ip: '4.4.4.4' })).res.status, 429);
-  w.advance(10_500);
-  await f.room.alarm();
-  assert.equal((await connect(w, 'viewer', ROOM, { ip: '4.4.4.4' })).res.status, 101);
+  const first = await connect(w, 'viewer', ROOM, { viewer: '5550000001', ip: '1.1.1.1' });
+  assert.equal(first.res.status, 101);
+  assert.equal((await connect(w, 'viewer', ROOM, { viewer: '5550000002', ip: '1.1.1.1' })).res.status, 429, '1 с IP до ключа');
+  for (let i = 3; i <= 6; i++) {
+    w.advance(1);
+    assert.equal((await connect(w, 'viewer', ROOM, { viewer: `555000000${i}`, ip: `2.2.2.${i}` })).res.status, 101);
+  }
+  assert.equal(first.socket.closes.length, 0, 'пять одновременных — все ждут проверки');
+  w.advance(1);
+  const sixth = await connect(w, 'viewer', ROOM, { viewer: '5550000007', ip: '4.4.4.4' });
+  assert.equal(sixth.res.status, 101, 'новый не получает отказ');
+  assert.equal(closeCode(first.socket), 4429, 'самый старый неаутентифицированный вытеснен');
+  assert.equal(msgOf(first.socket, 'error').code, 'rate-limited');
+  assert.equal(f.room.unauthViewers().length, 5);
+  // Вытесненный IP снова может подключиться; честный клиент проходит проверку сразу.
+  const back = await viewerLogin(w, keypair(21), ROOM, { viewer: '5550000001', ip: '1.1.1.1' });
+  assert.equal(back.info.auth, 'key');
 });
 
-test('pending: без CF-Connecting-IP лимит на IP не применяется (только общий 3)', async () => {
+test('до проверки ключа: auth-timeout освобождает место IP', async () => {
+  const w = world(), f = w.f(ROOM);
+  await hostLogin(w);
+  assert.equal((await connect(w, 'viewer', ROOM, { ip: '1.1.1.1' })).res.status, 101);
+  assert.equal((await connect(w, 'viewer', ROOM, { ip: '1.1.1.1' })).res.status, 429);
+  w.advance(10_500);
+  await f.room.alarm();
+  assert.equal((await connect(w, 'viewer', ROOM, { ip: '1.1.1.1' })).res.status, 101);
+});
+
+test('pending: без CF-Connecting-IP лимит на IP не применяется (только общий)', async () => {
   const w = world();
   await hostLogin(w);
   assert.equal((await connect(w, 'viewer', ROOM, { viewer: '5550000001' })).res.status, 101);
@@ -519,41 +558,68 @@ test('pending: подделанный x-relay-ip из клиента не обх
   assert.equal((await connect(w, 'viewer', ROOM, { viewer: '5550000002', ip: '1.1.1.1', headers: { 'x-relay-ip': '8.8.8.2' } })).res.status, 429);
 });
 
-test('BUG-1: пока в комнате висят 3 неавторизованных сокета «хоста», настоящий хост не может подключиться (429), лимита на IP нет', { todo: 'BUG-1 relay/src/index.js connectHostV2: pendingHosts() >= MAX_PENDING без разбивки по IP' }, async () => {
-  const w = world();
+test('BUG-1: пока в комнате висят 3 неавторизованных сокета «хоста», настоящий хост не может подключиться (429), лимита на IP нет', async () => {
+  const w = world(), f = w.f(ROOM);
   for (let i = 0; i < 3; i++) assert.equal((await connect(w, 'host', ROOM, { ip: '6.6.6.6' })).res.status, 101);
+  assert.equal(f.room.pendingHosts().length, 1, 'с одного IP — один неавторизованный «хост»');
   const legit = await connect(w, 'host', ROOM, { ip: '1.2.3.4' });
   assert.equal(legit.res.status, 101, 'настоящий хост с другого IP должен подключаться');
 });
 
+test('R-A: молчащие «хосты» с разных IP не мешают владельцу ни начать трансляцию, ни вернуться в grace', async () => {
+  const w = world(), f = w.f(ROOM);
+  const host = await hostLogin(w, OWNER, ROOM, { ip: '1.2.3.4' });
+  const viewer = f.socket('viewer', { id: VIEWER, approved: true, approvedBy: OWNER.pub, lastSeen: w.now });
+  f.room.webSocketClose(host, 1006);
+  const squat = [];
+  for (const ip of ['6.6.6.6', '6.6.6.6', '7.7.7.7', '8.8.8.8', '9.9.9.1', '9.9.9.2', '9.9.9.3']) { w.advance(1); squat.push((await connect(w, 'host', ROOM, { ip })).socket); }
+  assert.equal(closeCode(squat[0]), 4409, 'тот же IP: старый сокет вытеснен новым');
+  assert.equal(closeCode(squat[1]), 4429, 'переполнение: вытеснен самый старый');
+  assert.equal(f.room.pendingHosts().length, 5);
+  w.advance(1);
+  const back = await hostLogin(w, OWNER, ROOM, { ip: '1.2.3.4' });
+  assert.equal(msgOf(back, 'authed').claimed, false, 'владелец вернулся в grace');
+  assert.equal(viewer.messages.at(-1).type, 'resumed');
+  assert.deepEqual(f.room.activeHosts(), [back]);
+});
+
+test('R-A: молчащие «хосты» на непривязанном ID не мешают новому владельцу начать трансляцию', async () => {
+  const w = world(), f = w.f('1112223334');
+  for (const ip of ['6.6.6.6', '7.7.7.7', '8.8.8.8']) { w.advance(1); await connect(w, 'host', '1112223334', { ip }); }
+  w.advance(1);
+  const owner = await hostLogin(w, OTHER, '1112223334', { ip: '1.2.3.4' });
+  assert.equal(msgOf(owner, 'authed').claimed, true);
+  assert.deepEqual(f.room.activeHosts(), [owner]);
+});
+
 // =====================================================================================================
-// 9. Очередь request: 5 в минуту
+// 9. Очередь request: 20 в минуту (B1)
 // =====================================================================================================
-test('очередь: хосту уходит 5 запросов в минуту, остальные ждут и уходят после окна; закрывшиеся из очереди не отправляются', async () => {
+test('очередь: хосту уходит 20 запросов в минуту, остальные ждут и уходят после окна; закрывшиеся из очереди не отправляются', async () => {
   const w = world(), f = w.f(ROOM);
   const host = await hostLogin(w);
   const viewers = [];
-  for (let i = 0; i < 7; i++) {
-    const s = await viewerLogin(w, keypair(40 + i), ROOM, { viewer: `500000000${i}`, ip: `9.9.9.${i}` });
+  for (let i = 0; i < 22; i++) {
+    const s = await viewerLogin(w, keypair(40 + i), ROOM, { viewer: `50000000${String(i).padStart(2, '0')}`, ip: `9.9.9.${i}` });
     viewers.push(s);
-    if (i < 6) s.info.approved = true; // чтобы не упереться в MAX_PENDING; одобрение здесь только для освобождения слота
+    s.info.ended = true; // временно: чтобы не упереться в лимит ожидающих (10); на окно запросов не влияет
   }
-  for (const s of viewers.slice(0, 6)) s.info.approved = false;
+  for (const s of viewers) delete s.info.ended;
   const sent = () => msgsOf(host, 'request').map((m) => m.viewer);
-  assert.equal(sent().length, 5);
-  assert.equal(viewers[5].info.reqSent, false);
-  assert.equal(viewers[6].info.reqSent, false);
-  assert.deepEqual(types(viewers[5]), ['challenge', 'waiting'], 'ждущий получает waiting');
-  await send(f, host, { type: 'accept', viewer: '5000000005', rid: viewers[5].info.rid });
-  assert.equal(viewers[5].info.approved, false, 'хост ещё не видел запрос');
-  f.room.webSocketClose(viewers[6]);
-  assert.equal(msgsOf(host, 'cancelled').filter((m) => m.viewer === '5000000006').length, 0);
+  assert.equal(sent().length, 20);
+  assert.equal(viewers[20].info.reqSent, false);
+  assert.equal(viewers[21].info.reqSent, false);
+  assert.deepEqual(types(viewers[20]), ['challenge', 'waiting'], 'ждущий получает waiting');
+  await send(f, host, { type: 'accept', viewer: '5000000020', rid: viewers[20].info.rid });
+  assert.equal(viewers[20].info.approved, false, 'хост ещё не видел запрос');
+  f.room.webSocketClose(viewers[21]);
+  assert.equal(msgsOf(host, 'cancelled').filter((m) => m.viewer === '5000000021').length, 0);
   w.advance(61_000);
   for (const s of viewers) s.info.lastSeen = w.now;
   await f.room.alarm();
-  assert.equal(sent().includes('5000000005'), true);
-  assert.equal(sent().includes('5000000006'), false);
-  assert.equal(viewers[5].info.reqSent, true);
+  assert.equal(sent().includes('5000000020'), true);
+  assert.equal(sent().includes('5000000021'), false);
+  assert.equal(viewers[20].info.reqSent, true);
 });
 
 // =====================================================================================================
@@ -841,17 +907,19 @@ test('POST /status: свежесть ts — ±120 с принимается, д�
   for (const body of bodies) assert.equal((await postStatus(w, body)).status, 400, JSON.stringify(body).slice(0, 80));
 });
 
-test('POST /status: чужой публичный ключ (не владелец ID) → 403; ID без хоста и без владельца привязывается к ключу подписавшего', async () => {
+test('POST /status: чужой публичный ключ (не владелец ID) → 403; свободный ID не привязывается (только чтение)', async () => {
   const w = world();
   await hostLogin(w, OWNER, ROOM);
   const stolen = await postStatus(w, statusBody(ATTACKER, { id: ROOM, ids: [] }));
   assert.equal(stolen.status, 403);
   assert.equal((await stolen.json()).error, 'id-claimed');
   assert.equal(w.f(ROOM).store.get('owner').pub, OWNER.pub);
-  // Наблюдение: /status для свободного ID выполняет TOFU-привязку (claim), как и подключение. См. отчёт, раздел «Наблюдения».
+  // /status не привязывает свободный ID: занять чужой ID можно только подключением (там квота и остальные проверки).
   const fresh = await postStatus(w, statusBody(ATTACKER, { id: '3000000000', ids: [] }));
-  assert.equal(fresh.status, 200);
-  assert.equal(w.f('3000000000').store.get('owner').pub, ATTACKER.pub);
+  assert.equal(fresh.status, 403);
+  assert.equal((await fresh.json()).error, 'not-owner');
+  assert.equal(w.f('3000000000').store.get('owner'), undefined);
+  assert.equal(w.f('__limits').store.size, 0, 'квота привязок не тронута');
 });
 
 test('POST /status: форматы тела — 6-значные и лишние ID, > 20, не-JSON, пустое тело, > 4096 байт, не-массив ids', async () => {
@@ -905,7 +973,7 @@ test('POST /status: тот же подписанный запрос в окне 
   assert.deepEqual(a, b);
 });
 
-test('BUG-2: поддельные POST /status с публичным ключом жертвы расходуют её лимит 6/мин ещё до проверки подписи — настоящий клиент получает 429', { todo: 'BUG-2 relay/src/index.js statusPost: windowHit(statusWindow, fp) стоит до verifyEd25519; hostKey виден любому зрителю в challenge' }, async () => {
+test('BUG-2 / R-E: поддельные POST /status с публичным ключом жертвы не расходуют её лимит 6/мин — окно считается после подписи', async () => {
   const w = world();
   await hostLogin(w, OWNER, ROOM);
   const forged = { ...statusBody(OWNER, { id: ROOM, ids: [] }), sig: ATTACKER.sign('x') };
@@ -949,4 +1017,131 @@ test('e2e: «Сменить ID» — release освобождает ID, преж
   assert.equal(viewer.messages.at(-1).type, 'ended');
   const next = await hostLogin(w, ATTACKER);
   assert.equal(msgOf(next, 'authed').claimed, true);
+});
+
+// =====================================================================================================
+// 16. Исправления по security-ревью (.audit/review-auth-b.md): R-C, R-D, R-F, M3, M4, порядок cooldown, N5
+// =====================================================================================================
+test('R-F (M2): grace на непривязанном ID — чужой ключ занимает комнату, но пущенные legacy-хостом зрители завершаются, а не resumed', async () => {
+  const w = world(), f = w.f(ROOM);
+  const legacyHost = (await connect(w, 'host', ROOM, { token: V1, ip: '1.1.1.1' })).socket;
+  const v = (await connect(w, 'viewer', ROOM, { token: V1, viewer: VIEWER, ip: '2.2.2.2' })).socket;
+  await send(f, legacyHost, { type: 'accept', viewer: VIEWER });
+  assert.equal(v.info.approved, true);
+  assert.equal(v.info.approvedBy, 'none', 'пустил хост без ключа');
+  f.room.webSocketClose(legacyHost, 1006);
+  assert.equal(v.messages.at(-1).type, 'reconnecting');
+  w.advance(5_000);
+  const thief = await hostLogin(w, ATTACKER, ROOM, { ip: '6.6.6.6' });
+  assert.equal(msgOf(thief, 'authed').claimed, true, 'непривязанный ID занят (остаточный риск §5.4)');
+  assert.equal(v.messages.at(-1).type, 'ended', 'зритель не смотрит чужой экран');
+  assert.equal(msgsOf(v, 'resumed').length, 0);
+  v.messages.length = 0;
+  await f.room.webSocketMessage(thief, new Uint8Array([1, 2, 3]));
+  assert.equal(v.messages.length, 0, 'кадры захватчика зрителю не идут');
+});
+
+test('M2: зрители, пущенные ключом владельца, переживают grace и смену окна того же владельца; пущенные другим ключом — нет', async () => {
+  const w = world(), f = w.f(ROOM);
+  const host = await hostLogin(w);
+  const mine = await viewerLogin(w, VIEWER_KEY, ROOM, { ip: '2.2.2.2' });
+  await accept(w, host, mine);
+  assert.equal(mine.info.approvedBy, OWNER.pub);
+  const stale = f.socket('viewer', { id: '5550000077', approved: true, approvedBy: ATTACKER.pub, lastSeen: w.now });
+  f.room.webSocketClose(host, 1006);
+  const back = await hostLogin(w, OWNER, ROOM, { ip: '1.1.1.1' });
+  assert.equal(mine.messages.at(-1).type, 'resumed');
+  assert.equal(stale.messages.at(-1).type, 'ended');
+  await hostLogin(w, OWNER, ROOM, { ip: '1.1.1.2' });
+  assert.equal(closeCode(back), 4409);
+  assert.equal(mine.info.ended, undefined, 'смена окна того же владельца не рвёт зрителя');
+});
+
+test('R-C: v2-ключ прерывает живую legacy-трансляцию непривязанного ID (отступление 1, §5.4) — её зрители получают ended', async () => {
+  const w = world(), f = w.f(ROOM);
+  const legacyHost = (await connect(w, 'host', ROOM, { token: V1, ip: '1.1.1.1' })).socket;
+  const v = (await connect(w, 'viewer', ROOM, { token: V1, viewer: VIEWER, ip: '2.2.2.2' })).socket;
+  await send(f, legacyHost, { type: 'accept', viewer: VIEWER });
+  const thief = await hostLogin(w, ATTACKER, ROOM, { ip: '6.6.6.6' });
+  assert.equal(closeCode(legacyHost), 4409);
+  assert.equal(v.messages.at(-1).type, 'ended');
+  assert.deepEqual(f.room.activeHosts(), [thief]);
+});
+
+test('R-D (M3): квота привязок 5 в сутки на IP переживает выгрузку __limits; через сутки снова можно', async () => {
+  const w = world();
+  let host = await hostLogin(w);
+  // Одобряем сразу: иначе с одного IP упрёмся в лимит ожидающих (4), а проверяем здесь квоту привязок.
+  const claim = async (i, ip = '9.9.9.9') => {
+    const s = await viewerLogin(w, keypair(60 + i), ROOM, { viewer: `410000000${i}`, ip });
+    await accept(w, host, s);
+    return s;
+  };
+  for (let i = 0; i < 5; i++) assert.equal((await claim(i)).info.idVerified, true, `привязка ${i + 1}`);
+  w.f('__limits').reload();
+  assert.equal((await claim(5)).info.idVerified, false, '6-я в сутки — отказ и после выгрузки');
+  assert.equal(w.f('4100000005').store.get('owner'), undefined);
+  w.pass(86_400_000);
+  host = await hostLogin(w);
+  assert.equal((await claim(6)).info.idVerified, true, 'новые сутки');
+});
+
+test('M3: сбой счётчика квоты — привязка зрителя отклоняется (fail-closed), хоста — проходит (fail-open)', async () => {
+  const w = world();
+  const rooms = w.env.ROOMS;
+  w.env.ROOMS = { idFromName: rooms.idFromName, get: (name) => name === '__limits' ? { fetch: async () => { throw new Error('down'); } } : rooms.get(name) };
+  const host = await hostLogin(w, OWNER, ROOM, { ip: '1.1.1.1' });
+  assert.equal(msgOf(host, 'authed').claimed, true, 'хост закрепляет ID и при недоступном счётчике');
+  const v = await viewerLogin(w, VIEWER_KEY, ROOM, { ip: '2.2.2.2' });
+  assert.equal(v.info.idVerified, false, 'зритель — нет');
+  assert.equal(w.f(VIEWER).store.get('owner'), undefined);
+});
+
+test('M3: просроченные счётчики квоты стираются из storage', async () => {
+  const w = world();
+  await hostLogin(w);
+  await viewerLogin(w, VIEWER_KEY, ROOM, { ip: '9.9.9.9' });
+  const limits = w.f('__limits');
+  assert.ok(limits.store.has('q:9.9.9.9'));
+  w.pass(86_400_000 + 3_600_000);
+  await hostLogin(w);
+  await viewerLogin(w, keypair(70), ROOM, { viewer: '4200000000', ip: '8.8.8.8' });
+  assert.equal(limits.store.has('q:9.9.9.9'), false);
+  assert.ok(limits.store.has('q:8.8.8.8'));
+});
+
+test('M4: адреса IPv6 из одного /64 — один ключ для pending, квоты и x-relay-ip', async () => {
+  const w = world(), f = w.f(ROOM);
+  await hostLogin(w);
+  assert.equal((await connect(w, 'viewer', ROOM, { viewer: '5550000001', ip: '2001:db8:1:2::1' })).res.status, 101);
+  assert.equal(f.room.unauthViewers()[0].info.ip, '2001:db8:1:2::/64', 'в комнату уходит нормализованный ключ');
+  assert.equal((await connect(w, 'viewer', ROOM, { viewer: '5550000002', ip: '2001:db8:1:2:ffff:1:2:3' })).res.status, 429, 'тот же /64');
+  assert.equal((await connect(w, 'viewer', ROOM, { viewer: '5550000003', ip: '2001:db8:1:3::1' })).res.status, 101, 'другой /64');
+  // Квота привязок: ротация адресов внутри /64 не даёт новых привязок.
+  const g = world();
+  const gHost = await hostLogin(g, OWNER, ROOM);
+  for (let i = 0; i < 6; i++) {
+    const s = await viewerLogin(g, keypair(80 + i), ROOM, { viewer: `430000000${i}`, ip: `2001:db8:aa:bb:${i}::${i + 1}` });
+    assert.equal(s.info.idVerified, i < 5, `привязка ${i + 1}`);
+    await accept(g, gHost, s);
+  }
+});
+
+test('cooldown до привязки: отклонённый ключ не закрепляет новый ID и не тратит квоту', async () => {
+  const w = world();
+  const host = await hostLogin(w);
+  const first = await viewerLogin(w, VIEWER_KEY, ROOM, { ip: '2.2.2.2' });
+  await decline(w, host, first);
+  const quotaBefore = w.f('__limits').store.get('q:2.2.2.3');
+  const again = await viewerLogin(w, VIEWER_KEY, ROOM, { viewer: '4400000000', ip: '2.2.2.3' });
+  assert.equal(msgOf(again, 'error').code, 'rate-limited');
+  assert.equal(w.f('4400000000').store.get('owner'), undefined, 'новый ID не привязан');
+  assert.equal(w.f('__limits').store.get('q:2.2.2.3'), quotaBefore, 'квота не тронута');
+});
+
+test('N5: в required POST /status с mu-share-1 → 426', async () => {
+  const w = world({ AUTH_MODE: 'required' });
+  await hostLogin(w);
+  assert.equal((await postStatus(w, statusBody(OWNER, { id: ROOM, ids: [] }), { token: V1 })).status, 426);
+  assert.equal((await postStatus(w, statusBody(OWNER, { id: ROOM, ids: [] }))).status, 200);
 });

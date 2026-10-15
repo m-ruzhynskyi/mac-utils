@@ -90,6 +90,8 @@ final class ScreenShare: NSObject, ObservableObject {
     @Published private(set) var state: State = .idle
     /// Ретранслятор не объявил mu-share-2: работаем по-старому, личность зрителей не проверяется.
     @Published private(set) var relayWithoutKeys = false
+    /// Keychain недоступен: ключ не сохранить, трансляция и просмотр идут по mu-share-1 без проверки ключом.
+    @Published private(set) var keychainUnavailable = false
     /// Отпечаток этого Mac, как его вернул ретранслятор при последней проверке.
     @Published private(set) var myFingerprint: String?
     /// Нужен новый ID: этот закреплён за другим устройством.
@@ -210,11 +212,24 @@ final class ScreenShare: NSObject, ObservableObject {
         case failed(status: Int)
     }
 
+    /// Выбор протокола: mu-share-2 только если relay его объявил и ключ лежит в Keychain; иначе — как mu-share-1 с понятным сообщением.
+    func shouldUseKeys(_ capability: ShareRelay.Capability?) -> Bool {
+        let keyed = ShareHandshake.useKeys(capability: capability, identity: .shared)
+        if capability == .keyed && !keyed {
+            if !keychainUnavailable { Toast.show(ShareIdentity.keychainUnavailableMessage, symbol: "key.slash", tint: .orange) }
+            keychainUnavailable = true
+            myFingerprint = nil
+        } else if keyed {
+            keychainUnavailable = false
+        }
+        return keyed
+    }
+
     /// Подключение ведущего: по mu-share-2 (challenge → auth → authed), если ретранслятор его объявил, иначе по-старому.
     private func openHostSocket() async -> HostOpen {
         let code = ShareCode.myID
         guard let url = ShareCode.url(server: Self.server, code: code, role: "host") else { return .failed(status: 0) }
-        let keyedRelay = await probeRelay() == .keyed
+        let keyedRelay = shouldUseKeys(await probeRelay())
         let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url, token: keyedRelay ? ShareRelay.keyedToken : ShareRelay.legacyToken))
         socket.maximumMessageSize = 4 << 20
         socket.resume()
@@ -925,7 +940,7 @@ final class ShareViewer: ObservableObject {
         let mine = generation
         Task {
             // mu-share-2 — только если ретранслятор его объявил; иначе по-старому.
-            let keyed = await ScreenShare.shared.probeRelay() == .keyed
+            let keyed = ScreenShare.shared.shouldUseKeys(await ScreenShare.shared.probeRelay())
             guard generation == mine, state == .connecting else { return }
             let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url, token: keyed ? ShareRelay.keyedToken : ShareRelay.legacyToken))
             socket.maximumMessageSize = 4 << 20
@@ -950,6 +965,12 @@ final class ShareViewer: ObservableObject {
     private func handle(challenge json: [String: Any], on socket: URLSessionWebSocketTask) {
         guard let nonce = json["nonce"] as? String, let rid = json["rid"] as? String else {
             state = .ended("Сервер прислал неверный запрос проверки")
+            disconnect()
+            return
+        }
+        // Ключ в Keychain недоступен: на challenge не отвечаем (relay не должен узнать временный ключ).
+        guard ShareIdentity.shared.isPersistent else {
+            state = .ended(ShareIdentity.keychainUnavailableMessage)
             disconnect()
             return
         }

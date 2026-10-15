@@ -209,6 +209,114 @@ final class ShareHistoryTrustTests: XCTestCase {
         XCTAssertFalse(history.entries.first { $0.id == ids[0] }?.incomingOnly ?? true, "pinning не меняет историю посещений")
     }
 
+    // MARK: - N7: история читается поэлементно
+
+    func testOneBrokenEntryIsSkippedAndTheRestSurvives() throws {
+        let json = """
+        [{"id":"\(ids[0])","name":"Первый","lastSeen":782000000,"trusted":true,"incomingOnly":false},
+         {"id":"\(ids[1])","name":"Без даты","trusted":false,"incomingOnly":false},
+         "строка вместо объекта",
+         {"id":42,"name":"Число вместо ID","lastSeen":1},
+         null,
+         {"id":"\(ids[2])","name":"Третий","lastSeen":780000000,"trusted":false,"incomingOnly":false,"newField":{"a":1}}]
+        """
+        UserDefaults.standard.set(Data(json.utf8), forKey: Pref.shareHistory)
+        let history = ShareHistory()
+        XCTAssertEqual(history.entries.map(\.id), [ids[0], ids[2]], "испорченные пропущены, порядок и остальные сохранены")
+        XCTAssertTrue(history.isTrusted(ids[0]))
+        XCTAssertEqual(history.entries.first { $0.id == ids[2] }?.name, "Третий", "неизвестные поля не мешают")
+        // Первый save() не теряет то, что прочиталось.
+        history.rename(ids[2], to: "Подпись")
+        XCTAssertEqual(ShareHistory().entries.map(\.id), [ids[0], ids[2]])
+    }
+
+    func testBrokenElementsStillGetSanitized() throws {
+        let json = """
+        [{"id":"\(ids[0])","name":"A","lastSeen":1,"trusted":true,"incomingOnly":false,"key":"мусор","hostKey":"тоже"},
+         {"id":"123456","name":"Короткий","lastSeen":1,"trusted":true,"incomingOnly":false},
+         {"name":"нет id"}]
+        """
+        let entries = ShareHistory.decodeEntries(Data(json.utf8))
+        XCTAssertEqual(entries.map(\.id), [ids[0], "123456"])
+        XCTAssertNil(entries[0].key)
+        XCTAssertNil(entries[0].hostKey)
+        XCTAssertFalse(entries[1].trusted, "6-значный ID доверенным быть не может")
+    }
+
+    func testNotAnArrayOrEmptyDataGivesEmptyHistory() {
+        for text in ["{}", "\"x\"", "42", "", "[", "[]"] {
+            XCTAssertEqual(ShareHistory.decodeEntries(Data(text.utf8)), [], text)
+        }
+        UserDefaults.standard.set(Data("{\"id\":1}".utf8), forKey: Pref.shareHistory)
+        XCTAssertTrue(ShareHistory().entries.isEmpty)
+    }
+
+    func testAllElementsBrokenGivesEmptyHistoryWithoutCrash() {
+        XCTAssertEqual(ShareHistory.decodeEntries(Data(#"[1,2,"3",{"a":1},[]]"#.utf8)), [])
+    }
+
+    // MARK: - N8: Снять доверие не стирает pinning
+
+    func testUntrustKeepsHostKeyOfIncomingOnlyEntry() {
+        let history = ShareHistory()
+        history.trust(ids[0], name: "", pub: pub)
+        history.pinHost(id: ids[0], key: otherPub)
+        XCTAssertTrue(history.entries.first { $0.id == ids[0] }?.incomingOnly ?? false, "запись создана только доверием")
+        history.untrust(ids[0])
+        XCTAssertEqual(history.hostKey(for: ids[0]), otherPub, "pinning сохранился")
+        XCTAssertFalse(history.isTrusted(ids[0]))
+        XCTAssertNil(history.entries.first { $0.id == ids[0] }?.key)
+        XCTAssertFalse(history.visitedEntries.contains { $0.id == ids[0] }, "в списке посещений она не появляется")
+        XCTAssertEqual(ShareHistory().hostKey(for: ids[0]), otherPub, "и после перезапуска")
+    }
+
+    func testUntrustStillRemovesIncomingOnlyEntryWithoutPin() {
+        let history = ShareHistory()
+        history.trust(ids[0], name: "", pub: pub)
+        history.untrust(ids[0])
+        XCTAssertFalse(history.entries.contains { $0.id == ids[0] })
+    }
+
+    func testViewerOrderVisitedBeforePinKeepsPinThroughUntrust() {
+        let history = ShareHistory()
+        history.visited(ids[0], name: "Ведущий")   // порядок зрителя в ScreenShare.swift: visited(), затем pinHost()
+        history.pinHost(id: ids[0], key: pub)
+        history.trust(ids[0], name: "", pub: otherPub)
+        history.untrust(ids[0])
+        XCTAssertEqual(history.hostKey(for: ids[0]), pub)
+        XCTAssertTrue(history.visitedEntries.contains { $0.id == ids[0] })
+    }
+
+    func testVisitedAfterPinHostAlsoKeepsPin() {
+        let history = ShareHistory()
+        history.pinHost(id: ids[0], key: pub)      // pin раньше visited(): запись создана как incomingOnly
+        history.visited(ids[0], name: "Ведущий")
+        XCTAssertEqual(history.hostKey(for: ids[0]), pub)
+        XCTAssertFalse(history.entries.first { $0.id == ids[0] }?.incomingOnly ?? true, "visited делает её посещённой")
+    }
+
+    // MARK: - N3: ответы на подписанный POST /status
+
+    func testSignedStatusActions() {
+        typealias A = ShareHistory.SignedStatusAction
+        XCTAssertEqual(ShareHistory.signedStatusAction(status: 200, parsed: true), A.use)
+        XCTAssertEqual(ShareHistory.signedStatusAction(status: 200, parsed: false), A.rememberUnsupportedThenGet, "200 без карты — старый relay")
+        for status in [403, 404, 405] {
+            XCTAssertEqual(ShareHistory.signedStatusAction(status: status, parsed: false), A.rememberUnsupportedThenGet, "\(status)")
+        }
+        XCTAssertEqual(ShareHistory.signedStatusAction(status: 429, parsed: false), A.skipTick, "лимит: тик пропускается, GET не добавляется")
+        for status in [0, 400, 401, 413, 500, 502, 503] {
+            XCTAssertEqual(ShareHistory.signedStatusAction(status: status, parsed: false), A.getOnce, "\(status)")
+        }
+    }
+
+    func testUnsupportedMemoIsPerServerAndPerID() {
+        let a = ShareHistory.signedStatusKey(server: "https://relay.example", myID: "1111111111")
+        XCTAssertNotEqual(a, ShareHistory.signedStatusKey(server: "https://other.example", myID: "1111111111"))
+        XCTAssertNotEqual(a, ShareHistory.signedStatusKey(server: "https://relay.example", myID: "2222222222"), "после «Получить новый ID» подпись пробуется снова")
+        XCTAssertEqual(a, ShareHistory.signedStatusKey(server: "https://relay.example", myID: "1111111111"))
+    }
+
     // MARK: - /status
 
     func testStatusIDsAreTenDigitNewestTwenty() {

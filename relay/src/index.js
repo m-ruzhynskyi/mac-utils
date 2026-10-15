@@ -14,7 +14,7 @@
 import page from "./index.html";
 import landing from "./landing.html";
 // Одной строкой каждый: тестовая обвязка вырезает import и склеивает файлы в один скрипт.
-import { MAX_PENDING, AUTH_TIMEOUT_MS, CLAIM_PER_IP_PER_DAY, windowHit, pendingAllowed, declineCooldown, noteDecline } from "./limits.js";
+import { MAX_PENDING, MAX_PENDING_PER_IP, MAX_UNAUTH, MAX_UNAUTH_PER_IP, AUTH_TIMEOUT_MS, CLAIM_PER_IP_PER_DAY, ipKey, windowHit, pendingAllowed, declineCooldown, noteDecline } from "./limits.js";
 import { b64uHasLength, hostMessage, viewerMessage, statusMessage, verifyEd25519, fingerprintOf, newNonce } from "./auth.js";
 
 // Смотреть и транслировать можно только из приложений Mac Utils (Mac) и Mac Utils Share (Windows):
@@ -36,7 +36,8 @@ const OWNER_TOUCH_MS = 3_600_000;
 const STATUS_MAX_IDS = 20;
 const STATUS_SKEW_MS = 120_000;
 const STATUS_PER_KEY_PER_MIN = 6;
-const REQUESTS_PER_MIN = 5;
+// Встреча из 10–20 человек не должна ждать минуту, пока ведущий увидит запрос (B1).
+const REQUESTS_PER_MIN = 20;
 const CLAIM_PERIOD_MS = 86_400_000;
 // Лимит /status по ключу — в памяти изолята Worker (приблизительный: изолятов может быть несколько).
 const statusWindow = new Map();
@@ -157,18 +158,18 @@ async function statusPost(request, env, ip) {
     Number.isSafeInteger(body.ts) && Math.abs(now - body.ts) <= STATUS_SKEW_MS &&
     Array.isArray(body.ids) && body.ids.length <= STATUS_MAX_IDS && body.ids.every((id) => typeof id === "string" && ID10.test(id));
   if (!ok) return jsonError("bad-request", 400);
+  // Сначала подпись, потом окно по ключу: иначе чужие подделки с публичным ключом владельца съедают его лимит (N1).
+  if (!(await verifyEd25519(body.pub, body.sig, statusMessage(body.id, body.ts, body.ids)))) return jsonError("bad-signature", 401);
   const fp = await fingerprintOf(body.pub);
   if (!windowHit(statusWindow, fp, STATUS_PER_KEY_PER_MIN, 60_000, now)) return jsonError("rate-limited", 429);
-  if (!(await verifyEd25519(body.pub, body.sig, statusMessage(body.id, body.ts, body.ids)))) return jsonError("bad-signature", 401);
-  // Ключ должен принадлежать этому ID (первый запрос закрепляет ключ, как и подключение).
+  // Ключ должен уже принадлежать этому ID. Только чтение: /status никогда не привязывает свободный ID.
   let owner;
   try {
-    const response = await env.ROOMS.get(env.ROOMS.idFromName(body.id)).fetch("https://room/claim", {
-      method: "POST", body: JSON.stringify({ pub: body.pub, ip }),
-    });
+    const response = await env.ROOMS.get(env.ROOMS.idFromName(body.id)).fetch("https://room/owner", { method: "POST" });
     owner = await response.json();
   } catch (_) { return jsonError("unavailable", 503); }
-  if (!owner.ok) return jsonError(owner.reason || "id-claimed", owner.reason === "rate-limited" ? 429 : 403);
+  if (!owner || typeof owner !== "object") return jsonError("unavailable", 503);
+  if (owner.pub !== body.pub) return jsonError(owner.pub ? "id-claimed" : "not-owner", 403);
   return liveStatus(env, [...new Set(body.ids)]);
 }
 
@@ -177,7 +178,8 @@ export default {
     const url = new URL(request.url);
     const mode = authMode(env);
     const token = clientToken(request);
-    const ip = request.headers.get("CF-Connecting-IP") || "";
+    // Все лимиты по IP — по ipKey: IPv4 целиком, IPv6 по /64 (M4).
+    const ip = ipKey(request.headers.get("CF-Connecting-IP") || "");
     if (url.pathname === "/version") {
       const protocols = mode === "required" ? [CLIENT_V2] : [...ACCEPTED_CLIENTS];
       return Response.json({ commit: env.RELAY_COMMIT ?? "dev", protocols, auth: mode }, { headers: { "cache-control": "no-store" } });
@@ -187,6 +189,7 @@ export default {
       if (!token) return new Response("Use the Mac Utils app", { status: 403 });
       if (request.method === "POST") {
         if (mode === "off") return new Response("Not found", { status: 404 });
+        if (mode === "required" && token !== CLIENT_V2) return new Response("Update Mac Utils", { status: 426 });
         return statusPost(request, env, ip);
       }
       if (mode === "required") return new Response("Update Mac Utils", { status: 426 });
@@ -205,7 +208,7 @@ export default {
       return new Response("Expected WebSocket", { status: 426 });
     }
     if (await limited(env.RL_CONNECT, ip)) return new Response("Too many connections", { status: 429 });
-    // IP кладём сами и всегда перезаписываем: клиентский заголовок с таким именем не доходит до комнаты.
+    // IP кладём сами (уже как ipKey) и всегда перезаписываем: клиентский заголовок с таким именем не доходит до комнаты.
     const headers = new Headers(request.headers);
     headers.set("x-relay-ip", ip);
     return env.ROOMS.get(env.ROOMS.idFromName(room[1])).fetch(new Request(request, { headers }));
@@ -219,8 +222,8 @@ export class Room {
     // В памяти: после выгрузки объекта обнуляются, это допустимо (.audit/auth-design.md §7).
     this.declines = new Map();
     this.requestWindow = new Map();
-    this.quota = new Map();
-    this.claimChain = Promise.resolve();
+    // Цепочка для операций «прочитать — сравнить — записать» в storage (владелец ID, квота привязок).
+    this.chain = Promise.resolve();
   }
 
   async fetch(request) {
@@ -228,6 +231,7 @@ export class Room {
     // Внутренние вызовы между комнатами. Снаружи недоступны: Worker пропускает к комнате только /room/<цифры>.
     if (request.method === "POST" && url.pathname === "/claim") return this.claimRoute(request);
     if (request.method === "POST" && url.pathname === "/quota") return this.quotaRoute(request);
+    if (request.method === "POST" && url.pathname === "/owner") return this.ownerRoute();
     this.expireViewers();
     this.flushRequests();
     const hosts = this.activeHosts();
@@ -239,7 +243,7 @@ export class Room {
     if (mode === "required" && token !== CLIENT_V2) return new Response("Update Mac Utils", { status: 426 });
     const v2 = token === CLIENT_V2 && mode !== "off";
     const roomId = (url.pathname.match(/^\/room\/(\d+)$/) || [])[1] || "";
-    const ip = request.headers.get("x-relay-ip") || "";
+    const ip = ipKey(request.headers.get("x-relay-ip") || "");
     const role = url.searchParams.get("role");
 
     if (role === "host") {
@@ -252,10 +256,12 @@ export class Room {
       if (this.approvedViewers().length >= MAX_VIEWERS) {
         return new Response("Too many viewers", { status: 429 });
       }
-      if (!pendingAllowed(this.state.getWebSockets("viewer"), ip, MAX_PENDING, 1)) {
-        return new Response("rate-limited", { status: 429 });
-      }
-      if (!v2 && ip && declineCooldown(this.declines, `ip:${ip}`, Date.now()) > 0) {
+      // Ожидающие ответа ведущего: 10 в комнате, 4 с IP (офис за NAT, встреча) — и для legacy, и для v2 после ключа.
+      if (!this.waitingAllowed(ip)) return new Response("rate-limited", { status: 429 });
+      if (v2) {
+        // До проверки ключа: с одного IP — один сокет; комната полна — вытесняется самый старый (M1).
+        if (!this.makeRoomForUnauth(this.unauthViewers(), ip, false)) return new Response("rate-limited", { status: 429 });
+      } else if (ip && declineCooldown(this.declines, `ip:${ip}`, Date.now()) > 0) {
         return new Response("rate-limited", { status: 429 });
       }
     }
@@ -295,15 +301,19 @@ export class Room {
     return owner;
   }
 
-  // Запись владельца и сравнение — одним потоком, без гонки двух подключений.
-  claimOwner(pub, ip) {
-    const run = () => this.claimOwnerNow(pub, ip);
-    const result = this.claimChain.then(run, run);
-    this.claimChain = result.catch(() => {});
+  serial(run) {
+    const result = this.chain.then(run, run);
+    this.chain = result.catch(() => {});
     return result;
   }
 
-  async claimOwnerNow(pub, ip) {
+  // Запись владельца и сравнение — одним потоком, без гонки двух подключений.
+  // failOpen: сбой счётчика квоты не мешает привязке (только для хоста — иначе новый пользователь не начнёт трансляцию).
+  claimOwner(pub, ip, failOpen = false) {
+    return this.serial(() => this.claimOwnerNow(pub, ip, failOpen));
+  }
+
+  async claimOwnerNow(pub, ip, failOpen) {
     const now = Date.now();
     const owner = await this.readOwner();
     if (owner) {
@@ -311,38 +321,64 @@ export class Room {
       if (now - owner.lastSeenAt >= OWNER_TOUCH_MS) await this.state.storage.put("owner", { ...owner, lastSeenAt: now });
       return { ok: true, claimed: false };
     }
-    if (ip && !(await this.takeClaimQuota(ip))) return { ok: false, reason: "rate-limited" };
+    if (ip && !(await this.takeClaimQuota(ip, failOpen))) return { ok: false, reason: "rate-limited" };
     const fp = await fingerprintOf(pub);
     await this.state.storage.put("owner", { v: 2, pub, fp, claimedAt: now, lastSeenAt: now });
     return { ok: true, claimed: true };
   }
 
-  // Счётчик новых привязок по IP за сутки живёт в отдельной комнате «__limits» (в памяти).
-  async takeClaimQuota(ip) {
-    if (!this.env.ROOMS) return true;
+  // Счётчик новых привязок по IP за сутки — в storage отдельной комнаты «__limits» (M3): переживает выгрузку объекта.
+  async takeClaimQuota(ip, failOpen) {
+    if (!this.env.ROOMS) return failOpen;
     try {
       const response = await this.env.ROOMS.get(this.env.ROOMS.idFromName("__limits")).fetch("https://room/quota", {
         method: "POST", body: JSON.stringify({ key: ip }),
       });
-      return (await response.json()).ok === true;
-    } catch (_) { return true; }
+      const result = await response.json();
+      return result && typeof result.ok === "boolean" ? result.ok : failOpen;
+    } catch (_) { return failOpen; }
   }
 
   async quotaRoute(request) {
     let key = "";
-    try { key = String((await request.json()).key ?? ""); } catch (_) {}
-    const ok = key !== "" && windowHit(this.quota, key, CLAIM_PER_IP_PER_DAY, CLAIM_PERIOD_MS, Date.now());
-    return Response.json({ ok });
+    try { key = ipKey(String((await request.json()).key ?? "")); } catch (_) {}
+    if (key === "") return Response.json({ ok: false });
+    return this.serial(async () => {
+      const now = Date.now(), name = `q:${key}`;
+      const entry = await this.state.storage.get(name);
+      let ok = true;
+      if (!entry || now - entry.start >= CLAIM_PERIOD_MS || now < entry.start) await this.state.storage.put(name, { start: now, count: 1 });
+      else if (entry.count >= CLAIM_PER_IP_PER_DAY) ok = false;
+      else await this.state.storage.put(name, { start: entry.start, count: entry.count + 1 });
+      await this.pruneQuota(now);
+      return Response.json({ ok });
+    });
   }
 
+  // Старые счётчики стираются не чаще раза в час (просроченные сутки).
+  async pruneQuota(now) {
+    if (typeof this.state.storage.list !== "function" || now - (this.prunedAt ?? -Infinity) < 3_600_000) return;
+    this.prunedAt = now;
+    const entries = await this.state.storage.list({ prefix: "q:", limit: 1000 });
+    const stale = [...entries].filter(([, value]) => !value || now - value.start >= CLAIM_PERIOD_MS).map(([key]) => key);
+    if (stale.length) await this.state.storage.delete(stale);
+  }
+
+  // Привязка ID зрителя к ключу (вызов из другой комнаты). Квота строгая: сбой счётчика = отказ (idVerified:false безвреден).
   async claimRoute(request) {
     let body;
     try { body = await request.json(); } catch (_) { return Response.json({ ok: false, reason: "bad-request" }, { status: 400 }); }
     if (!body || typeof body.pub !== "string" || !b64uHasLength(body.pub, 32)) {
       return Response.json({ ok: false, reason: "bad-request" }, { status: 400 });
     }
-    const result = await this.claimOwner(body.pub, typeof body.ip === "string" ? body.ip : "");
+    const result = await this.claimOwner(body.pub, ipKey(typeof body.ip === "string" ? body.ip : ""), false);
     return Response.json({ ok: result.ok, claimed: !!result.claimed, reason: result.reason });
+  }
+
+  // Владелец ID без привязки и без записи (для POST /status).
+  async ownerRoute() {
+    const owner = await this.readOwner();
+    return Response.json({ pub: owner ? owner.pub : null });
   }
 
   // ---- Подключение v2 ----
@@ -354,8 +390,38 @@ export class Room {
     });
   }
 
+  unauthViewers() {
+    return this.state.getWebSockets("viewer").filter((s) => {
+      const info = s.deserializeAttachment() || {};
+      return s.readyState === 1 && !info.ended && info.auth === "pending";
+    });
+  }
+
+  waitingAllowed(ip) {
+    return pendingAllowed(this.state.getWebSockets("viewer"), ip, MAX_PENDING, MAX_PENDING_PER_IP, (info) => info.auth !== "pending");
+  }
+
+  // Место для ещё одного сокета до проверки ключа (M1). Неаутентифицированный сокет ничего не держит:
+  // при переполнении комнаты уходит самый старый, а не отказ новому (иначе 3 молчащих сокета держат комнату).
+  // С одного IP — MAX_UNAUTH_PER_IP: replaceSameIp — старый сокет этого IP вытесняется (хост переподключается),
+  // иначе новый получает отказ (зрители).
+  makeRoomForUnauth(sockets, ip, replaceSameIp) {
+    const age = (socket) => socket.deserializeAttachment()?.connectedAt ?? 0;
+    const live = () => sockets.filter((socket) => !socket.deserializeAttachment()?.ended).sort((x, y) => age(x) - age(y));
+    if (ip) {
+      const same = live().filter((socket) => socket.deserializeAttachment()?.ip === ip);
+      if (same.length >= MAX_UNAUTH_PER_IP) {
+        if (!replaceSameIp) return false;
+        for (const old of same.slice(0, same.length - MAX_UNAUTH_PER_IP + 1)) this.failAuth(old, "replaced");
+      }
+    }
+    const rest = live();
+    for (const old of rest.slice(0, Math.max(0, rest.length - MAX_UNAUTH + 1))) this.failAuth(old, "rate-limited");
+    return true;
+  }
+
   async connectHostV2(roomId, ip) {
-    if (this.pendingHosts().length >= MAX_PENDING) return new Response("rate-limited", { status: 429 });
+    this.makeRoomForUnauth(this.pendingHosts(), ip, true);
     const [client, server] = Object.values(new WebSocketPair());
     const nonce = newNonce(), now = Date.now();
     this.state.acceptWebSocket(server, ["host"]);
@@ -421,7 +487,7 @@ export class Room {
     }
     // 6-значные ID перебираются за ~10^6 запросов: привязывать ключ к ним нельзя.
     if (!ID10.test(info.roomId)) return this.failAuth(socket, "id-format");
-    const claim = await this.claimOwner(auth.pub, info.ip);
+    const claim = await this.claimOwner(auth.pub, info.ip, true);
     if (!claim.ok) return this.failAuth(socket, claim.reason === "rate-limited" ? "rate-limited" : "id-claimed");
     const fp = await fingerprintOf(auth.pub);
     const current = this.stillPending(socket);
@@ -438,6 +504,10 @@ export class Room {
     }
     // Зрителей, которых пустил хост без проверенного ключа, владельцу не передаём.
     if (foreign) this.endViewers();
+    // M2: пущенные зрители остаются только у того ключа, который их пустил, — и в grace, когда прежнего хоста уже нет.
+    for (const viewer of this.approvedViewers()) {
+      if ((viewer.deserializeAttachment() || {}).approvedBy !== auth.pub) this.endViewer(viewer);
+    }
     socket.serializeAttachment({ ...current, auth: "key", pub: auth.pub, fp, nonce: undefined, lastSeen: Date.now() });
     socket.send(JSON.stringify({ type: "authed", v: 2, fp, claimed: claim.claimed }));
     await this.resumeViewers();
@@ -471,9 +541,11 @@ export class Room {
     if (!auth || !(await verifyEd25519(auth.pub, auth.sig, viewerMessage(info.roomId, info.id, info.rid, info.nonce)))) {
       return this.failAuth(socket, "bad-signature");
     }
-    const fp = await fingerprintOf(auth.pub);
     const owner = await this.readOwner();
     const self = !!owner && owner.pub === auth.pub;
+    // Пауза после отказа — до привязки ID: отклонённый не тратит квоту и не закрепляет новый ID.
+    if (!self && declineCooldown(this.declines, `k:${auth.pub}`, Date.now()) > 0) return this.failAuth(socket, "rate-limited");
+    const fp = await fingerprintOf(auth.pub);
     let id = info.id, idVerified;
     if (info.id === info.roomId) {
       // ID комнаты как свой ID годится только владельцу комнаты (подпись требует его приватного ключа).
@@ -484,7 +556,7 @@ export class Room {
     }
     const current = this.stillPending(socket);
     if (!current) return;
-    if (!self && declineCooldown(this.declines, `k:${auth.pub}`, Date.now()) > 0) return this.failAuth(socket, "rate-limited");
+    if (!self && !this.waitingAllowed(current.ip)) return this.failAuth(socket, "rate-limited");
     socket.serializeAttachment({ ...current, auth: "key", pub: auth.pub, fp, idVerified, self, id, nonce: undefined, lastSeen: Date.now() });
     socket.send(JSON.stringify({ type: "waiting", v: 2, rid: current.rid }));
     await this.requestOrQueue(socket);
@@ -665,7 +737,7 @@ export class Room {
         return;
       }
       socket.serializeAttachment({ ...info, lastSeen: Date.now() });
-      if (typeof message === "string") return this.hostCommand(message, info.auth === "key" ? socket : null);
+      if (typeof message === "string") return this.hostCommand(message, socket);
       for (const viewer of this.approvedViewers()) {
         try { viewer.send(message); } catch (_) { /* зритель отвалился */ }
       }
@@ -715,13 +787,15 @@ export class Room {
     }
   }
 
-  // hostSocket — сокет хоста с проверенным ключом (v2): ему rid обязателен; без него — как раньше (старые хосты).
-  hostCommand(text, hostSocket = null) {
+  // hostSocket — сокет отправителя (обязателен, N4). Хосту с проверенным ключом rid обязателен; старым — как раньше.
+  hostCommand(text, hostSocket) {
+    const hostInfo = (hostSocket && hostSocket.deserializeAttachment()) || {};
+    const keyed = hostInfo.auth === "key";
     let command;
     try { command = JSON.parse(text); } catch (_) { return; }
     if (!command || typeof command !== "object") return;
     if (command.type === "heartbeat") return;
-    if (command.type === "release" && hostSocket) return this.releaseOwner(hostSocket);
+    if (command.type === "release" && keyed) return this.releaseOwner(hostSocket);
     // Игра ведущего — только выбранному зрителю (все его подключения).
     if (command.type === "game") {
       const { to, ...rest } = command;
@@ -733,7 +807,7 @@ export class Room {
       return;
     }
     if (command.type !== "accept" && command.type !== "decline") return;
-    if (hostSocket && typeof command.rid !== "string") return;
+    if (keyed && typeof command.rid !== "string") return;
     // Отвечаем одному ожидающему сокету: по rid, если ведущий его вернул, иначе самому раннему с этим id.
     const target = this.activeViewers().find((viewer) => {
       const info = viewer.deserializeAttachment() || {};
@@ -747,7 +821,8 @@ export class Room {
     for (const viewer of target ? [target] : []) {
       const info = viewer.deserializeAttachment() || {};
       if (command.type === "accept") {
-        viewer.serializeAttachment({ ...info, approved: true });
+        // Кто пустил: при смене хоста (в том числе в grace) пущенные чужим ключом завершаются (M2).
+        viewer.serializeAttachment({ ...info, approved: true, approvedBy: keyed ? hostInfo.pub : "none" });
         const accepted = { type: "accepted", name: command.name || "" };
         // Подпись хоста (accept\n<room>\n<pub зрителя>\n<rid>): зритель сверит её с hostKey, relay подделать её не может.
         if (info.auth === "key" && typeof command.hostSig === "string" && b64uHasLength(command.hostSig, 64)) {
@@ -770,8 +845,11 @@ export class Room {
   // «Сменить ID»: хост с проверенным ключом освобождает ID; трансляция заканчивается.
   async releaseOwner(socket) {
     const info = socket.deserializeAttachment() || {};
-    const owner = await this.readOwner();
-    if (owner && owner.pub === info.pub) await this.state.storage.delete("owner");
+    // Через ту же цепочку, что и привязка: параллельный claim не запишет ключ поверх удаления (N6).
+    await this.serial(async () => {
+      const owner = await this.readOwner();
+      if (owner && owner.pub === info.pub) await this.state.storage.delete("owner");
+    });
     this.closed(socket, true);
     try { socket.close(1000, "ID released"); } catch (_) {}
   }
@@ -786,13 +864,15 @@ export class Room {
   }
 
   endViewers() {
-    for (const viewer of this.state.getWebSockets("viewer")) {
-      try {
-        viewer.serializeAttachment({ ...viewer.deserializeAttachment(), ended: true });
-        viewer.send(JSON.stringify({ type: "ended" }));
-        viewer.close(1000, "Broadcast ended");
-      } catch (_) {}
-    }
+    for (const viewer of this.state.getWebSockets("viewer")) this.endViewer(viewer);
+  }
+
+  endViewer(viewer) {
+    try {
+      viewer.serializeAttachment({ ...viewer.deserializeAttachment(), ended: true });
+      viewer.send(JSON.stringify({ type: "ended" }));
+      viewer.close(1000, "Broadcast ended");
+    } catch (_) {}
   }
 
   closed(socket, explicit = false) {

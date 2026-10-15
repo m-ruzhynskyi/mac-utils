@@ -130,7 +130,7 @@ test('closing and errored viewers are excluded from counts and approval', () => 
   assert.equal(host.messages.at(-1).count, 0);
   const pending = f.socket('viewer', { id: '1111111111', approved: false });
   f.room.webSocketClose(pending);
-  f.room.hostCommand('{"type":"accept","viewer":"1111111111"}');
+  f.room.hostCommand('{"type":"accept","viewer":"1111111111"}', host);
   assert.equal(pending.info.approved, false);
 });
 test('two silent OPEN ghost viewers expire while one real viewer remains alive', async () => {
@@ -561,7 +561,7 @@ test('v2: другой ключ на занятом ID → id-claimed (4403), в
 test('v2: тот же ключ вытесняет старое подключение (replaced, 4409) без разрыва зрителей', async () => {
   const w = world(), f = w.f(ROOM);
   const old = await authHost(f);
-  const viewer = f.socket('viewer', { id: VIEWER_ID, approved: true, lastSeen: 1_000_000 });
+  const viewer = f.socket('viewer', { id: VIEWER_ID, approved: true, approvedBy: KEY_A.pub, lastSeen: 1_000_000 });
   const fresh = await authHost(f);
   assert.equal(msgOf(old, 'error').code, 'replaced');
   assert.equal(old.closes.at(-1)[0], 4409);
@@ -584,7 +584,7 @@ test('v2: владелец вытесняет хоста без ключа и з
 test('v2: grace сохраняется, возвращает комнату только прошедший проверку', async () => {
   const w = world(), f = w.f(ROOM);
   const host = await authHost(f);
-  const viewer = f.socket('viewer', { id: VIEWER_ID, approved: true, lastSeen: 1_000_000 });
+  const viewer = f.socket('viewer', { id: VIEWER_ID, approved: true, approvedBy: KEY_A.pub, lastSeen: 1_000_000 });
   f.room.webSocketClose(host, 1006);
   assert.equal(viewer.messages.at(-1).type, 'reconnecting');
   const pending = await connectHost(f);
@@ -825,17 +825,18 @@ test('AUTH_MODE=required: mu-share-1 → 426, mu-share-2 работает', asyn
   assert.equal((await connectHost(f)).res.status, 101);
 });
 
-test('лимит pending: не больше 3 ожидающих, не больше 1 с одного IP; одобренные не считаются', async () => {
+test('лимит ожидающих: не больше 10 в комнате, не больше 4 с одного IP; одобренные не считаются', async () => {
   const w = world(), f = w.f(ROOM);
   await authHost(f);
   const results = [];
-  for (const [i, ip] of ['1.1.1.1', '1.1.1.1', '2.2.2.2', '3.3.3.3', '4.4.4.4'].entries()) {
-    results.push((await connectViewer(f, { headers: V1, id: `555000111${i}`, ip })).res.status);
+  const ips = ['1.1.1.1', '1.1.1.1', '1.1.1.1', '1.1.1.1', '1.1.1.1', '2.2.2.2', '3.3.3.3', '4.4.4.4', '5.5.5.5', '6.6.6.6', '7.7.7.7', '8.8.8.8'];
+  for (const [i, ip] of ips.entries()) {
+    results.push((await connectViewer(f, { headers: V1, id: `55500011${String(i).padStart(2, '0')}`, ip })).res.status);
   }
-  assert.deepEqual(results, [101, 429, 101, 101, 429]);
+  assert.deepEqual(results, [101, 101, 101, 101, 429, 101, 101, 101, 101, 101, 101, 429]);
   const pending = f.all().filter((s) => s.tag === 'viewer');
   pending[0].info.approved = true;
-  assert.equal((await connectViewer(f, { headers: V1, id: '5550001119', ip: '5.5.5.5' })).res.status, 101);
+  assert.equal((await connectViewer(f, { headers: V1, id: '5550001199', ip: '9.9.9.9' })).res.status, 101);
 });
 
 test('MAX_VIEWERS считает только одобренных', async () => {
@@ -849,30 +850,29 @@ test('MAX_VIEWERS считает только одобренных', async () =>
   assert.equal((await connectViewer(g, { headers: V1 })).res.status, 101);
 });
 
-test('запросы хосту: 5 в минуту сразу, остальные ждут очереди; cancelled и accept для ожидающих не действуют', async () => {
+test('запросы хосту: 20 в минуту сразу, остальные ждут очереди; cancelled и accept для ожидающих не действуют', async () => {
   const w = world(), f = w.f(ROOM);
   const host = await authHost(f);
   const viewers = [];
-  for (let i = 0; i < 7; i++) {
-    // Одобренные не занимают места среди ожидающих; здесь это нужно только чтобы не упереться в MAX_PENDING.
-    for (const s of viewers) s.info.approved = true;
-    const { socket } = await connectViewer(f, { headers: V1, id: `500000000${i}`, ip: `9.9.9.${i}` });
+  for (let i = 0; i < 22; i++) {
+    // Временно завершены, чтобы не упереться в лимит ожидающих (10); на окно запросов это не влияет.
+    for (const s of viewers) s.info.ended = true;
+    const { socket } = await connectViewer(f, { headers: V1, id: `50000000${String(i).padStart(2, '0')}`, ip: `9.9.9.${i}` });
     viewers.push(socket);
   }
-  for (const v of viewers) v.info.approved = false;
+  for (const v of viewers) delete v.info.ended;
   const requestsOf = () => host.messages.filter((m) => m.type === 'request').map((m) => m.viewer);
-  assert.equal(requestsOf().length, 5);
-  assert.equal(viewers[5].info.reqSent, false);
-  await f.room.webSocketMessage(host, JSON.stringify({ type: 'accept', viewer: '5000000005', rid: viewers[5].info.rid }));
-  assert.equal(viewers[5].info.approved, false, 'запрос ещё не показан хосту');
-  f.room.webSocketClose(viewers[6]);
-  assert.equal(host.messages.filter((m) => m.type === 'cancelled' && m.viewer === '5000000006').length, 0);
+  assert.equal(requestsOf().length, 20);
+  assert.equal(viewers[20].info.reqSent, false);
+  await f.room.webSocketMessage(host, JSON.stringify({ type: 'accept', viewer: '5000000020', rid: viewers[20].info.rid }));
+  assert.equal(viewers[20].info.approved, false, 'запрос ещё не показан хосту');
+  f.room.webSocketClose(viewers[21]);
+  assert.equal(host.messages.filter((m) => m.type === 'cancelled' && m.viewer === '5000000021').length, 0);
   f.advance(61_000);
-  for (const v of viewers.slice(0, 5)) v.info.lastSeen = 1_061_000;
-  viewers[5].info.lastSeen = 1_061_000;
+  for (const v of viewers.slice(0, 21)) v.info.lastSeen = 1_061_000;
   await f.room.alarm();
-  assert.equal(requestsOf().includes('5000000005'), true);
-  assert.equal(requestsOf().includes('5000000006'), false, 'закрытый зритель из очереди не уходит');
+  assert.equal(requestsOf().includes('5000000020'), true);
+  assert.equal(requestsOf().includes('5000000021'), false, 'закрытый зритель из очереди не уходит');
 });
 
 test('после decline: тот же ключ (v2) и тот же IP (legacy) ждут 60 с, после третьего подряд — 10 минут', async () => {

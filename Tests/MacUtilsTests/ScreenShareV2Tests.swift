@@ -235,6 +235,37 @@ final class ScreenShareV2Tests: XCTestCase {
         XCTAssertEqual(ScreenShare.connectionMessage(500), "Сервер ответил 500")
     }
 
+    // MARK: Keychain недоступен (M5)
+
+    private final class LockedStore: ShareKeyStore {
+        var saves = 0
+        func load() throws -> Data? { throw KeychainError(status: -25308) }
+        func save(_ data: Data) throws { saves += 1 }
+        func delete() throws {}
+    }
+
+    func testTemporaryKeyIsNeverUsedForKeyedProtocol() {
+        let locked = ShareIdentity(store: LockedStore())
+        XCTAssertFalse(ShareHandshake.useKeys(capability: .keyed, identity: locked), "relay с ключами, но Keychain закрыт — только mu-share-1")
+        XCTAssertFalse(ShareHandshake.useKeys(capability: .legacy, identity: locked))
+        XCTAssertFalse(ShareHandshake.useKeys(capability: nil, identity: locked))
+        let healthy = identity()
+        XCTAssertTrue(ShareHandshake.useKeys(capability: .keyed, identity: healthy))
+        XCTAssertFalse(ShareHandshake.useKeys(capability: .legacy, identity: healthy))
+        XCTAssertFalse(ShareHandshake.useKeys(capability: nil, identity: healthy))
+    }
+
+    func testNothingIsSignedWithTemporaryKey() {
+        let locked = ShareIdentity(store: LockedStore())
+        XCTAssertNil(ShareHandshake.hostAuthMessage(identity: locked, roomId: "1234567890", nonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+                     "ответ на challenge хоста не формируется")
+        XCTAssertNil(ShareHandshake.viewerAuthMessage(identity: locked, roomId: "1234567890", viewerId: "9876543210",
+                                                      rid: "r", nonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+                     "ответ на challenge зрителя не формируется")
+        XCTAssertNil(ShareRules.hostSignature(for: keyed(), roomId: "1234567890", identity: locked), "подпись принятия тоже")
+        XCTAssertNotNil(ShareRules.hostSignature(for: keyed(), roomId: "1234567890", identity: identity()))
+    }
+
     func testAnswerMessageCarriesHostSignatureOnlyWhenGiven() throws {
         let plain = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try XCTUnwrap(
             ScreenShare.answerMessage(viewer: "9876543210", accept: true, rid: "r1")).utf8)) as? [String: Any])
