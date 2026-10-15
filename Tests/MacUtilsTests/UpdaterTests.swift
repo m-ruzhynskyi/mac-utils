@@ -484,3 +484,151 @@ private struct SignatureSetupError: Error, CustomStringConvertible {
     let message: String
     var description: String { message }
 }
+
+// MARK: - Версии (docs/VERSIONING.md)
+
+/// ДОСЛОВНАЯ копия компаратора, которым пользуется весь установленный парк (≤ 1.3.100):
+/// `git show origin/main:Sources/MacUtils/Features/Update/Updater.swift`, функция `isVersion`.
+/// Не «улучшать»: тест нужен, чтобы схема версий оставалась безопасной именно для старого кода.
+private func legacyIsVersion(_ candidate: String, newerThan current: String) -> Bool {
+    let a = candidate.split(separator: ".").map { Int($0) ?? 0 }
+    let b = current.split(separator: ".").map { Int($0) ?? 0 }
+    for i in 0..<max(a.count, b.count) {
+        let x = i < a.count ? a[i] : 0
+        let y = i < b.count ? b[i] : 0
+        if x != y { return x > y }
+    }
+    return false
+}
+
+@MainActor
+final class VersionSchemeTests: XCTestCase {
+    private static let sequence: [String] = (0...999).map { "1.4.\($0)" } + ["1.5.0", "2.0.0"]
+
+    func testLegacyComparatorMatchesItsKnownBehaviour() {
+        XCTAssertTrue(legacyIsVersion("1.4.0", newerThan: "1.3.100"))
+        XCTAssertTrue(legacyIsVersion("1.3.101", newerThan: "1.3.100"))
+        XCTAssertFalse(legacyIsVersion("1.3.100", newerThan: "1.3.100"))
+        // Причина запрета суффиксов: для старого кода «1.4.0-beta.1» — это [1,4,0,1], то есть НОВЕЕ 1.4.0.
+        XCTAssertTrue(legacyIsVersion("1.4.0-beta.1", newerThan: "1.4.0"))
+    }
+
+    func testSequenceIsStrictlyMonotonicForLegacyAndNewComparators() {
+        for (older, newer) in zip(Self.sequence, Self.sequence.dropFirst()) {
+            XCTAssertTrue(legacyIsVersion(newer, newerThan: older), "legacy: \(newer) должна быть новее \(older)")
+            XCTAssertFalse(legacyIsVersion(older, newerThan: newer), "legacy: \(older) не новее \(newer)")
+            XCTAssertTrue(Updater.isVersion(newer, newerThan: older), "новый: \(newer) должна быть новее \(older)")
+            XCTAssertFalse(Updater.isVersion(older, newerThan: newer), "новый: \(older) не новее \(newer)")
+        }
+    }
+
+    func testEverySchemeVersionIsNewerThanLastOldRelease() {
+        for version in Self.sequence {
+            XCTAssertTrue(legacyIsVersion(version, newerThan: "1.3.100"), version)
+            XCTAssertTrue(Updater.isVersion(version, newerThan: "1.3.100"), version)
+        }
+    }
+
+    func testLegacyAndNewComparatorsAgreeOnPlainVersions() {
+        let samples = ["1.3.100", "1.3.101", "1.4", "1.4.0", "1.4.1", "1.4.10", "1.4.9", "1.10.0", "1.9.99", "2.0.0", "0.9.9"]
+        for a in samples { for b in samples {
+            XCTAssertEqual(legacyIsVersion(a, newerThan: b), Updater.isVersion(a, newerThan: b), "\(a) vs \(b)")
+        } }
+    }
+
+    func testBuildNumberFormulaIsMonotonicAndAboveLegacyBuilds() {
+        func build(_ v: String) -> Int {
+            let p = v.split(separator: ".").map { Int($0)! }
+            return p[0] * 1_000_000 + p[1] * 1_000 + p[2]
+        }
+        for (older, newer) in zip(Self.sequence, Self.sequence.dropFirst()) {
+            XCTAssertLessThan(build(older), build(newer), "\(older) → \(newer)")
+        }
+        XCTAssertEqual(build("1.4.3"), 1_004_003)
+        XCTAssertGreaterThan(build("1.4.0"), 221, "у v1.3.100 CFBundleVersion был 221")
+    }
+}
+
+@MainActor
+final class UpdaterTagSelectionTests: XCTestCase {
+    private func release(_ tag: String, prerelease: Bool = false, draft: Bool = false, assets: [String] = ["MacUtils.zip"]) -> [String: Any] {
+        ["tag_name": tag, "draft": draft, "prerelease": prerelease,
+         "assets": assets.map { ["name": $0, "browser_download_url": "https://example.com/\(tag)/\($0)"] }]
+    }
+
+    private func version(of releases: [[String: Any]]) throws -> String {
+        try Updater.parseRelease(JSONSerialization.data(withJSONObject: releases)).version
+    }
+
+    func testWindowsLatestIsSkippedEvenWithMacAsset() throws {
+        XCTAssertEqual(try version(of: [release("windows-latest", prerelease: true), release("v1.4.0")]), "1.4.0")
+        XCTAssertEqual(try version(of: [release("windows-latest"), release("v1.4.0")]), "1.4.0", "и без флага pre-release тег без v не подходит")
+    }
+
+    func testPrereleaseIsSkipped() throws {
+        XCTAssertEqual(try version(of: [release("v1.5.0", prerelease: true), release("v1.4.2")]), "1.4.2")
+    }
+
+    func testTagsWithSuffixAreSkippedEvenIfNotMarkedPrerelease() throws {
+        // Старый код считает «1.4.0-beta.1» новее 1.4.0, поэтому такие теги нельзя принимать никогда.
+        for tag in ["v1.4.0-beta.1", "v1.4.1-rc1", "v1.4.1+abc", "v1.4", "v1.4.0.1", "V1.4.5", "v1.4.x", "v1.4.3 "] {
+            XCTAssertEqual(try version(of: [release(tag), release("v1.4.0")]), "1.4.0", "\(tag) должен быть пропущен")
+        }
+    }
+
+    func testOnlyUnsuitableReleasesMeansNotFound() {
+        XCTAssertThrowsError(try version(of: [release("v1.4.0-beta.1"), release("windows-latest", prerelease: true)]))
+    }
+
+    func testPicksHighestVersionRegardlessOfOrderAndNumerically() throws {
+        XCTAssertEqual(try version(of: [release("v1.4.2"), release("v1.4.10"), release("v1.4.3"), release("v1.3.100")]), "1.4.10")
+        XCTAssertEqual(try version(of: [release("v1.3.100"), release("v1.4.0"), release("v1.5.0"), release("v1.4.9")]), "1.5.0")
+        XCTAssertEqual(try version(of: [release("v1.9.99"), release("v1.10.0")]), "1.10.0", "1.10 > 1.9, не лексикографически")
+    }
+
+    func testHighestVersionWithoutAssetIsSkippedForNextOne() throws {
+        XCTAssertEqual(try version(of: [release("v1.4.9", assets: ["notes.txt"]), release("v1.4.8")]), "1.4.8")
+    }
+
+    func testDraftsAreSkippedWhenChoosingHighest() throws {
+        XCTAssertEqual(try version(of: [release("v1.4.9", draft: true), release("v1.4.8")]), "1.4.8")
+    }
+}
+
+final class UpdaterChannelTests: XCTestCase {
+    func testChannelFromInfoValue() {
+        XCTAssertEqual(Updater.Channel(infoValue: "release"), .release)
+        XCTAssertEqual(Updater.Channel(infoValue: nil), .dev)
+        XCTAssertEqual(Updater.Channel(infoValue: "dev"), .dev)
+        XCTAssertEqual(Updater.Channel(infoValue: 1), .dev)
+        XCTAssertEqual(Updater.Channel(infoValue: "Release"), .dev)
+        XCTAssertEqual(Updater.Channel(infoValue: ""), .dev)
+    }
+
+    func testOnlyReleaseInstallsAutomatically() {
+        XCTAssertTrue(Updater.Channel.release.installsAutomatically)
+        XCTAssertFalse(Updater.Channel.dev.installsAutomatically)
+    }
+
+    func testDisplayVersion() {
+        typealias U = Updater
+        XCTAssertEqual(U.displayVersion(short: "1.4.3", channel: .release, commit: "abc1234", since: "12"), "1.4.3")
+        XCTAssertEqual(U.displayVersion(short: "1.4.3", channel: .dev, commit: "abc1234", since: "12"), "1.4.3 · dev abc1234+12")
+        XCTAssertEqual(U.displayVersion(short: "1.4.3", channel: .dev, commit: "abc1234-dirty", since: "0"), "1.4.3 · dev abc1234-dirty+0")
+        XCTAssertEqual(U.displayVersion(short: "1.4.3", channel: .dev, commit: "abc1234", since: "?"), "1.4.3 · dev abc1234")
+        XCTAssertEqual(U.displayVersion(short: "1.4.3", channel: .dev, commit: "abc1234", since: ""), "1.4.3 · dev abc1234")
+        XCTAssertEqual(U.displayVersion(short: "1.4.3", channel: .dev, commit: "abc1234", since: nil), "1.4.3 · dev abc1234")
+        XCTAssertEqual(U.displayVersion(short: "1.4.3", channel: .dev, commit: "unknown", since: "5"), "1.4.3 · dev")
+        XCTAssertEqual(U.displayVersion(short: "1.4.3", channel: .dev, commit: "", since: "5"), "1.4.3 · dev")
+        XCTAssertEqual(U.displayVersion(short: "1.4.3", channel: .dev, commit: nil, since: nil), "1.4.3 · dev")
+    }
+
+    func testStrictVersion() {
+        XCTAssertEqual(Updater.strictVersion(tag: "v1.4.3"), [1, 4, 3])
+        XCTAssertEqual(Updater.strictVersion(tag: "v1.3.100"), [1, 3, 100])
+        XCTAssertEqual(Updater.strictVersion(tag: "v0.0.0"), [0, 0, 0])
+        for bad in ["1.4.3", "windows-latest", "v1.4", "v1.4.0.1", "v1.4.0-beta.1", "v1.4.x", "v1..3", "v1.4.", "v", "", "V1.4.3", "v1.4.3 ", "v+1.4.3", "v1.-4.3", "v١.٤.٣"] {
+            XCTAssertNil(Updater.strictVersion(tag: bad), bad)
+        }
+    }
+}

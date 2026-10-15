@@ -372,7 +372,7 @@ struct GeneralPage: View {
 
             Section {
                 HStack {
-                    Text("Версия \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—") (сборка \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")) · © Maksym Ruzhynskyi")
+                    Text("Версия \(Updater.shared.displayVersion) (сборка \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")) · © Maksym Ruzhynskyi")
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Выйти из Mac Utils") { NSApp.terminate(nil) }
@@ -406,7 +406,7 @@ struct UpdatesSection: View {
         Section("Обновления") {
             LabeledContent("Версия") {
                 HStack {
-                    Text(updater.currentVersion)
+                    Text(updater.displayVersion)
                     Button("Что нового и история версий") { WhatsNewWindowController.shared.show() }
                 }
             }
