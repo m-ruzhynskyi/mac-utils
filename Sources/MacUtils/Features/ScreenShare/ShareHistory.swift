@@ -15,6 +15,13 @@ final class ShareHistory: ObservableObject {
         var trusted = false
         /// Только из «всегда разрешать» — не подключались сами.
         var incomingOnly = false
+        // Протокол v2 (.audit/auth-design.md §3.1). Только опциональные: синтезированный Decodable
+        // требует неопциональные ключи, и старая история (1.4.0) без них не прочиталась бы целиком.
+        /// Публичный ключ зрителя, которому доверяем («Всегда разрешать» с ключом).
+        var key: String?
+        /// Публичный ключ ведущего, к которому подключались (pinning, §4.3).
+        var hostKey: String?
+        var keyConfirmedAt: Date?
 
         var title: String { label?.isEmpty == false ? label! : (name.isEmpty ? ShareCode.display(id) : name) }
     }
@@ -29,9 +36,12 @@ final class ShareHistory: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: Pref.shareHistory),
            let saved = try? JSONDecoder().decode([Entry].self, from: data) {
             // Свой и невалидный ID доверенными быть не могут (иначе «всегда разрешать» возвращает автопринятие).
+            // Ключи не того формата отбрасываются: с ними не совпадёт ни один настоящий ключ.
             entries = saved.map { entry in
                 var entry = entry
                 if entry.trusted, !Self.canTrust(entry.id) { entry.trusted = false }
+                if let key = entry.key, !Self.isPublicKey(key) { entry.key = nil; entry.keyConfirmedAt = nil }
+                if let key = entry.hostKey, !Self.isPublicKey(key) { entry.hostKey = nil }
                 return entry
             }
         }
@@ -39,7 +49,17 @@ final class ShareHistory: ObservableObject {
 
     /// Доверять можно только чужому ID из 10 ASCII-цифр (как принимает relay): свой и пустой/кривой ID подделывает любой зритель.
     static func canTrust(_ id: String, myID: String = ShareCode.myID) -> Bool {
-        id != myID && id.utf8.count == 10 && id.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 }
+        id != myID && isValidID(id)
+    }
+
+    /// 10 ASCII-цифр — как `^\d{10}$` в relay.
+    static func isValidID(_ id: String) -> Bool {
+        id.utf8.count == 10 && id.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 }
+    }
+
+    /// Публичный ключ Ed25519 в base64url без `=`: 43 символа, 32 байта.
+    static func isPublicKey(_ pub: String) -> Bool {
+        pub.utf8.count == 43 && ShareIdentity.data(fromBase64url: pub)?.count == 32
     }
 
     var visitedEntries: [Entry] { entries.filter { !$0.incomingOnly }.sorted { $0.lastSeen > $1.lastSeen } }
@@ -53,6 +73,7 @@ final class ShareHistory: ObservableObject {
         }
     }
 
+    /// Доверие по одному ID (протокол v1). Остаётся до перехода ScreenShare на `trust(_:name:pub:)` (M2).
     func trust(_ id: String, name: String) {
         guard Self.canTrust(id) else { return }
         update(id) { entry in
@@ -61,13 +82,50 @@ final class ShareHistory: ObservableObject {
         }
     }
 
+    /// «Всегда разрешать» с ключом: доверие привязывается к паре ID + ключ, прежний ключ заменяется.
+    func trust(_ id: String, name: String, pub: String) {
+        guard Self.canTrust(id), Self.isPublicKey(pub) else { return }
+        update(id) { entry in
+            entry.trusted = true
+            entry.key = pub
+            entry.keyConfirmedAt = Date()
+            if entry.name.isEmpty { entry.name = name }
+        }
+    }
+
+    /// Снимает доверие вместе с ключом: следующее «Всегда разрешать» запомнит ключ заново.
     func untrust(_ id: String) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        if entries[index].incomingOnly { entries.remove(at: index) } else { entries[index].trusted = false }
+        if entries[index].incomingOnly {
+            entries.remove(at: index)
+        } else {
+            entries[index].trusted = false
+            entries[index].key = nil
+            entries[index].keyConfirmedAt = nil
+        }
         save()
     }
 
+    /// Доверие по одному ID (протокол v1). Остаётся до перехода ScreenShare на `isTrusted(id:pub:)` (M2).
     func isTrusted(_ id: String) -> Bool { Self.canTrust(id) && entries.contains { $0.id == id && $0.trusted } }
+
+    /// v2: доверен этот ID **и** именно этот ключ. Совпадения одного ID недостаточно.
+    func isTrusted(id: String, pub: String) -> Bool {
+        Self.canTrust(id) && Self.isPublicKey(pub) && entries.contains { $0.id == id && $0.trusted && $0.key == pub }
+    }
+
+    /// Доверенный по старому ID без ключа: на первый v2-запрос — окно подтверждения, без автоприёма (§3.2).
+    func needsKeyConfirmation(id: String) -> Bool {
+        Self.canTrust(id) && entries.contains { $0.id == id && $0.trusted && $0.key == nil }
+    }
+
+    /// Запомнить ключ ведущего, к которому подключались (§4.3).
+    func pinHost(id: String, key: String) {
+        guard Self.isValidID(id), Self.isPublicKey(key) else { return }
+        update(id) { $0.hostKey = key }
+    }
+
+    func hostKey(for id: String) -> String? { entries.first { $0.id == id }?.hostKey }
 
     func label(for id: String) -> String? { entries.first { $0.id == id }.map(\.title) }
 
@@ -115,13 +173,65 @@ final class ShareHistory: ObservableObject {
         timer = nil
     }
 
+    /// Ключ для подписанного `POST /status`. Пока nil — только прежний `GET`. Ставит ScreenShare (M2), когда ключ
+    /// уже создан и relay понимает v2: сам опрос истории не должен создавать ключ и вызывать запрос Keychain.
+    static var statusIdentity: ShareIdentity?
+    /// Сервер, который не понял `POST /status` (старый или сторонний relay): до смены сервера только `GET`.
+    private var signedStatusUnsupported: String?
+
+    /// Кого опрашивать: только 10-значные ID, не больше 20 самых свежих (лимит relay, §6).
+    static func statusIDs(_ entries: [Entry]) -> [String] {
+        Array(entries.sorted { $0.lastSeen > $1.lastSeen }.map(\.id).filter(isValidID).prefix(20))
+    }
+
+    /// Подписанный запрос «кто в эфире» (§6): тело `{v, id, pub, ts, ids, sig}`, подпись — `ShareIdentity.statusMessage`.
+    static func statusRequest(server: String, myID: String, ids: [String], identity: ShareIdentity,
+                              ts: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> URLRequest? {
+        guard !ids.isEmpty, let url = ShareCode.statusURL(server: server, ids: []),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.query = nil
+        guard let postURL = components.url else { return nil }
+        let pub = identity.publicKey
+        guard isPublicKey(pub) else { return nil }
+        let body: [String: Any] = ["v": 2, "id": myID, "pub": pub, "ts": ts, "ids": ids,
+                                   "sig": identity.sign(status: myID, ts: ts, ids: ids)]
+        guard let data = try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]) else { return nil }
+        var request = ShareCode.request(postURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = data
+        return request
+    }
+
+    /// Ответ `/status`: в эфире те из `ids`, что отмечены true. `complete` — ответ должен быть про все `ids`:
+    /// старый relay на `POST` тело не читает и отвечает `{}`, это не «никого нет», а «не понял».
+    static func parseLive(_ data: Data, ids: [String], complete: Bool = false) -> Set<String>? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Bool],
+              !complete || ids.allSatisfy({ json[$0] != nil }) else { return nil }
+        return Set(ids.filter { json[$0] == true })
+    }
+
     func refreshLive() {
-        let ids = visitedEntries.map(\.id)
-        guard !ids.isEmpty, let url = ShareCode.statusURL(server: ScreenShare.server, ids: ids) else { return }
+        let ids = Self.statusIDs(visitedEntries)
+        let server = ScreenShare.server
+        guard !ids.isEmpty, let url = ShareCode.statusURL(server: server, ids: ids) else { return }
+        var signed: URLRequest?
+        if signedStatusUnsupported != server, let identity = Self.statusIdentity {
+            signed = Self.statusRequest(server: server, myID: ShareCode.myID, ids: ids, identity: identity)
+        }
         Task {
+            if let signed, let (data, response) = try? await URLSession.shared.data(for: signed) {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if status == 200, let result = Self.parseLive(data, ids: ids, complete: true) {
+                    live = result
+                    return
+                }
+                // Не понял `POST` — больше не пробуем. Прочие ошибки (лимит, подпись) — разовый откат на `GET`.
+                if status == 200 || status == 404 || status == 405 { signedStatusUnsupported = server }
+            }
             guard let (data, _) = try? await URLSession.shared.data(for: ShareCode.request(url)),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Bool] else { return }
-            live = Set(json.filter(\.value).map(\.key))
+                  let result = Self.parseLive(data, ids: ids) else { return }
+            live = result
         }
     }
 }
