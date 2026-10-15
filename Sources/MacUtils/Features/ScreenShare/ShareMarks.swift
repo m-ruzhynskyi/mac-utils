@@ -140,6 +140,9 @@ final class ShareMarksOverlay {
     private var filter: SCContentFilter?
     private var follow: Timer?
 
+    /// Окно меток — его в трансляцию не берём.
+    var windowNumber: Int? { panel?.windowNumber }
+
     func attach(to filter: SCContentFilter) {
         self.filter = filter
         updateFrame()
@@ -188,6 +191,7 @@ final class ShareMarksOverlay {
         })
         panel.contentView = host
         self.panel = panel
+        ScreenShare.shared.refreshVideoFilter()
         return panel
     }
 
