@@ -126,10 +126,7 @@ final class ScreenShare: NSObject, ObservableObject {
                     state = .failed("Не удалось начать захват экрана")
                     return
                 }
-                let ownPID = ProcessInfo.processInfo.processIdentifier
-                connect(filter: SCContentFilter(display: display,
-                                                excludingApplications: content.applications.filter { $0.processID == ownPID },
-                                                exceptingWindows: []))
+                connect(filter: Self.displayFilter(display, content: content))
             }
             return
         }
@@ -271,13 +268,57 @@ final class ScreenShare: NSObject, ObservableObject {
             config.queueDepth = 3
             ShareMarksOverlay.shared.attach(to: filter)
             Task {
+                let filter = await self.prepared(filter)
                 try? await stream.updateContentFilter(filter)
                 try? await stream.updateConfiguration(config)
             }
         }
     }
 
+    /// Весь экран: виден и интерфейс Mac Utils, кроме служебных окон эфира (метки зрителей, индикатор «Эфир»).
+    static func displayFilter(_ display: SCDisplay, content: SCShareableContent) -> SCContentFilter {
+        let hidden = hiddenWindowNumbers
+        return SCContentFilter(display: display, excludingWindows: content.windows.filter { hidden.contains(Int($0.windowID)) })
+    }
+
+    static var hiddenWindowNumbers: Set<Int> {
+        Set([ShareMarksOverlay.shared.windowNumber, ScreenShare.shared.hud?.windowNumber].compactMap { $0 })
+    }
+
+    /// Какой экран транслируем (nil — окно или программа).
+    private var videoDisplayID: CGDirectDisplayID?
+
+    /// Экран из системного окна выбора — пересобираем фильтр: окно выбора прячет Mac Utils целиком,
+    /// а зрителю нужен и его интерфейс.
+    private func prepared(_ filter: SCContentFilter) async -> SCContentFilter {
+        videoDisplayID = nil
+        guard filter.style == .display,
+              let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else { return filter }
+        var display: SCDisplay?
+        if #available(macOS 15.2, *) {
+            display = filter.includedDisplays.first.flatMap { chosen in content.displays.first { $0.displayID == chosen.displayID } }
+        }
+        if display == nil {
+            let size = filter.contentRect.size
+            display = content.displays.first { abs(CGFloat($0.width) - size.width) < 2 && abs(CGFloat($0.height) - size.height) < 2 }
+        }
+        guard let display else { return filter }
+        videoDisplayID = display.displayID
+        return Self.displayFilter(display, content: content)
+    }
+
+    /// Появилось или пропало служебное окно — обновляем, что исключено из картинки.
+    func refreshVideoFilter() {
+        guard let id = videoDisplayID, let stream else { return }
+        Task {
+            guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
+                  let display = content.displays.first(where: { $0.displayID == id }) else { return }
+            try? await stream.updateContentFilter(Self.displayFilter(display, content: content))
+        }
+    }
+
     private func beginCapture(filter: SCContentFilter) async throws {
+        let filter = await prepared(filter)
         let config = SCStreamConfiguration()
         Self.configure(config, for: filter)
         // H.264 (аппаратно): 30 кадров в секунду и формат, который кодек берёт без пересчёта.
@@ -529,6 +570,7 @@ final class ScreenShare: NSObject, ObservableObject {
         panel.contentView = host
         panel.orderFrontRegardless()
         hud = panel
+        refreshVideoFilter()
     }
 }
 
