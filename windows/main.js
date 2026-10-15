@@ -68,6 +68,10 @@ function hideOverlay() {
   overlay = null;
 }
 
+function cleanNames(list) {
+  return Array.isArray(list) ? list.filter((m) => typeof m === "string" && /^[^"\\/]{1,120}$/.test(m)).slice(0, 50) : [];
+}
+
 function stopAudio() {
   if (audioHelper) { audioHelper.kill(); audioHelper = null; }
 }
@@ -108,7 +112,8 @@ app.whenReady().then(() => {
     if (!chosen) return callback({});
     // Звук без выбранных программ идёт через помощник (mu-audio.exe), а не через общий loopback.
     // Звук отдаём, только если страница его просила, — иначе Chromium отменяет захват.
-    const audio = chosen.audio && !(chosen.muted || []).length && request.audioRequested;
+    // С помощником звук всегда идёт через него — так список «не передавать» можно менять прямо в эфире.
+    const audio = chosen.audio && !hasHelper() && request.audioRequested;
     callback(audio ? { video: chosen.source, audio: "loopback" } : { video: chosen.source });
   });
 
@@ -136,11 +141,20 @@ app.whenReady().then(() => {
   }));
 
   // Звук всех программ, кроме выбранных: PCM 24 кГц моно — странице, она отправляет зрителям.
-  ipcMain.on("startAudio", (event) => {
+  ipcMain.on("startAudio", (event) => startAudio(event.sender));
+
+  // Поменяли список в эфире — перезапускаем захват звука с новым списком.
+  ipcMain.on("setMuted", (event, muted) => {
+    if (!chosen) return;
+    chosen.muted = cleanNames(muted);
+    if (audioHelper) startAudio(event.sender);
+  });
+
+  function startAudio(sender) {
     stopAudio();
-    if (!chosen?.audio || !chosen.muted.length || !hasHelper()) return;
-    const sender = event.sender;
-    audioHelper = spawn(HELPER, ["capture", ...chosen.muted], { windowsHide: true });
+    if (!chosen?.audio || !hasHelper()) return;
+    const helper = spawn(HELPER, ["capture", ...chosen.muted], { windowsHide: true });
+    audioHelper = helper;
     let odd = null;
     audioHelper.stdout.on("data", (chunk) => {
       let data = odd ? Buffer.concat([odd, chunk]) : chunk;
@@ -148,8 +162,8 @@ app.whenReady().then(() => {
       if (odd) data = data.subarray(0, data.length - 1);
       if (data.length && !sender.isDestroyed()) sender.send("audio", data);
     });
-    audioHelper.on("exit", () => { audioHelper = null; });
-  });
+    helper.on("exit", () => { if (audioHelper === helper) audioHelper = null; });
+  }
 
   ipcMain.handle("sources", async () => {
     const sources = await desktopCapturer.getSources({
@@ -162,8 +176,7 @@ app.whenReady().then(() => {
   ipcMain.handle("choose", async (_event, id, audio, muted) => {
     const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
     const source = sources.find((s) => s.id === id);
-    const list = Array.isArray(muted) && hasHelper() ? muted.filter((m) => typeof m === "string" && /^[^"\\/]{1,120}$/.test(m)) : [];
-    chosen = source ? { source, audio: !!audio, muted: list } : null;
+    chosen = source ? { source, audio: !!audio, muted: cleanNames(muted) } : null;
     return !!source;
   });
 

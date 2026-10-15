@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("mu", {
     ipcRenderer.on("audio", (_e, data) => onChunk(data));
     ipcRenderer.send("startAudio");
   },
+  setMuted: (muted) => ipcRenderer.send("setMuted", muted),
   // Метки зрителей — на экран ведущего; трансляция закончилась — убрать окно меток.
   mark: (mark) => ipcRenderer.send("mark", mark),
   stopped: () => { ipcRenderer.removeAllListeners("audio"); ipcRenderer.send("stopped"); },
