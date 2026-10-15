@@ -26,6 +26,10 @@
   #live { display: none; align-items: center; gap: 8px; font-size: 13px; }
   #game { position: fixed; right: 16px; bottom: 16px; z-index: 12; display: none; background: #1c1c1e; border-radius: 14px;
           padding: 14px; width: 270px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  #mutePanel { position: fixed; right: 16px; top: 60px; z-index: 12; display: none; background: #1c1c1e; border-radius: 14px;
+               padding: 14px; width: 280px; max-height: 70vh; overflow: auto; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  #mutePanel .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+  #mutePanel .head button { padding: 2px 8px; }
   #game .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
   #game .head button { padding: 2px 8px; }
   #game .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
@@ -66,7 +70,7 @@
   <button class="primary" id="watch">Смотреть</button>
   <button id="leave" style="display:none" title="Перестать смотреть эту трансляцию">Отключиться</button>
   <button id="share">Транслировать свой экран</button>
-  <span id="live"><span class="dot"></span><span id="liveText"></span><button id="gameButton" style="display:none" title="Крестики-нолики со зрителем">＃ Сыграть</button><button class="danger" id="stop">Стоп</button></span>
+  <span id="live"><span class="dot"></span><span id="liveText"></span><button id="muteButton" style="display:none" title="Звук каких программ не передавать — можно менять прямо в эфире">🔇 Звук</button><button id="gameButton" style="display:none" title="Крестики-нолики со зрителем">＃ Сыграть</button><button class="danger" id="stop">Стоп</button></span>
   <button id="historyButton">История</button>
 </header>
 <div id="picker"><div class="box">
@@ -87,6 +91,9 @@
   </div>
 </div></div>
 <div id="game"></div>
+<div id="mutePanel" class="floatBox"><div class="head"><b>Не передавать звук программ</b><button id="muteClose">✕</button></div>
+  <p class="muted" style="margin:0 0 8px">Отмеченных программ зрители не слышат. Меняется сразу, прямо в эфире.</p>
+  <div id="muteLive" style="display:flex; flex-direction:column; gap:4px"></div></div>
 <div id="historyPanel"><b>История</b><p class="muted">Зелёная точка — сейчас в эфире.</p><div id="historyList"></div></div>
 <div id="stage">
   <img id="screen" alt="">
@@ -472,18 +479,45 @@ $("gameButton").onclick = () => {
 };
 $("gameInvite").onclick = () => gameInvite("host", hostName || display(watchingId || ""), viewGameSend);
 
+// Список «не передавать звук» прямо в эфире (приложение для Windows).
+async function showMutePanel() {
+  const list = $("muteLive");
+  const saved = store.get("mu-muted-apps", []);
+  const apps = (await window.mu.audioApps()) || [];
+  const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
+  list.innerHTML = "";
+  if (!names.length) list.textContent = "Сейчас ни одна программа не играет звук.";
+  for (const name of names) {
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox"; box.value = name; box.style.width = "auto"; box.checked = saved.includes(name);
+    box.onchange = () => {
+      const muted = [...list.querySelectorAll("input:checked")].map((i) => i.value);
+      store.set("mu-muted-apps", muted);
+      window.mu.setMuted(muted);
+    };
+    label.append(box, " " + name.replace(/\.exe$/i, ""));
+    list.appendChild(label);
+  }
+  $("mutePanel").style.display = "block";
+}
+$("muteButton").onclick = () => ($("mutePanel").style.display === "block" ? ($("mutePanel").style.display = "none") : showMutePanel());
+$("muteClose").onclick = () => { $("mutePanel").style.display = "none"; };
+
 // ---- Транслировать (приложение для Windows или браузер) ----
 // Звук без выбранных программ (Discord и т. п.) — через помощник приложения для Windows.
-let useHelperAudio = false;
+let useHelperAudio = false, helperAvailable = false;
 async function showMuteApps() {
   const box = $("muteBox"), list = $("muteApps");
+  helperAvailable = false;
   if (!window.mu || !window.mu.audioApps) { box.style.display = "none"; return; }
   const saved = store.get("mu-muted-apps", []);
   const apps = await window.mu.audioApps();
   if (!apps) { box.style.display = "none"; return; }
+  helperAvailable = true;
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
-  if (!names.length) list.textContent = "Сейчас ни одна программа не играет звук — запустите её и откройте выбор снова.";
+  if (!names.length) list.textContent = "Сейчас ни одна программа не играет звук — отметить можно и потом, прямо в эфире (кнопка «🔇 Звук»).";
   for (const name of names) {
     const label = document.createElement("label");
     label.style.whiteSpace = "nowrap";
@@ -511,7 +545,8 @@ function pickSource() {
         $("picker").style.display = "none";
         const muted = [...document.querySelectorAll("#muteApps input:checked")].map((i) => i.value);
         store.set("mu-muted-apps", muted);
-        useHelperAudio = $("withAudio").checked && muted.length > 0 && !!window.mu.startAudio;
+        // Новые версии приложения: звук всегда через помощник — список можно менять в эфире.
+        useHelperAudio = $("withAudio").checked && helperAvailable && !!window.mu.startAudio && (!!window.mu.setMuted || muted.length > 0);
         await window.mu.choose(source.id, $("withAudio").checked, muted);
         resolve(true);
       };
@@ -658,6 +693,7 @@ function startCapture(stream, code) {
     }, "image/jpeg", 0.55);
   }, canEncode ? 33 : 125);
   let audioContext = null;
+  $("muteButton").style.display = useHelperAudio && window.mu.setMuted ? "" : "none";
   if (useHelperAudio) {
     // PCM 24 кГц моно уже готов — только добавляем тип пакета.
     window.mu.startAudio((data) => {
@@ -716,6 +752,7 @@ async function reconnectHost(code) {
 
 function stopHost(message) {
   audience = []; $("gameButton").style.display = "none";
+  $("muteButton").style.display = "none"; $("mutePanel").style.display = "none";
   if (game.peer !== "host") gamePeerGone();
   if (capture) {
     clearInterval(capture.timer);
