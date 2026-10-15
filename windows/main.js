@@ -20,9 +20,29 @@ const hasHelper = () => fs.existsSync(HELPER);
 
 // Окно для меток: поверх того, что транслируется (экран или окно), сквозь него кликается.
 // В саму трансляцию оно не попадает — иначе зритель видел бы свою метку дважды (свою и в видео).
-function showOverlay() {
+// Какой монитор транслируется: по display_id источника, иначе по номеру в названии («Screen 2»), иначе основной.
+function sharedDisplay() {
   const displays = screen.getAllDisplays();
-  const display = displays.find((d) => String(d.id) === String(chosen?.source?.display_id)) || screen.getPrimaryDisplay();
+  const source = chosen?.source;
+  const byId = displays.find((d) => String(d.id) === String(source?.display_id || ""));
+  if (byId) return byId;
+  const index = /^screen:/.test(source?.id || "") ? Number((/(\d+)\s*$/.exec(source.name || "") || [])[1]) : NaN;
+  if (index >= 1 && index <= displays.length) {
+    // Порядок «Screen 1, 2…» у Windows — слева направо, как у мониторов по координатам.
+    return [...displays].sort((a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y)[index - 1];
+  }
+  return screen.getPrimaryDisplay();
+}
+
+// Окно на мониторе с другим масштабом Windows ставит не туда и не того размера — задаём границы ещё раз.
+function placeOverlay(bounds) {
+  if (!overlay || overlay.isDestroyed()) return;
+  overlay.setBounds(bounds);
+  setTimeout(() => { if (overlay && !overlay.isDestroyed()) overlay.setBounds(bounds); }, 50);
+}
+
+function showOverlay() {
+  const display = sharedDisplay();
   if (!overlay || overlay.isDestroyed()) {
     overlay = new BrowserWindow({
       ...display.bounds,
@@ -34,10 +54,9 @@ function showOverlay() {
     overlay.setIgnoreMouseEvents(true);
     overlay.setContentProtection(true);
     overlay.loadFile(path.join(__dirname, "overlay.html"));
-  } else {
-    overlay.setBounds(display.bounds);
   }
   overlay.showInactive();
+  if (!/^window:/.test(chosen?.source?.id || "")) placeOverlay(display.bounds);
   trackWindow();
 }
 
@@ -55,8 +74,8 @@ function trackWindow() {
       const [x, y, width, height] = line.trim().split(" ").map(Number);
       if (line.startsWith("hidden") || line.startsWith("gone")) { overlay.hide(); continue; }
       if (!width || !height) continue;
-      overlay.setBounds(screen.screenToDipRect(null, { x, y, width, height }));
       overlay.showInactive();
+      placeOverlay(screen.screenToDipRect(null, { x, y, width, height }));
     }
   });
   tracker.on("exit", () => { tracker = null; });
@@ -116,6 +135,13 @@ app.whenReady().then(() => {
     const audio = chosen.audio && !hasHelper() && request.audioRequested;
     callback(audio ? { video: chosen.source, audio: "loopback" } : { video: chosen.source });
   });
+
+  // Мониторы подключили, отключили или поменяли масштаб — метки снова на нужном экране.
+  for (const event of ["display-added", "display-removed", "display-metrics-changed"]) {
+    screen.on(event, () => {
+      if (overlay && !overlay.isDestroyed() && !/^window:/.test(chosen?.source?.id || "")) placeOverlay(sharedDisplay().bounds);
+    });
+  }
 
   ipcMain.on("version", (event) => { event.returnValue = app.getVersion(); });
   ipcMain.on("hostname", (event) => { event.returnValue = require("os").hostname(); });
