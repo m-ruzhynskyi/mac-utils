@@ -61,6 +61,8 @@
   <b>Что показывать?</b>
   <div class="grid" id="sources"></div>
   <label class="muted"><input type="checkbox" id="withAudio" checked style="width:auto"> Передавать звук системы</label>
+  <div id="muteBox" class="muted" style="display:none; margin-top:6px">Не передавать звук программ (например, созвона):
+    <div id="muteApps" style="display:flex; flex-wrap:wrap; gap:4px 14px; margin-top:4px"></div></div>
   <div style="text-align:right; margin-top:10px"><button id="pickerCancel">Отмена</button></div>
 </div></div>
 <div id="request"><div class="box">
@@ -354,6 +356,27 @@ function playPCM(buffer) {
 }
 
 // ---- Транслировать (приложение для Windows или браузер) ----
+// Звук без выбранных программ (Discord и т. п.) — через помощник приложения для Windows.
+let useHelperAudio = false;
+async function showMuteApps() {
+  const box = $("muteBox"), list = $("muteApps");
+  if (!window.mu || !window.mu.audioApps) { box.style.display = "none"; return; }
+  const saved = store.get("mu-muted-apps", []);
+  const apps = await window.mu.audioApps();
+  if (!apps) { box.style.display = "none"; return; }
+  const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
+  list.innerHTML = "";
+  if (!names.length) list.textContent = "Сейчас ни одна программа не играет звук — запустите её и откройте выбор снова.";
+  for (const name of names) {
+    const label = document.createElement("label");
+    label.style.whiteSpace = "nowrap";
+    const box = document.createElement("input");
+    box.type = "checkbox"; box.value = name; box.style.width = "auto"; box.checked = saved.includes(name);
+    label.append(box, " " + name.replace(/\.exe$/i, ""));
+    list.appendChild(label);
+  }
+  box.style.display = "";
+}
 // В приложении для Windows (window.mu) — свой выбор экрана и окна с превью.
 function pickSource() {
   return new Promise(async (resolve) => {
@@ -369,13 +392,17 @@ function pickSource() {
       item.querySelector(".name").textContent = source.name;
       item.onclick = async () => {
         $("picker").style.display = "none";
-        await window.mu.choose(source.id, $("withAudio").checked);
+        const muted = [...document.querySelectorAll("#muteApps input:checked")].map((i) => i.value);
+        store.set("mu-muted-apps", muted);
+        useHelperAudio = $("withAudio").checked && muted.length > 0 && !!window.mu.startAudio;
+        await window.mu.choose(source.id, $("withAudio").checked, muted);
         resolve(true);
       };
       grid.appendChild(item);
     }
     $("pickerCancel").onclick = () => { $("picker").style.display = "none"; resolve(false); };
     $("picker").style.display = "flex";
+    showMuteApps();
   });
 }
 
@@ -499,7 +526,15 @@ function startCapture(stream, code) {
     }, "image/jpeg", 0.55);
   }, canEncode ? 33 : 125);
   let audioContext = null;
-  if (stream.getAudioTracks().length) {
+  if (useHelperAudio) {
+    // PCM 24 кГц моно уже готов — только добавляем тип пакета.
+    window.mu.startAudio((data) => {
+      if (!hostSocket || hostSocket.readyState !== 1) return;
+      const packet = new Uint8Array(data.byteLength + 1);
+      packet[0] = 2; packet.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), 1);
+      hostSocket.send(packet);
+    });
+  } else if (stream.getAudioTracks().length) {
     // Частота — как у системы (48 кГц и т. п.); в 24 кГц пересчитываем сами: так работает во всех браузерах.
     audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
