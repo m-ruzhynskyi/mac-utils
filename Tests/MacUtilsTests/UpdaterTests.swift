@@ -246,6 +246,10 @@ final class UpdaterVerifySignatureTests: XCTestCase {
     private var root: URL!
     private var keychain: URL!
     private let keychainPassword = "pw"
+    /// Имя сертификата → SHA-1 (hex): codesign ищет identity по хешу, а не по имени.
+    private var identities: [String: String] = [:]
+    /// Список связок пользователя до теста: временная связка добавляется в него и убирается в tearDown.
+    private var originalSearchList: [String]?
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("UpdaterSig-\(UUID().uuidString)")
@@ -253,8 +257,19 @@ final class UpdaterVerifySignatureTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        if let originalSearchList {
+            _ = try? sh("/usr/bin/security", ["list-keychains", "-d", "user", "-s"] + originalSearchList)
+        }
         if let keychain { _ = try? sh("/usr/bin/security", ["delete-keychain", keychain.path]) }
         try? FileManager.default.removeItem(at: root)
+    }
+
+    /// `security list-keychains -d user`: строки вида `    "/path/to.keychain-db"`.
+    private func userSearchList() throws -> [String] {
+        try sh("/usr/bin/security", ["list-keychains", "-d", "user"]).output
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\""))) }
+            .filter { !$0.isEmpty }
     }
 
     /// Локально недоступная подпись — пропуск теста; в CI (GitHub ставит CI=true) — провал, иначе все проверки H4
@@ -292,20 +307,37 @@ final class UpdaterVerifySignatureTests: XCTestCase {
         return app
     }
 
-    private func sign(_ app: URL, identity: String = "-") throws {
-        var args = ["--force", "--sign", identity]
-        if identity != "-" { args += ["--keychain", keychain.path] }
-        let result = try sh("/usr/bin/codesign", args + [app.path])
-        guard result.status == 0 else { throw setupUnavailable("codesign не смог подписать: \(result.output)") }
+    /// Аргументы codesign для identity, созданной `makeIdentity`: SHA-1 сертификата и временная связка.
+    private func signingArguments(_ name: String) throws -> [String] {
+        guard let hash = identities[name] else { throw setupUnavailable("identity «\(name)» не создана") }
+        return ["--force", "--sign", hash, "--keychain", keychain.path]
     }
 
-    /// Самоподписанный сертификат во временной связке ключей (в связку пользователя ничего не попадает).
+    private func sign(_ app: URL, identity: String = "-") throws {
+        let args = identity == "-" ? ["--force", "--sign", "-"] : try signingArguments(identity)
+        let result = try sh("/usr/bin/codesign", args + [app.path])
+        guard result.status == 0 else {
+            let found = keychain.map { (try? sh("/usr/bin/security", ["find-identity", "-p", "codesigning", $0.path]).output) ?? "" } ?? ""
+            throw setupUnavailable("codesign не смог подписать: \(result.output)\n\(found)")
+        }
+    }
+
+    /// Самоподписанный сертификат во временной связке ключей. На время теста связка стоит первой в списке
+    /// поиска пользователя (на раннере GitHub codesign иначе не находит identity), tearDown возвращает список.
     private func makeIdentity(_ name: String) throws {
         if keychain == nil {
             keychain = root.appendingPathComponent("test.keychain-db")
             guard try sh("/usr/bin/security", ["create-keychain", "-p", keychainPassword, keychain.path]).status == 0,
-                  try sh("/usr/bin/security", ["unlock-keychain", "-p", keychainPassword, keychain.path]).status == 0 else {
+                  try sh("/usr/bin/security", ["unlock-keychain", "-p", keychainPassword, keychain.path]).status == 0,
+                  // Без -t/-l: связка не блокируется по таймауту и при сне.
+                  try sh("/usr/bin/security", ["set-keychain-settings", keychain.path]).status == 0 else {
                 throw setupUnavailable("не удалось создать временную связку ключей")
+            }
+            let original = try userSearchList()
+            originalSearchList = original
+            guard try sh("/usr/bin/security", ["list-keychains", "-d", "user", "-s", keychain.path]
+                         + original.filter { $0 != keychain.path }).status == 0 else {
+                throw setupUnavailable("не удалось добавить временную связку в список поиска")
             }
         }
         let cnf = root.appendingPathComponent("\(name).cnf")
@@ -332,6 +364,15 @@ final class UpdaterVerifySignatureTests: XCTestCase {
             throw setupUnavailable("не удалось импортировать сертификат во временную связку")
         }
         _ = try sh("/usr/bin/security", ["set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", keychainPassword, keychain.path])
+        // «SHA1 Fingerprint=AB:CD:…» → «ABCD…»: по хешу codesign находит и недоверенный самоподписанный сертификат.
+        let fingerprint = try sh("/usr/bin/openssl", ["x509", "-in", cert.path, "-noout", "-fingerprint", "-sha1"]).output
+        guard let raw = fingerprint.split(separator: "=").last else { throw setupUnavailable("нет SHA-1 сертификата: \(fingerprint)") }
+        let hash = raw.replacingOccurrences(of: ":", with: "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let listed = try sh("/usr/bin/security", ["find-identity", "-p", "codesigning", keychain.path]).output
+        guard hash.count == 40, listed.uppercased().contains(hash) else {
+            throw setupUnavailable("identity \(hash) не видна в связке: \(listed)")
+        }
+        identities[name] = hash
     }
 
     // --- без сертификата: ad-hoc ---
@@ -425,7 +466,7 @@ final class UpdaterVerifySignatureTests: XCTestCase {
                                                    withDestinationURL: URL(fileURLWithPath: "/etc"))
         try sign(current, identity: "MU Test A")
         // Подписать такой бандл codesign может; важно, что verifySignature его не принимает.
-        let signed = try sh("/usr/bin/codesign", ["--force", "--sign", "MU Test A", "--keychain", keychain.path, update.path])
+        let signed = try sh("/usr/bin/codesign", try signingArguments("MU Test A") + [update.path])
         // Именно XCTSkip, в том числе в CI: если codesign сам отказывается подписывать бандл с symlink наружу, это его
         // поведение, а не сломанная среда (среду проверяют предыдущие шаги через setupUnavailable). Тогда такой бандл
         // и не может попасть в обновление подписанным.
