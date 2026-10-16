@@ -103,7 +103,9 @@ final class UninstallerModel: ObservableObject {
         let items = leftovers.filter { checked.contains($0.url) && $0.kind != .receipt }
         guard !items.isEmpty else { return }
 
-        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleID).first {
+        // Все копии: программу можно запустить несколько раз (`open -n`), и каждая держит свои файлы.
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleID)
+        if !running.isEmpty {
             let alert = NSAlert()
             alert.messageText = "«\(app.name)» сейчас запущено"
             alert.informativeText = "Чтобы удалить его полностью, приложение нужно закрыть."
@@ -111,18 +113,18 @@ final class UninstallerModel: ObservableObject {
             alert.addButton(withTitle: "Отмена")
             NSApp.activate()
             guard alert.runModal() == .alertFirstButtonReturn else { return }
-            running.terminate()
+            running.forEach { $0.terminate() }
             working = true
             Task { @MainActor in
                 // Программа может спросить «Сохранить изменения?» — убивать её нельзя: ждём и спрашиваем пользователя.
                 while true {
-                    let closed = await LaunchUnload.waitForExit(attempts: 150, isTerminated: { running.isTerminated },
+                    let closed = await LaunchUnload.waitForExit(attempts: 150, isTerminated: { running.allSatisfy(\.isTerminated) },
                                                                 sleep: { try? await Task.sleep(nanoseconds: 100_000_000) })
                     if closed { break }
                     let alert = NSAlert()
                     alert.alertStyle = .warning
                     alert.messageText = "«\(app.name)» не закрылось"
-                    alert.informativeText = "Возможно, в нём есть несохранённые изменения. Закройте его сами и нажмите «Подождать», либо отмените удаление."
+                    alert.informativeText = "Закройте программу — возможно, есть несохранённые изменения. Затем нажмите «Подождать» или отмените удаление."
                     alert.addButton(withTitle: "Подождать")
                     alert.addButton(withTitle: "Отмена")
                     alert.addButton(withTitle: "Завершить принудительно")
@@ -131,8 +133,8 @@ final class UninstallerModel: ObservableObject {
                     case .alertFirstButtonReturn:
                         continue
                     case .alertThirdButtonReturn:
-                        running.forceTerminate()
-                        for _ in 0..<30 where !running.isTerminated { try? await Task.sleep(nanoseconds: 100_000_000) }
+                        running.filter { !$0.isTerminated }.forEach { $0.forceTerminate() }
+                        for _ in 0..<30 where !running.allSatisfy(\.isTerminated) { try? await Task.sleep(nanoseconds: 100_000_000) }
                     default:
                         self.working = false
                         return
@@ -151,8 +153,12 @@ final class UninstallerModel: ObservableObject {
         // Службы пользователя останавливаем до переноса plist (иначе они работают до перезагрузки), вне главного потока:
         // `launchctl bootout` ждёт, пока служба завершится.
         let urls = items.map(\.url)
+        let apps = items.filter { $0.kind == .app }.map(\.url)
         Task { @MainActor in
-            await Task.detached(priority: .userInitiated) { _ = LaunchUnload.bootoutUserServices(urls) }.value
+            await Task.detached(priority: .userInitiated) {
+                // Агенты, зарегистрированные программой из своего бандла (SMAppService), тоже останавливаем.
+                _ = LaunchUnload.bootoutUserServices(urls + apps.flatMap { LaunchUnload.bundledAgents(in: $0) })
+            }.value
             self.trashNow(items, app: app)
         }
     }
@@ -221,12 +227,14 @@ final class UninstallerModel: ObservableObject {
     /// Скрипт для root: создать `staging` (mkdir падает, если путь уже занят, в том числе symlink'ом),
     /// перенести файлы и отдать каталог пользователю ВСЕГДА, даже если часть переносов не удалась
     /// (иначе уже перенесённые файлы останутся запертыми в каталоге root). Любой сбой — ненулевой код выхода.
-    static func adminStagingScript(_ urls: [URL], staging: String, owner: String = NSUserName()) -> String {
-        let moves = urls.isEmpty ? ":" : adminTrashCommands(urls, trash: staging, stamp: nil, owner: owner)
+    /// Содержимое каталогов уже отдано пользователю в `adminTrashCommands`, здесь — только сам staging.
+    static func adminStagingScript(_ urls: [URL], staging: String, owner: String = NSUserName(),
+                                   identity: (URL) -> AdminSourceIdentity? = AdminSourceIdentity.read) -> String {
+        let moves = urls.isEmpty ? ":" : adminTrashCommands(urls, trash: staging, stamp: nil, owner: owner, identity: identity)
         // Системные демоны останавливаются до переноса; сбой остановки (демон не загружен) перенос не отменяет.
         let unload = LaunchUnload.rootCommands(for: urls, quote: shellQuote)
         return "/bin/mkdir -m 700 \(shellQuote(staging)) && { \(unload)\(moves); rc=$?; "
-            + "/usr/sbin/chown -hR \(shellQuote(owner)) \(shellQuote(staging)); exit $rc; }"
+            + "/usr/sbin/chown -h \(shellQuote(owner)) \(shellQuote(staging)); exit $rc; }"
     }
 
     /// Без root: содержимое staging — в Корзину, затем сам каталог удаляется. false при любой ошибке
@@ -259,20 +267,40 @@ final class UninstallerModel: ObservableObject {
 
     /// Команды sh, переносящие каждый файл в каталог `trash` (вынесено для тестов).
     /// Одноимённые файлы получают разные цели («имя stamp», «имя stamp-1»…; без stamp — «имя», «имя-1»…). Занятая цель или файл, который после
-    /// `mv -n` остался на месте, — ошибка (`mv -n` сам возвращает 0, ничего не сделав). После переноса владелец — `owner`.
-    static func adminTrashCommands(_ urls: [URL], trash: String, stamp: Int?, owner: String = NSUserName()) -> String {
+    /// `mv -n` остался на месте, — ошибка (`mv -n` сам возвращает 0, ничего не сделав).
+    ///
+    /// Защита от подмены пути между построением скрипта и `mv` (root переносит то, что ему подсунули):
+    /// - `cd -P` в родительский каталог, затем сверка `устройство:inode` этого каталога и самого элемента с тем, что было
+    ///   при построении скрипта (`identity`). `mv` и проверка, что исходник исчез, — относительно текущего каталога,
+    ///   то есть уже открытого inode: подмена любого предка symlink'ом после `cd` ни на что не влияет, а до `cd` — не пройдёт сверку;
+    /// - пользователю отдаются только каталоги. Файлы сохраняют владельца: удалить их из своего каталога пользователь
+    ///   может и так, а жёсткая ссылка на системный файл, подложенная в переносимую папку, не станет его файлом;
+    /// - смена владельца — тоже без путей: `cd -P` в `trash` (его подменить нельзя) и `find ./имя -execdir chown -h`.
+    ///   find сам переходит в каждый каталог (без перехода по ссылкам, со сверкой при входе), а chown получает
+    ///   только последнее имя в уже открытом каталоге. С полными путями (`-exec`) содержимое перенесённой папки,
+    ///   которое пользователь меняет через заранее открытый дескриптор, могло бы подменить промежуточный каталог
+    ///   symlink'ом, и chown ушёл бы в системный каталог.
+    static func adminTrashCommands(_ urls: [URL], trash: String, stamp: Int?, owner: String = NSUserName(),
+                                   identity: (URL) -> AdminSourceIdentity? = AdminSourceIdentity.read) -> String {
         var used: [String: Int] = [:]
         return urls.map { url -> String in
             let name = url.lastPathComponent
             let index = used[name, default: 0]
             used[name] = index + 1
-            let path = "\(trash)/\(name)" + (stamp.map { " \($0)" } ?? "") + (index == 0 ? "" : "-\(index)")
-            let target = shellQuote(path)
-            let source = shellQuote(url.path)
+            let targetName = name + (stamp.map { " \($0)" } ?? "") + (index == 0 ? "" : "-\(index)")
+            let target = shellQuote("\(trash)/\(targetName)")
+            let parent = shellQuote(url.deletingLastPathComponent().path)
+            let source = shellQuote("./" + name)
+            // Элемент пропал до построения скрипта — сверка заведомо не пройдёт.
+            let expected = identity(url) ?? AdminSourceIdentity(parent: "-", item: "-")
+            let check = "cd -P -- \(parent) || exit 1; "
+                + "[ \"$(/usr/bin/stat -f %d:%i .)\" = \(shellQuote(expected.parent)) ] || exit 1; "
+                + "[ \"$(/usr/bin/stat -f %d:%i \(source))\" = \(shellQuote(expected.item)) ] || exit 1"
             let move = "/bin/mv -n \(source) \(target) || exit 1"
-            return "(if [ -e \(target) ] || [ -L \(target) ]; then exit 1; fi; \(move); "
+            return "(if [ -e \(target) ] || [ -L \(target) ]; then exit 1; fi; \(check); \(move); "
                 + "if [ -e \(source) ] || [ -L \(source) ]; then exit 1; fi; "
-                + "/usr/sbin/chown -hR \(shellQuote(owner)) \(target))"
+                + "cd -P -- \(shellQuote(trash)) || exit 1; "
+                + "/usr/bin/find \(shellQuote("./" + targetName)) -type d -execdir /usr/sbin/chown -h \(shellQuote(owner)) {} +)"
         }.joined(separator: " && ")
     }
 
@@ -282,6 +310,21 @@ final class UninstallerModel: ObservableObject {
 
     static func appleScriptQuote(_ s: String) -> String {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
+}
+
+/// Что root должен застать на месте перед переносом: родительский каталог (как его откроет `cd -P`, по `stat`)
+/// и сам элемент (по `lstat`, ссылка — это сама ссылка), в виде `устройство:inode`, как печатает `stat -f %d:%i`.
+struct AdminSourceIdentity: Equatable {
+    let parent: String
+    let item: String
+
+    static func read(_ url: URL) -> AdminSourceIdentity? {
+        var info = stat()
+        guard stat(url.deletingLastPathComponent().path, &info) == 0 else { return nil }
+        let parent = "\(info.st_dev):\(info.st_ino)"
+        guard lstat(url.path, &info) == 0 else { return nil }
+        return AdminSourceIdentity(parent: parent, item: "\(info.st_dev):\(info.st_ino)")
     }
 }
 

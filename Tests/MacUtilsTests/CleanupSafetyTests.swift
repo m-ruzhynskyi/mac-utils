@@ -264,7 +264,8 @@ final class CleanupSafetyTests: XCTestCase {
             .replacingOccurrences(of: "/usr/sbin/chown", with: UninstallerModel.shellQuote(fake.path))
         XCTAssertNotEqual(try exitStatus(script), 0, "сбой переноса должен быть виден")
         let lines = ((try? String(contentsOf: chownLog, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
-        XCTAssertTrue(lines.contains("-hR tester \(staging.path)"),
+        // Содержимое отдаётся пользователю по каталогам при переносе; в конце — сам staging (без -R: см. plan-p2-uninst N1).
+        XCTAssertTrue(lines.contains("-h tester \(staging.path)"),
                       "итоговый chown каталога staging не выполнен после сбоя: \(lines)")
         XCTAssertTrue(FileManager.default.fileExists(atPath: staging.appendingPathComponent("a.plist").path),
                       "первый файл уже перенесён")

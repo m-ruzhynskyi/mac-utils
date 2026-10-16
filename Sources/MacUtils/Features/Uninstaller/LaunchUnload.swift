@@ -19,12 +19,25 @@ enum LaunchUnload {
     /// целиком (после `standardized`), а не по префиксу пути.
     static func domain(for url: URL, uid: uid_t = getuid(), home: String = NSHomeDirectory()) -> Domain? {
         guard url.pathExtension == "plist" else { return nil }
-        let parent = url.standardizedFileURL.deletingLastPathComponent().path
-        switch parent {
+        let parent = url.standardizedFileURL.deletingLastPathComponent()
+        switch parent.path {
         case "/Library/LaunchDaemons": return .system
         case "/Library/LaunchAgents", home + "/Library/LaunchAgents": return .gui(uid)
-        default: return nil
+        default:
+            // Агент из бандла программы (SMAppService): `<программа>.app/Contents/Library/LaunchAgents`.
+            let components = parent.pathComponents
+            guard components.count >= 5, components.suffix(3) == ["Contents", "Library", "LaunchAgents"],
+                  components[components.count - 4].hasSuffix(".app") else { return nil }
+            return .gui(uid)
         }
+    }
+
+    /// plist агентов в бандле программы: программа регистрирует их сама (SMAppService), и после удаления бандла
+    /// они работают до перезагрузки. Демоны из бандла сюда не входят: их остановка требует root.
+    static func bundledAgents(in app: URL) -> [URL] {
+        let folder = app.appendingPathComponent("Contents/Library/LaunchAgents", isDirectory: true)
+        let items = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        return items.filter { $0.pathExtension == "plist" }.sorted { $0.path < $1.path }
     }
 
     /// Аргументы `launchctl` для остановки; nil — останавливать нечего.
