@@ -29,8 +29,8 @@ enum PanelTabs {
             defaults.set(kept.joined(separator: ","), forKey: Pref.toolsPanelTabs)
         }
         // Новая вкладка «Музыка» — один раз добавляем первой.
-        if !defaults.bool(forKey: "panelTabsMusicAdded") {
-            defaults.set(true, forKey: "panelTabsMusicAdded")
+        if !defaults.bool(forKey: Pref.panelTabsMusicAdded) {
+            defaults.set(true, forKey: Pref.panelTabsMusicAdded)
             let current = defaults.string(forKey: Pref.toolsPanelTabs) ?? defaultValue
             if !current.split(separator: ",").contains("music") {
                 defaults.set("music," + current, forKey: Pref.toolsPanelTabs)

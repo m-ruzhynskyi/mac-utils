@@ -13,8 +13,8 @@ final class WindowPin: ObservableObject {
 
     func sync() {
         let center = HotKeyCenter.shared
-        center.unregister(id: HotKeyID.windowPin)
         guard UserDefaults.standard.bool(forKey: Pref.windowPin) else {
+            center.unregister(id: HotKeyID.windowPin)
             unpinAll()
             return
         }

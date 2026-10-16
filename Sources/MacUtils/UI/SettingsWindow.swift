@@ -26,13 +26,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func makeWindow() -> NSWindow {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 620),
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: DS.Size.settingsWindow),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "Mac Utils"
-        window.contentViewController = NSHostingController(rootView: SettingsView())
-        window.setContentSize(NSSize(width: 980, height: 620))
-        window.minSize = NSSize(width: 760, height: 520)
+        // Graphite: «светофор» над боковой панелью, без полосы заголовка (название окна — для Mission Control и меню «Окно»).
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.contentViewController = NSHostingController(rootView: SettingsRootView())
+        window.setContentSize(DS.Size.settingsWindow)
+        window.minSize = DS.Size.settingsWindowMin
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
@@ -43,5 +47,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         // Возвращаем фокус предыдущему приложению.
         FocusReturn.restore()
+    }
+}
+
+/// Содержимое окна настроек: на первом запуске — вводные шаги (`OnboardingView`) вместо разделов, затем — `SettingsView`.
+/// Решение за `FirstRun.needsOnboarding`; нового окна нет.
+struct SettingsRootView: View {
+    @State private var onboarding = FirstRun.needsOnboarding(done: UserDefaults.standard.object(forKey: Pref.onboardingDone) as? Bool)
+
+    var body: some View {
+        if onboarding {
+            OnboardingView {
+                UserDefaults.standard.set(true, forKey: Pref.onboardingDone)
+                onboarding = false
+            }
+        } else {
+            SettingsView()
+        }
     }
 }

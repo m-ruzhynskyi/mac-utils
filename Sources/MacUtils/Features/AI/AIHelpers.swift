@@ -2,6 +2,30 @@ import AppKit
 import Darwin
 import PDFKit
 
+// MARK: - Очередь фоновых задач ИИ
+
+/// Сколько фоновых запросов к модели ещё впереди (теги документов и имена снимков). Пока их больше одного, модель
+/// держится в памяти ~30 с между запросами; на последнем она выгружается сразу (`keep_alive: "0"`).
+final class BackgroundAIQueue: @unchecked Sendable {
+    static let shared = BackgroundAIQueue()
+    nonisolated static let keepWhileBusy = "30s"
+
+    private let lock = NSLock()
+    private var outstanding = 0
+
+    /// Элемент поставлен в очередь (или начал работу, если очереди нет).
+    func enter() { lock.withLock { outstanding += 1 } }
+    /// Элемент обработан или сброшен.
+    func leave() { lock.withLock { outstanding = max(0, outstanding - 1) } }
+    var count: Int { lock.withLock { outstanding } }
+    var keepAlive: String { Self.keepAlive(outstanding: count) }
+
+    /// `outstanding` включает текущий запрос: последний (1) и пустая очередь (0) → "0".
+    nonisolated static func keepAlive(outstanding: Int) -> String {
+        outstanding > 1 ? keepWhileBusy : "0"
+    }
+}
+
 // MARK: - «Загрузки»: папка для неизвестного типа
 
 enum DownloadsAI {
@@ -51,6 +75,7 @@ final class DocumentTagger: ObservableObject {
     func enqueue(_ url: URL) {
         guard Ollama.isOn(Pref.aiDownloadsTags), !queue.contains(url) else { return }
         queue.append(url)
+        BackgroundAIQueue.shared.enter()
         pending = queue.count + (working ? 1 : 0)
         next()
     }
@@ -83,6 +108,7 @@ final class DocumentTagger: ObservableObject {
                 Self.setComment(comment, for: url)
                 tagged += 1
             }
+            BackgroundAIQueue.shared.leave()
             working = false
             pending = queue.count
             next()
@@ -188,6 +214,8 @@ final class DocumentTagger: ObservableObject {
 enum ShotNamer {
     /// Короткое имя по распознанному тексту: «Счёт за интернет», «Ошибка сборки Xcode».
     static func name(for text: String, app: String) async throws -> String? {
+        BackgroundAIQueue.shared.enter()
+        defer { BackgroundAIQueue.shared.leave() }
         let prompt = """
         Это текст, распознанный на снимке экрана из программы «\(app)»:
         \(String(text.prefix(1200)))

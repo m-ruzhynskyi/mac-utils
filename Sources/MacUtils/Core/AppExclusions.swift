@@ -110,16 +110,10 @@ final class AppExclusions: ObservableObject {
 /// Страница настроек «Исключённые программы»: объяснение и список.
 struct ExclusionsPage: View {
     var body: some View {
-        Form {
-            Section {
-                Text("В этих программах Mac Utils не перехватывает клавиши и колесо мыши: не работают переключатель окон ⌥Tab, подсказки при удержании ⌘, плавная прокрутка и исправление раскладки.")
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Это нужно для виртуальных машин (Parallels, VMware, UTM) и удалённых рабочих столов (Общий экран, Microsoft Remote Desktop, TeamViewer, AnyDesk): они сами передают клавиатуру в другую систему, и перехват Mac Utils им мешает. Если таких программ у вас нет, здесь ничего менять не нужно.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
+        SettingsPage(.exclusions) {
+            Footnote("Это нужно для виртуальных машин (Parallels, VMware, UTM) и удалённых рабочих столов (Общий экран, Microsoft Remote Desktop, TeamViewer, AnyDesk): они сами передают клавиатуру в другую систему, и перехват Mac Utils им мешает. Если таких программ у вас нет, здесь ничего менять не нужно.")
             ExcludedAppsSection()
         }
-        .formStyle(.grouped)
     }
 }
 
@@ -129,29 +123,34 @@ struct ExcludedAppsSection: View {
     @State private var running: [NSRunningApplication] = []
 
     var body: some View {
-        Section("Список") {
+        GroupLabel("Список")
+        ListCard {
             ForEach(exclusions.list, id: \.self) { entry in
-                HStack {
-                    Image(systemName: "rectangle.on.rectangle.slash").foregroundStyle(.secondary)
-                    Text(AppExclusions.title(for: entry))
-                    if entry.hasSuffix(".") { Text("(все с таким началом)").font(.caption).foregroundStyle(.secondary) }
-                    Spacer()
-                    Button { exclusions.remove(entry) } label: { Image(systemName: "minus.circle") }
-                        .buttonStyle(.borderless).help("Убрать из списка")
+                let title = AppExclusions.title(for: entry)
+                // Значок программы, если она установлена; префикс bundle id — «все с таким началом».
+                AppRow(title, subtitle: entry.hasSuffix(".") ? "(все с таким началом)" : (title == entry ? nil : entry),
+                       bundleID: entry.hasSuffix(".") ? nil : entry, fallbackSymbol: "rectangle.on.rectangle.slash") {
+                    IconButton("Убрать из списка", systemImage: "minus", compact: true) { exclusions.remove(entry) }
                 }
             }
-            HStack {
-                Menu("Добавить запущенную программу…") {
-                    ForEach(running, id: \.processIdentifier) { app in
-                        if let id = app.bundleIdentifier {
-                            Button(app.localizedName ?? id) { exclusions.add(id) }
-                        }
+        }
+        HStack(spacing: DS.Space.s) {
+            Menu {
+                ForEach(running, id: \.processIdentifier) { app in
+                    if let id = app.bundleIdentifier {
+                        Button(app.localizedName ?? id) { exclusions.add(id) }
                     }
                 }
-                .onAppear { refreshRunning() }
-                Spacer()
-                Button("По умолчанию") { exclusions.resetToDefaults() }
+            } label: {
+                Label("Добавить запущенную программу…", systemImage: "plus")
             }
+            .menuStyle(.button)
+            .buttonStyle(.graphite(.secondary))
+            .fixedSize()
+            .onAppear { refreshRunning() }
+            Spacer()
+            Button("По умолчанию") { exclusions.resetToDefaults() }
+                .buttonStyle(.graphite(.ghost))
         }
     }
 

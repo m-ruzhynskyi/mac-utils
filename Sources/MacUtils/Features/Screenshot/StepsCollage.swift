@@ -97,26 +97,35 @@ private struct StepsHUD: View {
     @ObservedObject var session: StepsSession
 
     var body: some View {
-        HStack(spacing: 12) {
+        StepsHUDContent(count: session.images.count, cancel: { session.cancel() }, next: { session.nextStep() },
+                        finish: { session.finish() })
+    }
+}
+
+/// Панель коллажа шагов: плитка, «Коллаж шагов», счётчик, «Отмена / Ещё шаг / Готово». Значения готовые, без модели.
+struct StepsHUDContent: View {
+    let count: Int
+    let cancel: () -> Void
+    let next: () -> Void
+    let finish: () -> Void
+
+    var body: some View {
+        HStack(spacing: DS.Space.m) {
             Image(systemName: "square.stack.3d.down.right")
-                .foregroundStyle(Color.accentColor)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.dsText)
+                .frame(width: DS.Size.rowTile, height: DS.Size.rowTile)
+                .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Коллаж шагов")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("Шагов: \(session.images.count)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                Text("Коллаж шагов").font(DS.Font.manrope(13, .heavy, relativeTo: .callout)).foregroundStyle(.dsText)
+                Text("Шагов: \(count)").font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute)
             }
-            Button("Отмена") { session.cancel() }
-            Button("Ещё шаг") { session.nextStep() }
-                .help("⌘⇧X")
-            Button("Готово") { session.finish() }
-                .buttonStyle(.borderedProminent)
+            Button("Отмена", action: cancel).buttonStyle(.graphite(.ghost, size: .compact))
+            Button("Ещё шаг", action: next).buttonStyle(.graphite(.secondary, size: .compact)).help("⌘⇧X")
+            Button("Готово", action: finish).buttonStyle(.graphite(.primary, size: .compact))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .floating(.panel)
         .padding(4)
     }
 }

@@ -159,8 +159,9 @@ final class Ollama: ObservableObject {
         let (base, model) = await MainActor.run { (Self.base, Self.model) }
         var body: [String: Any] = [
             "model": model, "prompt": prompt, "stream": false,
-            // Фоновые задачи (имена снимков, подписи файлов) выгружают модель сразу — она занимает ~5 ГБ.
-            "keep_alive": background ? "0" : "5m",
+            // Фоновые задачи (имена снимков, подписи файлов): модель ~5 ГБ держим только пока очередь не пуста,
+            // на последнем элементе выгружаем сразу.
+            "keep_alive": background ? BackgroundAIQueue.shared.keepAlive : "5m",
             "options": context.map { ["temperature": temperature, "num_ctx": $0, "num_predict": maxTokens] }
                 ?? ["temperature": temperature, "num_predict": maxTokens],
         ]

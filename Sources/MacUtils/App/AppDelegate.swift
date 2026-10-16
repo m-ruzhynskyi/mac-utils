@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var syncScheduled = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Шрифты интерфейса (Graphite) — до первого окна; не вышло — системный шрифт.
+        DSFonts.registerAll()
         Pref.register()
         BusyRegistry.shared.installDefaultProviders()
         observeSystemShutdown()
@@ -40,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Чистая установка: «Что нового» не нужно (оно только после обновления). Делаем до `Updater.start()`.
         let launchDefaults = UserDefaults.standard
         let firstLaunch = !launchDefaults.bool(forKey: Pref.didShowWelcome)
+        FirstRun.beginOnboardingIfFirstLaunch(defaults: launchDefaults, firstLaunch: firstLaunch)
         FirstRun.seedChangelog(defaults: launchDefaults, current: Changelog.family(Updater.shared.currentVersion), welcomeShown: !firstLaunch)
         let plan = FirstRun.plan(firstLaunch: firstLaunch, accessibility: Permissions.accessibility,
                                  wantsMoveOffer: MoveToApplications.wantsOffer)
@@ -47,7 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if plan.offerMove { DispatchQueue.main.async { MoveToApplications.offerIfNeeded() } }
         // Модель не грузим заранее: она держит ~5 ГБ памяти; загрузится при первом запросе.
         Updater.shared.start()
-        ToolsLauncher.installIfNeeded()
+        // Спрашиваем не посреди запуска (там и так «Перенести?»/разрешения), а чуть позже.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { MainActor.assumeIsolated { ToolsLauncher.start() } }
 
         // Пока нет доступа к «Универсальному доступу», периодически проверяем:
         // как только пользователь выдаст разрешение, утилиты включатся сами.

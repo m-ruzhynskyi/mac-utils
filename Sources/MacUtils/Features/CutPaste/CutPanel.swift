@@ -49,49 +49,61 @@ struct CutPanelView: View {
     @ObservedObject var model: FinderCutPaste
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "scissors")
-                    .foregroundStyle(Color.accentColor)
-                Text("Вырезано: \(model.items.count) \(plural(model.items.count, "объект", "объекта", "объектов"))")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer(minLength: 12)
-                Button {
-                    model.cancelCut()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+        CutPanelContent(items: model.items, isBusy: model.isBusy, cancel: { model.cancelCut() })
+    }
+}
+
+/// Панель вырезанных файлов (Graphite: `panel`, обводка `line`, радиус 20). Без модели — для снимков интерфейса.
+struct CutPanelContent: View {
+    let items: [URL]
+    var isBusy = false
+    var cancel: () -> Void = {}
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "scissors").font(.system(size: 14, weight: .medium)).foregroundStyle(.dsAccText)
+                    .accessibilityHidden(true)
+                Text("Вырезано: \(items.count) \(plural(items.count, "объект", "объекта", "объектов"))")
+                    .font(DS.Font.rowTitle).foregroundStyle(.dsText)
+                Spacer(minLength: DS.Space.m)
+                Button(action: cancel) {
+                    Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(.dsMute)
+                        .frame(width: 26, height: 26)
+                        .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Отменить вырезание")
+                .accessibilityLabel("Отменить вырезание")
             }
 
-            ForEach(model.items.prefix(3), id: \.self) { url in
+            ForEach(items.prefix(3), id: \.self) { url in
                 HStack(spacing: 6) {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                         .resizable()
-                        .frame(width: 16, height: 16)
+                        .frame(width: 18, height: 18)
                     Text(url.lastPathComponent)
-                        .font(.system(size: 12))
+                        .font(DS.Font.manrope(12, .semibold, relativeTo: .caption))
+                        .foregroundStyle(.dsText)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
             }
-            if model.items.count > 3 {
-                Text("и ещё \(model.items.count - 3)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+            if items.count > 3 {
+                Text("и ещё \(items.count - 3)")
+                    .font(DS.Font.rowSub)
+                    .foregroundStyle(.dsMute)
             }
 
-            HStack(spacing: 4) {
-                Text(model.isBusy ? "Перемещаю…" : "⌘V — переместить в открытую папку")
-            }
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
+            Text(isBusy ? "Перемещаю…" : "⌘V — переместить в открытую папку")
+                .font(DS.Font.rowSub)
+                .foregroundStyle(.dsMute)
         }
-        .padding(12)
-        .frame(width: 280, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(DS.Space.l)
+        .frame(width: 300, alignment: .leading)
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
         .padding(4)
     }
 }

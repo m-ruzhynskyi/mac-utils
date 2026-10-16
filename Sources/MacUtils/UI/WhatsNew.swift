@@ -11,6 +11,17 @@ enum Changelog {
     }
 
     static let releases: [Release] = [
+        Release(version: "1.6", date: "16 октября 2026", items: [
+            "Новый дизайн Graphite: графит и лаймовый акцент, шрифты Manrope и JetBrains Mono, светлая и тёмная тема",
+            "Новая иконка приложения",
+            "Настройки по группам с поиском, у каждой страницы шапка и главный переключатель, подсказки клавишами",
+            "Панель в строке меню: вкладка «Главная» с быстрыми действиями и сочетаниями клавиш",
+            "Приветствие при первом запуске: разрешения по шагам",
+            "Обновлённые захват экрана, переключатель приложений, уведомления, запросы зрителей и окна трансляции",
+            "Запись и ИИ: прогресс и лимит GIF, «Исправляю…» ждёт ответа и отменяется, модель не перезагружается на каждом файле",
+            "Инструменты: «Открыть в окне», очистка без подвисаний, понятные сообщения без доступа к диску",
+            "Удаление программ: закрываются все копии программы, службы выгружаются, без принудительного завершения без спроса",
+        ]),
         Release(version: "1.5", date: "15 октября 2026", items: [
             "1.5.2: ключ трансляции больше не спрашивает пароль связки ключей после каждого обновления (последний раз — при переносе); запрос зрителя не обрезается; «Исключённые программы» — отдельный раздел настроек",
             "1.5.1–1.5.2: исправлены сбой и подтормаживание ввода (клики по своим окнам, панель в строке меню, переключение разделов настроек)",
@@ -96,6 +107,9 @@ final class WhatsNewWindowController {
         show()
     }
 
+    /// «Позже» в карточке обновления.
+    func close() { window?.close() }
+
     func show() {
         let window = self.window ?? make()
         NSApp.activate()
@@ -107,6 +121,7 @@ final class WhatsNewWindowController {
                               styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = "Что нового в Mac Utils"
         window.contentViewController = NSHostingController(rootView: WhatsNewView())
+        window.appearance = nil
         window.setContentSize(NSSize(width: 520, height: 560))
         window.isReleasedWhenClosed = false
         window.center()
@@ -115,46 +130,106 @@ final class WhatsNewWindowController {
     }
 }
 
+/// Окно «Что нового» и обновление (`.audit/concept/Update*.dc.html`): читает состояние `Updater`, сам ничего не запускает,
+/// кроме кнопки «Установить и перезапустить» (`installAvailable`).
 struct WhatsNewView: View {
-    private let current = Changelog.family(Updater.shared.currentVersion)
+    @ObservedObject private var updater = Updater.shared
+
+    var body: some View {
+        WhatsNewContent(state: updater.state, currentVersion: Changelog.family(updater.currentVersion),
+                        displayVersion: updater.displayVersion, releases: Changelog.releases,
+                        later: { WhatsNewWindowController.shared.close() },
+                        install: { updater.installAvailable() })
+    }
+}
+
+/// Вид окна на готовых значениях (без `Updater`) — для снимков интерфейса.
+struct WhatsNewContent: View {
+    let state: Updater.State
+    /// Линейка текущей версии (подсветка «сейчас»).
+    let currentVersion: String
+    let displayVersion: String
+    let releases: [Changelog.Release]
+    var later: () -> Void = {}
+    var install: () -> Void = {}
+
+    private var availableVersion: String? {
+        switch state {
+        case .available(let version), .installing(let version): return version
+        default: return nil
+        }
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 12) {
-                    Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 52, height: 52)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Что нового").font(.title2.weight(.bold))
-                        Text("Версия \(Updater.shared.displayVersion)").foregroundStyle(.secondary)
-                    }
-                }
-                ForEach(Changelog.releases) { release in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("Версия \(release.version)").font(.headline)
-                            if release.version == current {
-                                Text("сейчас").font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 6).padding(.vertical, 1)
-                                    .background(Color.accentColor.opacity(0.2), in: Capsule())
-                            }
-                            Spacer()
-                            Text(release.date).font(.caption).foregroundStyle(.secondary)
-                        }
-                        ForEach(release.items, id: \.self) { item in
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
-                                Text(item).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.primary.opacity(release.version == current ? 0.06 : 0.03),
-                                in: RoundedRectangle(cornerRadius: 10))
-                }
+            VStack(alignment: .leading, spacing: DS.Space.l) {
+                header
+                if availableVersion != nil { updateCard }
+                ForEach(releases) { release in releaseCard(release) }
             }
-            .padding(22)
+            .padding(26)
         }
         .frame(minWidth: 440, minHeight: 400)
+        .background(Color.dsPanel)
+    }
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            AppMark(size: 28, color: .dsAccLine)
+                .frame(width: 52, height: 52)
+                .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(availableVersion.map { "Доступна версия \($0)" } ?? "Что нового")
+                    .font(DS.Font.dialogTitle).foregroundStyle(.dsText)
+                    .accessibilityAddTraits(.isHeader)
+                Text(availableVersion == nil ? "Версия \(displayVersion)" : "Сейчас у вас \(displayVersion)")
+                    .font(DS.Font.manrope(13, .regular, relativeTo: .callout)).foregroundStyle(.dsMute)
+            }
+        }
+    }
+
+    /// Карточка обновления: ход установки и кнопки «Позже» / «Установить и перезапустить».
+    private var updateCard: some View {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
+            if case .installing(let version) = state {
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView().progressViewStyle(.linear).tint(.dsAccLine)
+                    Text("Устанавливаю \(version)…").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                }
+            }
+            HStack(spacing: 10) {
+                Spacer()
+                Button("Позже", action: later).buttonStyle(.graphite(.secondary, size: .large))
+                Button("Установить и перезапустить", action: install)
+                    .buttonStyle(.graphite(.primary, size: .large))
+                    .disabled({ if case .installing = state { return true } else { return false } }())
+            }
+        }
+        .padding(DS.Space.l)
+        .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+    }
+
+    private func releaseCard(_ release: Changelog.Release) -> some View {
+        let isCurrent = release.version == currentVersion
+        return VStack(alignment: .leading, spacing: DS.Space.m) {
+            HStack(alignment: .firstTextBaseline, spacing: DS.Space.s) {
+                Text("Версия \(release.version)").font(DS.Font.rowTitle).foregroundStyle(.dsText)
+                if isCurrent { Pill(.success, "сейчас") }
+                Spacer()
+                Text(release.date).font(DS.Font.rowSub).foregroundStyle(.dsMute)
+            }
+            ForEach(release.items, id: \.self) { item in
+                HStack(alignment: .firstTextBaseline, spacing: DS.Space.s) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 12)).foregroundStyle(.dsAccLine)
+                        .accessibilityHidden(true)
+                    Text(item).font(DS.Font.manrope(13, .regular, relativeTo: .callout)).foregroundStyle(.dsText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(DS.Space.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isCurrent ? Color.dsField : Color.dsBg, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
     }
 }

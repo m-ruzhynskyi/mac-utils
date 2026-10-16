@@ -76,6 +76,8 @@ final class TextFixer {
 
     private var busy = false
     private var task: Task<Void, Never>?
+    /// Номер уведомления «Исправляю…»: убираем только его, не чужое (например, прогресс GIF).
+    private var fixToast: Int?
 
     static let system = """
     Ты корректор. Исправь орфографию, опечатки, пунктуацию и грамматику в тексте пользователя. \
@@ -85,15 +87,33 @@ final class TextFixer {
 
     func sync() {
         let center = HotKeyCenter.shared
-        center.unregister(id: HotKeyID.fixText)
-        guard Ollama.isOn(Pref.aiFixText) else { return }
+        guard Ollama.isOn(Pref.aiFixText) else {
+            center.unregister(id: HotKeyID.fixText)
+            return
+        }
         center.register(id: HotKeyID.fixText, keyCode: kVK_ANSI_E, modifiers: controlKey | optionKey) {
             TextFixer.shared.fix()
         }
     }
 
+    /// Почему ⌃⌥E сейчас не сработает (nil — можно). Secure Input включают поля паролей и некоторые терминалы:
+    /// в них macOS не отдаёт выделение и не принимает вставку от других программ.
+    nonisolated static func blockedMessage(secureInput: Bool) -> String? {
+        secureInput ? "В этом поле исправление недоступно (защищённый ввод — пароль или терминал)" : nil
+    }
+
+    /// ⌘Z шлём, только если пользователь всё ещё в той программе, куда вставили текст: иначе отменится чужое действие.
+    nonisolated static func canUndo(pastedIn: pid_t?, frontmost: pid_t?) -> Bool {
+        guard let pastedIn, let frontmost else { return false }
+        return pastedIn == frontmost
+    }
+
     func fix() {
-        guard !busy, !IsSecureEventInputEnabled() else { return }
+        guard !busy else { return }
+        if let message = Self.blockedMessage(secureInput: IsSecureEventInputEnabled()) {
+            Toast.show(message, symbol: "lock.fill", tint: .orange)
+            return
+        }
         busy = true
         task = Task {
             defer { busy = false; task = nil }
@@ -110,13 +130,14 @@ final class TextFixer {
             // Фокус запоминаем до запроса: ответ модели может прийти через десятки секунд.
             let before = FocusSnapshot.capture()
             let startedAt = Date()
-            Toast.show("Исправляю…", symbol: "sparkles", tint: .purple,
-                       action: Toast.Action(title: "Отмена") { TextFixer.shared.cancel() }, sticky: true)
+            let toast = Toast.show("Исправляю…", symbol: "sparkles", tint: .purple,
+                                   action: Toast.Action(title: "Отмена") { TextFixer.shared.cancel() }, sticky: true)
+            fixToast = toast
             do {
                 let answer = try await Ollama.generate(text, system: Self.system, temperature: 0, maxTokens: max(200, text.count))
                 try Task.checkCancellation()
                 let fixed = AIParsing.keepingEdges(of: text, AIParsing.cleanedText(answer))
-                guard !fixed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { Toast.dismiss(); return }
+                guard !fixed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { Toast.dismiss(token: toast); return }
                 if fixed == text {
                     Toast.show("Ошибок не найдено", symbol: "checkmark.circle.fill")
                     return
@@ -127,7 +148,13 @@ final class TextFixer {
                 switch decision {
                 case .paste:
                     await Self.paste(fixed)
+                    let pastedIn = NSWorkspace.shared.frontmostApplication?.processIdentifier
                     Toast.show("Текст исправлен", symbol: "sparkles", tint: .purple, action: Toast.Action(title: "Отменить") {
+                        guard Self.canUndo(pastedIn: pastedIn, frontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier) else {
+                            Toast.show("Вы перешли в другую программу — отмените вставку там (⌘Z)",
+                                       symbol: "exclamationmark.triangle.fill", tint: .orange)
+                            return
+                        }
                         Self.undo()
                     })
                 case .clipboard(let reason):
@@ -136,9 +163,9 @@ final class TextFixer {
                     Toast.show("\(reason): исправленный текст в буфере (прежнее содержимое буфера заменено)", symbol: "doc.on.clipboard", tint: .purple)
                 }
             } catch is CancellationError {
-                Toast.dismiss()
+                Toast.dismiss(token: toast)
             } catch let error as URLError where error.code == .cancelled {
-                Toast.dismiss()
+                Toast.dismiss(token: toast)
             } catch {
                 Toast.show(error.localizedDescription, symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
@@ -148,7 +175,7 @@ final class TextFixer {
     /// «Отмена» в уведомлении «Исправляю…»: запрос к модели прерывается, ничего не вставляется.
     func cancel() {
         task?.cancel()
-        Toast.dismiss()
+        Toast.dismiss(token: fixToast)
     }
 
     /// Вставка через буфер обмена (надёжно для длинного текста с переносами), затем буфер возвращается.

@@ -74,6 +74,26 @@ enum QRTools {
         return max(1, Int((maxPoints / CGFloat(side)).rounded(.down)))
     }
 
+    /// Wi-Fi QR: `WIFI:T:WPA;S:сеть;P:пароль;;`.
+    static func isWiFi(_ payload: String) -> Bool { payload.uppercased().hasPrefix("WIFI:") }
+
+    /// Текст для показа на экране: у Wi-Fi QR пароль (`P:…`, с экранированием `\;`) заменён точками.
+    static func masked(_ payload: String) -> String {
+        guard isWiFi(payload) else { return payload }
+        var fields: [String] = []
+        var current = ""
+        var escaped = false
+        for ch in payload.dropFirst(5) {
+            if escaped { current.append(ch); escaped = false; continue }
+            if ch == "\\" { current.append(ch); escaped = true; continue }
+            if ch == ";" { fields.append(current); current = ""; continue }
+            current.append(ch)
+        }
+        if !current.isEmpty { fields.append(current) }
+        let hidden = fields.map { $0.uppercased().hasPrefix("P:") ? "P:••••" : $0 }
+        return payload.prefix(5) + hidden.joined(separator: ";") + ";;"
+    }
+
     /// Все QR (и другие 2D-коды) на картинке.
     static func detect(in image: CGImage) -> [String] {
         let request = VNDetectBarcodesRequest()
@@ -99,8 +119,8 @@ final class QRCodeService: ObservableObject {
 
     func sync() {
         let center = HotKeyCenter.shared
-        center.unregister(id: HotKeyID.qr)
         guard UserDefaults.standard.bool(forKey: Pref.qr) else {
+            center.unregister(id: HotKeyID.qr)
             hide()
             return
         }
@@ -177,8 +197,13 @@ final class QRCodeService: ObservableObject {
         guard let first = found.first else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(found.joined(separator: "\n"), forType: .string)
+        // Пароль Wi-Fi: менеджеры буфера обмена такое не запоминают.
+        if found.contains(where: QRTools.isWiFi) {
+            NSPasteboard.general.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        }
         let link = URL(string: first).flatMap { ["http", "https", "mailto", "tel"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
-        let preview = first.count > 60 ? String(first.prefix(57)) + "…" : first
+        let shown = QRTools.masked(first)
+        let preview = shown.count > 60 ? String(shown.prefix(57)) + "…" : shown
         let title = found.count > 1 ? "QR (\(found.count)) скопированы: \(preview)" : "QR скопирован: \(preview)"
         Toast.show(title, symbol: "qrcode.viewfinder", tint: .green,
                    action: link.map { url in Toast.Action(title: "Открыть") { NSWorkspace.shared.open(url) } })
@@ -276,32 +301,45 @@ private struct QRPanelView: View {
     @ObservedObject var service: QRCodeService
 
     var body: some View {
-        VStack(spacing: 10) {
-            if let image = service.image {
+        QRPanelContent(image: service.image, text: service.text,
+                       copy: { service.copyImage() }, save: { service.saveImage() }, close: { service.hide() })
+    }
+}
+
+/// Панель с QR-кодом (Graphite: `panel`, обводка `line`, радиус 20). Без модели — для снимков интерфейса.
+struct QRPanelContent: View {
+    let image: NSImage?
+    let text: String
+    var copy: () -> Void = {}
+    var save: () -> Void = {}
+    var close: () -> Void = {}
+
+    var body: some View {
+        VStack(spacing: DS.Space.m) {
+            if let image {
                 // Белое поле уже в картинке (тихая зона): без растяжения и отступов.
                 Image(nsImage: image)
                     .interpolation(.none)
                     .frame(width: image.size.width, height: image.size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
             }
-            Text(service.text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(text)
+                .font(DS.Font.mono(12, relativeTo: .caption))
+                .foregroundStyle(.dsMute)
                 .lineLimit(3)
                 .truncationMode(.middle)
                 .multilineTextAlignment(.center)
-            HStack {
-                Button("Скопировать") { service.copyImage() }
-                    .buttonStyle(.borderedProminent)
-                Button("Сохранить") { service.saveImage() }
-                Button("Закрыть") { service.hide() }
-                    .help("Esc")
+            HStack(spacing: DS.Space.s) {
+                Button("Скопировать", action: copy).buttonStyle(.graphite(.primary, size: .compact))
+                Button("Сохранить", action: save).buttonStyle(.graphite(.secondary, size: .compact))
+                Button("Закрыть", action: close).buttonStyle(.graphite(.ghost, size: .compact)).help("Esc")
             }
-            .controlSize(.small)
         }
-        .padding(16)
+        .padding(DS.Space.l)
         .frame(width: 300)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
         .padding(4)
     }
 }

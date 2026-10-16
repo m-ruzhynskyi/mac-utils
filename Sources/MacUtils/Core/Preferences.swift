@@ -3,6 +3,9 @@ import Foundation
 /// Ключи UserDefaults. Значения по умолчанию регистрируются при запуске.
 enum Pref {
     static let didShowWelcome = "didShowWelcome"
+    /// Первый запуск: `false` — вводные шаги ещё не пройдены (ставится только на чистой установке), `true` — пройдены.
+    /// Нет значения — вводных шагов не было (обновление с прежней версии): настройки открываются сразу.
+    static let onboardingDone = "onboardingDone"
 
     static let cutPaste = "cutPasteEnabled"
     static let cutPanel = "cutPanelEnabled"
@@ -61,6 +64,10 @@ enum Pref {
     static let toolsHiddenTabs = "toolsHiddenTabs"
     /// Вкладки панели 🔧: разделы настроек через запятую, в порядке настроек.
     static let toolsPanelTabs = "toolsPanelTabs"
+    /// Вкладка «Музыка» уже добавлена в панель 🔧 (один раз при обновлении).
+    static let panelTabsMusicAdded = "panelTabsMusicAdded"
+    /// Согласие на значок «Инструменты» в Программах: нет ключа — ещё не спрашивали.
+    static let toolsLauncherInstall = "toolsLauncherInstall"
     /// «Полка» для файлов (встряхнуть мышь при перетаскивании или ⌃⌥D).
     static let dropShelf = "dropShelfEnabled"
     /// «Шпаргалка»: удержание ⌘ показывает сочетания клавиш; задержка в секундах.

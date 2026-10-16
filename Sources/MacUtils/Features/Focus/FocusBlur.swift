@@ -28,8 +28,8 @@ final class FocusBlur: ObservableObject {
 
     func sync() {
         let center = HotKeyCenter.shared
-        center.unregister(id: HotKeyID.focus)
         guard UserDefaults.standard.bool(forKey: Pref.focus) else {
+            center.unregister(id: HotKeyID.focus)
             stop()
             return
         }
@@ -270,45 +270,39 @@ struct FocusPage: View {
     @State private var apps: [NSRunningApplication] = []
 
     var body: some View {
-        Form {
-            Section {
-                Toggle("Режим «Фокус»", isOn: $enabled)
-                Text("Выбранная программа остаётся чёткой, а всё позади её окон размывается и чуть затемняется — ничего не отвлекает. Клик по размытому фону переключает на ту программу, как обычно.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Section("Сейчас") {
-                HStack {
-                    if focus.isOn {
-                        Label("В фокусе: \(focus.targetName)", systemImage: "scope").foregroundStyle(Color.accentColor)
-                        Spacer()
-                        Button("Выключить") { focus.stop() }
-                    } else {
-                        Text("Выключен").foregroundStyle(.secondary)
-                        Spacer()
+        SettingsPage(.focus, isOn: $enabled, toggleLabel: "Режим «Фокус»") {
+            GroupLabel("Сейчас")
+            ListCard {
+                if focus.isOn {
+                    Row("В фокусе: \(focus.targetName)", systemImage: "scope", tile: .accent) {
+                        Button("Выключить") { focus.stop() }.buttonStyle(.graphite(.secondary, size: .compact))
+                    }
+                } else {
+                    Row("Выключен", systemImage: "scope") {
                         Menu("Выбрать программу…") {
                             ForEach(apps, id: \.processIdentifier) { app in
                                 Button(app.localizedName ?? "") { focus.start(app); app.activate() }
                             }
                         }
-                        .frame(width: 200)
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
                     }
                 }
-                ShortcutRow(keys: ["⌃", "⌥", "F"], text: "Включить для активной программы или выключить.")
+                HintRow(keys: ["⌃", "⌥", "F"], text: "Включить для активной программы или выключить.")
             }
             .disabled(!enabled)
-            Section("Настройка") {
-                LabeledContent("Сила размытия") {
-                    Slider(value: $strength, in: 0.2...1) { _ in focus.restyle() }
+            GroupLabel("Настройка")
+            ListCard {
+                Row("Сила размытия", systemImage: "aqi.medium") {
+                    Slider(value: $strength, in: 0.2...1) { _ in focus.restyle() }.frame(width: 180)
                 }
-                Toggle("Следовать за активной программой", isOn: $follow)
-                Text(follow ? "Переключились на другую программу — в фокусе становится она."
-                            : "Фокус остаётся на выбранной программе; когда работаете в другой, размытие прячется.")
-                    .font(.caption).foregroundStyle(.secondary)
+                ToggleRow("Следовать за активной программой",
+                          subtitle: follow ? "Переключились на другую программу — в фокусе становится она."
+                                           : "Фокус остаётся на выбранной программе; когда работаете в другой, размытие прячется.",
+                          systemImage: "arrow.triangle.swap", isOn: $follow)
             }
             .disabled(!enabled)
         }
-        .formStyle(.grouped)
-        .navigationTitle("Фокус")
         .onAppear {
             apps = NSWorkspace.shared.runningApplications
                 .filter { $0.activationPolicy == .regular && $0.processIdentifier != getpid() }

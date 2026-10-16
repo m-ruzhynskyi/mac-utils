@@ -57,8 +57,8 @@ final class ScreenAnnotator: ObservableObject {
 
     func sync() {
         let center = HotKeyCenter.shared
-        center.unregister(id: HotKeyID.annotate)
         guard UserDefaults.standard.bool(forKey: Pref.annotate) else {
+            center.unregister(id: HotKeyID.annotate)
             stop()
             return
         }

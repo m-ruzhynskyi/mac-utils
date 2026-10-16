@@ -19,7 +19,8 @@ final class AppStatusItem: NSObject {
                 let image = NSImage(systemSymbolName: "wrench.and.screwdriver", accessibilityDescription: "Mac Utils")
                 image?.isTemplate = true
                 button.image = image
-                button.toolTip = "Mac Utils — инструменты"
+                button.toolTip = "Mac Utils — инструменты (⌥-клик — в окне)"
+                button.setAccessibilityLabel("Mac Utils — инструменты")
                 button.target = self
                 button.action = #selector(clicked)
             }
@@ -30,8 +31,15 @@ final class AppStatusItem: NSObject {
         }
     }
 
+    /// ⌥-клик по значку открывает полное окно вместо панели.
+    nonisolated static func opensWindow(modifiers: NSEvent.ModifierFlags) -> Bool {
+        modifiers.intersection(.deviceIndependentFlagsMask).contains(.option)
+    }
+
     @objc private func clicked() {
-        if popover?.isShown == true {
+        if Self.opensWindow(modifiers: NSEvent.modifierFlags) {
+            ToolsWindowController.shared.showWindow()
+        } else if popover?.isShown == true {
             closeTools()
         } else {
             _ = showTools()
@@ -58,9 +66,10 @@ final class AppStatusItem: NSObject {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        let controller = NSHostingController(rootView: ToolsView(inPopover: true).frame(width: 420, height: 520))
+        let controller = NSHostingController(rootView: ToolsView(inPopover: true)
+            .frame(width: DS.Size.popover.width, height: DS.Size.popover.height))
         popover.contentViewController = controller
-        popover.contentSize = NSSize(width: 420, height: 520)
+        popover.contentSize = DS.Size.popover
         self.popover = popover
         return popover
     }

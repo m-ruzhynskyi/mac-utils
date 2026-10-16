@@ -12,8 +12,26 @@ struct ProcessRow: Identifiable, Equatable {
     var cpu: Double
     /// Занимаемая память (phys_footprint), байты.
     var memory: UInt64
+    /// Кем был PID, когда строка попала в список: PID может смениться до нажатия «Завершить».
+    var identity = ProcessIdentity(bundleID: nil, startTime: nil)
 
     var id: pid_t { pid }
+}
+
+/// Отпечаток процесса: по нему перед завершением проверяем, что PID всё ещё та же программа.
+struct ProcessIdentity: Equatable {
+    var bundleID: String?
+    /// Время запуска процесса (секунды с 1970), если ОС его сообщила.
+    var startTime: TimeInterval?
+
+    /// Тот же процесс: bundle id совпадает, а времена запуска (если известны обоим) различаются не больше чем на секунду.
+    /// `actual == nil` — процесса больше нет.
+    static func isSame(expected: ProcessIdentity, actual: ProcessIdentity?) -> Bool {
+        guard let actual else { return false }
+        if expected.bundleID != actual.bundleID { return false }
+        if let a = expected.startTime, let b = actual.startTime { return abs(a - b) <= 1 }
+        return true
+    }
 }
 
 /// Расчёт загрузки по процессорному времени (без системных вызовов — для тестов).
@@ -58,6 +76,21 @@ final class TaskManagerModel: ObservableObject {
     @Published var selection: pid_t?
     @Published private(set) var lastError: String?
 
+    /// Для снимков интерфейса: демонстрационные строки, процессы системы не читаются.
+    private(set) var isDemo = false
+
+    static func demo() -> TaskManagerModel {
+        let model = TaskManagerModel()
+        model.isDemo = true
+        let items: [(String, Double, UInt64)] = [("Safari", 12.4, 840 << 20), ("Xcode", 8.1, 2_100 << 20), ("Terminal", 1.2, 120 << 20),
+                                                 ("Figma", 0.8, 560 << 20), ("Notes", 0.2, 90 << 20), ("Mail", 0.1, 210 << 20)]
+        model.rows = items.enumerated().map { index, item in
+            ProcessRow(pid: pid_t(1000 + index), name: item.0, isApp: true, user: "demo", cpu: item.1, memory: item.2)
+        }
+        model.selection = 1002
+        return model
+    }
+
     private var timer: Timer?
     private var lastTimes: [pid_t: UInt64] = [:]
     private var lastSample: UInt64 = 0
@@ -75,7 +108,7 @@ final class TaskManagerModel: ObservableObject {
     }
 
     func start() {
-        guard timer == nil else { return }
+        guard !isDemo, timer == nil else { return }
         sample()
         let timer = Timer(timeInterval: 2, repeats: true) { _ in
             MainActor.assumeIsolated { TaskManagerModel.shared.sample() }
@@ -90,6 +123,7 @@ final class TaskManagerModel: ObservableObject {
     }
 
     func sample() {
+        guard !isDemo else { return }
         let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let elapsed = lastSample > 0 ? now - lastSample : 0
         lastSample = now
@@ -119,7 +153,8 @@ final class TaskManagerModel: ObservableObject {
             }
             result.append(ProcessRow(pid: pid, name: name,
                                      isApp: app.map { $0.activationPolicy == .regular } ?? false,
-                                     user: Self.userName(of: pid), cpu: cpu, memory: memory))
+                                     user: Self.userName(of: pid), cpu: cpu, memory: memory,
+                                     identity: Self.identity(of: pid, app: app) ?? ProcessIdentity(bundleID: nil, startTime: nil)))
         }
         lastTimes = times
         rows = result
@@ -127,13 +162,25 @@ final class TaskManagerModel: ObservableObject {
 
     // MARK: - Завершение
 
-    func quit(_ pid: pid_t, force: Bool) {
+    func quit(_ row: ProcessRow, force: Bool) {
+        let pid = row.pid
         guard pid > 1, pid != ProcessInfo.processInfo.processIdentifier else {
             lastError = "Этот процесс завершать нельзя"
             return
         }
-        if let app = NSRunningApplication(processIdentifier: pid) {
-            _ = force ? app.forceTerminate() : app.terminate()
+        // Между списком и нажатием PID мог перейти к другой программе — её не трогаем.
+        let app = NSRunningApplication(processIdentifier: pid)
+        guard ProcessIdentity.isSame(expected: row.identity, actual: Self.identity(of: pid, app: app)) else {
+            lastError = "«\(row.name)» уже закрыта или PID занят другой программой — список обновлён"
+            sample()
+            return
+        }
+        if let app {
+            let accepted = force ? app.forceTerminate() : app.terminate()
+            if !accepted {
+                lastError = "«\(row.name)» не приняла запрос на завершение"
+                return
+            }
         } else if kill(pid, force ? SIGKILL : SIGTERM) != 0 {
             lastError = errno == EPERM
                 ? "Нет прав: процесс принадлежит системе или другому пользователю"
@@ -154,6 +201,18 @@ final class TaskManagerModel: ObservableObject {
         var pids = [pid_t](repeating: 0, count: Int(count) + 32)
         let filled = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
         return Array(pids.prefix(Int(max(filled, 0))))
+    }
+
+    /// Отпечаток через sysctl: время запуска отдаётся и для процессов root и других пользователей
+    /// (`proc_pidinfo` для них не работает). nil — процесса нет.
+    static func identity(of pid: pid_t, app: NSRunningApplication?) -> ProcessIdentity? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0, size > 0, info.kp_proc.p_pid == pid else { return nil }
+        let started = info.kp_proc.p_starttime
+        let start = TimeInterval(started.tv_sec) + TimeInterval(started.tv_usec) / 1_000_000
+        return ProcessIdentity(bundleID: app?.bundleIdentifier, startTime: start)
     }
 
     private static var userNames: [uid_t: String] = [:]
@@ -186,90 +245,129 @@ struct TaskManagerView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if compact {
-                VStack(spacing: 6) {
-                    HStack(spacing: 8) {
-                        TextField("Поиск", text: $model.search).textFieldStyle(.roundedBorder)
-                        Toggle("Приложения", isOn: $model.appsOnly).toggleStyle(.checkbox)
-                    }
-                    Picker("Сортировка", selection: $model.sort) {
-                        ForEach(ProcessMath.Sort.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
-                .padding(8)
-            } else {
-                HStack(spacing: 10) {
-                    TextField("Поиск по имени или PID", text: $model.search)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 260)
-                    Picker("Сортировка", selection: $model.sort) {
-                        ForEach(ProcessMath.Sort.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 280)
-                    .labelsHidden()
-                    Toggle("Только приложения", isOn: $model.appsOnly)
-                    Spacer(minLength: 0)
-                }
-                .padding(10)
-            }
-
-            List(selection: $model.selection) {
-                ForEach(model.visible) { row in
-                    ProcessLine(row: row, compact: compact, category: aiOn ? ai.categories[row.name] : nil).tag(row.pid)
-                        .contextMenu {
-                            if aiOn {
-                                Button("Что это за процесс?") { explain(row) }
-                                Divider()
-                            }
-                            Button("Завершить") { model.quit(row.pid, force: false) }
-                            Button("Завершить принудительно") { confirmForce = row }
-                        }
-                }
-            }
-
-            HStack(spacing: 10) {
+        ToolsPageFrame(.tasks, compact: compact) {
+            VStack(spacing: compact ? 0 : DS.Space.m) {
+                toolbar
+                processList
                 if let error = model.lastError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        .lineLimit(1)
+                    Banner(.warning, title: error)
+                        .padding(.horizontal, compact ? DS.Space.s : 0)
+                        .padding(.top, compact ? DS.Space.s : 0)
                 }
-                Spacer()
-                if aiOn {
-                    if ai.categorizing { ProgressView().controlSize(.small) }
-                    Button {
-                        if let pid = model.selection, let row = model.rows.first(where: { $0.pid == pid }) {
-                            explain(row)
-                        } else {
-                            ai.categorize(model.visible)
-                        }
-                    } label: { Image(systemName: "sparkles") }
-                    .help("ИИ: выбран процесс — объяснить, что это и можно ли закрыть; не выбран — разложить список по категориям")
-                    .popover(item: $explaining, arrowEdge: .top) { row in
-                        ProcessExplanation(row: row, ai: ai)
-                    }
-                }
-                Text(compact ? "\(model.visible.count)" : "Процессов: \(model.visible.count)").foregroundStyle(.secondary).monospacedDigit()
-                    .help("Процессов в списке")
-                Button(compact ? "Стоп" : "Завершить") { if let pid = model.selection { model.quit(pid, force: false) } }
-                    .help("Завершить выбранный процесс")
-                    .disabled(model.selection == nil)
-                Button(compact ? "Убить" : "Принудительно") {
-                    if let pid = model.selection { confirmForce = model.rows.first { $0.pid == pid } }
-                }
-                .disabled(model.selection == nil)
+                bottomBar
             }
-            .padding(10)
         }
         .onAppear { model.start() }
         .onDisappear { model.stop() }
         .alert(item: $confirmForce) { row in
             Alert(title: Text("Завершить «\(row.name)» принудительно?"),
                   message: Text("Несохранённые данные будут потеряны."),
-                  primaryButton: .destructive(Text("Завершить")) { model.quit(row.pid, force: true) },
+                  primaryButton: .destructive(Text("Завершить")) { model.quit(row, force: true) },
                   secondaryButton: .cancel(Text("Отмена")))
+        }
+    }
+
+    private var sortOptions: [(value: ProcessMath.Sort, title: String)] {
+        ProcessMath.Sort.allCases.map { (value: $0, title: $0.title) }
+    }
+
+    @ViewBuilder
+    private var toolbar: some View {
+        if compact {
+            VStack(spacing: DS.Space.s) {
+                HStack(spacing: DS.Space.s) {
+                    ToolsSearchField(prompt: "Поиск", text: $model.search)
+                    Text("Приложения").font(DS.Font.bodyStrong).foregroundStyle(.dsText).lineLimit(1)
+                    Toggle("Приложения", isOn: $model.appsOnly).toggleStyle(.graphite).labelsHidden()
+                }
+                Segmented(selection: $model.sort, options: sortOptions)
+            }
+            .padding(DS.Space.s)
+        } else {
+            HStack(spacing: DS.Space.m) {
+                ToolsSearchField(prompt: "Поиск по имени или PID", text: $model.search)
+                    .frame(maxWidth: 240)
+                Segmented(selection: $model.sort, options: sortOptions)
+                Spacer(minLength: 0)
+                Text("Только приложения").font(DS.Font.bodyStrong).foregroundStyle(.dsText)
+                Toggle("Только приложения", isOn: $model.appsOnly).toggleStyle(.graphite).labelsHidden()
+            }
+        }
+    }
+
+    private var processList: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+        return ScrollView {
+            LazyVStack(spacing: 2) {
+                ForEach(model.visible) { row in
+                    let selected = model.selection == row.pid
+                    ProcessLine(row: row, compact: compact, category: aiOn ? ai.categories[row.name] : nil)
+                        .padding(.horizontal, 10)
+                        .background(selected ? Color.dsField : .clear, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.selection = row.pid }
+                        .accessibilityAddTraits(selected ? .isSelected : [])
+                        .contextMenu {
+                            if aiOn {
+                                Button("Что это за процесс?") { explain(row) }
+                                Divider()
+                            }
+                            Button("Завершить") { model.quit(row, force: false) }
+                            Button("Завершить принудительно") { confirmForce = row }
+                        }
+                }
+            }
+            .padding(DS.Space.xs)
+        }
+        .focusable()
+        .focusEffectDisabled()
+        .onMoveCommand { direction in
+            let rows = model.visible
+            guard !rows.isEmpty else { return }
+            let current = rows.firstIndex { $0.pid == model.selection }
+            switch direction {
+            case .down: model.selection = rows[min((current ?? -1) + 1, rows.count - 1)].pid
+            case .up: model.selection = rows[max((current ?? rows.count) - 1, 0)].pid
+            default: break
+            }
+        }
+        .background(compact ? Color.clear : Color.dsPanel, in: shape)
+        .overlay { if !compact { shape.strokeBorder(Color.dsLine, lineWidth: 1) } }
+        .clipShape(shape)
+        .padding(.horizontal, compact ? DS.Space.s : 0)
+    }
+
+    private var bottomBar: some View {
+        ToolsBar(compact: compact) {
+            Spacer()
+            if aiOn {
+                if ai.categorizing { ProgressView().controlSize(.small) }
+                IconButton("ИИ: выбран процесс — объяснить, что это и можно ли закрыть; не выбран — разложить список по категориям",
+                           systemImage: "sparkles", compact: true) {
+                    if let pid = model.selection, let row = model.rows.first(where: { $0.pid == pid }) {
+                        explain(row)
+                    } else {
+                        ai.categorize(model.visible)
+                    }
+                }
+                .popover(item: $explaining, arrowEdge: .top) { row in
+                    ProcessExplanation(row: row, ai: ai)
+                }
+            }
+            Text(compact ? "\(model.visible.count)" : "Процессов: \(model.visible.count)")
+                .font(DS.Font.mono(13, relativeTo: .callout)).foregroundStyle(.dsMute)
+                .help("Процессов в списке")
+            Button(compact ? "Стоп" : "Завершить") {
+                if let pid = model.selection, let row = model.rows.first(where: { $0.pid == pid }) { model.quit(row, force: false) }
+            }
+            .buttonStyle(.graphite(.secondary, size: .compact))
+            .help("Завершить выбранный процесс")
+            .disabled(model.selection == nil)
+            Button(compact ? "Убить" : "Принудительно") {
+                if let pid = model.selection { confirmForce = model.rows.first { $0.pid == pid } }
+            }
+            .buttonStyle(.graphite(.danger, size: .compact))
+            .disabled(model.selection == nil)
         }
     }
 }
@@ -281,21 +379,20 @@ private struct ProcessExplanation: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: "sparkles").foregroundStyle(.purple)
-                Text(row.name).font(.headline).lineLimit(1)
+                Image(systemName: "sparkles").foregroundStyle(.dsAccText)
+                Text(row.name).font(DS.Font.rowTitle).foregroundStyle(.dsText).lineLimit(1)
             }
             if let info = ai.infos[row.name] {
-                Text(info.category).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Text(info.what).fixedSize(horizontal: false, vertical: true)
-                Label(info.safe == "да" ? "Можно завершить" : info.safe == "нет" ? "Лучше не завершать" : "Осторожно",
-                      systemImage: info.safe == "да" ? "checkmark.circle.fill" : info.safe == "нет" ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(info.safe == "да" ? .green : info.safe == "нет" ? .red : .orange)
-                Text(info.why).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Text("Ответ локальной модели — может ошибаться.").font(.caption2).foregroundStyle(.tertiary)
+                let tone: DS.Tone = info.safe == "да" ? .success : info.safe == "нет" ? .danger : .warning
+                Text(info.category).font(DS.Font.caption).foregroundStyle(.dsMute)
+                Text(info.what).font(DS.Font.body).foregroundStyle(.dsText).fixedSize(horizontal: false, vertical: true)
+                Pill(tone, info.safe == "да" ? "Можно завершить" : info.safe == "нет" ? "Лучше не завершать" : "Осторожно")
+                Text(info.why).font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
+                Text("Ответ локальной модели — может ошибаться.").font(DS.Font.rowSub).foregroundStyle(.dsMute)
             } else if let error = ai.error, !ai.busy.contains(row.name) {
-                Text(error).foregroundStyle(.orange)
+                Text(error).font(DS.Font.body).foregroundStyle(Color.dsRec)
             } else {
-                HStack { ProgressView().controlSize(.small); Text("Спрашиваю модель…").foregroundStyle(.secondary) }
+                HStack { ProgressView().controlSize(.small); Text("Спрашиваю модель…").font(DS.Font.body).foregroundStyle(.dsMute) }
             }
         }
         .padding(14)
@@ -312,28 +409,31 @@ private struct ProcessLine: View {
         HStack(spacing: 10) {
             Image(nsImage: NSRunningApplication(processIdentifier: row.pid)?.icon
                   ?? NSWorkspace.shared.icon(for: .unixExecutable))
-                .resizable().frame(width: compact ? 16 : 20, height: compact ? 16 : 20)
+                .resizable().frame(width: compact ? 18 : 22, height: compact ? 18 : 22)
             if compact {
-                Text(row.name).lineLimit(1).truncationMode(.tail)
+                Text(row.name).font(DS.Font.bodyStrong).foregroundStyle(.dsText).lineLimit(1).truncationMode(.tail)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(row.name).lineLimit(1).truncationMode(.tail)
-                    Text("PID \(row.pid) · \(row.user)").font(.caption2).foregroundStyle(.secondary)
+                    Text(row.name).font(DS.Font.bodyStrong).foregroundStyle(.dsText).lineLimit(1).truncationMode(.tail)
+                    Text("PID \(row.pid) · \(row.user)").font(DS.Font.rowSub).foregroundStyle(.dsMute)
                 }
             }
             Spacer(minLength: 8)
             if let category {
-                Text(category).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                Text(category).font(DS.Font.rowSub).foregroundStyle(.dsMute).lineLimit(1)
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(Color.dsField, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.dsLine, lineWidth: 1))
             }
             Text(String(format: "%.1f %%", row.cpu))
-                .monospacedDigit()
-                .foregroundStyle(row.cpu > 80 ? .red : .primary)
-                .frame(width: compact ? 54 : 70, alignment: .trailing)
+                .font(DS.Font.mono(13, relativeTo: .callout))
+                .foregroundStyle(row.cpu > 80 ? Color.dsRec : .dsText)
+                .frame(width: compact ? 58 : 72, alignment: .trailing)
             Text(bytes(row.memory))
-                .monospacedDigit()
-                .frame(width: compact ? 68 : 90, alignment: .trailing)
+                .font(DS.Font.mono(13, relativeTo: .callout))
+                .foregroundStyle(.dsMute)
+                .frame(width: compact ? 70 : 92, alignment: .trailing)
         }
+        .padding(.vertical, 3)
     }
 }
