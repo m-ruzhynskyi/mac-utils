@@ -93,22 +93,20 @@ extension LiveIndicator where Actions == EmptyView {
     }
 }
 
-/// Точка «идёт запись»: пульсирует, если не включено «Уменьшить движение».
+/// Точка «идёт запись»: мигает раз в секунду (без «Уменьшить движение»). Плавная repeatForever-анимация пересчитывалась
+/// на каждом кадре и держала ~4,5 % ядра всю запись; шаг раз в секунду совпадает с таймером рядом и почти ничего не стоит.
 struct PulsingDot: View {
     var color: Color = .dsRec
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var dim = false
 
     var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 6, height: 6)
-            .opacity(dim ? 0.35 : 1)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
-            }
-            .accessibilityHidden(true)
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+                .opacity(!reduceMotion && Int(context.date.timeIntervalSinceReferenceDate) % 2 == 1 ? 0.35 : 1)
+        }
+        .accessibilityHidden(true)
     }
 }
 
