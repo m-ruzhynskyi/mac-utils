@@ -104,7 +104,8 @@ function createWindow() {
     backgroundColor: "#111111",
     title: "Mac Utils Share",
     autoHideMenuBar: true,
-    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true },
+    // backgroundThrottling: false — свёрнутое окно не замедляет таймер кадров трансляции (33 мс) до ~1 раза в секунду.
+    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, backgroundThrottling: false },
   });
   // Закрыли главное окно — выходим совсем (окно меток не должно держать приложение без окна).
   window.on("closed", () => { window = null; app.quit(); });
