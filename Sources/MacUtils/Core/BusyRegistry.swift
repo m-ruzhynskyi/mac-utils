@@ -109,7 +109,7 @@ final class BusyRegistry {
     /// Просмотр занят только пока есть подключение: окно с надписью «Трансляция завершена» ничего не держит.
     static func viewerIsConnected(_ state: ShareViewer.State) -> Bool {
         switch state {
-        case .connecting, .waiting, .watching: return true
+        case .connecting, .waiting, .watching, .reconnecting: return true
         case .idle, .ended: return false
         }
     }
