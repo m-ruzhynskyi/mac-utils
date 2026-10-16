@@ -3,6 +3,9 @@ import Foundation
 /// Ключи UserDefaults. Значения по умолчанию регистрируются при запуске.
 enum Pref {
     static let didShowWelcome = "didShowWelcome"
+    /// Первый запуск: `false` — вводные шаги ещё не пройдены (ставится только на чистой установке), `true` — пройдены.
+    /// Нет значения — вводных шагов не было (обновление с прежней версии): настройки открываются сразу.
+    static let onboardingDone = "onboardingDone"
 
     static let cutPaste = "cutPasteEnabled"
     static let cutPanel = "cutPanelEnabled"

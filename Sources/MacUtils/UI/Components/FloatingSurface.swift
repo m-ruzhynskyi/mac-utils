@@ -112,7 +112,7 @@ struct PulsingDot: View {
     }
 }
 
-/// Знак Mac Utils из концепта: «M» линией (`M14 46V18l18 20 18-20v28` в поле 64×64).
+/// Знак Mac Utils — ⌘ из иконки приложения: квадрат между четырьмя петлями, в петлях тёмные точки (поле 64×64).
 struct AppMark: View {
     var size: CGFloat = 22
     var color: Color = .dsAccText
@@ -120,14 +120,19 @@ struct AppMark: View {
     var body: some View {
         Canvas { context, canvas in
             let scale = canvas.width / 64
-            var path = Path()
-            path.move(to: CGPoint(x: 14 * scale, y: 46 * scale))
-            path.addLine(to: CGPoint(x: 14 * scale, y: 18 * scale))
-            path.addLine(to: CGPoint(x: 32 * scale, y: 38 * scale))
-            path.addLine(to: CGPoint(x: 50 * scale, y: 18 * scale))
-            path.addLine(to: CGPoint(x: 50 * scale, y: 46 * scale))
-            context.stroke(path, with: .color(color),
-                           style: StrokeStyle(lineWidth: max(1.5, 5.5 * scale), lineCap: .round, lineJoin: .round))
+            let center = CGPoint(x: 32 * scale, y: 32 * scale)
+            let half = 11 * scale, loop = 6.5 * scale
+            let corners = [CGPoint(x: center.x - half, y: center.y - half), CGPoint(x: center.x + half, y: center.y - half),
+                           CGPoint(x: center.x + half, y: center.y + half), CGPoint(x: center.x - half, y: center.y + half)]
+            let square = Path(CGRect(x: center.x - half, y: center.y - half, width: half * 2, height: half * 2))
+            context.stroke(square, with: .color(color), style: StrokeStyle(lineWidth: max(1.5, 4.6 * scale), lineJoin: .round))
+            for point in corners {
+                context.fill(Path(ellipseIn: CGRect(x: point.x - loop, y: point.y - loop, width: loop * 2, height: loop * 2)),
+                             with: .color(color))
+                let pin = max(0.8, 1.8 * scale)
+                context.fill(Path(ellipseIn: CGRect(x: point.x - pin, y: point.y - pin, width: pin * 2, height: pin * 2)),
+                             with: .color(.black.opacity(0.45)))
+            }
         }
         .frame(width: size, height: size)
         .accessibilityLabel("Mac Utils")

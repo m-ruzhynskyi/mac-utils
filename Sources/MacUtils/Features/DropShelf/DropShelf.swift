@@ -85,6 +85,13 @@ enum ShelfItems {
 final class DropShelf: ObservableObject {
     static let shared = DropShelf()
 
+    /// Для снимков интерфейса: полка с готовыми файлами (список на экране не меняется).
+    static func demo(items: [URL]) -> DropShelf {
+        let shelf = DropShelf()
+        shelf.items = items
+        return shelf
+    }
+
     @Published private(set) var items: [URL] = [] {
         didSet {
             // Новые файлы — обычный список; убранные — убираем и из групп.
@@ -279,74 +286,76 @@ final class DropShelf: ObservableObject {
 
 // MARK: - Вид
 
-private struct DropShelfView: View {
+struct DropShelfView: View {
     @ObservedObject var shelf: DropShelf
     @State private var targeted = false
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: DS.Space.s) {
             HStack(spacing: 6) {
-                Image(systemName: "tray.full").foregroundStyle(Color.accentColor)
-                Text("Полка").font(.callout.weight(.semibold))
+                Image(systemName: "tray.full").font(.system(size: 14, weight: .medium)).foregroundStyle(.dsAccText)
+                    .accessibilityHidden(true)
+                Text("Полка").font(DS.Font.rowTitle).foregroundStyle(.dsText)
                 if !shelf.items.isEmpty {
-                    Text("\(shelf.items.count)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    Text("\(shelf.items.count)").font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute)
                 }
                 Spacer()
                 if Ollama.isOn(Pref.aiShelf), shelf.items.count >= 2 {
                     if shelf.grouping {
                         ProgressView().controlSize(.small)
                     } else {
-                        Button { shelf.groups == nil ? shelf.groupWithAI() : (shelf.groups = nil) } label: {
-                            Image(systemName: shelf.groups == nil ? "sparkles" : "list.bullet")
+                        ShelfIconButton(symbol: shelf.groups == nil ? "sparkles" : "list.bullet",
+                                        help: shelf.groups == nil ? "Сгруппировать по смыслу (ИИ)" : "Обычный список") {
+                            shelf.groups == nil ? shelf.groupWithAI() : (shelf.groups = nil)
                         }
-                        .help(shelf.groups == nil ? "Сгруппировать по смыслу (ИИ)" : "Обычный список")
                     }
                 }
                 if !shelf.items.isEmpty {
-                    Button { shelf.clear() } label: { Image(systemName: "trash") }
-                        .help("Очистить полку")
+                    ShelfIconButton(symbol: "trash", help: "Очистить полку") { shelf.clear() }
                 }
-                Button { shelf.hide() } label: { Image(systemName: "xmark") }
-                    .help("Скрыть полку (файлы останутся)")
+                ShelfIconButton(symbol: "xmark", help: "Скрыть полку (файлы останутся)") { shelf.hide() }
             }
-            .buttonStyle(.borderless)
             .help("Потяните за заголовок, чтобы передвинуть полку")
 
             if shelf.items.isEmpty {
-                VStack(spacing: 6) {
-                    Image(systemName: "arrow.down.doc").font(.system(size: 28)).foregroundStyle(.secondary)
-                    Text("Перетащите сюда файлы").font(.callout).foregroundStyle(.secondary)
+                VStack(spacing: DS.Space.s) {
+                    Image(systemName: "arrow.down.doc").font(.system(size: 20, weight: .medium)).foregroundStyle(.dsText)
+                        .frame(width: DS.Size.headerTile, height: DS.Size.headerTile)
+                        .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+                        .accessibilityHidden(true)
+                    Text("Перетащите сюда файлы").font(DS.Font.manrope(13, .semibold, relativeTo: .callout)).foregroundStyle(.dsMute)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // «Все» — перетащить сразу все файлы.
                 DragOutHandle(urls: shelf.items) { shelf.draggedOut($0) } label: {
                     Label("Перетащить все (\(shelf.items.count))", systemImage: "square.stack.3d.up")
-                        .font(.caption.weight(.semibold))
+                        .font(DS.Font.manrope(13, .heavy, relativeTo: .callout))
+                        .foregroundStyle(.dsAccInk)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 5)
-                        .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 6))
+                        .padding(.vertical, 6)
+                        .background(Color.dsAcc, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
                 }
-                .frame(height: 26)
+                .frame(height: 32)
                 ScrollView {
                     VStack(spacing: 4) {
                         if let groups = shelf.groups {
                             ForEach(groups) { group in
                                 DragOutHandle(urls: group.files) { shelf.draggedOut($0) } label: {
                                     HStack {
-                                        Text(group.title).font(.caption.weight(.semibold)).lineLimit(1)
+                                        Text(group.title).font(DS.Font.groupLabel).foregroundStyle(.dsMute).lineLimit(1)
                                         Spacer()
-                                        Text("\(group.files.count)").font(.caption2).foregroundStyle(.secondary)
+                                        Text("\(group.files.count)").font(DS.Font.mono(11, relativeTo: .caption2)).foregroundStyle(.dsMute)
                                     }
                                     .padding(.horizontal, 4)
                                 }
-                                .frame(height: 20)
+                                .frame(height: 22)
                                 .help("Перетащите подпись — заберёте всю группу")
                                 ForEach(group.files, id: \.self) { url in
                                     DragOutHandle(urls: [url]) { shelf.draggedOut($0) } label: {
                                         ShelfRow(url: url) { shelf.remove(url) }
                                     }
-                                    .frame(height: 30)
+                                    .frame(height: 34)
                                 }
                             }
                         } else {
@@ -354,18 +363,18 @@ private struct DropShelfView: View {
                                 DragOutHandle(urls: [url]) { shelf.draggedOut($0) } label: {
                                     ShelfRow(url: url) { shelf.remove(url) }
                                 }
-                                .frame(height: 30)
+                                .frame(height: 34)
                             }
                         }
                     }
                 }
             }
         }
-        .padding(10)
+        .padding(DS.Space.m)
         .frame(width: 240, height: 300)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .strokeBorder(targeted ? Color.accentColor : Color.clear, lineWidth: 2))
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous)
+            .strokeBorder(targeted ? Color.dsAccLine : Color.dsLine, lineWidth: targeted ? 2 : 1))
         .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -378,6 +387,28 @@ private struct DropShelfView: View {
     }
 }
 
+/// Кнопка-значок в шапке полки: 28×28, `mute`, при наведении — фон `field`.
+private struct ShelfIconButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 13, weight: .medium))
+                .foregroundStyle(hovered ? Color.dsText : .dsMute)
+                .frame(width: 28, height: 28)
+                .background(hovered ? Color.dsField : .clear, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
 private struct ShelfRow: View {
     let url: URL
     let remove: () -> Void
@@ -385,20 +416,21 @@ private struct ShelfRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 22, height: 22)
-            Text(url.lastPathComponent).font(.caption).lineLimit(1).truncationMode(.middle)
+            Text(url.lastPathComponent).font(DS.Font.manrope(12, .semibold, relativeTo: .caption)).foregroundStyle(.dsText)
+                .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 4)
-            Button(action: remove) { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                .buttonStyle(.borderless)
+            Button(action: remove) { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(.dsMute) }
+                .buttonStyle(.plain)
                 .help("Убрать с полки")
+                .accessibilityLabel("Убрать с полки")
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 8)
         .frame(maxHeight: .infinity)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+        .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
         .help(url.path)
     }
 }
 
-/// Источник перетаскивания для одного или нескольких файлов (SwiftUI так не умеет).
 private struct DragOutHandle<Label: View>: NSViewRepresentable {
     let urls: [URL]
     let ended: ([URL]) -> Void

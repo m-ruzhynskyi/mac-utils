@@ -411,27 +411,26 @@ private struct RecordingHUD: View {
     @ObservedObject var recorder: ScreenRecorder
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle().fill(Color.red).frame(width: 10, height: 10)
-            Text(timeString)
-                .font(.system(size: 13, weight: .semibold))
-                .monospacedDigit()
-            Button("Отмена") { recorder.confirmCancel() }
+        RecordingHUDContent(elapsed: recorder.elapsed, cancel: { recorder.confirmCancel() }, stop: { recorder.stop() })
+    }
+}
+
+/// Индикатор записи экрана: «ЗАПИСЬ» с пульсирующей точкой, время, «Отмена» и «Стоп». Значения готовые, без модели.
+struct RecordingHUDContent: View {
+    let elapsed: TimeInterval
+    let cancel: () -> Void
+    let stop: () -> Void
+
+    var body: some View {
+        LiveIndicator(.recording, since: Date().addingTimeInterval(-elapsed)) {
+            Button("Отмена", action: cancel)
+                .buttonStyle(.graphite(.ghost, size: .compact))
                 .help("Удалить запись (с подтверждением)")
-            Button("Стоп") { recorder.stop() }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
+            Button("Стоп", action: stop)
+                .buttonStyle(.graphite(.danger, size: .compact))
                 .help("Сохранить запись: ⌘⇧X или Esc")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(4)
-    }
-
-    private var timeString: String {
-        let seconds = Int(recorder.elapsed)
-        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }
 

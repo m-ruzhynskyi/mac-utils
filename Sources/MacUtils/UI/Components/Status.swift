@@ -204,8 +204,12 @@ struct Banner<Actions: View>: View {
                     Text(message).font(DS.Font.manrope(13, .regular, relativeTo: .callout)).foregroundStyle(.dsMute)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                HStack(spacing: DS.Space.s) { actions }
-                    .padding(.top, DS.Space.xxs)
+                // Не помещаются в строку (узкая панель) — столбиком, без многоточий.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: DS.Space.s) { actions }
+                    VStack(alignment: .leading, spacing: DS.Space.s) { actions }
+                }
+                .padding(.top, DS.Space.xxs)
             }
             Spacer(minLength: 0)
         }

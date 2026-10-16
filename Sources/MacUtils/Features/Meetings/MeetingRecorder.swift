@@ -665,27 +665,26 @@ private struct MeetingHUD: View {
     @ObservedObject var recorder: MeetingRecorder
 
     var body: some View {
-        HStack(spacing: 8) {
-            if let interruption = recorder.interruption {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                Text(interruption).font(.callout).foregroundStyle(.orange)
-            } else {
-                Circle().fill(.red).frame(width: 9, height: 9)
-                if case .recording(let since) = recorder.state {
-                    Text(since, style: .timer).monospacedDigit().font(.callout)
-                }
-                if recorder.audioStalled {
-                    Label("Нет звука", systemImage: "waveform.slash").font(.caption).foregroundStyle(.orange)
-                        .help("Поток звука молчит больше 10 секунд — проверьте, что звук воспроизводится")
-                }
-            }
-            Button { recorder.stop() } label: { Image(systemName: "stop.fill") }
-                .buttonStyle(.borderless)
-                .help("Остановить и расшифровать (⌃⌥M)")
+        var since: Date?
+        if case .recording(let started) = recorder.state { since = started }
+        return MeetingHUDContent(since: since, interruption: recorder.interruption, stalled: recorder.audioStalled) { recorder.stop() }
+    }
+}
+
+/// Индикатор записи встречи: «ВСТРЕЧА», время, предупреждение (обрыв потока или «Нет звука») и «Стоп».
+/// Значения готовые, без модели.
+struct MeetingHUDContent: View {
+    var since: Date?
+    var interruption: String?
+    var stalled = false
+    let stop: () -> Void
+
+    var body: some View {
+        LiveIndicator(.meeting, since: interruption == nil ? since : nil,
+                      warning: interruption ?? (stalled ? "Нет звука" : nil)) {
+            HUDIconButton(symbol: "stop.fill", help: "Остановить и расшифровать (⌃⌥M)", kind: .stop, action: stop)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(.regularMaterial, in: Capsule())
+        .help(stalled && interruption == nil ? "Поток звука молчит больше 10 секунд — проверьте, что звук воспроизводится" : "")
         .padding(2)
     }
 }

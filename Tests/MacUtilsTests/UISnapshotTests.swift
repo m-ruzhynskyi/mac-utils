@@ -177,13 +177,19 @@ final class UISnapshotTests: XCTestCase {
         bothThemes("components-gallery-surfaces", size: NSSize(width: 1000, height: 1300), settle: 0.8) { ComponentsGallery(part: .surfaces) }
     }
 
+    /// Панель в строке меню (концепт `Popover*.dc.html`): «Главная» и вкладки разделов, размер — как у поповера.
     func testMenuBarPanelTabs() {
+        let size = NSSize(width: DS.Size.popover.width, height: DS.Size.popover.height)
+        let others = PanelTabs.sections(PanelTabs.defaultValue).filter { Self.skippedSections[$0] == nil }
+        // «Главная» с показательным рядом вкладок: разделы по умолчанию в основном личные и в снимках пропускаются.
+        suite.set(PanelHome.tab, forKey: Pref.toolsTab)
+        suite.set(PanelTabs.value([.screenshot, .shelf, .qr, .annotate, .wellbeing, .monitor]), forKey: Pref.toolsPanelTabs)
+        bothThemes("panel-home", size: size, settle: 0.6) { ToolsView(inPopover: true).frame(width: size.width, height: size.height) }
         for section in PanelTabs.available where Self.skippedSections[section] == nil {
             suite.set(section.rawValue, forKey: Pref.toolsTab)
-            suite.set(PanelTabs.value([section] + PanelTabs.sections(PanelTabs.defaultValue).filter { $0 != section && Self.skippedSections[$0] == nil }),
-                      forKey: Pref.toolsPanelTabs)
-            bothThemes("panel-\(section.rawValue)", size: NSSize(width: 420, height: 520)) {
-                ToolsView(inPopover: true).frame(width: 420, height: 520)
+            suite.set(PanelTabs.value([section] + others.filter { $0 != section }), forKey: Pref.toolsPanelTabs)
+            bothThemes("panel-\(section.rawValue)", size: size) {
+                ToolsView(inPopover: true).frame(width: size.width, height: size.height)
             }
         }
     }
@@ -234,7 +240,262 @@ final class UISnapshotTests: XCTestCase {
         bothThemes("files-monitor-demo-panel", size: NSSize(width: 420, height: 520)) { SystemMonitorView(model: monitor, compact: true) }
     }
 
+    /// Волна 2, исполнитель Ж: Capture, Switcher, первый запуск, обновление и «Что нового», QR, полка, вырезание, шпаргалка.
+    /// Только готовые значения (без моделей, без системы, без личных данных); окон на экране нет.
+    func testCaptureSwitcherOnboardingUpdateOverlays() {
+        // Capture: рамка выделения, плашка размера и панель инструментов поверх «снимка» (условный фон).
+        bothThemes("capture-selection", size: NSSize(width: 1100, height: 560)) { CapturePreview() }
+
+        // Switcher: четыре карточки, первая выбрана.
+        let names = ["Safari", "Xcode", "Finder", "Telegram"]
+        let symbols = ["safari", "hammer", "folder", "paperplane"]
+        let items = names.enumerated().map { index, name in
+            SwitcherItem(id: "demo-\(index)", app: NSRunningApplication.current, appName: name, title: name,
+                         icon: NSImage(systemSymbolName: symbols[index], accessibilityDescription: name) ?? NSImage(),
+                         windowID: CGWindowID(900 + index), axWindow: nil, isMinimized: false)
+        }
+        let previews = Dictionary(uniqueKeysWithValues: items.enumerated().map { index, item in
+            (item.windowID!, Self.gradientImage(hue: CGFloat(index) / 5 + 0.55, size: NSSize(width: 260, height: 160)))
+        })
+        bothThemes("switcher-main", size: NSSize(width: 960, height: 280)) {
+            SwitcherContent(items: items, selected: 0, previews: previews, showPreviews: true, maxWidth: 940)
+        }
+        bothThemes("switcher-icons", size: NSSize(width: 520, height: 180)) {
+            SwitcherContent(items: items, selected: 1, previews: [:], showPreviews: false, maxWidth: 500)
+        }
+
+        // Первый запуск: три шага.
+        bothThemes("onboarding-1-welcome", size: NSSize(width: 960, height: 600)) {
+            OnboardingContent(step: .welcome, accessibility: .needed, screenRecording: .needed, microphone: .needed)
+        }
+        bothThemes("onboarding-2-permissions", size: NSSize(width: 960, height: 600)) {
+            OnboardingContent(step: .permissions, accessibility: .granted, screenRecording: .needed, microphone: .needed)
+        }
+        bothThemes("onboarding-3-done", size: NSSize(width: 960, height: 600)) {
+            OnboardingContent(step: .done, accessibility: .granted, screenRecording: .granted, microphone: .needed)
+        }
+
+        // Обновление и «Что нового».
+        let releases = Array(Changelog.releases.prefix(2))
+        let family = releases.first?.version ?? ""
+        bothThemes("update-available", size: NSSize(width: 520, height: 640)) {
+            WhatsNewContent(state: .available("9.9.9"), currentVersion: family, displayVersion: "9.9.0", releases: releases)
+        }
+        bothThemes("update-installing", size: NSSize(width: 520, height: 640)) {
+            WhatsNewContent(state: .installing("9.9.9"), currentVersion: family, displayVersion: "9.9.0", releases: releases)
+        }
+        bothThemes("whats-new-list", size: NSSize(width: 520, height: 640)) {
+            WhatsNewContent(state: .upToDate, currentVersion: family, displayVersion: "9.9.0", releases: releases)
+        }
+
+        // Плавающие панели.
+        bothThemes("qr-panel", size: NSSize(width: 340, height: 420)) {
+            QRPanelContent(image: Self.demoQR(), text: "https://example.com/demo-link")
+        }
+        let files = ["Отчёт.pdf", "Схема.png", "Заметки.txt", "Архив.zip"].map { URL(fileURLWithPath: "/demo/\($0)") }
+        let shelf = DropShelf.demo(items: files)
+        bothThemes("shelf-full", size: NSSize(width: 280, height: 340)) { DropShelfView(shelf: shelf) }
+        let empty = DropShelf.demo(items: [])
+        bothThemes("shelf-empty", size: NSSize(width: 280, height: 340)) { DropShelfView(shelf: empty) }
+        bothThemes("cut-panel", size: NSSize(width: 340, height: 220)) { CutPanelContent(items: files) }
+        let groups = [
+            CheatGroup(title: "Файл", items: [CheatItem(title: "Новое окно", shortcut: "⌘N"), CheatItem(title: "Открыть…", shortcut: "⌘O"),
+                                              CheatItem(title: "Закрыть окно", shortcut: "⌘W")]),
+            CheatGroup(title: "Правка", items: [CheatItem(title: "Отменить", shortcut: "⌘Z"), CheatItem(title: "Повторить", shortcut: "⇧⌘Z"),
+                                                CheatItem(title: "Найти…", shortcut: "⌘F")]),
+            CheatGroup(title: "Mac Utils", items: [CheatItem(title: "Снимок экрана", shortcut: "⌃⌥⌘X"), CheatItem(title: "Полка", shortcut: "⌃⌥D")]),
+        ]
+        bothThemes("cheatsheet-overlay", size: NSSize(width: 820, height: 340)) {
+            CheatSheetContent(appName: "Demo Editor", appIcon: nil, loading: false, groups: groups, sticky: false)
+        }
+    }
+
+    private static func gradientImage(hue: CGFloat, size: NSSize) -> NSImage {
+        NSImage(size: size, flipped: false) { rect in
+            NSGradient(starting: NSColor(hue: hue.truncatingRemainder(dividingBy: 1), saturation: 0.35, brightness: 0.55, alpha: 1),
+                       ending: NSColor(hue: hue.truncatingRemainder(dividingBy: 1), saturation: 0.45, brightness: 0.25, alpha: 1))?
+                .draw(in: rect, angle: 160)
+            return true
+        }
+    }
+
+    private static func demoQR() -> NSImage {
+        let filter = CIFilter(name: "CIQRCodeGenerator")!
+        filter.setValue(Data("https://example.com/demo-link".utf8), forKey: "inputMessage")
+        let ci = filter.outputImage!.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
+        let rep = NSCIImageRep(ciImage: ci)
+        let image = NSImage(size: NSSize(width: rep.size.width + 32, height: rep.size.height + 32), flipped: false) { rect in
+            NSColor.white.setFill()
+            rect.fill()
+            rep.draw(in: NSRect(x: 16, y: 16, width: rep.size.width, height: rep.size.height))
+            return true
+        }
+        return image
+    }
+
     func testWhatsNew() {
         bothThemes("whats-new", size: NSSize(width: 520, height: 560)) { WhatsNewView() }
+    }
+
+    // MARK: Волна 2, исполнитель Е: Toast, статусные HUD, запрос зрителя, ведущий и зритель трансляции
+    // Все вью получают готовые значения (без живых моделей), окна не выводятся на экран, личных данных нет.
+
+    /// Рабочий стол из `MacHost.dc.html` / `MacWatch.dc.html`: градиент и условные окна.
+    private struct DesktopBackdrop: View {
+        var body: some View {
+            ZStack(alignment: .topLeading) {
+                LinearGradient(colors: [Color(red: 0.17, green: 0.19, blue: 0.25), Color(red: 0.09, green: 0.10, blue: 0.13),
+                                        Color(red: 0.11, green: 0.16, blue: 0.14)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                RoundedRectangle(cornerRadius: 8).fill(Color(red: 0.34, green: 0.38, blue: 0.47)).frame(width: 360, height: 14).offset(x: 50, y: 70)
+                RoundedRectangle(cornerRadius: 6).fill(Color(red: 0.26, green: 0.29, blue: 0.38)).frame(width: 460, height: 10).offset(x: 50, y: 98)
+                RoundedRectangle(cornerRadius: 16).fill(Color(red: 0.17, green: 0.2, blue: 0.27)).frame(width: 420, height: 250).offset(x: 50, y: 130)
+                Circle().fill(Color.dsAcc).frame(width: 14, height: 14)
+                    .shadow(color: Color.dsAcc.opacity(0.5), radius: 8).offset(x: 230, y: 220)
+            }
+        }
+    }
+
+    func testToastsAndHUDs() {
+        let notes = ["Нет разрешения «Запись экрана»"]
+        bothThemes("toast-cards", size: NSSize(width: 560, height: 470)) {
+            VStack(alignment: .leading, spacing: 8) {
+                ToastCard(text: "Скопировано", symbol: "doc.on.doc.fill", tint: .green, actionTitle: "Показать в Finder", action: {})
+                ToastCard(text: "Не удалось начать запись: нет разрешения «Запись экрана»", symbol: "exclamationmark.triangle.fill", tint: .orange)
+                ToastCard(text: "Исправляю…", symbol: "sparkles", tint: .purple, actionTitle: "Отмена", action: {})
+                ToastCard(text: "Создаю GIF… 42 %", symbol: "photo.stack", tint: .purple)
+                ToastCard(text: "Запись отменена", symbol: "xmark.circle.fill", tint: .secondary)
+                ToastCard(text: "Ошибка сохранения", symbol: "xmark.octagon.fill", tint: .red)
+            }
+            .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color.dsBg)
+        }
+        bothThemes("share-request-cards", size: NSSize(width: 900, height: 700)) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(spacing: 16) {
+                    ShareRequestCard(name: "Марко", viewer: "7312048815", fingerprint: nil,
+                                     prompt: .init(kind: .legacy, allowAlways: true, notes: []), moreCount: 0) { _ in }
+                    ShareRequestCard(name: "Анна", viewer: "6031184472", fingerprint: "65b6-0673-d6ed-884b",
+                                     prompt: .init(kind: .confirmKey, allowAlways: true, notes: []), moreCount: 2) { _ in }
+                }
+                VStack(spacing: 16) {
+                    ShareRequestCard(name: "Олег", viewer: "2187650931", fingerprint: "a1b2-c3d4-e5f6-0718",
+                                     prompt: .init(kind: .legacy, allowAlways: false,
+                                                   notes: ["ID не подтверждён: этот ID принадлежит другому ключу."]), moreCount: 1) { _ in }
+                    ShareRequestCard(name: "", viewer: "", fingerprint: nil,
+                                     prompt: .init(kind: .legacy, allowAlways: false, notes: []), moreCount: 0) { _ in }
+                }
+            }
+            .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color.dsBg)
+            .accessibilityLabel(notes.joined())
+        }
+        bothThemes("hud-recording-meeting-steps", size: NSSize(width: 640, height: 420)) {
+            VStack(alignment: .leading, spacing: 12) {
+                RecordingHUDContent(elapsed: 83, cancel: {}, stop: {})
+                MeetingHUDContent(since: Date().addingTimeInterval(-754), interruption: nil, stalled: false, stop: {})
+                MeetingHUDContent(since: Date().addingTimeInterval(-754), interruption: nil, stalled: true, stop: {})
+                MeetingHUDContent(since: nil, interruption: "Запись прервана: устройство звука отключено", stalled: false, stop: {})
+                StepsHUDContent(count: 3, cancel: {}, next: {}, finish: {})
+            }
+            .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color.dsBg)
+        }
+        bothThemes("hud-share-pill", size: NSSize(width: 520, height: 230)) {
+            VStack(alignment: .trailing, spacing: 12) {
+                ShareHUDPill(code: "4829173056", viewers: 0, requests: 0, reconnecting: false, expanded: false,
+                             copy: {}, showRequests: {}, changeSource: {}, stop: {})
+                ShareHUDPill(code: "4829173056", viewers: 2, requests: 0, reconnecting: false, expanded: false,
+                             copy: {}, showRequests: {}, changeSource: {}, stop: {})
+                ShareHUDPill(code: "4829173056", viewers: 2, requests: 1, reconnecting: false, expanded: false,
+                             copy: {}, showRequests: {}, changeSource: {}, stop: {})
+                ShareHUDPill(code: "4829173056", viewers: 2, requests: 0, reconnecting: true, expanded: false,
+                             copy: {}, showRequests: {}, changeSource: {}, stop: {})
+                ShareHUDPill(code: "4829173056", viewers: 2, requests: 1, reconnecting: false, expanded: true,
+                             copy: {}, showRequests: {}, changeSource: {}, stop: {})
+            }
+            .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).background(Color.dsBg)
+        }
+    }
+
+    func testMacHostAndWatchScenes() {
+        // Ведущий: капсула эфира в углу и запрос зрителя снизу (как в MacHost.dc.html).
+        bothThemes("mac-host-scene", size: NSSize(width: 1000, height: 620), settle: 0.5) {
+            ZStack(alignment: .topTrailing) {
+                DesktopBackdrop()
+                ShareHUDPill(code: "4829173056", viewers: 2, requests: 1, reconnecting: false, expanded: true,
+                             copy: {}, showRequests: {}, changeSource: {}, stop: {}).padding(20)
+                VStack {
+                    Spacer()
+                    ShareRequestCard(name: "Марко", viewer: "7312048815", fingerprint: nil,
+                                     prompt: .init(kind: .legacy, allowAlways: true, notes: []), moreCount: 0) { _ in }
+                        .padding(.bottom, 26)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        // Зритель: значок эфира, панель инструментов и состояния (как в MacWatch.dc.html).
+        bothThemes("mac-watch-scene", size: NSSize(width: 1000, height: 620), settle: 0.5) {
+            ZStack(alignment: .bottom) {
+                DesktopBackdrop()
+                ShareViewerBadge(height: 1080).padding(14).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                ShareViewerToolbar(tool: .constant(.draw), color: .constant("green"), playGame: {}).padding(26)
+            }
+        }
+        bothThemes("mac-watch-status", size: NSSize(width: 760, height: 760)) {
+            ZStack {
+                Color.black
+                VStack(spacing: 16) {
+                    ViewerStatusCard(.progress("Подключаюсь…"))
+                    ViewerStatusCard(.progress("Ждём, пока 603 118 4472 разрешит подключение…"))
+                    ViewerStatusCard(.notice("Ведущий переподключается…"))
+                    ViewerStatusCard(.reconnecting("Переподключаюсь… попытка 2", disconnect: {}))
+                    ViewerStatusCard(.ended("Трансляция завершена", warning: "Ключ этого компьютера изменился.",
+                                            accept: {}, dismiss: {}))
+                }
+            }
+        }
+    }
+}
+
+/// Условный экран с выделением, плашкой размера и панелью инструментов (как `Capture.dc.html`): рисуется кодом приложения.
+private struct CapturePreview: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { CapturePreviewView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+}
+
+private final class CapturePreviewView: NSView {
+    private let toolbar = CaptureToolbar()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        addSubview(toolbar)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        toolbar.setFrameOrigin(NSPoint(x: 40, y: 40))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSGradient(colors: [NSColor(srgbRed: 0.17, green: 0.19, blue: 0.25, alpha: 1), NSColor(srgbRed: 0.09, green: 0.10, blue: 0.13, alpha: 1)])?
+            .draw(in: bounds, angle: -45)
+        let selection = NSRect(x: 60, y: 180, width: 560, height: 330)
+        NSColor(srgbRed: 0.22, green: 0.26, blue: 0.34, alpha: 1).setFill()
+        selection.fill()
+        let dim = NSBezierPath(rect: bounds)
+        dim.append(NSBezierPath(rect: selection))
+        dim.windingRule = .evenOdd
+        NSColor.black.withAlphaComponent(0.45).setFill()
+        dim.fill()
+        let border = NSBezierPath(roundedRect: selection.insetBy(dx: -1, dy: -1), xRadius: 2, yRadius: 2)
+        border.lineWidth = 2
+        DS.Palette.acc.setStroke()
+        border.stroke()
+        for corner in [NSPoint(x: selection.minX, y: selection.minY), NSPoint(x: selection.maxX, y: selection.minY),
+                       NSPoint(x: selection.minX, y: selection.maxY), NSPoint(x: selection.maxX, y: selection.maxY)] {
+            let square = NSBezierPath(roundedRect: NSRect(x: corner.x - 4.5, y: corner.y - 4.5, width: 9, height: 9), xRadius: 3, yRadius: 3)
+            DS.Palette.acc.setFill()
+            square.fill()
+        }
+        CaptureView.drawSizeBadge(width: 1120, height: 660, selection: selection, canvas: bounds)
     }
 }

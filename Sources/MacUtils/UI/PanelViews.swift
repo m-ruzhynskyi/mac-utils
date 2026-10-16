@@ -6,36 +6,46 @@ extension Notification.Name {
     static let openSettingsSection = Notification.Name("MacUtils.openSettingsSection")
 }
 
-/// Вкладка панели 🔧: быстрые действия раздела, а не страница настроек.
+/// Вкладка «Главная» панели 🔧 (концепт `Popover.dc.html`): сводка быстрых действий всех функций.
+/// В `Pref.toolsTab` хранится как `tab`, остальные вкладки — `SettingsSection.rawValue`.
+enum PanelHome {
+    static let tab = "home"
+    static let title = "Главная"
+    static let symbol = "house"
+}
+
+/// Вкладка панели 🔧: быстрые действия раздела, а не страница настроек. Инструменты (программы, монитор, задачи,
+/// очистка, снимки) и разделы с собственным компактным видом показывают его.
 struct PanelSectionView: View {
     let section: SettingsSection
 
-    var body: some View {
+    /// Раздел показывает свою страницу в компактном виде (со своей прокруткой).
+    static func usesPage(_ section: SettingsSection) -> Bool {
         switch section {
-        case .music, .share, .textInput, .focus, .uninstaller, .monitor, .tasks, .cleanup, .shots:
+        case .music, .share, .textInput, .focus, .uninstaller, .monitor, .tasks, .cleanup, .shots: return true
+        default: return false
+        }
+    }
+
+    var body: some View {
+        if Self.usesPage(section) {
+            // Компактные страницы инструментов держат свои поля ~10 pt; +6 — вровень с шапкой и вкладками поповера (16 pt).
             SettingsSectionPage(section: section, compact: true)
-        default:
+                .padding(.horizontal, 6)
+        } else {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    content
-                    Divider()
-                    Button {
-                        AppStatusItem.shared.closeTools()
-                        SettingsWindowController.shared.show(section: section)
-                    } label: {
-                        Label("Все настройки раздела", systemImage: "gearshape")
-                    }
-                    .buttonStyle(.link)
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: DS.Space.m) { content }
+                    .padding(.horizontal, DS.Space.l)
+                    .padding(.top, DS.Space.xxs)
+                    .padding(.bottom, DS.Space.l)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
     @ViewBuilder private var content: some View {
         switch section {
-        case .screenshot: ScreenshotPanel()
+        case .screenshot: CaptureQuick(showsFixText: false)
         case .windows: WindowsPanel()
         case .volume: VolumePanel()
         case .layout: LayoutPanel()
@@ -47,8 +57,7 @@ struct PanelSectionView: View {
         case .wellbeing: WellbeingPanel()
         case .meetings: MeetingsPanel()
         case .ai: AIPanel()
-        case .cutPaste: SimpleTogglePanel(title: "Вырезать и вставить в Finder", key: Pref.cutPaste,
-                                          detail: "⌘X / ⌘V в Finder перемещают файлы.", symbol: "scissors")
+        case .cutPaste: CutPastePanel()
         case .smoothScroll: SmoothScrollPanel()
         case .switcher: SwitcherPanel()
         default: EmptyView()
@@ -56,34 +65,27 @@ struct PanelSectionView: View {
     }
 }
 
-// MARK: - Общие кусочки
-
-/// Большая кнопка действия: значок, название, подсказка.
-private struct ActionTile: View {
-    let title: String
-    let symbol: String
-    var detail: String?
-    var tint: Color = .accentColor
-    let action: () -> Void
-
+/// «Главная»: группы быстрых действий как в концепте и карточка трансляции.
+struct PanelHomeView: View {
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: symbol).font(.system(size: 18)).foregroundStyle(tint).frame(width: 28)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(.callout.weight(.medium))
-                    if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
-                }
-                Spacer(minLength: 0)
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.Space.m) {
+                CaptureQuick(showsFixText: true)
+                WindowsQuick()
+                InputQuick()
+                FilesScreenQuick()
+                MeetingsAIQuick()
+                ShareQuickCard()
             }
-            .padding(10)
+            .padding(.horizontal, DS.Space.l)
+            .padding(.top, DS.Space.xxs)
+            .padding(.bottom, DS.Space.l)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain)
     }
 }
+
+// MARK: - Общие кусочки
 
 /// Действие из панели: сначала закрываем её, чтобы не мешала (снимок, рисование…).
 @MainActor
@@ -92,328 +94,262 @@ private func fromPanel(_ action: @escaping @MainActor () -> Void) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { MainActor.assumeIsolated { action() } }
 }
 
-private struct SimpleTogglePanel: View {
+/// Строка-действие в карточке поповера: вся строка — кнопка, при наведении подсвечивается.
+private struct QuickAction: View {
     let title: String
-    let key: String
-    let detail: String
-    let symbol: String
-    @AppStorage private var on: Bool
+    var subtitle: String?
+    let systemImage: String
+    var tile: RowTile.Kind = .neutral
+    var keys: [String]?
+    var hotKey: HotKeyAction?
+    let action: () -> Void
 
-    init(title: String, key: String, detail: String, symbol: String) {
+    var body: some View {
+        Button(action: action) {
+            Row(title, subtitle: subtitle, systemImage: systemImage, tile: tile) {
+                if let hotKey {
+                    Keycap(action: hotKey, compact: true, onPanel: true)
+                } else if let keys {
+                    Keycap(keys, compact: true, onPanel: true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(QuickRowStyle())
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Подсветка строки поповера: при наведении — `panel` под строкой, при нажатии — чуть плотнее.
+private struct QuickRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { QuickRowBody(configuration: configuration) }
+}
+
+private struct QuickRowBody: View {
+    let configuration: ButtonStyleConfiguration
+    @State private var hovered = false
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        configuration.label
+            .background((hovered && enabled ? Color.dsPanel : .clear).opacity(configuration.isPressed ? 1 : 0.7),
+                        in: RoundedRectangle(cornerRadius: DS.Radius.iconButton, style: .continuous))
+            .opacity(enabled ? 1 : DS.State.disabledOpacity)
+            .onHover { hovered = $0 }
+    }
+}
+
+/// Заголовок группы и карточка поповера (`ListCard` на `field`).
+private struct QuickGroup<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
         self.title = title
-        self.key = key
-        self.detail = detail
-        self.symbol = symbol
-        _on = AppStorage(wrappedValue: true, key)
+        self.content = content()
     }
 
     var body: some View {
-        HStack {
-            Image(systemName: symbol).font(.title2).foregroundStyle(Color.accentColor)
-            VStack(alignment: .leading) {
-                Text(title).font(.headline)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Toggle("", isOn: $on).labelsHidden().toggleStyle(.switch)
+        VStack(alignment: .leading, spacing: 6) {
+            GroupLabel(title).padding(.horizontal, DS.Space.xs)
+            ListCard(style: .field) { content }
         }
     }
 }
 
-// MARK: - Разделы
+/// Сочетание переключателя приложений (⌥Tab или ⌘Tab — по настройке).
+private func switcherKeys(_ modifier: String) -> [String] { [modifier == "command" ? "⌘" : "⌥", "Tab"] }
 
-private struct ScreenshotPanel: View {
-    @ObservedObject private var library = ScreenshotLibrary.shared
+// MARK: - Группы «Главной» (и вкладок разделов)
+
+private struct CaptureQuick: View {
+    let showsFixText: Bool
 
     var body: some View {
-        VStack(spacing: 8) {
-            ActionTile(title: "Снять область или окно", symbol: "camera.viewfinder", detail: "⌘⇧X") {
+        QuickGroup("Захват") {
+            QuickAction(title: "Снять область или окно", systemImage: "camera.viewfinder", tile: .accent, hotKey: .screenshot) {
                 fromPanel { ScreenshotService.shared.start(.edit) }
             }
-            ActionTile(title: "Распознать текст", symbol: "text.viewfinder", detail: "⌘⇧⌥X — текст сразу в буфер") {
+            QuickAction(title: "Распознать текст", subtitle: "Текст сразу в буфер", systemImage: "text.viewfinder", hotKey: .screenshotOCR) {
                 fromPanel { ScreenshotService.shared.start(.ocr) }
             }
-            ActionTile(title: "Записать экран", symbol: "record.circle", detail: "Выделите область и нажмите R", tint: .red) {
+            QuickAction(title: "Записать экран", subtitle: "Выделите область и нажмите R", systemImage: "record.circle",
+                        tile: .record, keys: ["R"]) {
                 fromPanel { ScreenshotService.shared.start(.edit) }
             }
-            ActionTile(title: "Открыть папку снимков", symbol: "folder", tint: .secondary) {
+            QuickAction(title: "Открыть папку снимков", systemImage: "folder") {
                 NSWorkspace.shared.open(Pref.screenshotDirectory)
             }
+            if showsFixText { AIFixRow() }
         }
     }
 }
 
-private struct WindowsPanel: View {
-    @ObservedObject private var pin = WindowPin.shared
-    @ObservedObject private var memory = WindowMemory.shared
+private struct WindowsQuick: View {
+    @AppStorage(Pref.switcher) private var switcher = true
+    @AppStorage(Pref.switcherModifier) private var modifier = "option"
+    @AppStorage(Pref.windowSnap) private var windowSnap = true
+    @AppStorage(Pref.appVolume) private var appVolume = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Окна поверх всех").font(.headline)
-            if pin.pins.isEmpty {
-                Text("Нет закреплённых. ⌃⌥P — закрепить активное окно.").font(.caption).foregroundStyle(.secondary)
+        QuickGroup("Окна и приложения") {
+            KeyedToggleRow("Переключатель приложений", subtitle: "Превью каждого окна", systemImage: "rectangle.on.rectangle",
+                           keys: switcherKeys(modifier), isOn: $switcher)
+            Row("Окна поверх всех", subtitle: "Закрепить активное окно", systemImage: "pin") {
+                Keycap(action: .windowPin, compact: true, onPanel: true)
             }
-            ForEach(pin.pins) { item in
-                HStack {
-                    Image(systemName: "pin.fill").foregroundStyle(.blue)
-                    Text(item.title).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Slider(value: Binding(get: { item.opacity }, set: { item.setOpacity($0) }), in: 0.2...1).frame(width: 90)
-                    Button { pin.unpin(item) } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.borderless)
-                }
+            KeyedToggleRow("Раскладка окон", subtitle: "Половины, четверти, центр", systemImage: "rectangle.split.2x2",
+                           keys: [WindowSnapModifier.current.symbols, "←→"], isOn: $windowSnap)
+            if AppVolume.isSupported {
+                KeyedToggleRow("Громкость приложений", systemImage: "speaker.wave.2", hotKey: .appVolume, isOn: $appVolume)
             }
-            Divider()
-            Text("Окна по мониторам").font(.headline)
-            Text("Сейчас: \(memory.monitorsDescription), запомнено наборов: \(memory.layouts.count)")
-                .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("Запомнить") { memory.snapshot(force: true) }
-                Button("Расставить") { memory.restore() }
-            }
-            Divider()
-            Text("⌃⌥ ← → ↑ ↓ — половины, U I J K — четверти, ↩ — весь экран, C — центр, ⌫ — вернуть.")
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }
 
-private struct VolumePanel: View {
-    @ObservedObject private var model = AppVolume.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Громкость приложений").font(.headline)
-            AppVolumeList(model: model, compact: true)
-        }
-        .onAppear { model.refresh() }
-    }
-}
-
-private struct LayoutPanel: View {
+private struct InputQuick: View {
     @AppStorage(Pref.layoutFix) private var layoutFix = true
-    @AppStorage(Pref.appInputSource) private var perApp = true
+    @AppStorage(Pref.cheatSheet) private var cheatSheet = true
+    @AppStorage(Pref.cutPaste) private var cutPaste = true
+    @AppStorage(Pref.smoothScroll) private var smoothScroll = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: $layoutFix) {
-                VStack(alignment: .leading) {
-                    Text("Исправлять раскладку").font(.headline)
-                    Text("\(LayoutHotKey.current.title) — ghbdtn → привет").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Toggle(isOn: $perApp) {
-                VStack(alignment: .leading) {
-                    Text("Раскладка по программам").font(.headline)
-                    Text("У каждой программы — своя раскладка").font(.caption).foregroundStyle(.secondary)
-                }
-            }
+        QuickGroup("Ввод и прокрутка") {
+            KeyedToggleRow("Исправлять раскладку", subtitle: "ghbdtn → привет", systemImage: "keyboard", hotKey: .layoutFix, isOn: $layoutFix)
+            ToggleRow("Шпаргалка сочетаний", subtitle: "Удерживайте ⌘", systemImage: "command", isOn: $cheatSheet)
+            ToggleRow("Вырезать и вставить в Finder", subtitle: "⌘X → ⌘V", systemImage: "scissors", isOn: $cutPaste)
+            ToggleRow("Плавная прокрутка", subtitle: "Колесо обычной мыши", systemImage: "computermouse", isOn: $smoothScroll)
         }
-        .toggleStyle(.switch)
     }
 }
 
-private struct ShelfPanel: View {
-    @ObservedObject private var shelf = DropShelf.shared
+private struct FilesScreenQuick: View {
+    @AppStorage(Pref.downloadsSort) private var downloads = false
+    @AppStorage(Pref.breakReminder) private var breaks = false
+    @ObservedObject private var reminder = BreakReminder.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ActionTile(title: "Показать полку", symbol: "tray.full", detail: "⌃⌥D или встряхните мышь с файлами") {
+        QuickGroup("Файлы и экран") {
+            QuickAction(title: "Полка для файлов", subtitle: "Или встряхните мышь с файлами", systemImage: "tray.full", hotKey: .dropShelf) {
                 fromPanel { DropShelf.shared.toggle() }
             }
-            if shelf.items.isEmpty {
-                Text("Полка пуста").font(.caption).foregroundStyle(.secondary)
-            } else {
-                Text("На полке: \(shelf.items.count)").font(.headline)
-                ForEach(shelf.items.prefix(8), id: \.self) { url in
-                    HStack {
-                        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 18, height: 18)
-                        Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle)
-                        Spacer()
-                        Button { shelf.remove(url) } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.borderless).foregroundStyle(.secondary)
-                    }
-                    .onDrag { NSItemProvider(contentsOf: url) ?? NSItemProvider() }
-                }
-                Button("Очистить полку") { shelf.clear() }
-            }
-        }
-    }
-}
-
-private struct CheatSheetPanel: View {
-    @AppStorage(Pref.cheatSheet) private var enabled = true
-    @AppStorage(Pref.cheatSheetSticky) private var sticky = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: $enabled) {
-                VStack(alignment: .leading) {
-                    Text("Шпаргалка").font(.headline)
-                    Text("Удерживайте ⌘ — сочетания клавиш программы").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Toggle("Оставлять открытой (закрыть — ⌘ или Esc)", isOn: $sticky).disabled(!enabled)
-        }
-        .toggleStyle(.switch)
-    }
-}
-
-private struct DownloadsPanel: View {
-    @ObservedObject private var sorter = DownloadsSorter.shared
-    @AppStorage(Pref.downloadsSort) private var enabled = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle(isOn: $enabled) {
-                VStack(alignment: .leading) {
-                    Text("Сортировать «Загрузки»").font(.headline)
-                    Text("Новые файлы — по папкам Images, Documents…").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.switch)
-            ActionTile(title: "Разложить сейчас", symbol: "arrow.down.to.line.compact") {
-                _ = sorter.run()
-            }
-            .disabled(!enabled)
-            if let result = sorter.lastResult {
-                Text(result).font(.caption).foregroundStyle(.secondary)
-            }
-            ActionTile(title: "Открыть «Загрузки»", symbol: "folder", tint: .secondary) {
-                NSWorkspace.shared.open(sorter.folder)
-            }
-        }
-    }
-}
-
-private struct QRPanel: View {
-    @State private var text = ""
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ActionTile(title: "Прочитать QR с экрана", symbol: "qrcode.viewfinder", detail: "⌃⌥Q — без выделенного текста") {
+            ToggleRow("Сортировать «Загрузки»", subtitle: "Новые файлы по папкам", systemImage: "arrow.down.circle", isOn: $downloads)
+            QuickAction(title: "QR-коды", subtitle: "Прочитать с экрана", systemImage: "qrcode.viewfinder", hotKey: .qr) {
                 fromPanel { QRCodeService.shared.scanScreen() }
             }
-            Text("Сделать QR-код").font(.headline)
-            TextField("Текст или ссылка", text: $text).textFieldStyle(.roundedBorder)
-            if !text.isEmpty, let image = QRTools.make(text, scale: 6) {
-                HStack {
-                    Spacer()
-                    Image(nsImage: NSImage(cgImage: image, size: NSSize(width: 160, height: 160)))
-                        .interpolation(.none).resizable().frame(width: 160, height: 160)
-                        .onDrag {
-                            let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) ?? Data()
-                            return NSItemProvider(item: data as NSData, typeIdentifier: "public.png")
-                        }
-                    Spacer()
-                }
-                Button("Скопировать картинку") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.writeObjects([NSImage(cgImage: image, size: .zero)])
-                }
-            }
-        }
-    }
-}
-
-private struct AnnotatePanel: View {
-    var body: some View {
-        VStack(spacing: 8) {
-            ActionTile(title: "Рисовать на экране", symbol: "pencil.tip.crop.circle", detail: "⌃⌥A · 1–4 — инструменты, Esc — выйти", tint: .red) {
+            QuickAction(title: "Рисовать на экране", subtitle: "1–4 — инструменты, Esc — выйти", systemImage: "pencil.tip.crop.circle",
+                        hotKey: .annotate) {
                 fromPanel { ScreenAnnotator.shared.start() }
             }
+            WarmScreenRow()
+            ToggleRow("Напоминать о перерыве", subtitle: breaks ? "Работаете без перерыва: \(reminder.workedMinutes) мин" : nil,
+                      systemImage: "figure.walk", isOn: $breaks)
         }
     }
 }
 
-private struct WellbeingPanel: View {
+private struct MeetingsAIQuick: View {
+    @AppStorage(Pref.ai) private var ai = true
+
+    var body: some View {
+        QuickGroup("Встречи и ИИ") {
+            MeetingRow()
+            ToggleRow("ИИ-функции", subtitle: "Ollama · \(Ollama.model), всё локально", systemImage: "sparkles", isOn: $ai)
+        }
+    }
+}
+
+/// Переключатель с кейкапом сочетания между подписью и дорожкой.
+private struct KeyedToggleRow: View {
+    let title: String
+    var subtitle: String?
+    let systemImage: String
+    var keys: [String]?
+    var hotKey: HotKeyAction?
+    @Binding var isOn: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(_ title: String, subtitle: String? = nil, systemImage: String, keys: [String]? = nil, hotKey: HotKeyAction? = nil,
+         isOn: Binding<Bool>) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.keys = keys
+        self.hotKey = hotKey
+        _isOn = isOn
+    }
+
+    var body: some View {
+        Row(title, subtitle: subtitle, systemImage: systemImage) {
+            if let hotKey {
+                Keycap(action: hotKey, compact: true, onPanel: true)
+            } else if let keys {
+                Keycap(keys, compact: true, onPanel: true)
+            }
+            Toggle(title, isOn: $isOn).toggleStyle(.graphite)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(DS.Motion.animation(DS.Motion.toggle, reduceMotion: reduceMotion)) { isOn.toggle() }
+        }
+    }
+}
+
+/// Тёплый экран вручную (то же, что кнопка в шапке).
+private struct WarmScreenRow: View {
     @ObservedObject private var screen = WarmScreen.shared
-    @ObservedObject private var reminder = BreakReminder.shared
     @AppStorage(Pref.warmScreen) private var warm = false
     @AppStorage(Pref.warmMode) private var warmMode = "schedule"
     @AppStorage(Pref.warmManualOn) private var manualOn = false
-    @AppStorage(Pref.breakReminder) private var breaks = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ActionTile(title: warm && warmMode == "manual" && manualOn ? "Выключить тёплый экран" : "Включить тёплый экран",
-                       symbol: warm && screen.currentLevel > 0 ? "sun.horizon.fill" : "sun.horizon",
-                       detail: warm && warmMode == "schedule" ? "Сейчас по расписанию" : nil, tint: .orange) {
-                WarmScreen.shared.toggleManual()
-            }
-            Toggle(isOn: $breaks) {
-                VStack(alignment: .leading) {
-                    Text("Напоминать о перерыве").font(.headline)
-                    if breaks {
-                        Text("Работаете без перерыва: \(reminder.workedMinutes) мин").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .toggleStyle(.switch)
-            ActionTile(title: "Перерыв сейчас", symbol: "figure.walk", tint: .green) {
-                fromPanel { BreakReminder.shared.show() }
-            }
+        let on = warm && warmMode == "manual" && manualOn
+        Row("Тёплый экран", subtitle: warm && warmMode == "schedule" ? "Сейчас по расписанию" : nil,
+            systemImage: warm && screen.currentLevel > 0 ? "sun.horizon.fill" : "sun.horizon") {
+            Toggle("Тёплый экран", isOn: Binding(get: { on }, set: { _ in WarmScreen.shared.toggleManual() }))
+                .toggleStyle(.graphite)
         }
     }
 }
 
-private struct MeetingsPanel: View {
+/// Запись встречи: старт, остановка (с таймером) или ход расшифровки.
+private struct MeetingRow: View {
     @ObservedObject private var recorder = MeetingRecorder.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            switch recorder.state {
-            case .idle:
-                ActionTile(title: "Записать встречу", symbol: "record.circle", detail: "⌃⌥M", tint: .red) { recorder.start() }
-            case .recording(let since):
-                ActionTile(title: "Остановить запись", symbol: "stop.circle.fill", tint: .red) { recorder.stop() }
-                Text(since, style: .timer).font(.title3.monospacedDigit()).foregroundStyle(.red)
-            case .processing(let step):
-                HStack { ProgressView().controlSize(.small); Text(step).foregroundStyle(.secondary) }
-            }
-            if !recorder.meetings.isEmpty {
-                Text("Последние").font(.headline).padding(.top, 4)
-                ForEach(recorder.meetings.prefix(6)) { meeting in
-                    HStack {
-                        Image(systemName: meeting.hasReport ? "doc.text.fill" : "waveform").foregroundStyle(.secondary)
-                        Text(meeting.title)
-                        Spacer()
-                        if meeting.hasReport { Button("Отчёт") { NSWorkspace.shared.open(meeting.report) } }
-                        if meeting.hasTranscript { Button("Текст") { NSWorkspace.shared.open(meeting.transcript) } }
-                    }
-                    .buttonStyle(.link)
+        switch recorder.state {
+        case .idle:
+            QuickAction(title: "Записать встречу", systemImage: "waveform.badge.mic", tile: .record, hotKey: .meeting) { recorder.start() }
+        case .recording(let since):
+            Button { recorder.stop() } label: {
+                Row("Остановить запись", systemImage: "stop.circle.fill", tile: .record) {
+                    Text(since, style: .timer).font(DS.Font.mono).foregroundStyle(DS.Tone.danger.text)
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(QuickRowStyle())
+        case .processing(let step):
+            Row(step, systemImage: "waveform") { ProgressView().controlSize(.small) }
         }
-        .onAppear { recorder.reload() }
     }
 }
 
-private struct AIPanel: View {
-    @ObservedObject private var ollama = Ollama.shared
+/// «Исправить текст в буфере» (ИИ, локально): исправленный текст возвращается в буфер.
+private struct AIFixRow: View {
     @State private var fixing = false
     @State private var note: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                switch ollama.status {
-                case .ready: Label("Модель готова: \(Ollama.model)", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                case .noServer: Label("Ollama не запущена", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                case .noModel: Label("Модель не скачана", systemImage: "arrow.down.circle").foregroundStyle(.orange)
-                default: Label("Проверяю…", systemImage: "hourglass").foregroundStyle(.secondary)
-                }
-                Spacer()
-                if ollama.status == .noServer { Button("Запустить") { ollama.launchServer() } }
-            }
-            ActionTile(title: "Исправить текст в буфере", symbol: "sparkles",
-                       detail: "Скопируйте текст — исправленный вернётся в буфер. В любом поле: выделить и ⌃⌥E", tint: .purple) {
-                fixClipboard()
-            }
-            .disabled(fixing)
-            if fixing { ProgressView().controlSize(.small) }
-            if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
+        QuickAction(title: "Исправить текст в буфере",
+                    subtitle: note ?? "Скопируйте текст — исправленный вернётся в буфер. В любом поле: выделить и \(HotKeyRegistry.combo(for: .fixText).title)",
+                    systemImage: "sparkles", hotKey: nil) {
+            fixClipboard()
         }
-        .onAppear { ollama.refresh() }
+        .disabled(fixing)
+        .overlay(alignment: .trailing) {
+            if fixing { ProgressView().controlSize(.small).padding(.trailing, DS.Space.l) }
+        }
     }
 
     private func fixClipboard() {
@@ -438,20 +374,320 @@ private struct AIPanel: View {
     }
 }
 
+/// Трансляция экрана (концепт): мой ID, просмотр по ID собеседника, своя трансляция, история.
+private struct ShareQuickCard: View {
+    @ObservedObject private var share = ScreenShare.shared
+    @AppStorage(Pref.shareID) private var savedID = ""
+    @State private var code = ""
+
+    private var myID: String { savedID.count == 10 ? savedID : ShareCode.myID }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GroupLabel("Трансляция экрана").padding(.horizontal, DS.Space.xs)
+            Card(style: .field) {
+                HStack(spacing: DS.Space.m) {
+                    RowTile(systemImage: "dot.radiowaves.left.and.right")
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Мой ID · постоянный").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                        Text(ShareCode.display(myID)).font(DS.Font.monoLarge).tracking(1).foregroundStyle(.dsText)
+                            .textSelection(.enabled)
+                    }
+                    Spacer(minLength: DS.Space.s)
+                    Button("Копировать") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(myID, forType: .string)
+                        Toast.show("ID скопирован", symbol: "doc.on.doc.fill")
+                    }
+                    .buttonStyle(.graphite(.secondary, size: .compact))
+                }
+                HStack(spacing: DS.Space.s) {
+                    TextField("ID собеседника, 10 цифр", text: $code)
+                        .textFieldStyle(.graphiteMono)
+                        .onSubmit(watch)
+                    Button("Смотреть", action: watch)
+                        .buttonStyle(.graphite(.primary))
+                        .disabled(code.filter(\.isNumber).count != 10)
+                }
+                HStack(spacing: DS.Space.s) {
+                    switch share.state {
+                    case .idle, .failed:
+                        Button("Транслировать мой экран") { fromPanel { ScreenShare.shared.start() } }
+                            .buttonStyle(.graphite(.secondary, fill: true))
+                    case .connecting:
+                        Button("Отмена") { ScreenShare.shared.cancelConnecting() }
+                            .buttonStyle(.graphite(.secondary, fill: true))
+                    case .live:
+                        Button("Остановить трансляцию") { ScreenShare.shared.stop() }
+                            .buttonStyle(.graphite(.danger, fill: true))
+                    }
+                    Button("История") {
+                        AppStatusItem.shared.closeTools()
+                        SettingsWindowController.shared.show(section: .share)
+                    }
+                    .buttonStyle(.graphite(.secondary))
+                }
+                if case .failed(let message) = share.state {
+                    Text(message).font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Каждого зрителя вы сначала разрешаете. Зрители ставят метки, управлять вашим Mac они не могут.")
+                    .font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func watch() {
+        guard code.filter(\.isNumber).count == 10 else { return }
+        AppStatusItem.shared.closeTools()
+        ShareViewer.shared.watch(code: code)
+        code = ""
+    }
+}
+
+// MARK: - Вкладки разделов
+
+private struct WindowsPanel: View {
+    @ObservedObject private var pin = WindowPin.shared
+    @ObservedObject private var memory = WindowMemory.shared
+
+    var body: some View {
+        WindowsQuick()
+        QuickGroup("Окна поверх всех") {
+            if pin.pins.isEmpty {
+                EmptyState("Нет закреплённых окон", systemImage: "pin", compact: true)
+            }
+            ForEach(pin.pins) { item in
+                Row(item.title, systemImage: "pin.fill", tile: .accent) {
+                    Slider(value: Binding(get: { item.opacity }, set: { item.setOpacity($0) }), in: 0.2...1)
+                        .tint(.dsAccLine)
+                        .frame(width: 90)
+                        .accessibilityLabel("Прозрачность")
+                    IconButton("Открепить", systemImage: "xmark", compact: true) { pin.unpin(item) }
+                }
+            }
+        }
+        QuickGroup("Окна по мониторам") {
+            Row("Сейчас: \(memory.monitorsDescription)", subtitle: "Запомнено наборов: \(memory.layouts.count)", systemImage: "display.2") {
+                Button("Запомнить") { memory.snapshot(force: true) }.buttonStyle(.graphite(.secondary, size: .compact))
+                Button("Расставить") { memory.restore() }.buttonStyle(.graphite(.secondary, size: .compact))
+            }
+        }
+    }
+}
+
+private struct VolumePanel: View {
+    @ObservedObject private var model = AppVolume.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GroupLabel("Громкость приложений").padding(.horizontal, DS.Space.xs)
+            Card(style: .field) { AppVolumeList(model: model, compact: true) }
+        }
+        .onAppear { model.refresh() }
+    }
+}
+
+private struct LayoutPanel: View {
+    @AppStorage(Pref.layoutFix) private var layoutFix = true
+    @AppStorage(Pref.appInputSource) private var perApp = true
+
+    var body: some View {
+        QuickGroup("Раскладка") {
+            KeyedToggleRow("Исправлять раскладку", subtitle: "ghbdtn → привет", systemImage: "keyboard", hotKey: .layoutFix, isOn: $layoutFix)
+            ToggleRow("Раскладка по программам", subtitle: "У каждой программы — своя раскладка", systemImage: "arrow.left.arrow.right",
+                      isOn: $perApp)
+        }
+    }
+}
+
+private struct ShelfPanel: View {
+    @ObservedObject private var shelf = DropShelf.shared
+
+    var body: some View {
+        QuickGroup("Полка") {
+            QuickAction(title: "Показать полку", subtitle: "Или встряхните мышь с файлами", systemImage: "tray.full", hotKey: .dropShelf) {
+                fromPanel { DropShelf.shared.toggle() }
+            }
+        }
+        QuickGroup(shelf.items.isEmpty ? "На полке" : "На полке: \(shelf.items.count)") {
+            if shelf.items.isEmpty {
+                EmptyState("Полка пуста", systemImage: "tray", compact: true)
+            }
+            ForEach(shelf.items.prefix(8), id: \.self) { url in
+                AppRow(url.lastPathComponent, url: url) {
+                    IconButton("Убрать с полки", systemImage: "xmark", compact: true) { shelf.remove(url) }
+                }
+                .onDrag { NSItemProvider(contentsOf: url) ?? NSItemProvider() }
+            }
+        }
+        if !shelf.items.isEmpty {
+            Button("Очистить полку") { shelf.clear() }.buttonStyle(.graphite(.secondary))
+        }
+    }
+}
+
+private struct CheatSheetPanel: View {
+    @AppStorage(Pref.cheatSheet) private var enabled = true
+    @AppStorage(Pref.cheatSheetSticky) private var sticky = false
+
+    var body: some View {
+        QuickGroup("Шпаргалка") {
+            ToggleRow("Шпаргалка", subtitle: "Удерживайте ⌘ — сочетания клавиш программы", systemImage: "command", isOn: $enabled)
+            ToggleRow("Оставлять открытой", subtitle: "Закрыть — ⌘ или Esc", systemImage: "pin", isOn: $sticky)
+                .disabled(!enabled)
+        }
+    }
+}
+
+private struct DownloadsPanel: View {
+    @ObservedObject private var sorter = DownloadsSorter.shared
+    @AppStorage(Pref.downloadsSort) private var enabled = false
+
+    var body: some View {
+        QuickGroup("Загрузки") {
+            ToggleRow("Сортировать «Загрузки»", subtitle: "Новые файлы — по папкам Images, Documents…", systemImage: "arrow.down.circle",
+                      isOn: $enabled)
+            QuickAction(title: "Разложить сейчас", subtitle: sorter.lastResult, systemImage: "arrow.down.to.line.compact") {
+                _ = sorter.run()
+            }
+            .disabled(!enabled)
+            QuickAction(title: "Открыть «Загрузки»", systemImage: "folder") {
+                NSWorkspace.shared.open(sorter.folder)
+            }
+        }
+    }
+}
+
+private struct QRPanel: View {
+    @State private var text = ""
+
+    var body: some View {
+        QuickGroup("QR-коды") {
+            QuickAction(title: "Прочитать QR с экрана", subtitle: "Без выделенного текста", systemImage: "qrcode.viewfinder", hotKey: .qr) {
+                fromPanel { QRCodeService.shared.scanScreen() }
+            }
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            GroupLabel("Сделать QR-код").padding(.horizontal, DS.Space.xs)
+            Card(style: .field) {
+                TextField("Текст или ссылка", text: $text).textFieldStyle(.graphite)
+                if !text.isEmpty, let image = QRTools.make(text, scale: 6) {
+                    HStack {
+                        Spacer()
+                        Image(nsImage: NSImage(cgImage: image, size: NSSize(width: 160, height: 160)))
+                            .interpolation(.none).resizable().frame(width: 160, height: 160)
+                            .padding(DS.Space.s)
+                            .background(Color.white, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                            .onDrag {
+                                let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) ?? Data()
+                                return NSItemProvider(item: data as NSData, typeIdentifier: "public.png")
+                            }
+                            .accessibilityLabel("QR-код")
+                        Spacer()
+                    }
+                    Button("Скопировать картинку") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.writeObjects([NSImage(cgImage: image, size: .zero)])
+                    }
+                    .buttonStyle(.graphite(.secondary, fill: true))
+                }
+            }
+        }
+    }
+}
+
+private struct AnnotatePanel: View {
+    var body: some View {
+        QuickGroup("Рисование") {
+            QuickAction(title: "Рисовать на экране", subtitle: "1–4 — инструменты, Esc — выйти", systemImage: "pencil.tip.crop.circle",
+                        tile: .accent, hotKey: .annotate) {
+                fromPanel { ScreenAnnotator.shared.start() }
+            }
+        }
+    }
+}
+
+private struct WellbeingPanel: View {
+    @ObservedObject private var reminder = BreakReminder.shared
+    @AppStorage(Pref.breakReminder) private var breaks = false
+
+    var body: some View {
+        QuickGroup("Перерывы и тёплый экран") {
+            WarmScreenRow()
+            ToggleRow("Напоминать о перерыве", subtitle: breaks ? "Работаете без перерыва: \(reminder.workedMinutes) мин" : nil,
+                      systemImage: "figure.walk", isOn: $breaks)
+            QuickAction(title: "Перерыв сейчас", systemImage: "cup.and.saucer") {
+                fromPanel { BreakReminder.shared.show() }
+            }
+        }
+    }
+}
+
+private struct MeetingsPanel: View {
+    @ObservedObject private var recorder = MeetingRecorder.shared
+
+    var body: some View {
+        QuickGroup("Записи встреч") { MeetingRow() }
+        QuickGroup("Последние") {
+            if recorder.meetings.isEmpty {
+                EmptyState("Пока нет записей", systemImage: "waveform", compact: true)
+            }
+            ForEach(recorder.meetings.prefix(6)) { meeting in
+                Row(meeting.title, systemImage: meeting.hasReport ? "doc.text" : "waveform") {
+                    if meeting.hasReport {
+                        Button("Отчёт") { NSWorkspace.shared.open(meeting.report) }.buttonStyle(.graphite(.secondary, size: .compact))
+                    }
+                    if meeting.hasTranscript {
+                        Button("Текст") { NSWorkspace.shared.open(meeting.transcript) }.buttonStyle(.graphite(.ghost, size: .compact))
+                    }
+                }
+            }
+        }
+        .onAppear { recorder.reload() }
+    }
+}
+
+private struct AIPanel: View {
+    @ObservedObject private var ollama = Ollama.shared
+
+    var body: some View {
+        QuickGroup("ИИ (Ollama)") {
+            switch ollama.status {
+            case .ready:
+                FeatureStatusRow(tone: .success, label: "Готово", detail: "Модель готова: \(Ollama.model)")
+            case .noServer:
+                FeatureStatusRow(tone: .warning, label: "Нужен запуск", detail: "Ollama не запущена",
+                                 actions: [StatusAction(title: "Запустить") { ollama.launchServer() }])
+            case .noModel:
+                FeatureStatusRow(tone: .warning, label: "Нет модели", detail: "Модель не скачана")
+            default:
+                FeatureStatusRow(tone: .neutral, label: "Проверяю…")
+            }
+            AIFixRow()
+        }
+        .onAppear { ollama.refresh() }
+    }
+}
+
+private struct CutPastePanel: View {
+    @AppStorage(Pref.cutPaste) private var enabled = true
+
+    var body: some View {
+        QuickGroup("Вырезать и вставить") {
+            ToggleRow("Вырезать и вставить в Finder", subtitle: "⌘X / ⌘V в Finder перемещают файлы.", systemImage: "scissors", isOn: $enabled)
+        }
+    }
+}
+
 private struct SmoothScrollPanel: View {
     @AppStorage(Pref.smoothScroll) private var enabled = true
     @AppStorage(Pref.smoothSpeed) private var speed = 1.0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: $enabled) {
-                VStack(alignment: .leading) {
-                    Text("Плавная прокрутка").font(.headline)
-                    Text("Колесо обычной мыши").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.switch)
-            LabeledContent("Скорость") { Slider(value: $speed, in: 0.5...3) }.disabled(!enabled)
+        QuickGroup("Плавная прокрутка") {
+            ToggleRow("Плавная прокрутка", subtitle: "Колесо обычной мыши", systemImage: "computermouse", isOn: $enabled)
+            SliderRow("Скорость", systemImage: "hare", value: $speed, in: 0.5...3) { String(format: "%.1f×", $0) }
+                .disabled(!enabled)
         }
     }
 }
@@ -461,19 +697,12 @@ private struct SwitcherPanel: View {
     @AppStorage(Pref.switcherModifier) private var modifier = "option"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: $enabled) {
-                VStack(alignment: .leading) {
-                    Text("Переключатель окон").font(.headline)
-                    Text("Превью каждого окна").font(.caption).foregroundStyle(.secondary)
-                }
+        QuickGroup("Переключатель окон") {
+            KeyedToggleRow("Переключатель окон", subtitle: "Превью каждого окна", systemImage: "rectangle.on.rectangle",
+                           keys: switcherKeys(modifier), isOn: $enabled)
+            Row("Сочетание", systemImage: "command") {
+                Segmented(selection: $modifier, options: [("option", "⌥Tab"), ("command", "⌘Tab")])
             }
-            .toggleStyle(.switch)
-            Picker("Сочетание", selection: $modifier) {
-                Text("⌥Tab").tag("option")
-                Text("⌘Tab").tag("command")
-            }
-            .pickerStyle(.segmented)
             .disabled(!enabled)
         }
     }

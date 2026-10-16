@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // Контролы Graphite (`.audit/design-spec-v2.md` §2): переключатель, кнопки, кнопка-иконка, чипы, сегменты, таблетки,
@@ -76,7 +77,9 @@ struct ToggleTrack: View {
         .opacity(enabled ? 1 : DS.State.disabledOpacity)
         .contentShape(Capsule())
         .onTapGesture { flip() }
-        .focusable(enabled)
+        // Как у системных переключателей: фокус (и кольцо) — только при «Полной навигации с клавиатуры»,
+        // иначе окно при открытии отдаёт фокус первому переключателю и рисует кольцо без причины.
+        .focusable(enabled && NSApplication.shared.isFullKeyboardAccessEnabled)
         .focused($focused)
         .focusEffectDisabled()
         .onKeyPress(.space) {
@@ -308,7 +311,7 @@ struct Segmented<Value: Hashable>: View {
         .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.iconButton, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: DS.Radius.iconButton, style: .continuous)
             .strokeBorder(focused ? Color.dsAccLine : Color.dsLine, lineWidth: focused ? DS.State.focusRing : 1))
-        .focusable()
+        .focusable(NSApplication.shared.isFullKeyboardAccessEnabled)
         .focused($focused)
         .focusEffectDisabled()
         .onMoveCommand { direction in
@@ -327,7 +330,9 @@ struct Segmented<Value: Hashable>: View {
     }
 }
 
-/// Таблетка статуса: «Выдано» (лайм), «Позже» (`field`), «В ЭФИРЕ» (`rec`, капсом).
+/// Таблетка статуса — мягкая, чтобы не путать с залитыми кнопками: капсула `field` с тонкой обводкой, точка цвета тона
+/// и обычный текст («● Выдано», «● Нужно», «● Позже»). Цветной текст на `field` не ставим (контраст, §1.1).
+/// `caps` — сигнал «В ЭФИРЕ» / «ЗАПИСЬ»: залитый цветом тона, капсом, как в концепте.
 struct Pill: View {
     let tone: DS.Tone
     let text: String
@@ -342,15 +347,31 @@ struct Pill: View {
     }
 
     var body: some View {
-        Text(caps ? text.uppercased() : text)
-            .font(caps ? DS.Font.groupLabel : DS.Font.chip)
-            .tracking(caps ? DS.Font.tracking(0.06, size: 11) : 0)
-            .foregroundStyle(tone.ink)
-            .lineLimit(1)
-            .padding(.vertical, caps ? DS.Space.xs : 5)
-            .padding(.horizontal, caps ? 10 : DS.Space.m)
-            .capsuleFill(tone.fill, border: tone == .success && scheme == .light ? Color.dsAccLine : nil)
+        if caps {
+            Text(text.uppercased())
+                .font(DS.Font.groupLabel)
+                .tracking(DS.Font.tracking(0.06, size: 11))
+                .foregroundStyle(tone.ink)
+                .lineLimit(1)
+                .padding(.vertical, DS.Space.xs)
+                .padding(.horizontal, 10)
+                .capsuleFill(tone.fill)
+                .fixedSize()
+        } else {
+            HStack(spacing: 6) {
+                Circle().fill(tone == .neutral ? Color.dsMute : tone.line).frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                Text(text)
+                    .font(DS.Font.manrope(12, .bold, relativeTo: .caption))
+                    .foregroundStyle(.dsText)
+                    .lineLimit(1)
+            }
+            .padding(.vertical, DS.Space.xs)
+            .padding(.leading, 9)
+            .padding(.trailing, 11)
+            .capsuleFill(Color.dsField, border: Color.dsLine)
             .fixedSize()
+        }
     }
 }
 

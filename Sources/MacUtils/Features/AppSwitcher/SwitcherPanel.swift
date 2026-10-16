@@ -50,37 +50,56 @@ struct SwitcherView: View {
 
     @AppStorage(Pref.switcherPreviews) private var showPreviews = true
 
+    var body: some View {
+        SwitcherContent(items: model.items, selected: model.selected, previews: model.previews,
+                        showPreviews: showPreviews, maxWidth: maxWidth,
+                        hover: { model.selected = $0 }, choose: { model.choose($0) })
+    }
+}
+
+/// Сетка карточек переключателя (Graphite: `panel`, обводка `line`, радиус 24; выбранная — `field` и рамка `accLine` 2 pt).
+/// Без модели — чтобы рисовать на готовых данных (снимки интерфейса).
+struct SwitcherContent: View {
+    let items: [SwitcherItem]
+    let selected: Int
+    let previews: [CGWindowID: NSImage]
+    var showPreviews = true
+    let maxWidth: CGFloat
+    var hover: (Int) -> Void = { _ in }
+    var choose: (Int) -> Void = { _ in }
+
     private let thumbSize = CGSize(width: 200, height: 125)
     private let spacing: CGFloat = 8
 
     private var columns: Int {
         let cardWidth = (showPreviews ? thumbSize.width : 72) + 16
         let fit = Int((maxWidth - 40) / (cardWidth + spacing))
-        return max(1, min(model.items.count, fit))
+        return max(1, min(items.count, fit))
     }
 
     var body: some View {
         let grid = Array(repeating: GridItem(.fixed((showPreviews ? thumbSize.width : 72) + 16), spacing: spacing),
                          count: columns)
         LazyVGrid(columns: grid, spacing: spacing) {
-            ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                card(item, selected: index == model.selected)
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                card(item, selected: index == selected)
                     .contentShape(Rectangle())
                     .onHover { inside in
-                        if inside { model.selected = index }
+                        if inside { hover(index) }
                     }
-                    .onTapGesture { model.choose(index) }
+                    .onTapGesture { choose(index) }
             }
         }
-        .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(DS.Space.xl)
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
         .padding(6)
     }
 
     @ViewBuilder
     private func card(_ item: SwitcherItem, selected: Bool) -> some View {
-        let preview = item.windowID.flatMap { model.previews[$0] }
-        VStack(spacing: 6) {
+        let preview = item.windowID.flatMap { previews[$0] }
+        VStack(spacing: 8) {
             if showPreviews {
                 ZStack(alignment: .bottomTrailing) {
                     Group {
@@ -89,8 +108,7 @@ struct SwitcherView: View {
                                 .resizable()
                                 .interpolation(.high)
                                 .aspectRatio(contentMode: .fit)
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                .shadow(radius: 2)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                                 .opacity(item.isMinimized || item.isHidden ? 0.6 : 1)
                         } else {
                             Image(nsImage: item.icon)
@@ -116,26 +134,26 @@ struct SwitcherView: View {
             }
             HStack(spacing: 4) {
                 if item.isMinimized {
-                    Image(systemName: "minus.square").font(.system(size: 9))
+                    Image(systemName: "minus.square").font(.system(size: 10)).foregroundStyle(.dsMute)
                 } else if item.isHidden {
-                    Image(systemName: "eye.slash").font(.system(size: 9))
+                    Image(systemName: "eye.slash").font(.system(size: 10)).foregroundStyle(.dsMute)
                 }
                 Text(item.label)
-                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                    .font(DS.Font.manrope(13, selected ? .bold : .semibold, relativeTo: .callout))
+                    .foregroundStyle(selected ? Color.dsText : .dsMute)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             .frame(maxWidth: (showPreviews ? thumbSize.width : 72))
             .help(item.title.isEmpty ? item.appName : "\(item.appName) — \(item.title)")
         }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(selected ? Color.accentColor.opacity(0.28) : Color.clear)
-        )
+        .padding(10)
+        .background(selected ? Color.dsField : Color.clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(selected ? Color.dsAccLine : Color.clear, lineWidth: 2)
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

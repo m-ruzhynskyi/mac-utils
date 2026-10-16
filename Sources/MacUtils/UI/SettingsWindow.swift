@@ -34,7 +34,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
-        window.contentViewController = NSHostingController(rootView: SettingsView())
+        window.contentViewController = NSHostingController(rootView: SettingsRootView())
         window.setContentSize(DS.Size.settingsWindow)
         window.minSize = DS.Size.settingsWindowMin
         window.isReleasedWhenClosed = false
@@ -47,5 +47,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         // Возвращаем фокус предыдущему приложению.
         FocusReturn.restore()
+    }
+}
+
+/// Содержимое окна настроек: на первом запуске — вводные шаги (`OnboardingView`) вместо разделов, затем — `SettingsView`.
+/// Решение за `FirstRun.needsOnboarding`; нового окна нет.
+struct SettingsRootView: View {
+    @State private var onboarding = FirstRun.needsOnboarding(done: UserDefaults.standard.object(forKey: Pref.onboardingDone) as? Bool)
+
+    var body: some View {
+        if onboarding {
+            OnboardingView {
+                UserDefaults.standard.set(true, forKey: Pref.onboardingDone)
+                onboarding = false
+            }
+        } else {
+            SettingsView()
+        }
     }
 }

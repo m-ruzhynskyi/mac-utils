@@ -87,6 +87,9 @@ enum Toast {
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { $0.duration = 0.15; panel.animator().alphaValue = 1 }
         self.panel = panel
+        // VoiceOver: уведомление объявляется, а не просто появляется.
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
         if sticky { return token }
 
         Task { @MainActor in
@@ -116,19 +119,49 @@ private struct ToastView: View {
     let action: Toast.Action?
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol).foregroundStyle(tint)
-            Text(model.text).font(.system(size: 13, weight: .medium)).monospacedDigit()
-            if let action {
-                Button(action.title) { action.handler() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+        ToastCard(text: model.text, symbol: symbol, tint: tint, actionTitle: action?.title, action: action?.handler)
+    }
+}
+
+/// Карточка уведомления Graphite (как «Скопировано» в `Capture.dc.html`): плитка со значком тона, текст 13/700,
+/// при наличии — кнопка. Внутренняя, без модели: так её можно снять для проверки вида.
+struct ToastCard: View {
+    let text: String
+    let symbol: String
+    let tint: Color
+    var actionTitle: String?
+    var action: (@MainActor () -> Void)?
+
+    /// Лайм для ИИ-уведомлений (фиолетовый в Graphite не используется), остальное — по цвету вызова.
+    private var tone: DS.Tone { tint == .purple ? .success : DS.Tone.from(tint: tint) }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+        HStack(spacing: DS.Space.m) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tone.ink)
+                .frame(width: 30, height: 30)
+                .background(tone.fill, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+                .accessibilityHidden(true)
+            Text(text)
+                .font(DS.Font.manrope(13, .bold, relativeTo: .callout))
+                .foregroundStyle(.dsText)
+                .monospacedDigit()
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 360, alignment: .leading)
+            if let actionTitle, let action {
+                Button(actionTitle) { action() }.buttonStyle(.graphite(.primary, size: .compact))
             }
         }
-        .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: Capsule())
+        .padding(.leading, 10)
+        .padding(.trailing, actionTitle == nil ? 16 : 10)
+        .background(Color.dsPanel, in: shape)
+        .overlay(shape.strokeBorder(Color.dsLine, lineWidth: 1))
         .padding(4)
+        .accessibilityElement(children: .contain)
     }
 }
 

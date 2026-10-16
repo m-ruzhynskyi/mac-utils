@@ -782,45 +782,98 @@ private struct ShareHUD: View {
     @State private var expanded = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(.red).frame(width: 6, height: 6)
+        Group {
             if case .live(let code, let viewers) = share.state {
+                ShareHUDPill(code: code, viewers: viewers, requests: queue.items.count, reconnecting: share.reconnecting,
+                             expanded: expanded, copy: { share.copyCode() }, showRequests: { queue.show() },
+                             changeSource: { share.changeSource() }, stop: { share.stop() })
+            } else {
+                ShareHUDPill(code: nil, viewers: 0, requests: 0, reconnecting: false, expanded: false,
+                             copy: {}, showRequests: {}, changeSource: {}, stop: {})
+            }
+        }
+        .onHover { inside in withAnimation(.easeOut(duration: 0.15)) { expanded = inside } }
+        .fixedSize()
+        .frame(width: 330, height: 40, alignment: .trailing)
+    }
+}
+
+/// Капсула эфира (вид из `MacHost.dc.html`): пульсирующая точка и «Эфир · N»; в развёрнутом виде — код, зрители,
+/// счётчик запросов, «Другой экран», «Стоп». Значения готовые, без модели.
+struct ShareHUDPill: View {
+    let code: String?
+    let viewers: Int
+    let requests: Int
+    let reconnecting: Bool
+    let expanded: Bool
+    let copy: () -> Void
+    let showRequests: () -> Void
+    let changeSource: () -> Void
+    let stop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            PulsingDot(color: .dsRec)
+            if let code {
                 if expanded {
-                    Button { share.copyCode() } label: {
-                        Text(ShareCode.display(code)).font(.caption.monospacedDigit().weight(.semibold))
+                    Button(action: copy) {
+                        Text(ShareCode.display(code)).font(DS.Font.mono(13, relativeTo: .caption)).foregroundStyle(.dsText)
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.plain)
                     .help("Скопировать код")
-                    Label("\(viewers)", systemImage: "eye").font(.caption2).foregroundStyle(.secondary)
-                    if !queue.items.isEmpty { requestsButton }
-                    Button { share.changeSource() } label: { Image(systemName: "rectangle.on.rectangle").font(.caption2) }
-                        .buttonStyle(.borderless).help("Показать другой экран или окно")
-                    Button { share.stop() } label: { Image(systemName: "stop.fill").font(.caption2) }
-                        .buttonStyle(.borderless).foregroundStyle(.red).help("Остановить трансляцию")
-                } else if !queue.items.isEmpty {
+                    Label("\(viewers)", systemImage: "eye").font(DS.Font.caption).foregroundStyle(.dsMute)
+                    if requests > 0 { requestsButton }
+                    HUDIconButton(symbol: "rectangle.on.rectangle", help: "Показать другой экран или окно", kind: .plain, action: changeSource)
+                    HUDIconButton(symbol: "stop.fill", help: "Остановить трансляцию", kind: .stop, action: stop)
+                } else if requests > 0 {
                     // Запросов ждут ответа: счётчик виден всегда и по клику открывает панель.
                     requestsButton
                 } else {
-                    Text(share.reconnecting ? "Переподключаюсь…" : viewers > 0 ? "Эфир · \(viewers)" : "Эфир")
-                        .font(.caption2.weight(.medium)).foregroundStyle(share.reconnecting ? .orange : .secondary)
+                    Text(reconnecting ? "Переподключаюсь…" : viewers > 0 ? "Эфир · \(viewers)" : "Эфир")
+                        .font(DS.Font.caption)
+                        .foregroundStyle(reconnecting ? DS.Tone.warning.text : Color.dsText)
                 }
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.thinMaterial, in: Capsule())
-        .opacity(expanded ? 1 : 0.75)
-        .onHover { inside in withAnimation(.easeOut(duration: 0.15)) { expanded = inside } }
-        .fixedSize()
-        .frame(width: 190, height: 26, alignment: .trailing)
+        .padding(.vertical, 5)
+        .padding(.leading, 12)
+        .padding(.trailing, expanded ? 6 : 12)
+        .capsuleFill(Color.dsPanel, border: Color.dsLine)
+        .opacity(expanded ? 1 : 0.8)
     }
 
     private var requestsButton: some View {
-        Button { queue.show() } label: {
-            Text("Запросов: \(queue.items.count)").font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+        Button(action: showRequests) {
+            Text("Запросов: \(requests)").font(DS.Font.manrope(12, .bold, relativeTo: .caption))
+                .foregroundStyle(DS.Tone.warning.text)
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.plain)
         .help("Показать запросы на подключение")
+    }
+}
+
+/// Квадратная кнопка-значок индикатора: 26×26, радиус 8; «Стоп» — красная.
+struct HUDIconButton: View {
+    enum Kind { case plain, stop }
+    let symbol: String
+    let help: String
+    var kind: Kind = .plain
+    let action: () -> Void
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(kind == .stop ? Color.dsRecInk : Color.dsText)
+                .frame(width: 26, height: 26)
+                .background(kind == .stop ? Color.dsRec : Color.dsField, in: shape)
+                .overlay(shape.strokeBorder(kind == .stop ? .clear : Color.dsLine, lineWidth: 1))
+                .contentShape(shape)
+        }
+        .buttonStyle(PressScaleStyle())
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -1409,7 +1462,8 @@ private struct ShareViewerView: View {
             }
             .contentShape(Rectangle())
             .gesture(drawGesture(rect: rect))
-            .overlay(alignment: .bottom) { toolbar.padding(10) }
+            .overlay(alignment: .topTrailing) { badge }
+            .overlay(alignment: .bottom) { toolbar.padding(14) }
         }
         .frame(minWidth: 480, minHeight: 300)
     }
@@ -1455,73 +1509,207 @@ private struct ShareViewerView: View {
     @ViewBuilder private var status: some View {
         switch viewer.state {
         case .connecting:
-            VStack(spacing: 8) { ProgressView(); Text("Подключаюсь…").foregroundStyle(.white) }
+            ViewerStatusCard(.progress("Подключаюсь…"))
         case .watching where viewer.frame == nil && video.size == nil:
-            VStack(spacing: 8) { ProgressView(); Text("Жду картинку…").foregroundStyle(.white) }
+            ViewerStatusCard(.progress("Жду картинку…"))
         case .watching where viewer.hostReconnecting:
-            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Ведущий переподключается…").foregroundStyle(.white) }
-                .padding(10).background(.black.opacity(0.6), in: Capsule())
+            ViewerStatusCard(.notice("Ведущий переподключается…"))
         case .waiting:
-            VStack(spacing: 8) {
-                ProgressView()
-                Text("Ждём, пока \(ShareCode.display(viewer.code)) разрешит подключение…").foregroundStyle(.white)
-            }
+            ViewerStatusCard(.progress("Ждём, пока \(ShareCode.display(viewer.code)) разрешит подключение…"))
         case .reconnecting(let attempt):
-            VStack(spacing: 8) {
-                ProgressView()
-                Text(ShareViewerReconnect.status(attempt: attempt)).foregroundStyle(.white)
-                Button("Отключиться") {
-                    viewer.disconnect()
-                    viewer.endManually()
-                }
-            }
-            .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+            ViewerStatusCard(.reconnecting(ShareViewerReconnect.status(attempt: attempt)) {
+                viewer.disconnect()
+                viewer.endManually()
+            })
         case .ended(let message):
-            VStack(spacing: 10) {
-                Text(message).font(.title3).foregroundStyle(.white)
-                if let change = viewer.keyChange {
-                    // Кнопки и в окне просмотра: из поповера или по macutils://watch страницы настроек перед глазами нет.
-                    Text(change.warning).font(.caption).foregroundStyle(.orange).multilineTextAlignment(.center)
-                    HStack {
-                        Button("Подключиться и запомнить") { viewer.acceptKeyChange() }
-                        Button("Отмена") { viewer.dismissKeyChange() }
-                    }
-                }
-            }
-            .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+            // Кнопки и в окне просмотра: из поповера или по macutils://watch страницы настроек перед глазами нет.
+            ViewerStatusCard(.ended(message, warning: viewer.keyChange?.warning,
+                                    accept: viewer.keyChange == nil ? nil : { viewer.acceptKeyChange() },
+                                    dismiss: viewer.keyChange == nil ? nil : { viewer.dismissKeyChange() }))
         default:
             EmptyView()
+        }
+    }
+
+    /// Метка в углу: идёт трансляция и качество картинки.
+    @ViewBuilder private var badge: some View {
+        if viewer.state == .watching, frameSize != nil || viewer.frame != nil {
+            ShareViewerBadge(height: frameSize.map { Int($0.height) })
+                .padding(12)
         }
     }
 
     /// Метка (клик), рисование (вести мышью), цвет.
     @ViewBuilder private var toolbar: some View {
         if viewer.state == .watching {
-            HStack(spacing: 10) {
-                SwiftUI.Picker("", selection: $viewer.tool) {
-                    Label("Метка", systemImage: "scope").tag(ShareViewer.Tool.ping)
-                    Label("Рисовать", systemImage: "pencil.tip").tag(ShareViewer.Tool.draw)
-                    Label("Выкл", systemImage: "hand.raised.slash").tag(ShareViewer.Tool.off)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 260)
-                ForEach(ShareMark.palette, id: \.name) { item in
-                    Button { viewer.color = item.name } label: {
-                        Circle().fill(item.color).frame(width: 14, height: 14)
-                            .overlay(Circle().strokeBorder(.white, lineWidth: viewer.color == item.name ? 2 : 0))
-                    }
-                    .buttonStyle(.plain)
-                }
-                Divider().frame(height: 16)
-                Button { viewer.playGame() } label: { Label("Сыграть", systemImage: "number") }
-                    .buttonStyle(.plain)
-                    .help("Крестики-нолики с ведущим")
-            }
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(.regularMaterial, in: Capsule())
-            .help("Клик — метка «сюда!» на экране ведущего; «Рисовать» — ведите мышью. Всё исчезает само через пару секунд.")
+            ShareViewerToolbar(tool: $viewer.tool, color: $viewer.color) { viewer.playGame() }
         }
+    }
+}
+
+/// Что показать поверх картинки у зрителя (подключение, ожидание, переподключение, конец).
+enum ViewerStatusContent {
+    case progress(String)
+    case notice(String)
+    case reconnecting(String, disconnect: () -> Void)
+    case ended(String, warning: String?, accept: (() -> Void)?, dismiss: (() -> Void)?)
+}
+
+/// Карточка состояния по центру окна зрителя: `panel`, обводка `line`, радиус 20 (раньше — белый текст на чёрном).
+struct ViewerStatusCard: View {
+    let content: ViewerStatusContent
+
+    init(_ content: ViewerStatusContent) { self.content = content }
+
+    var body: some View {
+        card.accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder private var card: some View {
+        switch content {
+        case .progress(let text):
+            VStack(spacing: DS.Space.m) {
+                ProgressView().controlSize(.regular)
+                Text(text).font(DS.Font.bodyStrong).foregroundStyle(.dsText).multilineTextAlignment(.center)
+            }
+            .padding(DS.Space.xl).floating(.panel)
+        case .notice(let text):
+            HStack(spacing: DS.Space.s) {
+                ProgressView().controlSize(.small)
+                Text(text).font(DS.Font.bodyStrong).foregroundStyle(.dsText)
+            }
+            .floating(.pill)
+        case .reconnecting(let text, let disconnect):
+            VStack(spacing: DS.Space.m) {
+                ProgressView()
+                Text(text).font(DS.Font.bodyStrong).foregroundStyle(.dsText).multilineTextAlignment(.center)
+                Button("Отключиться", action: disconnect).buttonStyle(.graphite(.secondary, size: .compact))
+            }
+            .padding(DS.Space.l).floating(.panel)
+        case .ended(let message, let warning, let accept, let dismiss):
+            VStack(spacing: DS.Space.m) {
+                Text(message).font(DS.Font.dialogTitle).foregroundStyle(.dsText).multilineTextAlignment(.center)
+                if let warning {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: DS.Tone.warning.symbol).accessibilityHidden(true)
+                        Text(warning).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(DS.Font.caption).foregroundStyle(DS.Tone.warning.text)
+                }
+                if accept != nil || dismiss != nil {
+                    HStack(spacing: DS.Space.s) {
+                        if let accept { Button("Подключиться и запомнить", action: accept).buttonStyle(.graphite(.primary, size: .compact)) }
+                        if let dismiss { Button("Отмена", action: dismiss).buttonStyle(.graphite(.secondary, size: .compact)) }
+                    }
+                }
+            }
+            .frame(maxWidth: 420)
+            .padding(DS.Space.xl).floating(.panel)
+        }
+    }
+}
+
+/// «В ЭФИРЕ · 1080p» в углу окна зрителя (качество — в нижнем регистре, как принято).
+struct ShareViewerBadge: View {
+    var height: Int?
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text("В ЭФИРЕ").tracking(DS.Font.tracking(0.06, size: 11))
+            if let height { Text(" · \(height)p").monospacedDigit() }
+        }
+        .font(DS.Font.groupLabel)
+        .foregroundStyle(Color.dsRecInk)
+        .padding(.vertical, DS.Space.xs)
+        .padding(.horizontal, 10)
+        .background(Color.dsRec, in: Capsule())
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("В эфире")
+    }
+}
+
+/// Панель инструментов зрителя (как в `MacWatch.dc.html`): метка, рисование, выкл — значками (активный — лайм), цвет,
+/// «Сыграть». Подписи — во всплывающих подсказках. Цвета те же, что понимает ведущий (`ShareMark.palette`).
+/// Толщины линии в протоколе нет — её в панели нет.
+struct ShareViewerToolbar: View {
+    @Binding var tool: ShareViewer.Tool
+    @Binding var color: String
+    let playGame: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            toolButton(.ping, symbol: "scope", title: "Метка")
+            toolButton(.draw, symbol: "pencil", title: "Рисовать")
+            toolButton(.off, symbol: "hand.raised.slash", title: "Выкл")
+            separator
+            ForEach(ShareMark.palette, id: \.name) { item in
+                Button { color = item.name } label: {
+                    Circle().fill(item.color).frame(width: 24, height: 24)
+                        .overlay(Circle().strokeBorder(Color.black.opacity(0.25), lineWidth: 1))
+                        .padding(3)
+                        .overlay(Circle().strokeBorder(color == item.name ? Color.dsText : .clear, lineWidth: 2))
+                        .padding(2)
+                }
+                .buttonStyle(.plain)
+                .help(Self.colorTitle(item.name))
+                .accessibilityLabel(Self.colorTitle(item.name))
+                .accessibilityAddTraits(color == item.name ? .isSelected : [])
+            }
+            separator
+            ViewerToolButton(symbol: "number", title: "Сыграть", selected: false, action: playGame)
+                .help("Крестики-нолики с ведущим")
+        }
+        .padding(8)
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+        .help("Клик — метка «сюда!» на экране ведущего; «Рисовать» — ведите мышью. Всё исчезает само через пару секунд.")
+    }
+
+    private var separator: some View {
+        Rectangle().fill(Color.dsLine).frame(width: 1, height: 28).padding(.horizontal, 6).accessibilityHidden(true)
+    }
+
+    private func toolButton(_ value: ShareViewer.Tool, symbol: String, title: String) -> some View {
+        ViewerToolButton(symbol: symbol, title: title, selected: tool == value) { tool = value }
+    }
+
+    static func colorTitle(_ name: String) -> String {
+        switch name {
+        case "red": return "Красный"
+        case "yellow": return "Жёлтый"
+        case "green": return "Зелёный"
+        case "blue": return "Синий"
+        case "white": return "Белый"
+        default: return name
+        }
+    }
+}
+
+/// Кнопка-значок панели зрителя: 44×44, радиус 12; выбранная — лайм.
+private struct ViewerToolButton: View {
+    let symbol: String
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.iconButton, style: .continuous)
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(selected ? Color.dsAccInk : Color.dsText)
+                .frame(width: 44, height: 44)
+                .background(selected ? Color.dsAcc : (hovered ? Color.dsField : .clear), in: shape)
+                .contentShape(shape)
+        }
+        .buttonStyle(PressScaleStyle())
+        .onHover { hovered = $0 }
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

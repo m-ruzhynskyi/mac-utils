@@ -148,7 +148,8 @@ enum DS {
         static let contentMaxWidth: CGFloat = 760
         static let settingsWindow = CGSize(width: 1040, height: 760)
         static let settingsWindowMin = CGSize(width: 860, height: 560)
-        static let popover = CGSize(width: 420, height: 560)
+        /// Поповер в строке меню (концепт — 520; 460 вмещает вкладки и строки с кейкапами и не слишком широк для строки меню).
+        static let popover = CGSize(width: 460, height: 620)
         /// Высота под «светофор» над боковой панелью (окно `fullSizeContentView`).
         static let titlebar: CGFloat = 44
         /// Колонка сочетания в строке шпаргалки.

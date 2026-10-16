@@ -174,54 +174,8 @@ struct ShareRequestQueueView: View {
 
     var body: some View {
         if let item = queue.items.first {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("\(item.request.name.isEmpty ? "Зритель" : item.request.name) хочет посмотреть ваш экран")
-                    .font(.headline).fixedSize(horizontal: false, vertical: true)
-                VStack(alignment: .leading, spacing: 2) {
-                    if !item.request.viewer.isEmpty {
-                        Text("ID \(ShareCode.display(item.request.viewer))")
-                    }
-                    if let fp = item.request.fp {
-                        Text("Отпечаток \(fp)").monospacedDigit()
-                    }
-                }
-                .font(.caption).foregroundStyle(.secondary)
-                ForEach(item.prompt.notes, id: \.self) { note in
-                    Label(note, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                }
-                Text("Зритель только смотрит и может ставить метки — управлять вашим Mac он не может.")
-                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                if item.prompt.allowAlways {
-                    // Три длинные подписи в одну строку не помещаются: столбиком, главное действие сверху.
-                    VStack(spacing: 6) {
-                        Button { queue.answer(item, .allowOnce) } label: {
-                            Text(item.prompt.kind == .confirmKey ? "Разрешить один раз" : "Разрешить").frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        Button { queue.answer(item, .allowAlways) } label: {
-                            Text(item.prompt.kind == .confirmKey ? "Разрешить и запомнить ключ" : "Всегда разрешать").frame(maxWidth: .infinity)
-                        }
-                        Button { queue.answer(item, .decline) } label: { Text("Отклонить").frame(maxWidth: .infinity) }
-                    }
-                    .controlSize(.large)
-                } else {
-                    HStack {
-                        Button("Отклонить") { queue.answer(item, .decline) }
-                        Spacer()
-                        Button(item.prompt.kind == .confirmKey ? "Разрешить один раз" : "Разрешить") { queue.answer(item, .allowOnce) }
-                            .buttonStyle(.borderedProminent)
-                    }
-                }
-                if queue.items.count > 1 {
-                    Text("Ещё \(queue.items.count - 1) \(Self.requests(queue.items.count - 1)) в очереди")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .padding(14)
-            .frame(width: Self.width, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            ShareRequestCard(name: item.request.name, viewer: item.request.viewer, fingerprint: item.request.fp,
+                             prompt: item.prompt, moreCount: queue.items.count - 1) { queue.answer(item, $0) }
         }
     }
 
@@ -231,5 +185,96 @@ struct ShareRequestQueueView: View {
         if last == 1 && lastTwo != 11 { return "запрос" }
         if (2...4).contains(last) && !(12...14).contains(lastTwo) { return "запроса" }
         return "запросов"
+    }
+}
+
+/// Запрос зрителя (по `MacHost.dc.html`): аватар-инициал, имя, ID, предупреждения; «Отклонить / Всегда / Разрешить»
+/// в ряд, а если ряд не помещается (длинные подписи, узкая панель) — столбиком, главное действие сверху.
+/// Все значения готовые, без очереди: так карточку можно снять для проверки вида.
+struct ShareRequestCard: View {
+    let name: String
+    let viewer: String
+    var fingerprint: String?
+    let prompt: ShareDecision.Prompt
+    var moreCount = 0
+    let answer: (ShareAnswer) -> Void
+
+    private var title: String { name.isEmpty ? "Зритель" : name }
+    private var confirmKey: Bool { prompt.kind == .confirmKey }
+    private var allowTitle: String { confirmKey ? "Разрешить один раз" : "Разрешить" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
+            HStack(alignment: .center, spacing: DS.Space.m) {
+                Text(String(title.prefix(1)).uppercased())
+                    .font(DS.Font.manrope(16, .heavy, relativeTo: .headline))
+                    .foregroundStyle(.dsText)
+                    .frame(width: 38, height: 38)
+                    .background(Color.dsField, in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(title) хочет посмотреть ваш экран")
+                        .font(DS.Font.manrope(14, .heavy, relativeTo: .headline)).foregroundStyle(.dsText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !viewer.isEmpty {
+                        Text("ID \(ShareCode.display(viewer))").font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute)
+                    }
+                    if let fingerprint {
+                        Text("Отпечаток \(fingerprint)").font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute)
+                    }
+                }
+            }
+            ForEach(prompt.notes, id: \.self) { note in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: DS.Tone.warning.symbol).foregroundStyle(DS.Tone.warning.text).accessibilityHidden(true)
+                    Text(note).foregroundStyle(DS.Tone.warning.text).fixedSize(horizontal: false, vertical: true)
+                }
+                .font(DS.Font.caption)
+            }
+            Text("Зритель только смотрит и может ставить метки — управлять вашим Mac он не может.")
+                .font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
+            buttons
+            if moreCount > 0 {
+                Text("Ещё \(moreCount) \(ShareRequestQueueView.requests(moreCount)) в очереди")
+                    .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+            }
+        }
+        .padding(14)
+        .frame(width: ShareRequestQueueView.width, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func decline() -> some View {
+        Button { answer(.decline) } label: { Text("Отклонить").lineLimit(1) }
+            .buttonStyle(.graphite(.secondary, fill: true))
+    }
+
+    private func allow() -> some View {
+        Button { answer(.allowOnce) } label: { Text(allowTitle).lineLimit(1) }
+            .buttonStyle(.graphite(.primary, fill: true))
+    }
+
+    private func always() -> some View {
+        Button { answer(.allowAlways) } label: { Text(confirmKey ? "Разрешить и запомнить ключ" : "Всегда").lineLimit(1) }
+            .buttonStyle(.graphite(.secondary, fill: true))
+            .help(confirmKey ? "Разрешить и запомнить ключ устройства" : "Всегда разрешать этому зрителю")
+            .accessibilityLabel(confirmKey ? "Разрешить и запомнить ключ" : "Всегда разрешать")
+    }
+
+    @ViewBuilder private var buttons: some View {
+        if prompt.allowAlways {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DS.Space.s) { decline(); always(); allow() }
+                VStack(spacing: DS.Space.s) { allow(); always(); decline() }
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DS.Space.s) { decline(); allow() }
+                VStack(spacing: DS.Space.s) { allow(); decline() }
+            }
+        }
     }
 }
