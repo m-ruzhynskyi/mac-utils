@@ -290,68 +290,69 @@ struct ScreenshotLibraryView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                TextField("Поиск по тексту на снимке, программе, дате", text: $query)
-                    .textFieldStyle(.roundedBorder)
+        ToolsPageFrame(.shots, compact: compact) {
+            VStack(spacing: compact ? DS.Space.s : DS.Space.m) {
+                toolbar
+                if !enabled {
+                    EmptyState("Умная папка выключена", systemImage: "photo.on.rectangle.angled",
+                               message: "Включите её в настройках «Снимки экрана».")
+                } else if results.isEmpty {
+                    EmptyState(library.records.isEmpty ? "Здесь появятся ваши снимки (⌘⇧X)" : "Ничего не найдено",
+                               systemImage: "photo.on.rectangle.angled")
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: compact ? 104 : 150), spacing: DS.Space.m)], spacing: DS.Space.m) {
+                            ForEach(results) { record in
+                                ShotThumbnail(record: record, compact: compact)
+                                    .onTapGesture(count: 2) { NSWorkspace.shared.open(record.url) }
+                                    .onDrag { NSItemProvider(contentsOf: record.url) ?? NSItemProvider() }
+                                    .contextMenu {
+                                        Button("Скопировать") { Self.copy(record) }
+                                        Button("Открыть") { NSWorkspace.shared.open(record.url) }
+                                        Button("Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([record.url]) }
+                                        Button("Скопировать текст") {
+                                            NSPasteboard.general.clearContents()
+                                            NSPasteboard.general.setString(record.text, forType: .string)
+                                        }
+                                        .disabled(record.text.isEmpty)
+                                        Divider()
+                                        Button("В Корзину") { library.remove(record) }
+                                    }
+                            }
+                        }
+                        .padding(.vertical, compact ? 0 : DS.Space.xs)
+                        .padding(.bottom, compact ? DS.Space.s : 0)
+                    }
+                }
+            }
+            .padding(.horizontal, compact ? DS.Space.m : 0)
+            .padding(.top, compact ? DS.Space.s : 0)
+        }
+    }
+
+    /// Поиск, фильтр (все / снимки / видео), прогресс распознавания и папка.
+    private var toolbar: some View {
+        VStack(spacing: DS.Space.s) {
+            HStack(spacing: DS.Space.s) {
+                ToolsSearchField(prompt: "Поиск по тексту на снимке, программе, дате", text: $query)
                     .onChange(of: query) { _, value in semantic.expand(value) }
                 if semantic.thinking {
-                    Image(systemName: "sparkles").foregroundStyle(.purple).help("Ищу по смыслу…")
+                    Image(systemName: "sparkles").foregroundStyle(.dsAccText).help("Ищу по смыслу…")
                 } else if !semantic.words(for: query).isEmpty {
-                    Image(systemName: "sparkles").foregroundStyle(.secondary)
+                    Image(systemName: "sparkles").foregroundStyle(.dsMute)
                         .help("Ищу и по смыслу: " + semantic.words(for: query).joined(separator: ", "))
                 }
-                Picker("", selection: $kind) {
-                    Text("Все").tag(0)
-                    Image(systemName: "photo").tag(1)
-                    Image(systemName: "video").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: compact ? 110 : 140)
-                .help("Все / снимки / видео")
+            }
+            HStack(spacing: DS.Space.s) {
+                Chip("Все", selected: kind == 0) { kind = 0 }.help("Все")
+                Chip("Снимки", selected: kind == 1) { kind = 1 }.help("Только снимки")
+                Chip("Видео", selected: kind == 2) { kind = 2 }.help("Только видео")
+                Spacer()
                 if library.indexing > 0 {
                     ProgressView().controlSize(.small).help("Распознаётся текст…")
                 }
-                Button {
+                IconButton("Открыть папку снимков", systemImage: "folder", compact: true) {
                     NSWorkspace.shared.open(Pref.screenshotDirectory.appendingPathComponent("Снимки экрана"))
-                } label: { Image(systemName: "folder") }
-                .help("Открыть папку снимков")
-            }
-            .padding(compact ? 8 : 10)
-
-            if !enabled {
-                Text("Умная папка выключена — включите её в настройках «Снимки экрана».")
-                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if results.isEmpty {
-                VStack(spacing: 6) {
-                    Image(systemName: "photo.on.rectangle.angled").font(.system(size: 30)).foregroundStyle(.secondary)
-                    Text(library.records.isEmpty ? "Здесь появятся ваши снимки (⌘⇧X)" : "Ничего не найдено")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: compact ? 104 : 150), spacing: 10)], spacing: 10) {
-                        ForEach(results) { record in
-                            ShotThumbnail(record: record, compact: compact)
-                                .onTapGesture(count: 2) { NSWorkspace.shared.open(record.url) }
-                                .onDrag { NSItemProvider(contentsOf: record.url) ?? NSItemProvider() }
-                                .contextMenu {
-                                    Button("Скопировать") { Self.copy(record) }
-                                    Button("Открыть") { NSWorkspace.shared.open(record.url) }
-                                    Button("Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([record.url]) }
-                                    Button("Скопировать текст") {
-                                        NSPasteboard.general.clearContents()
-                                        NSPasteboard.general.setString(record.text, forType: .string)
-                                    }
-                                    .disabled(record.text.isEmpty)
-                                    Divider()
-                                    Button("В Корзину") { library.remove(record) }
-                                }
-                        }
-                    }
-                    .padding(compact ? 8 : 12)
                 }
             }
         }
@@ -378,37 +379,39 @@ private struct ShotThumbnail: View {
     @State private var image: NSImage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
             ZStack {
-                RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06))
+                Color.dsField
                 if let image {
                     Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 if record.isVideo {
                     Image(systemName: "play.circle.fill")
-                        .font(.system(size: compact ? 18 : 24))
+                        .font(.system(size: compact ? 20 : 26))
                         .foregroundStyle(.white, .black.opacity(0.45))
                 }
             }
             .frame(height: compact ? 64 : 96)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(Color.dsLine, lineWidth: 1))
             .overlay(alignment: .topTrailing) {
                 if hovering {
-                    Button { ScreenshotLibraryView.copy(record) } label: {
-                        Image(systemName: "doc.on.doc").font(.caption)
-                            .padding(4)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+                    IconButton("Скопировать (или перетащите снимок куда нужно)", systemImage: "doc.on.doc", compact: true) {
+                        ScreenshotLibraryView.copy(record)
                     }
-                    .buttonStyle(.borderless)
-                    .padding(4)
-                    .help("Скопировать (или перетащите снимок куда нужно)")
+                    .scaleEffect(0.8)
+                    .padding(2)
                 }
             }
             .onHover { hovering = $0 }
-            Text(record.app).font(.caption2.weight(.semibold)).lineLimit(1)
+            Text(record.app).font(DS.Font.caption).foregroundStyle(.dsText).lineLimit(1)
             Text(record.date, format: .dateTime.day().month().hour().minute())
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(DS.Font.mono(11, relativeTo: .caption2)).foregroundStyle(.dsMute)
         }
+        .padding(DS.Space.s)
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
         .help(record.text.isEmpty ? record.url.lastPathComponent : String(record.text.prefix(300)))
         .task(id: record.path) {
             let url = record.url

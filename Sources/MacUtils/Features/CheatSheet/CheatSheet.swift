@@ -279,35 +279,49 @@ final class CheatSheet: ObservableObject {
 struct CheatSheetView: View {
     @ObservedObject var sheet: CheatSheet
 
-    private let columns = [GridItem(.adaptive(minimum: 230, maximum: 320), spacing: 18, alignment: .top)]
+    var body: some View {
+        CheatSheetContent(appName: sheet.appName, appIcon: sheet.appIcon, loading: sheet.loading, groups: sheet.groups,
+                          sticky: UserDefaults.standard.bool(forKey: Pref.cheatSheetSticky))
+    }
+}
+
+/// Шпаргалка-оверлей (Graphite: `panel`, обводка `line`, радиус 20; заголовки групп — `GroupLabel`, сочетания — кейкапы).
+/// Без модели — для снимков интерфейса.
+struct CheatSheetContent: View {
+    let appName: String
+    var appIcon: NSImage?
+    var loading = false
+    let groups: [CheatGroup]
+    var sticky = false
+
+    private let columns = [GridItem(.adaptive(minimum: 250, maximum: 340), spacing: 22, alignment: .top)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(spacing: 10) {
-                if let icon = sheet.appIcon {
-                    Image(nsImage: icon).resizable().frame(width: 28, height: 28)
+                if let appIcon {
+                    Image(nsImage: appIcon).resizable().frame(width: 28, height: 28)
                 }
-                Text(sheet.appName).font(.title3.weight(.semibold))
+                Text(appName).font(DS.Font.headline).foregroundStyle(.dsText)
                 Spacer()
-                Text(UserDefaults.standard.bool(forKey: Pref.cheatSheetSticky)
-                     ? "Нажмите ⌘ или Esc, чтобы закрыть · колесо мыши — листать"
-                     : "Отпустите ⌘, чтобы закрыть · колесо мыши — листать")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(sticky ? "Нажмите ⌘ или Esc, чтобы закрыть · колесо мыши — листать"
+                            : "Отпустите ⌘, чтобы закрыть · колесо мыши — листать")
+                    .font(DS.Font.rowSub).foregroundStyle(.dsMute)
             }
-            if sheet.loading {
+            if loading {
                 ProgressView().frame(maxWidth: .infinity)
             }
             ScrollView {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                    ForEach(sheet.groups) { group in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(group.title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                .textCase(.uppercase)
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+                    ForEach(groups) { group in
+                        VStack(alignment: .leading, spacing: 6) {
+                            GroupLabel(group.title)
                             ForEach(group.items) { item in
-                                HStack(spacing: 8) {
-                                    Text(item.title).font(.callout).lineLimit(1).truncationMode(.tail)
+                                HStack(spacing: DS.Space.s) {
+                                    Text(item.title).font(DS.Font.manrope(13, .semibold, relativeTo: .callout))
+                                        .foregroundStyle(.dsText).lineLimit(1).truncationMode(.tail)
                                     Spacer(minLength: 6)
-                                    Text(item.shortcut).font(.callout.monospaced()).foregroundStyle(.secondary)
+                                    Keycap([item.shortcut], compact: true)
                                 }
                             }
                         }
@@ -315,8 +329,9 @@ struct CheatSheetView: View {
                 }
             }
         }
-        .padding(18)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(DS.Space.xl)
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
         .padding(4)
     }
 }

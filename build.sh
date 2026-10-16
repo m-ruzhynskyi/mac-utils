@@ -52,6 +52,8 @@ plist_set MUGitCommit "$V_COMMIT"
 plist_set MUCommitsSinceRelease "$V_SINCE"
 echo "Версия: $V_SHORT ($V_CHANNEL, $V_COMMIT)"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# Шрифты интерфейса (Manrope, JetBrains Mono — SIL OFL 1.1) с лицензиями; регистрируются при запуске (DSFonts).
+cp -R Resources/Fonts "$APP/Contents/Resources/Fonts"
 
 # Помощник «Сейчас играет» (грузится в системный perl — см. Helpers/NowPlaying.m).
 clang -fobjc-arc -dynamiclib -arch arm64 -arch x86_64 -mmacosx-version-min=14.0 \

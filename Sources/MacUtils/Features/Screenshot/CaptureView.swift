@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Carbon.HIToolbox
 import CoreImage
 
@@ -796,16 +797,22 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     /// «Окно (авто) | Область» — клик или Tab переключает.
     private func drawModeSwitch() {
         let rect = modeSwitchRect
-        NSColor.black.withAlphaComponent(0.65).setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 15, yRadius: 15).fill()
+        let pill = NSBezierPath(roundedRect: rect, xRadius: 15, yRadius: 15)
+        DS.Palette.panel.setFill()
+        pill.fill()
+        DS.Palette.line.setStroke()
+        pill.lineWidth = 1
+        pill.stroke()
         let half = rect.width / 2
         let active = NSRect(x: autoWindow ? rect.minX + 3 : rect.minX + half, y: rect.minY + 3,
                             width: half - 3, height: rect.height - 6)
-        NSColor.systemBlue.setFill()
+        DS.Palette.acc.setFill()
         NSBezierPath(roundedRect: active, xRadius: 12, yRadius: 12).fill()
         for (index, title) in ["Окно под курсором", "Своя область"].enumerated() {
+            let isActive = (index == 0) == autoWindow
             let text = NSAttributedString(string: title, attributes: [
-                .font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white,
+                .font: CaptureFont.manrope(12, isActive ? .heavy : .semibold),
+                .foregroundColor: isActive ? DS.Palette.accInk : DS.Palette.mute,
             ])
             let size = text.size()
             let x = rect.minX + half * CGFloat(index) + (half - size.width) / 2
@@ -814,7 +821,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         // Подсказка — только при наведении на переключатель.
         guard hoveringModeSwitch else { return }
         let hint = NSAttributedString(string: "Клик или Tab — переключить режим", attributes: [
-            .font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.white.withAlphaComponent(0.85),
+            .font: CaptureFont.manrope(11, .semibold), .foregroundColor: NSColor.white.withAlphaComponent(0.9),
         ])
         hint.draw(at: NSPoint(x: rect.midX - hint.size().width / 2, y: rect.minY - 16))
     }
@@ -827,7 +834,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 dim(outside: hoverRect, alpha: 0.3)
                 let border = NSBezierPath(rect: hoverRect.insetBy(dx: 1, dy: 1))
                 border.lineWidth = 2
-                NSColor.systemBlue.setStroke()
+                DS.Palette.acc.setStroke()
                 border.stroke()
             } else {
                 NSColor.black.withAlphaComponent(0.3).setFill()
@@ -846,9 +853,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         NSGraphicsContext.restoreGraphicsState()
 
         dim(outside: selection, alpha: 0.45)
-        let border = NSBezierPath(rect: selection.insetBy(dx: -0.5, dy: -0.5))
-        border.lineWidth = 1
-        NSColor.white.withAlphaComponent(0.9).setStroke()
+        let border = NSBezierPath(roundedRect: selection.insetBy(dx: -1, dy: -1), xRadius: 2, yRadius: 2)
+        border.lineWidth = 2
+        DS.Palette.acc.setStroke()
         border.stroke()
 
         if let selectedIndex, annotations.indices.contains(selectedIndex) {
@@ -860,10 +867,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             if isEditing {
                 for (_, c) in itemHandles(annotations[selectedIndex]) {
                     let dot = NSBezierPath(ovalIn: NSRect(x: c.x - 4.5, y: c.y - 4.5, width: 9, height: 9))
-                    NSColor.white.setFill()
+                    DS.Palette.panel.setFill()
                     dot.fill()
-                    dot.lineWidth = 1.5
-                    NSColor.systemBlue.setStroke()
+                    dot.lineWidth = 2
+                    DS.Palette.acc.setStroke()
                     dot.stroke()
                 }
             }
@@ -872,12 +879,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         if isEditing {
             for handle in Handle.allCases {
                 let c = handlePoint(handle, in: selection)
-                let square = NSBezierPath(roundedRect: NSRect(x: c.x - 4, y: c.y - 4, width: 8, height: 8),
-                                          xRadius: 2, yRadius: 2)
-                NSColor.white.setFill()
+                let square = NSBezierPath(roundedRect: NSRect(x: c.x - 4.5, y: c.y - 4.5, width: 9, height: 9),
+                                          xRadius: 3, yRadius: 3)
+                DS.Palette.acc.setFill()
                 square.fill()
-                NSColor.black.withAlphaComponent(0.4).setStroke()
-                square.lineWidth = 0.5
+                DS.Palette.accInk.withAlphaComponent(0.5).setStroke()
+                square.lineWidth = 1
                 square.stroke()
             }
         }
@@ -896,20 +903,25 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         path.fill()
     }
 
+    /// Плашка размера: JetBrains Mono 12, лайм с `accInk`, радиус 7, над левым верхним углом рамки.
     private func drawSizeLabel(for rect: NSRect) {
-        let text = "\(Int(rect.width * pixelScale)) × \(Int(rect.height * pixelScale))"
+        Self.drawSizeBadge(width: Int(rect.width * pixelScale), height: Int(rect.height * pixelScale),
+                           selection: rect, canvas: bounds)
+    }
+
+    static func drawSizeBadge(width: Int, height: Int, selection rect: NSRect, canvas: NSRect) {
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor.white,
+            .font: CaptureFont.mono(12),
+            .foregroundColor: DS.Palette.accInk,
         ]
-        let string = NSAttributedString(string: text, attributes: attributes)
+        let string = NSAttributedString(string: "\(width) × \(height)", attributes: attributes)
         let size = string.size()
-        var origin = NSPoint(x: rect.minX, y: rect.maxY + 6)
-        if origin.y + size.height + 6 > bounds.height { origin.y = rect.maxY - size.height - 10 }
-        let background = NSRect(x: origin.x, y: origin.y, width: size.width + 12, height: size.height + 4)
-        NSColor.black.withAlphaComponent(0.7).setFill()
-        NSBezierPath(roundedRect: background, xRadius: 4, yRadius: 4).fill()
-        string.draw(at: NSPoint(x: origin.x + 6, y: origin.y + 2))
+        var origin = NSPoint(x: rect.minX - 1, y: rect.maxY + 8)
+        if origin.y + size.height + 6 > canvas.height { origin.y = rect.maxY - size.height - 12 }
+        let background = NSRect(x: origin.x, y: origin.y, width: size.width + 16, height: size.height + 6)
+        DS.Palette.acc.setFill()
+        NSBezierPath(roundedRect: background, xRadius: 7, yRadius: 7).fill()
+        string.draw(at: NSPoint(x: origin.x + 8, y: origin.y + 3))
     }
 
     // MARK: - Итоговое изображение

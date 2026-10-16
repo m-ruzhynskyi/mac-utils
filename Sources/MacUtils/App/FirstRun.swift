@@ -20,4 +20,13 @@ enum FirstRun {
         guard !welcomeShown, defaults.string(forKey: Pref.lastSeenChangelog) == nil else { return }
         defaults.set(current, forKey: Pref.lastSeenChangelog)
     }
+
+    /// Вводные шаги нужны только на чистой установке: ключ явно `false`. У обновившегося пользователя его нет.
+    static func needsOnboarding(done: Bool?) -> Bool { done == false }
+
+    /// На чистой установке отмечает, что вводные шаги ещё не пройдены (один раз; пройденные не сбрасываются).
+    static func beginOnboardingIfFirstLaunch(defaults: UserDefaults, firstLaunch: Bool) {
+        guard firstLaunch, defaults.object(forKey: Pref.onboardingDone) == nil else { return }
+        defaults.set(false, forKey: Pref.onboardingDone)
+    }
 }

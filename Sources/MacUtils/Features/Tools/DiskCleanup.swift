@@ -92,6 +92,23 @@ final class DiskCleanupModel: ObservableObject {
     @Published private(set) var lastResult: String?
     @Published var expanded: Set<CleanupCategory.Kind> = []
 
+    /// Для снимков интерфейса: демонстрационные записи, диск не сканируется.
+    static func demo() -> DiskCleanupModel {
+        let model = DiskCleanupModel()
+        let home = URL(fileURLWithPath: "/demo")
+        model.items = [
+            CleanupItem(url: home.appendingPathComponent("Library/Caches/com.example.browser"), category: .caches, size: 820 << 20),
+            CleanupItem(url: home.appendingPathComponent("Library/Caches/com.example.editor"), category: .caches, size: 310 << 20),
+            CleanupItem(url: home.appendingPathComponent("Library/Logs/DiagnosticReports"), category: .logs, size: 48 << 20),
+            CleanupItem(url: home.appendingPathComponent("Library/Developer/Xcode/DerivedData/Demo-abc"), category: .xcode, size: 2_400 << 20),
+            CleanupItem(url: home.appendingPathComponent("Downloads/installer.dmg"), category: .downloads, size: 540 << 20),
+        ]
+        model.denied = [.trash]
+        model.checked = Set(model.items.filter { [.caches, .logs, .xcode].contains($0.category) }.map(\.url))
+        model.expanded = [.caches]
+        return model
+    }
+
     func items(in kind: CleanupCategory.Kind) -> [CleanupItem] {
         items.filter { $0.category == kind }.sorted { $0.size > $1.size }
     }
@@ -244,117 +261,119 @@ struct DiskCleanupView: View {
     private var aiOn: Bool { aiEnabled && aiCleanup }
 
     var body: some View {
-        VStack(spacing: 0) {
-            List {
-                ForEach(model.categories) { category in
-                    categoryRow(category)
-                    if model.expanded.contains(category.kind) {
-                        ForEach(model.items(in: category.kind)) { item in
-                            itemRow(item).padding(.leading, 30)
+        ToolsPageFrame(.cleanup, compact: compact) {
+            VStack(spacing: compact ? 0 : DS.Space.m) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: DS.Space.m) {
+                        if !model.denied.isEmpty {
+                            Banner(.warning, title: "Нет доступа — выдайте Полный доступ к диску",
+                                   message: model.categories.filter { model.denied.contains($0.kind) }.map(\.title).joined(separator: ", ")) {
+                                Button("Открыть") { Permissions.openFullDiskAccess() }
+                                    .buttonStyle(.graphite(.primary, size: .compact))
+                            }
+                        }
+                        ListCard(style: compact ? .field : .panel) {
+                            ForEach(model.categories) { category in
+                                categoryRow(category)
+                                if model.expanded.contains(category.kind) {
+                                    ForEach(model.items(in: category.kind)) { item in
+                                        itemRow(item)
+                                    }
+                                }
+                            }
                         }
                     }
+                    .padding(compact ? DS.Space.s : 0)
                 }
+                if let result = model.lastResult {
+                    Text(result).font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, compact ? DS.Space.m : 0)
+                        .padding(.top, compact ? DS.Space.xs : 0)
+                }
+                actionBar
             }
-            if compact, let result = model.lastResult {
-                Text(result).font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 10).padding(.top, 6)
-            }
-            HStack(spacing: 10) {
-                if !compact, let result = model.lastResult {
-                    Text(result).font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                if model.scanning || model.cleaning || advisor.working { ProgressView().controlSize(.small) }
-                if aiOn {
-                    Button {
-                        advisor.review(model.items)
-                        model.expanded = Set(CleanupCategory.Kind.allCases).subtracting([.trash])
-                    } label: { Label(compact ? "ИИ" : "Разобрать с ИИ", systemImage: "sparkles") }
-                    .disabled(model.scanning || advisor.working || model.items.isEmpty)
-                    .help("Локальная модель подскажет, что безопасно удалять: зелёный — безопасно, оранжевый — осторожно, красный — лучше оставить")
-                    if let progress = advisor.progress {
-                        Text(progress).font(.caption).foregroundStyle(.secondary)
-                    } else if let error = advisor.error {
-                        Text(error).font(.caption).foregroundStyle(.orange).lineLimit(1)
-                    }
-                    if !advisor.advice.isEmpty {
-                        Button(compact ? "Безопасное" : "Отметить безопасное") {
-                            model.checked = Set(model.items.filter { advisor.advice[$0.url]?.verdict == .safe }.map(\.url))
-                        }
-                        .help("Отметить только то, что ИИ считает безопасным")
-                    }
-                }
-                Button(compact ? "Обновить" : "Пересканировать") { model.scan() }.disabled(model.scanning || model.cleaning)
-                Button("Очистить · \(ByteCountFormatter.string(fromByteCount: model.checkedTotal, countStyle: .file))") {
-                    model.clean()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.scanning || model.cleaning || model.checked.isEmpty)
-            }
-            .padding(10)
         }
         .onAppear { if model.items.isEmpty && !model.scanning { model.scan() } }
+    }
+
+    private var actionBar: some View {
+        ToolsBar(compact: compact) {
+            Spacer()
+            if model.scanning || model.cleaning || advisor.working { ProgressView().controlSize(.small) }
+            if aiOn {
+                Button {
+                    advisor.review(model.items)
+                    model.expanded = Set(CleanupCategory.Kind.allCases).subtracting([.trash])
+                } label: { Label(compact ? "ИИ" : "Разобрать с ИИ", systemImage: "sparkles") }
+                .buttonStyle(.graphite(.secondary, size: .compact))
+                .disabled(model.scanning || advisor.working || model.items.isEmpty)
+                .help("Локальная модель подскажет, что безопасно удалять: зелёный — безопасно, оранжевый — осторожно, красный — лучше оставить")
+                if let progress = advisor.progress {
+                    Text(progress).font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                } else if let error = advisor.error {
+                    Text(error).font(DS.Font.rowSub).foregroundStyle(Color.dsRec).lineLimit(1)
+                }
+                if !advisor.advice.isEmpty {
+                    Button(compact ? "Безопасное" : "Отметить безопасное") {
+                        model.checked = Set(model.items.filter { advisor.advice[$0.url]?.verdict == .safe }.map(\.url))
+                    }
+                    .buttonStyle(.graphite(.secondary, size: .compact))
+                    .help("Отметить только то, что ИИ считает безопасным")
+                }
+            }
+            Button(compact ? "Обновить" : "Пересканировать") { model.scan() }
+                .buttonStyle(.graphite(.secondary, size: .compact))
+                .disabled(model.scanning || model.cleaning)
+            Button("Очистить · \(ByteCountFormatter.string(fromByteCount: model.checkedTotal, countStyle: .file))") {
+                model.clean()
+            }
+            .buttonStyle(.graphite(.primary, size: .compact))
+            .disabled(model.scanning || model.cleaning || model.checked.isEmpty)
+        }
     }
 
     private func categoryRow(_ category: CleanupCategory) -> some View {
         let items = model.items(in: category.kind)
         let allChecked = !items.isEmpty && items.allSatisfy { model.checked.contains($0.url) }
-        return HStack(spacing: 10) {
-            Toggle("", isOn: Binding(get: { allChecked },
-                                     set: { model.setCategory(category.kind, checked: $0) }))
-                .labelsHidden().toggleStyle(.checkbox).disabled(items.isEmpty)
-            Image(systemName: category.symbol).frame(width: 20).foregroundStyle(Color.accentColor)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(category.title).font(compact ? .callout.weight(.semibold) : .headline)
-                if model.denied.contains(category.kind) {
-                    HStack(spacing: 6) {
-                        Text("Нет доступа — выдайте Полный доступ к диску").font(.caption).foregroundStyle(.orange)
-                        Button("Открыть") { Permissions.openFullDiskAccess() }.controlSize(.mini)
-                    }
-                } else if !compact {
-                    Text(category.detail).font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        let expanded = model.expanded.contains(category.kind)
+        return Row(category.title, subtitle: compact ? nil : category.detail, systemImage: category.symbol) {
+            HStack(spacing: DS.Space.m) {
+                Text(model.scanning ? "…" : ByteCountFormatter.string(fromByteCount: model.total(category.kind), countStyle: .file))
+                    .font(DS.Font.mono(13, relativeTo: .callout)).foregroundStyle(.dsMute).lineLimit(1).fixedSize()
+                IconButton("Показать файлы", systemImage: expanded ? "chevron.down" : "chevron.right", compact: true) {
+                    if expanded { model.expanded.remove(category.kind) } else { model.expanded.insert(category.kind) }
                 }
+                .disabled(items.isEmpty)
+                Toggle(category.title, isOn: Binding(get: { allChecked }, set: { model.setCategory(category.kind, checked: $0) }))
+                    .toggleStyle(.graphite)
+                    .disabled(items.isEmpty)
             }
-            .help(category.detail)
-            Spacer(minLength: 8)
-            Text(model.scanning ? "…" : ByteCountFormatter.string(fromByteCount: model.total(category.kind), countStyle: .file))
-                .monospacedDigit().foregroundStyle(.secondary)
-            Button {
-                if model.expanded.contains(category.kind) { model.expanded.remove(category.kind) }
-                else { model.expanded.insert(category.kind) }
-            } label: {
-                Image(systemName: model.expanded.contains(category.kind) ? "chevron.down" : "chevron.right")
-            }
-            .buttonStyle(.borderless)
-            .disabled(items.isEmpty)
-            .help("Показать файлы")
         }
-        .padding(.vertical, 4)
+        .help(category.detail)
     }
 
     private func itemRow(_ item: CleanupItem) -> some View {
-        HStack(spacing: 8) {
-            Toggle("", isOn: Binding(get: { model.checked.contains(item.url) },
-                                     set: { on in if on { model.checked.insert(item.url) } else { model.checked.remove(item.url) } }))
-                .labelsHidden().toggleStyle(.checkbox)
-            if let advice = advisor.advice[item.url] {
-                Circle().fill(advice.verdict == .safe ? Color.green : advice.verdict == .careful ? .orange : .red)
-                    .frame(width: 8, height: 8)
-                    .help(advice.reason)
+        let sub = advisor.advice[item.url]?.reason
+        return Row(item.url.lastPathComponent, subtitle: sub) {
+            HStack(spacing: DS.Space.s) {
+                if let advice = advisor.advice[item.url] {
+                    Circle().fill(advice.verdict == .safe ? Color.dsAccLine : advice.verdict == .careful ? Color(nsColor: DS.Palette.warn) : .dsRec)
+                        .frame(width: 8, height: 8)
+                }
+                Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
+                    .font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute).lineLimit(1).fixedSize()
+                IconButton("Показать в Finder", systemImage: "magnifyingglass", compact: true) {
+                    NSWorkspace.shared.activateFileViewerSelecting([item.url])
+                }
+                Toggle(item.url.lastPathComponent, isOn: Binding(
+                    get: { model.checked.contains(item.url) },
+                    set: { on in if on { model.checked.insert(item.url) } else { model.checked.remove(item.url) } }))
+                    .toggleStyle(.graphite)
             }
-            Text(item.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
-                .help(advisor.advice[item.url]?.reason ?? item.url.path)
-            Spacer(minLength: 8)
-            Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
-                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-            Button { NSWorkspace.shared.activateFileViewerSelecting([item.url]) } label: {
-                Image(systemName: "magnifyingglass")
-            }
-            .buttonStyle(.borderless)
-            .help("Показать в Finder")
         }
+        .padding(.leading, compact ? 14 : 28)
+        .help(advisor.advice[item.url]?.reason ?? item.url.path)
     }
 }

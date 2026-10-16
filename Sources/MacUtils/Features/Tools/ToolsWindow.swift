@@ -100,144 +100,176 @@ final class ToolsWindow: NSWindow {
 }
 
 struct ToolsView: View {
-    @AppStorage(Pref.toolsTab) private var tab = ToolsWindowController.Tab.uninstaller.rawValue
+    /// Выбранная вкладка панели: `PanelHome.tab` или `SettingsSection.rawValue`. Окно «Инструменты» хранит здесь же свою.
+    @AppStorage(Pref.toolsTab) private var tab = PanelHome.tab
     @AppStorage(Pref.toolsPanelTabs) private var panelTabs = PanelTabs.defaultValue
-    @State private var hoveredTab: SettingsSection?
-    @Namespace private var tabNamespace
     @AppStorage(Pref.warmScreen) private var warmEnabled = false
     @AppStorage(Pref.warmMode) private var warmMode = "schedule"
     @AppStorage(Pref.warmManualOn) private var warmManualOn = false
+    @ObservedObject private var updater = Updater.shared
+    @Namespace private var tabNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var warmOn: Bool { warmEnabled && warmMode == "manual" && warmManualOn }
 
     private var visibleTabs: [SettingsSection] { PanelTabs.sections(panelTabs) }
 
-    /// Выбранная вкладка скрыта — показываем первую видимую.
-    private var currentTab: SettingsSection {
-        let selected = SettingsSection(rawValue: tab)
-        return selected.flatMap { visibleTabs.contains($0) ? $0 : nil } ?? visibleTabs[0]
+    /// Выбранный раздел; nil — «Главная» (или выбранная вкладка скрыта).
+    private var currentSection: SettingsSection? {
+        SettingsSection(rawValue: tab).flatMap { visibleTabs.contains($0) ? $0 : nil }
     }
-    /// В панели из строки меню — шапка с настройками и выходом.
+
+    /// В панели из строки меню — шапка, вкладки, нижняя панель.
     var inPopover = false
 
     var body: some View {
         if inPopover {
-            VStack(spacing: 0) {
+            VStack(spacing: DS.Space.m) {
                 header
-                compactTabs
-                Divider().padding(.top, 8)
-                compactContent
-                    .controlSize(.small)
-                    .font(.callout)
+                tabBar
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let section = currentSection, !PanelSectionView.usesPage(section) {
+                    footer(section)
+                }
             }
+            .padding(.top, DS.Space.l)
+            .background(Color.dsPanel)
+            .tint(.dsAccText)
         } else {
             tabs
         }
     }
 
-    /// Панель из строки меню: вкладки — всегда одним рядом на всю ширину.
-    /// До 5 — значок и подпись; больше — только значки (подпись — при наведении и под рядом).
-    private var compactTabs: some View {
-        HStack(spacing: 4) { tabButtons(stretch: true) }
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .zIndex(1)
-    }
+    // MARK: Шапка
 
-    @ViewBuilder
-    private func tabButtons(stretch: Bool) -> some View {
-        ForEach(visibleTabs) { item in
-            Button {
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { tab = item.rawValue }
-            } label: {
-                VStack(spacing: 2) {
-                    Image(systemName: item.symbol).font(.system(size: visibleTabs.count > 5 ? 15 : 13))
-                    if visibleTabs.count <= 5 {
-                        Text(item.panelTitle).font(.system(size: 10)).lineLimit(1)
-                    }
-                }
-                .frame(minWidth: visibleTabs.count > 5 ? 26 : 58, maxWidth: stretch ? .infinity : nil,
-                       minHeight: visibleTabs.count > 5 ? 26 : nil)
-                .padding(.vertical, 4)
-                .padding(.horizontal, 4)
-                .foregroundStyle(item == currentTab ? Color.accentColor : .primary)
-                // Подсветка выбранной вкладки плавно переезжает к новой.
-                .background {
-                    if item == currentTab {
-                        RoundedRectangle(cornerRadius: 7).fill(Color.accentColor.opacity(0.15))
-                            .matchedGeometryEffect(id: "selectedTab", in: tabNamespace)
-                    } else if hoveredTab == item {
-                        RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.06))
-                    }
-                }
-                // Кликается вся плашка, а не только значок и текст.
-                .contentShape(RoundedRectangle(cornerRadius: 7))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(item.title)
-            .onHover { inside in
-                withAnimation(.easeOut(duration: 0.15)) {
-                    if inside { hoveredTab = item } else if hoveredTab == item { hoveredTab = nil }
-                }
-            }
-            // Название — при наведении, поверх содержимого (места в ряду не занимает).
-            .overlay(alignment: .bottom) {
-                if visibleTabs.count > 5, hoveredTab == item {
-                    Text(item.panelTitle)
-                        .font(.system(size: 10, weight: .medium))
-                        .fixedSize()
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(.regularMaterial, in: Capsule())
-                        .shadow(radius: 2, y: 1)
-                        .offset(y: 20)
-                        .allowsHitTesting(false)
-                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
-                }
-            }
+    private var versionNote: String {
+        switch updater.state {
+        case .upToDate: return "\(updater.displayVersion) · актуальная версия"
+        case .available(let version): return "\(updater.displayVersion) · доступна версия \(version)"
+        default: return updater.displayVersion
         }
-    }
-
-    @ViewBuilder
-    private var compactContent: some View {
-        // Содержимое вкладки сменяется мягким переходом, без рывка.
-        ZStack {
-            PanelSectionView(section: currentTab)
-                .id(currentTab)
-                .transition(.opacity.combined(with: .offset(y: 4)))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.easeInOut(duration: 0.2), value: currentTab)
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "wrench.and.screwdriver.fill").foregroundStyle(Color.accentColor)
-            Text("Mac Utils").font(.callout.weight(.semibold))
-            Spacer()
-            Button { WarmScreen.shared.toggleManual() } label: {
-                Image(systemName: warmOn ? "sun.horizon.fill" : "sun.horizon")
+        HStack(spacing: DS.Space.m) {
+            AppMark(size: 22)
+                .frame(width: 38, height: 38)
+                .background(Color.dsField, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Mac Utils").font(DS.Font.headline).tracking(DS.Font.tracking(-0.01, size: 17)).foregroundStyle(.dsText)
+                Text(versionNote).font(DS.Font.rowSub).foregroundStyle(.dsMute).lineLimit(1)
             }
-            .help("Тёплый экран: включить или выключить вручную")
-            Button { ToolsWindowController.shared.showWindow() } label: {
-                Image(systemName: "macwindow")
+            Spacer(minLength: DS.Space.s)
+            IconButton("Тёплый экран: включить или выключить вручную", systemImage: warmOn ? "sun.horizon.fill" : "sun.horizon",
+                       active: warmOn) {
+                WarmScreen.shared.toggleManual()
             }
-            .help("Открыть в окне (то же — ⌥-клик по значку)")
-            Button {
+            IconButton("Открыть в окне (то же — ⌥-клик по значку)", systemImage: "macwindow") {
+                ToolsWindowController.shared.showWindow()
+            }
+            IconButton("Настройки Mac Utils (\(HotKeyRegistry.combo(for: .settings).title))", systemImage: "gearshape") {
                 AppStatusItem.shared.closeTools()
                 SettingsWindowController.shared.show()
-            } label: {
-                Image(systemName: "gearshape")
             }
-            .help("Настройки Mac Utils (⌃⌥⌘,)")
-            Button {
-                NSApp.terminate(nil)
-            } label: {
-                Image(systemName: "power")
-            }
-            .help("Выйти из Mac Utils")
+            IconButton("Выйти из Mac Utils", systemImage: "power") { NSApp.terminate(nil) }
         }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
+        .padding(.horizontal, DS.Space.l)
+    }
+
+    // MARK: Вкладки
+
+    /// Ряд вкладок как в концепте: выбранная — лайм со значком и подписью, остальные — значки (подпись — в подсказке
+    /// и для VoiceOver). Не помещаются — ряд прокручивается вбок.
+    private var tabBar: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: DS.Space.xs) {
+                    tabButton(id: PanelHome.tab, title: PanelHome.title, symbol: PanelHome.symbol, selected: currentSection == nil)
+                    ForEach(visibleTabs) { item in
+                        tabButton(id: item.rawValue, title: item.panelTitle, symbol: item.symbol, selected: item == currentSection,
+                                  accessibility: item.title)
+                    }
+                }
+                .padding(DS.Space.xs)
+                .frame(minWidth: DS.Size.popover.width - 2 * DS.Space.l)
+            }
+            .scrollIndicators(.never)
+            .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+            .padding(.horizontal, DS.Space.l)
+            .onAppear { proxy.scrollTo(currentSection?.rawValue ?? PanelHome.tab) }
+            .onChange(of: tab) { _, new in
+                withAnimation(DS.Motion.animation(DS.Motion.quick, reduceMotion: reduceMotion)) { proxy.scrollTo(new) }
+            }
+        }
+    }
+
+    private func tabButton(id: String, title: String, symbol: String, selected: Bool, accessibility: String? = nil) -> some View {
+        Button {
+            withAnimation(DS.Motion.animation(DS.Motion.toggle, reduceMotion: reduceMotion)) { tab = id }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 15, weight: .medium))
+                if selected {
+                    Text(title).font(DS.Font.manrope(13, .bold, relativeTo: .callout)).lineLimit(1).fixedSize()
+                }
+            }
+            .foregroundStyle(selected ? Color.dsAccInk : Color.dsMute)
+            .frame(height: 38)
+            .frame(minWidth: selected ? nil : 34, maxWidth: selected ? nil : .infinity)
+            .padding(.horizontal, selected ? DS.Space.m : 0)
+            .background {
+                if selected {
+                    RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous).fill(Color.dsAcc)
+                        .matchedGeometryEffect(id: "selectedTab", in: tabNamespace)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+        }
+        .buttonStyle(PressScaleStyle())
+        .id(id)
+        .help(accessibility ?? title)
+        .accessibilityLabel(accessibility ?? title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    // MARK: Содержимое и нижняя панель
+
+    @ViewBuilder
+    private var content: some View {
+        // Содержимое вкладки сменяется мягким переходом, без рывка (без анимации при «Уменьшить движение»).
+        ZStack {
+            Group {
+                if let section = currentSection {
+                    PanelSectionView(section: section)
+                } else {
+                    PanelHomeView()
+                }
+            }
+            .id(currentSection?.rawValue ?? PanelHome.tab)
+            .transition(.opacity)
+        }
+        .animation(DS.Motion.animation(DS.Motion.standard, reduceMotion: reduceMotion), value: tab)
+    }
+
+    private func footer(_ section: SettingsSection) -> some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Color.dsLine).frame(height: 1)
+            HStack {
+                Button {
+                    AppStatusItem.shared.closeTools()
+                    SettingsWindowController.shared.show(section: section)
+                } label: {
+                    Label("Все настройки раздела", systemImage: "gearshape")
+                        .font(DS.Font.bodyStrong)
+                        .foregroundStyle(.dsAccText)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+            .padding(.horizontal, DS.Space.l)
+            .frame(height: 40)
+        }
     }
 
     private var tabs: some View {

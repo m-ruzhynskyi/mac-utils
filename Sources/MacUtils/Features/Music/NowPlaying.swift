@@ -304,93 +304,95 @@ final class NowPlaying: NSObject, ObservableObject {
 struct NowPlayingView: View {
     @ObservedObject var player = NowPlaying.shared
     var compact = false
+    /// Демо для снимков интерфейса: не подключается к системному плееру.
+    var demo = false
     @State private var scrubbing: Double?
 
     var body: some View {
-        Group {
-            if let track = player.track {
-                content(track)
-            } else {
-                idle
+        ToolsPageFrame(.music, compact: compact) {
+            Group {
+                if let track = player.track {
+                    content(track)
+                } else {
+                    idle
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(compact ? Color.clear : Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            .overlay {
+                if !compact { RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1) }
             }
         }
-        .onAppear { player.attach() }
-        .onDisappear { player.detach() }
+        .onAppear { if !demo { player.attach() } }
+        .onDisappear { if !demo { player.detach() } }
+    }
+
+    private func artworkView(_ image: NSImage?, side: CGFloat, glyph: CGFloat) -> some View {
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                ZStack {
+                    Color.dsField
+                    Image(systemName: "music.note").font(.system(size: glyph, weight: .medium)).foregroundStyle(.dsMute)
+                }
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+        .accessibilityHidden(true)
     }
 
     /// Сейчас тишина: что играло последним (продолжить) и быстрый запуск своего плеера.
     private var idle: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: DS.Space.l) {
             if let last = player.last {
-                Text("Играло последним").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
-                Group {
-                    if let artwork = player.lastArtwork {
-                        Image(nsImage: artwork).resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        ZStack {
-                            LinearGradient(colors: [.purple.opacity(0.4), .blue.opacity(0.4)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                            Image(systemName: "music.note").font(.system(size: 34)).foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-                }
-                .frame(width: compact ? 130 : 170, height: compact ? 130 : 170)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .opacity(0.85)
-                VStack(spacing: 2) {
-                    Text(last.title).font(.headline).lineLimit(1)
+                Text("Играло последним".uppercased()).font(DS.Font.groupLabel)
+                    .tracking(DS.Font.tracking(0.12, size: 11)).foregroundStyle(.dsMute)
+                artworkView(player.lastArtwork, side: compact ? 130 : 170, glyph: 34).opacity(0.9)
+                VStack(spacing: DS.Space.xxs) {
+                    Text(last.title).font(DS.Font.headline).foregroundStyle(.dsText).lineLimit(1)
                     Text([last.artist, last.app].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .foregroundStyle(.secondary).lineLimit(1)
+                        .font(DS.Font.body).foregroundStyle(.dsMute).lineLimit(1)
                 }
                 .padding(.horizontal)
-                HStack(spacing: 10) {
+                HStack(spacing: DS.Space.m) {
                     Button { player.resumeLast() } label: { Label("Продолжить", systemImage: "play.fill") }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.graphite(.primary))
                     if !last.app.isEmpty {
                         Button { player.openLastApp() } label: { Label("Открыть \(last.app)", systemImage: "arrow.up.forward.app") }
+                            .buttonStyle(.graphite(.secondary))
                     }
                 }
             } else {
-                Image(systemName: "music.note").font(.system(size: 34)).foregroundStyle(.secondary)
-                Text(player.failed ? "Не удалось подключиться к системному плееру" : "Сейчас ничего не играет")
-                    .foregroundStyle(.secondary)
+                EmptyState(player.failed ? "Не удалось подключиться к системному плееру" : "Сейчас ничего не играет",
+                           systemImage: "music.note", compact: true)
             }
-            Divider().padding(.horizontal, 40)
             Button { player.openPreferredPlayer() } label: {
                 Label("Открыть \(NowPlaying.playerTitle(NowPlaying.preferredPlayer))", systemImage: "music.note.list")
             }
-            .buttonStyle(.link)
+            .buttonStyle(.graphite(.ghost, size: .compact))
             if !compact {
                 PlayerPicker()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        .padding(DS.Space.xl)
     }
 
     private func content(_ track: NowPlaying.Track) -> some View {
-        VStack(spacing: 14) {
-            Group {
-                if let artwork = player.artwork {
-                    Image(nsImage: artwork).resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    ZStack {
-                        LinearGradient(colors: [.purple.opacity(0.5), .blue.opacity(0.5)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        Image(systemName: "music.note").font(.system(size: 44)).foregroundStyle(.white.opacity(0.8))
-                    }
-                }
-            }
-            .frame(width: compact ? 180 : 220, height: compact ? 180 : 220)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .shadow(radius: 8, y: 3)
+        VStack(spacing: DS.Space.l) {
+            artworkView(player.artwork, side: compact ? 180 : 220, glyph: 44).shadow(color: .black.opacity(0.25), radius: 10, y: 4)
 
-            VStack(spacing: 3) {
-                Text(track.title).font(.headline).lineLimit(1)
-                Text(track.artist.isEmpty ? track.app : track.artist).foregroundStyle(.secondary).lineLimit(1)
+            VStack(spacing: DS.Space.xs) {
+                Text(track.title).font(DS.Font.headline).foregroundStyle(.dsText).lineLimit(1)
+                Text(track.artist.isEmpty ? track.app : track.artist).font(DS.Font.body).foregroundStyle(.dsMute).lineLimit(1)
                 if !track.app.isEmpty {
                     Button { player.openPlayer() } label: {
-                        Label(track.app, systemImage: "arrow.up.forward.app").font(.caption)
+                        Label(track.app, systemImage: "arrow.up.forward.app")
                     }
-                    .buttonStyle(.link)
+                    .buttonStyle(.graphite(.ghost, size: .compact))
                     .help("Открыть программу")
                 }
             }
@@ -399,7 +401,7 @@ struct NowPlayingView: View {
             if track.duration > 0 {
                 TimelineView(.periodic(from: .now, by: 0.5)) { context in
                     let position = scrubbing ?? track.position(at: context.date)
-                    VStack(spacing: 2) {
+                    VStack(spacing: DS.Space.xs) {
                         Slider(value: Binding(get: { position }, set: { scrubbing = $0 }), in: 0...track.duration) { editing in
                             if !editing, let value = scrubbing {
                                 player.seek(to: value)
@@ -407,35 +409,38 @@ struct NowPlayingView: View {
                             }
                         }
                         .controlSize(.small)
+                        .tint(.dsAccLine)
                         HStack {
                             Text(NowPlaying.time(position))
                             Spacer()
                             Text("−" + NowPlaying.time(track.duration - position))
                         }
-                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        .font(DS.Font.mono(11, relativeTo: .caption2)).foregroundStyle(.dsMute)
                     }
                 }
                 .padding(.horizontal, 24)
             }
 
-            HStack(spacing: 22) {
-                Button { player.skip(-15) } label: { Image(systemName: "gobackward.15") }
-                    .help("Назад на 15 секунд").disabled(track.duration <= 0)
-                Button { player.previous() } label: { Image(systemName: "backward.fill") }
-                    .help("Предыдущий")
+            HStack(spacing: DS.Space.m) {
+                IconButton("Назад на 15 секунд", systemImage: "gobackward.15", compact: true) { player.skip(-15) }
+                    .disabled(track.duration <= 0)
+                IconButton("Предыдущий", systemImage: "backward.fill", compact: true) { player.previous() }
                 Button { player.toggle() } label: {
-                    Image(systemName: track.playing ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 40))
+                    Image(systemName: track.playing ? "pause.fill" : "play.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.dsAccInk)
+                        .frame(width: 56, height: 56)
+                        .background(Color.dsAcc, in: Circle())
                 }
+                .buttonStyle(PressScaleStyle())
                 .help(track.playing ? "Пауза" : "Играть")
-                Button { player.next() } label: { Image(systemName: "forward.fill") }
-                    .help("Следующий")
-                Button { player.skip(15) } label: { Image(systemName: "goforward.15") }
-                    .help("Вперёд на 15 секунд").disabled(track.duration <= 0)
+                .accessibilityLabel(track.playing ? "Пауза" : "Играть")
+                IconButton("Следующий", systemImage: "forward.fill", compact: true) { player.next() }
+                IconButton("Вперёд на 15 секунд", systemImage: "goforward.15", compact: true) { player.skip(15) }
+                    .disabled(track.duration <= 0)
             }
-            .font(.system(size: 18))
-            .buttonStyle(.borderless)
         }
-        .padding(.vertical, 14)
+        .padding(.vertical, DS.Space.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -455,21 +460,25 @@ private struct PlayerPicker: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            Picker("Плеер по умолчанию", selection: $player) {
-                ForEach(installed, id: \.self) { Text(NowPlaying.playerTitle($0)).tag($0) }
-                if player.hasPrefix("http") { Text(NowPlaying.playerTitle(player)).tag(player) }
+        VStack(spacing: DS.Space.s) {
+            HStack(spacing: DS.Space.m) {
+                Text("Плеер по умолчанию").font(DS.Font.bodyStrong).foregroundStyle(.dsText)
+                Picker("Плеер по умолчанию", selection: $player) {
+                    ForEach(installed, id: \.self) { Text(NowPlaying.playerTitle($0)).tag($0) }
+                    if player.hasPrefix("http") { Text(NowPlaying.playerTitle(player)).tag(player) }
+                }
+                .graphitePicker()
             }
-            .frame(maxWidth: 320)
-            HStack {
+            HStack(spacing: DS.Space.s) {
                 Button("Другая программа…") {
                     let panel = NSOpenPanel()
                     panel.allowedContentTypes = [.application]
                     panel.directoryURL = URL(fileURLWithPath: "/Applications")
                     if panel.runModal() == .OK, let url = panel.url, let id = Bundle(url: url)?.bundleIdentifier { player = id }
                 }
+                .buttonStyle(.graphite(.secondary, size: .compact))
                 TextField("", text: $site, prompt: Text("или сайт: music.youtube.com"))
-                    .textFieldStyle(.roundedBorder).frame(width: 200)
+                    .textFieldStyle(.graphite).frame(width: 220)
                     .onSubmit {
                         let trimmed = site.trimmingCharacters(in: .whitespaces)
                         guard !trimmed.isEmpty else { return }
@@ -477,7 +486,6 @@ private struct PlayerPicker: View {
                         site = ""
                     }
             }
-            .font(.caption)
         }
     }
 }

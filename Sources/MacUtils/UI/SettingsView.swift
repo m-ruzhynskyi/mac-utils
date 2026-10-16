@@ -55,193 +55,6 @@ final class PermissionsModel: NSObject, ObservableObject {
     }
 }
 
-// MARK: - Разделы
-
-enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, hotKeys, exclusions, panel, music, share, focus, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
-         annotate, wellbeing, meetings, ai,
-         uninstaller, monitor, tasks, cleanup, shots
-
-    var id: String { rawValue }
-
-    /// Короткое имя для вкладки панели 🔧.
-    var panelTitle: String {
-        switch self {
-        case .uninstaller: return "Программы"
-        case .monitor: return "Монитор"
-        case .tasks: return "Задачи"
-        case .cleanup: return "Очистка"
-        case .shots: return "Снимки"
-        case .cutPaste: return "Вырезать"
-        case .smoothScroll: return "Прокрутка"
-        case .switcher: return "Переключатель"
-        case .screenshot: return "Скриншоты"
-        case .windows: return "Окна"
-        case .volume: return "Громкость"
-        case .layout: return "Раскладка"
-        case .shelf: return "Полка"
-        case .cheatSheet: return "Шпаргалка"
-        case .downloads: return "Загрузки"
-        case .qr: return "QR"
-        case .annotate: return "Рисование"
-        case .wellbeing: return "Перерывы"
-        case .meetings: return "Встречи"
-        case .ai: return "ИИ"
-        case .general: return "Общие"
-        case .hotKeys: return "Клавиши"
-        case .exclusions: return "Исключения"
-        case .panel: return "Панель"
-        case .music: return "Музыка"
-        case .share: return "Трансляция"
-        case .textInput: return "Ввод"
-        case .focus: return "Фокус"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .general: return "Общие"
-        case .hotKeys: return "Горячие клавиши"
-        case .exclusions: return "Исключённые программы"
-        case .panel: return "Панель в строке меню"
-        case .music: return "Музыка"
-        case .share: return "Трансляция экрана"
-        case .textInput: return "Ввод текста"
-        case .focus: return "Фокус"
-        case .cutPaste: return "Вырезать и вставить"
-        case .smoothScroll: return "Плавная прокрутка"
-        case .switcher: return "Переключатель приложений"
-        case .screenshot: return "Снимки экрана"
-        case .windows: return "Окна"
-        case .volume: return "Громкость"
-        case .layout: return "Раскладка"
-        case .shelf: return "Полка"
-        case .cheatSheet: return "Шпаргалка"
-        case .downloads: return "Загрузки"
-        case .qr: return "QR-коды"
-        case .annotate: return "Рисование на экране"
-        case .wellbeing: return "Перерывы и тёплый экран"
-        case .meetings: return "Записи встреч"
-        case .ai: return "ИИ (Ollama)"
-        case .uninstaller: return "Удаление программ"
-        case .monitor: return "Монитор системы"
-        case .tasks: return "Диспетчер задач"
-        case .cleanup: return "Очистка диска"
-        case .shots: return "Мои снимки"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .general: return "gearshape"
-        case .hotKeys: return "keyboard.badge.ellipsis"
-        case .exclusions: return "rectangle.on.rectangle.slash"
-        case .panel: return "menubar.rectangle"
-        case .music: return "music.note"
-        case .share: return "dot.radiowaves.left.and.right"
-        case .textInput: return "character.cursor.ibeam"
-        case .focus: return "scope"
-        case .cutPaste: return "scissors"
-        case .smoothScroll: return "computermouse"
-        case .switcher: return "rectangle.on.rectangle"
-        case .screenshot: return "camera.viewfinder"
-        case .windows: return "rectangle.split.2x2"
-        case .volume: return "speaker.wave.2"
-        case .layout: return "keyboard"
-        case .shelf: return "tray.full"
-        case .cheatSheet: return "command"
-        case .downloads: return "arrow.down.circle"
-        case .qr: return "qrcode"
-        case .annotate: return "pencil.tip.crop.circle"
-        case .wellbeing: return "sun.horizon"
-        case .meetings: return "waveform.badge.mic"
-        case .ai: return "sparkles"
-        case .uninstaller: return "trash"
-        case .monitor: return "gauge.with.dots.needle.67percent"
-        case .tasks: return "list.bullet.rectangle"
-        case .cleanup: return "externaldrive.badge.minus"
-        case .shots: return "photo.on.rectangle.angled"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .general: return .gray
-        case .hotKeys: return .blue
-        case .exclusions: return .orange
-        case .panel: return .teal
-        case .music: return .pink
-        case .share: return .red
-        case .textInput: return .gray
-        case .focus: return .indigo
-        case .cutPaste: return .orange
-        case .smoothScroll: return .green
-        case .switcher: return .blue
-        case .screenshot: return .purple
-        case .windows: return .indigo
-        case .volume: return .pink
-        case .layout: return .teal
-        case .shelf: return .orange
-        case .cheatSheet: return .gray
-        case .downloads: return .blue
-        case .qr: return .indigo
-        case .annotate: return .red
-        case .wellbeing: return .orange
-        case .meetings: return .green
-        case .ai: return .purple
-        case .uninstaller: return .red
-        case .monitor: return .mint
-        case .tasks: return .brown
-        case .cleanup: return .cyan
-        case .shots: return .purple
-        }
-    }
-}
-
-// MARK: - Поиск по разделам
-
-extension SettingsSection {
-    /// О чём раздел — для поиска (кроме заголовка и названий сочетаний, которые добавляются сами).
-    var keywords: String {
-        switch self {
-        case .general: return "автозапуск вход в систему dock значок строка меню разрешения универсальный доступ запись экрана полный доступ к диску обновления версия что нового репозиторий"
-        case .hotKeys: return "сочетания клавиш горячие клавиши шорткаты переназначить конфликт занято hotkey shortcut"
-        case .exclusions: return "исключения исключённые программы виртуальная машина parallels vmware utm виртуалбокс удалённый рабочий стол общий экран remote desktop teamviewer anydesk перехват клавиш колесо мыши не работает ⌥tab"
-        case .panel: return "панель вкладки порядок инструменты значок 🔧"
-        case .music: return "сейчас играет музыка spotify apple music плеер обложка"
-        case .share: return "трансляция экрана зрители id ретранслятор relay доверенные отпечаток ключ эфир"
-        case .textInput: return "ввод текста раскладка для приложения источник ввода язык"
-        case .focus: return "фокус размытие фона затемнение"
-        case .cutPaste: return "вырезать вставить finder перенос файлов ⌘x ⌘v"
-        case .smoothScroll: return "плавная прокрутка колесо мыши скорость инерция"
-        case .switcher: return "переключатель приложений ⌘tab окна превью"
-        case .screenshot: return "снимок скриншот разметка распознать текст ocr запись экрана видео gif длинный снимок шаги коллаж папка буфер"
-        case .windows: return "окна раскладка половины четверти прилипание поверх всех закрепить мониторы"
-        case .volume: return "громкость приложений звук микшер"
-        case .layout: return "раскладка ghbdtn исправить слово перевести клавиатуру"
-        case .shelf: return "полка файлы перетаскивание встряхнуть"
-        case .cheatSheet: return "шпаргалка удерживать ⌘ сочетания меню программы"
-        case .downloads: return "загрузки сортировка папки правила корзина"
-        case .qr: return "qr код ссылка распознать"
-        case .annotate: return "рисование на экране перо стрелка маркер презентация"
-        case .wellbeing: return "перерывы глаза тёплый экран ночной режим 20-20-20"
-        case .meetings: return "записи встреч созвон микрофон расшифровка whisper отчёт"
-        case .ai: return "ии ollama модель исправить текст умные имена"
-        case .uninstaller: return "удаление программ остатки приложения"
-        case .monitor: return "монитор системы процессор память диск сеть батарея"
-        case .tasks: return "диспетчер задач процессы завершить"
-        case .cleanup: return "очистка диска кэш корзина загрузки место"
-        case .shots: return "мои снимки история поиск умная папка копии снимков"
-        }
-    }
-
-    /// Всё, по чему ищется раздел.
-    var searchText: String {
-        let hotKeys = HotKeyAction.allCases.filter { $0.section == self }.map(\.title)
-        return ([title, panelTitle, keywords] + hotKeys).joined(separator: " ")
-    }
-}
-
 enum SettingsSearch {
     /// Каждое слово запроса должно встречаться в тексте (без учёта регистра, ё = е).
     static func matches(_ text: String, query: String) -> Bool {
@@ -255,43 +68,205 @@ enum SettingsSearch {
         sections.filter { matches($0.searchText, query: query) }
     }
 
+    /// Порядок показа в боковой панели: по группам (`SettingsGroup.sections`), а не по `allCases`.
+    static func displayOrder(_ sections: [SettingsSection]) -> [SettingsSection] {
+        SettingsGroup.allCases.flatMap(\.sections).filter(sections.contains)
+    }
+
     private static func normalize(_ text: String) -> String {
         text.lowercased().replacingOccurrences(of: "ё", with: "е")
     }
 }
 
+/// Окно настроек Graphite (`.audit/design-spec-v2.md` §3): боковая панель 250 pt на `side` с группами и поиском,
+/// справа — страница раздела на `bg`. Без `NavigationSplitView`: ширина и вид боковой панели под полным контролем.
 struct SettingsView: View {
-    @State private var selection: SettingsSection? = .general
+    @State private var selection: SettingsSection
     @State private var query = ""
 
+    init(selection: SettingsSection = .general) {
+        _selection = State(initialValue: selection)
+    }
+
     var body: some View {
-        let found = SettingsSearch.filter(SettingsSection.allCases, query: query)
-        NavigationSplitView {
-            List(found, selection: $selection) { section in
-                Label {
-                    Text(section.title)
-                } icon: {
-                    Image(systemName: section.symbol)
-                        .foregroundStyle(section.tint)
-                }
-                .tag(section)
-            }
-            .navigationSplitViewColumnWidth(min: 210, ideal: 230)
-            .searchable(text: $query, placement: .sidebar, prompt: "Поиск настроек")
-            .overlay {
-                if found.isEmpty { Text("Ничего не найдено").foregroundStyle(.secondary) }
-            }
-            .onChange(of: query) { _, newValue in
-                // Единственный найденный раздел сразу открывается.
-                let now = SettingsSearch.filter(SettingsSection.allCases, query: newValue)
-                if now.count == 1 { selection = now[0] }
-            }
-        } detail: {
-            SettingsSectionPage(section: selection ?? .general)
+        HStack(spacing: 0) {
+            SettingsSidebar(selection: $selection, query: $query)
+                .frame(width: DS.Size.sidebar)
+            Rectangle().fill(Color.dsLine).frame(width: 1).accessibilityHidden(true)
+            SettingsSectionPage(section: selection)
+                // Страницы, ещё не переведённые на Graphite (Form), — на общем фоне `bg`.
+                .scrollContentBackground(.hidden)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.dsBg)
+        }
+        .background(Color.dsBg)
+        // Системные контролы прежних страниц — в акценте Graphite (`accText`: текст кнопок ≥ 4,5:1 в обеих темах).
+        .tint(.dsAccText)
+        .onChange(of: query) { _, newValue in
+            // Единственный найденный раздел сразу открывается.
+            let now = SettingsSearch.filter(SettingsSection.allCases, query: newValue)
+            if now.count == 1 { selection = now[0] }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettingsSection)) { note in
             if let section = note.object as? SettingsSection { selection = section }
         }
+    }
+}
+
+/// Боковая панель: поиск, группы капсом, разделы (значок + название). Выбранный — фон `field` и цвет `accText`.
+/// ↑ ↓ с клавиатуры переходят по разделам.
+struct SettingsSidebar: View {
+    @Binding var selection: SettingsSection
+    @Binding var query: String
+
+    @FocusState private var listFocused: Bool
+
+    private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+    private var found: [SettingsSection] { SettingsSearch.displayOrder(SettingsSearch.filter(SettingsSection.allCases, query: query)) }
+    private var order: [SettingsSection] { searching ? found : SettingsGroup.allCases.flatMap(\.sections) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SidebarSearchField(text: $query)
+                .padding(.horizontal, DS.Space.s)
+                .padding(.top, DS.Size.titlebar)
+                .padding(.bottom, DS.Space.s)
+            ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                    if searching {
+                        if found.isEmpty {
+                            EmptyState("Ничего не найдено", systemImage: "magnifyingglass", compact: true)
+                        }
+                        ForEach(found) { row($0, showsGroup: true) }
+                    } else {
+                        ForEach(Array(SettingsGroup.allCases.enumerated()), id: \.element) { index, group in
+                            Text(group.title.uppercased())
+                                .font(DS.Font.groupLabel)
+                                .tracking(DS.Font.tracking(0.12, size: 11))
+                                .foregroundStyle(.dsMute)
+                                .padding(.top, index == 0 ? DS.Space.xs : 14)
+                                .padding(.bottom, DS.Space.xs)
+                                .padding(.horizontal, 10)
+                                .accessibilityLabel(group.title)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(group.sections) { row($0) }
+                        }
+                    }
+                }
+                .padding(.horizontal, DS.Space.s)
+                .padding(.bottom, DS.Space.l)
+            }
+            .scrollIndicators(.never)
+            .focusable()
+            .focused($listFocused)
+            .focusEffectDisabled()
+            .onMoveCommand(perform: move)
+            // Выбранный раздел всегда на виду (в том числе когда его открыли из панели или поиска).
+            .onAppear { proxy.scrollTo(selection, anchor: .center) }
+            .onChange(of: selection) { _, new in
+                withAnimation(DS.Motion.quick) { proxy.scrollTo(new, anchor: .center) }
+            }
+            }
+        }
+        .background(Color.dsSide)
+    }
+
+    private func row(_ section: SettingsSection, showsGroup: Bool = false) -> some View {
+        SettingsSidebarRow(section: section, selected: section == selection, showsGroup: showsGroup) {
+            selection = section
+        }
+        .id(section)
+    }
+
+    private func move(_ direction: MoveCommandDirection) {
+        guard let index = order.firstIndex(of: selection) else {
+            if let first = order.first { selection = first }
+            return
+        }
+        switch direction {
+        case .up where index > 0: selection = order[index - 1]
+        case .down where index < order.count - 1: selection = order[index + 1]
+        default: break
+        }
+    }
+}
+
+/// Строка боковой панели: значок 18 + название 14/600; невыбранная — `mute`, выбранная — фон `field` и `accText`.
+struct SettingsSidebarRow: View {
+    let section: SettingsSection
+    let selected: Bool
+    var showsGroup = false
+    let action: () -> Void
+
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var scheme
+
+    /// Выделение: в тёмной теме — `field` (как в концепте); в светлой `field` на `side` не виден (≈1,01:1),
+    /// поэтому — `panel` с обводкой `line`.
+    private var selectedFill: Color { scheme == .light ? .dsPanel : .dsField }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+        Button(action: action) {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: section.symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: DS.Size.rowIcon)
+                Text(section.title)
+                    .font(DS.Font.bodyStrong)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .truncationMode(.tail)
+                Spacer(minLength: DS.Space.xs)
+                if showsGroup {
+                    Text(section.group.title).font(DS.Font.caption).foregroundStyle(.dsMute).lineLimit(1)
+                }
+            }
+            .foregroundStyle(selected ? Color.dsAccText : Color.dsMute)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? selectedFill : (hovered ? selectedFill.opacity(0.6) : .clear), in: shape)
+            .overlay { if selected && scheme == .light { shape.strokeBorder(Color.dsLine, lineWidth: 1) } }
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(section.title)
+        .accessibilityLabel(section.title)
+        .accessibilityHint(showsGroup ? section.group.title : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Поле поиска боковой панели: `field`, радиус 10, лупа; фокус — рамка `accLine`.
+struct SidebarSearchField: View {
+    @Binding var text: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .medium)).foregroundStyle(.dsMute)
+                .accessibilityHidden(true)
+            TextField("Поиск настроек", text: $text)
+                .textFieldStyle(.plain)
+                .font(DS.Font.body)
+                .foregroundStyle(.dsText)
+                .focused($focused)
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.dsMute)
+                    .help("Очистить поиск")
+                    .accessibilityLabel("Очистить поиск")
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(Color.dsField, in: shape)
+        .overlay(shape.strokeBorder(focused ? Color.dsAccLine : Color.dsLine, lineWidth: focused ? DS.State.focusRing : 1))
     }
 }
 
@@ -331,1090 +306,5 @@ struct SettingsSectionPage: View {
             case .cleanup: DiskCleanupView(model: .shared, compact: compact).navigationTitle("Очистка диска")
             case .shots: ScreenshotLibraryView(library: .shared, compact: compact).navigationTitle("Мои снимки")
         }
-    }
-}
-
-// MARK: - Общие элементы
-
-struct StatusLine: View {
-    let ok: Bool
-    let okText: String
-    let problemText: String
-    var action: (() -> Void)?
-    var actionTitle = "Открыть настройки"
-    /// Разрешение «Запись экрана» и «Полный доступ к диску» вступают в силу только после перезапуска: macOS до него
-    /// отдаёт старое значение, поэтому рядом с «нет разрешения» есть «Перезапустить» (на случай, что оно уже выдано).
-    var relaunchHint = false
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(ok ? Color.green : Color.orange)
-            Text(ok ? okText : problemText)
-                .foregroundStyle(ok ? Color.green : Color.orange)
-            Spacer()
-            if !ok, let action {
-                Button(actionTitle, action: action)
-            }
-            if !ok, relaunchHint {
-                Button("Перезапустить") { Permissions.relaunch() }
-                    .help("Уже выдали разрешение? Оно начнёт действовать после перезапуска Mac Utils")
-            }
-        }
-    }
-}
-
-struct KeyCap: View {
-    let key: String
-
-    var body: some View {
-        Text(key)
-            .font(.system(size: 12, weight: .semibold))
-            .frame(minWidth: 26, minHeight: 24)
-            .padding(.horizontal, 4)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.08)))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.15)))
-    }
-}
-
-struct ShortcutRow: View {
-    let keys: [String]
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(keys, id: \.self) { KeyCap(key: $0) }
-            Text(text).padding(.leading, 4)
-        }
-    }
-}
-
-@MainActor
-private func accessibilityStatus(_ model: PermissionsModel, running: Bool, readyText: String) -> some View {
-    var action: (() -> Void)?
-    if !model.accessibility {
-        action = {
-            Permissions.requestAccessibility()
-            Permissions.open(.accessibility)
-        }
-    }
-    return StatusLine(
-        ok: model.accessibility && running,
-        okText: readyText,
-        problemText: model.accessibility ? "Утилита выключена" : "Нужен доступ «Универсальный доступ»",
-        action: action
-    )
-}
-
-// MARK: - Общие
-
-struct GeneralPage: View {
-    @ObservedObject private var permissions = PermissionsModel.shared
-    @ObservedObject private var hotKeys = HotKeyPrefs.shared
-    @AppStorage(Pref.menuBarIcon) private var menuBarIcon = true
-    @AppStorage(Pref.showInDock) private var showInDock = false
-
-    var body: some View {
-        Form {
-            Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(showInDock ? "Mac Utils показан в Dock: клик по значку открывает настройки." : "Mac Utils работает в фоне, без иконки в Dock.")
-                    Text("Открыть это окно: запустите приложение ещё раз или нажмите \(HotKeyRegistry.combo(for: .settings).title). Все сочетания — в разделе «Горячие клавиши».")
-                        .foregroundStyle(.secondary)
-                }
-                Toggle("Показывать в Dock", isOn: $showInDock)
-                Toggle("Значок в строке меню", isOn: $menuBarIcon)
-                if menuBarIcon {
-                    Text("Какие вкладки показывать в панели — в разделе «Панель в строке меню».")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Text("Клик — панель «Инструменты» со вкладками прямо под значком (или \(HotKeyRegistry.combo(for: .tools).title)). Настройки и выход — в шапке панели.")
-                    .foregroundStyle(.secondary)
-            }
-
-            if MoveToApplications.showsBanner {
-                Section {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "arrow.down.app").foregroundStyle(.orange)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Mac Utils не в «Программах»").font(.headline)
-                            Text("Оттуда запущенное приложение не может само обновляться.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Перенести…") { MoveToApplications.presentOffer() }
-                    }
-                }
-            }
-
-            Section("Разрешения") {
-                StatusLine(ok: permissions.accessibility,
-                           okText: "Универсальный доступ выдан",
-                           problemText: "Универсальный доступ: нужен для ⌘X/⌘V, прокрутки и переключателя",
-                           action: {
-                               Permissions.requestAccessibility()
-                               Permissions.open(.accessibility)
-                           })
-                StatusLine(ok: permissions.screenRecording,
-                           okText: "Запись экрана разрешена",
-                           problemText: "Запись экрана: нужна для снимков",
-                           action: {
-                               Permissions.requestScreenRecording()
-                               Permissions.open(.screenRecording)
-                           },
-                           relaunchHint: true)
-                StatusLine(ok: permissions.microphone == .granted,
-                           okText: "Микрофон разрешён",
-                           problemText: permissions.microphone == .denied
-                               ? "Микрофон запрещён: нужен записям встреч и записи экрана с микрофоном"
-                               : "Микрофон: нужен записям встреч и записи экрана с микрофоном",
-                           action: {
-                               if permissions.microphone == .notAsked { Permissions.requestMicrophone() }
-                               else { Permissions.open(.microphone) }
-                           },
-                           actionTitle: permissions.microphone == .notAsked ? "Разрешить" : "Открыть настройки")
-                if let disk = permissions.fullDiskAccess {
-                    StatusLine(ok: disk,
-                               okText: "Полный доступ к диску есть",
-                               problemText: "Полный доступ к диску: нужен удалению программ и очистке",
-                               action: { Permissions.openFullDiskAccess() },
-                               relaunchHint: true)
-                }
-                HStack {
-                    Text("Управление Finder (Автоматизация) macOS спросит при первом ⌘X.")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Открыть") { Permissions.open(.automation) }
-                }
-            }
-
-            UpdatesSection()
-
-            Section {
-                Toggle("Открывать при входе в систему", isOn: Binding(
-                    get: { permissions.launchAtLogin },
-                    set: { permissions.setLaunchAtLogin($0) }
-                ))
-            }
-
-            Section {
-                HStack {
-                    Text("Версия \(Updater.shared.displayVersion) (сборка \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")) · © Maksym Ruzhynskyi")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Выйти из Mac Utils") { NSApp.terminate(nil) }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Общие")
-    }
-}
-
-// MARK: - Обновления
-
-struct UpdatesSection: View {
-    @ObservedObject private var updater = Updater.shared
-    @AppStorage(Pref.autoUpdate) private var autoUpdate = true
-    @AppStorage(Pref.updateRepo) private var customRepo = ""
-
-    private var statusText: String {
-        switch updater.state {
-        case .idle: return ""
-        case .checking: return "Проверяю…"
-        case .upToDate: return "Установлена последняя версия"
-        case .available(let version): return "Доступна версия \(version)"
-        case .installing(let version): return "Устанавливаю \(version)…"
-        case .failed(let message): return message
-        }
-    }
-
-    var body: some View {
-        Section("Обновления") {
-            LabeledContent("Версия") {
-                HStack {
-                    Text(updater.displayVersion)
-                    Button("Что нового и история версий") { WhatsNewWindowController.shared.show() }
-                }
-            }
-            TextField("Репозиторий GitHub", text: $customRepo,
-                      prompt: Text(updater.repository.isEmpty ? "владелец/имя" : updater.repository))
-            Toggle("Обновляться автоматически", isOn: $autoUpdate)
-            HStack {
-                Text(statusText)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if case .available = updater.state {
-                    Button("Установить") { updater.installAvailable() }
-                }
-                Button("Проверить сейчас") { updater.check(install: false, userInitiated: true) }
-            }
-            Text("Новая версия собирается на GitHub при каждом пуше в main. Приложение проверяет релизы раз в 6 часов и само перезапускается после обновления.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-// MARK: - Вырезать и вставить
-
-struct CutPastePage: View {
-    @AppStorage(Pref.cutPaste) private var enabled = true
-    @AppStorage(Pref.cutPanel) private var showPanel = true
-    @ObservedObject private var permissions = PermissionsModel.shared
-    @ObservedObject private var service = FinderCutPaste.shared
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Вырезать и вставлять файлы в Finder", isOn: $enabled)
-                Text("⌘X — вырезать, ⌘V — переместить файлы и папки в Finder.")
-                    .foregroundStyle(.secondary)
-                Toggle("Показывать плавающую панель", isOn: $showPanel)
-                    .disabled(!enabled)
-                Text("Пока Finder активен, панель показывает вырезанные файлы.")
-                    .foregroundStyle(.secondary)
-                if enabled {
-                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Готово к вырезанию в Finder")
-                }
-            }
-
-            Section("Как пользоваться") {
-                ShortcutRow(keys: ["⌘", "X"], text: "Выделите объекты в Finder и нажмите ⌘X.")
-                ShortcutRow(keys: ["⌘", "V"], text: "Откройте нужную папку и нажмите ⌘V — объекты переместятся.")
-                Text("В текстовых полях (например, при переименовании) ⌘X и ⌘V работают как обычно. Если после ⌘X скопировать что-то другое, вырезание отменится.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Вырезать и вставить")
-    }
-}
-
-// MARK: - Плавная прокрутка
-
-struct SmoothScrollPage: View {
-    @AppStorage(Pref.smoothScroll) private var enabled = true
-    @AppStorage(Pref.smoothSpeed) private var speed = 1.0
-    @AppStorage(Pref.smoothDuration) private var duration = 0.35
-    @ObservedObject private var permissions = PermissionsModel.shared
-    @ObservedObject private var service = SmoothScroll.shared
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Плавная прокрутка", isOn: $enabled)
-                Text("Колесо обычной мыши прокручивает плавно, как трекпад. Трекпад и Magic Mouse не затрагиваются.")
-                    .foregroundStyle(.secondary)
-                if enabled {
-                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Плавная прокрутка работает")
-                }
-            }
-            Section("Настройка") {
-                LabeledContent("Скорость") {
-                    HStack {
-                        Slider(value: $speed, in: 0.3...3)
-                        Text(String(format: "%.1f×", speed)).monospacedDigit().frame(width: 40)
-                    }
-                }
-                .disabled(!enabled)
-                LabeledContent("Плавность") {
-                    HStack {
-                        Slider(value: $duration, in: 0.1...0.9)
-                        Text(String(format: "%.2f с", duration)).monospacedDigit().frame(width: 50)
-                    }
-                }
-                .disabled(!enabled)
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Плавная прокрутка")
-    }
-}
-
-// MARK: - Переключатель
-
-struct SwitcherPage: View {
-    @AppStorage(Pref.switcher) private var enabled = true
-    @AppStorage(Pref.switcherModifier) private var modifier = "option"
-    @AppStorage(Pref.switcherPreviews) private var previews = true
-    @ObservedObject private var permissions = PermissionsModel.shared
-    @ObservedObject private var service = AppSwitcher.shared
-
-    private var mod: String { modifier == "command" ? "⌘" : "⌥" }
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Переключатель приложений", isOn: $enabled)
-                Picker("Сочетание", selection: $modifier) {
-                    Text("⌥ Tab").tag("option")
-                    Text("⌘ Tab (заменить системный)").tag("command")
-                }
-                .disabled(!enabled)
-                Toggle("Показывать превью окон", isOn: $previews)
-                    .disabled(!enabled)
-                if enabled && previews && !permissions.screenRecording {
-                    StatusLine(ok: false, okText: "", problemText: "Для превью нужно разрешение «Запись экрана»",
-                               action: {
-                                   Permissions.requestScreenRecording()
-                                   Permissions.open(.screenRecording)
-                               },
-                               relaunchHint: true)
-                }
-                if enabled {
-                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Переключатель работает")
-                }
-            }
-            Section("Как пользоваться") {
-                ShortcutRow(keys: [mod, "Tab"], text: "Удерживайте \(mod) и нажимайте Tab, отпустите \(mod) — переход.")
-                ShortcutRow(keys: ["⇧", "Tab"], text: "Назад по списку. Также работают ← и →.")
-                ShortcutRow(keys: ["Q"], text: "Завершить выбранное приложение.")
-                ShortcutRow(keys: ["H"], text: "Скрыть выбранное приложение.")
-                ShortcutRow(keys: ["Esc"], text: "Закрыть без переключения.")
-                Text("Приложения идут в порядке последнего использования. Если у приложения нет окон, оно откроет новое, как при клике по Dock; свёрнутое окно разворачивается.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Переключатель приложений")
-    }
-}
-
-// MARK: - Инструменты
-
-// MARK: - Удаление программ
-
-struct UninstallerPage: View {
-    @ObservedObject private var permissions = PermissionsModel.shared
-    @ObservedObject private var model = UninstallerModel.shared
-    var compact = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            fullDiskAccessBar
-            UninstallerView(model: model, compact: compact)
-        }
-        .navigationTitle("Удаление программ")
-        .onAppear {
-            permissions.refresh()
-            if model.apps.isEmpty { model.reload() }
-        }
-    }
-
-    /// Нужен для контейнеров приложений из App Store и части защищённых папок.
-    @ViewBuilder
-    private var fullDiskAccessBar: some View {
-        if permissions.fullDiskAccess == false {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Нет «Полного доступа к диску» — часть контейнеров может не удалиться.")
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Уже включили? Доступ действует после перезапуска Mac Utils. Если и после перезапуска не видно — удалите Mac Utils из списка кнопкой «−» и добавьте снова.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Button("Открыть настройки") { Permissions.openFullDiskAccess() }
-                        Button("Перезапустить Mac Utils") { Permissions.relaunch() }
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(10)
-            .background(Color.orange.opacity(0.1))
-        } else if permissions.fullDiskAccess == true && !compact {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text("Полный доступ к диску есть").foregroundStyle(.secondary)
-                Spacer()
-            }
-            .font(.caption)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-        }
-    }
-}
-
-// MARK: - Громкость
-
-struct VolumePage: View {
-    @AppStorage(Pref.appVolume) private var enabled = true
-    @AppStorage(Pref.appVolumeKeyCode) private var keyCode = LayoutHotKey.controlOptionV.keyCode
-    @AppStorage(Pref.appVolumeModifiers) private var modifiers = LayoutHotKey.controlOptionV.modifiers
-    @ObservedObject private var model = AppVolume.shared
-
-    private var hotKey: LayoutHotKey { LayoutHotKey(keyCode: keyCode, modifiers: modifiers) }
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Громкость для каждого приложения", isOn: $enabled)
-                    .disabled(!AppVolume.isSupported)
-                Text("Своя громкость (0–150 %) и выключение звука для каждой программы. Громкость запоминается. Перехватываются только приложения, у которых она не 100 % — остальные звучат как обычно.")
-                    .foregroundStyle(.secondary)
-                if !AppVolume.isSupported {
-                    Text("Нужна macOS 14.2 или новее.").foregroundStyle(.orange)
-                }
-            }
-            if enabled && AppVolume.isSupported {
-                Section("Сейчас играют") {
-                    AppVolumeList(model: model)
-                    if model.permissionSuspect {
-                        HStack {
-                            Text("Перехват не получает звук — разрешите Mac Utils «Запись системного звука» (Конфиденциальность → Запись экрана и системного звука).")
-                                .foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer()
-                            Button("Открыть настройки") { model.openPrivacySettings() }
-                        }
-                    }
-                    if let error = model.lastError {
-                        Text(error).foregroundStyle(.orange).font(.caption)
-                    }
-                }
-                Section("Панель громкости") {
-                    LabeledContent("Открыть панель") {
-                        ShortcutRecorder(hotKey: hotKey, suspend: { recording in
-                            if recording { HotKeyCenter.shared.unregister(id: HotKeyID.appVolume) } else { AppVolume.shared.sync() }
-                        }, validate: { HotKeyPrefs.shared.problem($0, for: .appVolume) }) {
-                            $0.save(codeKey: Pref.appVolumeKeyCode, modifiersKey: Pref.appVolumeModifiers)
-                        }
-                    }
-                    Text("Плавающая панель со списком играющих приложений. Esc или клик мимо — закрыть. Двойной клик по процентам — вернуть 100 %.")
-                        .foregroundStyle(.secondary)
-                    Text("При первом изменении громкости macOS спросит разрешение на запись системного звука — оно нужно, чтобы перехватить звук приложения. Ничего не записывается и не сохраняется.")
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Громкость")
-        .onAppear { AppVolume.shared.refresh() }
-    }
-}
-
-// MARK: - QR
-
-struct QRPage: View {
-    @AppStorage(Pref.qr) private var enabled = true
-    @ObservedObject private var permissions = PermissionsModel.shared
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Мгновенный QR", isOn: $enabled)
-                Text("Одно сочетание для двух дел: сделать QR-код из выделенного текста или прочитать QR-код с экрана.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Section("Как пользоваться") {
-                ActionShortcutRow(action: .qr, text: "Выделен текст — появится его QR-код: скопировать картинку или сохранить.")
-                ActionShortcutRow(action: .qr, text: "Ничего не выделено — QR-коды на экране распознаются и копируются; ссылку можно сразу открыть.")
-                if !permissions.screenRecording {
-                    Text("Для чтения QR с экрана нужно разрешение «Запись экрана».").foregroundStyle(.orange)
-                }
-            }
-            .disabled(!enabled)
-        }
-        .formStyle(.grouped)
-        .navigationTitle("QR-коды")
-    }
-}
-
-// MARK: - Полка и шпаргалка
-
-struct ShelfPage: View {
-    @AppStorage(Pref.dropShelf) private var enabled = true
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Полка для файлов", isOn: $enabled)
-                Text("Временное место для файлов: положите их на полку, перейдите в нужную папку или программу и вытащите обратно — по одному или все сразу.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Section("Как пользоваться") {
-                ShortcutRow(keys: ["↔︎"], text: "Перетаскивая файлы, встряхните мышь влево-вправо — полка появится рядом с курсором.")
-                ActionShortcutRow(action: .dropShelf, text: "Показать или скрыть полку.")
-                Text("Вытащенные с полки файлы с неё убираются; чтобы оставить их на полке, держите ⌥. Сами файлы никуда не копируются, пока вы их не перетащите.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .disabled(!enabled)
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Полка")
-    }
-}
-
-struct CheatSheetPage: View {
-    @AppStorage(Pref.cheatSheet) private var enabled = true
-    @AppStorage(Pref.cheatSheetDelay) private var delay = 0.8
-    @AppStorage(Pref.cheatSheetSticky) private var sticky = false
-    @ObservedObject private var permissions = PermissionsModel.shared
-    @ObservedObject private var service = CheatSheet.shared
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Шпаргалка сочетаний клавиш", isOn: $enabled)
-                Text("Удерживайте ⌘ — появятся все сочетания клавиш активной программы (из её меню) и Mac Utils. Отпустите ⌘ — шпаргалка исчезнет.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if enabled {
-                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Шпаргалка работает")
-                }
-            }
-            Section("Настройка") {
-                Picker("Держать ⌘", selection: $delay) {
-                    Text("0,5 с").tag(0.5)
-                    Text("0,8 с").tag(0.8)
-                    Text("1,2 с").tag(1.2)
-                    Text("2 с").tag(2.0)
-                }
-                Toggle(isOn: $sticky) {
-                    VStack(alignment: .leading) {
-                        Text("Оставлять открытой")
-                        Text(sticky ? "Подержали ⌘ — шпаргалка открылась и остаётся; нажмите ⌘ ещё раз (или Esc), чтобы закрыть."
-                                    : "Шпаргалка видна, только пока ⌘ зажата.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Text("Когда сочетаний много, листайте колесом мыши или трекпадом, наведя курсор на шпаргалку.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .disabled(!enabled)
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Шпаргалка")
-    }
-}
-
-// MARK: - Окна
-
-struct WindowsPage: View {
-    @AppStorage(Pref.windowSnap) private var enabled = true
-    @AppStorage(Pref.windowSnapDrag) private var drag = true
-    @AppStorage(Pref.windowSnapGap) private var gap = 0
-    @AppStorage(Pref.windowSnapModifier) private var modifier = WindowSnapModifier.controlOption.rawValue
-    @ObservedObject private var permissions = PermissionsModel.shared
-    @ObservedObject private var service = WindowTiler.shared
-
-    /// Встроенная в macOS раскладка перетаскиванием (Рабочий стол и Dock).
-    private var systemTiling: Bool {
-        UserDefaults(suiteName: "com.apple.WindowManager")?.object(forKey: "EnableTilingByEdgeDrag") as? Bool ?? true
-    }
-
-    private var symbols: String { (WindowSnapModifier(rawValue: modifier) ?? .controlOption).symbols }
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Раскладка окон", isOn: $enabled)
-                Text("Как в Windows: перетащите окно за заголовок к краю экрана — оно займёт половину, к углу — четверть, к верхнему краю — весь экран. Или горячими клавишами.")
-                    .foregroundStyle(.secondary)
-                if enabled {
-                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Раскладка окон работает")
-                }
-            }
-            Section("Настройка") {
-                Toggle("Прилипание при перетаскивании", isOn: $drag)
-                if drag && systemTiling {
-                    Text("В macOS тоже включена раскладка перетаскиванием — подсказки могут дублироваться. Её можно выключить: Системные настройки → Рабочий стол и Dock → «Перетаскивать окна к краям экрана».")
-                        .foregroundStyle(.orange)
-                }
-                Picker("Отступ между окнами", selection: $gap) {
-                    Text("Нет").tag(0)
-                    Text("4 pt").tag(4)
-                    Text("8 pt").tag(8)
-                }
-                Picker("Модификатор клавиш", selection: $modifier) {
-                    ForEach(WindowSnapModifier.allCases) { option in
-                        Text(option.symbols).tag(option.rawValue)
-                    }
-                }
-                if !service.failedHotKeys.isEmpty {
-                    Label("Заняты другим приложением: \(service.failedHotKeys.joined(separator: ", "))",
-                          systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                }
-            }
-            .disabled(!enabled)
-            Section("Горячие клавиши") {
-                ForEach(WindowTiler.bindings, id: \.label) { binding in
-                    ShortcutRow(keys: Array(symbols).map(String.init) + [binding.label], text: binding.title)
-                }
-                Text("Повторное нажатие той же половины переносит окно на следующий монитор.")
-                    .foregroundStyle(.secondary)
-            }
-            WindowExtrasSections()
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Окна")
-    }
-}
-
-/// Образец фона в настройках снимков.
-private struct BackgroundSwatch: View {
-    let background: ShotBackground
-    let selected: Bool
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
-        ZStack {
-            if background == .transparent {
-                shape.fill(Color.gray.opacity(0.15))
-                Image(systemName: "circle.slash").foregroundStyle(.secondary).font(.system(size: 11))
-            } else {
-                shape.fill(LinearGradient(colors: background.colors.map(Color.init(nsColor:)),
-                                          startPoint: .topLeading, endPoint: .bottomTrailing))
-                // Мини-окно поверх фона.
-                RoundedRectangle(cornerRadius: 2).fill(.white).frame(width: 18, height: 12)
-                    .overlay(alignment: .topLeading) {
-                        HStack(spacing: 1.5) {
-                            Circle().fill(Color.red).frame(width: 2.5)
-                            Circle().fill(Color.yellow).frame(width: 2.5)
-                            Circle().fill(Color.green).frame(width: 2.5)
-                        }
-                        .padding(1.5)
-                    }
-                    .shadow(radius: 1)
-            }
-        }
-        .frame(width: 34, height: 24)
-        .overlay(shape.stroke(selected ? Color.accentColor : Color.primary.opacity(0.15), lineWidth: selected ? 2 : 1))
-        .contentShape(shape)
-    }
-}
-
-// MARK: - Раскладка
-
-struct LayoutPage: View {
-    @AppStorage(Pref.layoutFix) private var enabled = true
-    @AppStorage(Pref.layoutFixSwitchSource) private var switchSource = false
-    @AppStorage("layoutFixCyrillic") private var cyrillic = "auto"
-    @AppStorage(Pref.layoutFixKeyCode) private var keyCode = LayoutHotKey.commandBracket.keyCode
-    @AppStorage(Pref.layoutFixModifiers) private var modifiers = LayoutHotKey.commandBracket.modifiers
-    @ObservedObject private var permissions = PermissionsModel.shared
-    @ObservedObject private var service = LayoutFix.shared
-
-    private var current: LayoutHotKey { LayoutHotKey(keyCode: keyCode, modifiers: modifiers) }
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Исправление раскладки", isOn: $enabled)
-                Text("Набрали по-русски в английской раскладке (ghbdtn) или наоборот (руддщ)? Нажмите горячую клавишу — текст переведётся (привет, hello).")
-                    .foregroundStyle(.secondary)
-                if enabled {
-                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Исправление раскладки работает")
-                }
-            }
-            Section("Горячая клавиша") {
-                LabeledContent("Перевести") {
-                    ShortcutRecorder(hotKey: current, validate: { HotKeyPrefs.shared.problem($0, for: .layoutFix) }) { $0.save() }
-                }
-                LabeledContent("Готовые варианты") {
-                    HStack {
-                        ForEach(LayoutHotKey.presets, id: \.title) { preset in
-                            Button(preset.title) { preset.save() }
-                                .disabled(preset == current)
-                        }
-                    }
-                }
-                if enabled && !service.hotKeyRegistered && permissions.accessibility {
-                    Label("Сочетание \(current.title) занято системой или другим приложением — выберите другое.",
-                          systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                }
-                if let note = current.conflictNote {
-                    Text(note).foregroundStyle(.secondary)
-                }
-            }
-            .disabled(!enabled)
-            AppInputSourceSection()
-            Section("Как пользоваться") {
-                ShortcutRow(keys: current.keys, text: "Без выделения — последнее набранное слово. С выделением — весь выделенный текст.")
-                Text("Повторное нажатие возвращает слово обратно. Клик мышью, стрелки и Enter начинают слово заново. В полях паролей не работает.")
-                    .foregroundStyle(.secondary)
-                Toggle("Переключать раскладку после исправления", isOn: $switchSource)
-                    .disabled(!enabled)
-                Picker("Кириллица", selection: $cyrillic) {
-                    Text("Авто (по включённым раскладкам)").tag("auto")
-                    Text("Русская").tag("russian")
-                    Text("Украинская").tag("ukrainian")
-                }
-                .disabled(!enabled)
-                Text("Какую раскладку подставлять при переводе с английской: ghbdtn → привет (русская) или ghbdsn → привіт (украинская). Текст кириллицей всегда переводится в английскую.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Раскладка")
-    }
-}
-
-/// Запись сочетания: нажмите кнопку, затем нужные клавиши (нужен ⌘, ⌥ или ⌃). Esc — отмена.
-struct ShortcutRecorder: View {
-    let hotKey: LayoutHotKey
-    /// Пока идёт запись, старое сочетание нужно отключить, чтобы оно не сработало.
-    var suspend: (Bool) -> Void = { LayoutFix.shared.suspendHotKey($0) }
-    /// Почему сочетание нельзя сохранить (например, оно уже занято другой функцией Mac Utils); nil — можно.
-    var validate: (LayoutHotKey) -> String? = { _ in nil }
-    let onChange: (LayoutHotKey) -> Void
-
-    @State private var recording = false
-    @State private var monitor: Any?
-    @State private var hint: String?
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if let hint {
-                Text(hint).font(.caption).foregroundStyle(.orange)
-            }
-            Button(recording ? "Нажмите сочетание…" : hotKey.title) {
-                recording ? stop() : start()
-            }
-            .frame(minWidth: 140)
-        }
-        .onDisappear { stop() }
-    }
-
-    private func start() {
-        recording = true
-        hint = nil
-        suspend(true)
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 53 { // Esc
-                stop()
-                return nil
-            }
-            guard let key = LayoutHotKey(event: event) else {
-                hint = "Нужен ⌘, ⌥ или ⌃"
-                return nil
-            }
-            if let problem = validate(key) {
-                hint = problem
-                return nil
-            }
-            onChange(key)
-            stop()
-            return nil
-        }
-    }
-
-    private func stop() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-        if recording {
-            recording = false
-            suspend(false)
-        }
-    }
-}
-
-// MARK: - Снимки
-
-struct ScreenshotPage: View {
-    @AppStorage(Pref.screenshot) private var enabled = true
-    @AppStorage(Pref.screenshotFolder) private var folder = ""
-    @AppStorage(Pref.screenshotDestination) private var destination = "clipboard"
-    @AppStorage(Pref.screenshotStepsLayout) private var stepsLayout = StepsLayout.auto.rawValue
-    @AppStorage(Pref.screenshotStepsEqualSize) private var stepsEqualSize = true
-    @AppStorage(Pref.screenshotStepsFrame) private var stepsFrame = true
-    @AppStorage(Pref.screenshotStepsTitles) private var stepsTitles = true
-    @AppStorage(Pref.screenshotFrameDefault) private var frameDefault = false
-    @AppStorage(Pref.screenshotWindowSnap) private var windowSnap = false
-    @AppStorage(Pref.screenshotBackground) private var background = ShotBackground.sky.rawValue
-    @AppStorage(Pref.screenshotLibrary) private var library = true
-    @AppStorage(Pref.screenshotLibrarySystem) private var librarySystem = false
-    @AppStorage(Pref.screenshotLibraryClipboard) private var libraryClipboard = true
-    @AppStorage(Pref.screenshotLibraryTrashDays) private var libraryTrashDays = 0
-    @AppStorage(Pref.recordingFormat) private var recordingFormat = ScreenRecorder.Format.mp4.rawValue
-    @AppStorage(Pref.recordingFPS) private var recordingFPS = 30
-    @AppStorage(Pref.recordingCursor) private var recordingCursor = true
-    @AppStorage(Pref.recordingAudio) private var recordingAudio = false
-    @AppStorage(Pref.recordingMicrophone) private var recordingMicrophone = false
-    @AppStorage(Pref.recordingFolder) private var recordingFolder = ""
-    @AppStorage(Pref.recordingCopy) private var recordingCopy = true
-    @ObservedObject private var permissions = PermissionsModel.shared
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Снимки экрана", isOn: $enabled)
-                Text("Своя утилита по мотивам macshot: выделение области или окна, стрелки, рамки, текст, маркер, размытие и распознавание текста.")
-                    .foregroundStyle(.secondary)
-                if enabled {
-                    StatusLine(ok: permissions.screenRecording,
-                               okText: "Снимки готовы",
-                               problemText: "Нужно разрешение «Запись экрана»",
-                               action: {
-                                   Permissions.requestScreenRecording()
-                                   Permissions.open(.screenRecording)
-                               },
-                               relaunchHint: true)
-                }
-            }
-            Section("Выбор области") {
-                Picker("Что снимать", selection: $windowSnap) {
-                    Text("Окно под курсором (клик) или своя область").tag(true)
-                    Text("Только своя область").tag(false)
-                }
-                Text("Переключается и прямо при съёмке: кнопка вверху экрана или Tab. Названия кнопок панели видны при наведении.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .disabled(!enabled)
-            Section("Сохранение") {
-                Picker("Куда сохранять", selection: $destination) {
-                    Text("В буфер обмена").tag("clipboard")
-                    Text("В папку").tag("folder")
-                    Text("В буфер и в папку").tag("both")
-                }
-                LabeledContent("Папка снимков и видео") {
-                    HStack {
-                        Text(Pref.screenshotDirectory.path)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .foregroundStyle(.secondary)
-                        Button("Выбрать…", action: chooseFolder)
-                        Button {
-                            NSWorkspace.shared.open(Pref.screenshotDirectory)
-                        } label: { Image(systemName: "folder") }
-                        .help("Показать в Finder")
-                        if !folder.isEmpty {
-                            Button { folder = "" } label: { Image(systemName: "arrow.uturn.backward") }
-                                .help("Вернуть Рабочий стол")
-                        }
-                    }
-                }
-                Text("Действует для Enter, двойного клика и длинного снимка. Кнопки «Скопировать» (⌘C) и «Сохранить» (⌘S) работают как обычно.")
-                    .foregroundStyle(.secondary)
-            }
-            Section("Умная папка") {
-                Toggle("Раскладывать снимки по дням и программам", isOn: $library)
-                Text("Снимки и записи экрана сохраняются в «Снимки экрана/дата/программа» внутри папки снимков, текст на снимках распознаётся — искать и смотреть всё можно в «Мои снимки» (раздел слева и вкладка «Снимки» в панели 🔧).")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Toggle("Забирать и системные снимки (⌘⇧3, ⌘⇧4)", isOn: $librarySystem)
-                    .disabled(!library)
-                Toggle("Сохранять и скопированные в буфер", isOn: $libraryClipboard)
-                    .disabled(!library)
-                Picker("Удалять снимки и видео старше", selection: $libraryTrashDays) {
-                    Text("Никогда").tag(0)
-                    Text("7 дней").tag(7)
-                    Text("30 дней").tag(30)
-                    Text("90 дней").tag(90)
-                }
-                .disabled(!library)
-                if libraryTrashDays > 0 {
-                    Text("Старые снимки и видео из умной папки уходят в Корзину — безвозвратно ничего не удаляется.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Button("Разложить уже сохранённые снимки и видео") {
-                    let count = ScreenshotLibrary.shared.importExisting()
-                    Toast.show("Разложено: \(count)", symbol: "photo.on.rectangle.angled", tint: .green)
-                }
-                .disabled(!library)
-            }
-            Section("Оформление") {
-                LabeledContent("Фон") {
-                    HStack(spacing: 8) {
-                        ForEach(ShotBackground.allCases) { option in
-                            BackgroundSwatch(background: option, selected: background == option.rawValue)
-                                .onTapGesture { background = option.rawValue }
-                                .help(option.title)
-                        }
-                    }
-                }
-                Toggle("Рамка окна macOS для обычных снимков по умолчанию", isOn: $frameDefault)
-                Text("В режиме снимка рамку включает и выключает кнопка «Рамка» или клавиша F. Снимок кладётся в окно со «светофором», скруглёнными углами и тенью на выбранном фоне.")
-                    .foregroundStyle(.secondary)
-            }
-            Section("Запись экрана") {
-                Picker("Формат", selection: $recordingFormat) {
-                    ForEach(ScreenRecorder.Format.allCases) { format in
-                        Text(format.title).tag(format.rawValue)
-                    }
-                }
-                if recordingFormat == ScreenRecorder.Format.mp4.rawValue {
-                    Picker("Кадров в секунду", selection: $recordingFPS) {
-                        Text("30").tag(30)
-                        Text("60").tag(60)
-                    }
-                    Toggle("Звук системы", isOn: $recordingAudio)
-                    if #available(macOS 15.0, *) {
-                        Toggle("Микрофон", isOn: $recordingMicrophone)
-                    }
-                } else {
-                    Text("GIF: 15 кадров в секунду, ширина до 960 px, без звука, повтор по кругу.")
-                        .foregroundStyle(.secondary)
-                }
-                Toggle("Показывать курсор", isOn: $recordingCursor)
-                LabeledContent("Папка для видео") {
-                    HStack {
-                        Text(recordingFolder.isEmpty ? "Как у снимков (\(Pref.screenshotDirectory.lastPathComponent))"
-                                                     : Pref.recordingDirectory.path)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .foregroundStyle(.secondary)
-                        Button("Выбрать…", action: chooseRecordingFolder)
-                        Button {
-                            NSWorkspace.shared.open(Pref.recordingDirectory)
-                        } label: {
-                            Image(systemName: "folder")
-                        }
-                        .help("Показать в Finder")
-                        if !recordingFolder.isEmpty {
-                            Button {
-                                recordingFolder = ""
-                            } label: {
-                                Image(systemName: "arrow.uturn.backward")
-                            }
-                            .help("Как у снимков")
-                        }
-                    }
-                }
-                Toggle("Копировать видео в буфер обмена", isOn: $recordingCopy)
-                ShortcutRow(keys: ["R"], text: "В режиме снимка — записать выделенную область. Стоп — кнопкой на панели или ⌘⇧X, Esc — отмена.")
-                Text("Файл сохраняется в папку для видео и (если включено) копируется в буфер обмена — его можно сразу вставить в чат.")
-                    .foregroundStyle(.secondary)
-            }
-            Section("Коллаж шагов") {
-                Picker("Расположение", selection: $stepsLayout) {
-                    ForEach(StepsLayout.allCases) { layout in
-                        Text(layout.title).tag(layout.rawValue)
-                    }
-                }
-                Toggle("Одинаковый размер", isOn: $stepsEqualSize)
-                Toggle("Рамка окна macOS", isOn: $stepsFrame)
-                Toggle("Подпись «Шаг N» в заголовке окна", isOn: $stepsTitles)
-                    .disabled(!stepsFrame)
-                ShortcutRow(keys: ["A"], text: "В режиме снимка — «Шаг +»: область с разметкой добавляется в коллаж.")
-                Text("Внизу экрана появится панель: «Ещё шаг» (или ⌘⇧X) — следующий снимок, «Готово» — собрать одну картинку с номерами 1, 2, 3 и сохранить её по настройке «Куда сохранять», «Отмена» — сбросить.")
-                    .foregroundStyle(.secondary)
-            }
-            Section("Горячие клавиши") {
-                ActionShortcutRow(action: .screenshot, text: "Снимок области с разметкой.")
-                ActionShortcutRow(action: .screenshotOCR, text: "Распознать текст в области и скопировать.")
-                Text("Изменить — в разделе «Горячие клавиши».").font(.caption).foregroundStyle(.secondary)
-            }
-            Section("В режиме снимка") {
-                Text("Потяните мышью, чтобы выделить область. Клик без перетаскивания снимает окно под курсором (или весь экран).")
-                ShortcutRow(keys: ["1…7"], text: "Стрелка, прямоугольник, карандаш, маркер, текст, нумерация 1 2 3, размытие.")
-                ShortcutRow(keys: ["V"], text: "Выбор: перетаскивайте выделенную область целиком.")
-                ShortcutRow(keys: ["F"], text: "Рамка окна macOS вокруг снимка: вкл/выкл.")
-                Text("Нарисованное можно перетаскивать любым инструментом: наведите и тяните. Delete удаляет выбранный элемент, кнопка цвета перекрашивает его, синие ручки меняют размер (у стрелки — концы). За белые маркеры по краям меняется размер области.")
-                    .foregroundStyle(.secondary)
-                ShortcutRow(keys: ["⇕"], text: "Длинный снимок: кнопка на панели, затем медленно прокручивайте вниз и нажмите «Готово» (Enter).")
-                ShortcutRow(keys: ["⇧"], text: "Ровная стрелка / квадрат при рисовании.")
-                ShortcutRow(keys: ["Enter"], text: "Готово: в буфер или в папку — по настройке выше (также двойной клик).")
-                ShortcutRow(keys: ["⌘", "C"], text: "Скопировать в буфер обмена.")
-                ShortcutRow(keys: ["⌘", "S"], text: "Сохранить в папку.")
-                ShortcutRow(keys: ["⌘", "Z"], text: "Отменить последнее действие (также ⌃Z). ⇧⌘Z или ⇧⌃Z — повторить.")
-                ShortcutRow(keys: ["Esc"], text: "Закрыть.")
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Снимки экрана")
-    }
-
-    private func chooseRecordingFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Выбрать"
-        panel.directoryURL = Pref.recordingDirectory
-        if panel.runModal() == .OK, let url = panel.url {
-            recordingFolder = url.path
-        }
-    }
-
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Выбрать"
-        panel.directoryURL = Pref.screenshotDirectory
-        if panel.runModal() == .OK, let url = panel.url {
-            folder = url.path
-        }
-    }
-}
-
-// MARK: - Панель в строке меню
-
-struct PanelSettingsPage: View {
-    @ObservedObject private var hotKeys = HotKeyPrefs.shared
-    @AppStorage(Pref.menuBarIcon) private var menuBarIcon = true
-    @AppStorage(Pref.toolsPanelTabs) private var panelTabs = PanelTabs.defaultValue
-
-    private func tabBinding(_ section: SettingsSection) -> Binding<Bool> {
-        Binding(get: { PanelTabs.sections(panelTabs).contains(section) }, set: { show in
-            var list = PanelTabs.sections(panelTabs)
-            if show { list.append(section) } else { list.removeAll { $0 == section } }
-            // Хотя бы одна вкладка остаётся; новая — в конец ряда.
-            guard !list.isEmpty else { return }
-            panelTabs = PanelTabs.value(list)
-        })
-    }
-
-    private func move(_ section: SettingsSection, by offset: Int) {
-        var list = PanelTabs.sections(panelTabs)
-        guard let index = list.firstIndex(of: section), list.indices.contains(index + offset) else { return }
-        list.swapAt(index, index + offset)
-        panelTabs = PanelTabs.value(list)
-    }
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Значок 🔧 в строке меню", isOn: $menuBarIcon)
-                Text("Клик по значку — панель с вкладками прямо под ним (или \(HotKeyRegistry.combo(for: .tools).title)). Настройки, тёплый экран и выход — в шапке панели.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Section("Порядок вкладок") {
-                let order = PanelTabs.sections(panelTabs)
-                ForEach(Array(order.enumerated()), id: \.element) { index, section in
-                    HStack {
-                        Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
-                        Label(section.title, systemImage: section.symbol)
-                        Spacer()
-                        Button { move(section, by: -1) } label: { Image(systemName: "chevron.up") }
-                            .disabled(index == 0).help("Левее")
-                        Button { move(section, by: 1) } label: { Image(systemName: "chevron.down") }
-                            .disabled(index == order.count - 1).help("Правее")
-                    }
-                    .buttonStyle(.borderless)
-                }
-                .onMove { from, to in
-                    var list = PanelTabs.sections(panelTabs)
-                    list.move(fromOffsets: from, toOffset: to)
-                    panelTabs = PanelTabs.value(list)
-                }
-                Text("Сверху вниз — слева направо в панели. Перетащите строку или нажмите стрелки.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .disabled(!menuBarIcon)
-            Section("Вкладки панели") {
-                Text("Любые возможности Mac Utils — отметьте, что должно быть под рукой. Если вкладок много, их ряд листается вбок.")
-                    .font(.caption).foregroundStyle(.secondary)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), alignment: .leading)], alignment: .leading, spacing: 8) {
-                    ForEach(PanelTabs.available) { section in
-                        Toggle(isOn: tabBinding(section)) {
-                            Label(section.title, systemImage: section.symbol)
-                        }
-                        .toggleStyle(.checkbox)
-                    }
-                }
-            }
-            .disabled(!menuBarIcon)
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Панель в строке меню")
     }
 }
