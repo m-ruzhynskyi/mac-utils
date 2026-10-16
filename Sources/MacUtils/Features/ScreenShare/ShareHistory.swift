@@ -138,6 +138,12 @@ final class ShareHistory: ObservableObject {
         update(id) { $0.hostKey = key }
     }
 
+    /// Забыть ключ ведущего: он больше не подтверждает ключ (ID освобождён или стоит старая версия), пользователь согласился.
+    func unpinHost(id: String) {
+        guard Self.isValidID(id), entries.contains(where: { $0.id == id }) else { return }
+        update(id) { $0.hostKey = nil }
+    }
+
     func hostKey(for id: String) -> String? { entries.first { $0.id == id }?.hostKey }
 
     func label(for id: String) -> String? { entries.first { $0.id == id }.map(\.title) }
@@ -191,6 +197,8 @@ final class ShareHistory: ObservableObject {
     static var statusIdentity: ShareIdentity?
     /// Сервер, который не понял `POST /status` (старый или сторонний relay): до смены сервера только `GET`.
     private var signedStatusUnsupported: String?
+    /// После 403 `not-owner` подписанный запрос откладывается (ключ привяжется при первой трансляции).
+    private var signedStatusPausedUntil: (memo: String, until: Date)?
 
     /// Что делать с ответом на подписанный `POST /status` (N3).
     enum SignedStatusAction: Equatable {
@@ -198,15 +206,26 @@ final class ShareHistory: ObservableObject {
         case use
         /// Сервер не понял или не принял `POST` надолго (200 без карты, 403, 404, 405): дальше только `GET`.
         case rememberUnsupportedThenGet
+        /// 403 `not-owner`: ID ещё не привязан к ключу (первая трансляция впереди). Сейчас `GET`, подпись — через несколько минут.
+        case getOnceRetryLater
         /// 429: лимит — не добавлять к нему ещё и `GET`, пропустить тик.
         case skipTick
         /// Разовая ошибка (подпись, 5xx, нет связи): один `GET` в этом тике.
         case getOnce
     }
 
-    static func signedStatusAction(status: Int, parsed: Bool) -> SignedStatusAction {
+    /// Через сколько повторить подписанный `/status` после 403 `not-owner`.
+    static let notOwnerRetryDelay: TimeInterval = 300
+
+    /// Код ошибки из тела ответа relay (`{"error":"not-owner"}`).
+    static func statusErrorCode(_ data: Data) -> String? {
+        (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+    }
+
+    static func signedStatusAction(status: Int, parsed: Bool, error: String? = nil) -> SignedStatusAction {
         switch status {
         case 200: return parsed ? .use : .rememberUnsupportedThenGet
+        case 403 where error == "not-owner": return .getOnceRetryLater
         case 403, 404, 405: return .rememberUnsupportedThenGet
         case 429: return .skipTick
         default: return .getOnce
@@ -254,14 +273,15 @@ final class ShareHistory: ObservableObject {
         guard !ids.isEmpty, let url = ShareCode.statusURL(server: server, ids: ids) else { return }
         let memo = Self.signedStatusKey(server: server, myID: ShareCode.myID)
         var signed: URLRequest?
-        if signedStatusUnsupported != memo, let identity = Self.statusIdentity, identity.isPersistent {
+        let paused = signedStatusPausedUntil.map { $0.memo == memo && $0.until > Date() } ?? false
+        if signedStatusUnsupported != memo, !paused, let identity = Self.statusIdentity, identity.isPersistent {
             signed = Self.statusRequest(server: server, myID: ShareCode.myID, ids: ids, identity: identity)
         }
         Task {
             if let signed, let (data, response) = try? await URLSession.shared.data(for: signed) {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 let parsed = status == 200 ? Self.parseLive(data, ids: ids, complete: true) : nil
-                switch Self.signedStatusAction(status: status, parsed: parsed != nil) {
+                switch Self.signedStatusAction(status: status, parsed: parsed != nil, error: status == 403 ? Self.statusErrorCode(data) : nil) {
                 case .use:
                     live = parsed ?? []
                     return
@@ -269,6 +289,8 @@ final class ShareHistory: ObservableObject {
                     return
                 case .rememberUnsupportedThenGet:
                     signedStatusUnsupported = memo
+                case .getOnceRetryLater:
+                    signedStatusPausedUntil = (memo, Date().addingTimeInterval(Self.notOwnerRetryDelay))
                 case .getOnce:
                     break
                 }

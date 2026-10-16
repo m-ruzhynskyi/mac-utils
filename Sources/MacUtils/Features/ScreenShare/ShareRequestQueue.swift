@@ -15,7 +15,18 @@ final class ShareRequestQueue: ObservableObject {
         var id: String { request.queueKey }
     }
 
+    /// Сколько запрос ждёт ответа: потом отклоняется сам, иначе зритель и место на ретрансляторе заняты бесконечно.
+    static let defaultTimeout: TimeInterval = 180
+
     @Published private(set) var items: [Item] = []
+    var timeout: TimeInterval = ShareRequestQueue.defaultTimeout
+    /// Сработало автоотклонение (имя зрителя) — для пометки и тестов.
+    var onTimeout: (Item) -> Void = { item in
+        Toast.show("Запрос от \(item.request.name.isEmpty ? "зрителя" : item.request.name) отклонён: нет ответа 3 минуты",
+                   symbol: "clock.badge.xmark", tint: .orange)
+    }
+    private var timers: [String: Task<Void, Never>] = [:]
+    var playsSound = true
     private var panel: NSPanel?
     private var host: FirstMouseHostingView<ShareRequestQueueView>?
     private var cancellable: AnyCancellable?
@@ -26,62 +37,116 @@ final class ShareRequestQueue: ObservableObject {
     @discardableResult
     func add(_ item: Item) -> Bool {
         guard !items.contains(where: { $0.id == item.id }) else { return false }
+        let wasEmpty = items.isEmpty
         items.append(item)
+        startTimer(for: item)
         present()
+        // Панель не забирает фокус: о первом запросе сообщаем звуком (остальные видны в счётчике «Запросов: N»).
+        if wasEmpty, playsSound { NSSound(named: "Ping")?.play() }
         return true
+    }
+
+    private func startTimer(for item: Item) {
+        timers[item.id]?.cancel()
+        let id = item.id, delay = timeout
+        timers[id] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.expire(id)
+        }
+    }
+
+    private func expire(_ id: String) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        items.removeAll { $0.id == id }
+        timers[id] = nil
+        refreshPanel()
+        item.answer(.decline)
+        onTimeout(item)
+    }
+
+    private func cancelTimer(_ id: String) {
+        timers[id]?.cancel()
+        timers[id] = nil
+    }
+
+    /// Показать панель (клик по счётчику в «Эфир»).
+    func show() {
+        guard !items.isEmpty else { return }
+        present()
+    }
+
+    /// Создать панель заранее и скрытой: её номер окна нужен фильтру захвата ещё до первого запроса,
+    /// иначе первые кадры с именем и отпечатком просителя уйдут зрителям.
+    func prepare() {
+        guard panel == nil else { return }
+        makePanel()
+        guard let panel else { return }
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        panel.orderOut(nil)
     }
 
     func contains(key: String) -> Bool { items.contains { $0.id == key } }
 
     /// Зритель отозвал запрос (или ушёл): убираем без ответа.
     func remove(key: String) {
+        cancelTimer(key)
         items.removeAll { $0.id == key }
         refreshPanel()
     }
 
     func removeAll() {
+        for id in timers.keys { timers[id]?.cancel() }
+        timers = [:]
         items = []
         refreshPanel()
     }
 
     func answer(_ item: Item, _ answer: ShareAnswer) {
         guard items.contains(where: { $0.id == item.id }) else { return }
+        cancelTimer(item.id)
         items.removeAll { $0.id == item.id }
         refreshPanel()
         item.answer(answer)
     }
 
-    private func present() {
-        if panel == nil {
-            let host = FirstMouseHostingView(rootView: ShareRequestQueueView(queue: self))
-            let panel = HUDPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 120),
-                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            panel.isOpaque = false
-            panel.backgroundColor = .clear
-            panel.hasShadow = true
-            panel.level = .statusBar
-            panel.isMovableByWindowBackground = true
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            panel.contentView = host
-            self.host = host
-            self.panel = panel
-            // Размер меняется вместе с содержимым (следующий запрос, «Ещё N»).
-            cancellable = $items.receive(on: DispatchQueue.main).sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.layout() }
-            }
+    private func makePanel() {
+        guard panel == nil else { return }
+        let host = FirstMouseHostingView(rootView: ShareRequestQueueView(queue: self))
+        let panel = HUDPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 120),
+                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .statusBar
+        panel.isMovableByWindowBackground = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = host
+        self.host = host
+        self.panel = panel
+        // Размер меняется вместе с содержимым (следующий запрос, «Ещё N»).
+        cancellable = $items.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.layout() }
         }
-        layout()
+    }
+
+    private func present() {
+        makePanel()
+        panel?.alphaValue = 1
+        layout(force: true)
         panel?.orderFrontRegardless()
         NSApp.requestUserAttention(.informationalRequest)
         // Окно запроса не должно попасть в картинку для зрителей.
         ScreenShare.shared.refreshVideoFilter()
     }
 
-    private func layout() {
-        guard let panel, let host, let screen = NSScreen.withMouse ?? NSScreen.main else { return }
+    private func layout(force: Bool = false) {
+        // Экран, который транслируется (иначе ведущий на втором мониторе запрос не увидит), или главный.
+        guard let panel, let host, let screen = ScreenShare.shared.broadcastScreen ?? NSScreen.main else { return }
         let size = host.fittingSize
         let width = max(size.width, 360)
-        if !panel.isVisible || panel.frame.size != NSSize(width: width, height: size.height) {
+        if force || !panel.isVisible || panel.frame.size != NSSize(width: width, height: size.height) {
             // Правый верхний угол, под индикатором «Эфир».
             panel.setFrame(NSRect(x: screen.visibleFrame.maxX - width - 8,
                                   y: screen.visibleFrame.maxY - size.height - 44,

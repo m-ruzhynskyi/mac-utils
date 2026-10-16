@@ -235,12 +235,15 @@ function renderHistory() {
 // Подписанный POST /status (§6) — только с ключом; relay его не понял (404/405, ответ не про эти ID) — дальше GET.
 let signedStatus = true;
 async function fetchLive(ids) {
+  let limited = false;
   if (signedStatus && canSign("signStatus")) {
     try {
       const { pub } = await myIdentity(), ts = Date.now();
       const sig = await window.mu.signStatus(myId, ts, ids.join(","));
       const response = await fetch("/status", { method: "POST", headers: { "content-type": "application/json" },
                                                  body: JSON.stringify({ v: 2, id: myId, pub, ts, ids, sig }) });
+      // Лимит: GET уйдёт под тот же лимит, не удваиваем запросы.
+      if (response.status === 429) limited = true;
       if (response.status === 404 || response.status === 405) signedStatus = false;
       if (response.ok) {
         const json = await response.json();
@@ -248,6 +251,7 @@ async function fetchLive(ids) {
         signedStatus = false;
       }
     } catch (_) {}
+    if (limited) throw new Error("rate-limited");
   }
   return (await fetch(`/status?ids=${ids.join(",")}`)).json();
 }
@@ -757,7 +761,8 @@ function onRequest(msg) {
   if (kind === "legacy" && entry) return answer(viewer, true, rid);
   // Окно «сам себе»: relay сверил ключ зрителя с ключом владельца этого ID.
   if (kind === "key" && pub && msg.self === true && hostAuth?.keyed) return answer(viewer, true, rid);
-  if (kind === "key" && pub && entry && entry.pub === pub) return answer(viewer, true, rid);
+  // Автоприём только если ID принадлежит этому ключу: при idVerified:false он закреплён за другим устройством.
+  if (kind === "key" && pub && entry && entry.pub === pub && msg.idVerified !== false) return answer(viewer, true, rid);
   requests.push({ viewer, name, rid, kind, pub, entry, idVerified: msg.idVerified,
                   fp: typeof msg.fp === "string" ? msg.fp.slice(0, 19) : null });
   showRequest();

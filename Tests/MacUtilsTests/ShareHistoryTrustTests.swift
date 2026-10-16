@@ -209,6 +209,20 @@ final class ShareHistoryTrustTests: XCTestCase {
         XCTAssertFalse(history.entries.first { $0.id == ids[0] }?.incomingOnly ?? true, "pinning не меняет историю посещений")
     }
 
+    /// N2 (ревью этапа C): ведущий больше не подтверждает ключ — зритель забывает старый ключ, иначе круг без выхода.
+    func testUnpinHostForgetsKeyWithoutCreatingEntries() {
+        let history = ShareHistory()
+        history.visited(ids[0], name: "Ведущий")
+        history.pinHost(id: ids[0], key: pub)
+        history.unpinHost(id: ids[0])
+        XCTAssertNil(history.hostKey(for: ids[0]))
+        XCTAssertTrue(history.entries.contains { $0.id == ids[0] }, "запись о посещении остаётся")
+        history.unpinHost(id: ids[1])
+        XCTAssertFalse(history.entries.contains { $0.id == ids[1] }, "для неизвестного ID записи не создаётся")
+        history.unpinHost(id: "123456")
+        XCTAssertFalse(history.entries.contains { $0.id == "123456" })
+    }
+
     // MARK: - N7: история читается поэлементно
 
     func testOneBrokenEntryIsSkippedAndTheRestSurvives() throws {
@@ -304,6 +318,16 @@ final class ShareHistoryTrustTests: XCTestCase {
         for status in [403, 404, 405] {
             XCTAssertEqual(ShareHistory.signedStatusAction(status: status, parsed: false), A.rememberUnsupportedThenGet, "\(status)")
         }
+        // F4: 403 not-owner (ID ещё не привязан) — не «навсегда только GET», а повтор позже.
+        XCTAssertEqual(ShareHistory.signedStatusAction(status: 403, parsed: false, error: "not-owner"), A.getOnceRetryLater)
+        XCTAssertEqual(ShareHistory.signedStatusAction(status: 403, parsed: false, error: "other"), A.rememberUnsupportedThenGet)
+        XCTAssertEqual(ShareHistory.signedStatusAction(status: 403, parsed: false), A.rememberUnsupportedThenGet)
+        XCTAssertEqual(ShareHistory.signedStatusAction(status: 404, parsed: false, error: "not-owner"), A.rememberUnsupportedThenGet)
+        XCTAssertEqual(ShareHistory.statusErrorCode(Data(#"{"error":"not-owner"}"#.utf8)), "not-owner")
+        XCTAssertNil(ShareHistory.statusErrorCode(Data("<html>".utf8)))
+        XCTAssertNil(ShareHistory.statusErrorCode(Data(#"{"error":5}"#.utf8)))
+        XCTAssertGreaterThan(ShareHistory.notOwnerRetryDelay, 0)
+        XCTAssertLessThanOrEqual(ShareHistory.notOwnerRetryDelay, 600)
         XCTAssertEqual(ShareHistory.signedStatusAction(status: 429, parsed: false), A.skipTick, "лимит: тик пропускается, GET не добавляется")
         for status in [0, 400, 401, 413, 500, 502, 503] {
             XCTAssertEqual(ShareHistory.signedStatusAction(status: status, parsed: false), A.getOnce, "\(status)")

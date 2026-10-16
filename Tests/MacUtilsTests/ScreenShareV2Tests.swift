@@ -84,6 +84,32 @@ final class ScreenShareV2Tests: XCTestCase {
         XCTAssertTrue(prompt.notes.contains { $0.contains("ID не подтверждён") })
     }
 
+    /// MAJOR-1 ревью этапа C: ключ, который не владеет ID, нельзя ни запомнить, ни пускать автоматически.
+    func testUnverifiedIDNeverGetsAlwaysAllowConfirmKeyOrAutoAccept() {
+        let unverified = keyed(idVerified: false)
+        let rules = trust(needsConfirmation: ["9876543210"])
+        guard case .ask(let prompt) = ShareRules.decide(unverified, trust: rules) else { return XCTFail("принят без вопроса") }
+        XCTAssertFalse(prompt.allowAlways, "«Всегда разрешать» для ключа, не владеющего ID")
+        XCTAssertEqual(prompt.kind, .normal, "«подтвердите один раз» только для подтверждённого ID")
+        XCTAssertFalse(prompt.notes.contains { $0.contains("подтвердите один раз") })
+        XCTAssertTrue(prompt.notes.contains { $0.contains("ID не подтверждён") })
+
+        // Запись «доверен» с этим же ключом уже есть (появилась раньше), но idVerified:false — всё равно вопрос.
+        let alreadyTrusted = trust(trusted: ["9876543210|\(Self.pub)"])
+        guard case .ask = ShareRules.decide(unverified, trust: alreadyTrusted) else { return XCTFail("автоприём при idVerified:false") }
+        // Ответ «Всегда разрешать» ничего не запоминает.
+        var remembered = 0
+        XCTAssertTrue(ShareRules.apply(.allowAlways, to: unverified, prompt: prompt) { _, _, _ in remembered += 1 })
+        XCTAssertEqual(remembered, 0)
+        // Подтверждённый ID — прежнее поведение.
+        XCTAssertEqual(ShareRules.decide(keyed(idVerified: true), trust: alreadyTrusted), .accept)
+        guard case .ask(let verified) = ShareRules.decide(keyed(idVerified: true), trust: rules) else { return XCTFail() }
+        XCTAssertEqual(verified.kind, .confirmKey)
+        XCTAssertTrue(verified.allowAlways)
+        // Своё устройство принимается независимо от проверки ID.
+        XCTAssertEqual(ShareRules.decide(keyed(idVerified: false, isSelf: true), trust: trust()), .accept)
+    }
+
     func testAlwaysAllowHiddenWhenIDCannotBeTrusted() {
         guard case .ask(let prompt) = ShareRules.decide(keyed(viewer: ""), trust: trust(canTrust: false)) else { return XCTFail() }
         XCTAssertFalse(prompt.allowAlways)
@@ -288,6 +314,7 @@ final class ScreenShareV2Tests: XCTestCase {
 
     func testQueueDeduplicatesAndRemovesByKey() {
         let queue = ShareRequestQueue()
+        queue.playsSound = false
         let request = keyed(rid: "same")
         let prompt = ShareDecision.Prompt(kind: .normal, allowAlways: true, notes: [])
         var answers: [ShareAnswer] = []
@@ -302,5 +329,91 @@ final class ScreenShareV2Tests: XCTestCase {
         queue.answer(item, .allowOnce)
         XCTAssertEqual(answers, [.allowOnce], "на один запрос — один ответ")
         XCTAssertTrue(queue.items.isEmpty)
+    }
+
+    // MARK: очередь: автоотклонение, предварительная панель
+
+    func testUnansweredRequestIsDeclinedAfterTimeoutWithNote() async throws {
+        let queue = ShareRequestQueue()
+        queue.playsSound = false
+        queue.timeout = 0.05
+        let prompt = ShareDecision.Prompt(kind: .normal, allowAlways: true, notes: [])
+        var answers: [ShareAnswer] = []
+        var noted: [String] = []
+        queue.onTimeout = { noted.append($0.request.name) }
+        queue.add(.init(request: keyed(rid: "slow"), prompt: prompt) { answers.append($0) })
+        queue.add(.init(request: keyed(rid: "fast"), prompt: prompt) { answers.append($0) })
+        let fast = try XCTUnwrap(queue.items.last)
+        queue.answer(fast, .allowOnce)
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertEqual(answers, [.allowOnce, .decline], "ответ на один запрос, автоотказ на другой")
+        XCTAssertEqual(noted, ["Петя"], "пометка только для истёкшего")
+        XCTAssertTrue(queue.items.isEmpty)
+    }
+
+    func testRemovedAndClearedRequestsNeverExpire() async throws {
+        let queue = ShareRequestQueue()
+        queue.playsSound = false
+        queue.timeout = 0.05
+        let prompt = ShareDecision.Prompt(kind: .normal, allowAlways: true, notes: [])
+        var answers = 0
+        queue.onTimeout = { _ in answers += 100 }
+        queue.add(.init(request: keyed(rid: "a"), prompt: prompt) { _ in answers += 1 })
+        queue.add(.init(request: keyed(rid: "b"), prompt: prompt) { _ in answers += 1 })
+        queue.remove(key: "a")
+        queue.removeAll()
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(answers, 0)
+    }
+
+    func testDefaultTimeoutIsThreeMinutes() {
+        XCTAssertEqual(ShareRequestQueue.defaultTimeout, 180)
+        XCTAssertEqual(ShareRequestQueue().timeout, 180)
+    }
+
+    func testPreparedPanelHasWindowNumberBeforeFirstRequest() {
+        let queue = ShareRequestQueue()
+        XCTAssertNil(queue.windowNumber)
+        queue.prepare()
+        XCTAssertNotNil(queue.windowNumber, "номер окна нужен фильтру захвата до первого запроса")
+    }
+
+    // MARK: кэш возможностей relay, смена ключа ведущего
+
+    func testRelayCacheIsInvalidatedByServer() {
+        ShareRelay.resetCache()
+        defer { ShareRelay.resetCache() }
+        ShareRelay.remember(.keyed, server: "https://relay.example.com")
+        XCTAssertEqual(ShareRelay.cached(server: "wss://relay.example.com/"), .keyed)
+        ShareRelay.invalidate(server: "relay.example.com")
+        XCTAssertNil(ShareRelay.cached(server: "https://relay.example.com"))
+        XCTAssertEqual(ShareRelay.token(for: URL(string: "wss://relay.example.com/room/1")!), "mu-share-1")
+        XCTAssertGreaterThan(ShareRelay.unsureTTL, 0)
+        XCTAssertLessThanOrEqual(ShareRelay.unsureTTL, 600, "неуверенный ответ помним недолго")
+    }
+
+    func testKeyChangeWarningDistinguishesRemovedKey() {
+        let changed = ShareViewer.KeyChange(code: "1234567890", oldFingerprint: "aaaa", newFingerprint: "bbbb", newKey: Self.pub)
+        let removed = ShareViewer.KeyChange(code: "1234567890", oldFingerprint: "aaaa", newFingerprint: "неизвестен", newKey: nil)
+        XCTAssertFalse(changed.keyRemoved)
+        XCTAssertTrue(removed.keyRemoved)
+        XCTAssertTrue(changed.warning.contains("стал bbbb"))
+        XCTAssertTrue(removed.warning.contains("больше не подтверждает ключ"))
+        XCTAssertTrue(removed.warning.contains("aaaa"))
+    }
+
+    // MARK: тексты отказа ведущего (ревью исправлений: F1 п.4, M5)
+
+    func testHostRateLimitIsExplainedAsNetworkLimit() {
+        let generic = ShareErrorText.message(code: "rate-limited")
+        let host = ShareErrorText.hostRefusal(code: "rate-limited", message: generic)
+        XCTAssertTrue(host.contains("ограничил новые ID с вашей сети"))
+        XCTAssertFalse(host.contains("минуту"))
+        XCTAssertEqual(ShareErrorText.hostRefusal(code: "id-claimed", message: "X"), "X", "прочие коды — как есть")
+    }
+
+    func testBusyMessageBlamesKeychainWhenKeyIsUnavailable() {
+        XCTAssertTrue(ShareErrorText.busyMessage(keychainUnavailable: true).contains("Связке ключей"))
+        XCTAssertTrue(ShareErrorText.busyMessage(keychainUnavailable: false).contains("уже идёт трансляция"))
     }
 }

@@ -16,9 +16,23 @@ enum ShareRelay {
     private final class Cache: @unchecked Sendable {
         private let lock = NSLock()
         private var values: [String: Capability] = [:]
-        func get(_ key: String) -> Capability? { lock.lock(); defer { lock.unlock() }; return values[key] }
-        func set(_ key: String, _ value: Capability) { lock.lock(); defer { lock.unlock() }; values[key] = value }
-        func clear() { lock.lock(); defer { lock.unlock() }; values = [:] }
+        private var expiry: [String: Date] = [:]
+        func get(_ key: String) -> Capability? {
+            lock.lock(); defer { lock.unlock() }
+            if let until = expiry[key], until < Date() {
+                values[key] = nil
+                expiry[key] = nil
+            }
+            return values[key]
+        }
+        /// `ttl` — запомнить ненадолго (ответ был неуверенный); nil — до сброса или перезапуска.
+        func set(_ key: String, _ value: Capability, ttl: TimeInterval? = nil) {
+            lock.lock(); defer { lock.unlock() }
+            values[key] = value
+            expiry[key] = ttl.map { Date().addingTimeInterval($0) }
+        }
+        func remove(_ key: String) { lock.lock(); defer { lock.unlock() }; values[key] = nil; expiry[key] = nil }
+        func clear() { lock.lock(); defer { lock.unlock() }; values = [:]; expiry = [:] }
     }
     private static let cache = Cache()
 
@@ -64,21 +78,28 @@ enum ShareRelay {
         request.timeoutInterval = 6
         guard let (data, response) = try? await URLSession.shared.data(for: request) else { return nil }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        let result: Capability
         if status == 200, let parsed = parseVersion(data) {
-            result = parsed
-        } else if status == 404 || status == 405 || status == 200 {
-            // Старый ретранслятор: такого маршрута нет (отдаёт страницу или 404).
-            result = .legacy
-        } else {
-            return nil
+            cache.set(key, parsed)
+            return parsed
         }
-        cache.set(key, result)
-        return result
+        guard status == 404 || status == 405 || status == 200 else { return nil }
+        // Старый ретранслятор отдаёт страницу или 404. Но то же самое даёт страница входа в гостиничном Wi-Fi,
+        // поэтому такой ответ помним недолго: на настоящем ретрансляторе проверка ключей скоро включится.
+        cache.set(key, .legacy, ttl: unsureTTL)
+        return .legacy
+    }
+
+    /// Сколько помним «старый ретранслятор» без внятного ответа `/version`.
+    static let unsureTTL: TimeInterval = 300
+
+    /// Ретранслятор отказал по токену (403/426) — прежнее знание о нём неверно (откат, смена сервера): спросим заново.
+    static func invalidate(server: String) {
+        if let key = key(forServer: server) { cache.remove(key) }
     }
 
     /// Для тестов.
     static func resetCache() { cache.clear() }
+    static func cached(server: String) -> Capability? { key(forServer: server).flatMap(cache.get) }
     static func remember(_ capability: Capability, server: String) {
         if let key = key(forServer: server) { cache.set(key, capability) }
     }
@@ -160,8 +181,9 @@ enum ShareRules {
     static func decide(_ request: ShareRequest, trust: ShareTrust) -> ShareDecision {
         // 1. Своё же устройство: relay поставил self только после проверки подписи приватным ключом.
         if request.auth == .key, request.isSelf { return .accept }
-        // 2. Доверие по ключу: один ID недостаточно, нужен и тот же ключ.
-        if request.auth == .key, let pub = request.pub, trust.isTrusted(request.viewer, pub) { return .accept }
+        // 2. Доверие по ключу: один ID недостаточно, нужен и тот же ключ. И ID должен принадлежать этому ключу:
+        //    при idVerified == false ID закреплён за другим устройством, а запись «доверен» могла появиться раньше.
+        if request.auth == .key, request.idVerified, let pub = request.pub, trust.isTrusted(request.viewer, pub) { return .accept }
         // 3. Остальное — вопрос. Без ключа автоприёма и «Всегда разрешать» нет никогда.
         var notes: [String] = []
         let canTrust = trust.canTrust(request.viewer)
@@ -171,7 +193,8 @@ enum ShareRules {
             kind = .legacy
             notes.append("Старая версия или ретранслятор без проверки ключей: личность зрителя не подтверждена.")
         case .key:
-            if trust.needsKeyConfirmation(request.viewer) {
+            // Запомнить можно только ключ, который владеет этим ID: иначе чужой ключ получил бы доверие друга.
+            if request.idVerified, trust.needsKeyConfirmation(request.viewer) {
                 kind = .confirmKey
                 notes.append("Этот ID был в доверенных. Mac Utils теперь проверяет ключ устройства: подтвердите один раз.")
             } else {
@@ -182,7 +205,7 @@ enum ShareRules {
             }
         }
         if !canTrust { notes.append("У запроса нет корректного ID, запоминать его нельзя.") }
-        return .ask(.init(kind: kind, allowAlways: request.auth == .key && canTrust, notes: notes))
+        return .ask(.init(kind: kind, allowAlways: request.auth == .key && request.idVerified && canTrust, notes: notes))
     }
 
     /// Принять ли запрос по ответу. «Всегда разрешать» запоминает ключ только когда это разрешено правилом.
@@ -223,6 +246,20 @@ enum ShareErrorText {
             if let relayMessage, !relayMessage.isEmpty { return relayMessage }
             return "Ошибка проверки устройства (\(code))."
         }
+    }
+
+    /// Отказ при подключении ведущего: `rate-limited` здесь — лимит новых ID с этой сети, а не «подождите минуту».
+    static func hostRefusal(code: String, message: String) -> String {
+        code == "rate-limited"
+            ? "Сервер временно ограничил новые ID с вашей сети. Попробуйте позже или из другой сети."
+            : message
+    }
+
+    /// «Занято» (409) у ведущего: если ключ недоступен, а ID привязан к нему раньше, причина в Связке ключей, а не в другом окне.
+    static func busyMessage(keychainUnavailable: Bool) -> String {
+        keychainUnavailable
+            ? "Нет доступа к Связке ключей: этот ID привязан к ключу, без него трансляция не начнётся. Разрешите доступ и повторите."
+            : "С вашим ID уже идёт трансляция (может, в другом окне)"
     }
 
     /// Ошибка, которую лечит только новый ID.

@@ -160,11 +160,11 @@ final class ScreenShare: NSObject, ObservableObject {
             needsNewID = false
             switch await openHostSocket() {
             case .busy:
-                state = .failed("С вашим ID уже идёт трансляция (может, в другом окне)")
+                state = .failed(ShareErrorText.busyMessage(keychainUnavailable: keychainUnavailable))
                 return
             case .refused(let errorCode, let message):
                 needsNewID = ShareErrorText.needsNewID(errorCode)
-                state = .failed(message)
+                state = .failed(ShareErrorText.hostRefusal(code: errorCode, message: message))
                 return
             case .failed(let status):
                 state = .failed(Self.connectionMessage(status))
@@ -172,6 +172,8 @@ final class ScreenShare: NSObject, ObservableObject {
             case .ok(let socket, let keyed):
                 self.socket = socket
                 hostKeyed = keyed
+                // Панель запросов создаём заранее: её окно должно быть в фильтре захвата до первого запроса.
+                ShareRequestQueue.shared.prepare()
                 do {
                     try await beginCapture(filter: filter)
                 } catch {
@@ -226,7 +228,7 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Подключение ведущего: по mu-share-2 (challenge → auth → authed), если ретранслятор его объявил, иначе по-старому.
-    private func openHostSocket() async -> HostOpen {
+    private func openHostSocket(retried: Bool = false) async -> HostOpen {
         let code = ShareCode.myID
         guard let url = ShareCode.url(server: Self.server, code: code, role: "host") else { return .failed(status: 0) }
         let keyedRelay = shouldUseKeys(await probeRelay())
@@ -245,10 +247,21 @@ final class ScreenShare: NSObject, ObservableObject {
                 return .refused(code: errorCode, message: message)
             case .failed(let status):
                 socket.cancel(with: .goingAway, reason: nil)
+                // 403 — ретранслятор откатили на версию без mu-share-2: спросим его возможности заново.
+                if !retried, status == 403 || status == 426 {
+                    ShareRelay.invalidate(server: Self.server)
+                    return await openHostSocket(retried: true)
+                }
                 return status == 409 ? .busy : .failed(status: status)
             }
         }
         let status = await Self.handshake(socket)
+        // 426 по mu-share-1: relay требует ключи, а `/version` не ответил — проверяем заново и пробуем mu-share-2.
+        if !retried, status == 403 || status == 426 {
+            socket.cancel(with: .goingAway, reason: nil)
+            ShareRelay.invalidate(server: Self.server)
+            return await openHostSocket(retried: true)
+        }
         if status == 409 { return .busy }
         guard status == nil else { return .failed(status: status!) }
         return .ok(socket, keyed: false)
@@ -363,6 +376,11 @@ final class ScreenShare: NSObject, ObservableObject {
 
     /// Какой экран транслируем (nil — окно или программа).
     private var videoDisplayID: CGDirectDisplayID?
+
+    /// Экран трансляции: на нём показываем панель запросов, чтобы ведущий её увидел.
+    var broadcastScreen: NSScreen? {
+        videoDisplayID.flatMap { id in NSScreen.screens.first { $0.displayID == id } }
+    }
 
     /// Экран из системного окна выбора — пересобираем фильтр: окно выбора прячет Mac Utils целиком,
     /// а зрителю нужен и его интерфейс.
@@ -698,6 +716,7 @@ final class ScreenShare: NSObject, ObservableObject {
 /// при наведении — код, зрители и «Стоп».
 private struct ShareHUD: View {
     @ObservedObject var share: ScreenShare
+    @ObservedObject private var queue = ShareRequestQueue.shared
     @State private var expanded = false
 
     var body: some View {
@@ -711,10 +730,14 @@ private struct ShareHUD: View {
                     .buttonStyle(.borderless)
                     .help("Скопировать код")
                     Label("\(viewers)", systemImage: "eye").font(.caption2).foregroundStyle(.secondary)
+                    if !queue.items.isEmpty { requestsButton }
                     Button { share.changeSource() } label: { Image(systemName: "rectangle.on.rectangle").font(.caption2) }
                         .buttonStyle(.borderless).help("Показать другой экран или окно")
                     Button { share.stop() } label: { Image(systemName: "stop.fill").font(.caption2) }
                         .buttonStyle(.borderless).foregroundStyle(.red).help("Остановить трансляцию")
+                } else if !queue.items.isEmpty {
+                    // Запросов ждут ответа: счётчик виден всегда и по клику открывает панель.
+                    requestsButton
                 } else {
                     Text(share.reconnecting ? "Переподключаюсь…" : viewers > 0 ? "Эфир · \(viewers)" : "Эфир")
                         .font(.caption2.weight(.medium)).foregroundStyle(share.reconnecting ? .orange : .secondary)
@@ -728,6 +751,14 @@ private struct ShareHUD: View {
         .onHover { inside in withAnimation(.easeOut(duration: 0.15)) { expanded = inside } }
         .fixedSize()
         .frame(width: 190, height: 26, alignment: .trailing)
+    }
+
+    private var requestsButton: some View {
+        Button { queue.show() } label: {
+            Text("Запросов: \(queue.items.count)").font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+        }
+        .buttonStyle(.borderless)
+        .help("Показать запросы на подключение")
     }
 }
 
@@ -882,6 +913,15 @@ final class ShareViewer: ObservableObject {
         let oldFingerprint: String
         let newFingerprint: String
         let newKey: String?
+
+        /// Ведущий больше не подтверждает ключ (ID освобождён или на нём ведущий без проверки ключей).
+        var keyRemoved: Bool { newKey == nil }
+
+        var warning: String {
+            keyRemoved
+                ? "Ведущий больше не подтверждает ключ (раньше был \(oldFingerprint)): его ID освобождён или на нём теперь старая версия. Если вы не ждали этого, это может быть подмена."
+                : "Ключ этого компьютера изменился (был \(oldFingerprint), стал \(newFingerprint)). Если ведущий не менял ID вручную, это может быть подмена."
+        }
     }
 
     /// Параметры проверки текущего подключения (mu-share-2).
@@ -955,7 +995,9 @@ final class ShareViewer: ObservableObject {
     func acceptKeyChange() {
         guard let change = keyChange else { return }
         keyChange = nil
+        // Ведущий больше не подтверждает ключ (newKey == nil): забываем старый, иначе подключиться к этому ID не получится.
         if let key = change.newKey { ShareHistory.shared.pinHost(id: change.code, key: key) }
+        else { ShareHistory.shared.unpinHost(id: change.code) }
         watch(code: change.code)
     }
 
@@ -980,7 +1022,8 @@ final class ShareViewer: ObservableObject {
                                   oldFingerprint: ShareIdentity.fingerprint(ofBase64urlKey: pinned) ?? "—",
                                   newFingerprint: announced.flatMap { ShareIdentity.fingerprint(ofBase64urlKey: $0) } ?? "неизвестен",
                                   newKey: announced.flatMap { ShareHistory.isPublicKey($0) ? $0 : nil })
-            state = .ended("Ключ этого компьютера изменился: проверьте и подтвердите подключение")
+            state = .ended(announced == nil ? "Ведущий больше не подтверждает ключ: проверьте и подтвердите подключение"
+                                            : "Ключ этого компьютера изменился: проверьте и подтвердите подключение")
             disconnect()
             return
         }
@@ -1072,8 +1115,11 @@ final class ShareViewer: ObservableObject {
                         let status = (socket.response as? HTTPURLResponse)?.statusCode
                         switch viewer.state {
                         case .connecting, .waiting:
+                            // 403/426: ретранслятор не принял токен (откат, смена сервера) — при следующей попытке спросим `/version` заново.
+                            if status == 403 || status == 426 { ShareRelay.invalidate(server: ScreenShare.server) }
                             viewer.state = .ended(status == 404 ? "Сейчас этот ID ничего не транслирует"
-                                                  : status == 429 ? "Слишком много зрителей" : "Нет связи с сервером")
+                                                  : status == 429 ? "Слишком много зрителей"
+                                                  : status == 403 || status == 426 ? "Сервер не принял подключение — попробуйте ещё раз" : "Нет связи с сервером")
                         case .watching:
                             viewer.state = .ended("Трансляция завершена")
                         default:
@@ -1227,8 +1273,18 @@ private struct ShareViewerView: View {
                 Text("Ждём, пока \(ShareCode.display(viewer.code)) разрешит подключение…").foregroundStyle(.white)
             }
         case .ended(let message):
-            Text(message).font(.title3).foregroundStyle(.white)
-                .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+            VStack(spacing: 10) {
+                Text(message).font(.title3).foregroundStyle(.white)
+                if let change = viewer.keyChange {
+                    // Кнопки и в окне просмотра: из поповера или по macutils://watch страницы настроек перед глазами нет.
+                    Text(change.warning).font(.caption).foregroundStyle(.orange).multilineTextAlignment(.center)
+                    HStack {
+                        Button("Подключиться и запомнить") { viewer.acceptKeyChange() }
+                        Button("Отмена") { viewer.dismissKeyChange() }
+                    }
+                }
+            }
+            .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
         default:
             EmptyView()
         }
@@ -1356,8 +1412,7 @@ struct ScreenSharePage: View {
                 }
                 if let change = viewer.keyChange {
                     VStack(alignment: .leading, spacing: 6) {
-                        Label("Ключ этого компьютера изменился (был \(change.oldFingerprint), стал \(change.newFingerprint)). Если ведущий не менял ID вручную, это может быть подмена.",
-                              systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                        Label(change.warning, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
                         HStack {
                             Button("Подключиться и запомнить") { viewer.acceptKeyChange() }
                             Button("Отмена") { viewer.dismissKeyChange() }
