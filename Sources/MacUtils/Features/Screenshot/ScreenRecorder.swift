@@ -57,6 +57,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     private var hudPanel: NSPanel?
     private var keyTap: EventTap?
     private var finishing = false
+    private var gifWarned = false
 
     private init(rect: NSRect, screen: NSScreen, format: Format) {
         self.rect = rect
@@ -118,8 +119,32 @@ final class ScreenRecorder: NSObject, ObservableObject {
             .appendingPathComponent("MacUtils-\(UUID().uuidString).mp4")
         let writer = try RecordingWriter(url: url, width: config.width, height: config.height,
                                          audio: wantsAudio, microphone: wantsMic)
-        // Микрофон — с подавлением эха, иначе звук системы из динамиков попадает в него ещё раз.
+        // Любой сбой до старта захвата: временный .mp4 уже создан — удаляем, иначе мусор копится в temp.
         var echoFree: EchoFreeMicrophone?
+        do {
+            try await startCapture(writer: writer, config: config, filter: filter, wantsAudio: wantsAudio,
+                                   wantsMic: wantsMic, echoFree: &echoFree)
+        } catch {
+            echoFree?.stop()
+            writer.discard()
+            throw error
+        }
+        self.echoFree = echoFree
+        self.writer = writer
+        Log.capture.info("Запись: старт \(config.width)×\(config.height) @\(fps) fps, \(self.format.rawValue, privacy: .public)")
+
+        started = Date()
+        gifWarned = false
+        showPanels()
+        startKeyTap()
+        let timer = Timer(timeInterval: 0.25, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func startCapture(writer: RecordingWriter, config: SCStreamConfiguration, filter: SCContentFilter,
+                              wantsAudio: Bool, wantsMic: Bool, echoFree: inout EchoFreeMicrophone?) async throws {
+        // Микрофон — с подавлением эха, иначе звук системы из динамиков попадает в него ещё раз.
         if wantsMic {
             let candidate = EchoFreeMicrophone { [weak writer] buffer, pts in
                 guard let built = EchoFreeMicrophone.sampleBuffer(buffer, at: pts) else { return }
@@ -141,21 +166,21 @@ final class ScreenRecorder: NSObject, ObservableObject {
             try stream.addStreamOutput(writer, type: .microphone, sampleHandlerQueue: writer.queue)
         }
         try await stream.startCapture()
-        self.echoFree = echoFree
-        self.writer = writer
         self.stream = stream
-        Log.capture.info("Запись: старт \(config.width)×\(config.height) @\(fps) fps, \(self.format.rawValue, privacy: .public)")
-
-        started = Date()
-        showPanels()
-        startKeyTap()
-        let timer = Timer(timeInterval: 0.25, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
     }
 
     @objc private func tick() {
         elapsed = Date().timeIntervalSince(started)
+        guard format == .gif else { return }
+        switch GIFPolicy.check(elapsed: elapsed, warned: gifWarned) {
+        case .none: break
+        case .warn:
+            gifWarned = true
+            Toast.show("GIF длиннее \(Int(GIFPolicy.warnAfter)) с получится тяжёлым — для долгой записи лучше MP4. Остановится на \(Int(GIFPolicy.maxDuration)) с",
+                       symbol: "exclamationmark.triangle.fill", tint: .orange)
+        case .stop:
+            stop()
+        }
     }
 
     // MARK: - Стоп
@@ -248,7 +273,26 @@ final class ScreenRecorder: NSObject, ObservableObject {
             let library = ScreenshotLibrary.shared
             if format == .gif {
                 destination = library.destination(fileName: base + ".gif", root: folder)
-                try await GIFMaker.make(from: temp, to: destination, fps: 15, maxWidth: 960)
+                let toast = Toast.show("Создаю GIF… 0 %", symbol: "photo.stack", tint: .purple, sticky: true)
+                do {
+                    try await GIFMaker.make(from: temp, to: destination, fps: 15, maxWidth: 960) { percent in
+                        Task { @MainActor in Toast.updateText("Создаю GIF… \(percent) %", token: toast) }
+                    }
+                } catch {
+                    Toast.dismiss(token: toast)
+                    // GIF не вышел — запись не теряем: сохраняем исходный MP4.
+                    let fallback = library.destination(fileName: base + ".mp4", root: folder)
+                    try? FileManager.default.removeItem(at: destination)
+                    guard Self.saveFallback(temp, to: fallback) else { throw error }
+                    library.add(fallback, image: nil, app: library.captureApp)
+                    Log.capture.error("GIF не собрался, сохранён MP4: \(error.localizedDescription, privacy: .public)")
+                    Toast.show("GIF не получился — сохранил как MP4", symbol: "exclamationmark.triangle.fill", tint: .orange,
+                               action: Toast.Action(title: "Показать в Finder") {
+                                   NSWorkspace.shared.activateFileViewerSelecting([fallback])
+                               })
+                    return
+                }
+                Toast.dismiss(token: toast)
                 try? FileManager.default.removeItem(at: temp)
             } else {
                 destination = library.destination(fileName: base + ".mp4", root: folder)
@@ -269,6 +313,17 @@ final class ScreenRecorder: NSObject, ObservableObject {
         } catch {
             Toast.show("Не удалось сохранить запись: \(error.localizedDescription)",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
+        }
+    }
+
+    /// Перенести временный MP4 к пользователю; не вышло — удалить его, чтобы не копить мусор в temp.
+    nonisolated static func saveFallback(_ temp: URL, to destination: URL) -> Bool {
+        do {
+            try FileManager.default.moveItem(at: temp, to: destination)
+            return true
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            return false
         }
     }
 
@@ -427,7 +482,11 @@ final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             writer.add(input)
         }
         super.init()
-        guard writer.startWriting() else { throw writer.error ?? RecordingError.writer }
+        guard writer.startWriting() else {
+            let error = writer.error ?? RecordingError.writer
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -461,6 +520,15 @@ final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         Log.capture.error("Запись: поток остановлен: \(error.localizedDescription, privacy: .public)")
     }
 
+    /// Захват не стартовал: закрыть писатель и удалить временный файл.
+    func discard() {
+        queue.sync {
+            finished = true
+            if writer.status == .writing { writer.cancelWriting() }
+        }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     /// Закрывает файл; возвращает число записанных кадров.
     func finish() async -> Int {
         await withCheckedContinuation { continuation in
@@ -487,7 +555,8 @@ final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
 enum GIFMaker {
     /// Кадры из видео с шагом 1/fps, ширина не больше maxWidth, бесконечный повтор.
-    static func make(from video: URL, to destination: URL, fps: Int, maxWidth: CGFloat) async throws {
+    static func make(from video: URL, to destination: URL, fps: Int, maxWidth: CGFloat,
+                     progress: (@Sendable (Int) -> Void)? = nil) async throws {
         let asset = AVURLAsset(url: video)
         let duration = try await asset.load(.duration).seconds
         let generator = AVAssetImageGenerator(asset: asset)
@@ -505,11 +574,36 @@ enum GIFMaker {
         let frameProperties = [
             kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 1.0 / Double(fps)],
         ] as CFDictionary
+        var lastPercent = -1
         for index in 0..<count {
             let time = CMTime(seconds: Double(index) / Double(fps), preferredTimescale: 600)
             guard let image = try? await generator.image(at: time).image else { continue }
             CGImageDestinationAddImage(gif, image, frameProperties)
+            let percent = GIFPolicy.percent(done: index + 1, total: count)
+            if percent != lastPercent { lastPercent = percent; progress?(percent) }
         }
         guard CGImageDestinationFinalize(gif) else { throw RecordingError.writer }
+    }
+}
+
+/// Правила GIF-записи: предупреждение, предел длительности, проценты прогресса.
+enum GIFPolicy {
+    /// После скольких секунд записи предупреждаем, что GIF получится тяжёлым.
+    static let warnAfter: TimeInterval = 30
+    /// Дольше GIF не пишем: запись останавливается и сохраняется (15 кадров/с × 960 px — сотни МБ).
+    static let maxDuration: TimeInterval = 90
+
+    enum Action: Equatable { case none, warn, stop }
+
+    static func check(elapsed: TimeInterval, warned: Bool) -> Action {
+        if elapsed >= maxDuration { return .stop }
+        if elapsed >= warnAfter, !warned { return .warn }
+        return .none
+    }
+
+    /// Проценты 0…100 для «Создаю GIF… N %».
+    static func percent(done: Int, total: Int) -> Int {
+        guard total > 0 else { return 100 }
+        return min(100, max(0, done * 100 / total))
     }
 }

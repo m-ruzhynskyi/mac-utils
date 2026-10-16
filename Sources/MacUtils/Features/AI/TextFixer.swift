@@ -76,6 +76,8 @@ final class TextFixer {
 
     private var busy = false
     private var task: Task<Void, Never>?
+    /// Номер уведомления «Исправляю…»: убираем только его, не чужое (например, прогресс GIF).
+    private var fixToast: Int?
 
     static let system = """
     Ты корректор. Исправь орфографию, опечатки, пунктуацию и грамматику в тексте пользователя. \
@@ -110,13 +112,14 @@ final class TextFixer {
             // Фокус запоминаем до запроса: ответ модели может прийти через десятки секунд.
             let before = FocusSnapshot.capture()
             let startedAt = Date()
-            Toast.show("Исправляю…", symbol: "sparkles", tint: .purple,
-                       action: Toast.Action(title: "Отмена") { TextFixer.shared.cancel() }, sticky: true)
+            let toast = Toast.show("Исправляю…", symbol: "sparkles", tint: .purple,
+                                   action: Toast.Action(title: "Отмена") { TextFixer.shared.cancel() }, sticky: true)
+            fixToast = toast
             do {
                 let answer = try await Ollama.generate(text, system: Self.system, temperature: 0, maxTokens: max(200, text.count))
                 try Task.checkCancellation()
                 let fixed = AIParsing.keepingEdges(of: text, AIParsing.cleanedText(answer))
-                guard !fixed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { Toast.dismiss(); return }
+                guard !fixed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { Toast.dismiss(token: toast); return }
                 if fixed == text {
                     Toast.show("Ошибок не найдено", symbol: "checkmark.circle.fill")
                     return
@@ -136,9 +139,9 @@ final class TextFixer {
                     Toast.show("\(reason): исправленный текст в буфере (прежнее содержимое буфера заменено)", symbol: "doc.on.clipboard", tint: .purple)
                 }
             } catch is CancellationError {
-                Toast.dismiss()
+                Toast.dismiss(token: toast)
             } catch let error as URLError where error.code == .cancelled {
-                Toast.dismiss()
+                Toast.dismiss(token: toast)
             } catch {
                 Toast.show(error.localizedDescription, symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
@@ -148,7 +151,7 @@ final class TextFixer {
     /// «Отмена» в уведомлении «Исправляю…»: запрос к модели прерывается, ничего не вставляется.
     func cancel() {
         task?.cancel()
-        Toast.dismiss()
+        Toast.dismiss(token: fixToast)
     }
 
     /// Вставка через буфер обмена (надёжно для длинного текста с переносами), затем буфер возвращается.
