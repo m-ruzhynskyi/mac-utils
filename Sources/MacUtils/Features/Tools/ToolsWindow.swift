@@ -58,6 +58,12 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
         if let tab { UserDefaults.standard.set(tab.rawValue, forKey: Pref.toolsTab) }
         // Есть значок в строке меню — инструменты выпадают из него панелью со вкладками.
         if AppStatusItem.shared.showTools() { return }
+        showWindow()
+    }
+
+    /// Полное окно 1000×660 — даже когда есть значок в строке меню (кнопка «Открыть в окне», ⌥-клик по значку).
+    func showWindow() {
+        AppStatusItem.shared.closeTools()
         let window = self.window ?? make()
         if !window.isVisible { FocusReturn.remember() }
         NSApp.activate()
@@ -211,6 +217,10 @@ struct ToolsView: View {
                 Image(systemName: warmOn ? "sun.horizon.fill" : "sun.horizon")
             }
             .help("Тёплый экран: включить или выключить вручную")
+            Button { ToolsWindowController.shared.showWindow() } label: {
+                Image(systemName: "macwindow")
+            }
+            .help("Открыть в окне (то же — ⌥-клик по значку)")
             Button {
                 AppStatusItem.shared.closeTools()
                 SettingsWindowController.shared.show()

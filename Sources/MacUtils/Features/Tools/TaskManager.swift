@@ -12,8 +12,26 @@ struct ProcessRow: Identifiable, Equatable {
     var cpu: Double
     /// Занимаемая память (phys_footprint), байты.
     var memory: UInt64
+    /// Кем был PID, когда строка попала в список: PID может смениться до нажатия «Завершить».
+    var identity = ProcessIdentity(bundleID: nil, startTime: nil)
 
     var id: pid_t { pid }
+}
+
+/// Отпечаток процесса: по нему перед завершением проверяем, что PID всё ещё та же программа.
+struct ProcessIdentity: Equatable {
+    var bundleID: String?
+    /// Время запуска процесса (секунды с 1970), если ОС его сообщила.
+    var startTime: TimeInterval?
+
+    /// Тот же процесс: bundle id совпадает, а времена запуска (если известны обоим) различаются не больше чем на секунду.
+    /// `actual == nil` — процесса больше нет.
+    static func isSame(expected: ProcessIdentity, actual: ProcessIdentity?) -> Bool {
+        guard let actual else { return false }
+        if expected.bundleID != actual.bundleID { return false }
+        if let a = expected.startTime, let b = actual.startTime { return abs(a - b) <= 1 }
+        return true
+    }
 }
 
 /// Расчёт загрузки по процессорному времени (без системных вызовов — для тестов).
@@ -119,7 +137,8 @@ final class TaskManagerModel: ObservableObject {
             }
             result.append(ProcessRow(pid: pid, name: name,
                                      isApp: app.map { $0.activationPolicy == .regular } ?? false,
-                                     user: Self.userName(of: pid), cpu: cpu, memory: memory))
+                                     user: Self.userName(of: pid), cpu: cpu, memory: memory,
+                                     identity: Self.identity(of: pid, app: app) ?? ProcessIdentity(bundleID: nil, startTime: nil)))
         }
         lastTimes = times
         rows = result
@@ -127,13 +146,25 @@ final class TaskManagerModel: ObservableObject {
 
     // MARK: - Завершение
 
-    func quit(_ pid: pid_t, force: Bool) {
+    func quit(_ row: ProcessRow, force: Bool) {
+        let pid = row.pid
         guard pid > 1, pid != ProcessInfo.processInfo.processIdentifier else {
             lastError = "Этот процесс завершать нельзя"
             return
         }
-        if let app = NSRunningApplication(processIdentifier: pid) {
-            _ = force ? app.forceTerminate() : app.terminate()
+        // Между списком и нажатием PID мог перейти к другой программе — её не трогаем.
+        let app = NSRunningApplication(processIdentifier: pid)
+        guard ProcessIdentity.isSame(expected: row.identity, actual: Self.identity(of: pid, app: app)) else {
+            lastError = "«\(row.name)» уже закрыта или PID занят другой программой — список обновлён"
+            sample()
+            return
+        }
+        if let app {
+            let accepted = force ? app.forceTerminate() : app.terminate()
+            if !accepted {
+                lastError = "«\(row.name)» не приняла запрос на завершение"
+                return
+            }
         } else if kill(pid, force ? SIGKILL : SIGTERM) != 0 {
             lastError = errno == EPERM
                 ? "Нет прав: процесс принадлежит системе или другому пользователю"
@@ -154,6 +185,18 @@ final class TaskManagerModel: ObservableObject {
         var pids = [pid_t](repeating: 0, count: Int(count) + 32)
         let filled = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
         return Array(pids.prefix(Int(max(filled, 0))))
+    }
+
+    /// Отпечаток через sysctl: время запуска отдаётся и для процессов root и других пользователей
+    /// (`proc_pidinfo` для них не работает). nil — процесса нет.
+    static func identity(of pid: pid_t, app: NSRunningApplication?) -> ProcessIdentity? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0, size > 0, info.kp_proc.p_pid == pid else { return nil }
+        let started = info.kp_proc.p_starttime
+        let start = TimeInterval(started.tv_sec) + TimeInterval(started.tv_usec) / 1_000_000
+        return ProcessIdentity(bundleID: app?.bundleIdentifier, startTime: start)
     }
 
     private static var userNames: [uid_t: String] = [:]
@@ -225,7 +268,7 @@ struct TaskManagerView: View {
                                 Button("Что это за процесс?") { explain(row) }
                                 Divider()
                             }
-                            Button("Завершить") { model.quit(row.pid, force: false) }
+                            Button("Завершить") { model.quit(row, force: false) }
                             Button("Завершить принудительно") { confirmForce = row }
                         }
                 }
@@ -253,7 +296,7 @@ struct TaskManagerView: View {
                 }
                 Text(compact ? "\(model.visible.count)" : "Процессов: \(model.visible.count)").foregroundStyle(.secondary).monospacedDigit()
                     .help("Процессов в списке")
-                Button(compact ? "Стоп" : "Завершить") { if let pid = model.selection { model.quit(pid, force: false) } }
+                Button(compact ? "Стоп" : "Завершить") { if let pid = model.selection, let row = model.rows.first(where: { $0.pid == pid }) { model.quit(row, force: false) } }
                     .help("Завершить выбранный процесс")
                     .disabled(model.selection == nil)
                 Button(compact ? "Убить" : "Принудительно") {
@@ -268,7 +311,7 @@ struct TaskManagerView: View {
         .alert(item: $confirmForce) { row in
             Alert(title: Text("Завершить «\(row.name)» принудительно?"),
                   message: Text("Несохранённые данные будут потеряны."),
-                  primaryButton: .destructive(Text("Завершить")) { model.quit(row.pid, force: true) },
+                  primaryButton: .destructive(Text("Завершить")) { model.quit(row, force: true) },
                   secondaryButton: .cancel(Text("Отмена")))
         }
     }
