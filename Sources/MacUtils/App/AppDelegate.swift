@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var syncScheduled = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Шрифты интерфейса (Graphite) — до первого окна; не вышло — системный шрифт.
+        DSFonts.registerAll()
         Pref.register()
         BusyRegistry.shared.installDefaultProviders()
         observeSystemShutdown()

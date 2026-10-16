@@ -15,7 +15,8 @@ import XCTest
 /// Снимается:
 /// - все остальные разделы настроек и вкладки панели 🔧 (читают только настройки suite/раннера и состояние разрешений);
 /// - «Мои снимки» (`shots-demo`) — на `ScreenshotLibrary(records:)` с демонстрационными записями, файлов пользователя нет;
-/// - окно настроек (стартовый раздел «Общие»), «Что нового».
+/// - окно настроек (стартовый раздел «Общие» и по одному разделу из каждой группы боковой панели — без пропущенных),
+///   «Что нового», витрина компонентов дизайн-системы (`components-gallery-*`).
 /// Не снимаются: очередь запросов share (`ShareRequestQueueView` рисуется только через `queue.add`, который выводит
 /// настоящую панель на экран), Toast (private), первый запуск (нет представления).
 @MainActor
@@ -72,7 +73,9 @@ final class UISnapshotTests: XCTestCase {
 
     private func render<V: View>(_ view: V, size: NSSize, name: String, dark: Bool, settle: TimeInterval = 0.3) {
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
-        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height).defaultAppStorage(suite))
+        // Окно снимка не становится ключевым: без `.key` контролы рисуются «не в фокусе».
+        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height).defaultAppStorage(suite)
+            .environment(\.controlActiveState, .key))
         host.frame = NSRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: size.width, height: size.height),
                               styleMask: [.borderless], backing: .buffered, defer: false)
@@ -154,7 +157,24 @@ final class UISnapshotTests: XCTestCase {
 
     func testSettingsWindowWithSidebar() {
         // Окно настроек целиком — только стартовый раздел «Общие»: переключение разделов в боковой панели требует кликов.
-        bothThemes("settings-window", size: NSSize(width: 980, height: 620), settle: 0.6) { SettingsView() }
+        bothThemes("settings-window", size: DS.Size.settingsWindow, settle: 0.6) { SettingsView() }
+    }
+
+    /// Окно с выбранным разделом в каждой группе боковой панели (кроме «Основного» — оно в `settings-window`).
+    /// Разделы — без сети и личных данных.
+    func testSettingsWindowPerGroup() {
+        let shown: [(SettingsGroup, SettingsSection)] = [(.capture, .qr), (.windowsInput, .switcher), (.filesSystem, .shelf), (.more, .wellbeing)]
+        for (group, section) in shown {
+            XCTAssertNil(Self.skippedSections[section], "\(section) пропускается — снимать нельзя")
+            XCTAssertEqual(section.group, group)
+            bothThemes("settings-window-\(group.rawValue)", size: DS.Size.settingsWindow, settle: 0.6) { SettingsView(selection: section) }
+        }
+    }
+
+    /// Витрина компонентов Graphite: сверка с концептом (`.audit/concept/Settings*.dc.html`, `Popover*`, `Onboarding*`).
+    func testComponentsGallery() {
+        bothThemes("components-gallery-settings", size: NSSize(width: 790, height: 2100), settle: 0.8) { ComponentsGallery(part: .settings) }
+        bothThemes("components-gallery-surfaces", size: NSSize(width: 1000, height: 1300), settle: 0.8) { ComponentsGallery(part: .surfaces) }
     }
 
     func testMenuBarPanelTabs() {
