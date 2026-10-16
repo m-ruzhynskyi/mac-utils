@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import ScreenCaptureKit
 import SwiftUI
 
 /// Рисование поверх экрана (⌃⌥A): стрелки, рамки, маркер и перо — во время созвона или записи.
@@ -36,9 +37,23 @@ final class ScreenAnnotator: ObservableObject {
     @Published var fading = false
     @Published private(set) var isActive = false
 
-    private var canvasPanel: NSPanel?
+    /// Рисовать «сквозь клики»: рисунок остаётся, мышь работает с программами. Удержание ⌥ на время переворачивает режим.
+    @Published var clickThrough = false {
+        didSet { applyMouseMode() }
+    }
+    @Published private(set) var snapshotBusy = false
+
+    private(set) var store = AnnotationStore()
+    private struct Overlay {
+        let panel: NSPanel
+        let canvas: AnnotationCanvas
+    }
+    private var overlays: [CGDirectDisplayID: Overlay] = [:]
     private var toolbarPanel: NSPanel?
-    private weak var canvas: AnnotationCanvas?
+    private var optionHeld = false
+    private var flagMonitors: [Any] = []
+    private var screenObserver: Any?
+    private var fadeTimer: Timer?
 
     func sync() {
         let center = HotKeyCenter.shared
@@ -56,29 +71,22 @@ final class ScreenAnnotator: ObservableObject {
         isActive ? stop() : start()
     }
 
+    private static func frames() -> [CGDirectDisplayID: CGRect] {
+        Dictionary(NSScreen.screens.compactMap { screen in screen.displayID.map { ($0, screen.frame) } },
+                   uniquingKeysWith: { first, _ in first })
+    }
+
     func start() {
-        guard !isActive, let screen = NSScreen.withMouse ?? NSScreen.main else { return }
+        guard !isActive, let mouseScreen = NSScreen.withMouse ?? NSScreen.main else { return }
         isActive = true
-        let canvas = AnnotationCanvas(frame: NSRect(origin: .zero, size: screen.frame.size))
-        canvas.annotator = self
-        let panel = HUDPanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel],
-                             backing: .buffered, defer: false)
-        panel.title = ScreenRecorder.recordedWindowTitle
-        panel.isOpaque = false
-        panel.backgroundColor = NSColor.black.withAlphaComponent(0.001)
-        panel.level = .screenSaver
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = canvas
-        panel.setFrame(screen.frame, display: true)
-        panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(canvas)
-        canvasPanel = panel
-        self.canvas = canvas
+        optionHeld = false
+        // Холст на каждом экране: рисовать можно на любом мониторе без перезапуска.
+        rebuildOverlays(preferred: mouseScreen.displayID)
 
         let host = FirstMouseHostingView(rootView: AnnotationToolbar(annotator: self))
         let size = host.fittingSize
-        let bar = HUDPanel(contentRect: NSRect(x: screen.frame.midX - size.width / 2,
-                                               y: screen.visibleFrame.maxY - size.height - 12,
+        let bar = HUDPanel(contentRect: NSRect(x: mouseScreen.frame.midX - size.width / 2,
+                                               y: mouseScreen.visibleFrame.maxY - size.height - 12,
                                                width: size.width, height: size.height),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         bar.isOpaque = false
@@ -90,38 +98,243 @@ final class ScreenAnnotator: ObservableObject {
         bar.contentView = host
         bar.orderFrontRegardless()
         toolbarPanel = bar
+
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { ScreenAnnotator.shared.screensChanged() }
+        }
+        installOptionMonitors()
         ScreenRecorder.current?.refreshFilter()
     }
 
     func stop() {
         guard isActive else { return }
         isActive = false
-        canvasPanel?.orderOut(nil)
+        for overlay in overlays.values { overlay.panel.orderOut(nil) }
+        overlays = [:]
         toolbarPanel?.orderOut(nil)
-        canvasPanel = nil
         toolbarPanel = nil
+        store.clear()
+        fadeTimer?.invalidate()
+        fadeTimer = nil
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        screenObserver = nil
+        for monitor in flagMonitors { NSEvent.removeMonitor(monitor) }
+        flagMonitors = []
         ScreenRecorder.current?.refreshFilter()
     }
 
-    func undo() { canvas?.undo() }
-    func clear() { canvas?.clear() }
+    // MARK: Экраны
+
+    /// Подключили или отключили монитор, сменили разрешение: оверлеи пересобираются, штрихи остальных экранов сохраняются.
+    private func screensChanged() {
+        guard isActive else { return }
+        rebuildOverlays(preferred: nil)
+        // Панель инструментов должна остаться на существующем экране.
+        if let bar = toolbarPanel, !NSScreen.screens.contains(where: { $0.frame.intersects(bar.frame) }),
+           let screen = NSScreen.main {
+            bar.setFrameOrigin(NSPoint(x: screen.frame.midX - bar.frame.width / 2, y: screen.visibleFrame.maxY - bar.frame.height - 12))
+        }
+        if overlays.isEmpty { stop() }
+    }
+
+    private func rebuildOverlays(preferred: CGDirectDisplayID?) {
+        let current = Self.frames()
+        let plan = AnnotationScreens.plan(existing: overlays.mapValues { $0.panel.frame }, current: current)
+        for id in plan.remove {
+            overlays[id]?.panel.orderOut(nil)
+            overlays[id] = nil
+        }
+        store.drop(displays: Set(plan.remove + plan.resize))
+        for id in plan.resize {
+            guard let frame = current[id], let overlay = overlays[id] else { continue }
+            overlay.panel.setFrame(frame, display: true)
+            overlay.canvas.frame = NSRect(origin: .zero, size: frame.size)
+        }
+        for id in plan.add {
+            guard let frame = current[id] else { continue }
+            overlays[id] = makeOverlay(display: id, frame: frame)
+        }
+        applyMouseMode()
+        let key = preferred.flatMap { overlays[$0] } ?? overlays.values.first
+        for overlay in overlays.values {
+            if overlay.panel === key?.panel, !isClickThroughNow {
+                overlay.panel.makeKeyAndOrderFront(nil)
+                overlay.panel.makeFirstResponder(overlay.canvas)
+            } else {
+                overlay.panel.orderFrontRegardless()
+            }
+        }
+        redrawAll()
+        ScreenRecorder.current?.refreshFilter()
+    }
+
+    private func makeOverlay(display: CGDirectDisplayID, frame: CGRect) -> Overlay {
+        let canvas = AnnotationCanvas(frame: NSRect(origin: .zero, size: frame.size))
+        canvas.annotator = self
+        canvas.display = display
+        let panel = HUDPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
+                              backing: .buffered, defer: false)
+        panel.title = ScreenRecorder.recordedWindowTitle
+        panel.isOpaque = false
+        panel.backgroundColor = NSColor.black.withAlphaComponent(0.001)
+        panel.level = .screenSaver
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = canvas
+        panel.setFrame(frame, display: true)
+        return Overlay(panel: panel, canvas: canvas)
+    }
+
+    // MARK: Режим «сквозь клики»
+
+    private var isClickThroughNow: Bool { AnnotationMode.ignoresMouse(clickThrough: clickThrough, optionHeld: optionHeld) }
+
+    private func applyMouseMode() {
+        let ignore = isClickThroughNow
+        for overlay in overlays.values {
+            overlay.panel.ignoresMouseEvents = ignore
+            overlay.panel.invalidateCursorRects(for: overlay.canvas)
+        }
+        // Вернулись к рисованию — клавиши (Esc, 1–4) снова должны попадать на холст.
+        if !ignore, let overlay = overlays.values.first(where: { $0.panel.isKeyWindow }) ?? overlays.values.first {
+            overlay.panel.makeKeyAndOrderFront(nil)
+            overlay.panel.makeFirstResponder(overlay.canvas)
+        }
+    }
+
+    private func installOptionMonitors() {
+        let handler: (NSEvent) -> Void = { event in
+            let held = event.modifierFlags.contains(.option)
+            MainActor.assumeIsolated {
+                let annotator = ScreenAnnotator.shared
+                guard annotator.isActive, annotator.optionHeld != held else { return }
+                annotator.optionHeld = held
+                annotator.applyMouseMode()
+            }
+        }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: handler) { flagMonitors.append(global) }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { event in handler(event); return event }) {
+            flagMonitors.append(local)
+        }
+    }
+
+    // MARK: Штрихи
+
+    func commit(_ stroke: AnnotationStroke) {
+        store.add(stroke)
+        redrawAll()
+        scheduleFade()
+    }
+
+    func redrawAll() {
+        for overlay in overlays.values { overlay.canvas.needsDisplay = true }
+    }
+
+    func undo() {
+        store.undo()
+        redrawAll()
+    }
+
+    func clear() {
+        store.clear()
+        redrawAll()
+    }
+
+    private func scheduleFade() {
+        guard fading, fadeTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                let annotator = ScreenAnnotator.shared
+                annotator.store.removeExpired(now: Date())
+                annotator.redrawAll()
+                if annotator.store.isEmpty || !annotator.fading || !annotator.isActive {
+                    timer.invalidate()
+                    annotator.fadeTimer = nil
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        fadeTimer = timer
+    }
+
+    // MARK: Снимок экрана с рисунком
+
+    /// Снимает экран, на котором панель инструментов (без окон Mac Utils), накладывает штрихи этого экрана и отдаёт по
+    /// настройке «Куда сохранять»: в буфер, в папку или туда и туда.
+    func snapshot() {
+        guard !snapshotBusy, isActive else { return }
+        guard Permissions.screenRecording else {
+            Permissions.requestScreenRecording()
+            Toast.show("Чтобы снять экран с рисунком, разрешите «Запись экрана»", symbol: "exclamationmark.triangle.fill", tint: .orange)
+            return
+        }
+        let screen = toolbarPanel?.screen ?? NSScreen.withMouse ?? NSScreen.main
+        guard let screen, let display = screen.displayID else { return }
+        snapshotBusy = true
+        let items = store.strokes(on: display).map { ($0, AnnotationStore.alpha(age: Date().timeIntervalSince($0.born), fading: fading)) }
+        Task { @MainActor in
+            defer { snapshotBusy = false }
+            do {
+                let base = try await Self.captureClean(screen: screen, display: display)
+                guard let image = AnnotationRenderer.compose(base: base, strokes: items, pointSize: screen.frame.size),
+                      let png = AnnotationRenderer.png(image) else {
+                    Toast.show("Не удалось собрать снимок с рисунком", symbol: "exclamationmark.triangle.fill", tint: .orange)
+                    return
+                }
+                deliver(png: png)
+            } catch {
+                Toast.show("Не удалось снять экран: \(error.localizedDescription)", symbol: "exclamationmark.triangle.fill", tint: .orange)
+            }
+        }
+    }
+
+    private func deliver(png: Data) {
+        let destination = Pref.screenshotDestinationValue
+        if destination != .folder {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setData(png, forType: .png)
+        }
+        if destination != .clipboard {
+            do {
+                let folder = Pref.screenshotDirectory
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = try AnnotationRenderer.writeUnique(png, to: folder.appendingPathComponent(AnnotationRenderer.snapshotName()))
+                Toast.show(destination == .both ? "Снимок с рисунком скопирован и сохранён" : "Сохранено: \(url.lastPathComponent)",
+                           symbol: "camera.fill", tint: .green)
+                return
+            } catch {
+                Toast.show("Не удалось сохранить: \(error.localizedDescription)", symbol: "exclamationmark.triangle.fill", tint: .orange)
+                return
+            }
+        }
+        Toast.show("Снимок с рисунком скопирован", symbol: "camera.fill", tint: .green)
+    }
+
+    /// Экран без окон Mac Utils (холст и панель инструментов): рисунок накладывается отдельно, из хранилища штрихов.
+    private static func captureClean(screen: NSScreen, display: CGDirectDisplayID) async throws -> CGImage {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard let target = content.displays.first(where: { $0.displayID == display }) else {
+            throw NSError(domain: "MacUtils.Annotate", code: 1, userInfo: [NSLocalizedDescriptionKey: "Экран не найден"])
+        }
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let own = content.applications.filter { $0.processID == ownPID }
+        let filter = SCContentFilter(display: target, excludingApplications: own, exceptingWindows: [])
+        let config = SCStreamConfiguration()
+        config.width = Int(screen.frame.width * screen.backingScaleFactor)
+        config.height = Int(screen.frame.height * screen.backingScaleFactor)
+        config.showsCursor = false
+        config.captureResolution = .best
+        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+    }
 }
 
 // MARK: - Холст
 
 final class AnnotationCanvas: NSView {
-    struct Stroke {
-        var tool: ScreenAnnotator.Tool
-        var color: NSColor
-        var points: [NSPoint]
-        var born = Date()
-    }
-
     weak var annotator: ScreenAnnotator?
-    private var strokes: [Stroke] = []
-    private var current: Stroke?
-    private var fadeTimer: Timer?
-    private static let fadeAfter: TimeInterval = 3
+    var display: CGDirectDisplayID = 0
+    private var current: AnnotationStroke?
 
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -133,7 +346,7 @@ final class AnnotationCanvas: NSView {
     override func mouseDown(with event: NSEvent) {
         guard let annotator else { return }
         let point = convert(event.locationInWindow, from: nil)
-        current = Stroke(tool: annotator.tool, color: annotator.color, points: [point])
+        current = AnnotationStroke(display: display, tool: annotator.tool, color: annotator.color, points: [point])
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -153,104 +366,31 @@ final class AnnotationCanvas: NSView {
         current = nil
         if stroke.points.count == 1 { stroke.points.append(stroke.points[0]) }
         stroke.born = Date()
-        strokes.append(stroke)
-        needsDisplay = true
-        scheduleFade()
+        annotator?.commit(stroke)
     }
 
     override func keyDown(with event: NSEvent) {
         let annotator = self.annotator
         switch Int(event.keyCode) {
         case kVK_Escape: annotator?.stop()
-        case kVK_Delete, kVK_ForwardDelete: clear()
+        case kVK_Delete, kVK_ForwardDelete: annotator?.clear()
         case kVK_ANSI_1: annotator?.tool = .pen
         case kVK_ANSI_2: annotator?.tool = .arrow
         case kVK_ANSI_3: annotator?.tool = .rectangle
         case kVK_ANSI_4: annotator?.tool = .highlighter
-        case kVK_ANSI_Z where event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control): undo()
+        case kVK_ANSI_Z where event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control): annotator?.undo()
         default: super.keyDown(with: event)
         }
     }
 
-    func undo() {
-        _ = strokes.popLast()
-        needsDisplay = true
-    }
-
-    func clear() {
-        strokes.removeAll()
-        needsDisplay = true
-    }
-
-    private func scheduleFade() {
-        guard annotator?.fading == true, fadeTimer == nil else { return }
-        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] timer in
-            MainActor.assumeIsolated {
-                guard let self else { timer.invalidate(); return }
-                let now = Date()
-                self.strokes.removeAll { now.timeIntervalSince($0.born) > Self.fadeAfter + 0.6 }
-                self.needsDisplay = true
-                if self.strokes.isEmpty || self.annotator?.fading != true {
-                    timer.invalidate()
-                    self.fadeTimer = nil
-                }
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        fadeTimer = timer
-    }
-
     override func draw(_ dirtyRect: NSRect) {
-        let fading = annotator?.fading == true
+        guard let annotator else { return }
+        let fading = annotator.fading
         let now = Date()
-        for stroke in strokes {
-            var alpha: CGFloat = 1
-            if fading {
-                let age = now.timeIntervalSince(stroke.born)
-                alpha = age < Self.fadeAfter ? 1 : max(0, 1 - CGFloat(age - Self.fadeAfter) / 0.6)
-            }
-            draw(stroke, alpha: alpha)
+        for stroke in annotator.store.strokes(on: display) {
+            AnnotationRenderer.draw(stroke, alpha: AnnotationStore.alpha(age: now.timeIntervalSince(stroke.born), fading: fading))
         }
-        if let current { draw(current, alpha: 1) }
-    }
-
-    private func draw(_ stroke: Stroke, alpha: CGFloat) {
-        guard let first = stroke.points.first, let last = stroke.points.last else { return }
-        let path = NSBezierPath()
-        path.lineCapStyle = .round
-        path.lineJoinStyle = .round
-        var color = stroke.color
-        switch stroke.tool {
-        case .pen, .highlighter:
-            path.move(to: first)
-            for point in stroke.points.dropFirst() { path.line(to: point) }
-            path.lineWidth = stroke.tool == .pen ? 4 : 22
-            if stroke.tool == .highlighter { color = color.withAlphaComponent(0.35) }
-        case .rectangle:
-            let rect = NSRect(x: min(first.x, last.x), y: min(first.y, last.y),
-                              width: abs(last.x - first.x), height: abs(last.y - first.y))
-            path.appendRoundedRect(rect, xRadius: 6, yRadius: 6)
-            path.lineWidth = 4
-        case .arrow:
-            path.move(to: first)
-            path.line(to: last)
-            path.lineWidth = 5
-            let angle = atan2(last.y - first.y, last.x - first.x)
-            let head: CGFloat = 22
-            for side in [CGFloat.pi * 0.82, -CGFloat.pi * 0.82] {
-                path.move(to: last)
-                path.line(to: NSPoint(x: last.x + head * cos(angle + side), y: last.y + head * sin(angle + side)))
-            }
-        }
-        // Тёмная подложка — видно и на светлом, и на тёмном фоне.
-        if stroke.tool != .highlighter {
-            NSColor.black.withAlphaComponent(0.35 * alpha).setStroke()
-            let shadow = path.copy() as! NSBezierPath
-            shadow.lineWidth = path.lineWidth + 2
-            shadow.stroke()
-        }
-        color.withAlphaComponent(color.alphaComponent * alpha).setStroke()
-        path.stroke()
+        if let current { AnnotationRenderer.draw(current, alpha: 1) }
     }
 }
 
@@ -281,6 +421,17 @@ private struct AnnotationToolbar: View {
                 Image(systemName: annotator.fading ? "timer" : "infinity").frame(width: 24, height: 24)
             }
             .help(annotator.fading ? "Штрихи исчезают через 3 секунды" : "Штрихи остаются")
+            Button { annotator.clickThrough.toggle() } label: {
+                Image(systemName: annotator.clickThrough ? "cursorarrow.click.2" : "pencil.line")
+                    .frame(width: 24, height: 24)
+                    .background(annotator.clickThrough ? Color.accentColor.opacity(0.35) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .help(annotator.clickThrough ? "Сквозь клики: мышь работает с программами (⌥ — порисовать)" : "Рисование: клики идут на холст (⌥ — пропустить клик)")
+            Button { annotator.snapshot() } label: {
+                Image(systemName: annotator.snapshotBusy ? "hourglass" : "camera").frame(width: 24, height: 24)
+            }
+            .disabled(annotator.snapshotBusy)
+            .help("Снимок экрана вместе с рисунком")
             Button { annotator.undo() } label: { Image(systemName: "arrow.uturn.backward").frame(width: 24, height: 24) }
                 .help("Отменить (⌘Z)")
             Button { annotator.clear() } label: { Image(systemName: "trash").frame(width: 24, height: 24) }
