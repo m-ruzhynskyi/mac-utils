@@ -14,6 +14,8 @@ struct ProcessRow: Identifiable, Equatable {
     var memory: UInt64
     /// Кем был PID, когда строка попала в список: PID может смениться до нажатия «Завершить».
     var identity = ProcessIdentity(bundleID: nil, startTime: nil)
+    /// Нагрузку удалось прочитать. У процессов root и других пользователей macOS без прав администратора её не отдаёт.
+    var statsKnown = true
 
     var id: pid_t { pid }
 }
@@ -57,6 +59,9 @@ enum ProcessMath {
     static func sorted(_ rows: [ProcessRow], by sort: Sort) -> [ProcessRow] {
         rows.sorted {
             switch sort {
+            // Процессы с неизвестной нагрузкой — в конце, а не вперемешку с настоящими нулями.
+            case .cpu where $0.statsKnown != $1.statsKnown, .memory where $0.statsKnown != $1.statsKnown:
+                return $0.statsKnown
             case .cpu: return $0.cpu != $1.cpu ? $0.cpu > $1.cpu : $0.pid < $1.pid
             case .memory: return $0.memory != $1.memory ? $0.memory > $1.memory : $0.pid < $1.pid
             case .name: return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
@@ -122,6 +127,18 @@ final class TaskManagerModel: ObservableObject {
         timer = nil
     }
 
+    /// Имя из таблицы процессов ядра (как у `ps`): доступно и для процессов root, когда proc_name отказывает.
+    nonisolated static func kernelName(of pid: pid_t) -> String? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let name = withUnsafeBytes(of: info.kp_proc.p_comm) { raw in
+            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        }
+        return name.isEmpty ? nil : name
+    }
+
     func sample() {
         guard !isDemo else { return }
         let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
@@ -140,7 +157,7 @@ final class TaskManagerModel: ObservableObject {
                 }
             }
             let app = apps[pid]
-            let name = app?.localizedName ?? ProcessInfo.processName(pid) ?? "pid \(pid)"
+            let name = app?.localizedName ?? ProcessInfo.processName(pid) ?? Self.kernelName(of: pid) ?? "pid \(pid)"
             var cpu = 0.0
             var memory: UInt64 = 0
             if ok {
@@ -154,7 +171,8 @@ final class TaskManagerModel: ObservableObject {
             result.append(ProcessRow(pid: pid, name: name,
                                      isApp: app.map { $0.activationPolicy == .regular } ?? false,
                                      user: Self.userName(of: pid), cpu: cpu, memory: memory,
-                                     identity: Self.identity(of: pid, app: app) ?? ProcessIdentity(bundleID: nil, startTime: nil)))
+                                     identity: Self.identity(of: pid, app: app) ?? ProcessIdentity(bundleID: nil, startTime: nil),
+                                     statsKnown: ok))
         }
         lastTimes = times
         rows = result
@@ -418,11 +436,12 @@ private struct ProcessLine: View {
                     .background(Color.dsField, in: Capsule())
                     .overlay(Capsule().strokeBorder(Color.dsLine, lineWidth: 1))
             }
-            Text(String(format: "%.1f %%", row.cpu))
+            Text(row.statsKnown ? String(format: "%.1f %%", row.cpu) : "—")
                 .font(DS.Font.mono(13, relativeTo: .callout))
-                .foregroundStyle(row.cpu > 80 ? Color.dsRec : .dsText)
+                .foregroundStyle(row.cpu > 80 ? Color.dsRec : (row.statsKnown ? .dsText : .dsMute))
                 .frame(width: compact ? 58 : 72, alignment: .trailing)
-            Text(bytes(row.memory))
+                .help(row.statsKnown ? "" : "Системный процесс: macOS не сообщает его нагрузку без прав администратора")
+            Text(row.statsKnown ? bytes(row.memory) : "—")
                 .font(DS.Font.mono(13, relativeTo: .callout))
                 .foregroundStyle(.dsMute)
                 .frame(width: compact ? 70 : 92, alignment: .trailing)
