@@ -167,9 +167,12 @@ final class WindowTiler: ObservableObject {
             endDrag()
             let point = event.location
             let generation = dragGeneration
+            // Наши окна, которые принимают мышь (настройки, панель в строке меню). Узнаём здесь, на главном потоке:
+            // к своему процессу из фона через AX обращаться нельзя — AppKit отвечает на такой запрос в фоновом потоке и падает.
+            let ownWindows = Set(NSApp.windows.filter { $0.isVisible && !$0.ignoresMouseEvents }.map(\.windowNumber))
             // Окно под курсором и его рамка — вне обработчика: AX-запрос к зависшей программе не держит клики системы.
             axQueue.async { [weak self] in
-                guard let window = Self.window(at: point), let frame = Self.frame(of: window) else { return }
+                guard let window = Self.window(at: point, ownWindows: ownWindows), let frame = Self.frame(of: window) else { return }
                 let box = UncheckedSendable(window)
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
@@ -337,16 +340,18 @@ final class WindowTiler: ObservableObject {
     }
 
     /// Окно под точкой (координаты CG/AX), не наше и не рабочий стол.
-    private nonisolated static func window(at point: CGPoint) -> AXUIElement? {
-        // Таймаут на system-wide элементе — общий для всех AX-запросов процесса, поэтому здесь его не меняем
-        // (другие функции ставят свои значения на конкретных элементах); запрос идёт в фоне и главный поток не держит.
-        let system = AXUIElementCreateSystemWide()
+    /// Чья программа под курсором, узнаём по списку окон WindowServer, а AX спрашиваем уже у неё самой: system-wide запрос
+    /// попадал и в наш процесс (клик по настройкам или панели), и AppKit отвечал на него в фоновом потоке — сбой и подвисания.
+    private nonisolated static func window(at point: CGPoint, ownWindows: Set<Int>) -> AXUIElement? {
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let windows = info.compactMap(WindowDragRules.ScreenWindow.init)
+        guard let pid = WindowDragRules.ownerUnder(point, windows: windows, ownPID: ProcessInfo.processInfo.processIdentifier,
+                                                   ownWindows: ownWindows) else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.3)
         var element: AXUIElement?
-        guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &element) == .success,
+        guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &element) == .success,
               let element else { return nil }
-        var pid: pid_t = 0
-        AXUIElementGetPid(element, &pid)
-        guard pid != ProcessInfo.processInfo.processIdentifier else { return nil }
         if role(of: element) == kAXWindowRole as String { return standard(element) }
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &value) == .success,
@@ -465,6 +470,43 @@ enum WindowDragRules {
     /// Нажатие пришлось на верхнюю полосу окна (координаты AX).
     static func isTitleBarPoint(_ point: CGPoint, in frame: CGRect) -> Bool {
         point.y - frame.minY < titleBarHeight
+    }
+
+    /// Окно из списка WindowServer (CGWindowListCopyWindowInfo), координаты CG.
+    struct ScreenWindow: Equatable {
+        var number: Int
+        var pid: pid_t
+        var layer: Int
+        var alpha: Double
+        var bounds: CGRect
+
+        init(number: Int, pid: pid_t, layer: Int, alpha: Double = 1, bounds: CGRect) {
+            self.number = number; self.pid = pid; self.layer = layer; self.alpha = alpha; self.bounds = bounds
+        }
+
+        init?(_ info: [String: Any]) {
+            guard let number = info[kCGWindowNumber as String] as? Int,
+                  let pid = info[kCGWindowOwnerPID as String] as? Int,
+                  let dict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: dict as CFDictionary) else { return nil }
+            self.init(number: number, pid: pid_t(pid), layer: info[kCGWindowLayer as String] as? Int ?? 0,
+                      alpha: info[kCGWindowAlpha as String] as? Double ?? 1, bounds: bounds)
+        }
+    }
+
+    /// Программа, обычному окну которой достался клик (список окон — спереди назад). nil — клик не по чужому обычному окну:
+    /// по нашему окну, меню, панели или вообще мимо. Прозрачные окна и наши окна, пропускающие мышь (тёплый экран,
+    /// рисование «сквозь клики»), клик не забирают — смотрим под них.
+    static func ownerUnder(_ point: CGPoint, windows: [ScreenWindow], ownPID: pid_t, ownWindows: Set<Int>) -> pid_t? {
+        for window in windows where window.bounds.contains(point) {
+            if window.pid == ownPID {
+                if ownWindows.contains(window.number) { return nil }
+                continue
+            }
+            if window.alpha <= 0 { continue }
+            return window.layer == 0 ? window.pid : nil
+        }
+        return nil
     }
 
     /// Окно сдвинулось, а размер прежний — его тащат за заголовок, а не меняют размер.
