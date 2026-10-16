@@ -58,7 +58,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 // MARK: - Разделы
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, hotKeys, panel, music, share, focus, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
+    case general, hotKeys, exclusions, panel, music, share, focus, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
          uninstaller, monitor, tasks, cleanup, shots
 
@@ -89,6 +89,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .ai: return "ИИ"
         case .general: return "Общие"
         case .hotKeys: return "Клавиши"
+        case .exclusions: return "Исключения"
         case .panel: return "Панель"
         case .music: return "Музыка"
         case .share: return "Трансляция"
@@ -101,6 +102,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "Общие"
         case .hotKeys: return "Горячие клавиши"
+        case .exclusions: return "Исключённые программы"
         case .panel: return "Панель в строке меню"
         case .music: return "Музыка"
         case .share: return "Трансляция экрана"
@@ -133,6 +135,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .hotKeys: return "keyboard.badge.ellipsis"
+        case .exclusions: return "rectangle.on.rectangle.slash"
         case .panel: return "menubar.rectangle"
         case .music: return "music.note"
         case .share: return "dot.radiowaves.left.and.right"
@@ -165,6 +168,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return .gray
         case .hotKeys: return .blue
+        case .exclusions: return .orange
         case .panel: return .teal
         case .music: return .pink
         case .share: return .red
@@ -202,6 +206,7 @@ extension SettingsSection {
         switch self {
         case .general: return "автозапуск вход в систему dock значок строка меню разрешения универсальный доступ запись экрана полный доступ к диску обновления версия что нового репозиторий"
         case .hotKeys: return "сочетания клавиш горячие клавиши шорткаты переназначить конфликт занято hotkey shortcut"
+        case .exclusions: return "исключения исключённые программы виртуальная машина parallels vmware utm виртуалбокс удалённый рабочий стол общий экран remote desktop teamviewer anydesk перехват клавиш колесо мыши не работает ⌥tab"
         case .panel: return "панель вкладки порядок инструменты значок 🔧"
         case .music: return "сейчас играет музыка spotify apple music плеер обложка"
         case .share: return "трансляция экрана зрители id ретранслятор relay доверенные отпечаток ключ эфир"
@@ -299,6 +304,7 @@ struct SettingsSectionPage: View {
         switch section {
             case .general: GeneralPage()
             case .hotKeys: HotKeysPage()
+            case .exclusions: ExclusionsPage()
             case .panel: PanelSettingsPage()
             case .music: NowPlayingView(compact: compact).navigationTitle("Музыка")
             case .share: ScreenSharePage(compact: compact)
@@ -481,8 +487,6 @@ struct GeneralPage: View {
                     Button("Открыть") { Permissions.open(.automation) }
                 }
             }
-
-            ExcludedAppsSection()
 
             UpdatesSection()
 
