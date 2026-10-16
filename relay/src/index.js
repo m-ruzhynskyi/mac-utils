@@ -14,7 +14,7 @@
 import page from "./index.html";
 import landing from "./landing.html";
 // Одной строкой каждый: тестовая обвязка вырезает import и склеивает файлы в один скрипт.
-import { MAX_PENDING, MAX_PENDING_PER_IP, MAX_UNAUTH, MAX_UNAUTH_PER_IP, AUTH_TIMEOUT_MS, CLAIM_PER_IP_PER_DAY, ipKey, windowHit, pendingAllowed, declineCooldown, noteDecline } from "./limits.js";
+import { MAX_PENDING, MAX_PENDING_PER_IP, MAX_UNAUTH, MAX_UNAUTH_PER_IP, MAX_UNAUTH_VIEWERS_PER_IP, AUTH_TIMEOUT_MS, CLAIM_PER_IP_PER_DAY, ipKey, windowHit, pendingAllowed, declineCooldown, noteDecline } from "./limits.js";
 import { b64uHasLength, hostMessage, viewerMessage, statusMessage, verifyEd25519, fingerprintOf, newNonce } from "./auth.js";
 
 // Смотреть и транслировать можно только из приложений Mac Utils (Mac) и Mac Utils Share (Windows):
@@ -259,8 +259,9 @@ export class Room {
       // Ожидающие ответа ведущего: 10 в комнате, 4 с IP (офис за NAT, встреча) — и для legacy, и для v2 после ключа.
       if (!this.waitingAllowed(ip)) return new Response("rate-limited", { status: 429 });
       if (v2) {
-        // До проверки ключа: с одного IP — один сокет; комната полна — вытесняется самый старый (M1).
-        if (!this.makeRoomForUnauth(this.unauthViewers(), ip, false)) return new Response("rate-limited", { status: 429 });
+        // До проверки ключа: с одного IP — 3 (F3); комната полна — вытесняется самый старый, проверяемые последними (M1, F2).
+        const room = { perIp: MAX_UNAUTH_VIEWERS_PER_IP, sameIpCode: "rate-limited", strictSameIp: true };
+        if (!this.makeRoomForUnauth(this.unauthViewers(), ip, room)) return new Response("rate-limited", { status: 429 });
       } else if (ip && declineCooldown(this.declines, `ip:${ip}`, Date.now()) > 0) {
         return new Response("rate-limited", { status: 429 });
       }
@@ -308,12 +309,12 @@ export class Room {
   }
 
   // Запись владельца и сравнение — одним потоком, без гонки двух подключений.
-  // failOpen: сбой счётчика квоты не мешает привязке (только для хоста — иначе новый пользователь не начнёт трансляцию).
-  claimOwner(pub, ip, failOpen = false) {
-    return this.serial(() => this.claimOwnerNow(pub, ip, failOpen));
+  // useQuota: только привязка ID зрителя (вызов /claim из чужой комнаты) тратит суточную квоту IP; хост — нет (F1).
+  claimOwner(pub, ip, useQuota) {
+    return this.serial(() => this.claimOwnerNow(pub, ip, useQuota));
   }
 
-  async claimOwnerNow(pub, ip, failOpen) {
+  async claimOwnerNow(pub, ip, useQuota) {
     const now = Date.now();
     const owner = await this.readOwner();
     if (owner) {
@@ -321,22 +322,23 @@ export class Room {
       if (now - owner.lastSeenAt >= OWNER_TOUCH_MS) await this.state.storage.put("owner", { ...owner, lastSeenAt: now });
       return { ok: true, claimed: false };
     }
-    if (ip && !(await this.takeClaimQuota(ip, failOpen))) return { ok: false, reason: "rate-limited" };
+    if (useQuota && ip && !(await this.takeClaimQuota(ip))) return { ok: false, reason: "rate-limited" };
     const fp = await fingerprintOf(pub);
     await this.state.storage.put("owner", { v: 2, pub, fp, claimedAt: now, lastSeenAt: now });
     return { ok: true, claimed: true };
   }
 
   // Счётчик новых привязок по IP за сутки — в storage отдельной комнаты «__limits» (M3): переживает выгрузку объекта.
-  async takeClaimQuota(ip, failOpen) {
-    if (!this.env.ROOMS) return failOpen;
+  // Сбой счётчика — отказ (fail-closed): у зрителя это лишь idVerified:false.
+  async takeClaimQuota(ip) {
+    if (!this.env.ROOMS) return false;
     try {
       const response = await this.env.ROOMS.get(this.env.ROOMS.idFromName("__limits")).fetch("https://room/quota", {
         method: "POST", body: JSON.stringify({ key: ip }),
       });
       const result = await response.json();
-      return result && typeof result.ok === "boolean" ? result.ok : failOpen;
-    } catch (_) { return failOpen; }
+      return result && result.ok === true;
+    } catch (_) { return false; }
   }
 
   async quotaRoute(request) {
@@ -371,7 +373,7 @@ export class Room {
     if (!body || typeof body.pub !== "string" || !b64uHasLength(body.pub, 32)) {
       return Response.json({ ok: false, reason: "bad-request" }, { status: 400 });
     }
-    const result = await this.claimOwner(body.pub, ipKey(typeof body.ip === "string" ? body.ip : ""), false);
+    const result = await this.claimOwner(body.pub, ipKey(typeof body.ip === "string" ? body.ip : ""), true);
     return Response.json({ ok: result.ok, claimed: !!result.claimed, reason: result.reason });
   }
 
@@ -402,18 +404,19 @@ export class Room {
   }
 
   // Место для ещё одного сокета до проверки ключа (M1). Неаутентифицированный сокет ничего не держит:
-  // при переполнении комнаты уходит самый старый, а не отказ новому (иначе 3 молчащих сокета держат комнату).
-  // С одного IP — MAX_UNAUTH_PER_IP: replaceSameIp — старый сокет этого IP вытесняется (хост переподключается),
-  // иначе новый получает отказ (зрители).
-  makeRoomForUnauth(sockets, ip, replaceSameIp) {
-    const age = (socket) => socket.deserializeAttachment()?.connectedAt ?? 0;
-    const live = () => sockets.filter((socket) => !socket.deserializeAttachment()?.ended).sort((x, y) => age(x) - age(y));
+  // при переполнении комнаты уходит самый старый, а не отказ новому (иначе молчащие сокеты держат комнату).
+  // Порядок вытеснения: сначала не приславшие auth, приславшие (verifying, идёт проверка) — последними (F2).
+  // С одного IP — perIp. Лишние с этого IP вытесняются (sameIpCode); если вытеснять пришлось бы
+  // уже проверяемый сокет, а strictSameIp — новый получает отказ (зритель), хост вытесняет всё равно.
+  makeRoomForUnauth(sockets, ip, { perIp, sameIpCode, strictSameIp }) {
+    const info = (socket) => socket.deserializeAttachment() || {};
+    const order = (x, y) => (info(x).verifying ? 1 : 0) - (info(y).verifying ? 1 : 0) || (info(x).connectedAt ?? 0) - (info(y).connectedAt ?? 0);
+    const live = () => sockets.filter((socket) => !info(socket).ended).sort(order);
     if (ip) {
-      const same = live().filter((socket) => socket.deserializeAttachment()?.ip === ip);
-      if (same.length >= MAX_UNAUTH_PER_IP) {
-        if (!replaceSameIp) return false;
-        for (const old of same.slice(0, same.length - MAX_UNAUTH_PER_IP + 1)) this.failAuth(old, "replaced");
-      }
+      const same = live().filter((socket) => info(socket).ip === ip);
+      const victims = same.slice(0, Math.max(0, same.length - perIp + 1));
+      if (strictSameIp && victims.some((socket) => info(socket).verifying)) return false;
+      for (const old of victims) this.failAuth(old, sameIpCode);
     }
     const rest = live();
     for (const old of rest.slice(0, Math.max(0, rest.length - MAX_UNAUTH + 1))) this.failAuth(old, "rate-limited");
@@ -421,7 +424,7 @@ export class Room {
   }
 
   async connectHostV2(roomId, ip) {
-    this.makeRoomForUnauth(this.pendingHosts(), ip, true);
+    this.makeRoomForUnauth(this.pendingHosts(), ip, { perIp: MAX_UNAUTH_PER_IP, sameIpCode: "replaced", strictSameIp: false });
     const [client, server] = Object.values(new WebSocketPair());
     const nonce = newNonce(), now = Date.now();
     this.state.acceptWebSocket(server, ["host"]);
@@ -478,16 +481,23 @@ export class Room {
     return { pub: command.pub, sig: command.sig };
   }
 
+  // Сокет прислал auth: идёт проверка подписи и привязки (до сотен мс). Такие вытесняются последними (F2).
+  markVerifying(socket, info) {
+    if (!info.verifying) socket.serializeAttachment({ ...info, verifying: true });
+    return { ...info, verifying: true };
+  }
+
   async handleHostAuth(socket, command) {
-    const info = this.stillPending(socket);
-    if (!info) return;
+    const pending = this.stillPending(socket);
+    if (!pending) return;
+    const info = this.markVerifying(socket, pending);
     const auth = this.parseAuth(command);
     if (!auth || !(await verifyEd25519(auth.pub, auth.sig, hostMessage(info.roomId, info.nonce)))) {
       return this.failAuth(socket, "bad-signature");
     }
     // 6-значные ID перебираются за ~10^6 запросов: привязывать ключ к ним нельзя.
     if (!ID10.test(info.roomId)) return this.failAuth(socket, "id-format");
-    const claim = await this.claimOwner(auth.pub, info.ip, true);
+    const claim = await this.claimOwner(auth.pub, info.ip, false);
     if (!claim.ok) return this.failAuth(socket, claim.reason === "rate-limited" ? "rate-limited" : "id-claimed");
     const fp = await fingerprintOf(auth.pub);
     const current = this.stillPending(socket);
@@ -508,7 +518,7 @@ export class Room {
     for (const viewer of this.approvedViewers()) {
       if ((viewer.deserializeAttachment() || {}).approvedBy !== auth.pub) this.endViewer(viewer);
     }
-    socket.serializeAttachment({ ...current, auth: "key", pub: auth.pub, fp, nonce: undefined, lastSeen: Date.now() });
+    socket.serializeAttachment({ ...current, auth: "key", pub: auth.pub, fp, nonce: undefined, verifying: undefined, lastSeen: Date.now() });
     socket.send(JSON.stringify({ type: "authed", v: 2, fp, claimed: claim.claimed }));
     await this.resumeViewers();
     await this.ensureAlarm();
@@ -535,8 +545,9 @@ export class Room {
   }
 
   async handleViewerAuth(socket, command) {
-    const info = this.stillPending(socket);
-    if (!info) return;
+    const pending = this.stillPending(socket);
+    if (!pending) return;
+    const info = this.markVerifying(socket, pending);
     const auth = this.parseAuth(command);
     if (!auth || !(await verifyEd25519(auth.pub, auth.sig, viewerMessage(info.roomId, info.id, info.rid, info.nonce)))) {
       return this.failAuth(socket, "bad-signature");
@@ -557,7 +568,7 @@ export class Room {
     const current = this.stillPending(socket);
     if (!current) return;
     if (!self && !this.waitingAllowed(current.ip)) return this.failAuth(socket, "rate-limited");
-    socket.serializeAttachment({ ...current, auth: "key", pub: auth.pub, fp, idVerified, self, id, nonce: undefined, lastSeen: Date.now() });
+    socket.serializeAttachment({ ...current, auth: "key", pub: auth.pub, fp, idVerified, self, id, nonce: undefined, verifying: undefined, lastSeen: Date.now() });
     socket.send(JSON.stringify({ type: "waiting", v: 2, rid: current.rid }));
     await this.requestOrQueue(socket);
   }

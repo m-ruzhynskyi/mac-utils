@@ -899,22 +899,24 @@ test('после decline: тот же ключ (v2) и тот же IP (legacy) �
   assert.equal((await connectViewer(f, { headers: V1, id: '7770001112', ip: '8.8.8.8' })).res.status, 101);
 });
 
-test('новые привязки: не больше 5 в сутки с одного IP, потом rate-limited; без IP лимита нет', async () => {
+test('новые привязки: хосты квоту не тратят; ID зрителя — не больше 20 в сутки с одного IP, потом idVerified:false', async () => {
   const w = world();
-  const ids = ['1000000001', '1000000002', '1000000003', '1000000004', '1000000005', '1000000006'];
   const outcomes = [];
-  for (const id of ids) {
-    const f = w.f(id);
-    const host = await authHost(f, keypair(10 + outcomes.length), id, '7.7.7.7');
+  for (let i = 0; i < 6; i++) {
+    const id = `100000000${i + 1}`;
+    const host = await authHost(w.f(id), keypair(10 + i), id, '7.7.7.7');
     outcomes.push(msgOf(host, 'authed') ? 'ok' : msgOf(host, 'error').code);
   }
-  assert.deepEqual(outcomes, ['ok', 'ok', 'ok', 'ok', 'ok', 'rate-limited']);
-  assert.equal(w.f(ids[5]).store.get('owner'), undefined);
-  // другой IP и привязанный ранее ключ (не новая привязка) — проходят
-  assert.ok(msgOf(await authHost(w.f('1000000007'), keypair(30), '1000000007', '6.6.6.6'), 'authed'));
-  assert.ok(msgOf(await authHost(w.f(ids[0]), keypair(10), ids[0], '7.7.7.7'), 'authed'));
+  assert.deepEqual(outcomes, ['ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
+  // Квота зрителя — через внутренний /claim (так его вызывает комната, где зритель подключается).
+  const claim = async (id, n) => (await (await w.f(id).room.fetch(new Request('https://room/claim', {
+    method: 'POST', body: JSON.stringify({ pub: keypair(50 + n).pub, ip: '8.8.8.8' }) }))).json());
+  const results = [];
+  for (let n = 0; n < 21; n++) results.push((await claim(`20000000${String(n).padStart(2, '0')}`, n)).ok);
+  assert.deepEqual(results, [...Array(20).fill(true), false]);
+  assert.equal((await claim('2000000020', 20)).reason, 'rate-limited');
   w.advance(86_400_001);
-  assert.ok(msgOf(await authHost(w.f(ids[5]), keypair(40), ids[5], '7.7.7.7'), 'authed'));
+  assert.equal((await claim('2000000020', 20)).ok, true, 'новые сутки');
 });
 
 test('release: хост с ключом освобождает ID, зрители завершаются, ID свободен для другого ключа', async () => {

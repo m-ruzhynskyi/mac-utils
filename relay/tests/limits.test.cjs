@@ -8,7 +8,7 @@ const source = fs.readFileSync(`${__dirname}/../src/limits.js`, 'utf8')
   .replace(/^export /gm, '');
 assert.doesNotMatch(fs.readFileSync(`${__dirname}/../src/limits.js`, 'utf8'), /^import /m, 'limits.js не должен ничего импортировать');
 const names = ['windowHit', 'pendingAllowed', 'declineCooldown', 'noteDecline', 'ipKey',
-  'MAX_PENDING', 'MAX_PENDING_PER_IP', 'MAX_UNAUTH', 'MAX_UNAUTH_PER_IP', 'AUTH_TIMEOUT_MS', 'DECLINE_BASE_MS', 'DECLINE_LONG_MS', 'CLAIM_PER_IP_PER_DAY'];
+  'MAX_PENDING', 'MAX_PENDING_PER_IP', 'MAX_UNAUTH', 'MAX_UNAUTH_PER_IP', 'MAX_UNAUTH_VIEWERS_PER_IP', 'AUTH_TIMEOUT_MS', 'DECLINE_BASE_MS', 'DECLINE_LONG_MS', 'CLAIM_PER_IP_PER_DAY'];
 const L = vm.runInNewContext(`${source}\n({ ${names.join(', ')} })`);
 
 test('константы по контракту', () => {
@@ -16,10 +16,11 @@ test('константы по контракту', () => {
   assert.equal(L.MAX_PENDING_PER_IP, 4);
   assert.equal(L.MAX_UNAUTH, 5);
   assert.equal(L.MAX_UNAUTH_PER_IP, 1);
+  assert.equal(L.MAX_UNAUTH_VIEWERS_PER_IP, 3);
   assert.equal(L.AUTH_TIMEOUT_MS, 10_000);
   assert.equal(L.DECLINE_BASE_MS, 60_000);
   assert.equal(L.DECLINE_LONG_MS, 600_000);
-  assert.equal(L.CLAIM_PER_IP_PER_DAY, 5);
+  assert.equal(L.CLAIM_PER_IP_PER_DAY, 20);
 });
 
 test('windowHit: лимит в окне, сброс после окна, ключи независимы', () => {
