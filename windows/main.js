@@ -1,21 +1,13 @@
 // Mac Utils Share для Windows: трансляция экрана по коду и просмотр чужих трансляций.
 // Интерфейс — страница ретранслятора (та же, что в браузере), приложение добавляет:
 // выбор экрана или окна с превью, системный звук (loopback) и автообновление.
-const { app, BrowserWindow, desktopCapturer, ipcMain, session, dialog, shell, screen, safeStorage } = require("electron");
+const { app, BrowserWindow, desktopCapturer, ipcMain, session, dialog, shell, screen } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
-const { Identity } = require("./identity");
-const { detectToken, LEGACY } = require("./relay-token");
-const { isTrustedSender, navigationAction } = require("./origin-guard");
-const { pathToFileURL } = require("url");
 
 const RELAY = "https://mac-utils-relay.mako-62d.workers.dev/";
-// Ключ устройства (mu-share-2). Создаётся после запуска приложения: safeStorage доступен только тогда.
-let identity = null;
-// Токен протокола для запросов к relay: mu-share-2 только после `GET /version` с ним в protocols и при доступном safeStorage.
-let tokenCache = null; // { token, until }
 let window = null;
 let chosen = null; // { source, audio }
 let overlay = null; // прозрачное окно поверх экрана ведущего: метки и рисунки зрителей
@@ -118,73 +110,23 @@ function createWindow() {
   window.on("closed", () => { window = null; app.quit(); });
   window.loadURL(RELAY).catch(() => window.loadFile(path.join(__dirname, "offline.html")));
   window.webContents.on("did-fail-load", () => window.loadFile(path.join(__dirname, "offline.html")));
-  // Окно остаётся на странице ретранслятора (и offline.html): чужой адрес — в браузере, иначе он получил бы API ключа.
-  const offlineUrl = pathToFileURL(path.join(__dirname, "offline.html")).href;
-  const guardNavigation = (event, url) => {
-    const action = navigationAction(url, RELAY, offlineUrl);
-    if (action === "allow") return;
-    event.preventDefault();
-    if (action === "external") shell.openExternal(url);
-  };
-  window.webContents.on("will-navigate", guardNavigation);
-  window.webContents.on("will-redirect", guardNavigation);
   // Внешние ссылки — в браузере.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (navigationAction(url, RELAY, offlineUrl) === "external") shell.openExternal(url);
+    shell.openExternal(url);
     return { action: "deny" };
   });
 }
 
-// Токен для очередного запроса. Каждая загрузка страницы спрашивает relay заново (откат relay на версию без v2 не должен
-// оставлять клиента с токеном, который старый relay отвергает); WebSocket страницы использует тот же ответ.
-async function relayToken(resourceType) {
-  if (resourceType === "mainFrame") tokenCache = null;
-  if (tokenCache && tokenCache.until > Date.now()) return tokenCache.token;
-  const { token, certain } = await detectToken({ base: RELAY, keysAvailable: !!identity?.available });
-  // Неуверенный ответ (нет связи, relay не отдал JSON) помним недолго.
-  tokenCache = { token, until: Date.now() + (certain ? 24 * 3600 * 1000 : 30 * 1000) };
-  return token;
-}
-
 app.whenReady().then(() => {
-  identity = new Identity({ safeStorage, dir: app.getPath("userData") });
-
   // Ретранслятор пускает только приложения Mac Utils — добавляем их метку ко всем запросам к нему
   // (и к странице, и к WebSocket). В обычном браузере трансляции недоступны.
-  const relayUrls = ["https://mac-utils-relay.mako-62d.workers.dev/*", "wss://mac-utils-relay.mako-62d.workers.dev/*"];
-  session.defaultSession.webRequest.onBeforeSendHeaders({ urls: relayUrls }, (details, callback) => {
-    relayToken(details.resourceType).then((token) => {
-      details.requestHeaders["X-MacUtils-Client"] = token;
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ["https://mac-utils-relay.mako-62d.workers.dev/*", "wss://mac-utils-relay.mako-62d.workers.dev/*"] },
+    (details, callback) => {
+      details.requestHeaders["X-MacUtils-Client"] = "mu-share-1";
       callback({ requestHeaders: details.requestHeaders });
-    }, () => {
-      details.requestHeaders["X-MacUtils-Client"] = LEGACY;
-      callback({ requestHeaders: details.requestHeaders });
-    });
-  });
-  // Relay отказал по токену (403/426: откат, смена сервера) — при следующем запросе спросим /version заново.
-  session.defaultSession.webRequest.onCompleted({ urls: relayUrls }, (details) => {
-    if (details.statusCode === 403 || details.statusCode === 426) tokenCache = null;
-  });
-
-  // Ключ устройства. Страница получает только подпись строк протокола; приватный ключ из этого процесса не выходит.
-  // Все обработчики ключа отвечают только странице ретранслятора в главном кадре главного окна.
-  const trusted = (event) => !!window && !window.isDestroyed() && event.sender === window.webContents
-    && isTrustedSender(event.senderFrame, window.webContents.mainFrame, RELAY);
-  const guarded = (fn) => (event, ...args) => {
-    if (!trusted(event)) throw new Error("forbidden");
-    return fn(...args);
-  };
-  ipcMain.on("identity-available", (event) => { event.returnValue = trusted(event) && !!identity?.available; });
-  // Прежний ID из localStorage страницы (если был) переносим сюда один раз, чтобы он не менялся.
-  ipcMain.on("myId", (event, legacy) => {
-    if (!trusted(event)) { event.returnValue = null; return; }
-    try { event.returnValue = identity.myId(typeof legacy === "string" ? legacy : null); } catch (_) { event.returnValue = null; }
-  });
-  ipcMain.handle("identity", guarded(() => identity.identity()));
-  ipcMain.handle("signHost", guarded((roomId, nonce) => identity.signHost(roomId, nonce)));
-  ipcMain.handle("signViewer", guarded((roomId, viewerId, rid, nonce) => identity.signViewer(roomId, viewerId, rid, nonce)));
-  ipcMain.handle("signStatus", guarded((myId, ts, idsCsv) => identity.signStatus(myId, ts, idsCsv)));
-  ipcMain.handle("resetId", guarded(() => identity.reset()));
+    }
+  );
 
   // getDisplayMedia на странице получает то, что пользователь выбрал в нашем окне выбора.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
