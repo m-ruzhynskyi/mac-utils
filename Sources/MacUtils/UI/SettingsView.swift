@@ -274,6 +274,8 @@ struct SidebarSearchField: View {
 struct SettingsSectionPage: View {
     let section: SettingsSection
     var compact = false
+    /// Снимки интерфейса: страницы с сетью показывают демо-состояние (`ScreenSharePage(demo:)`).
+    @Environment(\.uiDemo) private var demo
 
     var body: some View {
         switch section {
@@ -282,7 +284,7 @@ struct SettingsSectionPage: View {
             case .exclusions: ExclusionsPage()
             case .panel: PanelSettingsPage()
             case .music: NowPlayingView(compact: compact).navigationTitle("Музыка")
-            case .share: ScreenSharePage(compact: compact)
+            case .share: ScreenSharePage(compact: compact, demo: demo)
             case .textInput: TextInputPage()
             case .focus: FocusPage()
             case .cutPaste: CutPastePage()
@@ -306,5 +308,19 @@ struct SettingsSectionPage: View {
             case .cleanup: DiskCleanupView(model: .shared, compact: compact).navigationTitle("Очистка диска")
             case .shots: ScreenshotLibraryView(library: .shared, compact: compact).navigationTitle("Мои снимки")
         }
+    }
+}
+
+// MARK: - Демо для снимков
+
+private struct UIDemoKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Снимки интерфейса (`UISnapshotTests`): без сети и личных данных. В приложении всегда false.
+    var uiDemo: Bool {
+        get { self[UIDemoKey.self] }
+        set { self[UIDemoKey.self] = newValue }
     }
 }

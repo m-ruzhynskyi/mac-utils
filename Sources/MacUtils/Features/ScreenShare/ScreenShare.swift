@@ -1816,11 +1816,13 @@ struct ScreenSharePage: View {
 
         if !compact || server.isEmpty {
             GroupLabel("Сервер")
-            ListCard {
-                Row("Адрес сервера", systemImage: "server.rack") {
-                    TextField("", text: $server, prompt: Text("https://mac-utils-relay….workers.dev"))
-                        .textFieldStyle(.graphiteMono).frame(minWidth: 240, maxWidth: 320)
-                }
+            // Подпись над полем: в узкой панели поле справа от подписи сжимало её до столбика.
+            Card {
+                Text("Адрес сервера").font(DS.Font.rowTitle).foregroundStyle(.dsText)
+                TextField("", text: $server, prompt: Text("https://mac-utils-relay….workers.dev"))
+                    .textFieldStyle(.graphiteMono)
+                    .frame(maxWidth: 420, alignment: .leading)
+                    .accessibilityLabel("Адрес сервера")
             }
             Footnote("Ретранслятор из папки relay/ проекта (Cloudflare Workers). Экран идёт через него в зашифрованном соединении и нигде не сохраняется.")
         }
@@ -1834,72 +1836,114 @@ struct ScreenSharePage: View {
     /// Свой ID крупно, копирование и состояние трансляции.
     private var idCard: some View {
         Card {
-            HStack(spacing: DS.Space.m) {
-                Text(ShareCode.display(myID)).font(DS.Font.mono(26, relativeTo: .title))
-                    .foregroundStyle(.dsText).textSelection(.enabled)
-                IconButton("Скопировать ID", systemImage: "doc.on.doc", compact: true) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(myID, forType: .string)
-                    Toast.show("ID скопирован", symbol: "doc.on.doc.fill")
+            // Широко — ID и кнопки в одну строку; узко (поповер, ~420) — кнопки под ID на всю ширину. ID всегда в одну строку.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DS.Space.m) {
+                    idLine
+                    Spacer(minLength: DS.Space.s)
+                    stateControls(fill: false)
                 }
-                Spacer(minLength: DS.Space.s)
-                stateControls
+                VStack(alignment: .leading, spacing: DS.Space.m) {
+                    idLine
+                    stateControls(fill: true)
+                }
             }
             if share.needsNewID {
                 Button { share.confirmRenewID() } label: { Label("Получить новый ID…", systemImage: "arrow.triangle.2.circlepath") }
                     .buttonStyle(.graphite(.primary, size: .compact))
             }
             if let fp = fingerprint {
-                HStack(spacing: DS.Space.m) {
-                    Text("Отпечаток этого Mac").font(DS.Font.rowSub).foregroundStyle(.dsMute)
-                    Text(fp).font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText).textSelection(.enabled)
-                    Spacer()
-                    if !share.needsNewID {
-                        Button("Получить новый ID…") { share.confirmRenewID() }
-                            .buttonStyle(.graphite(.ghost, size: .compact))
-                            .help("Заменить ключ и ID этого Mac")
+                // Широко — в одну строку; узко — отпечаток, а под ним «Получить новый ID…» (без обрезанной кнопки).
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: DS.Space.m) {
+                        fingerprintLine(fp)
+                        Spacer(minLength: DS.Space.s)
+                        renewIDButton
+                    }
+                    VStack(alignment: .leading, spacing: DS.Space.s) {
+                        fingerprintLine(fp)
+                        renewIDButton
                     }
                 }
             }
         }
     }
 
-    @ViewBuilder private var stateControls: some View {
+    private func fingerprintLine(_ fp: String) -> some View {
+        HStack(spacing: DS.Space.m) {
+            Text("Отпечаток этого Mac").font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize()
+            Text(fp).font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText)
+                .lineLimit(1).fixedSize().textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder private var renewIDButton: some View {
+        if !share.needsNewID {
+            Button("Получить новый ID…") { share.confirmRenewID() }
+                .buttonStyle(.graphite(.ghost, size: .compact))
+                .fixedSize()
+                .help("Заменить ключ и ID этого Mac")
+        }
+    }
+
+    /// ID моноширинным в одну строку (при нехватке места шрифт уменьшается, а не переносится) и «Скопировать ID».
+    private var idLine: some View {
+        HStack(spacing: DS.Space.m) {
+            Text(ShareCode.display(myID))
+                .font(DS.Font.mono(26, relativeTo: .title))
+                .foregroundStyle(.dsText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .layoutPriority(1)
+            IconButton("Скопировать ID", systemImage: "doc.on.doc", compact: true) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(myID, forType: .string)
+                Toast.show("ID скопирован", symbol: "doc.on.doc.fill")
+            }
+        }
+    }
+
+    /// Состояние трансляции и кнопки; `fill` — кнопки на всю ширину (под ID в узкой панели).
+    @ViewBuilder private func stateControls(fill: Bool) -> some View {
         switch share.state {
         case .idle, .failed:
             Button { share.start() } label: { Label("Начать трансляцию…", systemImage: "dot.radiowaves.left.and.right") }
                 .help("Откроется выбор: весь экран, окно или программа")
-                .buttonStyle(.graphite(.primary, size: .compact))
+                .buttonStyle(.graphite(.primary, size: fill ? .regular : .compact, fill: fill))
                 .disabled(server.isEmpty)
         case .connecting:
             HStack(spacing: DS.Space.s) {
                 ProgressView().controlSize(.small)
-                Text("Подключаюсь…").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                Text("Подключаюсь…").font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize()
+                if fill { Spacer(minLength: 0) }
                 Button("Отмена") { share.cancelConnecting() }.buttonStyle(.graphite(.secondary, size: .compact))
             }
         case .live:
             HStack(spacing: DS.Space.s) {
                 Pill(.danger, "В эфире", caps: true)
-                Button("Сменить экран…") { share.changeSource() }.buttonStyle(.graphite(.secondary, size: .compact))
-                Button("Стоп") { share.stop() }.buttonStyle(.graphite(.danger, size: .compact))
+                if fill { Spacer(minLength: 0) }
+                Button("Сменить экран…") { share.changeSource() }.buttonStyle(.graphite(.secondary, size: .compact)).fixedSize()
+                Button("Стоп") { share.stop() }.buttonStyle(.graphite(.danger, size: .compact)).fixedSize()
             }
         }
     }
 
     private var connectCard: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
-            ListCard {
-                Row("Смотреть", systemImage: "eye") {
-                    HStack(spacing: DS.Space.s) {
-                        TextField("", text: $code, prompt: Text("ID собеседника, 10 цифр"))
-                            .textFieldStyle(.graphite)
-                            .frame(width: 190)
-                            .onSubmit { viewer.watch(code: code) }
-                        Button("Смотреть") { viewer.watch(code: code) }
-                            .buttonStyle(.graphite(.primary, size: .compact))
-                            .fixedSize()
-                            .disabled(ShareCode.normalized(code) == nil || server.isEmpty)
-                    }
+            // Поле на всю ширину и «Смотреть» в одну строку (без заголовка строки: его роль играет «Подключиться»).
+            Card {
+                HStack(spacing: DS.Space.s) {
+                    TextField("", text: $code, prompt: Text("ID собеседника, 10 цифр"))
+                        .textFieldStyle(.graphiteMono)
+                        .frame(maxWidth: .infinity)
+                        .onSubmit { viewer.watch(code: code) }
+                        .accessibilityLabel("ID собеседника")
+                    Button("Смотреть") { viewer.watch(code: code) }
+                        .buttonStyle(.graphite(.primary))
+                        .fixedSize()
+                        .disabled(ShareCode.normalized(code) == nil || server.isEmpty)
                 }
             }
             if case .ended(let message) = viewer.state {
@@ -1933,9 +1977,19 @@ private struct ShareHistoryRows: View {
                     systemImage: "person.crop.circle", tile: live ? .accent : .neutral) {
                     HStack(spacing: DS.Space.s) {
                         if live { Pill(.success, "В эфире") }
-                        Button("Смотреть") { viewer.watch(code: entry.id) }.buttonStyle(.graphite(.secondary, size: .compact))
-                        IconButton("Переименовать", systemImage: "pencil", compact: true) { newLabel = entry.label ?? entry.name; renaming = entry }
-                        IconButton("Удалить из истории", systemImage: "trash", compact: true) { history.remove(entry.id) }
+                        Button("Смотреть") { viewer.watch(code: entry.id) }.buttonStyle(.graphite(.secondary, size: .compact)).fixedSize()
+                        // Переименовать и удалить — в меню: в узкой панели четыре кнопки сжимали подпись строки.
+                        Menu {
+                            Button("Переименовать") { newLabel = entry.label ?? entry.name; renaming = entry }
+                            Button("Удалить из истории", role: .destructive) { history.remove(entry.id) }
+                        } label: {
+                            Image(systemName: "ellipsis").frame(width: DS.Size.rowTile, height: DS.Size.rowTile)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("Переименовать или удалить")
+                        .accessibilityLabel("Ещё")
                     }
                 }
                 .help(live ? "Сейчас в эфире" : "Сейчас не транслирует")

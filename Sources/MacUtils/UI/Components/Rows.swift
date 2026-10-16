@@ -66,23 +66,27 @@ struct RowContainer<Leading: View, Trailing: View>: View {
         self.trailing = trailing()
     }
 
+    /// Меньше этой ширины тексту не оставляем: контрол уходит под текст (иначе узкая панель рвёт слова по буквам).
+    private static var minTextWidth: CGFloat { 140 }
+
     var body: some View {
-        HStack(spacing: style == .panel ? 14 : DS.Space.m) {
-            leading
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(style == .panel ? DS.Font.rowTitle : DS.Font.bodyStrong)
-                    .foregroundStyle(.dsText)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(DS.Font.rowSub)
-                        .foregroundStyle(.dsMute)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        let spacing: CGFloat = style == .panel ? 14 : DS.Space.m
+        ViewThatFits(in: .horizontal) {
+            // Обычно — в одну строку; текст переносится по словам в оставшейся ширине (не меньше minTextWidth).
+            HStack(spacing: spacing) {
+                leading
+                text.frame(minWidth: 0, idealWidth: Self.minTextWidth, maxWidth: .infinity, alignment: .leading)
+                // Контролы не сжимаются (иначе подписи кнопок обрезаются многоточием); не помещаются — второй вариант.
+                trailing.fixedSize(horizontal: true, vertical: false)
             }
-            Spacer(minLength: DS.Space.s)
-            trailing
+            // Узко — контрол под текстом, с отступом под плиткой.
+            VStack(alignment: .leading, spacing: DS.Space.s) {
+                HStack(alignment: .top, spacing: spacing) {
+                    leading
+                    text.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                HStack(spacing: DS.Space.s) { trailing }
+            }
         }
         .padding(.vertical, style == .panel ? 13 : DS.Space.s)
         .padding(.horizontal, style == .panel ? 18 : 10)
@@ -92,6 +96,21 @@ struct RowContainer<Leading: View, Trailing: View>: View {
             if style == .panel { Rectangle().fill(Color.dsLine).frame(height: 1).accessibilityHidden(true) }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private var text: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(style == .panel ? DS.Font.rowTitle : DS.Font.bodyStrong)
+                .foregroundStyle(.dsText)
+                .fixedSize(horizontal: false, vertical: true)
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(DS.Font.rowSub)
+                    .foregroundStyle(.dsMute)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 

@@ -67,7 +67,11 @@ final class AppStatusItem: NSObject {
         popover.behavior = .transient
         popover.animates = true
         let controller = NSHostingController(rootView: ToolsView(inPopover: true)
-            .frame(width: DS.Size.popover.width, height: DS.Size.popover.height))
+            .frame(width: DS.Size.popover.width, height: DS.Size.popover.height)
+            .clipped())
+        // Размер задаёт поповер, а не «идеальный» размер содержимого: иначе широкий вид внутри раздувал поповер,
+        // и справа за фоном оставалась тёмная полоса.
+        controller.sizingOptions = []
         popover.contentViewController = controller
         popover.contentSize = DS.Size.popover
         self.popover = popover

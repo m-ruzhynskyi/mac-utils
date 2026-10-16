@@ -280,5 +280,9 @@ func bytes(_ value: UInt64) -> String {
 }
 
 func speed(_ bytesPerSecond: Double) -> String {
-    ByteCountFormatter.string(fromByteCount: Int64(bytesPerSecond), countStyle: .file) + "/с"
+    // Без allowsNonnumericFormatting = false форматтер пишет «Zero KB» вместо «0 КБ».
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    formatter.allowsNonnumericFormatting = false
+    return formatter.string(fromByteCount: Int64(max(0, bytesPerSecond))) + "/с"
 }
