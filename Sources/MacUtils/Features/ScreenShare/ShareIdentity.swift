@@ -3,7 +3,7 @@ import Foundation
 import os
 import Security
 
-/// Хранилище 32 байт приватного ключа. В приложении — Keychain, в тестах — память.
+/// Хранилище 32 байт приватного ключа. В приложении — файл (с переносом из Keychain), в тестах — память.
 protocol ShareKeyStore {
     func load() throws -> Data?
     func save(_ data: Data) throws
@@ -15,7 +15,80 @@ struct KeychainError: Error, CustomStringConvertible {
     var description: String { "Keychain: \(SecCopyErrorMessageString(status, nil) as String? ?? "\(status)") (\(status))" }
 }
 
+/// Файл с ключом в «Application Support/Mac Utils», доступ только у владельца (0600, папка 0700).
+/// Keychain для этого не годится: у приложения с самоподписанным сертификатом (без Team ID) доступ к элементу
+/// привязан к хешу конкретной сборки (`partition_id cdhash:…`), и после каждого обновления macOS снова просит пароль.
+struct FileKeyStore: ShareKeyStore {
+    let url: URL
+
+    static var standard: FileKeyStore {
+        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Mac Utils", isDirectory: true)
+        return FileKeyStore(url: folder.appendingPathComponent("share-identity.key"))
+    }
+
+    func load() throws -> Data? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try Data(contentsOf: url)
+    }
+
+    func save(_ data: Data) throws {
+        let folder = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        // Сначала временный файл с правами 0600, потом атомарная замена: ключ ни на миг не лежит открытым или наполовину.
+        let temp = folder.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        do {
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: temp)
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            throw error
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    func delete() throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
+    }
+}
+
+/// Файл — основное хранилище; ключ из Keychain (1.5.0–1.5.1) переносится в него один раз, чтобы ID не сменился.
+/// Перенос может в последний раз спросить пароль связки. Элемент Keychain не удаляется: удаление тоже спросило бы пароль,
+/// а после переноса его больше никто не читает.
+struct MigratingKeyStore: ShareKeyStore {
+    let primary: ShareKeyStore
+    let legacy: ShareKeyStore
+    let defaults: UserDefaults
+    static let migratedKey = "shareKeyMigratedFromKeychain"
+
+    func load() throws -> Data? {
+        if let data = try primary.load() { return data }
+        guard !defaults.bool(forKey: Self.migratedKey) else { return nil }
+        // Ошибка чтения Keychain (отменили запрос пароля) пробрасывается: попробуем при следующем запуске.
+        let data = try legacy.load()
+        if let data { try primary.save(data) }
+        defaults.set(true, forKey: Self.migratedKey)
+        return data
+    }
+
+    func save(_ data: Data) throws {
+        try primary.save(data)
+        // Новый ключ уже в файле: старый из Keychain подхватывать нельзя (иначе «Сменить ID» откатился бы).
+        defaults.set(true, forKey: Self.migratedKey)
+    }
+
+    func delete() throws {
+        try primary.delete()
+        defaults.set(true, forKey: Self.migratedKey)
+    }
+}
+
 /// Обычная login keychain (data-protection keychain требует entitlement, которого нет у самоподписанного сертификата).
+/// Только для переноса ключа, сохранённого версиями 1.5.0–1.5.1.
 struct KeychainKeyStore: ShareKeyStore {
     static let service = "com.mruzhynskyi.macutils.share-identity"
     static let account = "ed25519-v1"
@@ -55,7 +128,8 @@ struct KeychainKeyStore: ShareKeyStore {
 /// Ключ Ed25519 для трансляции (протокол v2, см. .audit/auth-design.md §2). Создаётся лениво при первом обращении.
 /// Приватный ключ наружу не отдаётся: подписываются только канонические строки протокола.
 final class ShareIdentity: @unchecked Sendable {
-    static let shared = ShareIdentity(store: KeychainKeyStore())
+    static let shared = ShareIdentity(store: MigratingKeyStore(primary: FileKeyStore.standard, legacy: KeychainKeyStore(),
+                                                               defaults: .standard))
     private static let log = Logger(subsystem: "com.mruzhynskyi.macutils", category: "share-identity")
 
     private let store: ShareKeyStore
@@ -96,7 +170,7 @@ final class ShareIdentity: @unchecked Sendable {
             if let data = try store.load() {
                 if let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: data) { return key }
                 // Элемент есть, но испорчен: пользоваться им нельзя, заменяем.
-                Self.log.error("Ключ трансляции в Keychain испорчен (\(data.count) байт), создаю новый")
+                Self.log.error("Ключ трансляции испорчен (\(data.count) байт), создаю новый")
                 try store.delete()
             }
             let key = Curve25519.Signing.PrivateKey()
@@ -110,7 +184,7 @@ final class ShareIdentity: @unchecked Sendable {
         }
     }
 
-    /// Новый ключ вместо текущего (старый стирается из Keychain). Новый ID задаёт вызывающий («Сменить ID»).
+    /// Новый ключ вместо текущего (старый стирается). Новый ID задаёт вызывающий («Сменить ID»).
     func reset() {
         lock.lock(); defer { lock.unlock() }
         do { try store.delete() } catch {

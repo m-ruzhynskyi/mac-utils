@@ -126,8 +126,10 @@ final class ShareRequestQueue: ObservableObject {
         self.host = host
         self.panel = panel
         // Размер меняется вместе с содержимым (следующий запрос, «Ещё N»).
-        cancellable = $items.receive(on: DispatchQueue.main).sink { [weak self] _ in
-            MainActor.assumeIsolated { self?.layout() }
+        // @Published сообщает до изменения: размер считаем на следующем проходе, когда SwiftUI уже перестроил содержимое,
+        // иначе новый запрос (с предупреждениями) оказывался выше панели и обрезался сверху.
+        cancellable = $items.sink { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.layout() } }
         }
     }
 
@@ -144,8 +146,10 @@ final class ShareRequestQueue: ObservableObject {
     private func layout(force: Bool = false) {
         // Экран, который транслируется (иначе ведущий на втором мониторе запрос не увидит), или главный.
         guard let panel, let host, let screen = ScreenShare.shared.broadcastScreen ?? NSScreen.main else { return }
+        host.invalidateIntrinsicContentSize()
+        host.layoutSubtreeIfNeeded()
         let size = host.fittingSize
-        let width = max(size.width, 360)
+        let width = max(size.width, ShareRequestQueueView.width)
         if force || !panel.isVisible || panel.frame.size != NSSize(width: width, height: size.height) {
             // Правый верхний угол, под индикатором «Эфир».
             panel.setFrame(NSRect(x: screen.visibleFrame.maxX - width - 8,
@@ -165,6 +169,7 @@ final class ShareRequestQueue: ObservableObject {
 }
 
 struct ShareRequestQueueView: View {
+    static let width: CGFloat = 380
     @ObservedObject var queue: ShareRequestQueue
 
     var body: some View {
@@ -187,16 +192,26 @@ struct ShareRequestQueueView: View {
                 }
                 Text("Зритель только смотрит и может ставить метки — управлять вашим Mac он не может.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Button("Отклонить") { queue.answer(item, .decline) }
-                    Spacer()
-                    if item.prompt.allowAlways {
-                        Button(item.prompt.kind == .confirmKey ? "Разрешить и запомнить ключ" : "Всегда разрешать") {
-                            queue.answer(item, .allowAlways)
+                if item.prompt.allowAlways {
+                    // Три длинные подписи в одну строку не помещаются: столбиком, главное действие сверху.
+                    VStack(spacing: 6) {
+                        Button { queue.answer(item, .allowOnce) } label: {
+                            Text(item.prompt.kind == .confirmKey ? "Разрешить один раз" : "Разрешить").frame(maxWidth: .infinity)
                         }
-                    }
-                    Button(item.prompt.kind == .confirmKey ? "Разрешить один раз" : "Разрешить") { queue.answer(item, .allowOnce) }
                         .buttonStyle(.borderedProminent)
+                        Button { queue.answer(item, .allowAlways) } label: {
+                            Text(item.prompt.kind == .confirmKey ? "Разрешить и запомнить ключ" : "Всегда разрешать").frame(maxWidth: .infinity)
+                        }
+                        Button { queue.answer(item, .decline) } label: { Text("Отклонить").frame(maxWidth: .infinity) }
+                    }
+                    .controlSize(.large)
+                } else {
+                    HStack {
+                        Button("Отклонить") { queue.answer(item, .decline) }
+                        Spacer()
+                        Button(item.prompt.kind == .confirmKey ? "Разрешить один раз" : "Разрешить") { queue.answer(item, .allowOnce) }
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
                 if queue.items.count > 1 {
                     Text("Ещё \(queue.items.count - 1) \(Self.requests(queue.items.count - 1)) в очереди")
@@ -204,7 +219,8 @@ struct ShareRequestQueueView: View {
                 }
             }
             .padding(14)
-            .frame(width: 360, alignment: .leading)
+            .frame(width: Self.width, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         }
     }
