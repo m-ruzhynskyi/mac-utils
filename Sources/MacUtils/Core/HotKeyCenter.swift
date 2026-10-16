@@ -50,8 +50,17 @@ final class HotKeyCenter: ObservableObject {
 
     @discardableResult
     func register(id: UInt32, keyCode: Int, modifiers: Int, handler: @escaping () -> Void) -> Bool {
-        requests[id] = Request(combo: LayoutHotKey(keyCode: keyCode, modifiers: modifiers), handler: handler)
-        return apply(id)
+        let combo = LayoutHotKey(keyCode: keyCode, modifiers: modifiers)
+        // Те же клавиши и уже зарегистрировано: только обновляем обработчик, Carbon не трогаем
+        // (функции вызывают sync на каждую запись в UserDefaults).
+        let unchanged = Self.isUnchanged(old: requests[id]?.combo, new: combo, registered: refs[id] != nil)
+        requests[id] = Request(combo: combo, handler: handler)
+        return unchanged ? true : apply(id)
+    }
+
+    /// Перерегистрировать не нужно: просили то же сочетание, и оно уже стоит.
+    nonisolated static func isUnchanged(old: LayoutHotKey?, new: LayoutHotKey, registered: Bool) -> Bool {
+        registered && old == new
     }
 
     /// Пометка «приостановлено» (идёт запись в настройках) сохраняется: её снимает только `resume`.

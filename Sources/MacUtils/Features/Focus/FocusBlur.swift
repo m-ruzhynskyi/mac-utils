@@ -28,8 +28,8 @@ final class FocusBlur: ObservableObject {
 
     func sync() {
         let center = HotKeyCenter.shared
-        center.unregister(id: HotKeyID.focus)
         guard UserDefaults.standard.bool(forKey: Pref.focus) else {
+            center.unregister(id: HotKeyID.focus)
             stop()
             return
         }

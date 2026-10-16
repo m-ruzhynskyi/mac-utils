@@ -4,11 +4,25 @@ import AppKit
 /// нужно: через него работают ⌘W, ⌘Q и правка текста (⌘C/⌘V) в окне настроек.
 @MainActor
 enum MainMenu {
+    private static let actions = MainMenuActions()
+
     static func install() {
+        NSApp.mainMenu = build()
+    }
+
+    static func build() -> NSMenu {
         let main = NSMenu()
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        let about = appMenu.addItem(withTitle: "О программе Mac Utils", action: #selector(MainMenuActions.about), keyEquivalent: "")
+        about.target = actions
+        let updates = appMenu.addItem(withTitle: "Проверить обновления…", action: #selector(MainMenuActions.checkUpdates), keyEquivalent: "")
+        updates.target = actions
+        appMenu.addItem(.separator())
+        let settings = appMenu.addItem(withTitle: "Настройки…", action: #selector(MainMenuActions.settings), keyEquivalent: ",")
+        settings.target = actions
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Закрыть окно", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Выйти из Mac Utils", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -28,6 +42,21 @@ enum MainMenu {
         editItem.submenu = editMenu
         main.addItem(editItem)
 
-        NSApp.mainMenu = main
+        return main
     }
+}
+
+@MainActor
+private final class MainMenuActions: NSObject {
+    @objc func about() {
+        NSApp.activate()
+        NSApp.orderFrontStandardAboutPanel(nil)
+    }
+
+    @objc func checkUpdates() {
+        SettingsWindowController.shared.show(section: .general)
+        Updater.shared.check(install: false, userInitiated: true)
+    }
+
+    @objc func settings() { SettingsWindowController.shared.show() }
 }
