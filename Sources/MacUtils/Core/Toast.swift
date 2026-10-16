@@ -6,13 +6,40 @@ import SwiftUI
 enum Toast {
     private static var panel: NSPanel?
     private static var generation = 0
+    private static var model: ToastModel?
 
-    /// Убрать текущее уведомление (например, «Исправляю…» после ответа).
-    static func dismiss() {
+    /// Убрать уведомление. Без `token` — какое висит сейчас (как раньше); с `token` (его вернул `show`) — только своё:
+    /// если его уже заменили другим, чужое уведомление остаётся.
+    static func dismiss(token: Int? = nil) {
+        if let token, token != generation { return }
         generation += 1
         panel?.orderOut(nil)
         panel = nil
+        model = nil
     }
+
+    /// Сменить текст висящего уведомления (прогресс «Создаю GIF… 40 %»), не пересоздавая панель.
+    /// Действует только на уведомление с этим `token`: если его заменили другим или убрали — ничего не делает.
+    static func updateText(_ text: String, token: Int) {
+        guard token == generation, let model else { return }
+        model.text = text
+        // SwiftUI пересчитывает вид на следующем проходе цикла: размер подгоняем после него, иначе панель отстаёт на шаг.
+        DispatchQueue.main.async { fitPanel(token: token) }
+    }
+
+    private static func fitPanel(token: Int) {
+        guard token == generation, let panel, let host = panel.contentView else { return }
+        host.layoutSubtreeIfNeeded()
+        let size = host.fittingSize
+        let old = panel.frame
+        panel.setFrame(NSRect(x: old.midX - size.width / 2, y: old.maxY - size.height, width: size.width, height: size.height),
+                       display: true)
+    }
+
+    /// Для тестов: текст и ширина панели уведомления с этим номером (nil — его уже нет).
+    static func text(of token: Int) -> String? { token == generation ? model?.text : nil }
+    static func panelWidth(of token: Int) -> CGFloat? { token == generation ? panel?.frame.width : nil }
+    static func fittingWidth(of token: Int) -> CGFloat? { token == generation ? panel?.contentView?.fittingSize.width : nil }
 
     /// Кнопка в уведомлении, например «Показать в Finder».
     struct Action {
@@ -21,8 +48,10 @@ enum Toast {
     }
 
     /// `sticky` — уведомление висит, пока его не заменят или не вызовут `dismiss()` (долгая операция с кнопкой «Отмена»).
+    /// Возвращает номер уведомления: по нему можно обновить или убрать именно его.
+    @discardableResult
     static func show(_ text: String, symbol: String = "checkmark.circle.fill", tint: Color = .green,
-                     action: Action? = nil, sticky: Bool = false) {
+                     action: Action? = nil, sticky: Bool = false) -> Int {
         generation += 1
         let token = generation
         panel?.orderOut(nil)
@@ -30,11 +59,13 @@ enum Toast {
         // Кнопка сначала прячет уведомление (Toast.panel — не локальная панель ниже).
         let wrapped: Action? = action.map { action in
             Action(title: action.title) {
-                Toast.panel?.orderOut(nil)
+                if token == Toast.generation { Toast.panel?.orderOut(nil) }
                 action.handler()
             }
         }
-        let host = FirstMouseHostingView(rootView: ToastView(text: text, symbol: symbol, tint: tint, action: wrapped))
+        let model = ToastModel(text: text)
+        self.model = model
+        let host = FirstMouseHostingView(rootView: ToastView(model: model, symbol: symbol, tint: tint, action: wrapped))
         let size = host.fittingSize
         let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                             styleMask: [.borderless, .nonactivatingPanel],
@@ -56,7 +87,7 @@ enum Toast {
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { $0.duration = 0.15; panel.animator().alphaValue = 1 }
         self.panel = panel
-        if sticky { return }
+        if sticky { return token }
 
         Task { @MainActor in
             // С кнопкой уведомление висит дольше: на неё нужно успеть нажать.
@@ -68,11 +99,18 @@ enum Toast {
             guard token == generation else { return }
             panel.orderOut(nil)
         }
+        return token
     }
 }
 
+@MainActor
+private final class ToastModel: ObservableObject {
+    @Published var text: String
+    init(text: String) { self.text = text }
+}
+
 private struct ToastView: View {
-    let text: String
+    @ObservedObject var model: ToastModel
     let symbol: String
     let tint: Color
     let action: Toast.Action?
@@ -80,7 +118,7 @@ private struct ToastView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: symbol).foregroundStyle(tint)
-            Text(text).font(.system(size: 13, weight: .medium))
+            Text(model.text).font(.system(size: 13, weight: .medium)).monospacedDigit()
             if let action {
                 Button(action.title) { action.handler() }
                     .buttonStyle(.borderedProminent)
