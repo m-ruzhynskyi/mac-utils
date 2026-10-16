@@ -24,21 +24,27 @@ struct PageHeader<Accessory: View>: View {
     var subtitle: String?
     var isOn: Binding<Bool>?
     var toggleLabel: String?
+    /// Переключатель виден, но недоступен (например, функция не поддерживается этой macOS).
+    var toggleEnabled = true
     let accessory: Accessory
 
     init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
-         @ViewBuilder accessory: () -> Accessory) {
+         toggleEnabled: Bool = true, @ViewBuilder accessory: () -> Accessory) {
         self.section = section
         self.subtitle = subtitle
         self.isOn = isOn
         self.toggleLabel = toggleLabel
+        self.toggleEnabled = toggleEnabled
         self.accessory = accessory()
     }
 
     private var text: String { subtitle ?? section.subtitle }
 
+    @ScaledMetric(relativeTo: .largeTitle) private var tileSide = DS.Size.headerTile
+
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
+        // По верху: при подзаголовке в 2–3 строки плитка остаётся рядом с заголовком, а переключатель — по центру плитки.
+        HStack(alignment: .top, spacing: 14) {
             HeaderTile(systemImage: section.symbol)
             VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 Text(section.title)
@@ -54,19 +60,24 @@ struct PageHeader<Accessory: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .frame(minHeight: tileSide)
             Spacer(minLength: DS.Space.m)
-            accessory
-            if let isOn {
-                Toggle(toggleLabel ?? section.title, isOn: isOn).toggleStyle(.graphite)
+            HStack(spacing: DS.Space.m) {
+                accessory
+                if let isOn {
+                    Toggle(toggleLabel ?? section.title, isOn: isOn).toggleStyle(.graphite).disabled(!toggleEnabled)
+                }
             }
+            .frame(height: tileSide)
         }
         .accessibilityElement(children: .contain)
     }
 }
 
 extension PageHeader where Accessory == EmptyView {
-    init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil) {
-        self.init(section, subtitle: subtitle, isOn: isOn, toggleLabel: toggleLabel) { EmptyView() }
+    init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
+         toggleEnabled: Bool = true) {
+        self.init(section, subtitle: subtitle, isOn: isOn, toggleLabel: toggleLabel, toggleEnabled: toggleEnabled) { EmptyView() }
     }
 }
 
@@ -97,15 +108,17 @@ struct SettingsPage<Content: View, Accessory: View>: View {
     var subtitle: String?
     var isOn: Binding<Bool>?
     var toggleLabel: String?
+    var toggleEnabled = true
     let accessory: Accessory
     let content: Content
 
     init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
-         @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content) {
+         toggleEnabled: Bool = true, @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content) {
         self.section = section
         self.subtitle = subtitle
         self.isOn = isOn
         self.toggleLabel = toggleLabel
+        self.toggleEnabled = toggleEnabled
         self.accessory = accessory()
         self.content = content()
     }
@@ -113,7 +126,7 @@ struct SettingsPage<Content: View, Accessory: View>: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.Space.section) {
-                PageHeader(section, subtitle: subtitle, isOn: isOn, toggleLabel: toggleLabel) { accessory }
+                PageHeader(section, subtitle: subtitle, isOn: isOn, toggleLabel: toggleLabel, toggleEnabled: toggleEnabled) { accessory }
                 content
             }
             .padding(.vertical, DS.Space.pageVertical)
@@ -128,7 +141,25 @@ struct SettingsPage<Content: View, Accessory: View>: View {
 
 extension SettingsPage where Accessory == EmptyView {
     init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
-         @ViewBuilder content: () -> Content) {
-        self.init(section, subtitle: subtitle, isOn: isOn, toggleLabel: toggleLabel, accessory: { EmptyView() }, content: content)
+         toggleEnabled: Bool = true, @ViewBuilder content: () -> Content) {
+        self.init(section, subtitle: subtitle, isOn: isOn, toggleLabel: toggleLabel, toggleEnabled: toggleEnabled,
+                  accessory: { EmptyView() }, content: content)
+    }
+}
+
+/// Сноска под карточкой или шапкой: мелкий текст `mute` с отступом как у строк карточки.
+struct Footnote: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(DS.Font.rowSub)
+            .foregroundStyle(.dsMute)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 18)
+            .padding(.top, -DS.Space.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

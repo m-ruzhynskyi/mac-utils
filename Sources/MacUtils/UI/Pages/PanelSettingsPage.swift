@@ -25,51 +25,55 @@ struct PanelSettingsPage: View {
         panelTabs = PanelTabs.value(list)
     }
 
+    /// Перетащили вкладку `dragged` на место `target`: она встаёт перед ней (или после, если тащили сверху вниз).
+    private func drop(_ dragged: String, onto target: SettingsSection) -> Bool {
+        guard let section = SettingsSection(rawValue: dragged), section != target else { return false }
+        var list = PanelTabs.sections(panelTabs)
+        guard let from = list.firstIndex(of: section), let to = list.firstIndex(of: target) else { return false }
+        list.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        panelTabs = PanelTabs.value(list)
+        return true
+    }
+
     var body: some View {
-        Form {
-            Section {
-                Toggle("Значок 🔧 в строке меню", isOn: $menuBarIcon)
-                Text("Клик по значку — панель с вкладками прямо под ним (или \(HotKeyRegistry.combo(for: .tools).title)). Настройки, тёплый экран и выход — в шапке панели.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Section("Порядок вкладок") {
-                let order = PanelTabs.sections(panelTabs)
+        SettingsPage(.panel, isOn: $menuBarIcon, toggleLabel: "Значок 🔧 в строке меню") {
+            Footnote("Настройки, тёплый экран и выход — в шапке панели.")
+            GroupLabel("Порядок вкладок")
+            let order = PanelTabs.sections(panelTabs)
+            ListCard {
                 ForEach(Array(order.enumerated()), id: \.element) { index, section in
-                    HStack {
-                        Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
-                        Label(section.title, systemImage: section.symbol)
-                        Spacer()
-                        Button { move(section, by: -1) } label: { Image(systemName: "chevron.up") }
-                            .disabled(index == 0).help("Левее")
-                        Button { move(section, by: 1) } label: { Image(systemName: "chevron.down") }
-                            .disabled(index == order.count - 1).help("Правее")
+                    Row(section.title, systemImage: section.symbol) {
+                        IconButton("Левее", systemImage: "chevron.up", compact: true) { move(section, by: -1) }
+                            .disabled(index == 0)
+                        IconButton("Правее", systemImage: "chevron.down", compact: true) { move(section, by: 1) }
+                            .disabled(index == order.count - 1)
+                        Image(systemName: "line.3.horizontal").foregroundStyle(.dsMute).accessibilityHidden(true)
                     }
-                    .buttonStyle(.borderless)
+                    .contentShape(Rectangle())
+                    .draggable(section.rawValue)
+                    .dropDestination(for: String.self) { items, _ in
+                        items.first.map { drop($0, onto: section) } ?? false
+                    }
                 }
-                .onMove { from, to in
-                    var list = PanelTabs.sections(panelTabs)
-                    list.move(fromOffsets: from, toOffset: to)
-                    panelTabs = PanelTabs.value(list)
-                }
-                Text("Сверху вниз — слева направо в панели. Перетащите строку или нажмите стрелки.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             .disabled(!menuBarIcon)
-            Section("Вкладки панели") {
+            Footnote("Сверху вниз — слева направо в панели. Перетащите строку или нажмите стрелки.")
+            GroupLabel("Вкладки панели")
+            Card {
                 Text("Любые возможности Mac Utils — отметьте, что должно быть под рукой. Если вкладок много, их ряд листается вбок.")
-                    .font(.caption).foregroundStyle(.secondary)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), alignment: .leading)], alignment: .leading, spacing: 8) {
+                    .font(DS.Font.body).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
+                FlowLayout {
                     ForEach(PanelTabs.available) { section in
-                        Toggle(isOn: tabBinding(section)) {
-                            Label(section.title, systemImage: section.symbol)
+                        let shown = tabBinding(section)
+                        Chip(shown.wrappedValue ? section.title : "+ " + section.title, selected: shown.wrappedValue) {
+                            shown.wrappedValue.toggle()
                         }
-                        .toggleStyle(.checkbox)
+                        .accessibilityLabel(section.title)
+                        .accessibilityValue(shown.wrappedValue ? "Показана" : "Скрыта")
                     }
                 }
             }
             .disabled(!menuBarIcon)
         }
-        .formStyle(.grouped)
-        .navigationTitle("Панель в строке меню")
     }
 }

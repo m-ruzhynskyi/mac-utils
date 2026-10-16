@@ -284,3 +284,30 @@ struct EmptyState: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+/// Состояние функции, которой нужен «Универсальный доступ»: работает / утилита выключена / нужен доступ (с кнопкой).
+/// Замена прежнего `accessibilityStatus` для страниц Graphite; ставится строкой в `ListCard`.
+struct AccessibilityStatusRow: View {
+    let running: Bool
+    let readyText: String
+    @ObservedObject private var model = PermissionsModel.shared
+
+    init(running: Bool, readyText: String) {
+        self.running = running
+        self.readyText = readyText
+    }
+
+    var body: some View {
+        if model.accessibility && running {
+            FeatureStatusRow(tone: .success, label: "Работает", detail: readyText)
+        } else if model.accessibility {
+            FeatureStatusRow(tone: .warning, label: "Выключено", detail: "Утилита выключена")
+        } else {
+            FeatureStatusRow(tone: .warning, label: "Нужен доступ", detail: "Нужен доступ «Универсальный доступ»",
+                             actions: [StatusAction(title: "Открыть настройки") {
+                                 Permissions.requestAccessibility()
+                                 Permissions.open(.accessibility)
+                             }])
+        }
+    }
+}

@@ -424,34 +424,43 @@ struct DownloadsPage: View {
     }
 
     var body: some View {
-        Form {
-            Section {
-                Toggle("Раскладывать «Загрузки» по папкам", isOn: $enabled)
-                Text("Новые файлы сами перемещаются в папки по типу: \(DownloadsRules.Category.allCases.map(\.rawValue).joined(separator: ", ")) — и по вашим правилам ниже. Недокачанные файлы и ваши папки не трогаются.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        SettingsPage(.downloads, isOn: $enabled, toggleLabel: "Раскладывать «Загрузки» по папкам") {
+            VStack(alignment: .leading, spacing: DS.Space.section) {
+                rulesGroup
+                if aiEnabled && UserDefaults.standard.bool(forKey: Pref.aiDownloadsTags) { tagsGroup }
+                oldFilesGroup
+                actions
             }
-            Section("Свои правила") {
-                Text("Куда класть файлы других типов. Правило важнее встроенных категорий.")
-                    .font(.caption).foregroundStyle(.secondary)
-                ForEach(sorter.customRules.keys.sorted(), id: \.self) { ext in
-                    HStack(spacing: 8) {
-                        Text(".\(ext)").monospaced()
-                        Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                        Label(Self.folderTitle(sorter.customRules[ext] ?? ""), systemImage: "folder")
-                            .lineLimit(1).truncationMode(.middle)
-                        Spacer()
-                        Button { sorter.setRule(extension: ext, folder: nil) } label: { Image(systemName: "trash") }
-                            .buttonStyle(.borderless).help("Удалить правило")
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : DS.State.disabledOpacity)
+        }
+        .onAppear { sorter.refreshTrashPreview() }
+        .onChange(of: days) { sorter.refreshTrashPreview() }
+    }
+
+    // MARK: Свои правила
+
+    private var rulesGroup: some View {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
+            GroupLabel("Свои правила")
+            Text("Куда класть файлы других типов. Правило важнее встроенных категорий.")
+                .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+            let rules = sorter.customRules.keys.sorted()
+            if !rules.isEmpty {
+                ListCard {
+                    ForEach(rules, id: \.self) { ext in
+                        Row(".\(ext)", subtitle: Self.folderTitle(sorter.customRules[ext] ?? ""), systemImage: "folder") {
+                            IconButton("Удалить правило", systemImage: "trash", compact: true) { sorter.setRule(extension: ext, folder: nil) }
+                        }
                     }
                 }
-                HStack(spacing: 8) {
-                    TextField("", text: $newExtension, prompt: Text("mdz"))
-                        .textFieldStyle(.roundedBorder)
-                        .labelsHidden()
-                        .frame(width: 90)
+            }
+            Card {
+                HStack(spacing: DS.Space.s) {
+                    DownloadsField(prompt: "mdz", text: $newExtension)
+                        .frame(width: 96)
                         .help("Расширение файла, без точки")
-                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                    Image(systemName: "arrow.right").foregroundStyle(.dsMute).accessibilityHidden(true)
                     Menu {
                         ForEach(DownloadsRules.Category.allCases, id: \.self) { category in
                             Button(category.rawValue) { newFolder = category.rawValue }
@@ -464,10 +473,13 @@ struct DownloadsPage: View {
                             if let path = Self.chooseFolder(start: sorter.folder) { newFolder = path }
                         }
                     } label: {
-                        Label(newFolder.isEmpty ? "Папка…" : Self.folderTitle(newFolder), systemImage: "folder")
+                        DownloadsMenuLabel(text: newFolder.isEmpty ? "Папка…" : Self.folderTitle(newFolder), symbol: "folder")
                     }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
                     .frame(maxWidth: 260)
-                    Spacer()
+                    Spacer(minLength: DS.Space.s)
                     Button("Добавить") {
                         if sorter.setRule(extension: newExtension, folder: newFolder) {
                             newExtension = ""
@@ -476,97 +488,165 @@ struct DownloadsPage: View {
                             Toast.show("Такая папка не подходит (., .., ~ или корень)", symbol: "exclamationmark.triangle.fill", tint: .orange)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.graphite(.primary, size: .compact))
                     .disabled(DownloadsRules.normalizedExtension(newExtension).isEmpty || newFolder.isEmpty)
                 }
                 let unknown = sorter.unknownExtensions()
                 if !unknown.isEmpty {
-                    HStack(spacing: 6) {
-                        Text("Сейчас без правила:").font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: DS.Space.s) {
+                        Text("Сейчас без правила:").font(DS.Font.rowSub).foregroundStyle(.dsMute)
                         ForEach(unknown.prefix(6), id: \.ext) { item in
-                            Button(".\(item.ext) (\(item.count))") { newExtension = item.ext }
-                                .buttonStyle(.link).font(.caption)
+                            Chip(".\(item.ext) (\(item.count))", selected: false) { newExtension = item.ext }
                                 .help("Подставить в поле")
                         }
                     }
                 }
                 if aiOn {
-                    HStack(spacing: 8) {
+                    HStack(spacing: DS.Space.s) {
                         Button {
                             suggest()
                         } label: {
                             Label("Предложить папку", systemImage: "sparkles")
                         }
+                        .buttonStyle(.graphite(.secondary, size: .compact))
                         .disabled(suggesting || DownloadsRules.normalizedExtension(newExtension).isEmpty)
                         .help("Локальная модель посмотрит на имена таких файлов и предложит папку")
                         if suggesting { ProgressView().controlSize(.small) }
                         if let aiNote {
-                            Text(aiNote).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text(aiNote).font(DS.Font.rowSub).foregroundStyle(.dsMute).lineLimit(2)
                         }
-                    }
-                }
-            }
-            .disabled(!enabled)
-            if aiEnabled && UserDefaults.standard.bool(forKey: Pref.aiDownloadsTags) {
-                Section("Подписи файлов (ИИ)") {
-                    Text("Каждому новому файлу при сортировке — короткая подпись по-английски в комментарии Spotlight: «📋 Spec — notch app for AI agents», «💿 Installer — Docker Desktop». Видно в ⌘I и в колонке «Комментарии», ищется через ⌘Пробел.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        if tagger.pending > 0 {
-                            ProgressView().controlSize(.small)
-                            Text("Осталось \(tagger.pending), помечено \(tagger.tagged)").foregroundStyle(.secondary)
-                        } else if tagger.tagged > 0 {
-                            Text("Помечено документов: \(tagger.tagged)").foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Подписать уже лежащие") { tagger.tagExisting(in: sorter.folder) }
-                            .disabled(tagger.pending > 0)
-                    }
-                }
-            }
-            Section("Старые файлы") {
-                Picker("Убирать в Корзину", selection: $days) {
-                    Text("Никогда").tag(0)
-                    Text("Через 7 дней").tag(7)
-                    Text("Через 30 дней").tag(30)
-                    Text("Через 90 дней").tag(90)
-                }
-                Text("Файлы во встроенных папках категорий, которые не открывали и не меняли дольше этого срока, перемещаются в Корзину — безвозвратно ничего не удаляется. Сначала вы видите список и подтверждаете.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !sorter.trashPreview.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("В Корзину готово \(sorter.trashPreview.count) файл(ов) старше \(days) дн.", systemImage: "trash")
-                            .foregroundStyle(.orange)
-                        ForEach(sorter.trashPreview.prefix(5), id: \.self) { url in
-                            Text(url.lastPathComponent).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                        if sorter.trashPreview.count > 5 {
-                            Text("…и ещё \(sorter.trashPreview.count - 5)").font(.caption).foregroundStyle(.secondary)
-                        }
-                        Button("Переместить в Корзину") { sorter.confirmTrash(days: days) }
-                    }
-                }
-            }
-            .disabled(!enabled)
-            Section {
-                HStack {
-                    Button("Разложить сейчас") {
-                        let result = sorter.run()
-                        Toast.show("Разложено: \(result.moved), в Корзину: \(result.trashed)", symbol: "folder.fill", tint: .green)
-                    }
-                    .disabled(!enabled)
-                    Button("Открыть «Загрузки»") { NSWorkspace.shared.open(sorter.folder) }
-                    Spacer()
-                    if let result = sorter.lastResult {
-                        Text(result).font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
         }
-        .formStyle(.grouped)
-        .navigationTitle("Загрузки")
-        .onAppear { sorter.refreshTrashPreview() }
-        .onChange(of: days) { sorter.refreshTrashPreview() }
+    }
+
+    // MARK: Подписи файлов (ИИ)
+
+    private var tagsGroup: some View {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
+            GroupLabel("Подписи файлов (ИИ)")
+            Card {
+                Text("Каждому новому файлу при сортировке — короткая подпись по-английски в комментарии Spotlight: «📋 Spec — notch app for AI agents», «💿 Installer — Docker Desktop». Видно в ⌘I и в колонке «Комментарии», ищется через ⌘Пробел.")
+                    .font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: DS.Space.s) {
+                    if tagger.pending > 0 {
+                        ProgressView().controlSize(.small)
+                        Text("Осталось \(tagger.pending), помечено \(tagger.tagged)").font(DS.Font.body).foregroundStyle(.dsMute)
+                    } else if tagger.tagged > 0 {
+                        Text("Помечено документов: \(tagger.tagged)").font(DS.Font.body).foregroundStyle(.dsMute)
+                    }
+                    Spacer()
+                    Button("Подписать уже лежащие") { tagger.tagExisting(in: sorter.folder) }
+                        .buttonStyle(.graphite(.secondary, size: .compact))
+                        .disabled(tagger.pending > 0)
+                }
+            }
+        }
+    }
+
+    // MARK: Старые файлы
+
+    private var oldFilesGroup: some View {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
+            GroupLabel("Старые файлы")
+            ListCard {
+                Row("Убирать в Корзину", systemImage: "trash") {
+                    Menu {
+                        ForEach([(0, "Никогда"), (7, "Через 7 дней"), (30, "Через 30 дней"), (90, "Через 90 дней")], id: \.0) { option in
+                            Button(option.1) { days = option.0 }
+                        }
+                    } label: {
+                        DownloadsMenuLabel(text: Self.daysTitle(days), symbol: nil)
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+                    .frame(width: 200)
+                }
+            }
+            Text("Файлы во встроенных папках категорий, которые не открывали и не меняли дольше этого срока, перемещаются в Корзину — безвозвратно ничего не удаляется. Сначала вы видите список и подтверждаете.")
+                .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                .fixedSize(horizontal: false, vertical: true)
+            if !sorter.trashPreview.isEmpty {
+                let names = sorter.trashPreview.prefix(5).map(\.lastPathComponent).joined(separator: "\n")
+                    + (sorter.trashPreview.count > 5 ? "\n…и ещё \(sorter.trashPreview.count - 5)" : "")
+                Banner(.warning, title: "В Корзину готово \(sorter.trashPreview.count) файл(ов) старше \(days) дн.", message: names) {
+                    Button("Переместить в Корзину") { sorter.confirmTrash(days: days) }
+                        .buttonStyle(.graphite(.primary, size: .compact))
+                }
+            }
+        }
+    }
+
+    private static func daysTitle(_ days: Int) -> String {
+        switch days {
+        case 7: return "Через 7 дней"
+        case 30: return "Через 30 дней"
+        case 90: return "Через 90 дней"
+        default: return "Никогда"
+        }
+    }
+
+    // MARK: Действия
+
+    private var actions: some View {
+        HStack(spacing: DS.Space.s) {
+            Button("Разложить сейчас") {
+                let result = sorter.run()
+                Toast.show("Разложено: \(result.moved), в Корзину: \(result.trashed)", symbol: "folder.fill", tint: .green)
+            }
+            .buttonStyle(.graphite(.primary))
+            .disabled(!enabled)
+            Button("Открыть «Загрузки»") { NSWorkspace.shared.open(sorter.folder) }
+                .buttonStyle(.graphite(.secondary))
+            Spacer()
+            if let result = sorter.lastResult {
+                Text(result).font(DS.Font.rowSub).foregroundStyle(.dsMute)
+            }
+        }
+    }
+}
+
+/// Поле ввода Graphite: `field`, обводка `line`, радиус 10.
+private struct DownloadsField: View {
+    let prompt: String
+    @Binding var text: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+        TextField("", text: $text, prompt: Text(prompt).foregroundStyle(Color.dsMute))
+            .textFieldStyle(.plain)
+            .font(DS.Font.mono(13, relativeTo: .callout))
+            .foregroundStyle(.dsText)
+            .focused($focused)
+            .accessibilityLabel("Расширение файла")
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(Color.dsField, in: shape)
+            .overlay(shape.strokeBorder(focused ? Color.dsAccLine : Color.dsLine, lineWidth: focused ? DS.State.focusRing : 1))
+    }
+}
+
+/// Вид выпадающего списка: плашка `field` с обводкой и стрелками.
+private struct DownloadsMenuLabel: View {
+    let text: String
+    let symbol: String?
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+        HStack(spacing: DS.Space.s) {
+            if let symbol { Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(.dsMute) }
+            Text(text).font(DS.Font.manrope(13, .semibold, relativeTo: .callout)).foregroundStyle(.dsText)
+                .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: DS.Space.xs)
+            Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(.dsMute)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .background(Color.dsField, in: shape)
+        .overlay(shape.strokeBorder(Color.dsLine, lineWidth: 1))
+        .contentShape(shape)
     }
 }

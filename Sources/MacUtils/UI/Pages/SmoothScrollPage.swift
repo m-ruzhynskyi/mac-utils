@@ -11,33 +11,18 @@ struct SmoothScrollPage: View {
     @ObservedObject private var service = SmoothScroll.shared
 
     var body: some View {
-        Form {
-            Section {
-                Toggle("Плавная прокрутка", isOn: $enabled)
-                Text("Колесо обычной мыши прокручивает плавно, как трекпад. Трекпад и Magic Mouse не затрагиваются.")
-                    .foregroundStyle(.secondary)
-                if enabled {
-                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Плавная прокрутка работает")
-                }
+        SettingsPage(.smoothScroll,
+                     subtitle: "Колесо обычной мыши прокручивает плавно, как трекпад. Трекпад и Magic Mouse не затрагиваются.",
+                     isOn: $enabled, toggleLabel: "Плавная прокрутка") {
+            if enabled {
+                ListCard { AccessibilityStatusRow(running: service.isRunning, readyText: "Плавная прокрутка работает") }
             }
-            Section("Настройка") {
-                LabeledContent("Скорость") {
-                    HStack {
-                        Slider(value: $speed, in: 0.3...3)
-                        Text(String(format: "%.1f×", speed)).monospacedDigit().frame(width: 40)
-                    }
-                }
-                .disabled(!enabled)
-                LabeledContent("Плавность") {
-                    HStack {
-                        Slider(value: $duration, in: 0.1...0.9)
-                        Text(String(format: "%.2f с", duration)).monospacedDigit().frame(width: 50)
-                    }
-                }
-                .disabled(!enabled)
+            GroupLabel("Настройка")
+            ListCard {
+                SliderRow("Скорость", systemImage: "hare", value: $speed, in: 0.3...3) { String(format: "%.1f×", $0) }
+                SliderRow("Плавность", systemImage: "waveform.path", value: $duration, in: 0.1...0.9) { String(format: "%.2f с", $0) }
             }
+            .disabled(!enabled)
         }
-        .formStyle(.grouped)
-        .navigationTitle("Плавная прокрутка")
     }
 }

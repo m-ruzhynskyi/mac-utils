@@ -8,38 +8,48 @@ struct CheatSheetPage: View {
     @ObservedObject private var permissions = PermissionsModel.shared
     @ObservedObject private var service = CheatSheet.shared
 
+    private let delays: [(value: Double, title: String)] = [(0.5, "0,5 с"), (0.8, "0,8 с"), (1.2, "1,2 с"), (2.0, "2 с")]
+
     var body: some View {
-        Form {
-            Section {
-                Toggle("Шпаргалка сочетаний клавиш", isOn: $enabled)
-                Text("Удерживайте ⌘ — появятся все сочетания клавиш активной программы (из её меню) и Mac Utils. Отпустите ⌘ — шпаргалка исчезнет.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if enabled {
-                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Шпаргалка работает")
-                }
-            }
-            Section("Настройка") {
-                Picker("Держать ⌘", selection: $delay) {
-                    Text("0,5 с").tag(0.5)
-                    Text("0,8 с").tag(0.8)
-                    Text("1,2 с").tag(1.2)
-                    Text("2 с").tag(2.0)
-                }
-                Toggle(isOn: $sticky) {
-                    VStack(alignment: .leading) {
-                        Text("Оставлять открытой")
-                        Text(sticky ? "Подержали ⌘ — шпаргалка открылась и остаётся; нажмите ⌘ ещё раз (или Esc), чтобы закрыть."
-                                    : "Шпаргалка видна, только пока ⌘ зажата.")
-                            .font(.caption).foregroundStyle(.secondary)
+        SettingsPage(.cheatSheet, isOn: $enabled, toggleLabel: "Шпаргалка сочетаний клавиш") {
+            VStack(alignment: .leading, spacing: DS.Space.section) {
+                if enabled { status }
+                GroupLabel("Настройка")
+                VStack(alignment: .leading, spacing: DS.Space.m) {
+                    ListCard {
+                        Row("Держать ⌘", systemImage: "command") {
+                            Segmented(selection: $delay, options: delays)
+                        }
+                        ToggleRow("Оставлять открытой",
+                                  subtitle: sticky ? "Подержали ⌘ — шпаргалка открылась и остаётся; нажмите ⌘ ещё раз (или Esc), чтобы закрыть."
+                                                   : "Шпаргалка видна, только пока ⌘ зажата.",
+                                  systemImage: "pin", isOn: $sticky)
                     }
+                    Text("Когда сочетаний много, листайте колесом мыши или трекпадом, наведя курсор на шпаргалку.")
+                        .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("Когда сочетаний много, листайте колесом мыши или трекпадом, наведя курсор на шпаргалку.")
-                    .font(.caption).foregroundStyle(.secondary)
+                .disabled(!enabled)
+                .opacity(enabled ? 1 : DS.State.disabledOpacity)
             }
-            .disabled(!enabled)
         }
-        .formStyle(.grouped)
-        .navigationTitle("Шпаргалка")
+    }
+
+    /// «Универсальный доступ»: рабочее состояние — таблетка, иначе — предупреждение с кнопкой.
+    @ViewBuilder
+    private var status: some View {
+        if permissions.accessibility && service.isRunning {
+            HStack { Pill(.success, "Шпаргалка работает"); Spacer() }
+        } else {
+            Banner(.warning, title: permissions.accessibility ? "Утилита выключена" : "Нужен доступ «Универсальный доступ»") {
+                if !permissions.accessibility {
+                    Button("Открыть настройки") {
+                        Permissions.requestAccessibility()
+                        Permissions.open(.accessibility)
+                    }
+                    .buttonStyle(.graphite(.primary, size: .compact))
+                }
+            }
+        }
     }
 }

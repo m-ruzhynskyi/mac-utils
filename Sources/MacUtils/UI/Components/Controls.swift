@@ -3,6 +3,22 @@ import SwiftUI
 // Контролы Graphite (`.audit/design-spec-v2.md` §2): переключатель, кнопки, кнопка-иконка, чипы, сегменты, таблетки,
 // прогресс, плитки инструментов. Состояния: наведение, нажатие, выключено (45 %), фокус (кольцо `accLine`).
 
+// MARK: - Капсула с обводкой
+
+extension View {
+    /// Фон-капсула с обводкой: внешняя капсула цвета обводки, на ней — внутренняя с отступом `width`.
+    /// (`Capsule().strokeBorder` даёт на концах плоские выступы за скруглённую заливку.)
+    func capsuleFill(_ fill: Color, border: Color? = nil, width: CGFloat = 1) -> some View {
+        background {
+            if let border {
+                Capsule().fill(border).overlay(Capsule().fill(fill).padding(width))
+            } else {
+                Capsule().fill(fill)
+            }
+        }
+    }
+}
+
 // MARK: - Переключатель
 
 /// Переключатель Graphite: дорожка 42×24, включён — лайм с тёмной ручкой справа, выключен — `off` с ручкой `mute` слева.
@@ -43,10 +59,9 @@ struct ToggleTrack: View {
     var body: some View {
         let size = DS.Size.toggleTrack
         ZStack(alignment: isOn ? .trailing : .leading) {
-            Capsule()
-                .fill(isOn ? Color.dsAcc : Color.dsOff)
-                // Светлая тема: лайм и `off` почти сливаются с фоном — обводка даёт границу ≥ 3:1 (WCAG 1.4.11).
-                .overlay(Capsule().strokeBorder(scheme == .light ? (isOn ? Color.dsAccLine : Color.dsLine) : .clear, lineWidth: 1))
+            // Светлая тема: лайм и `off` почти сливаются с фоном — обводка даёт границу ≥ 3:1 (WCAG 1.4.11).
+            Color.clear
+                .capsuleFill(isOn ? Color.dsAcc : Color.dsOff, border: scheme == .light ? (isOn ? Color.dsAccLine : Color.dsLine) : nil)
             Circle()
                 .fill(isOn ? Color.dsAccInk : Color.dsMute)
                 .frame(width: DS.Size.toggleKnob, height: DS.Size.toggleKnob)
@@ -244,8 +259,8 @@ struct Chip: View {
             .foregroundStyle(selected ? Color.dsAccInk : Color.dsMute)
             .padding(.vertical, 6)
             .padding(.horizontal, 14)
-            .background(selected ? Color.dsAcc : Color.dsField, in: Capsule())
-            .overlay(Capsule().strokeBorder(selected ? (scheme == .light ? Color.dsAccLine : .clear) : Color.dsLine, lineWidth: 1))
+            .capsuleFill(selected ? Color.dsAcc : Color.dsField,
+                         border: selected ? (scheme == .light ? Color.dsAccLine : nil) : Color.dsLine)
         if let action {
             Button(action: action) { label }
                 .buttonStyle(PressScaleStyle())
@@ -334,8 +349,7 @@ struct Pill: View {
             .lineLimit(1)
             .padding(.vertical, caps ? DS.Space.xs : 5)
             .padding(.horizontal, caps ? 10 : DS.Space.m)
-            .background(tone.fill, in: Capsule())
-            .overlay(Capsule().strokeBorder(tone == .success && scheme == .light ? Color.dsAccLine : .clear, lineWidth: 1))
+            .capsuleFill(tone.fill, border: tone == .success && scheme == .light ? Color.dsAccLine : nil)
             .fixedSize()
     }
 }
@@ -379,5 +393,49 @@ struct ToolTile: View {
         .padding(.horizontal, 10)
         .background(Color.dsField, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Поле ввода и выбор
+
+/// Поле ввода Graphite: `field`, обводка `line`, радиус 10; фокус — рамка `accLine`.
+struct GraphiteFieldStyle: TextFieldStyle {
+    var monospaced = false
+
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        GraphiteFieldBody(content: configuration, monospaced: monospaced)
+    }
+}
+
+private struct GraphiteFieldBody<Content: View>: View {
+    let content: Content
+    let monospaced: Bool
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+        content
+            .textFieldStyle(.plain)
+            .font(monospaced ? DS.Font.mono : DS.Font.body)
+            .foregroundStyle(.dsText)
+            .focused($focused)
+            .padding(.horizontal, DS.Space.m)
+            .frame(minHeight: DS.Size.button)
+            .background(Color.dsField, in: shape)
+            .overlay(shape.strokeBorder(focused ? Color.dsAccLine : Color.dsLine, lineWidth: focused ? DS.State.focusRing : 1))
+    }
+}
+
+extension TextFieldStyle where Self == GraphiteFieldStyle {
+    static var graphite: GraphiteFieldStyle { GraphiteFieldStyle() }
+    static var graphiteMono: GraphiteFieldStyle { GraphiteFieldStyle(monospaced: true) }
+}
+
+extension View {
+    /// Выбор из списка в строке карточки: системное меню без подписи (подпись — заголовок строки), по ширине содержимого.
+    func graphitePicker() -> some View {
+        labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
     }
 }

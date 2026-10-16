@@ -49,28 +49,26 @@ struct RowTile: View {
     }
 }
 
-/// Строка карточки: плитка со значком, заголовок, подпись, контрол справа. Вся строка — один элемент VoiceOver.
-struct Row<Trailing: View>: View {
-    var systemImage: String?
+/// Каркас строки карточки: слева — плитка или значок, заголовок, подпись, справа — контрол. Отступы и разделитель —
+/// по виду карточки (`CardStyle`). Вся строка — один элемент VoiceOver.
+struct RowContainer<Leading: View, Trailing: View>: View {
     let title: String
     var subtitle: String?
-    var tile: RowTile.Kind = .neutral
+    let leading: Leading
     let trailing: Trailing
 
     @Environment(\.dsCardStyle) private var style
 
-    init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, tile: RowTile.Kind = .neutral,
-         @ViewBuilder trailing: () -> Trailing) {
+    init(_ title: String, subtitle: String? = nil, @ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
         self.title = title
         self.subtitle = subtitle
-        self.systemImage = systemImage
-        self.tile = tile
+        self.leading = leading()
         self.trailing = trailing()
     }
 
     var body: some View {
         HStack(spacing: style == .panel ? 14 : DS.Space.m) {
-            if let systemImage { RowTile(systemImage: systemImage, kind: tile) }
+            leading
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(style == .panel ? DS.Font.rowTitle : DS.Font.bodyStrong)
@@ -94,6 +92,73 @@ struct Row<Trailing: View>: View {
             if style == .panel { Rectangle().fill(Color.dsLine).frame(height: 1).accessibilityHidden(true) }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Строка карточки: плитка со значком, заголовок, подпись, контрол справа.
+struct Row<Trailing: View>: View {
+    var systemImage: String?
+    let title: String
+    var subtitle: String?
+    var tile: RowTile.Kind = .neutral
+    let trailing: Trailing
+
+    init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, tile: RowTile.Kind = .neutral,
+         @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.tile = tile
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        RowContainer(title, subtitle: subtitle) {
+            if let systemImage { RowTile(systemImage: systemImage, kind: tile) }
+        } trailing: {
+            trailing
+        }
+    }
+}
+
+/// Строка программы: настоящий значок программы (по bundle id или пути), если она найдена, иначе — плитка с `fallbackSymbol`.
+struct AppRow<Trailing: View>: View {
+    let title: String
+    var subtitle: String?
+    var bundleID: String?
+    var url: URL?
+    var fallbackSymbol = "app.dashed"
+    let trailing: Trailing
+
+    @ScaledMetric(relativeTo: .body) private var side = DS.Size.rowTile
+
+    init(_ title: String, subtitle: String? = nil, bundleID: String? = nil, url: URL? = nil, fallbackSymbol: String = "app.dashed",
+         @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.subtitle = subtitle
+        self.bundleID = bundleID
+        self.url = url
+        self.fallbackSymbol = fallbackSymbol
+        self.trailing = trailing()
+    }
+
+    private var appURL: URL? {
+        url ?? bundleID.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+    }
+
+    var body: some View {
+        RowContainer(title, subtitle: subtitle) {
+            if let appURL {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: appURL.path))
+                    .resizable()
+                    .frame(width: side, height: side)
+                    .accessibilityHidden(true)
+            } else {
+                RowTile(systemImage: fallbackSymbol)
+            }
+        } trailing: {
+            trailing
+        }
     }
 }
 

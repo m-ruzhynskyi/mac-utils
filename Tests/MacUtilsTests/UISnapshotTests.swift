@@ -199,6 +199,41 @@ final class UISnapshotTests: XCTestCase {
         bothThemes("shots-demo-panel", size: NSSize(width: 420, height: 520)) { ScreenshotLibraryView(library: library, compact: true) }
     }
 
+    /// Группа «Файлы и система»: страницы-инструменты на демонстрационных моделях (система и личные данные не читаются).
+    func testFilesAndSystemToolsDemo() {
+        let apps = ["Demo Browser", "Demo Editor", "Demo Notes", "Demo Player"].map {
+            InstalledApp(demoName: $0, bundleID: "com.example.\($0.lowercased().replacingOccurrences(of: " ", with: "-"))")
+        }
+        let selected = apps[1]
+        let base = URL(fileURLWithPath: "/demo/Library")
+        let leftovers = [
+            Leftover(url: selected.url, group: "Приложение", kind: .app, shared: false, needsAdmin: false, sizeUnknown: false),
+            Leftover(url: base.appendingPathComponent("Application Support/Demo Editor"), group: "Данные", kind: .file, shared: false, needsAdmin: false, sizeUnknown: false),
+            Leftover(url: base.appendingPathComponent("Caches/com.example.demo-editor"), group: "Данные", kind: .file, shared: false, needsAdmin: false, sizeUnknown: false),
+            Leftover(url: base.appendingPathComponent("Preferences/com.example.demo-editor.plist"), group: "Настройки", kind: .file, shared: true, needsAdmin: false, sizeUnknown: false),
+        ]
+        let sizes = Dictionary(uniqueKeysWithValues: leftovers.enumerated().map { ($1.url, Int64(($0 + 1) * 40 << 20)) })
+        let appSizes = Dictionary(uniqueKeysWithValues: apps.enumerated().map { ($1.url, Int64(($0 + 2) * 90 << 20)) })
+        let withDetails = UninstallerModel.demo(apps: apps, appSizes: appSizes, selected: selected, leftovers: leftovers, sizes: sizes)
+        let listOnly = UninstallerModel.demo(apps: apps, appSizes: appSizes, selected: nil, leftovers: [], sizes: [:])
+        bothThemes("files-uninstaller-demo", size: NSSize(width: 760, height: 620)) { UninstallerPage(compact: false, model: withDetails) }
+        bothThemes("files-uninstaller-demo-empty", size: NSSize(width: 760, height: 620)) { UninstallerPage(compact: false, model: listOnly) }
+        bothThemes("files-uninstaller-demo-panel", size: NSSize(width: 420, height: 520)) { UninstallerPage(compact: true, model: listOnly) }
+        bothThemes("files-uninstaller-demo-panel-details", size: NSSize(width: 420, height: 520)) { UninstallerPage(compact: true, model: withDetails) }
+
+        let cleanup = DiskCleanupModel.demo()
+        bothThemes("files-cleanup-demo", size: NSSize(width: 760, height: 620)) { DiskCleanupView(model: cleanup) }
+        bothThemes("files-cleanup-demo-panel", size: NSSize(width: 420, height: 520)) { DiskCleanupView(model: cleanup, compact: true) }
+
+        let tasks = TaskManagerModel.demo()
+        bothThemes("files-tasks-demo", size: NSSize(width: 760, height: 620)) { TaskManagerView(model: tasks) }
+        bothThemes("files-tasks-demo-panel", size: NSSize(width: 420, height: 520)) { TaskManagerView(model: tasks, compact: true) }
+
+        let monitor = SystemMonitorModel.demo()
+        bothThemes("files-monitor-demo", size: NSSize(width: 760, height: 620)) { SystemMonitorView(model: monitor) }
+        bothThemes("files-monitor-demo-panel", size: NSSize(width: 420, height: 520)) { SystemMonitorView(model: monitor, compact: true) }
+    }
+
     func testWhatsNew() {
         bothThemes("whats-new", size: NSSize(width: 520, height: 560)) { WhatsNewView() }
     }

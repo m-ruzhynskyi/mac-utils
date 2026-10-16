@@ -54,95 +54,105 @@ struct HotKeysPage: View {
         let problems = HotKeyAction.allCases.filter {
             HotKeyStatus.of($0, combo: HotKeyRegistry.combo(for: $0), entries: entries, center: center).level == .error
         }
-        Form {
-            Section {
-                Text("Все сочетания Mac Utils. Нажмите на сочетание и введите новое (нужен ⌘, ⌥ или ⌃; Esc — отмена). Сочетание, уже занятое другой функцией Mac Utils, не сохранится.")
-                    .foregroundStyle(.secondary)
-                if !problems.isEmpty {
-                    Label("Не работают: \(problems.map(\.title).joined(separator: ", "))", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                }
+        SettingsPage(.hotKeys) {
+            Footnote("Нажмите на сочетание и введите новое (нужен ⌘, ⌥ или ⌃; Esc — отмена). Сочетание, уже занятое другой функцией Mac Utils, не сохранится.")
+            if !problems.isEmpty {
+                Banner(.danger, title: "Не работают: \(problems.map(\.title).joined(separator: ", "))")
             }
-            Section("Сочетания") {
+            GroupLabel("Сочетания")
+            ListCard {
                 ForEach(HotKeyAction.allCases) { action in
                     HotKeyActionRow(action: action, entries: entries)
                 }
-                if HotKeyAction.allCases.contains(where: { HotKeyRegistry.isCustomized($0) }) {
+            }
+            if HotKeyAction.allCases.contains(where: { HotKeyRegistry.isCustomized($0) }) {
+                HStack {
+                    Spacer()
                     Button("Вернуть все по умолчанию") {
                         for action in HotKeyAction.allCases {
                             HotKeyRegistry.reset(action)
                             HotKeyCenter.shared.reapply(id: action.hotKeyID)
                         }
                     }
+                    .buttonStyle(.graphite(.secondary))
                 }
             }
-            Section("Раскладка окон") {
-                Picker("Модификатор", selection: $snapModifier) {
-                    ForEach(WindowSnapModifier.allCases) { Text($0.symbols + " + клавиша").tag($0.rawValue) }
+            GroupLabel("Раскладка окон")
+            ListCard {
+                Row("Модификатор", systemImage: "command") {
+                    Picker("Модификатор", selection: $snapModifier) {
+                        ForEach(WindowSnapModifier.allCases) { Text($0.symbols + " + клавиша").tag($0.rawValue) }
+                    }
+                    .graphitePicker()
                 }
                 let modifier = WindowSnapModifier(rawValue: snapModifier) ?? .controlOption
                 ForEach(WindowTiler.bindings, id: \.label) { binding in
                     let combo = LayoutHotKey(keyCode: binding.keyCode, modifiers: modifier.carbon)
                     let clash = HotKeyConflicts.duplicates(of: combo, excluding: .windowSnap(binding.title), in: entries).first
-                    HStack {
-                        ShortcutRow(keys: combo.keys, text: binding.title)
-                        Spacer()
-                        if let clash, windowSnap {
-                            Label("Совпадает с «\(clash.title)»", systemImage: "xmark.octagon.fill").foregroundStyle(.red).font(.caption)
+                    Row(binding.title, subtitle: clash != nil && windowSnap ? "Совпадает с «\(clash!.title)»" : nil) {
+                        if clash != nil && windowSnap {
+                            Image(systemName: DS.Tone.danger.symbol).foregroundStyle(DS.Tone.danger.text).accessibilityHidden(true)
                         }
+                        Keycap(combo)
                     }
-                }
-                if !windowSnap {
-                    Text("Раскладка окон выключена — эти сочетания сейчас не действуют.").foregroundStyle(.secondary)
                 }
             }
             .disabled(!windowSnap)
-            Section("Другие клавиши") {
+            if !windowSnap {
+                Footnote("Раскладка окон выключена — эти сочетания сейчас не действуют.")
+            }
+            GroupLabel("Другие клавиши")
+            Card {
                 Text("Удерживание ⌘ — шпаргалка, ⌘Tab — переключатель приложений, ⌘X/⌘V в Finder — перенос файлов. Их меняют в разделах «Шпаргалка», «Переключатель приложений» и «Вырезать и вставить».")
-                    .foregroundStyle(.secondary)
+                    .font(DS.Font.body).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .formStyle(.grouped)
-        .navigationTitle("Горячие клавиши")
     }
 }
 
+/// Строка сочетания: название (переход в раздел функции), состояние, запись сочетания и «по умолчанию».
 struct HotKeyActionRow: View {
     let action: HotKeyAction
     let entries: [HotKeyRegistry.Entry]
     @ObservedObject private var center = HotKeyCenter.shared
 
+    private func tone(_ level: HotKeyStatus.Level) -> DS.Tone {
+        switch level {
+        case .ok: return .success
+        case .off: return .neutral
+        case .warning: return .warning
+        case .error: return .danger
+        }
+    }
+
     var body: some View {
         let combo = HotKeyRegistry.combo(for: action)
         let status = HotKeyStatus.of(action, combo: combo, entries: entries, center: center)
-        LabeledContent {
-            HStack(spacing: 6) {
-                ShortcutRecorder(hotKey: combo,
-                                 suspend: { $0 ? center.suspend(id: action.hotKeyID) : center.resume(id: action.hotKeyID) },
-                                 validate: { HotKeyPrefs.shared.problem($0, for: action) }) {
-                    HotKeyRegistry.setCombo($0, for: action)
-                    HotKeyCenter.shared.reapply(id: action.hotKeyID)
-                }
-                Button {
-                    HotKeyRegistry.reset(action)
-                    HotKeyCenter.shared.reapply(id: action.hotKeyID)
-                } label: { Image(systemName: "arrow.uturn.backward") }
-                    .buttonStyle(.borderless)
-                    .help("По умолчанию: \(action.defaultCombo.title)")
-                    .opacity(HotKeyRegistry.isCustomized(action) ? 1 : 0)
-                    .disabled(!HotKeyRegistry.isCustomized(action))
+        RowContainer(action.title, subtitle: status.text) {
+            Button {
+                NotificationCenter.default.post(name: .openSettingsSection, object: action.section)
+            } label: {
+                RowTile(systemImage: action.section.symbol)
             }
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Button(action.title) {
-                    NotificationCenter.default.post(name: .openSettingsSection, object: action.section)
-                }
-                .buttonStyle(.plain)
-                .help("Открыть раздел «\(action.section.title)»")
-                Label(status.text, systemImage: status.symbol)
-                    .font(.caption)
-                    .foregroundStyle(status.color)
+            .buttonStyle(PressScaleStyle())
+            .help("Открыть раздел «\(action.section.title)»")
+            .accessibilityLabel("Открыть раздел «\(action.section.title)»")
+        } trailing: {
+            if status.level == .warning || status.level == .error {
+                Image(systemName: status.symbol).foregroundStyle(tone(status.level).text).accessibilityHidden(true)
             }
+            ShortcutRecorder(hotKey: combo,
+                             suspend: { $0 ? center.suspend(id: action.hotKeyID) : center.resume(id: action.hotKeyID) },
+                             validate: { HotKeyPrefs.shared.problem($0, for: action) }) {
+                HotKeyRegistry.setCombo($0, for: action)
+                HotKeyCenter.shared.reapply(id: action.hotKeyID)
+            }
+            IconButton("По умолчанию: \(action.defaultCombo.title)", systemImage: "arrow.uturn.backward", compact: true) {
+                HotKeyRegistry.reset(action)
+                HotKeyCenter.shared.reapply(id: action.hotKeyID)
+            }
+            .opacity(HotKeyRegistry.isCustomized(action) ? 1 : 0)
+            .disabled(!HotKeyRegistry.isCustomized(action))
         }
     }
 }

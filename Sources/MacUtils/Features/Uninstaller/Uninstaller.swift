@@ -20,6 +20,19 @@ final class UninstallerModel: ObservableObject {
     /// Не удалось убрать часть файлов из-за защиты macOS — подсказка про «Полный доступ к диску».
     @Published private(set) var needsFullDiskAccess = false
 
+    /// Для снимков интерфейса: демонстрационные данные, система не читается.
+    static func demo(apps: [InstalledApp], appSizes: [URL: Int64], selected: InstalledApp?,
+                     leftovers: [Leftover], sizes: [URL: Int64]) -> UninstallerModel {
+        let model = UninstallerModel()
+        model.apps = apps
+        model.appSizes = appSizes
+        model.selected = selected
+        model.leftovers = leftovers
+        model.sizes = sizes
+        model.checked = Set(leftovers.filter(\.checkedByDefault).map(\.url))
+        return model
+    }
+
     var filtered: [InstalledApp] {
         let query = search.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return apps }
@@ -328,6 +341,16 @@ struct AdminSourceIdentity: Equatable {
     }
 }
 
+extension InstalledApp {
+    /// Демонстрационная программа для снимков интерфейса: файлов на диске нет.
+    init(demoName: String, bundleID: String) {
+        url = URL(fileURLWithPath: "/demo/Applications/\(demoName).app")
+        name = demoName
+        self.bundleID = bundleID
+        teamID = "DEMO123456"
+    }
+}
+
 // MARK: - Вид (страница настроек «Удаление программ»)
 
 struct UninstallerView: View {
@@ -347,9 +370,9 @@ struct UninstallerView: View {
                         } label: {
                             Label("Все программы", systemImage: "chevron.left")
                         }
-                        .buttonStyle(.borderless)
-                        .padding(.horizontal, 14)
-                        .padding(.top, 8)
+                        .buttonStyle(.graphite(.ghost, size: .compact))
+                        .padding(.horizontal, DS.Space.s)
+                        .padding(.top, DS.Space.s)
                         details
                     }
                 } else {
@@ -358,12 +381,11 @@ struct UninstallerView: View {
             } else {
                 // Колонка списка тянется вместе с окном (220…340), детали занимают остальное.
                 GeometryReader { geometry in
-                    HStack(spacing: 0) {
+                    HStack(spacing: DS.Space.l) {
                         listColumn
-                            .frame(width: min(max(geometry.size.width * 0.36, 220), 340))
-                        Divider()
+                            .frame(width: min(max(geometry.size.width * 0.36, 220), 300))
                         details
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                 }
             }
@@ -378,67 +400,88 @@ struct UninstallerView: View {
         }
         .overlay {
             if dropTargeted {
-                RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor, lineWidth: 3).padding(4)
+                RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                    .strokeBorder(Color.dsAccLine, lineWidth: 3).padding(4).allowsHitTesting(false)
             }
         }
     }
 
     private var listColumn: some View {
-        VStack(spacing: 0) {
-            TextField("Поиск", text: $model.search)
-                .textFieldStyle(.roundedBorder)
-                .padding(compact ? 6 : 8)
-            List(model.filtered, selection: Binding(
-                get: { model.selected?.url },
-                set: { url in if let app = model.apps.first(where: { $0.url == url }) { model.select(app) } }
-            )) { app in
-                HStack(spacing: 8) {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
-                        .resizable().frame(width: compact ? 16 : 20, height: compact ? 16 : 20)
-                    Text(app.name).lineLimit(1)
-                    Spacer()
-                    Text(byteString(model.appSizes[app.url]))
-                        .foregroundStyle(.secondary).font(.caption).monospacedDigit()
+        VStack(spacing: DS.Space.s) {
+            ToolsSearchField(prompt: "Поиск", text: $model.search)
+                .padding(.horizontal, compact ? DS.Space.s : 0)
+                .padding(.top, compact ? DS.Space.s : 0)
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(model.filtered) { app in appRow(app) }
                 }
-                .tag(app.url)
+                .padding(DS.Space.xs)
+            }
+            .background(compact ? Color.clear : Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            .overlay {
+                if !compact { RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1) }
             }
         }
+    }
+
+    private func appRow(_ app: InstalledApp) -> some View {
+        let selected = model.selected?.url == app.url
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+        return Button {
+            model.select(app)
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
+                    .resizable().frame(width: compact ? 18 : 22, height: compact ? 18 : 22)
+                Text(app.name).font(DS.Font.bodyStrong).foregroundStyle(selected ? Color.dsAccText : .dsText).lineLimit(1)
+                Spacer(minLength: DS.Space.xs)
+                Text(byteString(model.appSizes[app.url]))
+                    .font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute).lineLimit(1).fixedSize()
+            }
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .background(selected ? Color.dsField : .clear, in: shape)
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder
     private var details: some View {
         if let app = model.selected {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: DS.Space.m) {
+                HStack(spacing: DS.Space.m) {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
-                        .resizable().frame(width: compact ? 32 : 48, height: compact ? 32 : 48)
+                        .resizable().frame(width: compact ? 32 : 46, height: compact ? 32 : 46)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(app.name).font(compact ? .headline : .title2.weight(.semibold)).lineLimit(1).truncationMode(.tail)
+                        Text(app.name).font(compact ? DS.Font.headline : DS.Font.dialogTitle).foregroundStyle(.dsText)
+                            .lineLimit(1).truncationMode(.tail)
                         Text(app.bundleID + (app.teamID.map { " · Team ID \($0)" } ?? ""))
-                            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            .font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute).textSelection(.enabled)
                             .lineLimit(1).truncationMode(.middle)
                     }
                 }
                 if let refusal = model.refusal {
-                    Label("\(refusal) — удалять нельзя.", systemImage: "lock.fill").foregroundStyle(.orange)
+                    Banner(.warning, title: "\(refusal) — удалять нельзя.")
                     Spacer()
                 } else {
-                    List {
-                        ForEach(groups, id: \.self) { group in
-                            Section(group) {
-                                ForEach(model.leftovers.filter { $0.group == group }) { item in
-                                    row(item)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: DS.Space.m) {
+                            ForEach(groups, id: \.self) { group in
+                                GroupLabel(group)
+                                ListCard(style: compact ? .field : .panel) {
+                                    ForEach(model.leftovers.filter { $0.group == group }) { item in
+                                        row(item)
+                                    }
                                 }
                             }
                         }
                     }
                     if model.needsFullDiskAccess {
-                        HStack {
-                            Label("Контейнеры защищены macOS. Дайте Mac Utils «Полный доступ к диску».",
-                                  systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Button("Открыть настройки") { Permissions.openFullDiskAccess() }
-                            Button("Перезапустить") { Permissions.relaunch() }
+                        Banner(.warning, title: "Контейнеры защищены macOS. Дайте Mac Utils «Полный доступ к диску».") {
+                            Button("Открыть настройки") { Permissions.openFullDiskAccess() }.buttonStyle(.graphite(.primary, size: .compact))
+                            Button("Перезапустить") { Permissions.relaunch() }.buttonStyle(.graphite(.secondary, size: .compact))
                         }
                     }
                     ViewThatFits(in: .horizontal) {
@@ -454,33 +497,25 @@ struct UninstallerView: View {
                     }
                 }
             }
-            .padding(14)
+            .padding(compact ? DS.Space.m : 0)
         } else {
             emptyState
         }
     }
 
     private var selectedTotal: some View {
-        Text("Выбрано: \(byteString(model.totalChecked))").monospacedDigit()
+        Text("Выбрано: \(byteString(model.totalChecked))").font(DS.Font.bodyStrong).foregroundStyle(.dsText).monospacedDigit()
     }
 
     private var trashButton: some View {
         Button("Переместить в корзину") { model.moveToTrash() }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
+            .buttonStyle(.graphite(.danger))
             .disabled(model.working || !model.leftovers.contains { model.checked.contains($0.url) && $0.kind != .receipt })
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "trash.circle").font(.system(size: 44)).foregroundStyle(.secondary)
-            Text("Выберите приложение слева или перетащите .app на эту страницу")
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyState("Выберите приложение слева или перетащите .app на эту страницу", systemImage: "trash", compact: compact)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var groups: [String] {
@@ -491,38 +526,24 @@ struct UninstallerView: View {
 
     @ViewBuilder
     private func row(_ item: Leftover) -> some View {
-        HStack(spacing: 8) {
-            if item.kind == .receipt {
-                Image(systemName: "doc.text").foregroundStyle(.secondary).frame(width: 18)
-            } else {
-                Toggle("", isOn: Binding(
-                    get: { model.checked.contains(item.url) },
-                    set: { on in if on { model.checked.insert(item.url) } else { model.checked.remove(item.url) } }
-                ))
-                .labelsHidden()
-                .toggleStyle(.checkbox)
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(item.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
-                Text(item.url.deletingLastPathComponent().path)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                if item.needsAdmin {
-                    Text("нужен пароль администратора").font(.caption).foregroundStyle(.orange)
+        let sub = item.url.deletingLastPathComponent().path
+            + (item.needsAdmin ? " · нужен пароль администратора" : "")
+            + (item.shared ? " · общая папка разработчика — проверьте перед удалением" : "")
+        Row(item.url.lastPathComponent, subtitle: sub, systemImage: item.kind == .receipt ? "doc.text" : nil) {
+            HStack(spacing: DS.Space.s) {
+                Text(item.sizeUnknown ? "—" : byteString(model.sizes[item.url]))
+                    .font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute).lineLimit(1).fixedSize()
+                if item.kind != .receipt {
+                    Toggle(item.url.lastPathComponent, isOn: Binding(
+                        get: { model.checked.contains(item.url) },
+                        set: { on in if on { model.checked.insert(item.url) } else { model.checked.remove(item.url) } }
+                    ))
+                    .toggleStyle(.graphite)
                 }
-                if item.shared {
-                    Text("общая папка разработчика — проверьте перед удалением").font(.caption).foregroundStyle(.orange)
+                IconButton("Показать в Finder", systemImage: "magnifyingglass", compact: true) {
+                    NSWorkspace.shared.activateFileViewerSelecting([item.url])
                 }
             }
-            Spacer()
-            Text(item.sizeUnknown ? "—" : byteString(model.sizes[item.url]))
-                .foregroundStyle(.secondary).font(.caption).monospacedDigit()
-            Button {
-                NSWorkspace.shared.activateFileViewerSelecting([item.url])
-            } label: {
-                Image(systemName: "magnifyingglass")
-            }
-            .buttonStyle(.borderless)
-            .help("Показать в Finder")
         }
     }
 }

@@ -44,29 +44,19 @@ struct TextInputPage: View {
     @State private var values: [String: Bool] = [:]
 
     var body: some View {
-        Form {
-            Section {
-                Text("Автозамены macOS при наборе текста во всех программах. Самое частое: после точки сам ставится пробел — его даёт «Точка по двойному пробелу».")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Section("Автозамены") {
+        SettingsPage(.textInput) {
+            Footnote("Самое частое: после точки сам ставится пробел — его даёт «Точка по двойному пробелу».")
+            GroupLabel("Автозамены")
+            ListCard {
                 ForEach(TextInputSettings.options) { option in
-                    Toggle(isOn: Binding(get: { values[option.key] ?? true }, set: { on in
+                    ToggleRow(option.title, subtitle: option.detail, isOn: Binding(get: { values[option.key] ?? true }, set: { on in
                         values[option.key] = on
                         TextInputSettings.set(option.key, on)
-                    })) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(option.title)
-                            Text(option.detail).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
+                    }))
                 }
-                Text("Изменения действуют в новых окнах; в уже открытых программах — после их перезапуска.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
+            Footnote("Изменения действуют в новых окнах; в уже открытых программах — после их перезапуска.")
         }
-        .formStyle(.grouped)
-        .navigationTitle("Ввод текста")
         .onAppear {
             values = Dictionary(uniqueKeysWithValues: TextInputSettings.options.map { ($0.key, TextInputSettings.isOn($0.key)) })
         }

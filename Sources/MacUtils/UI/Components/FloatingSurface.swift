@@ -20,8 +20,7 @@ private struct FloatingModifier: ViewModifier {
             content
                 .padding(.vertical, 6)
                 .padding(.horizontal, DS.Space.m)
-                .background(Color.dsPanel, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.dsLine, lineWidth: 1))
+                .capsuleFill(Color.dsPanel, border: Color.dsLine)
         }
     }
 }

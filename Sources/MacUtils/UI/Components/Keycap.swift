@@ -111,3 +111,37 @@ struct ShortcutHintRow: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+/// Строка подсказки в карточке (`ListCard`, `CollapsibleCard`): кейкап в колонке слева, текст справа, отступы и
+/// разделитель — как у строк карточки.
+struct HintRow: View {
+    private let keycap: Keycap
+    let text: String
+
+    @Environment(\.dsCardStyle) private var style
+    @ScaledMetric(relativeTo: .body) private var column = DS.Size.shortcutColumn
+
+    init(keys: [String], text: String) {
+        keycap = Keycap(keys, compact: true)
+        self.text = text
+    }
+
+    init(action: HotKeyAction, text: String) {
+        keycap = Keycap(action: action, compact: true)
+        self.text = text
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 14) {
+            keycap.frame(minWidth: column, alignment: .leading)
+            Text(text).font(DS.Font.body).foregroundStyle(.dsText).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, style == .panel ? 11 : DS.Space.s)
+        .padding(.horizontal, style == .panel ? 18 : 10)
+        .overlay(alignment: .top) {
+            if style == .panel { Rectangle().fill(Color.dsLine).frame(height: 1).accessibilityHidden(true) }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}

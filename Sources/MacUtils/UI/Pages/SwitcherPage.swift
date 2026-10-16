@@ -13,39 +13,34 @@ struct SwitcherPage: View {
     private var mod: String { modifier == "command" ? "⌘" : "⌥" }
 
     var body: some View {
-        Form {
-            Section {
-                Toggle("Переключатель приложений", isOn: $enabled)
-                Picker("Сочетание", selection: $modifier) {
-                    Text("⌥ Tab").tag("option")
-                    Text("⌘ Tab (заменить системный)").tag("command")
+        SettingsPage(.switcher, isOn: $enabled, toggleLabel: "Переключатель приложений") {
+            ListCard {
+                Row("Сочетание", systemImage: "command") {
+                    Segmented(selection: $modifier, options: [("option", "⌥ Tab"), ("command", "⌘ Tab (заменить системный)")])
                 }
                 .disabled(!enabled)
-                Toggle("Показывать превью окон", isOn: $previews)
+                ToggleRow("Показывать превью окон", systemImage: "rectangle.on.rectangle", isOn: $previews)
                     .disabled(!enabled)
                 if enabled && previews && !permissions.screenRecording {
-                    StatusLine(ok: false, okText: "", problemText: "Для превью нужно разрешение «Запись экрана»",
-                               action: {
-                                   Permissions.requestScreenRecording()
-                                   Permissions.open(.screenRecording)
-                               },
-                               relaunchHint: true)
+                    PermissionRow(.screenRecording, state: .needed, purpose: "Для превью нужно разрешение «Запись экрана»",
+                                  action: {
+                                      Permissions.requestScreenRecording()
+                                      Permissions.open(.screenRecording)
+                                  },
+                                  relaunchHint: true)
                 }
                 if enabled {
-                    accessibilityStatus(permissions, running: service.isRunning, readyText: "Переключатель работает")
+                    AccessibilityStatusRow(running: service.isRunning, readyText: "Переключатель работает")
                 }
             }
-            Section("Как пользоваться") {
-                ShortcutRow(keys: [mod, "Tab"], text: "Удерживайте \(mod) и нажимайте Tab, отпустите \(mod) — переход.")
-                ShortcutRow(keys: ["⇧", "Tab"], text: "Назад по списку. Также работают ← и →.")
-                ShortcutRow(keys: ["Q"], text: "Завершить выбранное приложение.")
-                ShortcutRow(keys: ["H"], text: "Скрыть выбранное приложение.")
-                ShortcutRow(keys: ["Esc"], text: "Закрыть без переключения.")
-                Text("Приложения идут в порядке последнего использования. Если у приложения нет окон, оно откроет новое, как при клике по Dock; свёрнутое окно разворачивается.")
-                    .foregroundStyle(.secondary)
+            CollapsibleCard("Как пользоваться") {
+                HintRow(keys: [mod, "Tab"], text: "Удерживайте \(mod) и нажимайте Tab, отпустите \(mod) — переход.")
+                HintRow(keys: ["⇧", "Tab"], text: "Назад по списку. Также работают ← и →.")
+                HintRow(keys: ["Q"], text: "Завершить выбранное приложение.")
+                HintRow(keys: ["H"], text: "Скрыть выбранное приложение.")
+                HintRow(keys: ["Esc"], text: "Закрыть без переключения.")
             }
+            Footnote("Приложения идут в порядке последнего использования. Если у приложения нет окон, оно откроет новое, как при клике по Dock; свёрнутое окно разворачивается.")
         }
-        .formStyle(.grouped)
-        .navigationTitle("Переключатель приложений")
     }
 }

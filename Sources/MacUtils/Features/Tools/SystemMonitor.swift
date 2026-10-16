@@ -22,6 +22,26 @@ final class SystemMonitorModel: ObservableObject {
 
     let cores = ProcessInfo.processInfo.activeProcessorCount
 
+    /// Для снимков интерфейса: демонстрационные значения, выборка не запускается.
+    private(set) var isDemo = false
+
+    static func demo() -> SystemMonitorModel {
+        let model = SystemMonitorModel()
+        model.isDemo = true
+        model.cpu = 0.32
+        model.memory = SystemStats.Memory(total: 16 << 30, used: 11 << 30, wired: 2 << 30, compressed: 1 << 30, app: 6 << 30)
+        model.disk = SystemStats.Disk(total: 500_000_000_000, available: 210_000_000_000)
+        model.download = 2_400_000
+        model.upload = 380_000
+        model.battery = SystemStats.Battery(percent: 78, charging: false, onAC: true)
+        let wave = (0..<historyLength).map { 0.25 + 0.15 * sin(Double($0) / 6) }
+        model.cpuHistory = wave
+        model.memoryHistory = wave.map { $0 + 0.4 }
+        model.downloadHistory = wave.map { $0 * 4_000_000 }
+        model.uploadHistory = wave.map { $0 * 600_000 }
+        return model
+    }
+
     private var timer: Timer?
     private var lastTicks: [SystemStats.CPUTicks] = []
     private var lastNetwork: (received: UInt64, sent: UInt64) = (0, 0)
@@ -30,6 +50,7 @@ final class SystemMonitorModel: ObservableObject {
 
     /// Вкладки включают выборку, пока они на экране.
     func start() {
+        guard !isDemo else { return }
         users += 1
         guard timer == nil else { return }
         lastTicks = SystemStats.cpuTicks()
@@ -44,6 +65,7 @@ final class SystemMonitorModel: ObservableObject {
     }
 
     func stop() {
+        guard !isDemo else { return }
         users = max(users - 1, 0)
         guard users == 0 else { return }
         timer?.invalidate()
@@ -88,25 +110,27 @@ struct SystemMonitorView: View {
     private var columns: [GridItem] { [GridItem(.adaptive(minimum: compact ? 160 : 280), spacing: compact ? 10 : 14)] }
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: compact ? 10 : 14) {
-                MonitorCard(title: "Процессор", symbol: "cpu", tint: .blue,
-                            value: percent(model.cpu),
-                            detail: "\(model.cores) \(plural(model.cores, "ядро", "ядра", "ядер"))",
-                            history: model.cpuHistory, maximum: 1)
-                MonitorCard(title: "Память", symbol: "memorychip", tint: .green,
-                            value: model.memory.map { percent($0.fraction) } ?? "—",
-                            detail: model.memory.map { "\(bytes($0.used)) из \(bytes($0.total)) · сжато \(bytes($0.compressed))" } ?? "",
-                            history: model.memoryHistory, maximum: 1)
-                MonitorCard(title: "Сеть", symbol: "network", tint: .purple,
-                            value: "↓ \(speed(model.download))",
-                            detail: "↑ \(speed(model.upload))",
-                            history: model.downloadHistory, maximum: nil,
-                            secondHistory: model.uploadHistory)
-                diskCard
-                statusCard
+        ToolsPageFrame(.monitor, compact: compact) {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: compact ? 10 : 14) {
+                    MonitorCard(title: "Процессор", symbol: "cpu", tint: .dsAccLine,
+                                value: percent(model.cpu),
+                                detail: "\(model.cores) \(plural(model.cores, "ядро", "ядра", "ядер"))",
+                                history: model.cpuHistory, maximum: 1)
+                    MonitorCard(title: "Память", symbol: "memorychip", tint: .dsBlue,
+                                value: model.memory.map { percent($0.fraction) } ?? "—",
+                                detail: model.memory.map { "\(bytes($0.used)) из \(bytes($0.total)) · сжато \(bytes($0.compressed))" } ?? "",
+                                history: model.memoryHistory, maximum: 1)
+                    MonitorCard(title: "Сеть", symbol: "network", tint: .dsBlue,
+                                value: "↓ \(speed(model.download))",
+                                detail: "↑ \(speed(model.upload))",
+                                history: model.downloadHistory, maximum: nil,
+                                secondHistory: model.uploadHistory)
+                    diskCard
+                    statusCard
+                }
+                .padding(compact ? 10 : 0)
             }
-            .padding(compact ? 10 : 16)
         }
         .environment(\.compactCards, compact)
         .onAppear { model.start() }
@@ -114,27 +138,36 @@ struct SystemMonitorView: View {
     }
 
     private var diskCard: some View {
-        CardShell(title: "Диск", symbol: "internaldrive", tint: .orange) {
+        CardShell(title: "Диск", symbol: "internaldrive") {
             if let disk = model.disk {
-                Text(percent(disk.fraction)).font(.system(size: compact ? 17 : 26, weight: .semibold)).monospacedDigit()
-                ProgressView(value: disk.fraction).tint(disk.fraction > 0.9 ? .red : .orange)
+                Text(percent(disk.fraction)).font(CardShell<EmptyView>.valueFont(compact)).foregroundStyle(.dsText).monospacedDigit()
+                ProgressBar(value: disk.fraction)
                 Text("Свободно \(bytes(UInt64(disk.available))) из \(bytes(UInt64(disk.total)))")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DS.Font.rowSub).foregroundStyle(.dsMute)
             } else {
-                Text("—")
+                Text("—").font(DS.Font.rowTitle).foregroundStyle(.dsMute)
             }
         }
     }
 
     private var statusCard: some View {
-        CardShell(title: "Система", symbol: "gauge.with.dots.needle.33percent", tint: .teal) {
+        CardShell(title: "Система", symbol: "gauge.with.dots.needle.33percent") {
             if let battery = model.battery {
-                Label("Батарея \(battery.percent) %\(battery.charging ? " · заряжается" : battery.onAC ? " · от сети" : "")",
-                      systemImage: battery.charging ? "battery.100.bolt" : "battery.75")
+                line("Батарея \(battery.percent) %\(battery.charging ? " · заряжается" : battery.onAC ? " · от сети" : "")",
+                     symbol: battery.charging ? "battery.100.bolt" : "battery.75")
             }
-            Label("Нагрев: \(thermalText)", systemImage: "thermometer.medium")
-            Label("Работает \(uptime)", systemImage: "clock")
+            line("Нагрев: \(thermalText)", symbol: "thermometer.medium")
+            line("Работает \(uptime)", symbol: "clock")
         }
+    }
+
+    private func line(_ text: String, symbol: String) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(.dsMute).frame(width: 20)
+                .accessibilityHidden(true)
+            Text(text).font(DS.Font.bodyStrong).foregroundStyle(.dsText)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var thermalText: String {
@@ -165,23 +198,30 @@ extension EnvironmentValues {
     }
 }
 
+/// Карточка монитора: в окне — `panel` с обводкой, в панели из строки меню — `field`.
 private struct CardShell<Content: View>: View {
     @Environment(\.compactCards) private var compact
     let title: String
     let symbol: String
-    let tint: Color
     @ViewBuilder let content: Content
 
+    static func valueFont(_ compact: Bool) -> Font { DS.Font.manrope(compact ? 20 : 28, .heavy, relativeTo: .title) }
+
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
         VStack(alignment: .leading, spacing: compact ? 5 : 8) {
-            Label(title, systemImage: symbol)
-                .font(compact ? .subheadline.weight(.semibold) : .headline)
-                .foregroundStyle(tint)
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: symbol).font(.system(size: compact ? 12 : 14, weight: .medium)).foregroundStyle(.dsMute)
+                    .accessibilityHidden(true)
+                Text(title.uppercased()).font(DS.Font.groupLabel).tracking(DS.Font.tracking(0.12, size: 11)).foregroundStyle(.dsMute)
+            }
             content
         }
         .frame(maxWidth: .infinity, minHeight: compact ? 96 : 150, alignment: .topLeading)
-        .padding(compact ? 10 : 14)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(compact ? 12 : 16)
+        .background(compact ? Color.dsField : Color.dsPanel, in: shape)
+        .overlay { if !compact { shape.strokeBorder(Color.dsLine, lineWidth: 1) } }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -198,20 +238,20 @@ private struct MonitorCard: View {
     var secondHistory: [Double]? = nil
 
     var body: some View {
-        CardShell(title: title, symbol: symbol, tint: tint) {
-            Text(value).font(.system(size: compact ? 17 : 26, weight: .semibold)).monospacedDigit()
-            Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        CardShell(title: title, symbol: symbol) {
+            Text(value).font(CardShell<EmptyView>.valueFont(compact)).foregroundStyle(.dsText).monospacedDigit()
+            Text(detail).font(DS.Font.rowSub).foregroundStyle(.dsMute).lineLimit(1)
             Chart {
                 ForEach(Array(history.enumerated()), id: \.offset) { index, point in
                     AreaMark(x: .value("t", index), y: .value("v", point))
-                        .foregroundStyle(tint.opacity(0.25))
+                        .foregroundStyle(tint.opacity(0.18))
                     LineMark(x: .value("t", index), y: .value("v", point))
                         .foregroundStyle(tint)
                 }
                 if let secondHistory {
                     ForEach(Array(secondHistory.enumerated()), id: \.offset) { index, point in
                         LineMark(x: .value("t", index), y: .value("up", point), series: .value("s", "up"))
-                            .foregroundStyle(Color.pink)
+                            .foregroundStyle(Color.dsRec)
                     }
                 }
             }
