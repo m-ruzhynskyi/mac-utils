@@ -1,4 +1,5 @@
 import AVFoundation
+@preconcurrency import CoreMedia
 import AppKit
 import ImageIO
 import ScreenCaptureKit
@@ -121,8 +122,9 @@ final class ScreenRecorder: NSObject, ObservableObject {
         var echoFree: EchoFreeMicrophone?
         if wantsMic {
             let candidate = EchoFreeMicrophone { [weak writer] buffer, pts in
-                guard let sample = EchoFreeMicrophone.sampleBuffer(buffer, at: pts) else { return }
-                writer?.queue.async { writer?.appendMicrophone(sample) }
+                guard let built = EchoFreeMicrophone.sampleBuffer(buffer, at: pts) else { return }
+                let sample = UncheckedSendable(built)
+                writer?.queue.async { writer?.appendMicrophone(sample.value) }
             }
             do {
                 try candidate.start()
@@ -176,6 +178,25 @@ final class ScreenRecorder: NSObject, ObservableObject {
             }
             await self.deliver(writer.url)
         }
+    }
+
+    /// Отмена записи кнопкой HUD: запись удаляется, поэтому сначала спрашиваем.
+    /// Пока открыто окно подтверждения, Esc принадлежит ему (глобальный перехват не должен останавливать запись под ним).
+    private var confirmingCancel = false
+
+    func confirmCancel() {
+        guard !finishing, !confirmingCancel else { return }
+        confirmingCancel = true
+        defer { confirmingCancel = false }
+        let alert = NSAlert()
+        alert.messageText = "Удалить запись?"
+        alert.informativeText = "Записанное будет удалено без возможности восстановления. Чтобы сохранить, нажмите «Стоп» (или Esc)."
+        alert.addButton(withTitle: "Продолжить запись")
+        alert.addButton(withTitle: "Удалить запись")
+        alert.buttons[0].keyEquivalent = "\u{1b}"  // Esc = «Продолжить запись»
+        alert.buttons[1].hasDestructiveAction = true
+        NSApp.activate()
+        if alert.runModal() == .alertSecondButtonReturn { cancel() }
     }
 
     func cancel() {
@@ -274,9 +295,10 @@ final class ScreenRecorder: NSObject, ObservableObject {
     private func startKeyTap() {
         let tap = EventTap(types: [.keyDown]) { [weak self] _, event in
             guard let self else { return true }
-            if event.getIntegerValueField(.keyboardEventKeycode) == 53 { // Esc
-                self.cancel()
-                return false
+            // Esc нажимают в любой программе постоянно (закрыть диалог, выйти из полноэкранного режима),
+            // поэтому он только останавливает запись с сохранением, а не удаляет её. Клавиша идёт дальше в приложение.
+            if event.getIntegerValueField(.keyboardEventKeycode) == 53, !self.confirmingCancel { // Esc
+                self.stop()
             }
             return true
         }
@@ -339,12 +361,12 @@ private struct RecordingHUD: View {
             Text(timeString)
                 .font(.system(size: 13, weight: .semibold))
                 .monospacedDigit()
-            Button("Отмена") { recorder.cancel() }
-                .help("Esc")
+            Button("Отмена") { recorder.confirmCancel() }
+                .help("Удалить запись (с подтверждением)")
             Button("Стоп") { recorder.stop() }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
-                .help("⌘⇧X")
+                .help("Сохранить запись: ⌘⇧X или Esc")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

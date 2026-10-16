@@ -32,6 +32,15 @@ final class AppSwitcher: NSObject, ObservableObject {
     private var active = false
     private var recent: [pid_t] = []
     private var systemSwitcherDisabled = false
+    /// Режим «⌘Tab (заменить системный)».
+    private var commandMode = false
+    /// Последний собранный список окон: ⌥Tab показывает его сразу, не обращаясь к Accessibility в обработчике tap.
+    private var cache: [SwitcherItem] = []
+    /// Ключи окон, которые CG показывал в момент последнего сбора: окно из свежего CG-списка, которого там не было, — новое.
+    private var seenKeys: Set<String> = []
+    private var refreshTask: Task<Void, Never>?
+    private var refreshAgain = false
+    private var cacheTimer: Timer?
     private let panel = SwitcherPanelController()
 
     private override init() {
@@ -44,29 +53,60 @@ final class AppSwitcher: NSObject, ObservableObject {
                            name: NSWorkspace.didActivateApplicationNotification, object: nil)
         center.addObserver(self, selector: #selector(appTerminated(_:)),
                            name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+        // Исключённая программа вышла на передний план или ушла с него — системный ⌘Tab включаем и выключаем.
+        NotificationCenter.default.addObserver(forName: AppExclusions.didChangeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { AppSwitcher.shared.exclusionChanged() }
+        }
     }
 
     func sync() {
         let defaults = UserDefaults.standard
         let wanted = defaults.bool(forKey: Pref.switcher) && Permissions.accessibility
         let useCommand = defaults.string(forKey: Pref.switcherModifier) == "command"
+        commandMode = useCommand
         modifier = useCommand ? .maskCommand : .maskAlternate
 
         if wanted {
             if tap == nil {
-                tap = EventTap(types: [.keyDown, .keyUp, .flagsChanged]) { [weak self] type, event in
+                let tap = EventTap(types: [.keyDown, .keyUp, .flagsChanged]) { [weak self] type, event in
                     self?.handle(type: type, event: event) ?? true
                 }
+                // Tap отключился по таймауту: отпускание ⌥ могло потеряться, и тогда `active` остался бы true
+                // и поглощал бы все клавиши. Закрываем панель и сбрасываем состояние.
+                tap.onDisabled = { [weak self] in self?.cancel() }
+                self.tap = tap
             }
             isRunning = tap?.start() ?? false
-            setSystemSwitcher(disabled: isRunning && useCommand)
+            if isRunning { startCacheRefresh() }
+            applySystemSwitcher()
         } else {
             cancel()
             tap?.stop()
             tap = nil
             isRunning = false
+            cacheTimer?.invalidate()
+            cacheTimer = nil
+            cache = []
             setSystemSwitcher(disabled: false)
         }
+    }
+
+    /// Системный ⌘Tab выключен, только пока наш переключатель его заменяет. В исключённой программе (виртуальная машина,
+    /// удалённый стол) наш перехват пропускает ⌘Tab, поэтому там системный переключатель должен работать: иначе из неё
+    /// нельзя уйти с клавиатуры.
+    static func shouldDisableSystemSwitcher(running: Bool, commandMode: Bool, frontExcluded: Bool) -> Bool {
+        running && commandMode && !frontExcluded
+    }
+
+    private func applySystemSwitcher() {
+        setSystemSwitcher(disabled: Self.shouldDisableSystemSwitcher(
+            running: isRunning, commandMode: commandMode, frontExcluded: AppExclusions.shared.isFrontExcluded))
+    }
+
+    private func exclusionChanged() {
+        if AppExclusions.shared.isFrontExcluded { cancel() }
+        guard isRunning else { return }
+        applySystemSwitcher()
     }
 
     /// Возвращает системный ⌘Tab при выходе.
@@ -81,11 +121,59 @@ final class AppSwitcher: NSObject, ObservableObject {
         let pid = app.processIdentifier
         recent.removeAll { $0 == pid }
         recent.insert(pid, at: 0)
+        refreshItems()
     }
 
     @objc private func appTerminated(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         recent.removeAll { $0 == app.processIdentifier }
+        refreshItems()
+    }
+
+    // MARK: - Кэш списка окон (вне обработчика tap)
+
+    /// Список окон обновляется в фоне (смена программы, раз в 5 секунд), чтобы ⌥Tab не ждал Accessibility.
+    private func startCacheRefresh() {
+        refreshItems()
+        guard cacheTimer == nil else { return }
+        let timer = Timer(timeInterval: 5, repeats: true) { _ in
+            MainActor.assumeIsolated { AppSwitcher.shared.refreshItems() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cacheTimer = timer
+    }
+
+    /// Полный сбор в фоновом потоке. Один сбор за раз; пришёл запрос во время сбора — после него повторим.
+    /// Если панель открыта, список в ней уточняется на месте (выбор сохраняется).
+    private func refreshItems() {
+        guard isRunning else { return }
+        guard refreshTask == nil else { refreshAgain = true; return }
+        let recent = self.recent
+        // Программы и иконки — на главном потоке; в фон уходит только Accessibility и CG.
+        let apps = WindowList.snapshotApps()
+        refreshTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                UncheckedSendable(WindowList.collect(recent: recent, apps: apps))
+            }.value
+            guard let self else { return }
+            self.refreshTask = nil
+            self.cache = result.value
+            self.seenKeys = WindowList.visibleWindowKeys()
+            if self.active { self.applyRefined(result.value) }
+            if self.refreshAgain {
+                self.refreshAgain = false
+                self.refreshItems()
+            }
+        }
+    }
+
+    /// Подменяет список в открытой панели, оставляя выбранным то же окно.
+    private func applyRefined(_ fresh: [SwitcherItem]) {
+        guard !fresh.isEmpty else { return }
+        let selectedID = items.indices.contains(selected) ? items[selected].id : nil
+        selected = SwitcherSelection.index(keeping: selectedID, in: fresh.map(\.id), fallback: selected)
+        items = fresh
+        panel.show()
     }
 
     // MARK: - Клавиши
@@ -102,8 +190,10 @@ final class AppSwitcher: NSObject, ObservableObject {
                 guard key == Key.tab,
                       flags.contains(modifier),
                       flags.intersection(others).isEmpty else { return true }
-                open(reverse: flags.contains(.maskShift))
-                return false
+                // Виртуальная машина или удалённый рабочий стол сами забирают Tab: отдаём событие им.
+                if AppExclusions.shared.isFrontExcluded { return true }
+                // Список окон не нашёлся: событие не поглощаем (в режиме ⌘ системный ⌘Tab отключён, но хотя бы не «съедаем» клавишу).
+                return !open(reverse: flags.contains(.maskShift))
             }
             switch key {
             case Key.tab: move(flags.contains(.maskShift) ? -1 : 1)
@@ -133,9 +223,20 @@ final class AppSwitcher: NSObject, ObservableObject {
 
     // MARK: - Действия
 
-    private func open(reverse: Bool) {
-        items = WindowList.collect(recent: recent)
-        guard !items.isEmpty else { return }
+    /// Открывает панель из кэша (в обработчике tap нельзя ходить в Accessibility) и запускает уточнение в фоне.
+    /// false — окон нет, панель не открылась.
+    private func open(reverse: Bool) -> Bool {
+        // Свежий порядок окон берём из CG (1–3 мс, без Accessibility); подробности (заголовки, свёрнутые) — из кэша.
+        // Кэш мог устареть (клик между окнами одной программы не обновляет его), а ⌥Tab должен вести к предыдущему окну.
+        let draft = WindowList.collect(recent: recent, apps: WindowList.snapshotApps(), axBudget: 0)
+        let merged = SwitcherMerge.merge(draft: draft, cached: cache, seen: seenKeys, id: \.id,
+                                         isBackground: { $0.isMinimized || $0.isHidden })
+        let list = merged.isEmpty ? (cache.isEmpty ? draft : cache) : merged
+        guard !list.isEmpty else {
+            refreshItems()
+            return false
+        }
+        items = list
         // Первое окно — текущее; стартуем со второго, как системный ⌘Tab.
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let startsWithFront = items.first?.pid == frontPID
@@ -147,6 +248,7 @@ final class AppSwitcher: NSObject, ObservableObject {
             selected = startsWithFront ? 1 : 0
         }
         active = true
+        refreshItems()
         if UserDefaults.standard.bool(forKey: Pref.switcherPreviews) {
             refreshPreviews()
         }
@@ -156,6 +258,7 @@ final class AppSwitcher: NSObject, ObservableObject {
             try? await Task.sleep(nanoseconds: 120_000_000)
             if self.active { self.panel.show() }
         }
+        return true
     }
 
     /// Снимает окна через ScreenCaptureKit (свёрнутые — если система отдаст кадр).
@@ -252,5 +355,46 @@ final class AppSwitcher: NSObject, ObservableObject {
         _ = setEnabled(1, !disabled) // ⌘Tab
         _ = setEnabled(2, !disabled) // ⌘⇧Tab
         systemSwitcherDisabled = disabled
+    }
+}
+
+/// Выбор в списке после его обновления.
+enum SwitcherSelection {
+    /// Индекс прежнего выбранного окна в новом списке; нет такого — прежний индекс, зажатый в границы.
+    static func index(keeping id: String?, in ids: [String], fallback: Int) -> Int {
+        guard !ids.isEmpty else { return 0 }
+        if let id, let found = ids.firstIndex(of: id) { return found }
+        return min(max(fallback, 0), ids.count - 1)
+    }
+}
+
+/// Склейка свежего списка CG (правильный порядок окон) с кэшем (заголовки, AX-окна, свёрнутые).
+enum SwitcherMerge {
+    /// - `draft` — окна, которые CG видит сейчас, спереди назад (без Accessibility);
+    /// - `cached` — прошлый полный список;
+    /// - `seen` — ключи окон, которые CG показывал при последнем полном сборе. Окно из `draft` без записи в кэше:
+    ///   новое (его `seen` не знает) — добавляется; известное, но отсутствующее в кэше, Accessibility отсеял
+    ///   (панель, вспомогательное окно) — не добавляется;
+    /// - окно из кэша, которого нет в `draft`, остаётся только если оно свёрнуто или программа скрыта (`isBackground`);
+    ///   иначе оно закрыто или ушло с этого рабочего стола.
+    static func merge<T>(draft: [T], cached: [T], seen: Set<String>, id: (T) -> String, isBackground: (T) -> Bool) -> [T] {
+        let cachedByID = Dictionary(cached.map { (id($0), $0) }, uniquingKeysWith: { first, _ in first })
+        var result: [T] = []
+        var used = Set<String>()
+        for window in draft {
+            let key = id(window)
+            if let known = cachedByID[key] {
+                result.append(known)
+                used.insert(key)
+            } else if !seen.contains(key) {
+                result.append(window)
+                used.insert(key)
+            }
+        }
+        for window in cached where isBackground(window) && !used.contains(id(window)) {
+            result.append(window)
+            used.insert(id(window))
+        }
+        return result
     }
 }

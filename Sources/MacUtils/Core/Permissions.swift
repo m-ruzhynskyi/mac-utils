@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import ApplicationServices
 
@@ -13,6 +14,23 @@ enum Permissions {
 
     /// «Запись экрана»: нужна для снимков.
     static var screenRecording: Bool { CGPreflightScreenCaptureAccess() }
+
+    enum Level: Equatable { case granted, notAsked, denied }
+
+    /// Статус микрофона macOS → наш: нужен записи встреч и записи экрана с микрофоном.
+    static func microphoneLevel(_ status: AVAuthorizationStatus) -> Level {
+        switch status {
+        case .authorized: return .granted
+        case .notDetermined: return .notAsked
+        default: return .denied
+        }
+    }
+
+    static var microphone: Level { microphoneLevel(AVCaptureDevice.authorizationStatus(for: .audio)) }
+
+    static func requestMicrophone() {
+        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+    }
 
     /// «Полный доступ к диску»: пробуем прочитать защищённые TCC места.
     /// nil — проверить не на чем (ни одного такого пути нет).
@@ -70,6 +88,7 @@ enum Permissions {
         case accessibility = "Privacy_Accessibility"
         case screenRecording = "Privacy_ScreenCapture"
         case automation = "Privacy_Automation"
+        case microphone = "Privacy_Microphone"
     }
 
     static func open(_ pane: Pane) {

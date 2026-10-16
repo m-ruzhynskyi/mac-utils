@@ -31,10 +31,11 @@ enum ShareCode {
         return digits.count == 10 || digits.count == 6 ? digits : nil
     }
 
-    /// Ретранслятор пускает только приложения Mac Utils — по этому заголовку.
-    static func request(_ url: URL) -> URLRequest {
+    /// Ретранслятор пускает только приложения Mac Utils — по этому заголовку. Токен mu-share-2 ставится,
+    /// только если ретранслятор сам объявил его в `/version`; иначе mu-share-1 (старый протокол).
+    static func request(_ url: URL, token: String? = nil) -> URLRequest {
         var request = URLRequest(url: url)
-        request.setValue("mu-share-1", forHTTPHeaderField: "X-MacUtils-Client")
+        request.setValue(token ?? ShareRelay.token(for: url), forHTTPHeaderField: "X-MacUtils-Client")
         return request
     }
 
@@ -87,6 +88,20 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     @Published private(set) var state: State = .idle
+    /// Ретранслятор не объявил mu-share-2: работаем по-старому, личность зрителей не проверяется.
+    @Published private(set) var relayWithoutKeys = false
+    /// Keychain недоступен: ключ не сохранить, трансляция и просмотр идут по mu-share-1 без проверки ключом.
+    @Published private(set) var keychainUnavailable = false
+    /// Отпечаток этого Mac, как его вернул ретранслятор при последней проверке.
+    @Published private(set) var myFingerprint: String?
+    /// Нужен новый ID: этот закреплён за другим устройством.
+    @Published private(set) var needsNewID = false
+    /// Меняется при смене ID — чтобы страница перечитала его.
+    @Published private(set) var idVersion = 0
+    /// Подключение к ведущему прошло проверку ключом (а не старым протоколом).
+    private var hostKeyed = false
+    /// Попытки подключения: «Отмена», «Стоп» и таймаут делают запоздавший результат недействительным (SH3).
+    private var attempts = ShareAttempts()
 
     private var socket: URLSessionWebSocketTask?
     private var stream: SCStream?
@@ -118,53 +133,79 @@ final class ScreenShare: NSObject, ObservableObject {
         }
         // Сначала — что показывать: системное окно выбора (экран, окно или программа).
         state = .connecting
+        let attempt = attempts.begin()
         if screen {
             Task {
                 guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
                       let display = content.displays.first(where: { $0.displayID == (NSScreen.withMouse ?? NSScreen.main)?.displayID })
                         ?? content.displays.first else {
-                    state = .failed("Не удалось начать захват экрана")
+                    if attempts.isCurrent(attempt) { state = .failed("Не удалось начать захват экрана") }
                     return
                 }
-                connect(filter: Self.displayFilter(display, content: content))
+                connect(filter: Self.displayFilter(display, content: content), attempt: attempt)
             }
             return
         }
         Picker.shared.choose { [weak self] filter in
-            guard let self else { return }
+            guard let self, self.attempts.isCurrent(attempt) else { return }
             guard let filter else {
                 self.state = .idle
                 return
             }
-            self.connect(filter: filter)
+            self.connect(filter: filter, attempt: attempt)
         }
     }
 
-    private func connect(filter: SCContentFilter) {
+    /// «Отмена» во время подключения: выбор экрана, рукопожатие и начало захвата прерываются, эфир не начнётся.
+    func cancelConnecting() {
+        guard state == .connecting else { return }
+        stop()
+    }
+
+    private func connect(filter: SCContentFilter, attempt: Int) {
+        guard attempts.isCurrent(attempt) else { return }
+        armConnectTimeout(attempt)
         Task {
             // Комната — свой постоянный ID; занята — значит, трансляция с этим ID уже идёт.
-            for _ in 0..<1 {
-                let code = ShareCode.myID
-                guard let url = ShareCode.url(server: Self.server, code: code, role: "host") else { break }
-                let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url))
-                socket.maximumMessageSize = 4 << 20
-                socket.resume()
-                let status = await Self.handshake(socket)
-                if status == 409 {
-                    state = .failed("С вашим ID уже идёт трансляция (может, в другом окне)")
-                    return
-                }
-                guard status == nil else {
-                    state = .failed(status == 0 ? "Нет связи с сервером трансляции" : "Сервер ответил \(status!)")
-                    return
-                }
+            let code = ShareCode.myID
+            needsNewID = false
+            let opened = await openHostSocket()
+            // Пока ждали сервер, подключение отменили или вышло время: свежий сокет закрываем, состояние не трогаем.
+            guard attempts.isCurrent(attempt) else {
+                if case .ok(let late, _) = opened { late.cancel(with: .goingAway, reason: nil) }
+                return
+            }
+            switch opened {
+            case .busy:
+                state = .failed(ShareErrorText.busyMessage(keychainUnavailable: keychainUnavailable))
+                return
+            case .refused(let errorCode, let message):
+                needsNewID = ShareErrorText.needsNewID(errorCode)
+                state = .failed(ShareErrorText.hostRefusal(code: errorCode, message: message))
+                return
+            case .failed(let status):
+                state = .failed(Self.connectionMessage(status))
+                return
+            case .ok(let socket, let keyed):
                 self.socket = socket
+                hostKeyed = keyed
+                // Панель запросов создаём заранее: её окно должно быть в фильтре захвата до первого запроса.
+                ShareRequestQueue.shared.prepare()
                 do {
                     try await beginCapture(filter: filter)
                 } catch {
+                    // Звук мог уже пойти (он запускается раньше видео): останавливаем всё, что успело начаться (SH2).
+                    teardownCapture()
                     socket.cancel(with: .goingAway, reason: nil)
                     self.socket = nil
-                    state = .failed("Не удалось начать захват экрана")
+                    if attempts.isCurrent(attempt) { state = .failed("Не удалось начать захват экрана") }
+                    return
+                }
+                guard attempts.isCurrent(attempt) else {
+                    // Отменили, пока начинался захват.
+                    teardownCapture()
+                    socket.cancel(with: .goingAway, reason: nil)
+                    if self.socket === socket { self.socket = nil }
                     return
                 }
                 startHeartbeat(socket)
@@ -172,10 +213,109 @@ final class ScreenShare: NSObject, ObservableObject {
                 ShareMarksOverlay.shared.attach(to: filter)
                 listen(socket)
                 showHUD()
-                return
             }
-            state = .failed("Не удалось начать трансляцию")
         }
+    }
+
+    /// Сервер не ответил вовремя (сокет висит до системного таймаута в 60 с): попытка прерывается с понятным текстом.
+    private func armConnectTimeout(_ attempt: Int) {
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(ShareTimeouts.hostConnect * 1_000_000_000))
+            guard attempts.isCurrent(attempt), state == .connecting else { return }
+            Log.capture.error("Трансляция: сервер не ответил за \(Int(ShareTimeouts.hostConnect)) с")
+            stop(reason: ShareTimeouts.hostConnectMessage)
+        }
+    }
+
+    static func connectionMessage(_ status: Int) -> String {
+        switch status {
+        case 0: return "Нет связи с сервером трансляции"
+        case 429: return ShareErrorText.message(code: "rate-limited")
+        case 426: return ShareErrorText.message(code: "upgrade-required")
+        default: return "Сервер ответил \(status)"
+        }
+    }
+
+    /// Возможности ретранслятора (mu-share-2 или нет); nil — нет связи.
+    func probeRelay() async -> ShareRelay.Capability? {
+        let capability = await ShareRelay.capability(server: Self.server)
+        if let capability { relayWithoutKeys = capability == .legacy }
+        return capability
+    }
+
+    private enum HostOpen {
+        case ok(URLSessionWebSocketTask, keyed: Bool)
+        case busy
+        case refused(code: String, message: String)
+        case failed(status: Int)
+    }
+
+    /// Выбор протокола: mu-share-2 только если relay его объявил и ключ лежит в Keychain; иначе — как mu-share-1 с понятным сообщением.
+    func shouldUseKeys(_ capability: ShareRelay.Capability?) -> Bool {
+        let keyed = ShareHandshake.useKeys(capability: capability, identity: .shared)
+        if capability == .keyed && !keyed {
+            if !keychainUnavailable { Toast.show(ShareIdentity.keychainUnavailableMessage, symbol: "key.slash", tint: .orange) }
+            keychainUnavailable = true
+            myFingerprint = nil
+        } else if keyed {
+            keychainUnavailable = false
+        }
+        return keyed
+    }
+
+    /// Подключение ведущего: по mu-share-2 (challenge → auth → authed), если ретранслятор его объявил, иначе по-старому.
+    private func openHostSocket(retried: Bool = false) async -> HostOpen {
+        let code = ShareCode.myID
+        guard let url = ShareCode.url(server: Self.server, code: code, role: "host") else { return .failed(status: 0) }
+        // «Отмена», «Стоп» и таймаут меняют попытку: и при первом подключении, и при переподключении в эфире.
+        let attempt = attempts.current
+        let keyedRelay = shouldUseKeys(await probeRelay())
+        // Отменили, пока спрашивали `/version`: сокет не открываем.
+        guard attempts.isCurrent(attempt) else { return .failed(status: 0) }
+        let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url, token: keyedRelay ? ShareRelay.keyedToken : ShareRelay.legacyToken))
+        socket.maximumMessageSize = 4 << 20
+        socket.resume()
+        // Пока идёт рукопожатие, отмена закрывает сокет сразу: иначе он пройдёт `auth` позже новой попытки и relay
+        // выбьет её (`replaced`), а в legacy новая попытка получит 409.
+        attempts.track(socket) { socket.cancel(with: .goingAway, reason: nil) }
+        defer { attempts.untrack(socket) }
+        if keyedRelay {
+            switch await ShareHandshake.authenticateHost(socket, roomId: code, identity: .shared) {
+            case .authed where !attempts.isCurrent(attempt):
+                socket.cancel(with: .goingAway, reason: nil)
+                return .failed(status: 0)
+            case .authed(let fp, let keyed):
+                // Ключ создан и привязан к ID: теперь можно подписывать запросы `/status`.
+                if keyed { ShareHistory.statusIdentity = .shared }
+                myFingerprint = keyed ? (fp ?? ShareIdentity.fingerprint) : nil
+                return .ok(socket, keyed: keyed)
+            case .refused(let errorCode, let message):
+                socket.cancel(with: .goingAway, reason: nil)
+                return .refused(code: errorCode, message: message)
+            case .failed(let status):
+                socket.cancel(with: .goingAway, reason: nil)
+                // 403 — ретранслятор откатили на версию без mu-share-2: спросим его возможности заново.
+                if !retried, status == 403 || status == 426 {
+                    ShareRelay.invalidate(server: Self.server)
+                    return await openHostSocket(retried: true)
+                }
+                return status == 409 ? .busy : .failed(status: status)
+            }
+        }
+        let status = await Self.handshake(socket)
+        // 426 по mu-share-1: relay требует ключи, а `/version` не ответил — проверяем заново и пробуем mu-share-2.
+        if !retried, status == 403 || status == 426 {
+            socket.cancel(with: .goingAway, reason: nil)
+            ShareRelay.invalidate(server: Self.server)
+            return await openHostSocket(retried: true)
+        }
+        if status == 409 { return .busy }
+        guard status == nil else { return .failed(status: status!) }
+        guard attempts.isCurrent(attempt) else {
+            socket.cancel(with: .goingAway, reason: nil)
+            return .failed(status: 0)
+        }
+        return .ok(socket, keyed: false)
     }
 
     private var isFailed: Bool {
@@ -282,11 +422,16 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     static var hiddenWindowNumbers: Set<Int> {
-        Set([ShareMarksOverlay.shared.windowNumber, ScreenShare.shared.hud?.windowNumber].compactMap { $0 })
+        Set([ShareMarksOverlay.shared.windowNumber, ScreenShare.shared.hud?.windowNumber, ShareRequestQueue.shared.windowNumber].compactMap { $0 })
     }
 
     /// Какой экран транслируем (nil — окно или программа).
     private var videoDisplayID: CGDirectDisplayID?
+
+    /// Экран трансляции: на нём показываем панель запросов, чтобы ведущий её увидел.
+    var broadcastScreen: NSScreen? {
+        videoDisplayID.flatMap { id in NSScreen.screens.first { $0.displayID == id } }
+    }
 
     /// Экран из системного окна выбора — пересобираем фильтр: окно выбора прячет Mac Utils целиком,
     /// а зрителю нужен и его интерфейс.
@@ -338,9 +483,10 @@ final class ScreenShare: NSObject, ObservableObject {
             self.audioStream = audioStream
             startAudioRefresh()
         }
+        self.sender = sender
+        // Видео не пошло, а звук уже идёт — его останавливает teardownCapture в вызывающем (SH2).
         try await stream.startCapture()
         self.stream = stream
-        self.sender = sender
     }
 
 
@@ -374,10 +520,15 @@ final class ScreenShare: NSObject, ObservableObject {
                         if let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] {
                             switch json["type"] as? String {
                             case "request":
-                                self.request(viewer: json["viewer"] as? String ?? "", name: json["name"] as? String ?? "",
-                                             rid: json["rid"] as? String)
+                                if let request = ShareRequest.parse(json) { self.handle(request) }
                             case "cancelled":
-                                self.pendingRequests.remove(json["viewer"] as? String ?? "")
+                                let rid = json["rid"] as? String
+                                ShareRequestQueue.shared.remove(key: rid ?? "id:" + (json["viewer"] as? String ?? ""))
+                            case "error":
+                                // Например replaced: этот ID занял другой экземпляр того же устройства.
+                                let code = json["code"] as? String ?? "unknown"
+                                self.stop(reason: ShareErrorText.message(code: code, relayMessage: json["message"] as? String))
+                                return
                             case "game":
                                 let viewer = json["from"] as? String ?? ""
                                 ShareGame.shared.receive(json, peer: viewer, name: json["name"] as? String ?? "",
@@ -404,8 +555,10 @@ final class ScreenShare: NSObject, ObservableObject {
                            json["type"] as? String == "viewers", let count = json["count"] as? Int,
                            case .live(let code, _) = self.state {
                             self.state = .live(code: code, viewers: count)
+                            // Никто не смотрит — кодер на паузе; появился зритель — сразу ключевой кадр (SH4).
+                            self.sender?.setViewers(count)
                             // Новый зритель сразу получает картинку, даже если экран не меняется.
-                            self.sender?.resendLast()
+                            if count > 0 { self.sender?.resendLast() }
                         }
                         self.listen(socket)
                     case .success:
@@ -440,54 +593,36 @@ final class ScreenShare: NSObject, ObservableObject {
             self?.socket?.send(.string(text)) { _ in }
         }
     }
-    private var pendingRequests: Set<String> = []
-
-    /// Зритель просится посмотреть: доверенных пускаем сразу, остальных — по вопросу.
-    private func request(viewer: String, name: String, rid: String? = nil) {
-        // Без вопроса — только доверенные. ID приходит от зрителя и им же задаётся, поэтому
-        // «свой» ID (viewer == myID) автоматически не принимается: это знает любой, у кого есть код.
-        if ShareHistory.shared.isTrusted(viewer) {
-            answer(viewer: viewer, accept: true, rid: rid)
-            return
-        }
-        guard !pendingRequests.contains(viewer) else { return }
-        pendingRequests.insert(viewer)
-        let canTrust = ShareHistory.canTrust(viewer)
-        let alert = NSAlert()
-        alert.messageText = "\(name) хочет посмотреть ваш экран"
-        var text = "ID \(ShareCode.display(viewer)). Зритель только смотрит и может ставить метки — управлять вашим Mac он не может."
-        if viewer == ShareCode.myID {
-            text += "\n\nЗапрос с вашим собственным ID — это может быть не вы."
-        } else if !canTrust {
-            text += "\n\nУ запроса нет корректного ID, «Всегда разрешать» недоступно."
-        }
-        alert.informativeText = text
-        alert.addButton(withTitle: "Разрешить")
-        if canTrust { alert.addButton(withTitle: "Всегда разрешать") }
-        alert.addButton(withTitle: "Отклонить")
-        NSApp.activate()
-        let response = alert.runModal()
-        guard pendingRequests.remove(viewer) != nil, isLive else { return }
-        switch response {
-        case .alertFirstButtonReturn: answer(viewer: viewer, accept: true, rid: rid)
-        case .alertSecondButtonReturn where canTrust:
-            ShareHistory.shared.trust(viewer, name: name)
-            answer(viewer: viewer, accept: true, rid: rid)
-        default: answer(viewer: viewer, accept: false, rid: rid)
+    /// Зритель просится посмотреть: правило решения — в `ShareRules.decide`. Спрашиваем немодально, через очередь.
+    private func handle(_ request: ShareRequest) {
+        switch ShareRules.decide(request, trust: .live()) {
+        case .accept:
+            answer(request, accept: true)
+        case .ask(let prompt):
+            let item = ShareRequestQueue.Item(request: request, prompt: prompt) { [weak self] reply in
+                guard let self, self.isLive else { return }
+                let accept = ShareRules.apply(reply, to: request, prompt: prompt) { id, name, pub in
+                    ShareHistory.shared.trust(id, name: name, pub: pub)
+                }
+                self.answer(request, accept: accept)
+            }
+            ShareRequestQueue.shared.add(item)
         }
     }
 
-    private func answer(viewer: String, accept: Bool, rid: String? = nil) {
-        if let message = Self.answerMessage(viewer: viewer, accept: accept, rid: rid) {
+    private func answer(_ request: ShareRequest, accept: Bool) {
+        let hostSig = accept && hostKeyed ? ShareRules.hostSignature(for: request, roomId: ShareCode.myID, identity: .shared) : nil
+        if let message = Self.answerMessage(viewer: request.viewer, accept: accept, rid: request.rid, hostSig: hostSig) {
             socket?.send(.string(message)) { _ in }
         }
         if accept { sender?.resendLast() }
     }
 
     /// JSON ответа ведущего; значения экранирует JSONSerialization, а не подстановка в строку.
-    static func answerMessage(viewer: String, accept: Bool, rid: String? = nil) -> String? {
+    static func answerMessage(viewer: String, accept: Bool, rid: String? = nil, hostSig: String? = nil) -> String? {
         var object: [String: Any] = ["type": accept ? "accept" : "decline", "viewer": viewer, "name": ShareCode.myName]
         if let rid { object["rid"] = rid }
+        if let hostSig { object["hostSig"] = hostSig }
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
         return String(data: data, encoding: .utf8)
     }
@@ -508,23 +643,27 @@ final class ScreenShare: NSObject, ObservableObject {
         Task {
             for delay in [1, 2, 3, 5, 8, 10, 15] as [UInt64] {
                 try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
-                guard isLive, reconnecting,
-                      let url = ShareCode.url(server: Self.server, code: ShareCode.myID, role: "host") else { return }
-                let fresh = URLSession.shared.webSocketTask(with: ShareCode.request(url))
-                fresh.maximumMessageSize = 4 << 20
-                fresh.resume()
-                guard await Self.handshake(fresh) == nil else {
-                    fresh.cancel(with: .goingAway, reason: nil)
+                guard isLive, reconnecting else { return }
+                switch await openHostSocket() {
+                case .ok(let fresh, let keyed):
+                    hostKeyed = keyed
+                    self.socket = fresh
+                    sender?.replace(fresh)
+                    listen(fresh)
+                    startHeartbeat(fresh)
+                    sender?.resendLast()
+                    reconnecting = false
+                    Log.capture.info("Трансляция: переподключено")
+                    return
+                case .refused(let code, let message) where ShareErrorText.needsNewID(code):
+                    // ID за это время закрепили за другим устройством: повторять бессмысленно.
+                    reconnecting = false
+                    needsNewID = true
+                    stop(reason: message)
+                    return
+                case .busy, .refused, .failed:
                     continue
                 }
-                self.socket = fresh
-                sender?.replace(fresh)
-                listen(fresh)
-                startHeartbeat(fresh)
-                sender?.resendLast()
-                reconnecting = false
-                Log.capture.info("Трансляция: переподключено")
-                return
             }
             reconnecting = false
             stop(reason: "Связь с сервером прервалась")
@@ -537,29 +676,73 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     func stop(reason: String? = nil) {
+        attempts.cancel()
         reconnecting = false
         watchers = []
         audience = []
         if ShareGame.shared.peer != "host" { ShareGame.shared.peerGone() }
-        pendingRequests = []
+        ShareRequestQueue.shared.removeAll()
+        hostKeyed = false
         Picker.shared.reset()
         ShareMarksOverlay.shared.detach()
+        teardownCapture()
+        heartbeat?.invalidate()
+        heartbeat = nil
+        socket?.cancel(with: .normalClosure, reason: nil)
+        socket = nil
+        hud?.orderOut(nil)
+        hud = nil
+        state = reason.map { .failed($0) } ?? .idle
+    }
+
+    /// Остановить захват видео и звука и таймер фильтра звука (общая часть «Стоп» и сбоя старта — SH2).
+    private func teardownCapture() {
         let stream = self.stream
         let audioStream = self.audioStream
         self.stream = nil
         self.audioStream = nil
         audioRefresh?.invalidate()
         audioRefresh = nil
-        heartbeat?.invalidate()
-        heartbeat = nil
-        Task { try? await audioStream?.stopCapture() }
         sender = nil
-        Task { try? await stream?.stopCapture() }
-        socket?.cancel(with: .normalClosure, reason: nil)
-        socket = nil
-        hud?.orderOut(nil)
-        hud = nil
-        state = reason.map { .failed($0) } ?? .idle
+        Task {
+            try? await audioStream?.stopCapture()
+            try? await stream?.stopCapture()
+        }
+    }
+
+    /// «Получить новый ID»: освобождаем старый на сервере (если соединение с ключом), меняем ключ и ID.
+    /// Старый ID перестаёт работать — друзьям нужно сообщить новый.
+    func renewID() {
+        let old = hostKeyed ? socket : nil
+        Task {
+            if let old {
+                // Отвязать ID: relay сотрёт владельца и закроет соединение. Сокет отцепляем заранее, чтобы
+                // обрыв не запустил переподключение.
+                self.socket = nil
+                try? await old.send(.string(ShareHandshake.releaseMessage))
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                old.cancel(with: .normalClosure, reason: nil)
+            }
+            stop()
+            ShareIdentity.reset()
+            UserDefaults.standard.removeObject(forKey: Pref.shareID)
+            _ = ShareCode.myID
+            myFingerprint = nil
+            needsNewID = false
+            idVersion += 1
+            Toast.show("Новый ID: \(ShareCode.display(ShareCode.myID))", symbol: "arrow.triangle.2.circlepath")
+        }
+    }
+
+    /// Подтверждение перед сменой ID (действие необратимо).
+    func confirmRenewID() {
+        let alert = NSAlert()
+        alert.messageText = "Получить новый ID?"
+        alert.informativeText = "Трансляция остановится, ключ этого Mac и ID будут заменены. Старый ID перестанет работать: друзьям нужно сообщить новый."
+        alert.addButton(withTitle: "Получить новый ID")
+        alert.addButton(withTitle: "Отмена")
+        NSApp.activate()
+        if alert.runModal() == .alertFirstButtonReturn { renewID() }
     }
 
     func copyCode() {
@@ -595,6 +778,7 @@ final class ScreenShare: NSObject, ObservableObject {
 /// при наведении — код, зрители и «Стоп».
 private struct ShareHUD: View {
     @ObservedObject var share: ScreenShare
+    @ObservedObject private var queue = ShareRequestQueue.shared
     @State private var expanded = false
 
     var body: some View {
@@ -608,10 +792,14 @@ private struct ShareHUD: View {
                     .buttonStyle(.borderless)
                     .help("Скопировать код")
                     Label("\(viewers)", systemImage: "eye").font(.caption2).foregroundStyle(.secondary)
+                    if !queue.items.isEmpty { requestsButton }
                     Button { share.changeSource() } label: { Image(systemName: "rectangle.on.rectangle").font(.caption2) }
                         .buttonStyle(.borderless).help("Показать другой экран или окно")
                     Button { share.stop() } label: { Image(systemName: "stop.fill").font(.caption2) }
                         .buttonStyle(.borderless).foregroundStyle(.red).help("Остановить трансляцию")
+                } else if !queue.items.isEmpty {
+                    // Запросов ждут ответа: счётчик виден всегда и по клику открывает панель.
+                    requestsButton
                 } else {
                     Text(share.reconnecting ? "Переподключаюсь…" : viewers > 0 ? "Эфир · \(viewers)" : "Эфир")
                         .font(.caption2.weight(.medium)).foregroundStyle(share.reconnecting ? .orange : .secondary)
@@ -625,6 +813,14 @@ private struct ShareHUD: View {
         .onHover { inside in withAnimation(.easeOut(duration: 0.15)) { expanded = inside } }
         .fixedSize()
         .frame(width: 190, height: 26, alignment: .trailing)
+    }
+
+    private var requestsButton: some View {
+        Button { queue.show() } label: {
+            Text("Запросов: \(queue.items.count)").font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+        }
+        .buttonStyle(.borderless)
+        .help("Показать запросы на подключение")
     }
 }
 
@@ -675,6 +871,18 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     var legacyFrames = false
     private var lastLegacy = Date.distantPast
     private let context = CIContext()
+    /// Никто не смотрит — не кодируем и не шлём видео и звук (SH4). До первого числа зрителей от сервера — не на паузе.
+    private let pauseLock = NSLock()
+    private var pausedValue = false
+    var isPaused: Bool {
+        pauseLock.lock(); defer { pauseLock.unlock() }
+        return pausedValue
+    }
+    /// Последний полный кадр экрана (на queue): на статичном экране ScreenCaptureKit новых кадров не присылает,
+    /// поэтому для нового зрителя и после паузы кодируем его заново — картинка появляется сразу.
+    private var lastPixels: CVPixelBuffer?
+    /// Метки времени кадров для кодера (на queue): строго растут, даже вперемешку с повтором последнего кадра.
+    private var clock = ShareFrameClock()
     private lazy var encoder = H264Encoder { [weak self] data, key in
         self?.queue.async { self?.sendVideo(data, key: key) }
     }
@@ -685,9 +893,19 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
 
     let audioQueue = DispatchQueue(label: "macutils.share.audio")
 
+    /// Число зрителей пришло от сервера: 0 — пауза, иначе работаем.
+    func setViewers(_ count: Int) {
+        let pause = ShareEncoderGate.shouldPause(viewers: count)
+        pauseLock.lock()
+        let changed = pausedValue != pause
+        pausedValue = pause
+        pauseLock.unlock()
+        if changed { Log.capture.info("Трансляция: кодирование \(pause ? "на паузе (нет зрителей)" : "возобновлено", privacy: .public)") }
+    }
+
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         if type == .audio {
-            if let packet = ShareProtocol.audioPacket(sampleBuffer) {
+            if !isPaused, let packet = ShareProtocol.audioPacket(sampleBuffer) {
                 socket.send(.data(packet)) { _ in }
             }
             return
@@ -697,22 +915,34 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
                 as? [[SCStreamFrameInfo: Any]],
               let raw = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
               let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        encoder.encode(pixels, at: sampleBuffer.presentationTimeStamp)
-        if legacyFrames, Date().timeIntervalSince(lastLegacy) > 0.25, pendingBytes < 1_500_000,
-           let image = context.createCGImage(CIImage(cvPixelBuffer: pixels),
-                                             from: CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(pixels), height: CVPixelBufferGetHeight(pixels))),
-           let jpeg = Self.jpeg(image) {
-            lastLegacy = Date()
-            let packet = ShareProtocol.framePacket(jpeg)
-            pendingBytes += packet.count
-            let size = packet.count
-            socket.send(.data(packet)) { _ in self.queue.async { self.pendingBytes = max(0, self.pendingBytes - size) } }
-        }
+        lastPixels = pixels
+        guard !isPaused else { return }
+        encoder.encode(pixels, at: clock.next(sampleBuffer.presentationTimeStamp))
+        sendLegacyFrame(pixels, force: false)
     }
 
-    /// Новый зритель или переподключение — следующий кадр ключевой, чтобы картинка появилась сразу.
+    /// Вызывается на queue. Кадр JPEG для старых зрителей (раз в ~0.25 с или сразу — для нового зрителя).
+    private func sendLegacyFrame(_ pixels: CVPixelBuffer, force: Bool) {
+        guard legacyFrames, force || Date().timeIntervalSince(lastLegacy) > 0.25, pendingBytes < 1_500_000,
+              let image = context.createCGImage(CIImage(cvPixelBuffer: pixels),
+                                                from: CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(pixels), height: CVPixelBufferGetHeight(pixels))),
+              let jpeg = Self.jpeg(image) else { return }
+        lastLegacy = Date()
+        let packet = ShareProtocol.framePacket(jpeg)
+        pendingBytes += packet.count
+        let size = packet.count
+        socket.send(.data(packet)) { _ in self.queue.async { self.pendingBytes = max(0, self.pendingBytes - size) } }
+    }
+
+    /// Новый зритель, конец паузы или переподключение: ключевой кадр сразу, из последнего кадра экрана
+    /// (статичный экран новых кадров не даёт), дальше — обычный поток.
     func resendLast() {
-        encoder.requestKeyFrame()
+        queue.async {
+            self.encoder.requestKeyFrame()
+            guard !self.isPaused, let pixels = self.lastPixels else { return }
+            self.encoder.encode(pixels, at: self.clock.next(CMClockGetTime(CMClockGetHostTimeClock())))
+            self.sendLegacyFrame(pixels, force: true)
+        }
     }
 
     /// Вызывается на queue.
@@ -766,11 +996,43 @@ final class ShareViewer: ObservableObject {
 
     enum State: Equatable {
         case idle, connecting, waiting, watching, ended(String)
+        /// Связь оборвалась во время просмотра: переподключаемся сами (SH5).
+        case reconnecting(attempt: Int)
     }
 
     @Published private(set) var state: State = .idle
     @Published private(set) var frame: NSImage?
     @Published private(set) var code = ""
+    /// Ключ ведущего не совпал с запомненным: ждём решения пользователя (раздел 4.3 дизайна).
+    @Published private(set) var keyChange: KeyChange?
+
+    struct KeyChange: Equatable {
+        let code: String
+        let oldFingerprint: String
+        let newFingerprint: String
+        let newKey: String?
+
+        /// Ведущий больше не подтверждает ключ (ID освобождён или на нём ведущий без проверки ключей).
+        var keyRemoved: Bool { newKey == nil }
+
+        var warning: String {
+            keyRemoved
+                ? "Ведущий больше не подтверждает ключ (раньше был \(oldFingerprint)): его ID освобождён или на нём теперь старая версия. Если вы не ждали этого, это может быть подмена."
+                : "Ключ этого компьютера изменился (был \(oldFingerprint), стал \(newFingerprint)). Если ведущий не менял ID вручную, это может быть подмена."
+        }
+    }
+
+    /// Параметры проверки текущего подключения (mu-share-2).
+    private var rid: String?
+    private var hostKey: String?
+    private var generation = 0
+    /// Сколько попыток переподключения сделано подряд (0 — просмотр идёт или ещё не начинался).
+    private var reconnectsMade = 0
+    /// Когда от сервера последний раз что-то пришло, и сторож молчащего соединения.
+    private var lastMessage = Date()
+    private var silenceWatch: Timer?
+    /// Сервер этого соединения шлёт heartbeat: только тогда тишина что-то значит (старый ретранслятор мог не слать).
+    private var sawHeartbeat = false
 
     private var socket: URLSessionWebSocketTask?
     private var window: NSWindow?
@@ -812,16 +1074,146 @@ final class ShareViewer: ObservableObject {
         }
         disconnect()
         self.code = code
+        keyChange = nil
         frame = nil
         video.reset()
         state = .connecting
         showWindow()
-        let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url))
-        socket.maximumMessageSize = 4 << 20
-        self.socket = socket
-        socket.resume()
-        // Сразу читаем: пока не забираем входящие кадры, ответ на ping может не прийти.
-        receive(socket)
+        generation += 1
+        open(url, generation: generation)
+    }
+
+    /// Новое соединение с тем же ID (первое и при переподключении): протокол и проверка ключа ведущего — заново.
+    private func open(_ url: URL, generation mine: Int) {
+        rid = nil
+        hostKey = nil
+        Task {
+            // mu-share-2 — только если ретранслятор его объявил; иначе по-старому.
+            let keyed = ScreenShare.shared.shouldUseKeys(await ScreenShare.shared.probeRelay())
+            guard generation == mine else { return }
+            switch state {
+            case .connecting, .reconnecting: break
+            default: return
+            }
+            let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url, token: keyed ? ShareRelay.keyedToken : ShareRelay.legacyToken))
+            socket.maximumMessageSize = 4 << 20
+            self.socket = socket
+            socket.resume()
+            lastMessage = Date()
+            sawHeartbeat = false
+            startSilenceWatch()
+            // Сразу читаем: пока не забираем входящие кадры, ответ на ping может не прийти.
+            receive(socket)
+            if case .reconnecting = state { armAttemptTimeout(socket, generation: mine) }
+        }
+    }
+
+    /// Попытка переподключения не дошла до сервера за `attemptTimeout`: закрываем сокет — сработает обычный обрыв
+    /// и следующая попытка (без этого одна попытка висит до системных 60 с).
+    private func armAttemptTimeout(_ socket: URLSessionWebSocketTask, generation mine: Int) {
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(ShareViewerReconnect.attemptTimeout * 1_000_000_000))
+            guard generation == mine, self.socket === socket, ShareViewerReconnect.shouldAbortAttempt(state: state) else { return }
+            Log.capture.info("Просмотр: попытка переподключения не ответила за \(Int(ShareViewerReconnect.attemptTimeout)) с")
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+    }
+
+    /// Раз в 15 с: если сервер молчит дольше `silenceLimit`, закрываем сокет — сработает обычное переподключение.
+    private func startSilenceWatch() {
+        silenceWatch?.invalidate()
+        let timer = Timer(timeInterval: 15, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                let viewer = ShareViewer.shared
+                guard viewer.sawHeartbeat, viewer.state == .watching || viewer.state == .waiting,
+                      ShareViewerReconnect.isSilent(lastMessage: viewer.lastMessage, now: Date()) else { return }
+                Log.capture.info("Просмотр: сервер молчит дольше \(Int(ShareViewerReconnect.silenceLimit)) с — переподключаюсь")
+                viewer.socket?.cancel(with: .goingAway, reason: nil)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        silenceWatch = timer
+    }
+
+    /// Соединение оборвалось. Во время просмотра — переподключаемся сами с паузами (последний кадр остаётся на экране);
+    /// попытки кончились — честное сообщение. Возвращает false, если это не обрыв просмотра.
+    private func dropped(status: Int?) -> Bool {
+        guard let decision = ShareViewerReconnect.onDrop(wasWatching: state == .watching, attemptsMade: reconnectsMade,
+                                                         status: status) else { return false }
+        socket?.cancel(with: .goingAway, reason: nil)
+        socket = nil
+        player.stop()
+        if ShareGame.shared.peer == "host" { ShareGame.shared.peerGone("host") }
+        switch decision {
+        case .end(let message):
+            state = .ended(message)
+            disconnect()
+        case .reconnect(let attempt, let delay):
+            reconnectsMade = attempt
+            hostReconnecting = false
+            state = .reconnecting(attempt: attempt)
+            Log.capture.info("Просмотр: связь потеряна, попытка \(attempt) через \(delay) с")
+            generation += 1
+            let mine = generation
+            Task {
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                guard generation == mine, case .reconnecting = state,
+                      let url = ShareCode.url(server: ScreenShare.server, code: code, role: "viewer") else { return }
+                open(url, generation: mine)
+            }
+        }
+        return true
+    }
+
+    /// Ключ ведущего изменился — пользователь подтвердил: запоминаем новый и подключаемся заново.
+    func acceptKeyChange() {
+        guard let change = keyChange else { return }
+        keyChange = nil
+        // Ведущий больше не подтверждает ключ (newKey == nil): забываем старый, иначе подключиться к этому ID не получится.
+        if let key = change.newKey { ShareHistory.shared.pinHost(id: change.code, key: key) }
+        else { ShareHistory.shared.unpinHost(id: change.code) }
+        watch(code: change.code)
+    }
+
+    func dismissKeyChange() { keyChange = nil }
+
+    /// Ответ на challenge: сверяем ключ ведущего с запомненным и подписываем (комната и свой ID — наши, не из сообщения).
+    private func handle(challenge json: [String: Any], on socket: URLSessionWebSocketTask) {
+        guard let nonce = json["nonce"] as? String, let rid = json["rid"] as? String else {
+            state = .ended("Сервер прислал неверный запрос проверки")
+            disconnect()
+            return
+        }
+        // Ключ в Keychain недоступен: на challenge не отвечаем (relay не должен узнать временный ключ).
+        guard ShareIdentity.shared.isPersistent else {
+            state = .ended(ShareIdentity.keychainUnavailableMessage)
+            disconnect()
+            return
+        }
+        let announced = json["hostKey"] as? String
+        if let pinned = ShareHistory.shared.hostKey(for: code), pinned != announced {
+            keyChange = KeyChange(code: code,
+                                  oldFingerprint: ShareIdentity.fingerprint(ofBase64urlKey: pinned) ?? "—",
+                                  newFingerprint: announced.flatMap { ShareIdentity.fingerprint(ofBase64urlKey: $0) } ?? "неизвестен",
+                                  newKey: announced.flatMap { ShareHistory.isPublicKey($0) ? $0 : nil })
+            state = .ended(announced == nil ? "Ведущий больше не подтверждает ключ: проверьте и подтвердите подключение"
+                                            : "Ключ этого компьютера изменился: проверьте и подтвердите подключение")
+            disconnect()
+            return
+        }
+        guard let reply = ShareHandshake.viewerAuthMessage(identity: .shared, roomId: code, viewerId: ShareCode.myID, rid: rid, nonce: nonce) else { return }
+        self.rid = rid
+        hostKey = announced.flatMap { ShareHistory.isPublicKey($0) ? $0 : nil }
+        ShareHistory.statusIdentity = .shared
+        socket.send(.string(reply)) { _ in }
+    }
+
+    /// `accepted`: если ведущий подписал принятие, подпись должна сойтись с его ключом из challenge.
+    private func hostSignatureIsValid(_ sig: String?) -> Bool {
+        guard let sig else { return true }  // старый ведущий не подписывает
+        guard let hostKey, let rid else { return false }
+        return ShareIdentity.verify(pub: hostKey, sig: sig,
+                                    message: ShareIdentity.acceptMessage(roomId: code, viewerPub: ShareIdentity.publicKey, rid: rid))
     }
 
     private func receive(_ socket: URLSessionWebSocketTask) {
@@ -830,9 +1222,11 @@ final class ShareViewer: ObservableObject {
                 MainActor.assumeIsolated {
                     let viewer = ShareViewer.shared
                     guard viewer.socket === socket else { return }
+                    if case .success = result { viewer.lastMessage = Date() }
                     switch result {
                     case .success(.data(let data)):
                         if viewer.state != .watching { viewer.state = .watching }
+                        viewer.reconnectsMade = 0
                         switch data.first {
                         case ShareProtocol.frame:
                             if let image = NSImage(data: data.dropFirst()) { viewer.frame = image }
@@ -851,6 +1245,7 @@ final class ShareViewer: ObservableObject {
                             viewer.marks.add(mark)
                             viewer.receive(socket)
                         } else if type == "heartbeat" {
+                            viewer.sawHeartbeat = true
                             socket.send(.string(#"{"type":"heartbeat"}"#)) { _ in }
                             viewer.receive(socket)
                         } else if type == "reconnecting" {
@@ -866,10 +1261,24 @@ final class ShareViewer: ObservableObject {
                             ShareGame.shared.receive(json ?? [:], peer: "host", name: viewer.hostName,
                                                      transport: viewer.gameTransport)
                             viewer.receive(socket)
+                        } else if type == "challenge" {
+                            viewer.handle(challenge: json ?? [:], on: socket)
+                            viewer.receive(socket)
+                        } else if type == "error" {
+                            let code = json?["code"] as? String ?? "unknown"
+                            viewer.state = .ended(ShareErrorText.message(code: code, relayMessage: json?["message"] as? String))
+                            viewer.disconnect()
                         } else if type == "accepted" {
+                            guard viewer.hostSignatureIsValid(json?["hostSig"] as? String) else {
+                                viewer.state = .ended("Подпись ведущего не сошлась: подключение отменено")
+                                viewer.disconnect()
+                                return
+                            }
                             viewer.state = .watching
+                            viewer.reconnectsMade = 0
                             viewer.hostName = json?["name"] as? String ?? ""
                             ShareHistory.shared.visited(viewer.code, name: json?["name"] as? String ?? "")
+                            if let key = viewer.hostKey { ShareHistory.shared.pinHost(id: viewer.code, key: key) }
                             viewer.receive(socket)
                         } else if type == "declined" {
                             viewer.state = .ended("Вам не разрешили подключиться")
@@ -882,10 +1291,15 @@ final class ShareViewer: ObservableObject {
                         }
                     case .failure:
                         let status = (socket.response as? HTTPURLResponse)?.statusCode
+                        // 403/426: ретранслятор не принял токен (откат, смена сервера) — при следующей попытке спросим `/version` заново.
+                        if status == 403 || status == 426 { ShareRelay.invalidate(server: ScreenShare.server) }
+                        // Обрыв во время просмотра (Wi-Fi, сон, смена сети) — переподключаемся сами.
+                        if viewer.dropped(status: status) { return }
                         switch viewer.state {
                         case .connecting, .waiting:
                             viewer.state = .ended(status == 404 ? "Сейчас этот ID ничего не транслирует"
-                                                  : status == 429 ? "Слишком много зрителей" : "Нет связи с сервером")
+                                                  : status == 429 ? "Слишком много зрителей"
+                                                  : status == 403 || status == 426 ? "Сервер не принял подключение — попробуйте ещё раз" : "Нет связи с сервером")
                         case .watching:
                             viewer.state = .ended("Трансляция завершена")
                         default:
@@ -899,6 +1313,9 @@ final class ShareViewer: ObservableObject {
             }
         }
     }
+
+    /// Пользователь прервал переподключение.
+    func endManually() { state = .ended("Отключено") }
 
     /// Имя компьютера ведущего (для игры).
     var hostName = ""
@@ -915,11 +1332,22 @@ final class ShareViewer: ObservableObject {
         }
     }
 
+    /// Закончить просмотр (окно закрыли, «Отключиться», конец трансляции): и переподключение тоже прекращается.
     func disconnect() {
+        generation += 1
+        reconnectsMade = 0
+        silenceWatch?.invalidate()
+        silenceWatch = nil
         if ShareGame.shared.peer == "host" { ShareGame.shared.peerGone("host") }
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil
         player.stop()
+    }
+
+    /// Остановить просмотр при выходе: подключение закрывается, состояние уходит из «идёт» (окно остаётся до закрытия).
+    func stopWatching() {
+        if BusyRegistry.viewerIsConnected(state) { state = .ended("Просмотр остановлен") }
+        disconnect()
     }
 
     /// Окно просмотра открыто — Mac Utils виден в Dock и в ⌘Tab.
@@ -1038,9 +1466,29 @@ private struct ShareViewerView: View {
                 ProgressView()
                 Text("Ждём, пока \(ShareCode.display(viewer.code)) разрешит подключение…").foregroundStyle(.white)
             }
+        case .reconnecting(let attempt):
+            VStack(spacing: 8) {
+                ProgressView()
+                Text(ShareViewerReconnect.status(attempt: attempt)).foregroundStyle(.white)
+                Button("Отключиться") {
+                    viewer.disconnect()
+                    viewer.endManually()
+                }
+            }
+            .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
         case .ended(let message):
-            Text(message).font(.title3).foregroundStyle(.white)
-                .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+            VStack(spacing: 10) {
+                Text(message).font(.title3).foregroundStyle(.white)
+                if let change = viewer.keyChange {
+                    // Кнопки и в окне просмотра: из поповера или по macutils://watch страницы настроек перед глазами нет.
+                    Text(change.warning).font(.caption).foregroundStyle(.orange).multilineTextAlignment(.center)
+                    HStack {
+                        Button("Подключиться и запомнить") { viewer.acceptKeyChange() }
+                        Button("Отмена") { viewer.dismissKeyChange() }
+                    }
+                }
+            }
+            .padding(14).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
         default:
             EmptyView()
         }
@@ -1094,7 +1542,7 @@ struct ScreenSharePage: View {
         Form {
             Section("Мой ID") {
                 HStack {
-                    Text(ShareCode.display(ShareCode.myID)).font(.system(size: 26, weight: .bold).monospacedDigit())
+                    Text(ShareCode.display({ _ = share.idVersion; return ShareCode.myID }())).font(.system(size: 26, weight: .bold).monospacedDigit())
                         .textSelection(.enabled)
                     Button {
                         NSPasteboard.general.clearContents()
@@ -1111,6 +1559,8 @@ struct ScreenSharePage: View {
                             .disabled(server.isEmpty)
                     case .connecting:
                         ProgressView().controlSize(.small)
+                        Text("Подключаюсь…").foregroundStyle(.secondary)
+                        Button("Отмена") { share.cancelConnecting() }
                     case .live:
                         Circle().fill(.red).frame(width: 8, height: 8)
                         Text("В эфире").foregroundStyle(.red)
@@ -1120,6 +1570,14 @@ struct ScreenSharePage: View {
                 }
                 if case .failed(let message) = share.state {
                     Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                if share.needsNewID {
+                    Button { share.confirmRenewID() } label: { Label("Получить новый ID…", systemImage: "arrow.triangle.2.circlepath") }
+                        .buttonStyle(.borderedProminent)
+                }
+                if share.relayWithoutKeys {
+                    Label("Ретранслятор без проверки ключей: личность зрителей не подтверждается, «Всегда разрешать» недоступно.",
+                          systemImage: "exclamationmark.shield").font(.caption).foregroundStyle(.orange)
                 }
                 if case .live = share.state {
                     Text(share.watchers.isEmpty ? "Пока никто не смотрит." : "Смотрят: " + share.watchers.joined(separator: ", "))
@@ -1134,6 +1592,17 @@ struct ScreenSharePage: View {
                 }
                 Text("Этот ID постоянный — по нему к вам подключаются. Каждого зрителя вы сначала разрешаете (или отмечаете «Всегда разрешать»). Управлять вашим Mac зритель не может.")
                     .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    if let fp = share.myFingerprint {
+                        Text("Отпечаток этого Mac: \(fp)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    Spacer()
+                    if !share.needsNewID {
+                        Button("Получить новый ID…") { share.confirmRenewID() }.controlSize(.small)
+                            .help("Заменить ключ и ID этого Mac")
+                    }
+                }
             }
             Section("Подключиться") {
                 HStack {
@@ -1146,6 +1615,15 @@ struct ScreenSharePage: View {
                 }
                 if case .ended(let message) = viewer.state {
                     Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+                if let change = viewer.keyChange {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(change.warning, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                        HStack {
+                            Button("Подключиться и запомнить") { viewer.acceptKeyChange() }
+                            Button("Отмена") { viewer.dismissKeyChange() }
+                        }
+                    }
                 }
                 Text("Смотреть друг друга: оба начинают трансляцию и подключаются по ID друг к другу.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -1191,6 +1669,7 @@ struct ScreenSharePage: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Трансляция экрана")
+        .task { _ = await share.probeRelay() }
     }
 }
 

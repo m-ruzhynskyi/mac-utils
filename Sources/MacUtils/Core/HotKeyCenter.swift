@@ -2,13 +2,28 @@ import Carbon.HIToolbox
 import Foundation
 
 /// Глобальные горячие клавиши через Carbon (не требуют «Универсального доступа»).
+/// Функции просят своё сочетание по умолчанию; если пользователь переназначил его в настройках,
+/// регистрируется выбранное (`HotKeyRegistry.resolve`). Для каждого сочетания помнится, что просили
+/// и удалось ли зарегистрировать — это показывают настройки и шпаргалка.
 @MainActor
-final class HotKeyCenter {
+final class HotKeyCenter: ObservableObject {
     static let shared = HotKeyCenter()
 
-    private var handlers: [UInt32: () -> Void] = [:]
+    private struct Request {
+        var combo: LayoutHotKey
+        var handler: () -> Void
+    }
+
+    private var requests: [UInt32: Request] = [:]
     private var refs: [UInt32: EventHotKeyRef] = [:]
+    /// Пока в настройках записывается новое сочетание, старое не регистрируется.
+    private var suspended: Set<UInt32> = []
     private var installed = false
+
+    /// Зарегистрированные сейчас сочетания (фактические, после замены из настроек).
+    @Published private(set) var active: [UInt32: LayoutHotKey] = [:]
+    /// Не удалось зарегистрировать: сочетание занято системой или другой программой (код Carbon).
+    @Published private(set) var failures: [UInt32: OSStatus] = [:]
 
     private func installIfNeeded() {
         guard !installed else { return }
@@ -35,31 +50,80 @@ final class HotKeyCenter {
 
     @discardableResult
     func register(id: UInt32, keyCode: Int, modifiers: Int, handler: @escaping () -> Void) -> Bool {
-        installIfNeeded()
-        unregister(id: id)
-        var ref: EventHotKeyRef?
-        let hotKeyID = EventHotKeyID(signature: OSType(0x4D555449), id: id) // 'MUTI'
-        let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID,
-                                         GetApplicationEventTarget(), 0, &ref)
-        guard status == noErr, let ref else {
-            Log.window.error("Горячая клавиша \(id) не зарегистрирована: \(status)")
-            return false
-        }
-        refs[id] = ref
-        handlers[id] = handler
-        return true
+        requests[id] = Request(combo: LayoutHotKey(keyCode: keyCode, modifiers: modifiers), handler: handler)
+        return apply(id)
     }
 
+    /// Пометка «приостановлено» (идёт запись в настройках) сохраняется: её снимает только `resume`.
     func unregister(id: UInt32) {
-        if let ref = refs.removeValue(forKey: id) {
-            UnregisterEventHotKey(ref)
-        }
-        handlers[id] = nil
+        removeCarbon(id)
+        requests[id] = nil
+        setActive(id, nil)
+        setFailure(id, nil)
     }
 
     func isRegistered(id: UInt32) -> Bool { refs[id] != nil }
 
+    /// Функция просила это сочетание (включена), даже если зарегистрировать его не удалось.
+    func isRequested(id: UInt32) -> Bool { requests[id] != nil }
+
+    /// Временно снять сочетание (запись нового в настройках), не забывая, что функция его просила.
+    func suspend(id: UInt32) {
+        suspended.insert(id)
+        removeCarbon(id)
+        setActive(id, nil)
+    }
+
+    func resume(id: UInt32) {
+        suspended.remove(id)
+        apply(id)
+    }
+
+    /// Сочетание в настройках изменилось: перерегистрировать с новым значением, если функция включена.
+    func reapply(id: UInt32) {
+        if requests[id] != nil { apply(id) }
+    }
+
+    @discardableResult
+    private func apply(_ id: UInt32) -> Bool {
+        guard let request = requests[id] else { return false }
+        removeCarbon(id)
+        guard !suspended.contains(id) else { return false }
+        installIfNeeded()
+        let combo = HotKeyRegistry.resolve(id: id, requested: request.combo)
+        var ref: EventHotKeyRef?
+        let hotKeyID = EventHotKeyID(signature: OSType(0x4D555449), id: id) // 'MUTI'
+        let status = RegisterEventHotKey(UInt32(combo.keyCode), UInt32(combo.modifiers), hotKeyID,
+                                         GetApplicationEventTarget(), 0, &ref)
+        guard status == noErr, let ref else {
+            Log.window.error("Горячая клавиша \(id) (\(combo.title, privacy: .public)) не зарегистрирована: \(status)")
+            setActive(id, nil)
+            setFailure(id, status == noErr ? -1 : status)
+            return false
+        }
+        refs[id] = ref
+        setActive(id, combo)
+        setFailure(id, nil)
+        return true
+    }
+
+    private func removeCarbon(_ id: UInt32) {
+        if let ref = refs.removeValue(forKey: id) {
+            UnregisterEventHotKey(ref)
+        }
+    }
+
+    // Публикуем только изменения: функции перерегистрируют сочетания на каждую запись в UserDefaults.
+    private func setActive(_ id: UInt32, _ combo: LayoutHotKey?) {
+        if active[id] != combo { active[id] = combo }
+    }
+
+    private func setFailure(_ id: UInt32, _ status: OSStatus?) {
+        if failures[id] != status { failures[id] = status }
+    }
+
     fileprivate func fire(_ id: UInt32) {
-        handlers[id]?()
+        guard refs[id] != nil else { return }
+        requests[id]?.handler()
     }
 }

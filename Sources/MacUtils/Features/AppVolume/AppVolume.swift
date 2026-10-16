@@ -19,7 +19,7 @@ final class AppVolume: ObservableObject {
     private var taps: [String: VolumeTapping] = [:]
     private var listenersInstalled = false
     private var refreshTimer: Timer?
-    private var silentTicks = 0
+    private var watch = PermissionWatch()
     private let hud = VolumeHUDController()
 
     private init() {
@@ -39,6 +39,7 @@ final class AppVolume: ObservableObject {
         center.unregister(id: HotKeyID.appVolume)
         guard enabled else {
             stopAll()
+            watch = PermissionWatch()
             refreshTimer?.invalidate()
             refreshTimer = nil
             hud.hide()
@@ -56,8 +57,8 @@ final class AppVolume: ObservableObject {
             RunLoop.main.add(timer, forMode: .common)
             refreshTimer = timer
         }
-        refresh()
         isRunning = true
+        refresh()
     }
 
     // MARK: - Громкость
@@ -66,6 +67,9 @@ final class AppVolume: ObservableObject {
 
     func set(percent: Int? = nil, muted: Bool? = nil, for bundleID: String) {
         var entry = store.entry(for: bundleID)
+        // Пользователь сам меняет громкость — пробуем перехват снова (после отказа в разрешении он был снят).
+        permissionSuspect = false
+        watch.reset()
         if let percent { entry.percent = percent }
         if let muted { entry.muted = muted }
         store.set(entry, for: bundleID)
@@ -79,7 +83,7 @@ final class AppVolume: ObservableObject {
 
     /// Создаёт, обновляет или убирает перехват приложения по его настройке.
     private func apply(_ bundleID: String) {
-        guard #available(macOS 14.2, *) else { return }
+        guard #available(macOS 14.2, *), isRunning else { return }
         let entry = store.entry(for: bundleID)
         let gain = VolumeMath.gain(percent: entry.percent, muted: entry.muted)
         guard VolumeMath.needsTap(percent: entry.percent, muted: entry.muted),
@@ -112,13 +116,19 @@ final class AppVolume: ObservableObject {
     // MARK: - Список и слежение
 
     func refresh() {
+        // Слушатели Core Audio не снимаются при выключении: без этой проверки смена списка процессов
+        // заново перехватила бы приложения при выключенной функции.
+        guard isRunning else { return }
         let configured = Set(store.entries.keys)
         let list = AudioProcesses.list(including: configured)
         if list != apps {
             apps = list
             if hud.isVisible { hud.relayout() }
         }
-        for bundleID in configured { apply(bundleID) }
+        // После отказа в разрешении перехваты не создаём: иначе приложения снова окажутся заглушёнными.
+        if !permissionSuspect {
+            for bundleID in configured { apply(bundleID) }
+        }
         // Перехваты приложений, которые закрылись, убираем.
         for bundleID in taps.keys where !list.contains(where: { $0.bundleID == bundleID }) {
             taps.removeValue(forKey: bundleID)?.stop()
@@ -133,8 +143,7 @@ final class AppVolume: ObservableObject {
     /// Уровни перехвата: если приложение играет, а на входе тишина — нет разрешения.
     private func checkLevels() {
         guard #available(macOS 14.2, *), !taps.isEmpty else {
-            silentTicks = 0
-            permissionSuspect = false
+            watch.reset()
             return
         }
         var anyPlaying = false, anySound = false
@@ -147,9 +156,14 @@ final class AppVolume: ObservableObject {
                 Log.audio.debug("Уровень \(bundleID, privacy: .public): вход \(levels.input) → выход \(levels.output)")
             }
         }
-        silentTicks = anyPlaying && !anySound ? silentTicks + 1 : 0
-        let suspect = silentTicks >= 3
-        if suspect != permissionSuspect { permissionSuspect = suspect }
+        if watch.record(anyPlaying: anyPlaying, anySound: anySound) {
+            // Ни один перехват за сессию не получил звука, а оригинал уже заглушён: fail-open, возвращаем приложениям их звук.
+            permissionSuspect = true
+            stopAll()
+            Log.audio.error("Громкость: нет звука на входе перехвата, похоже нет разрешения; перехваты сняты")
+            Toast.show("Громкость приложений выключена: нет разрешения на запись звука",
+                       symbol: "exclamationmark.triangle.fill", tint: .orange)
+        }
     }
 
     private func installListeners() {
@@ -326,4 +340,29 @@ struct VolumeHUDView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .padding(4)
     }
+}
+
+/// Разрешение на запись звука действует на весь процесс. «Нет разрешения» — только если ни один перехват за сессию
+/// ни разу не получил звука и тишина длится долго; пауза в разговоре у приложения, которое держит вывод, разрешением не считается.
+struct PermissionWatch: Equatable {
+    static let silentTicksToTrip = 10
+
+    private(set) var silentTicks = 0
+    private(set) var proven = false
+
+    /// Один тик (раз в секунду). true — пора снимать перехваты и сообщить об отказе в разрешении.
+    mutating func record(anyPlaying: Bool, anySound: Bool) -> Bool {
+        if anySound {
+            proven = true
+            silentTicks = 0
+            return false
+        }
+        silentTicks = anyPlaying ? silentTicks + 1 : 0
+        guard !proven, silentTicks >= Self.silentTicksToTrip else { return false }
+        silentTicks = 0
+        return true
+    }
+
+    /// Счётчик тишины заново (пользователь трогал громкость, перехватов нет); доказанное разрешение остаётся.
+    mutating func reset() { silentTicks = 0 }
 }

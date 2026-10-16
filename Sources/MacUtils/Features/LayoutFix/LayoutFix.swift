@@ -19,8 +19,9 @@ final class LayoutFix: ObservableObject {
     private var tap: EventTap?
     private var hotKey: LayoutHotKey?
     /// Последнее слово и пробелы после него — как они были набраны.
-    private var word = ""
-    private var trailing = ""
+    private var tracker = WordTracker()
+    private var word: String { tracker.word }
+    private var trailing: String { tracker.trailing }
     private var busy = false
 
     private init() {
@@ -28,6 +29,10 @@ final class LayoutFix: ObservableObject {
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { _ in
             MainActor.assumeIsolated { LayoutFix.shared.reset() }
+        }
+        // В исключённой программе горячая клавиша не регистрируется (иначе она не дошла бы до виртуальной машины).
+        NotificationCenter.default.addObserver(forName: AppExclusions.didChangeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { LayoutFix.shared.sync() }
         }
     }
 
@@ -48,21 +53,29 @@ final class LayoutFix: ObservableObject {
             return
         }
         if tap == nil {
-            tap = EventTap(types: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] type, event in
+            // Обработчик ничего не поглощает: только наблюдаем (система не ждёт ответа и не задерживает ввод).
+            let tap = EventTap(types: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown], listenOnly: true) { [weak self] type, event in
                 self?.track(type: type, event: event)
                 return true
             }
+            // Tap отключали: нажатия могли пропасть, слово больше не соответствует тексту.
+            tap.onDisabled = { [weak self] in self?.reset() }
+            self.tap = tap
         }
         let tapOK = tap?.start() ?? false
-        if hotKey != key || !center.isRegistered(id: HotKeyID.layoutFix) {
+        let excluded = AppExclusions.shared.isFrontExcluded
+        if excluded {
+            center.unregister(id: HotKeyID.layoutFix)
+            hotKey = nil
+        } else if hotKey != key || !center.isRegistered(id: HotKeyID.layoutFix) {
             center.register(id: HotKeyID.layoutFix, keyCode: key.keyCode, modifiers: key.modifiers) {
                 LayoutFix.shared.fix()
             }
             hotKey = key
         }
-        hotKeyRegistered = center.isRegistered(id: HotKeyID.layoutFix)
-        if !hotKeyRegistered { Log.layout.error("Горячая клавиша \(key.title, privacy: .public) не зарегистрирована") }
-        isRunning = tapOK && hotKeyRegistered
+        hotKeyRegistered = excluded ? false : center.isRegistered(id: HotKeyID.layoutFix)
+        if !hotKeyRegistered && !excluded { Log.layout.error("Горячая клавиша \(key.title, privacy: .public) не зарегистрирована") }
+        isRunning = tapOK && (excluded || hotKeyRegistered)
     }
 
     /// Пока в настройках записывается новое сочетание, старое не должно срабатывать.
@@ -78,8 +91,7 @@ final class LayoutFix: ObservableObject {
     // MARK: - Последнее слово
 
     private func reset() {
-        word = ""
-        trailing = ""
+        tracker.reset()
     }
 
     private func track(type: CGEventType, event: CGEvent) {
@@ -88,6 +100,10 @@ final class LayoutFix: ObservableObject {
             return
         }
         if event.getIntegerValueField(.eventSourceUserData) == Self.marker || busy { return }
+        if AppExclusions.shared.isFrontExcluded {
+            reset()
+            return
+        }
         if IsSecureEventInputEnabled() {
             reset()
             return
@@ -96,47 +112,24 @@ final class LayoutFix: ObservableObject {
         // Наша же горячая клавиша.
         if let hotKey, event.getIntegerValueField(.keyboardEventKeycode) == Int64(hotKey.keyCode),
            flags.intersection([.maskShift, .maskAlternate, .maskControl, .maskCommand]) == hotKey.cgFlags { return }
-        if flags.contains(.maskCommand) || flags.contains(.maskControl) {
-            reset()
-            return
-        }
-        // ⌥ — спецсимволы: слово не трогаем.
-        if flags.contains(.maskAlternate) { return }
-
-        switch Int(event.getIntegerValueField(.keyboardEventKeycode)) {
-        case kVK_Delete:
-            if !trailing.isEmpty { trailing.removeLast() } else if !word.isEmpty { word.removeLast() }
-            return
-        case kVK_Return, kVK_ANSI_KeypadEnter, kVK_Tab, kVK_Escape, kVK_ForwardDelete,
-             kVK_LeftArrow, kVK_RightArrow, kVK_UpArrow, kVK_DownArrow,
-             kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown:
-            reset()
-            return
-        default:
-            break
-        }
-
-        guard let characters = NSEvent(cgEvent: event)?.characters, !characters.isEmpty else { return }
-        for character in characters {
-            if character == " " {
-                if !word.isEmpty { trailing.append(character) }
-            } else if character.isLetter || character.isNumber || character.isPunctuation || character.isSymbol {
-                if !trailing.isEmpty {
-                    word = ""
-                    trailing = ""
-                }
-                word.append(character)
-                if word.count > 64 { word.removeFirst(word.count - 64) }
-            } else {
-                reset()
-            }
-        }
+        var modifiers: WordTracker.Modifiers = []
+        if flags.contains(.maskShift) { modifiers.insert(.shift) }
+        if flags.contains(.maskAlternate) { modifiers.insert(.option) }
+        if flags.contains(.maskControl) { modifiers.insert(.control) }
+        if flags.contains(.maskCommand) { modifiers.insert(.command) }
+        tracker.feed(keyCode: Int(event.getIntegerValueField(.keyboardEventKeycode)), modifiers: modifiers,
+                     characters: NSEvent(cgEvent: event)?.characters)
     }
 
     // MARK: - Перевод
 
     func fix() {
         guard !busy else { return }
+        // Виртуальная машина / удалённый рабочий стол: синтетические Backspace и ввод ушли бы в гостевую систему.
+        guard !AppExclusions.shared.isFrontExcluded else {
+            Log.layout.info("Программа из списка исключений: перевод раскладки пропущен")
+            return
+        }
         guard !IsSecureEventInputEnabled() else {
             Log.layout.info("Поле пароля: перевод раскладки пропущен")
             return
@@ -156,7 +149,7 @@ final class LayoutFix: ObservableObject {
     }
 
     private func replaceSelection(_ text: String) {
-        let direction = LayoutMap.direction(of: text)
+        let direction = LayoutMap.direction(of: text, cyrillic: Self.cyrillicLayout())
         let converted = LayoutMap.convert(text, direction)
         guard converted != text else { return }
         Log.layout.debug("Выделение: \(text.count) симв.")
@@ -166,7 +159,7 @@ final class LayoutFix: ObservableObject {
     }
 
     private func replaceLastWord() {
-        let direction = LayoutMap.direction(of: word)
+        let direction = LayoutMap.direction(of: word, cyrillic: Self.cyrillicLayout())
         let converted = LayoutMap.convert(word, direction)
         let erase = word.count + trailing.count
         let tail = trailing
@@ -174,8 +167,7 @@ final class LayoutFix: ObservableObject {
         pressBackspace(times: erase)
         Self.type(converted + tail)
         // Повторное нажатие вернёт как было.
-        word = converted
-        trailing = tail
+        tracker.replace(word: converted, trailing: tail)
         if UserDefaults.standard.bool(forKey: Pref.layoutFixSwitchSource) { Self.selectInputSource(for: direction) }
     }
 
@@ -266,8 +258,28 @@ final class LayoutFix: ObservableObject {
 
     // MARK: - Раскладка
 
+    /// Включённые в системе раскладки: основной язык каждой («ru», «uk», «en»…).
+    private static func enabledKeyboardLanguages() -> [String] {
+        let filter = [kTISPropertyInputSourceCategory as String: kTISCategoryKeyboardInputSource as String,
+                      kTISPropertyInputSourceIsSelectCapable as String: true] as CFDictionary
+        guard let list = TISCreateInputSourceList(filter, false)?.takeRetainedValue() as? [TISInputSource] else { return [] }
+        return list.compactMap { source in
+            guard let pointer = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages) else { return nil }
+            return (Unmanaged<CFArray>.fromOpaque(pointer).takeUnretainedValue() as? [String])?.first
+        }
+    }
+
+    /// Русская или украинская: настройка «Кириллица» (авто / русская / украинская).
+    static func cyrillicLayout() -> LayoutMap.CyrillicLayout {
+        let setting = UserDefaults.standard.string(forKey: cyrillicSettingKey)
+        // В режиме «авто» включённые раскладки смотрим только если выбор вообще нужен.
+        return LayoutMap.cyrillicLayout(setting: setting, enabledLanguages: setting == "russian" || setting == "ukrainian" ? [] : enabledKeyboardLanguages())
+    }
+
+    static let cyrillicSettingKey = "layoutFixCyrillic"
+
     private static func selectInputSource(for direction: LayoutMap.Direction) {
-        let language = direction == .toRussian ? "ru" : "en"
+        let language = LayoutMap.inputLanguage(for: direction)
         let filter = [kTISPropertyInputSourceCategory as String: kTISCategoryKeyboardInputSource as String,
                       kTISPropertyInputSourceIsSelectCapable as String: true] as CFDictionary
         guard let list = TISCreateInputSourceList(filter, false)?.takeRetainedValue() as? [TISInputSource] else { return }

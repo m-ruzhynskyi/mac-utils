@@ -172,7 +172,13 @@ final class Whisper: ObservableObject {
             process.standardError = pipe
             process.standardOutput = FileHandle.nullDevice
             pipe.fileHandleForReading.readabilityHandler = { handle in
-                guard let line = String(data: handle.availableData, encoding: .utf8) else { return }
+                let data = handle.availableData
+                // Конец потока: снимаем обработчик, иначе он крутится без остановки до завершения процесса.
+                guard !data.isEmpty else {
+                    handle.readabilityHandler = nil
+                    return
+                }
+                guard let line = String(data: data, encoding: .utf8) else { return }
                 if let value = WhisperOutput.progress(in: line) { progress(value) }
             }
             process.terminationHandler = { process in

@@ -97,16 +97,25 @@ final class Updater: NSObject, ObservableObject {
         }
     }
 
+    /// Повторная попытка отложена: одна цепочка, а не по одной на каждую «занятую» проверку.
+    private var deferredCheck: DispatchWorkItem?
+    static let deferDelay: TimeInterval = 600
+
     @objc private func scheduledCheck() {
         guard UserDefaults.standard.bool(forKey: Pref.autoUpdate) else { return }
-        // Идёт запись или расшифровка — перезапуск всё оборвёт; попробуем через 10 минут.
-        if MeetingRecorder.shared.state != .idle || ScreenRecorder.current != nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 600) {
-                MainActor.assumeIsolated { Updater.shared.scheduledCheck() }
-            }
+        // Идёт запись, эфир, просмотр, удаление и т. п. — перезапуск всё оборвёт; попробуем позже.
+        if BusyRegistry.shouldDefer(BusyRegistry.shared.active) {
+            deferInstall()
             return
         }
         check(install: releaseChannel.installsAutomatically, userInitiated: false)
+    }
+
+    private func deferInstall() {
+        deferredCheck?.cancel()
+        let work = DispatchWorkItem { MainActor.assumeIsolated { Updater.shared.scheduledCheck() } }
+        deferredCheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.deferDelay, execute: work)
     }
 
     // MARK: - Проверка
@@ -132,9 +141,16 @@ final class Updater: NSObject, ObservableObject {
                 }
                 self.state = .available(release.version)
                 if install {
-                    try await self.install(release)
+                    // Автоматическая установка не перезапускает приложение посреди записи или эфира.
+                    if !userInitiated, BusyRegistry.shouldDefer(BusyRegistry.shared.active) {
+                        self.deferInstall()
+                        return
+                    }
+                    try await self.install(release, automatic: !userInitiated)
                 }
             } catch {
+                // Установка не удалась — подтверждение перезапуска ради неё больше не действует.
+                BusyRegistry.shared.terminationConfirmed = false
                 self.state = .failed(error.localizedDescription)
             }
         }
@@ -234,7 +250,23 @@ final class Updater: NSObject, ObservableObject {
 
     // MARK: - Установка
 
-    private func install(_ release: ReleaseInfo) async throws {
+    private func install(_ release: ReleaseInfo, automatic: Bool) async throws {
+        // Ручная установка во время записи или эфира: спрашиваем до скачивания. Согласие учитывается при выходе,
+        // отказ оставляет всё как было (не «Устанавливаю…» навсегда).
+        if !automatic, let prompt = BusyRegistry.quitPrompt(for: BusyRegistry.shared.active) {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Обновление перезапустит Mac Utils"
+            alert.informativeText = prompt.title + ". " + prompt.message
+            alert.addButton(withTitle: "Обновить и перезапустить")
+            alert.addButton(withTitle: "Не сейчас")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                state = .available(release.version)
+                return
+            }
+            BusyRegistry.shared.terminationConfirmed = true
+        }
         state = .installing(release.version)
         let target = Bundle.main.bundleURL
         let parent = target.deletingLastPathComponent()
@@ -288,6 +320,14 @@ final class Updater: NSObject, ObservableObject {
                 return work
             }.value
 
+            // Пока скачивали, могла начаться запись или эфир: автоматическую установку откладываем.
+            if automatic, BusyRegistry.shouldDefer(BusyRegistry.shared.active) {
+                try? FileManager.default.removeItem(at: staged)
+                try? FileManager.default.removeItem(at: work)
+                state = .available(release.version)
+                deferInstall()
+                return
+            }
             // Скрипт ждёт выхода текущего процесса, меняет бандлы местами с откатом и запускает новую версию.
             let script = Self.installScript(pid: ProcessInfo.processInfo.processIdentifier,
                                             target: target, staged: staged, work: work)

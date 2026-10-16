@@ -49,11 +49,24 @@ struct CleanupCategory: Identifiable {
     }
 
     /// Для «Загрузок» — только старше 30 дней; служебные .DS_Store и т. п. не показываем.
-    func includes(name: String, modified: Date?, now: Date = Date()) -> Bool {
+    /// `added` — когда файл попал в папку: у файлов из архивов и с серверов mtime старый, а загрузили их вчера.
+    /// «Старым» файл считается, только если старыми являются обе даты (недавно добавленный или изменённый не трогаем).
+    func includes(name: String, modified: Date?, added: Date? = nil, now: Date = Date()) -> Bool {
         if name.hasPrefix(".") { return false }
         guard kind == .downloads else { return true }
-        guard let modified else { return false }
-        return now.timeIntervalSince(modified) > 30 * 86_400
+        guard let reference = [modified, added].compactMap({ $0 }).max() else { return false }
+        return now.timeIntervalSince(reference) > 30 * 86_400
+    }
+
+    /// Ошибка чтения папки из-за защиты macOS (нет «Полного доступа к диску»), а не «папки нет».
+    static func isAccessDenied(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain, [NSFileReadNoPermissionError, NSFileWriteNoPermissionError].contains(nsError.code) { return true }
+        if nsError.domain == NSPOSIXErrorDomain, [Int(EPERM), Int(EACCES)].contains(nsError.code) { return true }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error, underlying as NSError != nsError {
+            return isAccessDenied(underlying)
+        }
+        return false
     }
 }
 
@@ -72,6 +85,10 @@ final class DiskCleanupModel: ObservableObject {
     @Published private(set) var items: [CleanupItem] = []
     @Published var checked: Set<URL> = []
     @Published private(set) var scanning = false
+    /// Идёт очистка (удаление выполняется вне главного потока).
+    @Published private(set) var cleaning = false
+    /// Категории, которые не удалось прочитать из-за защиты macOS: пусто там — не значит «ничего нет».
+    @Published private(set) var denied: Set<CleanupCategory.Kind> = []
     @Published private(set) var lastResult: String?
     @Published var expanded: Set<CleanupCategory.Kind> = []
 
@@ -86,20 +103,28 @@ final class DiskCleanupModel: ObservableObject {
     var checkedTotal: Int64 { items.filter { checked.contains($0.url) }.reduce(0) { $0 + $1.size } }
 
     func scan() {
-        guard !scanning else { return }
+        guard !scanning, !cleaning else { return }
         scanning = true
         lastResult = nil
         let categories = self.categories
         Task.detached(priority: .userInitiated) {
             var found: [CleanupItem] = []
+            var denied: Set<CleanupCategory.Kind> = []
             let manager = FileManager.default
+            let keys: [URLResourceKey] = [.contentModificationDateKey, .addedToDirectoryDateKey]
             for category in categories {
                 for folder in category.folders {
-                    guard let entries = try? manager.contentsOfDirectory(
-                        at: folder, includingPropertiesForKeys: [.contentModificationDateKey], options: []) else { continue }
+                    let entries: [URL]
+                    do {
+                        entries = try manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [])
+                    } catch {
+                        if CleanupCategory.isAccessDenied(error) { denied.insert(category.kind) }
+                        continue
+                    }
                     for url in entries {
-                        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-                        guard category.includes(name: url.lastPathComponent, modified: modified) else { continue }
+                        let values = try? url.resourceValues(forKeys: Set(keys))
+                        guard category.includes(name: url.lastPathComponent, modified: values?.contentModificationDate,
+                                                added: values?.addedToDirectoryDate) else { continue }
                         let size = AppScanner.size(of: url)
                         guard size > 0 else { continue }
                         found.append(CleanupItem(url: url, category: category.kind, size: size))
@@ -107,10 +132,12 @@ final class DiskCleanupModel: ObservableObject {
                 }
             }
             let result = found
+            let deniedKinds = denied
             await MainActor.run {
                 let found = result
                 let model = DiskCleanupModel.shared
                 model.items = found
+                model.denied = deniedKinds
                 let defaults = Set(categories.filter(\.checkedByDefault).map(\.kind))
                 model.checked = Set(found.filter { defaults.contains($0.category) }.map(\.url))
                 model.scanning = false
@@ -143,6 +170,43 @@ final class DiskCleanupModel: ObservableObject {
         return (freed, failed)
     }
 
+    /// Итог очистки: что ушло в Корзину, что удалено насовсем, сколько не вышло.
+    struct Outcome: Equatable {
+        var trashed: Int64 = 0
+        var deleted: Int64 = 0
+        var failed = 0
+    }
+
+    nonisolated static func performDetailed(
+        _ items: [CleanupItem],
+        trash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) },
+        remove: (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }
+    ) -> Outcome {
+        var outcome = Outcome()
+        for item in items {
+            do {
+                if item.category == .trash { try remove(item.url); outcome.deleted += item.size }
+                else { try trash(item.url); outcome.trashed += item.size }
+            } catch {
+                outcome.failed += 1
+            }
+        }
+        return outcome
+    }
+
+    /// Текст итога. Перенос в Корзину не освобождает место — так и называется; безвозвратное удаление — «освобождено».
+    nonisolated static func resultText(_ outcome: Outcome) -> String {
+        func size(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
+        var parts: [String] = []
+        if outcome.deleted > 0 { parts.append("удалено насовсем \(size(outcome.deleted))") }
+        if outcome.trashed > 0 { parts.append("перенесено в Корзину \(size(outcome.trashed)) (место освободится после её очистки)") }
+        if parts.isEmpty { parts.append("ничего не убрано") }
+        var text = parts.joined(separator: ", ")
+        text = text.prefix(1).uppercased() + text.dropFirst()
+        if outcome.failed > 0 { text += ". Не удалось: \(outcome.failed) (файлы заняты или нет доступа)" }
+        return text
+    }
+
     /// В Корзину (или безвозвратно — для самой Корзины).
     func clean() {
         let selected = items.filter { checked.contains($0.url) }
@@ -156,12 +220,18 @@ final class DiskCleanupModel: ObservableObject {
             alert.alertStyle = .warning
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
-        let (freed, failed) = Self.perform(selected)
-        let freedText = ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)
-        lastResult = failed == 0
-            ? "Освобождено \(freedText). Кроме Корзины, всё перемещено в Корзину — место освободится после её очистки."
-            : "Освобождено \(freedText), не удалось: \(failed) (файлы заняты или нет доступа)"
-        scan()
+        guard !cleaning else { return }
+        cleaning = true
+        // Рекурсивное удаление гигабайтов — не на главном потоке: окно остаётся живым.
+        Task.detached(priority: .userInitiated) {
+            let outcome = Self.performDetailed(selected)
+            await MainActor.run {
+                let model = DiskCleanupModel.shared
+                model.lastResult = Self.resultText(outcome)
+                model.cleaning = false
+                model.scan()
+            }
+        }
     }
 }
 
@@ -196,7 +266,7 @@ struct DiskCleanupView: View {
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
-                if model.scanning || advisor.working { ProgressView().controlSize(.small) }
+                if model.scanning || model.cleaning || advisor.working { ProgressView().controlSize(.small) }
                 if aiOn {
                     Button {
                         advisor.review(model.items)
@@ -216,12 +286,12 @@ struct DiskCleanupView: View {
                         .help("Отметить только то, что ИИ считает безопасным")
                     }
                 }
-                Button(compact ? "Обновить" : "Пересканировать") { model.scan() }.disabled(model.scanning)
+                Button(compact ? "Обновить" : "Пересканировать") { model.scan() }.disabled(model.scanning || model.cleaning)
                 Button("Очистить · \(ByteCountFormatter.string(fromByteCount: model.checkedTotal, countStyle: .file))") {
                     model.clean()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.scanning || model.checked.isEmpty)
+                .disabled(model.scanning || model.cleaning || model.checked.isEmpty)
             }
             .padding(10)
         }
@@ -238,7 +308,12 @@ struct DiskCleanupView: View {
             Image(systemName: category.symbol).frame(width: 20).foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 1) {
                 Text(category.title).font(compact ? .callout.weight(.semibold) : .headline)
-                if !compact {
+                if model.denied.contains(category.kind) {
+                    HStack(spacing: 6) {
+                        Text("Нет доступа — выдайте Полный доступ к диску").font(.caption).foregroundStyle(.orange)
+                        Button("Открыть") { Permissions.openFullDiskAccess() }.controlSize(.mini)
+                    }
+                } else if !compact {
                     Text(category.detail).font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

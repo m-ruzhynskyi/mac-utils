@@ -12,10 +12,33 @@ final class EventTap {
     private var source: CFRunLoopSource?
     private let mask: CGEventMask
     private let handler: Handler
+    private let listenOnly: Bool
 
-    init(types: [CGEventType], handler: @escaping Handler) {
+    /// Вызывается, когда macOS отключила tap (обработчик не уложился во время или пользователь/система его выключили).
+    /// За это время события могли пропасть (например, отпускание модификатора), поэтому владелец сбрасывает своё состояние
+    /// («идёт перетаскивание», «панель открыта»), иначе оно остаётся навсегда.
+    var onDisabled: (@MainActor () -> Void)?
+
+    /// `listenOnly` — события только наблюдаются: обработчик ничего не может поглотить, система не ждёт его ответа и
+    /// не задерживает ввод. Для обработчиков, которые всегда возвращают `true` (мышь для раскладки окон, подсказки).
+    init(types: [CGEventType], listenOnly: Bool = false, handler: @escaping Handler) {
         mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << CGEventMask($1.rawValue)) }
+        self.listenOnly = listenOnly
         self.handler = handler
+    }
+
+    /// Служебное событие об отключении tap (а не настоящий ввод).
+    static func isDisableEvent(_ type: CGEventType) -> Bool {
+        type == .tapDisabledByTimeout || type == .tapDisabledByUserInput
+    }
+
+    /// Забытый tap остаётся в run loop, а его callback держит неудерживаемую ссылку на уже освобождённый объект.
+    deinit {
+        if let port {
+            CGEvent.tapEnable(tap: port, enable: false)
+            CFMachPortInvalidate(port)
+        }
+        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
     }
 
     var isRunning: Bool { port != nil }
@@ -30,7 +53,7 @@ final class EventTap {
         guard let port = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .defaultTap,
+            options: listenOnly ? .listenOnly : .defaultTap,
             eventsOfInterest: mask,
             callback: { _, type, event, info in
                 guard let info else { return Unmanaged.passUnretained(event) }
@@ -65,8 +88,9 @@ final class EventTap {
 
     private func dispatch(type: CGEventType, event: CGEvent) -> Bool {
         // macOS отключает «зависший» tap; включаем обратно.
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        if Self.isDisableEvent(type) {
             if let port { CGEvent.tapEnable(tap: port, enable: true) }
+            onDisabled?()
             return true
         }
         return handler(type, event)

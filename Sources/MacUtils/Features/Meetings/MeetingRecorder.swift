@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import AppKit
 import Carbon.HIToolbox
 import ScreenCaptureKit
@@ -59,6 +59,9 @@ enum MeetingText {
 
 /// Запись созвона: звук системы (собеседники) и микрофон (вы) — отдельными дорожками,
 /// затем локальная расшифровка и отчёт локальной моделью: итог, решения, задачи.
+///
+/// Запись и расшифровка независимы: пока идёт расшифровка, можно записывать следующую встречу (очередь `queue`).
+/// Дорожки пишутся кусками (`MeetingFiles`), поэтому сбой или ⌘Q стоят не больше одного куска.
 @MainActor
 final class MeetingRecorder: NSObject, ObservableObject {
     static let shared = MeetingRecorder()
@@ -73,6 +76,8 @@ final class MeetingRecorder: NSObject, ObservableObject {
         var hasTranscript: Bool { FileManager.default.fileExists(atPath: transcript.path) }
     }
 
+    /// `.recording` — идёт запись (даже если параллельно что-то расшифровывается); `.processing` — записи нет, но идёт
+    /// сохранение или расшифровка; `.idle` — ничего. Считается из `recordingSince`, активностей и очереди (`refreshState`).
     enum State: Equatable {
         case idle
         case recording(since: Date)
@@ -84,25 +89,84 @@ final class MeetingRecorder: NSObject, ObservableObject {
     /// Встреча, которая сейчас расшифровывается (её нельзя удалить).
     @Published private(set) var busyFolder: URL?
     @Published private(set) var lastError: String?
+    /// Запись прервалась (поток остановился): показывается в HUD, пока идёт перезапуск.
+    @Published fileprivate(set) var interruption: String?
+    /// Давно нет звука от потока — запись может идти вхолостую.
+    @Published fileprivate(set) var audioStalled = false
 
     private var stream: SCStream?
     private var writer: MeetingWriter?
     private var echoFree: EchoFreeMicrophone?
     private var folder: URL?
     private var hud: NSPanel?
+    private var microphoneWanted = false
+    private var recordingSince: Date?
+    private var starting = false
+    private var restartAttempts = 0
+    /// Когда поток последний раз перезапускали: после 10 минут ровной записи счётчик попыток обнуляется (N3).
+    private var lastRestartAt: Date?
+    private var watchdog: Timer?
+    private var closingOld: Task<Void, Never>?
+    private var recovered = false
+    /// Папки, начатые в этом запуске: восстановление «оборванных» их не трогает, даже если `begin` ещё идёт (N6).
+    private var sessionFolders: Set<URL> = []
+    private var wakeObserver: NSObjectProtocol?
+
+    // Очередь расшифровки и фоновые «активности» (сохранение записи, подготовка звука).
+    private struct Job: Equatable { let folder: URL; let reportOnly: Bool }
+    private struct Queued { let job: Job; let waiter: CheckedContinuation<Void, Never>? }
+    private var queue: [Queued] = []
+    private var currentJob: Job?
+    private var worker: Task<Void, Never>?
+    private var currentStep = ""
+    private var activities: [Int: String] = [:]
+    private var nextActivity = 0
 
     static var root: URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return documents.appendingPathComponent("Встречи", isDirectory: true)
     }
 
+    // MARK: - Состояние
+
+    /// Единственное место, где меняется `state`.
+    private func refreshState() {
+        if let since = recordingSince {
+            state = .recording(since: since)
+        } else if let label = activities.sorted(by: { $0.key < $1.key }).first?.value {
+            state = .processing(label)
+        } else if currentJob != nil {
+            let waiting = queue.count
+            state = .processing(waiting > 0 ? "\(currentStep) (ещё в очереди: \(waiting))" : currentStep)
+        } else {
+            state = .idle
+        }
+    }
+
+    private func beginActivity(_ label: String) -> Int {
+        nextActivity += 1
+        activities[nextActivity] = label
+        refreshState()
+        return nextActivity
+    }
+
+    private func endActivity(_ id: Int) {
+        activities[id] = nil
+        refreshState()
+    }
+
+    /// Идёт ли расшифровка или в очереди есть встречи.
+    var hasPendingWork: Bool { currentJob != nil || !queue.isEmpty || !activities.isEmpty }
+
     func sync() {
+        observeWake()
         let center = HotKeyCenter.shared
         center.unregister(id: HotKeyID.meeting)
         if UserDefaults.standard.bool(forKey: Pref.meetings) {
             center.register(id: HotKeyID.meeting, keyCode: kVK_ANSI_M, modifiers: controlKey | optionKey) {
                 MeetingRecorder.shared.toggle()
             }
+            recoverUnfinishedOnce()
         }
         reload()
     }
@@ -113,32 +177,51 @@ final class MeetingRecorder: NSObject, ObservableObject {
         meetings = folders.filter { $0.hasDirectoryPath }.map(Meeting.init).sorted { $0.title > $1.title }
     }
 
-    /// Встречу целиком (звук, расшифровка, отчёт) — в Корзину.
+    /// Встречу целиком (звук, расшифровка, отчёт) — в Корзину. Идущую расшифровку и ожидающую в очереди не трогаем.
     func delete(_ meeting: Meeting) {
+        guard currentJob?.folder != meeting.folder, !queue.contains(where: { $0.job.folder == meeting.folder }),
+              folder != meeting.folder || recordingSince == nil else { return }
         try? FileManager.default.trashItem(at: meeting.folder, resultingItemURL: nil)
         reload()
     }
 
     func toggle() {
-        switch state {
-        case .idle: start()
-        case .recording: stop()
-        case .processing: break
-        }
+        // Запись не зависит от расшифровки: ⌃⌥M во время расшифровки начинает новую запись.
+        if recordingSince != nil { stop() } else { start() }
     }
 
     // MARK: - Запись
 
     func start() {
-        guard state == .idle else { return }
+        guard recordingSince == nil, !starting else { return }
+        starting = true
         lastError = nil
         Task {
+            defer { starting = false }
+            let folder = MeetingFiles.uniqueFolder(in: Self.root, name: Self.folderName(for: Date()))
+            sessionFolders.insert(folder.standardizedFileURL)
             do {
-                try await begin()
-                state = .recording(since: Date())
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let wantsMic = UserDefaults.standard.bool(forKey: Pref.meetingsMicrophone)
+                // Метка «запись идёт»: если приложение оборвётся, при следующем запуске запись восстановится из кусков.
+                MeetingFiles.writeMarker(in: folder, startedAt: Date(), microphone: wantsMic)
+                microphoneWanted = wantsMic
+                try await begin(into: folder)
+                self.folder = folder
+                recordingSince = Date()
+                restartAttempts = 0
+                lastRestartAt = nil
+                interruption = nil
+                audioStalled = false
+                refreshState()
                 showHUD()
+                startWatchdog()
                 Toast.show("Записываю встречу. Остановить — ⌃⌥M", symbol: "record.circle", tint: .red)
             } catch {
+                MeetingFiles.removeMarker(in: folder)
+                if ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).isEmpty {
+                    try? FileManager.default.removeItem(at: folder)
+                }
                 Log.audio.error("Встреча: не началась: \(error.localizedDescription, privacy: .public)")
                 lastError = "Не удалось начать запись: \(error.localizedDescription)"
                 Toast.show("Нет разрешения «Запись экрана» или микрофона", symbol: "exclamationmark.triangle.fill", tint: .orange)
@@ -146,7 +229,15 @@ final class MeetingRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func begin() async throws {
+    /// Папка по минуте: «2026-10-16 10.30» (повтор в ту же минуту получает « (2)» — см. `MeetingFiles.uniqueFolder`).
+    static func folderName(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH.mm"
+        return formatter.string(from: date)
+    }
+
+    /// Запускает захват звука в папку (первый раз и после обрыва потока). Куски нумеруются дальше уже лежащих.
+    private func begin(into folder: URL) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first else { throw CocoaError(.featureUnsupported) }
         let ownPID = ProcessInfo.processInfo.processIdentifier
@@ -162,13 +253,15 @@ final class MeetingRecorder: NSObject, ObservableObject {
         config.excludesCurrentProcessAudio = true
         config.sampleRate = 48_000
         config.channelCount = 2
-        let wantsMic = UserDefaults.standard.bool(forKey: Pref.meetingsMicrophone)
+        let wantsMic = microphoneWanted
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH.mm"
-        let folder = Self.root.appendingPathComponent(formatter.string(from: Date()), isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let writer = try MeetingWriter(folder: folder, microphone: wantsMic)
+        let writer = MeetingWriter(folder: folder, microphone: wantsMic)
+        writer.onFailure = { [weak self, weak writer] error in
+            Task { @MainActor in
+                guard let writer else { return }
+                self?.streamFailed(error, from: writer)
+            }
+        }
         // Микрофон — с подавлением эха: голоса собеседников из динамиков не попадают в «Я».
         var echoFree: EchoFreeMicrophone?
         if wantsMic {
@@ -197,19 +290,159 @@ final class MeetingRecorder: NSObject, ObservableObject {
     }
 
     func stop() {
-        guard case .recording = state, let stream, let writer, let folder else { return }
+        finishRecording(note: nil)
+    }
+
+    /// Останавливает запись, склеивает куски и ставит встречу в очередь расшифровки.
+    private func finishRecording(note: String?) {
+        guard recordingSince != nil, let folder else { return }
+        let stream = self.stream, writer = self.writer
         self.stream = nil
         self.writer = nil
         echoFree?.stop()
         echoFree = nil
         hud?.orderOut(nil)
         hud = nil
-        state = .processing("Сохраняю запись…")
+        watchdog?.invalidate()
+        watchdog = nil
+        recordingSince = nil
+        interruption = nil
+        audioStalled = false
+        self.folder = nil
+        // В очередь — сразу, на диске: если приложение закроется во время сохранения, при запуске встреча
+        // восстановится и расшифруется (MAJOR-1).
+        MeetingFiles.writeQueueMarker(in: folder, reportOnly: false)
+        let activity = beginActivity("Сохраняю запись…")
+        let closing = closingOld
         Task {
-            try? await stream.stopCapture()
-            await writer.finish()
+            try? await stream?.stopCapture()
+            await writer?.finish()
+            await closing?.value
+            await MeetingMerge.finalize(folder: folder)
             reload()
-            await process(Meeting(folder: folder))
+            // Запись в очередь и снятие «сохраняю» — без паузы между ними, чтобы состояние не мигало.
+            enqueue(Job(folder: folder, reportOnly: false), waiter: nil)
+            endActivity(activity)
+            if let note { Toast.show(note, symbol: "exclamationmark.triangle.fill", tint: .orange) }
+        }
+    }
+
+    // MARK: - Обрыв потока
+
+    /// Поток ScreenCaptureKit остановился сам (отключили монитор, отозвали разрешение, сменилось устройство).
+    fileprivate func streamFailed(_ error: Error, from failed: MeetingWriter) {
+        guard writer === failed, recordingSince != nil, let folder else { return }
+        Log.audio.error("Встреча: поток остановлен: \(error.localizedDescription, privacy: .public)")
+        interruption = "Запись прервалась"
+        stream = nil
+        writer = nil
+        echoFree?.stop()
+        echoFree = nil
+        Toast.show("Запись встречи прервалась — пробую продолжить", symbol: "exclamationmark.triangle.fill", tint: .orange)
+        let closing = Task { await failed.finish() }
+        closingOld = closing
+        Task {
+            await closing.value
+            guard recordingSince != nil, writer == nil else { return }
+            // Долгая встреча: обрывы раз в час (отключали монитор) не должны копиться до остановки записи.
+            if let last = lastRestartAt, Date().timeIntervalSince(last) > 600 { restartAttempts = 0 }
+            guard restartAttempts < 2 else {
+                finishRecording(note: "Запись встречи прервалась. Записанное сохранено и расшифровывается.")
+                return
+            }
+            restartAttempts += 1
+            lastRestartAt = Date()
+            do {
+                // Другой экран и устройство: берём первый доступный, как при обычном старте.
+                try await begin(into: folder)
+                interruption = nil
+                Toast.show("Запись встречи продолжена", symbol: "record.circle", tint: .red)
+            } catch {
+                Log.audio.error("Встреча: перезапуск не удался: \(error.localizedDescription, privacy: .public)")
+                guard recordingSince != nil, writer == nil else { return }
+                finishRecording(note: "Запись встречи прервалась. Записанное сохранено и расшифровывается.")
+            }
+        }
+    }
+
+    // MARK: - Сон
+
+    /// После сна поток ScreenCaptureKit часто не падает, а молчит: запись шла бы в тот же кусок с «дырой».
+    /// Через 5 с после пробуждения проверяем звук; если его нет — перезапускаем поток, как при обрыве (N5).
+    private func observeWake() {
+        guard wakeObserver == nil else { return }
+        let center = NSWorkspace.shared.notificationCenter
+        wakeObserver = center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { MeetingRecorder.shared.didWake() }
+        }
+        _ = center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                if MeetingRecorder.shared.recordingSince != nil { Log.audio.info("Встреча: Mac засыпает во время записи") }
+            }
+        }
+    }
+
+    private func didWake() {
+        guard recordingSince != nil else { return }
+        Log.audio.info("Встреча: Mac проснулся во время записи")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            MainActor.assumeIsolated {
+                let recorder = MeetingRecorder.shared
+                guard recorder.recordingSince != nil, recorder.interruption == nil, let writer = recorder.writer,
+                      writer.secondsSinceAudio > MeetingStall.threshold else { return }
+                recorder.streamFailed(CocoaError(.userCancelled), from: writer)
+            }
+        }
+    }
+
+    /// Раз в 5 секунд: если поток молчит дольше 10 секунд, HUD предупреждает (запись могла пойти вхолостую).
+    private func startWatchdog() {
+        watchdog?.invalidate()
+        let timer = Timer(timeInterval: 5, repeats: true) { _ in
+            MainActor.assumeIsolated { MeetingRecorder.shared.checkAudioFlow() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        watchdog = timer
+    }
+
+    private func checkAudioFlow() {
+        guard recordingSince != nil, interruption == nil, let writer else {
+            if audioStalled { audioStalled = false }
+            return
+        }
+        let stalled = MeetingStall.isStalled(secondsSinceAudio: writer.secondsSinceAudio)
+        if stalled != audioStalled { audioStalled = stalled }
+    }
+
+    // MARK: - Восстановление после сбоя
+
+    /// При запуске: оборванные записи (сбой, ⌘Q во время сохранения) склеиваются из кусков, а встречи, которые стояли
+    /// в очереди до выхода (метка «В очереди»), снова ставятся в очередь. Обо всём — одно уведомление.
+    func recoverUnfinishedOnce() {
+        guard !recovered else { return }
+        recovered = true
+        let root = Self.root
+        let skip = sessionFolders.union(folder.map { [$0.standardizedFileURL] } ?? [])
+        let unfinished = MeetingFiles.unfinished(in: root).filter { !skip.contains($0.standardizedFileURL) }
+        let queued = MeetingFiles.queued(in: root).filter { !skip.contains($0.folder.standardizedFileURL) }
+        guard !unfinished.isEmpty || !queued.isEmpty else { return }
+        Task {
+            var restored: [URL] = []
+            for folder in unfinished where !(await MeetingMerge.finalize(folder: folder)).isEmpty {
+                restored.append(folder)
+            }
+            reload()
+            let plan = MeetingRecovery.plan(restored: restored, queued: queued,
+                                            hasTranscript: { Meeting(folder: $0).hasTranscript })
+            for job in plan.resume { enqueue(Job(folder: job.folder, reportOnly: job.reportOnly), waiter: nil) }
+            guard let message = plan.message else { return }
+            let offer = plan.offer
+            Toast.show(message, symbol: "arrow.counterclockwise.circle.fill", tint: .orange,
+                       action: offer.isEmpty ? nil : Toast.Action(title: "Расшифровать") {
+                           for folder in offer {
+                               MeetingRecorder.shared.enqueue(Job(folder: folder, reportOnly: false), waiter: nil)
+                           }
+                       })
         }
     }
 
@@ -222,18 +455,19 @@ final class MeetingRecorder: NSObject, ObservableObject {
         panel.prompt = "Расшифровать"
         panel.message = "Выберите запись встречи — аудио или видео"
         NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let source = panel.url, state == .idle else { return }
+        guard panel.runModal() == .OK, let source = panel.url else { return }
         lastError = nil
-        state = .processing("Готовлю звук…")
+        let activity = beginActivity("Готовлю звук…")
         Task {
+            defer { endActivity(activity) }
             do {
-                let folder = Self.root.appendingPathComponent(source.deletingPathExtension().lastPathComponent, isDirectory: true)
+                let name = source.deletingPathExtension().lastPathComponent
+                let folder = MeetingFiles.uniqueFolder(in: Self.root, name: name)
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 try await Self.extractAudio(from: source, to: folder.appendingPathComponent("Собеседники.m4a"))
                 reload()
-                await process(Meeting(folder: folder))
+                enqueue(Job(folder: folder, reportOnly: false), waiter: nil)
             } catch {
-                state = .idle
                 lastError = "Не удалось прочитать звук: \(error.localizedDescription)"
             }
         }
@@ -256,25 +490,75 @@ final class MeetingRecorder: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Расшифровка и отчёт
+    // MARK: - Очередь расшифровки и отчёта
 
-    /// reportOnly — расшифровка уже есть, заново делаем только отчёт.
+    /// reportOnly — расшифровка уже есть, заново делаем только отчёт. Возвращается, когда эта встреча обработана.
     func process(_ meeting: Meeting, reportOnly: Bool = false) async {
-        busyFolder = meeting.folder
-        defer { busyFolder = nil }
+        let job = Job(folder: meeting.folder, reportOnly: reportOnly)
+        guard !isQueued(job) else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            enqueue(job, waiter: continuation)
+        }
+    }
+
+    private func isQueued(_ job: Job) -> Bool { currentJob == job || queue.contains { $0.job == job } }
+
+    private func enqueue(_ job: Job, waiter: CheckedContinuation<Void, Never>?) {
+        guard !isQueued(job) else { waiter?.resume(); return }
+        // Очередь живёт и на диске: после выхода или сбоя она подхватывается при запуске (MAJOR-1).
+        MeetingFiles.writeQueueMarker(in: job.folder, reportOnly: job.reportOnly)
+        queue.append(Queued(job: job, waiter: waiter))
+        startWorker()
+        refreshState()
+    }
+
+    private func startWorker() {
+        guard worker == nil else { return }
+        worker = Task {
+            while !queue.isEmpty {
+                let item = queue.removeFirst()
+                currentJob = item.job
+                busyFolder = item.job.folder
+                currentStep = "Расшифровываю…"
+                refreshState()
+                MeetingFiles.noteQueueAttempt(in: item.job.folder)
+                await run(item.job)
+                // Обработана (успешно или с понятной ошибкой) — после перезапуска не повторяется.
+                // Метку оставляем, если та же встреча ждёт ещё раз (например, полная расшифровка после «только отчёта»).
+                if !queue.contains(where: { $0.job.folder == item.job.folder }) {
+                    MeetingFiles.removeQueueMarker(in: item.job.folder)
+                }
+                currentJob = nil
+                busyFolder = nil
+                item.waiter?.resume()
+            }
+            worker = nil
+            refreshState()
+        }
+    }
+
+    /// Расшифровка и отчёт одной встречи (очередь вызывает по одной).
+    private func run(_ job: Job) async {
+        let meeting = Meeting(folder: job.folder)
+        if recordingSince != nil, folder == job.folder {
+            lastError = "Эта встреча ещё записывается"
+            return
+        }
+        // Куски дорожек (после остановки или сбоя) — в обычные файлы.
+        await MeetingMerge.finalize(folder: meeting.folder)
         let tracks: [(file: String, speaker: String)] = [("Собеседники.m4a", "Собеседники"), ("Я.m4a", "Я")]
         do {
             var lines: [TranscriptLine] = []
-            let existing = reportOnly ? try? String(contentsOf: meeting.transcript, encoding: .utf8) : nil
+            let existing = job.reportOnly ? try? String(contentsOf: meeting.transcript, encoding: .utf8) : nil
             for track in tracks where existing == nil {
                 let url = meeting.folder.appendingPathComponent(track.file)
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
                 let step = "Расшифровываю: \(track.speaker.lowercased())"
-                state = .processing(step + "…")
+                setStep(step + "…")
                 if Whisper.isReady, UserDefaults.standard.string(forKey: Pref.meetingsEngine) != "apple" {
                     let language = UserDefaults.standard.string(forKey: Pref.meetingsLanguage) ?? "auto"
                     lines += try await Whisper.transcribe(url, speaker: track.speaker, language: language) { percent in
-                        Task { @MainActor in MeetingRecorder.shared.state = .processing("\(step)… \(percent) %") }
+                        Task { @MainActor in MeetingRecorder.shared.setStep("\(step)… \(percent) %") }
                     }
                 } else {
                     lines += try await Transcriber.transcribe(url, speaker: track.speaker)
@@ -284,7 +568,6 @@ final class MeetingRecorder: NSObject, ObservableObject {
             let transcript = existing ?? MeetingText.format(MeetingText.merge(lines))
             guard !transcript.isEmpty else {
                 Log.audio.info("Встреча: речи не найдено")
-                state = .idle
                 lastError = "В записи не нашлось речи"
                 Toast.show("В записи не нашлось речи", symbol: "waveform.slash", tint: .orange)
                 return
@@ -294,24 +577,27 @@ final class MeetingRecorder: NSObject, ObservableObject {
             let words = transcript.split(whereSeparator: \.isWhitespace).count
             if words < 40 { try? FileManager.default.removeItem(at: meeting.report) }
             if Ollama.isOn(Pref.meetingsReport), words >= 40 {
-                state = .processing("Готовлю отчёт…")
+                setStep("Готовлю отчёт…")
                 let report = try await Self.report(for: transcript) { step in
-                    Task { @MainActor in MeetingRecorder.shared.state = .processing(step) }
+                    Task { @MainActor in MeetingRecorder.shared.setStep(step) }
                 }
                 try ("# Встреча \(meeting.title)\n\n" + report).write(to: meeting.report, atomically: true, encoding: .utf8)
             }
-            state = .idle
             reload()
             let target = meeting.hasReport ? meeting.report : meeting.transcript
             Toast.show(meeting.hasReport ? "Отчёт о встрече готов" : "Расшифровка готова", symbol: "doc.text.fill",
                        action: Toast.Action(title: "Открыть") { NSWorkspace.shared.open(target) })
         } catch {
             Log.audio.error("Встреча: \(error.localizedDescription, privacy: .public)")
-            state = .idle
             lastError = error.localizedDescription
             reload()
             Toast.show(error.localizedDescription, symbol: "exclamationmark.triangle.fill", tint: .orange)
         }
+    }
+
+    private func setStep(_ step: String) {
+        currentStep = step
+        refreshState()
     }
 
     static let reportSystem = """
@@ -380,9 +666,18 @@ private struct MeetingHUD: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle().fill(.red).frame(width: 9, height: 9)
-            if case .recording(let since) = recorder.state {
-                Text(since, style: .timer).monospacedDigit().font(.callout)
+            if let interruption = recorder.interruption {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(interruption).font(.callout).foregroundStyle(.orange)
+            } else {
+                Circle().fill(.red).frame(width: 9, height: 9)
+                if case .recording(let since) = recorder.state {
+                    Text(since, style: .timer).monospacedDigit().font(.callout)
+                }
+                if recorder.audioStalled {
+                    Label("Нет звука", systemImage: "waveform.slash").font(.caption).foregroundStyle(.orange)
+                        .help("Поток звука молчит больше 10 секунд — проверьте, что звук воспроизводится")
+                }
             }
             Button { recorder.stop() } label: { Image(systemName: "stop.fill") }
                 .buttonStyle(.borderless)
@@ -395,25 +690,57 @@ private struct MeetingHUD: View {
     }
 }
 
+/// Звук молчит дольше этого — HUD предупреждает.
+enum MeetingStall {
+    static let threshold: TimeInterval = 10
+    static func isStalled(secondsSinceAudio: TimeInterval, threshold: TimeInterval = MeetingStall.threshold) -> Bool {
+        secondsSinceAudio > threshold
+    }
+}
+
 // MARK: - Файлы дорожек
 
-/// Две дорожки M4A с общей шкалой времени: звук системы и микрофон.
+/// Дорожки M4A кусками (`MeetingFiles`): звук системы и микрофон с общей шкалой времени.
 /// AVAudioFile пишет каждый кусок синхронно — ничего не теряется (AVAssetWriter в реальном
 /// времени пропускал куски, когда был занят, и речь распознавалась обрывками).
+/// Кусок закрывается каждые `MeetingChunking.seconds` секунд: M4A читается только закрытым,
+/// а закрытые куски переживают сбой.
 final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "macutils.meeting")
-    enum Track { case system, microphone }
+    enum Track {
+        case system, microphone
+        var name: String { self == .system ? MeetingFiles.systemTrack : MeetingFiles.micTrack }
+    }
 
-    private let urls: [Track: URL]
+    private let folder: URL
+    private let tracks: Set<Track>
     private var files: [Track: AVAudioFile] = [:]
+    private var framesInPart: [Track: Int64] = [:]
+    private var nextIndex: [Track: Int] = [:]
     private var start: CMTime?
+    /// Первый кусок этого писателя у дорожки уже начат (тишина в начале — только в нём, N1).
+    private var startedTracks: Set<Track> = []
+    /// Сколько секунд записано этим писателем по каждой дорожке (с тишиной в начале) и формат последнего буфера.
+    private var writtenSeconds: [Track: Double] = [:]
+    private var lastFormat: [Track: AVAudioFormat] = [:]
     private var finished = false
+    private var reportedFailure = false
+    private let lock = NSLock()
+    private var lastAudio = Date()
+    /// Поток остановился сам или запись на диск не удалась (диск полон).
+    var onFailure: (@Sendable (Error) -> Void)?
 
-    init(folder: URL, microphone: Bool) throws {
-        var urls: [Track: URL] = [.system: folder.appendingPathComponent("Собеседники.m4a")]
-        if microphone { urls[.microphone] = folder.appendingPathComponent("Я.m4a") }
-        self.urls = urls
+    init(folder: URL, microphone: Bool) {
+        self.folder = folder
+        tracks = microphone ? [.system, .microphone] : [.system]
         super.init()
+        for track in tracks { nextIndex[track] = MeetingFiles.nextPartIndex(in: folder, track: track.name) }
+    }
+
+    /// Сколько секунд от последнего буфера звука.
+    var secondsSinceAudio: TimeInterval {
+        lock.lock(); defer { lock.unlock() }
+        return Date().timeIntervalSince(lastAudio)
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -424,29 +751,46 @@ final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
 
     /// Вызывается на queue.
     func write(_ buffer: AVAudioPCMBuffer, at pts: CMTime, track type: Track) {
-        guard !finished, let url = urls[type] else { return }
+        guard !finished, tracks.contains(type) else { return }
+        lock.lock(); lastAudio = Date(); lock.unlock()
         if start == nil { start = pts }
         do {
             if files[type] == nil {
+                let index = nextIndex[type] ?? 1
+                nextIndex[type] = index + 1
                 let format = buffer.format
-                let file = try AVAudioFile(forWriting: url, settings: [
+                let file = try AVAudioFile(forWriting: MeetingFiles.partURL(folder: folder, track: type.name, index: index), settings: [
                     AVFormatIDKey: kAudioFormatMPEG4AAC,
                     AVSampleRateKey: format.sampleRate,
                     AVNumberOfChannelsKey: format.channelCount,
                     AVEncoderBitRateKey: 96_000,
                 ], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
                 files[type] = file
+                framesInPart[type] = 0
                 // Дорожка началась позже другой — дополняем тишиной, чтобы реплики совпадали по времени.
+                // В первом куске каждого писателя (после перезапуска потока — тоже); следующие продолжают без разрыва.
                 let lead = (pts - start!).seconds
-                if lead > 0.05, let silence = AVAudioPCMBuffer(pcmFormat: format,
-                                                               frameCapacity: AVAudioFrameCount(lead * format.sampleRate)) {
-                    silence.frameLength = silence.frameCapacity
-                    try file.write(from: silence)
+                if startedTracks.insert(type).inserted, lead > 0.05 {
+                    try Self.writeSilence(seconds: lead, format: format, to: file)
+                    writtenSeconds[type, default: 0] += lead
                 }
             }
             try files[type]?.write(from: buffer)
+            framesInPart[type, default: 0] += Int64(buffer.frameLength)
+            writtenSeconds[type, default: 0] += Double(buffer.frameLength) / buffer.format.sampleRate
+            lastFormat[type] = buffer.format
+            if MeetingChunking.shouldRotate(frames: framesInPart[type] ?? 0, sampleRate: buffer.format.sampleRate) {
+                // Освобождение закрывает файл и дописывает заголовок: кусок становится читаемым.
+                files[type] = nil
+                framesInPart[type] = 0
+            }
         } catch {
             Log.audio.error("Встреча: запись звука: \(error.localizedDescription, privacy: .public)")
+            // Диск полон или папка пропала: сообщаем один раз, запись не продолжится.
+            if !reportedFailure {
+                reportedFailure = true
+                onFailure?(error)
+            }
         }
     }
 
@@ -463,16 +807,61 @@ final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         Log.audio.error("Встреча: поток остановлен: \(error.localizedDescription, privacy: .public)")
+        onFailure?(error)
     }
 
     func finish() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.async {
                 self.finished = true
+                self.padShorterTrack()
                 // AVAudioFile закрывается и дописывает заголовок при освобождении.
                 self.files.removeAll()
                 continuation.resume()
             }
+        }
+    }
+
+    /// Дорожки этого писателя к концу разной длины (например, микрофон замолчал раньше обрыва): короткую дополняем
+    /// тишиной, иначе после перезапуска потока «Я» и «Собеседники» в склейке сдвинутся друг относительно друга (N1).
+    private func padShorterTrack() {
+        guard let longest = writtenSeconds.values.max() else { return }
+        for (track, seconds) in writtenSeconds {
+            let gap = MeetingAlignment.padding(written: seconds, longest: longest)
+            guard gap > 0, let format = lastFormat[track] else { continue }
+            do {
+                let file: AVAudioFile
+                if let open = files[track] {
+                    file = open
+                } else {
+                    let index = nextIndex[track] ?? 1
+                    nextIndex[track] = index + 1
+                    file = try AVAudioFile(forWriting: MeetingFiles.partURL(folder: folder, track: track.name, index: index), settings: [
+                        AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: format.sampleRate,
+                        AVNumberOfChannelsKey: format.channelCount, AVEncoderBitRateKey: 96_000,
+                    ], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+                    files[track] = file
+                }
+                try Self.writeSilence(seconds: gap, format: format, to: file)
+            } catch {
+                Log.audio.error("Встреча: выравнивание дорожек: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    private static func writeSilence(seconds: Double, format: AVAudioFormat, to file: AVAudioFile) throws {
+        // Кусками по секунде: тишина в несколько минут не должна занимать память одним буфером.
+        var left = AVAudioFrameCount(seconds * format.sampleRate)
+        let step = AVAudioFrameCount(format.sampleRate)
+        while left > 0 {
+            let frames = min(left, step)
+            guard let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return }
+            silence.frameLength = frames
+            for buffer in UnsafeMutableAudioBufferListPointer(silence.mutableAudioBufferList) {
+                if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
+            }
+            try file.write(from: silence)
+            left -= frames
         }
     }
 }
