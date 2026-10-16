@@ -137,6 +137,7 @@ final class BusyRegistryTests: XCTestCase {
         XCTAssertTrue(BusyRegistry.viewerIsConnected(.connecting))
         XCTAssertTrue(BusyRegistry.viewerIsConnected(.waiting))
         XCTAssertTrue(BusyRegistry.viewerIsConnected(.watching))
+        XCTAssertTrue(BusyRegistry.viewerIsConnected(.reconnecting(attempt: 1)), "переподключение — просмотр ещё идёт")
         XCTAssertFalse(BusyRegistry.viewerIsConnected(.idle))
         XCTAssertFalse(BusyRegistry.viewerIsConnected(.ended("Трансляция завершена")), "открытое окно с «завершена» ничего не держит")
     }
