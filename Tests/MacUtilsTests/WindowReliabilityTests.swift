@@ -214,6 +214,11 @@ final class WindowReliabilityTests: XCTestCase {
         XCTAssertNil(WindowDragRules.ownerUnder(CGPoint(x: 150, y: 150), windows: windows, ownPID: me, ownWindows: []))
     }
 
+    func testFloatingWindowOfOtherAppIsDraggable() {
+        let windows = [SW(number: 8, pid: 300, layer: 3, bounds: CGRect(x: 100, y: 100, width: 200, height: 200))]
+        XCTAssertEqual(WindowDragRules.ownerUnder(CGPoint(x: 150, y: 110), windows: windows, ownPID: me, ownWindows: []), 300)
+    }
+
     func testFrontmostForeignWindowWins() {
         let windows = [SW(number: 7, pid: 300, layer: 0, bounds: CGRect(x: 100, y: 100, width: 200, height: 200)),
                        SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 0, width: 800, height: 600))]

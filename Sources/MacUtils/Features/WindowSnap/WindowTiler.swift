@@ -494,6 +494,9 @@ enum WindowDragRules {
         }
     }
 
+    /// Обычные окна и окна «поверх всех» (kCGFloatingWindowLevel). Меню, Dock, строка меню и панели (≥ 8) не трогаем.
+    static let draggableLayers: Set<Int> = [Int(CGWindowLevelForKey(.normalWindow)), Int(CGWindowLevelForKey(.floatingWindow))]
+
     /// Программа, обычному окну которой достался клик (список окон — спереди назад). nil — клик не по чужому обычному окну:
     /// по нашему окну, меню, панели или вообще мимо. Прозрачные окна и наши окна, пропускающие мышь (тёплый экран,
     /// рисование «сквозь клики»), клик не забирают — смотрим под них.
@@ -504,7 +507,7 @@ enum WindowDragRules {
                 continue
             }
             if window.alpha <= 0 { continue }
-            return window.layer == 0 ? window.pid : nil
+            return draggableLayers.contains(window.layer) ? window.pid : nil
         }
         return nil
     }
