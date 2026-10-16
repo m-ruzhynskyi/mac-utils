@@ -1207,3 +1207,45 @@ test('N5: в required POST /status с mu-share-1 → 426', async () => {
   assert.equal((await postStatus(w, statusBody(OWNER, { id: ROOM, ids: [] }), { token: V1 })).status, 426);
   assert.equal((await postStatus(w, statusBody(OWNER, { id: ROOM, ids: [] }))).status, 200);
 });
+
+// ---- GET /room/<ID>/host-check: причина отказа ведущему без WebSocket (страница relay) ----
+const hostCheck = (w, id, { token = V1, ip, env, method = 'GET' } = {}) => w.worker(new Request(`https://relay.example/room/${id}/host-check`, {
+  method, headers: { ...(token ? { 'x-macutils-client': token } : {}), ...(ip ? { 'CF-Connecting-IP': ip } : {}) },
+}), env);
+
+test('host-check: свободный ID — ok', async () => {
+  const w = world();
+  const res = await hostCheck(w, ROOM);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true });
+});
+
+test('host-check: ID привязан к ключу — id-claimed для клиента без ключа, ok для mu-share-2', async () => {
+  const w = world();
+  const host = await hostLogin(w);
+  w.f(ROOM).room.webSocketClose(host, 1000);
+  assert.deepEqual(await (await hostCheck(w, ROOM)).json(), { error: 'id-claimed' });
+  assert.deepEqual(await (await hostCheck(w, ROOM, { token: V2 })).json(), { ok: true });
+});
+
+test('host-check: идёт трансляция без ключа — busy; AUTH_MODE=off не знает владельцев', async () => {
+  const w = world();
+  const { res } = await connect(w, 'host', ROOM, { token: V1 });
+  assert.equal(res.status, 101);
+  assert.deepEqual(await (await hostCheck(w, ROOM)).json(), { error: 'busy' });
+  const owned = world();
+  const host = await hostLogin(owned);
+  owned.f(ROOM).room.webSocketClose(host, 1000);
+  owned.env.AUTH_MODE = 'off';
+  assert.deepEqual(await (await hostCheck(owned, ROOM)).json(), { ok: true });
+});
+
+test('host-check: без заголовка клиента 403, не GET 405, старый клиент при required 426, лимит подключений 429', async () => {
+  const w = world();
+  assert.equal((await hostCheck(w, ROOM, { token: null })).status, 403);
+  assert.equal((await hostCheck(w, ROOM, { method: 'POST' })).status, 405);
+  assert.equal((await hostCheck(w, ROOM, { env: { ...w.env, AUTH_MODE: 'required' } })).status, 426);
+  const limitedEnv = { ...w.env, RL_CONNECT: { limit: async ({ key }) => ({ success: key !== '6.6.6.6' }) } };
+  assert.equal((await hostCheck(w, ROOM, { ip: '6.6.6.6', env: limitedEnv })).status, 429);
+  assert.equal((await hostCheck(w, ROOM, { ip: '7.7.7.7', env: limitedEnv })).status, 200);
+});

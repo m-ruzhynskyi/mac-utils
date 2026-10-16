@@ -854,7 +854,7 @@ async function share() {
   // Звук системы просим, только если он нужен (в приложении для Windows звук без выбранных программ идёт отдельно).
   const wantAudio = window.mu ? $("withAudio").checked && !useHelperAudio : true;
   let stream = null, failure = null;
-  for (const constraints of [{ video: { frameRate: 30 }, audio: wantAudio }, { video: true, audio: wantAudio }, { video: true, audio: false }]) {
+  for (const constraints of [{ video: { frameRate: { ideal: 30, max: 30 } }, audio: wantAudio }, { video: true, audio: wantAudio }, { video: true, audio: false }]) {
     try { stream = await navigator.mediaDevices.getDisplayMedia(constraints); break; }
     catch (error) {
       failure = error;
@@ -864,8 +864,25 @@ async function share() {
   }
   if (!stream) return status(`Трансляция не началась${failure ? ` (${failure.name}: ${failure.message})` : ""}`);
   const ok = await openHost(myId);
-  if (!ok) { stream.getTracks().forEach((t) => t.stop()); return status("С вашим ID уже идёт трансляция или нет связи с сервером"); }
+  if (!ok) { stream.getTracks().forEach((t) => t.stop()); return explainHostFailure(); }
   startCapture(stream, myId);
+}
+
+// Почему relay не пустил ведущего: WebSocket причины не отдаёт, поэтому спрашиваем лёгким GET (без подключения).
+async function explainHostFailure() {
+  let reason = null;
+  try {
+    const res = await fetch(`/room/${myId}/host-check`, { cache: "no-store" });
+    if (res.status === 429) return status("Слишком много попыток подряд. Подождите минуту и попробуйте снова.");
+    if (res.ok) reason = (await res.json()).error || "ok";
+  } catch (_) {}
+  if (reason === "id-claimed") {
+    status("Этот ID привязан к ключу устройства из прежней версии приложения. Получите новый ID — трансляция сразу заработает; новый ID сообщите тем, кто вас смотрит.");
+    return offerNewId(true);
+  }
+  if (reason === "busy") return status("С вашим ID уже идёт трансляция (другое окно/компьютер). Остановите её там или получите новый ID.");
+  if (reason === "ok") return status("Не удалось начать трансляцию. Попробуйте ещё раз.");
+  status("Нет связи с сервером: проверьте интернет/VPN и попробуйте снова.");
 }
 
 // hostAuth: null — relay не спрашивал ключ (legacy); {keyed, fp} после `authed` (keyed false при AUTH_MODE=off).
@@ -900,7 +917,7 @@ function hostClosed(code, event) {
   reconnectHost(code);
 }
 
-function offerNewId() {
+function offerNewId(restart = false) {
   if (idFromApp && !(window.mu && typeof window.mu.resetId === "function")) return;
   $("status").insertAdjacentHTML("beforeend", '<br><button id="newId" style="margin-top:8px">Получить новый ID</button>');
   $("newId").onclick = async () => {
@@ -911,6 +928,8 @@ function offerNewId() {
       next = generateId();
     }
     myId = next; store.set("mu-id", myId); $("myId").textContent = display(myId);
+    $("myId").textContent = display(myId);
+    if (restart) { status(`Новый ID: ${display(myId)}. Сообщите его зрителям.`); return share(); }
     status(`Новый ID: ${display(myId)}. Сообщите его зрителям и начните трансляцию снова.`);
   };
 }
@@ -992,25 +1011,27 @@ function startCapture(stream, code) {
   // Видео H.264 через аппаратный кодек (WebCodecs), как в Discord; нет кодека — кадры JPEG.
   let encoder = null, frameIndex = 0, encodedSize = "";
   // Скорость под сеть: очередь в сокете растёт — снижаем, свободно — поднимаем.
-  let bitrate = 3_000_000, encodedBitrate = 0, lastAdapt = 0;
+  let bitrate = 4_000_000, encodedBitrate = 0, lastAdapt = 0, lastKey = 0;
   forceKey = true;
   const canEncode = typeof VideoEncoder !== "undefined";
-  const timer = setInterval(() => {
-    if (!hostSocket || hostSocket.readyState !== 1 || !video.videoWidth) { forceKey = true; return; }
+  // Кадр из захвата (VideoFrame или <video>) → холст до 1920 по длинной стороне → кодер.
+  const tick = (source, sourceWidth, sourceHeight) => {
+    if (!hostSocket || hostSocket.readyState !== 1 || !sourceWidth) { forceKey = true; return; }
     const now = performance.now(), queued = hostSocket.bufferedAmount;
     if (queued > 250_000 && now - lastAdapt > 500) { bitrate = Math.max(700_000, bitrate * 0.7); lastAdapt = now; }
-    else if (queued < 60_000 && now - lastAdapt > 2000 && bitrate < 6_000_000) { bitrate = Math.min(6_000_000, bitrate * 1.15); lastAdapt = now; }
+    else if (queued < 60_000 && now - lastAdapt > 2000 && bitrate < 8_000_000) { bitrate = Math.min(8_000_000, bitrate * 1.15); lastAdapt = now; }
     // Больше ~1 с в очереди — пропускаем кадры, потом начинаем с ключевого.
     if (queued > Math.max(400_000, bitrate / 8)) { forceKey = true; return; }
-    const scale = Math.min(1, 1600 / video.videoWidth);
-    canvas.width = Math.round(video.videoWidth * scale / 2) * 2;
-    canvas.height = Math.round(video.videoHeight * scale / 2) * 2;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // До 1920 по длинной стороне (как на Mac); уровень кодека 5.0 (4D4032) — 4.0 не принимает 1920×1200 и выше.
+    const scale = Math.min(1, 1920 / Math.max(sourceWidth, sourceHeight));
+    canvas.width = Math.round(sourceWidth * scale / 2) * 2;
+    canvas.height = Math.round(sourceHeight * scale / 2) * 2;
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
     if (canEncode) {
       const size = `${canvas.width}x${canvas.height}`;
       if (encoder && encoder.state === "configured" && size === encodedSize && Math.abs(bitrate - encodedBitrate) > encodedBitrate * 0.2) {
         encodedBitrate = bitrate;
-        encoder.configure({ codec: "avc1.4D4028", width: canvas.width, height: canvas.height, bitrate: Math.round(bitrate), framerate: 30,
+        encoder.configure({ codec: "avc1.4D4032", width: canvas.width, height: canvas.height, bitrate: Math.round(bitrate), framerate: 30,
                             latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: "prefer-hardware" });
         forceKey = true;
       }
@@ -1028,13 +1049,14 @@ function startCapture(stream, code) {
           error: () => { encoder = null; },
         });
         encodedBitrate = bitrate;
-        encoder.configure({ codec: "avc1.4D4028", width: canvas.width, height: canvas.height, bitrate: Math.round(bitrate), framerate: 30,
+        encoder.configure({ codec: "avc1.4D4032", width: canvas.width, height: canvas.height, bitrate: Math.round(bitrate), framerate: 30,
                             latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: "prefer-hardware" });
       }
       if (encoder.encodeQueueSize > 2) return;
       const frame = new VideoFrame(canvas, { timestamp: Math.round(performance.now() * 1000) });
-      encoder.encode(frame, { keyFrame: forceKey || frameIndex % 120 === 0 });
-      frame.close(); forceKey = false; frameIndex++;
+      const keyFrame = forceKey || now - lastKey > 4000;
+      encoder.encode(frame, { keyFrame });
+      frame.close(); if (keyFrame) lastKey = now; forceKey = false; frameIndex++;
       return;
     }
     canvas.toBlob(async (blob) => {
@@ -1044,7 +1066,32 @@ function startCapture(stream, code) {
       packet[0] = 1; packet.set(body, 1);
       hostSocket.send(packet);
     }, "image/jpeg", 0.55);
-  }, canEncode ? 33 : 125);
+  };
+  // Кадры берём по мере прихода от захвата (до 30/с), а не по таймеру; нет MediaStreamTrackProcessor — таймер, как раньше.
+  const timer = { cancel() {} };
+  const videoTrack = stream.getVideoTracks()[0];
+  if (canEncode && typeof MediaStreamTrackProcessor !== "undefined") {
+    let running = true, lastFrameAt = 0;
+    const reader = new MediaStreamTrackProcessor({ track: videoTrack }).readable.getReader();
+    // Статичный экран: захват может не присылать кадров, а новому зрителю нужен ключевой — берём кадр из <video>.
+    const keepAlive = setInterval(() => {
+      if (forceKey && performance.now() - lastFrameAt > 500) tick(video, video.videoWidth, video.videoHeight);
+    }, 500);
+    timer.cancel = () => { running = false; clearInterval(keepAlive); reader.cancel().catch(() => {}); };
+    (async () => {
+      try {
+        while (running) {
+          const { value: frame, done } = await reader.read();
+          if (done) break;
+          lastFrameAt = performance.now();
+          try { tick(frame, frame.displayWidth, frame.displayHeight); } finally { frame.close(); }
+        }
+      } catch (_) {}
+    })();
+  } else {
+    const interval = setInterval(() => tick(video, video.videoWidth, video.videoHeight), canEncode ? 33 : 125);
+    timer.cancel = () => clearInterval(interval);
+  }
   let audioContext = null;
   $("muteButton").style.display = useHelperAudio && window.mu.setMuted ? "" : "none";
   if (useHelperAudio) {
@@ -1135,7 +1182,7 @@ function stopHost(message) {
   $("muteButton").style.display = "none"; $("mutePanel").style.display = "none";
   if (game.peer !== "host") gamePeerGone();
   if (capture) {
-    clearInterval(capture.timer);
+    capture.timer.cancel();
     capture.stream.getTracks().forEach((t) => t.stop());
     capture.audioContext?.close();
     capture = null;
