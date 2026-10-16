@@ -167,6 +167,13 @@ final class SettingsSearchTests: XCTestCase {
         XCTAssertTrue(SettingsSearch.filter(SettingsSection.allCases, query: "распознать текст").contains(.screenshot),
                       "название сочетания из реестра")
         XCTAssertEqual(SettingsSearch.filter(SettingsSection.allCases, query: "ghbdtn"), [.layout])
+        XCTAssertTrue(SettingsSearch.filter(SettingsSection.allCases, query: "parallels").contains(.exclusions))
+        XCTAssertTrue(SettingsSearch.filter(SettingsSection.allCases, query: "удалённый рабочий стол").contains(.exclusions))
+        XCTAssertTrue(SettingsSearch.filter(SettingsSection.allCases, query: "исключения").contains(.exclusions))
+        for section in SettingsSection.allCases {
+            XCTAssertFalse(section.title.isEmpty); XCTAssertFalse(section.panelTitle.isEmpty)
+            XCTAssertFalse(section.symbol.isEmpty); XCTAssertFalse(section.keywords.isEmpty)
+        }
         XCTAssertTrue(SettingsSearch.filter(SettingsSection.allCases, query: "zzzz несуществующее").isEmpty)
     }
 }

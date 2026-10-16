@@ -413,7 +413,7 @@ final class ScreenShareV2Tests: XCTestCase {
     }
 
     func testBusyMessageBlamesKeychainWhenKeyIsUnavailable() {
-        XCTAssertTrue(ShareErrorText.busyMessage(keychainUnavailable: true).contains("Связке ключей"))
+        XCTAssertTrue(ShareErrorText.busyMessage(keychainUnavailable: true).contains("ключу трансляции"))
         XCTAssertTrue(ShareErrorText.busyMessage(keychainUnavailable: false).contains("уже идёт трансляция"))
     }
 }

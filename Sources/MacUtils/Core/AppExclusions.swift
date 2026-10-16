@@ -107,15 +107,29 @@ final class AppExclusions: ObservableObject {
     }
 }
 
-/// Раздел настроек «Исключённые программы».
+/// Страница настроек «Исключённые программы»: объяснение и список.
+struct ExclusionsPage: View {
+    var body: some View {
+        Form {
+            Section {
+                Text("В этих программах Mac Utils не перехватывает клавиши и колесо мыши: не работают переключатель окон ⌥Tab, подсказки при удержании ⌘, плавная прокрутка и исправление раскладки.")
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Это нужно для виртуальных машин (Parallels, VMware, UTM) и удалённых рабочих столов (Общий экран, Microsoft Remote Desktop, TeamViewer, AnyDesk): они сами передают клавиатуру в другую систему, и перехват Mac Utils им мешает. Если таких программ у вас нет, здесь ничего менять не нужно.")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            ExcludedAppsSection()
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Список исключённых программ с кнопками (на странице «Исключённые программы»).
 struct ExcludedAppsSection: View {
     @ObservedObject private var exclusions = AppExclusions.shared
     @State private var running: [NSRunningApplication] = []
 
     var body: some View {
-        Section("Исключённые программы") {
-            Text("В этих программах переключатель окон, подсказки по ⌘, плавная прокрутка и исправление раскладки не перехватывают клавиши и колесо: виртуальные машины и удалённые рабочие столы сами их забирают.")
-                .font(.caption).foregroundStyle(.secondary)
+        Section("Список") {
             ForEach(exclusions.list, id: \.self) { entry in
                 HStack {
                     Image(systemName: "rectangle.on.rectangle.slash").foregroundStyle(.secondary)
