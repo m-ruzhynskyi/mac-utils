@@ -72,6 +72,53 @@ enum H264Packet {
     }
 }
 
+/// Параметры видео трансляции Mac-ведущего: размер, скорость, ключевые кадры (чистые функции — для тестов).
+enum ShareVideo {
+    /// Не больше 1920 точек по длинной стороне: текст на экране читаем, поток по силам сети.
+    static let maxDimension: CGFloat = 1920
+    static let minBitrate = 700_000
+    static let startBitrate = 4_000_000
+    static let maxBitrate = 8_000_000
+    static let frameRate = 30
+    /// Ключевой кадр — не реже раза в ~4 с: новый зритель и потерянный кадр восстанавливаются быстро.
+    static let keyFrameSeconds = 4
+    /// Самый крупный кадр, байт: ретранслятор (Cloudflare) пересылает сообщения WebSocket до 1 МиБ — с запасом.
+    static let maxFrameBytes = 700_000
+
+    /// Размер потока по размеру захватываемой области в пикселях: пропорции сохраняются, стороны чётные (нужно H.264).
+    static func streamSize(pixelWidth: CGFloat, pixelHeight: CGFloat) -> (width: Int, height: Int) {
+        let scale = min(1, maxDimension / max(pixelWidth, 1), maxDimension / max(pixelHeight, 1))
+        return (max(2, Int(pixelWidth * scale) / 2 * 2), max(2, Int(pixelHeight * scale) / 2 * 2))
+    }
+
+    /// `DataRateLimits` (пары «байт, секунд»): в среднем не больше 1,5× скорости за секунду (без всплесков,
+    /// которые забивают сеть), и ни один кадр не больше `maxFrameBytes` (короткое окно 0,1 с).
+    static func dataRateLimits(bitrate: Int) -> [Double] {
+        [Double(bitrate * 3 / 2 / 8), 1, Double(maxFrameBytes), 0.1]
+    }
+
+    /// Профиль: High лучше сохраняет мелкий текст при той же скорости — только у аппаратного кодера
+    /// (программный High медленный); иначе Main, как раньше.
+    static func profile(hardware: Bool) -> CFString {
+        hardware ? kVTProfileLevel_H264_High_AutoLevel : kVTProfileLevel_H264_Main_AutoLevel
+    }
+
+    /// Подстройка скорости под сеть (как в Discord): очередь неотправленного растёт — снижаем, свободно — поднимаем.
+    /// Пороги очереди растут вместе со скоростью: на 8 Мбит/с один ключевой кадр уже больше прежних 250 КБ.
+    /// nil — оставить как есть.
+    static func adaptedBitrate(current: Int, pendingBytes: Int, secondsSinceLast: TimeInterval) -> Int? {
+        let high = max(250_000, current / 8 / 2)   // больше ~0,5 с данных в очереди (на 4 Мбит/с — прежние 250 КБ)
+        let low = max(60_000, current / 8 / 8)     // меньше ~1/8 с
+        if pendingBytes > high, secondsSinceLast > 0.5 {
+            return max(minBitrate, current * 7 / 10)
+        }
+        if pendingBytes < low, secondsSinceLast > 2, current < maxBitrate {
+            return min(maxBitrate, current * 23 / 20)
+        }
+        return nil
+    }
+}
+
 /// Аппаратное кодирование кадров экрана в H.264.
 final class H264Encoder: @unchecked Sendable {
     private var session: VTCompressionSession?
@@ -86,7 +133,9 @@ final class H264Encoder: @unchecked Sendable {
     func requestKeyFrame() { forceKey = true }
 
     /// Скорость потока, бит/с: подстраивается под сеть (см. FrameSender).
-    private(set) var bitrate = 3_000_000
+    private(set) var bitrate = ShareVideo.startBitrate
+    /// Выбранный профиль (для журнала и проверки): High при аппаратном кодере, иначе Main.
+    private(set) var profile: CFString?
 
     func setBitrate(_ value: Int) {
         guard value != bitrate else { return }
@@ -96,9 +145,9 @@ final class H264Encoder: @unchecked Sendable {
 
     private static func applyBitrate(_ value: Int, to session: VTCompressionSession) {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: value as CFTypeRef)
-        // Жёсткий предел на секунду: без всплесков, которые забивают сеть и копят задержку.
-        let limit = [value * 3 / 2 / 8, 1] as CFArray
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: limit)
+        // Жёсткие пределы: без всплесков, которые забивают сеть и копят задержку, и без кадров крупнее предела relay.
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits,
+                             value: ShareVideo.dataRateLimits(bitrate: value) as CFArray)
     }
 
     func encode(_ pixels: CVPixelBuffer, at time: CMTime) {
@@ -124,16 +173,30 @@ final class H264Encoder: @unchecked Sendable {
               let created else { return }
         let properties: [CFString: Any] = [
             kVTCompressionPropertyKey_RealTime: true,
-            kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_Main_AutoLevel,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
-            kVTCompressionPropertyKey_ExpectedFrameRate: 30,
-            kVTCompressionPropertyKey_MaxKeyFrameInterval: 120,
-            kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: 4,
+            kVTCompressionPropertyKey_ExpectedFrameRate: ShareVideo.frameRate,
+            kVTCompressionPropertyKey_MaxKeyFrameInterval: ShareVideo.frameRate * ShareVideo.keyFrameSeconds,
+            kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: ShareVideo.keyFrameSeconds,
             // Кадр уходит сразу, без очереди внутри кодека.
             kVTCompressionPropertyKey_MaxFrameDelayCount: 0,
             kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality: true,
         ]
         for (key, value) in properties { VTSessionSetProperty(created, key: key, value: value as CFTypeRef) }
+        // High — только если кодек аппаратный и принял профиль; иначе Main (как раньше). Зрители (страница, Windows,
+        // Mac) берут профиль из SPS в потоке, их настраивать не нужно.
+        let usingHardware = UnsafeMutablePointer<CFTypeRef?>.allocate(capacity: 1)
+        usingHardware.initialize(to: nil)
+        defer { usingHardware.deinitialize(count: 1); usingHardware.deallocate() }
+        let hardware = VTSessionCopyProperty(created, key: kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder,
+                                             allocator: nil, valueOut: usingHardware) == noErr
+            && (usingHardware.pointee as? Bool) == true
+        var chosen = ShareVideo.profile(hardware: hardware)
+        if VTSessionSetProperty(created, key: kVTCompressionPropertyKey_ProfileLevel, value: chosen) != noErr {
+            chosen = kVTProfileLevel_H264_Main_AutoLevel
+            VTSessionSetProperty(created, key: kVTCompressionPropertyKey_ProfileLevel, value: chosen)
+        }
+        profile = chosen
+        Log.capture.info("Трансляция: H.264 \(width)×\(height), \(hardware ? "аппаратно" : "программно", privacy: .public), профиль \(chosen == kVTProfileLevel_H264_High_AutoLevel ? "High" : "Main", privacy: .public)")
         Self.applyBitrate(bitrate, to: created)
         VTCompressionSessionPrepareToEncodeFrames(created)
         session = created
@@ -149,27 +212,53 @@ final class H264Encoder: @unchecked Sendable {
     deinit { invalidate() }
 }
 
-/// Показ H.264 у зрителя: AVSampleBufferDisplayLayer декодирует аппаратно.
-@MainActor
-final class H264Player: ObservableObject {
+/// Показ H.264 у зрителя: AVSampleBufferDisplayLayer декодирует аппаратно. Пакеты разбираются и попадают в слой
+/// на своей последовательной очереди — главный поток (интерфейс, другие окна) не влияет на плавность.
+/// `size` публикуется на главном потоке.
+final class H264Player: ObservableObject, @unchecked Sendable {
     let layer = AVSampleBufferDisplayLayer()
     @Published private(set) var size: CGSize?
+    private let queue = DispatchQueue(label: "macutils.share.video", qos: .userInteractive)
+    // Состояние разбора — только на `queue`.
     private var format: CMVideoFormatDescription?
     private var sps: Data?
     private var pps: Data?
+    /// Сокет, чьи пакеты показываем: пакеты оборванного соединения отбрасываются.
+    private let sourceLock = NSLock()
+    private var source: AnyObject?
 
     init() {
         layer.videoGravity = .resizeAspect
         layer.backgroundColor = NSColor.black.cgColor
     }
 
-    func reset() {
-        layer.flushAndRemoveImage()
-        format = nil
-        size = nil
+    /// Показывать пакеты этого соединения (nil — никакого). Последний кадр остаётся на экране.
+    func attach(_ socket: AnyObject?) {
+        sourceLock.lock()
+        source = socket
+        sourceLock.unlock()
     }
 
-    func play(_ payload: Data) {
+    /// Новый просмотр: убрать картинку и формат. Вызывается с главного потока.
+    func reset() {
+        size = nil
+        queue.async {
+            self.layer.flushAndRemoveImage()
+            self.format = nil
+        }
+    }
+
+    /// Пакет видео от `socket` (с любого потока): разбор и показ — на очереди проигрывателя.
+    func play(_ payload: Data, from socket: AnyObject) {
+        sourceLock.lock()
+        let current = source === socket
+        sourceLock.unlock()
+        guard current else { return }
+        queue.async { self.decodeAndShow(payload) }
+    }
+
+    /// Вызывается на `queue`.
+    private func decodeAndShow(_ payload: Data) {
         guard payload.count > 1 else { return }
         let units = H264Packet.units(payload.dropFirst())
         var frame: [Data] = []
@@ -205,10 +294,12 @@ final class H264Player: ObservableObject {
             CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
                                  Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
         }
+        // `enqueue` можно звать с отдельной последовательной очереди (не обязательно с главной).
         if layer.status == .failed { layer.flush() }
         layer.enqueue(sample)
     }
 
+    /// Вызывается на `queue`.
     private func makeFormat(sps: Data, pps: Data) {
         var created: CMVideoFormatDescription?
         let status = sps.withUnsafeBytes { spsBytes in
@@ -224,7 +315,8 @@ final class H264Player: ObservableObject {
         if let format, CMFormatDescriptionEqual(format, otherFormatDescription: created) { return }
         format = created
         let dimensions = CMVideoFormatDescriptionGetDimensions(created)
-        size = CGSize(width: CGFloat(dimensions.width), height: CGFloat(dimensions.height))
+        let newSize = CGSize(width: CGFloat(dimensions.width), height: CGFloat(dimensions.height))
+        DispatchQueue.main.async { if self.size != newSize { self.size = newSize } }
     }
 }
 

@@ -197,6 +197,17 @@ export default {
       const ids = (url.searchParams.get("ids") || "").split(",").filter((id) => ID10.test(id)).slice(0, STATUS_MAX_IDS);
       return liveStatus(env, ids);
     }
+    // GET /room/<ID>/host-check: страница узнаёт причину отказа ведущему без WebSocket. Лимит тот же, что у подключений.
+    const check = url.pathname.match(/^\/room\/(\d+)\/host-check$/);
+    if (check && ID.test(check[1])) {
+      if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
+      if (!token) return new Response("Use the Mac Utils app", { status: 403 });
+      if (mode === "required" && token !== CLIENT_V2) return new Response("Update Mac Utils", { status: 426 });
+      if (await limited(env.RL_CONNECT, ip)) return jsonError("rate-limited", 429);
+      const headers = new Headers(request.headers);
+      headers.set("x-relay-ip", ip);
+      return env.ROOMS.get(env.ROOMS.idFromName(check[1])).fetch(new Request(request, { headers }));
+    }
     if (!room || !ID.test(room[1])) {
       return new Response(isClient(request) ? page : landing, {
         headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
@@ -237,6 +248,7 @@ export class Room {
     const hosts = this.activeHosts();
     if (hosts.length) await this.ensureAlarm();
     if (url.pathname === "/live") return new Response(hosts.length > 0 ? "1" : "0", { headers: { "x-relay-revision": "auth-v2-1" } });
+    if (request.method === "GET" && /^\/room\/\d+\/host-check$/.test(url.pathname)) return this.hostCheck(hosts.length > 0, clientToken(request) === CLIENT_V2 && authMode(this.env) !== "off", authMode(this.env));
 
     const mode = authMode(this.env);
     const token = clientToken(request);
@@ -293,6 +305,15 @@ export class Room {
   }
 
   // ---- Владелец ID (ключ в хранилище комнаты) ----
+
+  // Те же отказы, что у host-подключения без ключа (mu-share-1): занято окном — busy, ID привязан к ключу — id-claimed.
+  // С mu-share-2 привязанный ID не отказ: ведущий докажет владение ключом.
+  async hostCheck(busy, v2, mode) {
+    const headers = { "cache-control": "no-store" };
+    if (busy && !v2) return Response.json({ error: "busy" }, { headers });
+    if (!v2 && mode !== "off" && await this.readOwner()) return Response.json({ error: "id-claimed" }, { headers });
+    return Response.json({ ok: true }, { headers });
+  }
 
   async readOwner() {
     const owner = await this.state.storage.get("owner");
