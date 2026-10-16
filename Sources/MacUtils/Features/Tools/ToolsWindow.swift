@@ -61,7 +61,7 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
         showWindow()
     }
 
-    /// Полное окно 1000×660 — даже когда есть значок в строке меню (кнопка «Открыть в окне», ⌥-клик по значку).
+    /// Полное окно 1000×660 — даже когда есть значок в строке меню (⌥-клик по значку в строке меню).
     func showWindow() {
         AppStatusItem.shared.closeTools()
         let window = self.window ?? make()
@@ -212,9 +212,6 @@ struct ToolsView: View {
             IconButton("Тёплый экран: включить или выключить вручную", systemImage: warmOn ? "sun.horizon.fill" : "sun.horizon",
                        active: warmOn) {
                 WarmScreen.shared.toggleManual()
-            }
-            IconButton("Открыть в окне (то же — ⌥-клик по значку)", systemImage: "macwindow") {
-                ToolsWindowController.shared.showWindow()
             }
             IconButton("Настройки Mac Utils (\(HotKeyRegistry.combo(for: .settings).title))", systemImage: "gearshape") {
                 AppStatusItem.shared.closeTools()
