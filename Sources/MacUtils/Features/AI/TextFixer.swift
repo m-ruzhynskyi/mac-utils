@@ -87,15 +87,33 @@ final class TextFixer {
 
     func sync() {
         let center = HotKeyCenter.shared
-        center.unregister(id: HotKeyID.fixText)
-        guard Ollama.isOn(Pref.aiFixText) else { return }
+        guard Ollama.isOn(Pref.aiFixText) else {
+            center.unregister(id: HotKeyID.fixText)
+            return
+        }
         center.register(id: HotKeyID.fixText, keyCode: kVK_ANSI_E, modifiers: controlKey | optionKey) {
             TextFixer.shared.fix()
         }
     }
 
+    /// Почему ⌃⌥E сейчас не сработает (nil — можно). Secure Input включают поля паролей и некоторые терминалы:
+    /// в них macOS не отдаёт выделение и не принимает вставку от других программ.
+    nonisolated static func blockedMessage(secureInput: Bool) -> String? {
+        secureInput ? "В этом поле исправление недоступно (защищённый ввод — пароль или терминал)" : nil
+    }
+
+    /// ⌘Z шлём, только если пользователь всё ещё в той программе, куда вставили текст: иначе отменится чужое действие.
+    nonisolated static func canUndo(pastedIn: pid_t?, frontmost: pid_t?) -> Bool {
+        guard let pastedIn, let frontmost else { return false }
+        return pastedIn == frontmost
+    }
+
     func fix() {
-        guard !busy, !IsSecureEventInputEnabled() else { return }
+        guard !busy else { return }
+        if let message = Self.blockedMessage(secureInput: IsSecureEventInputEnabled()) {
+            Toast.show(message, symbol: "lock.fill", tint: .orange)
+            return
+        }
         busy = true
         task = Task {
             defer { busy = false; task = nil }
@@ -130,7 +148,13 @@ final class TextFixer {
                 switch decision {
                 case .paste:
                     await Self.paste(fixed)
+                    let pastedIn = NSWorkspace.shared.frontmostApplication?.processIdentifier
                     Toast.show("Текст исправлен", symbol: "sparkles", tint: .purple, action: Toast.Action(title: "Отменить") {
+                        guard Self.canUndo(pastedIn: pastedIn, frontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier) else {
+                            Toast.show("Вы перешли в другую программу — отмените вставку там (⌘Z)",
+                                       symbol: "exclamationmark.triangle.fill", tint: .orange)
+                            return
+                        }
                         Self.undo()
                     })
                 case .clipboard(let reason):

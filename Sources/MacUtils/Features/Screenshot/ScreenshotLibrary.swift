@@ -93,6 +93,11 @@ final class ScreenshotLibrary: ObservableObject {
         return support.appendingPathComponent("screenshots.json")
     }
 
+    /// Для тестов и снимков интерфейса: готовые записи, индекс на диске не читается.
+    init(records: [ShotRecord]) {
+        self.records = records
+    }
+
     private init() {
         if let data = try? Data(contentsOf: Self.indexURL),
            let decoded = try? JSONDecoder().decode([ShotRecord].self, from: data) {

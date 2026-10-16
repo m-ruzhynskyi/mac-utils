@@ -47,7 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if plan.offerMove { DispatchQueue.main.async { MoveToApplications.offerIfNeeded() } }
         // Модель не грузим заранее: она держит ~5 ГБ памяти; загрузится при первом запросе.
         Updater.shared.start()
-        ToolsLauncher.installIfNeeded()
+        // Спрашиваем не посреди запуска (там и так «Перенести?»/разрешения), а чуть позже.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { MainActor.assumeIsolated { ToolsLauncher.start() } }
 
         // Пока нет доступа к «Универсальному доступу», периодически проверяем:
         // как только пользователь выдаст разрешение, утилиты включатся сами.

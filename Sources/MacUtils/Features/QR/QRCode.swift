@@ -74,6 +74,26 @@ enum QRTools {
         return max(1, Int((maxPoints / CGFloat(side)).rounded(.down)))
     }
 
+    /// Wi-Fi QR: `WIFI:T:WPA;S:сеть;P:пароль;;`.
+    static func isWiFi(_ payload: String) -> Bool { payload.uppercased().hasPrefix("WIFI:") }
+
+    /// Текст для показа на экране: у Wi-Fi QR пароль (`P:…`, с экранированием `\;`) заменён точками.
+    static func masked(_ payload: String) -> String {
+        guard isWiFi(payload) else { return payload }
+        var fields: [String] = []
+        var current = ""
+        var escaped = false
+        for ch in payload.dropFirst(5) {
+            if escaped { current.append(ch); escaped = false; continue }
+            if ch == "\\" { current.append(ch); escaped = true; continue }
+            if ch == ";" { fields.append(current); current = ""; continue }
+            current.append(ch)
+        }
+        if !current.isEmpty { fields.append(current) }
+        let hidden = fields.map { $0.uppercased().hasPrefix("P:") ? "P:••••" : $0 }
+        return payload.prefix(5) + hidden.joined(separator: ";") + ";;"
+    }
+
     /// Все QR (и другие 2D-коды) на картинке.
     static func detect(in image: CGImage) -> [String] {
         let request = VNDetectBarcodesRequest()
@@ -99,8 +119,8 @@ final class QRCodeService: ObservableObject {
 
     func sync() {
         let center = HotKeyCenter.shared
-        center.unregister(id: HotKeyID.qr)
         guard UserDefaults.standard.bool(forKey: Pref.qr) else {
+            center.unregister(id: HotKeyID.qr)
             hide()
             return
         }
@@ -177,8 +197,13 @@ final class QRCodeService: ObservableObject {
         guard let first = found.first else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(found.joined(separator: "\n"), forType: .string)
+        // Пароль Wi-Fi: менеджеры буфера обмена такое не запоминают.
+        if found.contains(where: QRTools.isWiFi) {
+            NSPasteboard.general.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        }
         let link = URL(string: first).flatMap { ["http", "https", "mailto", "tel"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
-        let preview = first.count > 60 ? String(first.prefix(57)) + "…" : first
+        let shown = QRTools.masked(first)
+        let preview = shown.count > 60 ? String(shown.prefix(57)) + "…" : shown
         let title = found.count > 1 ? "QR (\(found.count)) скопированы: \(preview)" : "QR скопирован: \(preview)"
         Toast.show(title, symbol: "qrcode.viewfinder", tint: .green,
                    action: link.map { url in Toast.Action(title: "Открыть") { NSWorkspace.shared.open(url) } })
