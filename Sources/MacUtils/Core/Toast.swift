@@ -7,14 +7,22 @@ enum Toast {
     private static var panel: NSPanel?
     private static var generation = 0
 
+    /// Убрать текущее уведомление (например, «Исправляю…» после ответа).
+    static func dismiss() {
+        generation += 1
+        panel?.orderOut(nil)
+        panel = nil
+    }
+
     /// Кнопка в уведомлении, например «Показать в Finder».
     struct Action {
         let title: String
         let handler: @MainActor () -> Void
     }
 
+    /// `sticky` — уведомление висит, пока его не заменят или не вызовут `dismiss()` (долгая операция с кнопкой «Отмена»).
     static func show(_ text: String, symbol: String = "checkmark.circle.fill", tint: Color = .green,
-                     action: Action? = nil) {
+                     action: Action? = nil, sticky: Bool = false) {
         generation += 1
         let token = generation
         panel?.orderOut(nil)
@@ -48,6 +56,7 @@ enum Toast {
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { $0.duration = 0.15; panel.animator().alphaValue = 1 }
         self.panel = panel
+        if sticky { return }
 
         Task { @MainActor in
             // С кнопкой уведомление висит дольше: на неё нужно успеть нажать.

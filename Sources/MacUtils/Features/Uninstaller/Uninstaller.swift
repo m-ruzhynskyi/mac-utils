@@ -31,9 +31,10 @@ final class UninstallerModel: ObservableObject {
     }
 
     func reload() {
-        apps = InstalledApp.all()
-        let urls = apps.map(\.url)
         Task.detached(priority: .utility) {
+            let installed = InstalledApp.all()
+            let urls = installed.map(\.url)
+            await MainActor.run { UninstallerModel.shared.apps = installed }
             for url in urls {
                 let size = AppScanner.size(of: url)
                 await MainActor.run { UninstallerModel.shared.appSizes[url] = size }
@@ -67,16 +68,25 @@ final class UninstallerModel: ObservableObject {
         sizes = [:]
         needsFullDiskAccess = false
         refusal = app.refusal
+        scanning = false
         guard refusal == nil else { return }
         scanning = true
-        let others = apps.isEmpty ? InstalledApp.all() : apps
-        let found = AppScanner.scan(app, others: others)
-        leftovers = found
-        checked = Set(found.filter(\.checkedByDefault).map(\.url))
-        scanning = false
-        let targets = found.filter { !$0.sizeUnknown }.map(\.url)
+        let known = apps
+        // Обход Containers, Caches и т. д. — вне главного потока: выбор программы не вешает окно.
         Task.detached(priority: .userInitiated) {
-            for url in targets {
+            let others = known.isEmpty ? InstalledApp.all() : known
+            let found = AppScanner.scan(app, others: others)
+            let applied = await MainActor.run { () -> Bool in
+                let model = UninstallerModel.shared
+                // Пока шёл обход, пользователь мог выбрать другую программу: старый результат отбрасывается.
+                guard model.selected?.url == app.url else { return false }
+                model.leftovers = found
+                model.checked = Set(found.filter(\.checkedByDefault).map(\.url))
+                model.scanning = false
+                return true
+            }
+            guard applied else { return }
+            for url in found.filter({ !$0.sizeUnknown }).map(\.url) {
                 let size = AppScanner.size(of: url)
                 await MainActor.run {
                     guard UninstallerModel.shared.selected?.url == app.url else { return }
@@ -104,10 +114,31 @@ final class UninstallerModel: ObservableObject {
             running.terminate()
             working = true
             Task { @MainActor in
-                for _ in 0..<50 where !running.isTerminated {
-                    try? await Task.sleep(nanoseconds: 100_000_000)
+                // Программа может спросить «Сохранить изменения?» — убивать её нельзя: ждём и спрашиваем пользователя.
+                while true {
+                    let closed = await LaunchUnload.waitForExit(attempts: 150, isTerminated: { running.isTerminated },
+                                                                sleep: { try? await Task.sleep(nanoseconds: 100_000_000) })
+                    if closed { break }
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "«\(app.name)» не закрылось"
+                    alert.informativeText = "Возможно, в нём есть несохранённые изменения. Закройте его сами и нажмите «Подождать», либо отмените удаление."
+                    alert.addButton(withTitle: "Подождать")
+                    alert.addButton(withTitle: "Отмена")
+                    alert.addButton(withTitle: "Завершить принудительно")
+                    NSApp.activate()
+                    switch alert.runModal() {
+                    case .alertFirstButtonReturn:
+                        continue
+                    case .alertThirdButtonReturn:
+                        running.forceTerminate()
+                        for _ in 0..<30 where !running.isTerminated { try? await Task.sleep(nanoseconds: 100_000_000) }
+                    default:
+                        self.working = false
+                        return
+                    }
+                    break
                 }
-                if !running.isTerminated { running.forceTerminate() }
                 self.trash(items, app: app)
             }
             return
@@ -117,6 +148,19 @@ final class UninstallerModel: ObservableObject {
     }
 
     private func trash(_ items: [Leftover], app: InstalledApp) {
+        // Службы пользователя останавливаем до переноса plist (иначе они работают до перезагрузки), вне главного потока:
+        // `launchctl bootout` ждёт, пока служба завершится.
+        let urls = items.map(\.url)
+        Task { @MainActor in
+            await Task.detached(priority: .userInitiated) { _ = LaunchUnload.bootoutUserServices(urls) }.value
+            self.trashNow(items, app: app)
+        }
+    }
+
+    /// Результат удаления относится к выбранной сейчас программе, а не к той, что выбрали позже.
+    nonisolated static func isStillSelected(_ selected: URL?, app: URL) -> Bool { selected == app }
+
+    private func trashNow(_ items: [Leftover], app: InstalledApp) {
         var failed: [Leftover] = []
         var adminItems: [Leftover] = []
         for item in items {
@@ -137,16 +181,22 @@ final class UninstallerModel: ObservableObject {
 
         working = false
         let removed = items.count - failed.count
+        // Пока шло удаление, пользователь мог выбрать другую программу: её список не трогаем.
+        let stillSelected = Self.isStillSelected(selected?.url, app: app.url)
         if failed.isEmpty {
             Toast.show("«\(app.name)» удалено: \(removed) \(plural(removed, "объект", "объекта", "объектов")) в Корзине",
                        symbol: "trash.fill", tint: .green)
-            selected = nil
-            leftovers = []
+            if stillSelected {
+                selected = nil
+                leftovers = []
+            }
             reload()
         } else {
-            needsFullDiskAccess = failed.contains { $0.group == "Контейнеры" }
-            leftovers = leftovers.filter { item in failed.contains(item) || item.kind == .receipt }
-            checked = Set(failed.map(\.url))
+            if stillSelected {
+                needsFullDiskAccess = failed.contains { $0.group == "Контейнеры" }
+                leftovers = leftovers.filter { item in failed.contains(item) || item.kind == .receipt }
+                checked = Set(failed.map(\.url))
+            }
             Toast.show("Перемещено \(removed), не удалось \(failed.count)",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
         }
@@ -173,7 +223,9 @@ final class UninstallerModel: ObservableObject {
     /// (иначе уже перенесённые файлы останутся запертыми в каталоге root). Любой сбой — ненулевой код выхода.
     static func adminStagingScript(_ urls: [URL], staging: String, owner: String = NSUserName()) -> String {
         let moves = urls.isEmpty ? ":" : adminTrashCommands(urls, trash: staging, stamp: nil, owner: owner)
-        return "/bin/mkdir -m 700 \(shellQuote(staging)) && { \(moves); rc=$?; "
+        // Системные демоны останавливаются до переноса; сбой остановки (демон не загружен) перенос не отменяет.
+        let unload = LaunchUnload.rootCommands(for: urls, quote: shellQuote)
+        return "/bin/mkdir -m 700 \(shellQuote(staging)) && { \(unload)\(moves); rc=$?; "
             + "/usr/sbin/chown -hR \(shellQuote(owner)) \(shellQuote(staging)); exit $rc; }"
     }
 

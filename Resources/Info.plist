@@ -48,7 +48,7 @@
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Mac Utils расшифровывает записи встреч прямо на этом Mac.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Mac Utils записывает звук с микрофона в запись экрана, если это включено в настройках.</string>
+    <string>Mac Utils записывает ваш голос с микрофона: в записи встреч (для расшифровки и отчёта) и в записи экрана, если это включено в настройках. Звук обрабатывается на этом Mac.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Mac Utils делает снимки экрана по горячей клавише.</string>
 </dict>

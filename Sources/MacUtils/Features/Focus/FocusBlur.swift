@@ -16,6 +16,9 @@ final class FocusBlur: ObservableObject {
     private var overlays: [NSWindow] = []
     private var timer: Timer?
     private var observer: Any?
+    private var screenObserver: Any?
+    private var spaceObserver: Any?
+    private var pollInterval: TimeInterval?
     private var visible = false
 
     static var follow: Bool { UserDefaults.standard.bool(forKey: Pref.focusFollow) }
@@ -57,13 +60,19 @@ final class FocusBlur: ObservableObject {
                 }
             }
         }
-        if timer == nil {
-            // Окна программы меняют порядок (новое окно, клик) — держим размытие сразу под ними.
-            let timer = Timer(timeInterval: 0.25, repeats: true) { _ in
+        // Смена разрешения, порядка и расположения экранов — оверлеи пересобираются под новые рамки.
+        if screenObserver == nil {
+            screenObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { FocusBlur.shared.screensChanged() }
+            }
+        }
+        // Другой рабочий стол: окна программы там свои.
+        if spaceObserver == nil {
+            spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated { FocusBlur.shared.update() }
             }
-            RunLoop.main.add(timer, forMode: .common)
-            self.timer = timer
         }
         update()
     }
@@ -72,9 +81,35 @@ final class FocusBlur: ObservableObject {
         target = nil
         timer?.invalidate()
         timer = nil
+        pollInterval = nil
         if let observer { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
         observer = nil
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        screenObserver = nil
+        if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
+        spaceObserver = nil
         fade(in: false)
+    }
+
+    private func screensChanged() {
+        guard isOn else { return }
+        buildOverlays()
+        update()
+    }
+
+    /// Опрос порядка окон нужен, только пока программа впереди (новое окно, клик между её окнами). Когда впереди другая
+    /// программа, размытие скрыто, а возврат приходит уведомлением об активации — опрос выключен.
+    private func schedulePolling(_ interval: TimeInterval?) {
+        guard interval != pollInterval else { return }
+        pollInterval = interval
+        timer?.invalidate()
+        timer = nil
+        guard let interval else { return }
+        let timer = Timer(timeInterval: interval, repeats: true) { _ in
+            MainActor.assumeIsolated { FocusBlur.shared.update() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     private func activated(_ app: NSRunningApplication?) {
@@ -94,8 +129,10 @@ final class FocusBlur: ObservableObject {
             return
         }
         // Работаете в другой программе — размытие прячем, чтобы не мешало.
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
-              let below = Self.lowestFrontWindow(of: app.processIdentifier) else {
+        let isFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier
+        let below = isFront ? Self.lowestFrontWindow(of: app.processIdentifier) : nil
+        schedulePolling(FocusPolling.interval(targetIsFront: isFront, hasWindow: below != nil))
+        guard isFront, let below else {
             fade(in: false)
             return
         }
@@ -112,18 +149,7 @@ final class FocusBlur: ObservableObject {
     private static func lowestFrontWindow(of pid: pid_t) -> Int? {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                 as? [[String: Any]] else { return nil }
-        let ownPID = getpid()
-        var lowest: Int?
-        for info in list {
-            guard (info[kCGWindowLayer as String] as? Int) == 0,
-                  let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner != ownPID else { continue }
-            if owner == pid {
-                lowest = info[kCGWindowNumber as String] as? Int
-            } else if lowest != nil {
-                break
-            }
-        }
-        return lowest
+        return FocusWindows.lowestFront(in: list, pid: pid, ownPID: getpid())
     }
 
     // MARK: - Окна размытия
@@ -200,6 +226,37 @@ final class FocusBlur: ObservableObject {
 
     func restyle() {
         applyStyle()
+    }
+}
+
+/// Чистая логика над списком окон CG (для тестов).
+enum FocusWindows {
+    /// Самое нижнее из подряд идущих сверху окон программы `pid` (список спереди назад). Свои окна и окна с layer != 0 пропускаются;
+    /// как только после окон программы идёт чужое окно, цепочка заканчивается. nil — у программы нет окон сверху.
+    static func lowestFront(in list: [[String: Any]], pid: pid_t, ownPID: pid_t) -> Int? {
+        var lowest: Int?
+        for info in list {
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner != ownPID else { continue }
+            if owner == pid {
+                lowest = info[kCGWindowNumber as String] as? Int
+            } else if lowest != nil {
+                break
+            }
+        }
+        return lowest
+    }
+}
+
+/// Как часто опрашивать порядок окон.
+enum FocusPolling {
+    static let activeInterval: TimeInterval = 0.5
+    static let waitingForWindowInterval: TimeInterval = 1
+
+    /// nil — опрос не нужен: целевая программа не впереди, возврат придёт уведомлением об активации.
+    static func interval(targetIsFront: Bool, hasWindow: Bool) -> TimeInterval? {
+        guard targetIsFront else { return nil }
+        return hasWindow ? activeInterval : waitingForWindowInterval
     }
 }
 

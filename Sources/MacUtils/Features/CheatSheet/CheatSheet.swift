@@ -101,6 +101,11 @@ final class CheatSheet: ObservableObject {
     }
 
     private func handle(type: CGEventType, event: CGEvent) {
+        // В виртуальной машине и удалённом рабочем столе подсказки по ⌘ не нужны (там своя система сочетаний).
+        if AppExclusions.shared.isFrontExcluded {
+            if isVisible || commandDown { cancel() }
+            return
+        }
         switch type {
         case .scrollWheel:
             // Прокрутка над шпаргалкой листает её; в другом месте — значит, пользователь занят другим.
@@ -252,24 +257,19 @@ final class CheatSheet: ObservableObject {
         return value as? T
     }
 
+    /// Сочетания Mac Utils, которые действительно работают сейчас (из реестра `HotKeyCenter`):
+    /// выключенные функции и занятые другими программами не показываются, переназначенные — с новым сочетанием.
     private static func macUtilsGroup() -> CheatGroup {
-        let layout = LayoutHotKey.current.title
-        return CheatGroup(title: "Mac Utils", items: [
-            CheatItem(title: "Инструменты", shortcut: "⌃⌥⌘T"),
-            CheatItem(title: "Настройки", shortcut: "⌃⌥⌘,"),
-            CheatItem(title: "Снимок экрана", shortcut: "⌘⇧X"),
-            CheatItem(title: "Распознать текст", shortcut: "⌘⇧⌥X"),
-            CheatItem(title: "Полка", shortcut: "⌃⌥D"),
-            CheatItem(title: "Рисовать на экране", shortcut: "⌃⌥A"),
-            CheatItem(title: "Окно поверх всех", shortcut: "⌃⌥P"),
-            CheatItem(title: "Исправить текст (ИИ)", shortcut: "⌃⌥E"),
-            CheatItem(title: "Запись встречи", shortcut: "⌃⌥M"),
-            CheatItem(title: "Фокус (размыть фон)", shortcut: "⌃⌥F"),
-            CheatItem(title: "Громкость приложений", shortcut: "⌃⌥V"),
-            CheatItem(title: "Исправить раскладку", shortcut: layout),
-            CheatItem(title: "Окно влево / вправо", shortcut: "⌃⌥← / →"),
-            CheatItem(title: "На весь экран", shortcut: "⌃⌥↩"),
-        ])
+        let active = HotKeyCenter.shared.active
+        var items = HotKeyAction.allCases.compactMap { action in
+            active[action.hotKeyID].map { CheatItem(title: action.title, shortcut: $0.title) }
+        }
+        if UserDefaults.standard.bool(forKey: Pref.windowSnap) {
+            let symbols = WindowSnapModifier.current.symbols
+            items.append(CheatItem(title: "Окно влево / вправо", shortcut: "\(symbols)← / →"))
+            items.append(CheatItem(title: "На весь экран", shortcut: "\(symbols)↩"))
+        }
+        return CheatGroup(title: "Mac Utils", items: items)
     }
 }
 

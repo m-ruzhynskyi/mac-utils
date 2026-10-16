@@ -55,16 +55,28 @@ final class NowPlaying: NSObject, ObservableObject {
         lastArtwork = NSImage(contentsOf: Self.lastArtworkURL)
     }
 
-    private func remember(_ track: Track, artwork: NSImage?) {
+    private static let artworkQueue = DispatchQueue(label: "macutils.nowplaying.artwork", qos: .utility)
+
+    /// Хеш обложки, лежащей в `last-artwork.png` (или показанной как «последняя»).
+    private var storedArtworkHash: String?
+
+    private func remember(_ track: Track, artwork: NSImage?, artworkHash: String?, artworkData: Data?) {
         if last?.title != track.title || last?.artist != track.artist {
             UserDefaults.standard.set(["title": track.title, "artist": track.artist, "app": track.app, "bundle": track.bundle],
                                       forKey: Pref.musicLast)
             last = track
         }
-        if let artwork, artwork !== lastArtwork,
-           let tiff = artwork.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-            try? png.write(to: Self.lastArtworkURL)
-            lastArtwork = artwork
+        // Обложка приходит с каждым событием помощника: на диск пишем, только если изменилось содержимое,
+        // и не на главном потоке.
+        guard let artwork, let artworkHash, let artworkData,
+              ArtworkFingerprint.shouldStore(newHash: artworkHash, lastStoredHash: storedArtworkHash) else { return }
+        storedArtworkHash = artworkHash
+        lastArtwork = artwork
+        let url = Self.lastArtworkURL
+        // Одна очередь по порядку и атомарная запись: две быстрые смены обложки не перепутаются, недописанный файл не прочитается.
+        Self.artworkQueue.async {
+            guard let png = NSBitmapImageRep(data: artworkData)?.representation(using: .png, properties: [:]) else { return }
+            try? png.write(to: url, options: .atomic)
         }
     }
 
@@ -110,7 +122,10 @@ final class NowPlaying: NSObject, ObservableObject {
     private var input: FileHandle?
     private var users = 0
     private var stopWork: DispatchWorkItem?
-    private var buffer = Data()
+    private var lines = LineBuffer()
+    private var outputHandle: FileHandle?
+    /// Хеш данных обложки текущего трека: по нему решаем, пересоздавать ли NSImage.
+    private var artworkHash: String?
 
     /// Вид с плеером появился / исчез: помощник работает, только пока плеер на экране (+ минута).
     func attach() {
@@ -154,17 +169,24 @@ final class NowPlaying: NSObject, ObservableObject {
         process.standardError = FileHandle.nullDevice
         output.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            guard !data.isEmpty else { return }
+            // Конец потока (помощник завершился): без снятия обработчик вызывается без остановки и занимает ядро.
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { NowPlaying.shared.receive(data) }
             }
         }
-        process.terminationHandler = { _ in
+        process.terminationHandler = { finished in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     let player = NowPlaying.shared
+                    // Намеренная остановка (stop) уже обнулила process: это не сбой.
+                    guard player.process === finished else { return }
                     player.process = nil
                     player.input = nil
+                    player.helperDied()
                 }
             }
         }
@@ -172,6 +194,8 @@ final class NowPlaying: NSObject, ObservableObject {
             try process.run()
             self.process = process
             self.input = input.fileHandleForWriting
+            outputHandle = output.fileHandleForReading
+            lines.reset()
             failed = false
         } catch {
             failed = true
@@ -179,22 +203,33 @@ final class NowPlaying: NSObject, ObservableObject {
     }
 
     private func stop() {
+        outputHandle?.readabilityHandler = nil
+        outputHandle = nil
         send("quit")
         process?.terminate()
         process = nil
         input = nil
+        lines.reset()
+    }
+
+    /// Помощник умер сам (perl не загрузил dylib, сбой): данные устарели, показывать трек и тикать времени нельзя.
+    private func helperDied() {
+        Log.audio.error("Музыка: помощник завершился сам")
+        lines.reset()
+        track = nil
+        artwork = nil
+        artworkHash = nil
+        failed = true
     }
 
     private func receive(_ data: Data) {
-        buffer.append(data)
-        while let newline = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[buffer.startIndex..<newline]
-            buffer.removeSubrange(buffer.startIndex...newline)
+        for line in lines.feed(data) {
             guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
             let title = json["title"] as? String ?? ""
             guard !title.isEmpty else {
                 track = nil
                 artwork = nil
+                artworkHash = nil
                 continue
             }
             var next = Track()
@@ -206,12 +241,22 @@ final class NowPlaying: NSObject, ObservableObject {
             next.duration = (json["duration"] as? NSNumber)?.doubleValue ?? 0
             next.elapsed = (json["elapsed"] as? NSNumber)?.doubleValue ?? 0
             next.playing = (json["playing"] as? Bool) ?? false
-            if track?.title != next.title || track?.artist != next.artist { artwork = nil }
+            if track?.title != next.title || track?.artist != next.artist {
+                artwork = nil
+                artworkHash = nil
+            }
+            var artworkData: Data?
             if let base64 = json["artwork"] as? String, let data = Data(base64Encoded: base64) {
-                artwork = NSImage(data: data)
+                let hash = ArtworkFingerprint.hash(data)
+                // Та же обложка — не декодируем и не пересоздаём NSImage (иначе обновляется весь вид).
+                if hash != artworkHash || artwork == nil {
+                    artwork = NSImage(data: data)
+                    artworkHash = hash
+                }
+                artworkData = data
             }
             track = next
-            remember(next, artwork: artwork)
+            remember(next, artwork: artwork, artworkHash: artworkHash, artworkData: artworkData)
         }
     }
 

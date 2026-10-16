@@ -8,6 +8,8 @@ final class StepsSession: ObservableObject {
     private(set) static var current: StepsSession?
 
     @Published private(set) var images: [CGImage] = []
+    /// Когда добавлен последний шаг (забытая сессия не должна вечно считаться «занятостью»).
+    private(set) var lastActivity = Date()
     /// Пикселей в точке у снятых шагов (2 на Retina).
     private var unit: CGFloat = 1
     private var hudPanel: NSPanel?
@@ -17,6 +19,7 @@ final class StepsSession: ObservableObject {
         let session = current ?? StepsSession()
         current = session
         session.images.append(image)
+        session.lastActivity = Date()
         session.unit = max(session.unit, unit)
         Log.capture.info("Коллаж: шаг \(session.images.count)")
     }

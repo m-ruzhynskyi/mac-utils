@@ -15,7 +15,7 @@ final class ScrollCapture: NSObject, ObservableObject {
     private let rect: NSRect
     private let screen: NSScreen
     private let filter: SCContentFilter
-    private var stitcher = Stitcher()
+    private let stitcher = StitchWorker()
     private var timer: Timer?
     private var busy = false
     private var borderPanel: NSPanel?
@@ -75,13 +75,20 @@ final class ScrollCapture: NSObject, ObservableObject {
     }
 
     func finish() {
+        // `current` обнуляется в stop(): пока склеивается и доставляется результат, занятость держит отдельная причина.
+        BusyRegistry.shared.begin(.screenshotSaving)
         stop()
-        Log.capture.info("Длинный снимок: готово, \(self.stitcher.height) px")
-        guard let image = stitcher.makeImage() else {
-            Toast.show("Длинный снимок пуст: кадры не сняты", symbol: "exclamationmark.triangle.fill", tint: .orange)
-            return
+        Log.capture.info("Длинный снимок: готово, \(self.capturedHeight) px")
+        let stitcher = self.stitcher
+        // Склейка до 40 000 строк — на отдельной очереди, после кадров, которые ещё в работе.
+        Task { @MainActor in
+            defer { BusyRegistry.shared.end(.screenshotSaving) }
+            guard let image = await stitcher.makeImage() else {
+                Toast.show("Длинный снимок пуст: кадры не сняты", symbol: "exclamationmark.triangle.fill", tint: .orange)
+                return
+            }
+            ScreenshotService.shared.deliverLongImage(image)
         }
-        ScreenshotService.shared.deliverLongImage(image)
     }
 
     func cancel() {
@@ -104,7 +111,7 @@ final class ScrollCapture: NSObject, ObservableObject {
     // MARK: - Кадры
 
     @objc private func tick() {
-        guard !busy, timer != nil || stitcher.height == 0 else { return }
+        guard !busy, timer != nil || capturedHeight == 0 else { return }
         busy = true
         Task { @MainActor in
             defer { self.busy = false }
@@ -116,9 +123,11 @@ final class ScrollCapture: NSObject, ObservableObject {
                 return
             }
             guard Self.current === self else { return }
-            let before = self.stitcher.height
-            let result = self.stitcher.add(frame)
-            Log.capture.debug("Кадр \(frame.width)×\(frame.height): \(String(describing: result), privacy: .public), +\(self.stitcher.height - before) px")
+            let before = self.capturedHeight
+            // Подписи строк и поиск сдвига — на отдельной очереди: главный поток во время прокрутки свободен.
+            let (result, height, isFull) = await self.stitcher.add(frame)
+            guard Self.current === self else { return }
+            Log.capture.debug("Кадр \(frame.width)×\(frame.height): \(String(describing: result), privacy: .public), +\(height - before) px")
             switch result {
             case .appended, .first:
                 self.lostTrack = false
@@ -127,8 +136,8 @@ final class ScrollCapture: NSObject, ObservableObject {
             case .lost:
                 self.lostTrack = true
             }
-            self.capturedHeight = self.stitcher.height
-            if self.stitcher.isFull { self.finish() }
+            self.capturedHeight = height
+            if isFull { self.finish() }
         }
     }
 
@@ -260,6 +269,28 @@ private struct ScrollCaptureHUD: View {
 }
 
 // MARK: - Склейка
+
+/// `Stitcher` на отдельной последовательной очереди: вызовы выстраиваются по порядку, главный поток не занят.
+final class StitchWorker: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "macutils.stitch", qos: .userInitiated)
+    private var stitcher = Stitcher()
+
+    func add(_ frame: CGImage) async -> (Stitcher.Result, Int, Bool) {
+        let boxed = UncheckedSendable(frame)
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                let result = self.stitcher.add(boxed.value)
+                continuation.resume(returning: (result, self.stitcher.height, self.stitcher.isFull))
+            }
+        }
+    }
+
+    func makeImage() async -> CGImage? {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: self.stitcher.makeImage().map(UncheckedSendable.init)) }
+        }?.value
+    }
+}
 
 /// Склеивает кадры одной области по вертикали. Каждый кадр сжимается до
 /// 64 колонок в оттенках серого; полоса строк нового кадра ищется в прошлом

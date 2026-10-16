@@ -31,12 +31,39 @@ enum DownloadsRules {
         ext.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
     }
 
-    /// Папка для файла: своё правило важнее встроенной категории.
+    /// Папка из правила в безопасном виде: имя внутри «Загрузок» или полный путь. nil — значение недопустимо
+    /// (пусто, «.», «..», «~» без пути, корень, «..» внутри пути): иначе файлы ушли бы за пределы «Загрузок» (в домашнюю папку).
+    static func validatedFolder(_ value: String, downloads: URL? = nil) -> String? {
+        var folder = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !folder.isEmpty, !folder.contains("\0") else { return nil }
+        if folder == "~" || folder.hasPrefix("~/") {
+            folder = (folder as NSString).expandingTildeInPath
+            // Сама домашняя папка — не папка для файлов.
+            if folder == NSHomeDirectory() || folder == NSHomeDirectory() + "/" { return nil }
+        }
+        if folder.hasPrefix("/") {
+            let parts = folder.split(separator: "/", omittingEmptySubsequences: true)
+            guard !parts.isEmpty, !parts.contains(".."), !parts.contains(".") else { return nil }
+            let path = "/" + parts.joined(separator: "/")
+            // Сами «Загрузки» и их родители: файл «переехал» бы в ту же папку и получал бы всё более длинное имя.
+            if let downloads {
+                let own = downloads.standardizedFileURL.path
+                if own == path || own.hasPrefix(path + "/") { return nil }
+            }
+            return path
+        }
+        // Относительное имя — одна папка в «Загрузках»; «/» внутри заменяется, как и раньше.
+        let name = folder.replacingOccurrences(of: "/", with: "-")
+        guard name != ".", name != "..", name != "~", !name.allSatisfy({ $0 == "." }) else { return nil }
+        return name
+    }
+
+    /// Папка для файла: своё правило важнее встроенной категории. Недопустимое правило игнорируется.
     static func folderName(for url: URL, custom: [String: String]) -> String? {
         let ext = url.pathExtension.lowercased()
-        if !ext.isEmpty, let folder = custom[ext]?.trimmingCharacters(in: .whitespacesAndNewlines), !folder.isEmpty {
+        if !ext.isEmpty, let rule = custom[ext], let folder = validatedFolder(rule) {
             // Полный путь — любая папка на диске; иначе — папка внутри «Загрузок».
-            return folder.hasPrefix("/") ? folder : folder.replacingOccurrences(of: "/", with: "-")
+            return folder
         }
         return category(for: url)?.rawValue
     }
@@ -80,10 +107,46 @@ enum DownloadsRules {
         }
     }
 
+    // MARK: - Корзина: согласие и кандидаты
+
+    /// Согласие на отправку в Корзину запоминается вместе со сроком: другой срок — новое подтверждение.
+    static let trashConfirmedKey = "downloadsTrashConfirmedDays"
+
+    static func isTrashConfirmed(days: Int, defaults: UserDefaults = .standard) -> Bool {
+        days > 0 && defaults.integer(forKey: trashConfirmedKey) == days
+    }
+
+    static func confirmTrash(days: Int, defaults: UserDefaults = .standard) {
+        defaults.set(days, forKey: trashConfirmedKey)
+    }
+
+    /// Что уйдёт в Корзину: просроченные файлы во встроенных папках категорий, кроме `excluding`
+    /// (разложенное в этом же проходе). Папки по своим правилам не чистятся: это ваши папки.
+    static func trashCandidates(in folder: URL, days: Int, excluding: Set<URL> = [], now: Date = Date()) -> [URL] {
+        guard days > 0 else { return [] }
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .contentAccessDateKey, .addedToDirectoryDateKey]
+        var result: [URL] = []
+        for category in Category.allCases {
+            let dir = folder.appendingPathComponent(category.rawValue, isDirectory: true)
+            for url in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys,
+                                                                     options: [.skipsHiddenFiles])) ?? [] {
+                guard !excluding.contains(url.standardizedFileURL) else { continue }
+                let values = try? url.resourceValues(forKeys: Set(keys))
+                if isExpired(modified: values?.contentModificationDate, accessed: values?.contentAccessDate,
+                             added: values?.addedToDirectoryDate, days: days, now: now) {
+                    result.append(url)
+                }
+            }
+        }
+        return result
+    }
+
     /// Пора ли в Корзину: не менялся и не открывался дольше `days` дней.
-    static func isExpired(modified: Date?, accessed: Date?, days: Int, now: Date = Date()) -> Bool {
+    /// `added` — когда файл попал в эту папку: файлы из архивов и AirDrop приходят со старыми датами изменения и открытия,
+    /// но только что разложенный файл не должен сразу уходить в Корзину.
+    static func isExpired(modified: Date?, accessed: Date?, added: Date? = nil, days: Int, now: Date = Date()) -> Bool {
         guard days > 0 else { return false }
-        let last = [modified, accessed].compactMap { $0 }.max() ?? now
+        let last = [modified, accessed, added].compactMap { $0 }.max() ?? now
         return now.timeIntervalSince(last) > Double(days) * 86_400
     }
 }
@@ -96,6 +159,8 @@ final class DownloadsSorter: ObservableObject {
 
     @Published private(set) var isRunning = false
     @Published private(set) var lastResult: String?
+    /// Что ушло бы в Корзину, но ждёт вашего согласия (срок выбран, подтверждения ещё не было).
+    @Published private(set) var trashPreview: [URL] = []
     @Published private(set) var customRules: [String: String] = DownloadsSorter.customRules
 
     /// Свои правила: расширение → папка.
@@ -103,14 +168,21 @@ final class DownloadsSorter: ObservableObject {
         UserDefaults.standard.dictionary(forKey: Pref.downloadsCustomRules) as? [String: String] ?? [:]
     }
 
-    func setRule(extension ext: String, folder: String?) {
+    /// false — папка недопустима (`..`, `.`, `~`, корень) и правило не сохранено.
+    @discardableResult
+    func setRule(extension ext: String, folder: String?) -> Bool {
         var rules = Self.customRules
         let key = DownloadsRules.normalizedExtension(ext)
-        guard !key.isEmpty else { return }
-        rules[key] = folder?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if rules[key]?.isEmpty == true { rules[key] = nil }
+        guard !key.isEmpty else { return false }
+        if let folder, !folder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let valid = DownloadsRules.validatedFolder(folder, downloads: self.folder) else { return false }
+            rules[key] = valid
+        } else {
+            rules[key] = nil
+        }
         UserDefaults.standard.set(rules, forKey: Pref.downloadsCustomRules)
         customRules = rules
+        return true
     }
 
     /// Типы файлов в «Загрузках», для которых нет ни категории, ни своего правила.
@@ -195,17 +267,23 @@ final class DownloadsSorter: ObservableObject {
     }
 
     /// Разложить новые файлы и убрать старые. Возвращает (перемещено, в Корзину).
+    /// `trashDays` задан явно (тесты, ручной вызов) — это и есть согласие; иначе срок берётся из настроек
+    /// и в Корзину идёт только после подтверждения этого срока (`DownloadsRules.confirmTrash`).
     @discardableResult
-    func run(in root: URL? = nil, trashDays: Int? = nil) -> (moved: Int, trashed: Int) {
+    /// `only` — в Корзину можно только эти файлы (то, что пользователь видел в предпросмотре при подтверждении).
+    func run(in root: URL? = nil, trashDays: Int? = nil, only: Set<URL>? = nil,
+             trash: ((URL) -> Bool)? = nil) -> (moved: Int, trashed: Int) {
         let folder = root ?? self.folder
         let manager = FileManager.default
         let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey, .contentAccessDateKey, .isPackageKey]
         let custom = Self.customRules
         Self.migrateLegacyFolders(in: folder)
         let categoryNames = Set(DownloadsRules.Category.allCases.map(\.rawValue))
-            .union(custom.values.filter { !$0.hasPrefix("/") })
+            .union(custom.values.compactMap { DownloadsRules.validatedFolder($0) }.filter { !$0.hasPrefix("/") })
         let now = Date()
         var moved = 0, trashed = 0
+        var placed: Set<URL> = []
+        var folderContents: [URL: Set<String>] = [:]
 
         let entries = (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys,
                                                          options: [.skipsHiddenFiles])) ?? []
@@ -221,11 +299,17 @@ final class DownloadsSorter: ObservableObject {
             let target = folderName.hasPrefix("/")
                 ? URL(fileURLWithPath: folderName, isDirectory: true)
                 : folder.appendingPathComponent(folderName, isDirectory: true)
+            // Правило, указывающее на сами «Загрузки», ничего не перекладывает.
+            if target.standardizedFileURL.path == folder.standardizedFileURL.path { continue }
             do {
                 try manager.createDirectory(at: target, withIntermediateDirectories: true)
-                let existing = Set((try? manager.contentsOfDirectory(atPath: target.path)) ?? [])
+                // Содержимое папки читаем один раз и дополняем: раньше — заново на каждый файл (O(n²)).
+                var existing = folderContents[target] ?? Set((try? manager.contentsOfDirectory(atPath: target.path)) ?? [])
                 let name = DownloadsRules.uniqueName(url.lastPathComponent, existing: existing)
                 try manager.moveItem(at: url, to: target.appendingPathComponent(name))
+                existing.insert(name)
+                folderContents[target] = existing
+                placed.insert(target.appendingPathComponent(name).standardizedFileURL)
                 moved += 1
                 if root == nil { DocumentTagger.shared.enqueue(target.appendingPathComponent(name)) }
             } catch {
@@ -235,16 +319,20 @@ final class DownloadsSorter: ObservableObject {
 
         let days = trashDays ?? UserDefaults.standard.integer(forKey: Pref.downloadsTrashDays)
         if days > 0 {
-            for name in categoryNames {
-                let dir = folder.appendingPathComponent(name, isDirectory: true)
-                for url in (try? manager.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys,
-                                                             options: [.skipsHiddenFiles])) ?? [] {
-                    let values = try? url.resourceValues(forKeys: Set(keys))
-                    guard DownloadsRules.isExpired(modified: values?.contentModificationDate,
-                                                   accessed: values?.contentAccessDate, days: days, now: now) else { continue }
-                    if (try? manager.trashItem(at: url, resultingItemURL: nil)) != nil { trashed += 1 }
+            // Разложенное в этом же проходе в Корзину не идёт: у файла старая дата, но человек его только что получил.
+            var candidates = DownloadsRules.trashCandidates(in: folder, days: days, excluding: placed, now: now)
+            if let only { candidates = candidates.filter { only.contains($0.standardizedFileURL) } }
+            if trashDays != nil || DownloadsRules.isTrashConfirmed(days: days) {
+                for url in candidates {
+                    let done = trash?(url) ?? ((try? manager.trashItem(at: url, resultingItemURL: nil)) != nil)
+                    if done { trashed += 1 } else { Log.window.error("Загрузки: не удалось отправить в Корзину \(url.lastPathComponent, privacy: .public)") }
                 }
+                trashPreview = []
+            } else {
+                trashPreview = candidates
             }
+        } else {
+            trashPreview = []
         }
         if moved > 0 || trashed > 0 {
             let formatter = DateFormatter()
@@ -252,6 +340,22 @@ final class DownloadsSorter: ObservableObject {
             lastResult = "\(formatter.string(from: now)): разложено \(moved), в Корзину \(trashed)"
         }
         return (moved, trashed)
+    }
+
+    /// Пользователь увидел список и согласился: запоминаем срок и убираем старое.
+    func confirmTrash(days: Int) {
+        DownloadsRules.confirmTrash(days: days)
+        // Ровно то, что показывали: файлы, разложенные после предпросмотра, в этот раз не уходят.
+        let shown = Set(trashPreview.map(\.standardizedFileURL))
+        let result = run(only: shown)
+        Toast.show("В Корзину: \(result.trashed)", symbol: "trash.fill", tint: .green)
+    }
+
+    /// Пересчитать предпросмотр (срок изменили в настройках).
+    func refreshTrashPreview() {
+        let days = UserDefaults.standard.integer(forKey: Pref.downloadsTrashDays)
+        trashPreview = days > 0 && !DownloadsRules.isTrashConfirmed(days: days)
+            ? DownloadsRules.trashCandidates(in: folder, days: days) : []
     }
 }
 
@@ -365,9 +469,12 @@ struct DownloadsPage: View {
                     .frame(maxWidth: 260)
                     Spacer()
                     Button("Добавить") {
-                        sorter.setRule(extension: newExtension, folder: newFolder)
-                        newExtension = ""
-                        newFolder = ""
+                        if sorter.setRule(extension: newExtension, folder: newFolder) {
+                            newExtension = ""
+                            newFolder = ""
+                        } else {
+                            Toast.show("Такая папка не подходит (., .., ~ или корень)", symbol: "exclamationmark.triangle.fill", tint: .orange)
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(DownloadsRules.normalizedExtension(newExtension).isEmpty || newFolder.isEmpty)
@@ -424,9 +531,22 @@ struct DownloadsPage: View {
                     Text("Через 30 дней").tag(30)
                     Text("Через 90 дней").tag(90)
                 }
-                Text("Файлы в папках категорий, которые не открывали и не меняли дольше этого срока, перемещаются в Корзину — безвозвратно ничего не удаляется.")
+                Text("Файлы во встроенных папках категорий, которые не открывали и не меняли дольше этого срока, перемещаются в Корзину — безвозвратно ничего не удаляется. Сначала вы видите список и подтверждаете.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if !sorter.trashPreview.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("В Корзину готово \(sorter.trashPreview.count) файл(ов) старше \(days) дн.", systemImage: "trash")
+                            .foregroundStyle(.orange)
+                        ForEach(sorter.trashPreview.prefix(5), id: \.self) { url in
+                            Text(url.lastPathComponent).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        if sorter.trashPreview.count > 5 {
+                            Text("…и ещё \(sorter.trashPreview.count - 5)").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Button("Переместить в Корзину") { sorter.confirmTrash(days: days) }
+                    }
+                }
             }
             .disabled(!enabled)
             Section {
@@ -446,5 +566,7 @@ struct DownloadsPage: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Загрузки")
+        .onAppear { sorter.refreshTrashPreview() }
+        .onChange(of: days) { sorter.refreshTrashPreview() }
     }
 }

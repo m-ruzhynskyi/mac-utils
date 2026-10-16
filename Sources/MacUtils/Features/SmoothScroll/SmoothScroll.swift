@@ -17,13 +17,8 @@ final class SmoothScroll: NSObject, ObservableObject {
     private var tap: EventTap?
     private var timer: Timer?
 
-    private var remainingY = 0.0
-    private var remainingX = 0.0
-    private var carryY = 0.0
-    private var carryX = 0.0
-    private var lastTick: TimeInterval = 0
+    private var glide = GlideModel()
     private var lastFrame: TimeInterval = 0
-    private var streak = 0
     private var flags: CGEventFlags = []
 
     private override init() {
@@ -51,6 +46,7 @@ final class SmoothScroll: NSObject, ObservableObject {
     private func handle(type: CGEventType, event: CGEvent) -> Bool {
         guard type == .scrollWheel else { return true }
         if event.getIntegerValueField(.eventSourceUserData) == Self.marker { return true }
+        if AppExclusions.shared.isFrontExcluded { return true }
         // Трекпад, Magic Mouse и инерция всегда идут с фазами — они уже плавные.
         if event.getIntegerValueField(.scrollWheelEventScrollPhase) != 0
             || event.getIntegerValueField(.scrollWheelEventMomentumPhase) != 0 { return true }
@@ -69,21 +65,11 @@ final class SmoothScroll: NSObject, ObservableObject {
         } else {
             let dy = Double(event.getIntegerValueField(.scrollWheelEventDeltaAxis1))
             let dx = Double(event.getIntegerValueField(.scrollWheelEventDeltaAxis2))
-            // Быстрое вращение колеса ускоряет прокрутку.
-            let now = ProcessInfo.processInfo.systemUptime
-            streak = (now - lastTick) < 0.12 ? min(streak + 1, 15) : 0
-            lastTick = now
-            let step = 50.0 * speed * (1 + Double(streak) * 0.12)
-            pixelsY = dy * step
-            pixelsX = dx * step
+            (pixelsY, pixelsX) = glide.notchPixels(dy: dy, dx: dx, now: ProcessInfo.processInfo.systemUptime, speed: speed)
         }
         guard pixelsY != 0 || pixelsX != 0 else { return true }
 
-        // Смена направления сразу гасит остаток.
-        if pixelsY != 0, remainingY * pixelsY < 0 { remainingY = 0; carryY = 0 }
-        if pixelsX != 0, remainingX * pixelsX < 0 { remainingX = 0; carryX = 0 }
-        remainingY += pixelsY
-        remainingX += pixelsX
+        glide.add(y: pixelsY, x: pixelsX)
         flags = event.flags
 
         startGlide()
@@ -108,38 +94,20 @@ final class SmoothScroll: NSObject, ObservableObject {
     private func stopGlide() {
         timer?.invalidate()
         timer = nil
-        remainingX = 0
-        remainingY = 0
-        carryX = 0
-        carryY = 0
+        glide.reset()
     }
 
     @objc private func frame() {
         let now = ProcessInfo.processInfo.systemUptime
-        let dt = min(max(now - lastFrame, 1.0 / 240.0), 1.0 / 30.0)
+        let dt = now - lastFrame
         lastFrame = now
 
-        let duration = min(max(UserDefaults.standard.double(forKey: Pref.smoothDuration), 0.08), 1.5)
-        // Экспоненциальное замедление: ~98% пути проходится за `duration`.
-        let k = 1 - exp(-dt / (duration / 4))
-
-        let moveY = abs(remainingY) < 1 ? remainingY : remainingY * k
-        let moveX = abs(remainingX) < 1 ? remainingX : remainingX * k
-        remainingY -= moveY
-        remainingX -= moveX
-
-        let totalY = moveY + carryY
-        let totalX = moveX + carryX
-        let pixelsY = totalY.rounded(.towardZero)
-        let pixelsX = totalX.rounded(.towardZero)
-        carryY = totalY - pixelsY
-        carryX = totalX - pixelsX
-
-        if pixelsY != 0 || pixelsX != 0 {
-            post(dy: Int32(pixelsY), dx: Int32(pixelsX))
+        let duration = UserDefaults.standard.double(forKey: Pref.smoothDuration)
+        let pixels = glide.step(dt: dt, duration: duration)
+        if pixels.y != 0 || pixels.x != 0 {
+            post(dy: pixels.y, dx: pixels.x)
         }
-
-        if remainingY == 0 && remainingX == 0 {
+        if glide.isIdle {
             stopGlide()
         }
     }

@@ -43,6 +43,9 @@ final class WindowPin: ObservableObject {
             do {
                 try await pin.start()
                 Toast.show("«\(app.localizedName ?? "Окно")» поверх всех. Снять — ⌃⌥P", symbol: "pin.fill", tint: .blue)
+            } catch is CancellationError {
+                // Закрепление сняли (повторное ⌃⌥P) ещё до конца запуска: копию не оставляем, ошибки нет.
+                unpin(pin)
             } catch {
                 unpin(pin)
                 Toast.show("Не удалось закрепить окно", symbol: "exclamationmark.triangle.fill", tint: .orange)
@@ -77,6 +80,10 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
     private var panel: NSPanel?
     private let layer = CALayer()
     private var poll: Timer?
+    /// Закрепление снято: после любого `await` в `start()` это надо проверять, иначе возникнет «осиротевшая» копия.
+    private(set) var isStopped = false
+    /// Копия сейчас скрыта (программа окна впереди): захват замедлен.
+    private var isHiddenCopy = false
     private var lastFrame: CGRect = .zero
     private var observer: Any?
     private let queue = DispatchQueue(label: "macutils.pin")
@@ -96,6 +103,7 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
 
     func start() async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+        guard !isStopped else { throw CancellationError() }
         guard let window = content.windows.first(where: { $0.windowID == windowID }),
               let frame = WindowTiler.frame(of: element) else { throw CocoaError(.featureUnsupported) }
         lastFrame = frame
@@ -103,6 +111,10 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
         let stream = SCStream(filter: filter, configuration: configuration(for: frame), delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         try await stream.startCapture()
+        guard !isStopped else {
+            try? await stream.stopCapture()
+            throw CancellationError()
+        }
         self.stream = stream
         makePanel(frame: frame)
         observer = NSWorkspace.shared.notificationCenter.addObserver(
@@ -118,6 +130,7 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
     }
 
     func stop() {
+        isStopped = true
         poll?.invalidate()
         poll = nil
         if let observer { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
@@ -137,10 +150,19 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
     /// Когда программа активна, её настоящее окно и так сверху — копию прячем.
     private func updateVisibility() {
         guard let panel else { return }
-        if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
+        let hidden = NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier
+        if hidden {
             panel.orderOut(nil)
         } else {
             panel.orderFrontRegardless()
+        }
+        // Копия скрыта — кадры никому не нужны: захват 30 к/с без дела только греет Mac.
+        if hidden != isHiddenCopy {
+            isHiddenCopy = hidden
+            if let stream {
+                let config = configuration(for: lastFrame)
+                Task { try? await stream.updateConfiguration(config) }
+            }
         }
     }
 
@@ -170,7 +192,7 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
         config.width = Int(frame.width * scale)
         config.height = Int(frame.height * scale)
         config.showsCursor = false
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(PinFrameRate.fps(hidden: isHiddenCopy)))
         config.queueDepth = 4
         if #available(macOS 14.2, *) { config.ignoreShadowsSingleWindow = true }
         return config
@@ -294,4 +316,12 @@ final class ClosureMenuItem: NSMenuItem {
     required init(coder: NSCoder) { fatalError() }
 
     @objc private func run() { handler() }
+}
+
+/// Частота захвата копии «поверх всех»: пока копия скрыта, достаточно изредка (чтобы при показе не было пустого кадра).
+enum PinFrameRate {
+    static let visibleFPS = 30
+    static let hiddenFPS = 1
+
+    static func fps(hidden: Bool) -> Int { hidden ? hiddenFPS : visibleFPS }
 }

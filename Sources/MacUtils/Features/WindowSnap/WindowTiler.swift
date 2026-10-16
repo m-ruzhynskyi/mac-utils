@@ -34,6 +34,11 @@ final class WindowTiler: ObservableObject {
     private var dragTarget: Target?
     private var dragScreen: NSScreen?
     private var lastProbe: TimeInterval = 0
+    /// Номер текущего нажатия/перетаскивания: ответы AX из фона для устаревшего нажатия отбрасываются.
+    private var dragGeneration = 0
+    private var probing = false
+    /// Вся работа с Accessibility — здесь, не в обработчике tap и не на главном потоке.
+    private let axQueue = DispatchQueue(label: "macutils.windowsnap.ax", qos: .userInteractive)
 
     private init() {}
 
@@ -46,10 +51,14 @@ final class WindowTiler: ObservableObject {
 
         if wantsDrag {
             if tap == nil {
-                tap = EventTap(types: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] type, event in
+                // Мышь только наблюдаем: обработчик ничего не меняет, поэтому система не ждёт его и клики не задерживаются.
+                let tap = EventTap(types: [.leftMouseDown, .leftMouseDragged, .leftMouseUp], listenOnly: true) { [weak self] type, event in
                     self?.handleMouse(type: type, event: event)
                     return true
                 }
+                // Tap отключали: отпускание кнопки могло пропасть — перетаскивание считать оконченным.
+                tap.onDisabled = { [weak self] in self?.endDrag() }
+                self.tap = tap
             }
             if tap?.start() != true { Log.window.error("Окна: не удалось создать перехват мыши") }
         } else {
@@ -151,27 +160,51 @@ final class WindowTiler: ObservableObject {
 
     // MARK: - Перетаскивание
 
+    /// Обработчик tap: только запоминает события и отдаёт Accessibility фоновой очереди.
     private func handleMouse(type: CGEventType, event: CGEvent) {
         switch type {
         case .leftMouseDown:
             endDrag()
             let point = event.location
-            guard let window = Self.window(at: point), let frame = Self.frame(of: window) else { return }
-            // Только за заголовок: верхняя полоса окна.
-            guard point.y - frame.minY < 40 else { return }
-            dragWindow = window
-            dragStartFrame = frame
+            let generation = dragGeneration
+            // Окно под курсором и его рамка — вне обработчика: AX-запрос к зависшей программе не держит клики системы.
+            axQueue.async { [weak self] in
+                guard let window = Self.window(at: point), let frame = Self.frame(of: window) else { return }
+                let box = UncheckedSendable(window)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard let self, self.dragGeneration == generation else { return }
+                        // Только за заголовок: верхняя полоса окна.
+                        guard WindowDragRules.isTitleBarPoint(point, in: frame) else { return }
+                        self.dragWindow = box.value
+                        self.dragStartFrame = frame
+                    }
+                }
+            }
 
         case .leftMouseDragged:
             guard let window = dragWindow, let start = dragStartFrame else { return }
             if !dragMoving {
                 let now = ProcessInfo.processInfo.systemUptime
-                guard now - lastProbe > 0.05 else { return }
+                guard now - lastProbe > 0.05, !probing else { return }
                 lastProbe = now
-                // Окно двигается, а размер прежний — значит, его тащат за заголовок.
-                guard let frame = Self.frame(of: window), frame.origin != start.origin,
-                      abs(frame.width - start.width) < 1, abs(frame.height - start.height) < 1 else { return }
-                dragMoving = true
+                probing = true
+                let generation = dragGeneration
+                let box = UncheckedSendable(window)
+                // Окно двигается, а размер прежний — значит, его тащат за заголовок (проверка в фоне).
+                axQueue.async { [weak self] in
+                    let frame = Self.frame(of: box.value)
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            guard let self, self.dragGeneration == generation else { return }
+                            self.probing = false
+                            guard let frame, WindowDragRules.isMoveDrag(start: start, now: frame) else { return }
+                            self.dragMoving = true
+                            self.updateDragTarget()
+                        }
+                    }
+                }
+                return
             }
             updateDragTarget()
 
@@ -180,9 +213,10 @@ final class WindowTiler: ObservableObject {
                let start = dragStartFrame {
                 remember(start, of: window)
                 let frame = Self.frame(for: target, on: screen, window: start)
-                // Даём системе закончить перетаскивание, затем ставим рамку.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    Self.setFrame(frame, of: window)
+                let box = UncheckedSendable(window)
+                // Даём системе закончить перетаскивание, затем ставим рамку (в фоне: AX может быть медленным).
+                axQueue.asyncAfter(deadline: .now() + 0.15) {
+                    Self.setFrame(frame, of: box.value)
                 }
             }
             endDrag()
@@ -207,6 +241,8 @@ final class WindowTiler: ObservableObject {
     }
 
     private func endDrag() {
+        dragGeneration += 1
+        probing = false
         dragWindow = nil
         dragStartFrame = nil
         dragMoving = false
@@ -216,7 +252,7 @@ final class WindowTiler: ObservableObject {
     }
 
     /// Зона у края экрана: углы — четверти, бока — половины, верх — весь экран.
-    private static func zone(for p: NSPoint, in frame: NSRect) -> Target? {
+    static func zone(for p: NSPoint, in frame: NSRect) -> Target? {
         let edge: CGFloat = 6, corner: CGFloat = 60
         let left = p.x <= frame.minX + edge, right = p.x >= frame.maxX - edge - 1
         let top = p.y >= frame.maxY - edge - 1, bottom = p.y <= frame.minY + edge
@@ -301,9 +337,10 @@ final class WindowTiler: ObservableObject {
     }
 
     /// Окно под точкой (координаты CG/AX), не наше и не рабочий стол.
-    private static func window(at point: CGPoint) -> AXUIElement? {
+    private nonisolated static func window(at point: CGPoint) -> AXUIElement? {
+        // Таймаут на system-wide элементе — общий для всех AX-запросов процесса, поэтому здесь его не меняем
+        // (другие функции ставят свои значения на конкретных элементах); запрос идёт в фоне и главный поток не держит.
         let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, 0.1)
         var element: AXUIElement?
         guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &element) == .success,
               let element else { return nil }
@@ -317,19 +354,19 @@ final class WindowTiler: ObservableObject {
         return standard(value as! AXUIElement)
     }
 
-    private static func standard(_ window: AXUIElement) -> AXUIElement? {
+    private nonisolated static func standard(_ window: AXUIElement) -> AXUIElement? {
         var value: CFTypeRef?
         AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &value)
         return (value as? String) == kAXStandardWindowSubrole as String ? window : nil
     }
 
-    private static func role(of element: AXUIElement) -> String? {
+    private nonisolated static func role(of element: AXUIElement) -> String? {
         var value: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &value)
         return value as? String
     }
 
-    static func frame(of window: AXUIElement) -> CGRect? {
+    nonisolated static func frame(of window: AXUIElement) -> CGRect? {
         var position: CFTypeRef?, size: CFTypeRef?
         guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &position) == .success,
               AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &size) == .success,
@@ -342,7 +379,7 @@ final class WindowTiler: ObservableObject {
 
     /// Позиция, размер и ещё раз позиция: при переезде на другой монитор
     /// система может подрезать размер по старому экрану.
-    static func setFrame(_ frame: CGRect, of window: AXUIElement) {
+    nonisolated static func setFrame(_ frame: CGRect, of window: AXUIElement) {
         var origin = frame.origin, size = frame.size
         guard let position = AXValueCreate(.cgPoint, &origin), let extent = AXValueCreate(.cgSize, &size) else { return }
         AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, position)
@@ -417,5 +454,21 @@ private final class SnapPreview {
                     .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 2)))
         self.panel = panel
         return panel
+    }
+}
+
+/// Чистые правила перетаскивания окна (для тестов).
+enum WindowDragRules {
+    /// Высота полосы заголовка, за которую окно можно тащить к краю.
+    static let titleBarHeight: CGFloat = 40
+
+    /// Нажатие пришлось на верхнюю полосу окна (координаты AX).
+    static func isTitleBarPoint(_ point: CGPoint, in frame: CGRect) -> Bool {
+        point.y - frame.minY < titleBarHeight
+    }
+
+    /// Окно сдвинулось, а размер прежний — его тащат за заголовок, а не меняют размер.
+    static func isMoveDrag(start: CGRect, now: CGRect) -> Bool {
+        now.origin != start.origin && abs(now.width - start.width) < 1 && abs(now.height - start.height) < 1
     }
 }

@@ -22,21 +22,56 @@ struct SwitcherItem: Identifiable {
 /// Собирает окна для переключателя: обычные окна текущего рабочего стола
 /// (по порядку на экране, спереди назад), затем свёрнутые и окна скрытых приложений.
 /// Служебные окна, панели и приложения без окон не попадают в список.
-@MainActor
 enum WindowList {
     private static let minSize = CGSize(width: 100, height: 60)
 
-    static func collect(recent: [pid_t]) -> [SwitcherItem] {
+    /// Сколько секунд суммарно можно ходить в Accessibility за один сбор: зависшее приложение не должно растягивать сбор
+    /// (AX-запрос к нему ждёт свой таймаут). Приложения сверх бюджета берутся только по CG, без проверки через AX.
+    static let axBudget: TimeInterval = 1.0
+
+    /// Собирает список. Вызывается НЕ из обработчика tap и не на главном потоке: AX-запросы могут быть медленными.
+    /// `axBudget: 0` — только CG (быстрый черновик без Accessibility, пока идёт полный сбор).
+    /// Программа и то, что про неё читается из NSWorkspace: снимается на главном потоке (Apple гарантирует актуальность
+    /// этих свойств только там), а в фон уходит готовый снимок.
+    struct AppInfo {
+        let app: NSRunningApplication
+        let name: String
+        let icon: NSImage
+        let isHidden: Bool
+    }
+
+    @MainActor
+    static func snapshotApps() -> UncheckedSendable<[pid_t: AppInfo]> {
         let ownPID = ProcessInfo.processInfo.processIdentifier
-        let apps = Dictionary(
-            NSWorkspace.shared.runningApplications
-                .filter { $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != ownPID }
-                .map { ($0.processIdentifier, $0) },
-            uniquingKeysWith: { first, _ in first })
+        let apps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != ownPID }
+            .map { app in
+                (app.processIdentifier, AppInfo(app: app, name: app.localizedName ?? app.bundleIdentifier ?? "?",
+                                                 icon: app.icon ?? NSWorkspace.shared.icon(for: .application), isHidden: app.isHidden))
+            }
+        return UncheckedSendable(Dictionary(apps, uniquingKeysWith: { first, _ in first }))
+    }
+
+    /// Ключи видимых окон текущего рабочего стола (`w<номер>`): быстрый запрос CG без Accessibility.
+    static func visibleWindowKeys() -> Set<String> {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return Set(list.compactMap { info in
+            guard (info[kCGWindowLayer as String] as? Int) == 0, ((info[kCGWindowAlpha as String] as? Double) ?? 1) > 0,
+                  let number = info[kCGWindowNumber as String] as? UInt32 else { return nil }
+            return "w\(number)"
+        })
+    }
+
+    static func collect(recent: [pid_t], apps snapshot: UncheckedSendable<[pid_t: AppInfo]>,
+                        axBudget: TimeInterval = WindowList.axBudget) -> [SwitcherItem] {
+        let deadline = Date().addingTimeInterval(axBudget)
+        let infos = snapshot.value
+        let apps = infos.mapValues(\.app)
 
         var axCache: [pid_t: [AXWindowInfo]?] = [:]
         func axWindows(_ pid: pid_t) -> [AXWindowInfo]? {
             if let cached = axCache[pid] { return cached }
+            guard Date() < deadline else { return nil }
             let value = AXWindowInfo.windows(pid: pid)
             axCache[pid] = value
             return value
@@ -67,8 +102,8 @@ enum WindowList {
                 guard let ax, ax.isStandard else { continue }
             }
             used.insert(number)
-            items.append(SwitcherItem(id: "w\(number)", app: app, appName: name(of: app),
-                                      title: ax?.title ?? cgTitle, icon: icon(of: app),
+            items.append(SwitcherItem(id: "w\(number)", app: app, appName: infos[pid]?.name ?? name(of: app),
+                                      title: ax?.title ?? cgTitle, icon: infos[pid]?.icon ?? icon(of: app),
                                       windowID: number, axWindow: ax?.element, isMinimized: false))
         }
 
@@ -82,13 +117,13 @@ enum WindowList {
         for app in rest {
             guard let windows = axWindows(app.processIdentifier) else { continue }
             for (index, window) in windows.enumerated() where window.isStandard {
-                guard window.isMinimized || app.isHidden else { continue }
+                guard window.isMinimized || (infos[app.processIdentifier]?.isHidden ?? false) else { continue }
                 if let id = window.windowID, used.contains(id) { continue }
                 guard window.frame.width >= minSize.width, window.frame.height >= minSize.height else { continue }
                 if let id = window.windowID { used.insert(id) }
                 let key = window.windowID.map { "w\($0)" } ?? "ax\(app.processIdentifier)-\(index)"
-                items.append(SwitcherItem(id: key, app: app, appName: name(of: app), title: window.title,
-                                          icon: icon(of: app), windowID: window.windowID,
+                items.append(SwitcherItem(id: key, app: app, appName: infos[app.processIdentifier]?.name ?? name(of: app), title: window.title,
+                                          icon: infos[app.processIdentifier]?.icon ?? icon(of: app), windowID: window.windowID,
                                           axWindow: window.element, isMinimized: window.isMinimized))
             }
         }
@@ -126,6 +161,8 @@ struct AXWindowInfo {
 
     init(_ element: AXUIElement) {
         self.element = element
+        // Таймаут задаём на самом окне: наследуют ли его дочерние элементы приложения, не гарантировано.
+        AXUIElementSetMessagingTimeout(element, 0.15)
         windowID = AXWindowID.of(element)
         title = Self.string(element, kAXTitleAttribute) ?? ""
         isMinimized = Self.bool(element, kAXMinimizedAttribute) ?? false
