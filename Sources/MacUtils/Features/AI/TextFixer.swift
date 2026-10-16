@@ -1,5 +1,73 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
+
+/// Где был фокус, когда запрос ушёл к модели: программа, поле (AX-элемент) и выделение. Нужен, чтобы не вставить текст
+/// «не туда» и не заменить выделение, которое пользователь успел сделать другим.
+struct FocusSnapshot: Equatable {
+    var pid: pid_t
+    /// Хеш AX-элемента в фокусе; nil — программа не отдаёт его (часть Electron/Java): сверять можно только программу.
+    var field: Int?
+    /// Выделенный текст в этом поле на момент снимка; nil — прочитать нельзя.
+    var selection: String?
+
+    init(pid: pid_t, field: Int?, selection: String? = nil) {
+        self.pid = pid
+        self.field = field
+        self.selection = selection
+    }
+
+    enum PasteDecision: Equatable {
+        case paste
+        case clipboard(reason: String)
+    }
+
+    /// Вставлять только если пользователь остался в той же программе и том же поле **и** выделено всё то же:
+    /// - выделение читается — оно обязано совпасть с исходным текстом (другое выделение или курсор без выделения → буфер);
+    /// - не читается (Chrome, Electron) — проверить нечем, поэтому любое нажатие или клик после запроса → буфер.
+    /// `original` nil — старая проверка только по программе и полю (для тестов).
+    static func decide(before: FocusSnapshot?, now: FocusSnapshot?, original: String? = nil,
+                       inputSinceRequest: Bool = false) -> PasteDecision {
+        guard let before, let now else { return .clipboard(reason: "Не удалось определить, где вы сейчас") }
+        guard before.pid == now.pid else { return .clipboard(reason: "Вы перешли в другую программу") }
+        if let was = before.field {
+            guard let isNow = now.field else { return .clipboard(reason: "Поле ввода изменилось") }
+            guard was == isNow else { return .clipboard(reason: "Вы перешли в другое поле") }
+        }
+        guard let original else { return .paste }
+        if let selection = now.selection {
+            return selection == original ? .paste : .clipboard(reason: "Выделение изменилось")
+        }
+        return inputSinceRequest ? .clipboard(reason: "Вы продолжили работу, не могу проверить выделение") : .paste
+    }
+
+    /// Было ли нажатие клавиши или клик за последние `seconds` секунд.
+    static func hadInput(within seconds: TimeInterval) -> Bool {
+        [CGEventType.keyDown, .leftMouseDown, .rightMouseDown].contains { type in
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: type) < seconds
+        }
+    }
+
+    @MainActor
+    static func capture() -> FocusSnapshot? {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
+        // Запрос к конкретной программе с коротким таймаутом: глобальный таймаут AX не меняем.
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.2)
+        var focused: CFTypeRef?
+        var field: Int?
+        var selection: String?
+        if AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+           let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() {
+            field = Int(bitPattern: CFHash(focused))
+            var value: CFTypeRef?
+            if AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXSelectedTextAttribute as CFString, &value) == .success {
+                selection = value as? String
+            }
+        }
+        return FocusSnapshot(pid: pid, field: field, selection: selection)
+    }
+}
 
 /// ⌃⌥E: исправить ошибки и опечатки в выделенном тексте локальной моделью и заменить выделение.
 @MainActor
@@ -7,6 +75,7 @@ final class TextFixer {
     static let shared = TextFixer()
 
     private var busy = false
+    private var task: Task<Void, Never>?
 
     static let system = """
     Ты корректор. Исправь орфографию, опечатки, пунктуацию и грамматику в тексте пользователя. \
@@ -26,8 +95,8 @@ final class TextFixer {
     func fix() {
         guard !busy, !IsSecureEventInputEnabled() else { return }
         busy = true
-        Task {
-            defer { busy = false }
+        task = Task {
+            defer { busy = false; task = nil }
             var text = LayoutFix.selectedTextViaAX()
             if text?.isEmpty ?? true { text = await LayoutFix.selectedTextViaCopy() }
             guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -38,23 +107,48 @@ final class TextFixer {
                 Toast.show("Слишком длинный текст — выделите поменьше", symbol: "exclamationmark.triangle.fill", tint: .orange)
                 return
             }
-            Toast.show("Исправляю…", symbol: "sparkles", tint: .purple)
+            // Фокус запоминаем до запроса: ответ модели может прийти через десятки секунд.
+            let before = FocusSnapshot.capture()
+            let startedAt = Date()
+            Toast.show("Исправляю…", symbol: "sparkles", tint: .purple,
+                       action: Toast.Action(title: "Отмена") { TextFixer.shared.cancel() }, sticky: true)
             do {
                 let answer = try await Ollama.generate(text, system: Self.system, temperature: 0, maxTokens: max(200, text.count))
+                try Task.checkCancellation()
                 let fixed = AIParsing.keepingEdges(of: text, AIParsing.cleanedText(answer))
-                guard !fixed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                guard !fixed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { Toast.dismiss(); return }
                 if fixed == text {
                     Toast.show("Ошибок не найдено", symbol: "checkmark.circle.fill")
                     return
                 }
-                await Self.paste(fixed)
-                Toast.show("Текст исправлен", symbol: "sparkles", tint: .purple, action: Toast.Action(title: "Отменить") {
-                    Self.undo()
-                })
+                let waited = Date().timeIntervalSince(startedAt)
+                let decision = FocusSnapshot.decide(before: before, now: FocusSnapshot.capture(), original: text,
+                                                    inputSinceRequest: FocusSnapshot.hadInput(within: waited))
+                switch decision {
+                case .paste:
+                    await Self.paste(fixed)
+                    Toast.show("Текст исправлен", symbol: "sparkles", tint: .purple, action: Toast.Action(title: "Отменить") {
+                        Self.undo()
+                    })
+                case .clipboard(let reason):
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(fixed, forType: .string)
+                    Toast.show("\(reason): исправленный текст в буфере (прежнее содержимое буфера заменено)", symbol: "doc.on.clipboard", tint: .purple)
+                }
+            } catch is CancellationError {
+                Toast.dismiss()
+            } catch let error as URLError where error.code == .cancelled {
+                Toast.dismiss()
             } catch {
                 Toast.show(error.localizedDescription, symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
         }
+    }
+
+    /// «Отмена» в уведомлении «Исправляю…»: запрос к модели прерывается, ничего не вставляется.
+    func cancel() {
+        task?.cancel()
+        Toast.dismiss()
     }
 
     /// Вставка через буфер обмена (надёжно для длинного текста с переносами), затем буфер возвращается.

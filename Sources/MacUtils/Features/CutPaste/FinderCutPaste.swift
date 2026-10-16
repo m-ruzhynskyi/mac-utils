@@ -1,6 +1,45 @@
 import AppKit
 import ApplicationServices
 
+/// Правила вырезания без системных вызовов (для тестов).
+enum CutRules {
+    /// Что осталось из вырезанного: файлы могли переименовать или удалить между ⌘X и ⌘V. `exists` видит и «висячие» ссылки.
+    static func alive(_ urls: [URL], exists: (URL) -> Bool) -> (alive: [URL], gone: [URL]) {
+        var alive: [URL] = [], gone: [URL] = []
+        for url in urls { if exists(url) { alive.append(url) } else { gone.append(url) } }
+        return (alive, gone)
+    }
+
+    static func exists(_ url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.path) || (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
+    }
+
+    enum PasteAction: Equatable {
+        /// Вырезанного нет — обычная вставка.
+        case passThrough
+        /// В буфер обмена после ⌘X что-то скопировали: вырезание отменяется, ⌘V работает как обычно.
+        case cancelledByClipboard
+        /// Все вырезанные файлы исчезли.
+        case allGone
+        /// Часть исчезла: переносим оставшиеся, об остальных сообщаем.
+        case move(alive: [URL], goneCount: Int)
+    }
+
+    static func pasteAction(items: [URL], changeCount: Int, cutChangeCount: Int, exists: (URL) -> Bool) -> PasteAction {
+        guard !items.isEmpty else { return .passThrough }
+        guard changeCount == cutChangeCount else { return .cancelledByClipboard }
+        let split = alive(items, exists: exists)
+        if split.alive.isEmpty { return .allGone }
+        return .move(alive: split.alive, goneCount: split.gone.count)
+    }
+
+    static func goneMessage(_ count: Int) -> String {
+        "Не найдено при вставке: \(count) \(plural(count, "объект", "объекта", "объектов")) (переименованы или удалены)"
+    }
+
+    static let clipboardCancelMessage = "Вырезание отменено: буфер обмена изменился. ⌘V вставит скопированное"
+}
+
 /// ⌘X / ⌘V для файлов в Finder: ⌘X запоминает выделенные объекты,
 /// ⌘V перемещает их в открытую папку. В текстовых полях (переименование,
 /// поиск) сочетания работают как обычно.
@@ -71,15 +110,29 @@ final class FinderCutPaste: NSObject, ObservableObject {
             if !isRepeat { cut() }
             return false
         case Self.keyV:
-            guard !items.isEmpty else { return true }
-            // Пользователь скопировал что-то после ⌘X — обычная вставка.
-            if NSPasteboard.general.changeCount != cutChangeCount {
-                cancelCut()
+            switch CutRules.pasteAction(items: items, changeCount: NSPasteboard.general.changeCount,
+                                        cutChangeCount: cutChangeCount, exists: CutRules.exists) {
+            case .passThrough:
                 return true
+            case .cancelledByClipboard:
+                // Пользователь скопировал что-то после ⌘X — обычная вставка, но не молча.
+                cancelCut()
+                Toast.show(CutRules.clipboardCancelMessage, symbol: "doc.on.clipboard", tint: .orange)
+                return true
+            case .allGone:
+                cancelCut()
+                Toast.show(CutRules.goneMessage(items.count), symbol: "exclamationmark.triangle.fill", tint: .orange)
+                return true
+            case .move(let alive, let goneCount):
+                if isEditingText() { return true }
+                if goneCount > 0 {
+                    items = alive
+                    refreshPanel()
+                    Toast.show(CutRules.goneMessage(goneCount), symbol: "exclamationmark.triangle.fill", tint: .orange)
+                }
+                if !isRepeat { paste() }
+                return false
             }
-            if isEditingText() { return true }
-            if !isRepeat { paste() }
-            return false
         default:
             return true
         }
@@ -172,6 +225,11 @@ final class FinderCutPaste: NSObject, ObservableObject {
     }
 
     private func refreshPanel() {
+        // Панель не должна показывать файлы, которых уже нет (переименованы или удалены после ⌘X).
+        if finderIsFrontmost, !items.isEmpty {
+            let split = CutRules.alive(items, exists: CutRules.exists)
+            if !split.gone.isEmpty { items = split.alive }
+        }
         let show = isRunning
             && !items.isEmpty
             && UserDefaults.standard.bool(forKey: Pref.cutPanel)
@@ -249,21 +307,25 @@ enum FileMover {
     static func move(_ urls: [URL], into folder: URL) -> MoveOutcome {
         let fm = FileManager()
         var outcome = MoveOutcome()
-        let folderPath = folder.standardizedFileURL.path
+        // Папка назначения со снятыми ссылками и «.»/«..»: «та же папка» и «внутри себя» определяются по настоящему пути.
+        let folderPath = folder.standardizedFileURL.resolvingSymlinksInPath().path
         for source in urls {
             let src = source.standardizedFileURL
+            // Родитель — по настоящему пути, а сам объект не трогаем: перемещается ссылка, а не её цель.
+            let parentPath = src.deletingLastPathComponent().resolvingSymlinksInPath().path
+            let realPath = (parentPath as NSString).appendingPathComponent(src.lastPathComponent)
             // Уже в этой папке — ничего не делаем.
-            if src.deletingLastPathComponent().path == folderPath {
+            if parentPath == folderPath || sameDirectory(src.deletingLastPathComponent(), folder) {
                 outcome.moved += 1
                 continue
             }
             // Нельзя переместить папку внутрь самой себя.
-            if (folderPath + "/").hasPrefix(src.path + "/") {
+            if (folderPath + "/").hasPrefix(realPath + "/") {
                 outcome.failed.append(source)
                 outcome.error = "Нельзя переместить папку в саму себя."
                 continue
             }
-            let destination = uniqueDestination(for: src.lastPathComponent, in: folder, fm: fm)
+            let destination = uniqueDestination(for: src, in: folder, fm: fm)
             do {
                 try fm.moveItem(at: src, to: destination)
                 outcome.moved += 1
@@ -275,18 +337,35 @@ enum FileMover {
         return outcome
     }
 
-    /// «Файл.txt» → «Файл 2.txt», если имя занято.
-    private static func uniqueDestination(for name: String, in folder: URL, fm: FileManager) -> URL {
+    /// Один и тот же каталог по идентификатору файловой системы: ловит регистр (`~/downloads` и `~/Downloads` на обычном
+    /// томе macOS) и firmlink'и, которые сравнение строк не видит.
+    private static func sameDirectory(_ a: URL, _ b: URL) -> Bool {
+        guard let first = try? a.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier,
+              let second = try? b.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier else { return false }
+        return first.isEqual(second)
+    }
+
+    /// «Файл.txt» → «Файл 2.txt», «Папка v1.2» → «Папка v1.2 2», «Программа.app» → «Программа 2.app».
+    /// Расширением считается только у файлов и пакетов (.app, .bundle): у обычной папки точка в имени — часть имени.
+    private static func uniqueDestination(for source: URL, in folder: URL, fm: FileManager) -> URL {
+        let name = source.lastPathComponent
         var candidate = folder.appendingPathComponent(name)
-        guard fm.fileExists(atPath: candidate.path) else { return candidate }
-        let ext = (name as NSString).pathExtension
-        let base = (name as NSString).deletingPathExtension
+        guard fm.fileExists(atPath: candidate.path) || isLink(candidate) else { return candidate }
+        let values = try? source.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .isSymbolicLinkKey])
+        let plainFolder = values?.isSymbolicLink != true && values?.isDirectory == true && values?.isPackage != true
+        let ext = plainFolder ? "" : (name as NSString).pathExtension
+        let base = plainFolder ? name : (name as NSString).deletingPathExtension
         var index = 2
         repeat {
             let newName = ext.isEmpty ? "\(base) \(index)" : "\(base) \(index).\(ext)"
             candidate = folder.appendingPathComponent(newName)
             index += 1
-        } while fm.fileExists(atPath: candidate.path)
+        } while fm.fileExists(atPath: candidate.path) || isLink(candidate)
         return candidate
+    }
+
+    /// Существующая, в том числе «висячая», ссылка: `fileExists` по ней говорит «нет», а имя занято.
+    private static func isLink(_ url: URL) -> Bool {
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
     }
 }

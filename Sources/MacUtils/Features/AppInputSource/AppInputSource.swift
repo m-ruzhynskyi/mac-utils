@@ -9,6 +9,21 @@ enum InputSourceRules {
                        remember: Bool) -> String? {
         rules[bundleID] ?? (remember ? remembered[bundleID] : nil)
     }
+
+    /// Сразу после смены программы уведомление о раскладке может относиться к прошлой программе
+    /// (или к нашему же переключению, пришедшему с задержкой) — не запоминаем.
+    static let settleAfterActivation: TimeInterval = 0.5
+
+    /// Запомнить ли текущую раскладку как выбранную пользователем в программе `front`.
+    /// - secure: включён защищённый ввод (поле пароля): система сама переключает на латиницу, это не выбор пользователя;
+    /// - ownUntil: до этого момента смена раскладки — наша собственная;
+    /// - activatedAt: когда активировалась текущая программа.
+    static func shouldRemember(now: Date, ownUntil: Date, activatedAt: Date?, secure: Bool,
+                               front: String?, ownBundleID: String?) -> Bool {
+        guard !secure, now > ownUntil, let front, !front.isEmpty, front != ownBundleID else { return false }
+        if let activatedAt, now.timeIntervalSince(activatedAt) < settleAfterActivation { return false }
+        return true
+    }
 }
 
 struct KeyboardInputSource: Identifiable, Hashable {
@@ -29,6 +44,10 @@ final class AppInputSource: ObservableObject {
 
     /// Когда мы сами переключили раскладку — это не выбор пользователя.
     private var ownSwitchUntil = Date.distantPast
+    /// Программа, активная сейчас, и когда она стала активной (раскладка запоминается за ней, а не за той,
+    /// что окажется впереди к моменту запоздавшего уведомления).
+    private var activeBundleID: String?
+    private var activatedAt: Date?
     private var observing = false
 
     private init() {
@@ -55,8 +74,11 @@ final class AppInputSource: ObservableObject {
     // MARK: - События
 
     @objc private func appActivated(_ note: Notification) {
+        let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+        activeBundleID = app?.bundleIdentifier
+        activatedAt = Date()
         guard enabled,
-              let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let app,
               let bundleID = app.bundleIdentifier,
               let target = InputSourceRules.target(for: bundleID, rules: rules, remembered: remembered, remember: remember),
               target != Self.currentSourceID() else { return }
@@ -64,9 +86,12 @@ final class AppInputSource: ObservableObject {
     }
 
     @objc private func sourceChanged() {
-        guard enabled, remember, Date() > ownSwitchUntil,
-              let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-              bundleID != Bundle.main.bundleIdentifier,
+        let front = activeBundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        guard enabled, remember,
+              InputSourceRules.shouldRemember(now: Date(), ownUntil: ownSwitchUntil, activatedAt: activatedAt,
+                                              secure: IsSecureEventInputEnabled(), front: front,
+                                              ownBundleID: Bundle.main.bundleIdentifier),
+              let bundleID = front,
               let current = Self.currentSourceID() else { return }
         remembered[bundleID] = current
         UserDefaults.standard.set(remembered, forKey: Pref.appInputRemembered)

@@ -152,28 +152,23 @@ final class ScreenshotService: ObservableObject {
 
     func copy(_ image: CGImage) {
         close()
-        guard let png = Self.png(image) else { return }
-        Self.putOnPasteboard(png, image)
-        Self.keepCopy(png, prefix: "Снимок экрана")
-        Toast.show("Снимок скопирован", symbol: "doc.on.clipboard.fill", tint: .accentColor)
-    }
-
-    /// Скопированное только в буфер тоже попадает в умную папку и в «Мои снимки».
-    private static func keepCopy(_ png: Data, prefix: String) {
-        guard ScreenshotLibrary.shared.enabled,
-              UserDefaults.standard.bool(forKey: Pref.screenshotLibraryClipboard) else { return }
-        _ = try? writeToFolder(png, prefix: prefix)
+        complete(image, prefix: "Снимок экрана", clipboard: true, folder: false) { _, copied in
+            if copied { Toast.show("Снимок скопирован", symbol: "doc.on.clipboard.fill", tint: .accentColor) }
+        }
     }
 
     func save(_ image: CGImage) {
         close()
-        guard let png = Self.png(image) else { return }
-        do {
-            let url = try Self.writeToFolder(png, prefix: "Снимок экрана")
-            Toast.show("Сохранено: \(url.lastPathComponent)", symbol: "square.and.arrow.down.fill", tint: .green)
-        } catch {
-            Toast.show("Не удалось сохранить: \(error.localizedDescription)",
-                       symbol: "exclamationmark.triangle.fill", tint: .orange)
+        complete(image, prefix: "Снимок экрана", clipboard: false, folder: true) { saved, _ in
+            switch saved {
+            case .success(let url)?:
+                Toast.show("Сохранено: \(url.lastPathComponent)", symbol: "square.and.arrow.down.fill", tint: .green)
+            case .failure(let error)?:
+                Toast.show("Не удалось сохранить: \(error.localizedDescription)",
+                           symbol: "exclamationmark.triangle.fill", tint: .orange)
+            case nil:
+                break
+            }
         }
     }
 
@@ -211,20 +206,23 @@ final class ScreenshotService: ObservableObject {
 
     /// Длинный снимок готов: туда же, куда и обычные снимки.
     func deliverLongImage(_ image: CGImage) {
-        guard let png = Self.png(image) else { return }
         let size = "\(image.height) px"
         switch Pref.screenshotDestinationValue {
         case .clipboard:
-            Self.putOnPasteboard(png, image)
-            Self.keepCopy(png, prefix: "Длинный снимок")
-            Toast.show("Длинный снимок скопирован (\(size))", symbol: "scroll.fill", tint: .green)
+            complete(image, prefix: "Длинный снимок", clipboard: true, folder: false) { _, copied in
+                if copied { Toast.show("Длинный снимок скопирован (\(size))", symbol: "scroll.fill", tint: .green) }
+            }
         case .folder:
-            do {
-                _ = try Self.writeToFolder(png, prefix: "Длинный снимок")
-                Toast.show("Длинный снимок сохранён (\(size))", symbol: "scroll.fill", tint: .green)
-            } catch {
-                Toast.show("Не удалось сохранить: \(error.localizedDescription)",
-                           symbol: "exclamationmark.triangle.fill", tint: .orange)
+            complete(image, prefix: "Длинный снимок", clipboard: false, folder: true) { saved, _ in
+                switch saved {
+                case .success?:
+                    Toast.show("Длинный снимок сохранён (\(size))", symbol: "scroll.fill", tint: .green)
+                case .failure(let error)?:
+                    Toast.show("Не удалось сохранить: \(error.localizedDescription)",
+                               symbol: "exclamationmark.triangle.fill", tint: .orange)
+                case nil:
+                    break
+                }
             }
         case .both:
             deliverBoth(image, prefix: "Длинный снимок", what: "Длинный снимок")
@@ -232,41 +230,86 @@ final class ScreenshotService: ObservableObject {
     }
 
     private func deliverBoth(_ image: CGImage, prefix: String, what: String) {
-        guard let png = Self.png(image) else { return }
-        Self.putOnPasteboard(png, image)
-        do {
-            _ = try Self.writeToFolder(png, prefix: prefix)
-            Toast.show("\(what) скопирован и сохранён", symbol: "checkmark.circle.fill", tint: .green)
-        } catch {
-            Toast.show("Скопировано, но не сохранено: \(error.localizedDescription)",
-                       symbol: "exclamationmark.triangle.fill", tint: .orange)
+        complete(image, prefix: prefix, clipboard: true, folder: true) { saved, copied in
+            switch saved {
+            case .success? where copied:
+                Toast.show("\(what) скопирован и сохранён", symbol: "checkmark.circle.fill", tint: .green)
+            case .success?:
+                // Пока кодировался этот снимок, в буфер скопировали более новый: этот только сохранён.
+                Toast.show("\(what) сохранён", symbol: "checkmark.circle.fill", tint: .green)
+            case .failure(let error)?:
+                Toast.show("Скопировано, но не сохранено: \(error.localizedDescription)",
+                           symbol: "exclamationmark.triangle.fill", tint: .orange)
+            case nil:
+                break
+            }
         }
     }
 
-    private static func png(_ image: CGImage) -> Data? {
-        NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    /// Общий путь доставки. Кодирование PNG и запись файла идут вне главного потока; в буфер обмена кладётся PNG,
+    /// а TIFF кодируется лениво, только если приложение его запросит. Занятое имя файла не перезаписывается.
+    /// `done(saved, copied)`: `saved` — результат записи (nil, если в папку не писали); `copied` — снимок лежит в буфере
+    /// (false, если за время кодирования пользователь скопировал более новый: в буфере остаётся последний, а не самый медленный).
+    private func complete(_ image: CGImage, prefix: String, clipboard: Bool, folder: Bool,
+                          done: @escaping @MainActor (Result<URL, Error>?, Bool) -> Void) {
+        let library = ScreenshotLibrary.shared
+        // Скопированное только в буфер тоже может попасть в умную папку и в «Мои снимки».
+        let keepsCopy = clipboard && !folder && library.enabled && UserDefaults.standard.bool(forKey: Pref.screenshotLibraryClipboard)
+        var target: (url: URL, app: String)?
+        var reserveError: Error?
+        if folder || keepsCopy {
+            do { target = (try Self.destinationURL(prefix: prefix), library.captureApp) } catch { reserveError = error }
+        }
+        let boxed = UncheckedSendable(image)
+        // Выход или автообновление в эти секунды не должны терять снимок (кодирование длинного — секунды).
+        BusyRegistry.shared.begin(.screenshotSaving)
+        let ticket = clipboard ? Self.clipboardTickets.next() : 0
+        Task { @MainActor in
+            defer { BusyRegistry.shared.end(.screenshotSaving) }
+            let png = await Task.detached(priority: .userInitiated) { ScreenshotEncoding.png(boxed.value) }.value
+            guard let png else {
+                Toast.show("Не удалось закодировать снимок", symbol: "exclamationmark.triangle.fill", tint: .orange)
+                return
+            }
+            let copied = clipboard && Self.clipboardTickets.isLatest(ticket)
+            if copied { Self.putOnPasteboard(png, boxed.value) }
+            guard let target else {
+                done(folder ? reserveError.map { .failure($0) } : nil, copied)
+                return
+            }
+            let written = await Task.detached(priority: .userInitiated) {
+                Result { try ScreenshotEncoding.write(png, to: target.url) }
+            }.value
+            if case .success(let url) = written { library.add(url, image: nil, app: target.app) }
+            done(folder ? written : nil, copied)
+        }
     }
+
+    private static var lazyTIFF: LazyTIFFProvider?
+    private static var clipboardTickets = ClipboardTickets()
 
     private static func putOnPasteboard(_ png: Data, _ image: CGImage) {
         let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setData(png, forType: .png)
-        if let tiff = NSBitmapImageRep(cgImage: image).tiffRepresentation {
-            pasteboard.setData(tiff, forType: .tiff)
+        let item = NSPasteboardItem()
+        item.setData(png, forType: .png)
+        let provider = LazyTIFFProvider(image)
+        lazyTIFF = provider   // провайдер должен жить, пока кто-то может запросить TIFF
+        provider.onFinish = { [weak provider] in
+            // Буфер занят другим содержимым: кадр (десятки МБ для 5K) больше не нужен.
+            DispatchQueue.main.async { MainActor.assumeIsolated { if lazyTIFF === provider { lazyTIFF = nil } } }
         }
+        item.setDataProvider(provider, forTypes: [.tiff])
+        pasteboard.clearContents()
+        pasteboard.writeObjects([item])
     }
 
-    private static func writeToFolder(_ png: Data, prefix: String) throws -> URL {
+    /// Путь для нового снимка (умная папка: день и программа). Имя с точностью до секунды, уникальность — при записи.
+    private static func destinationURL(prefix: String) throws -> URL {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd 'в' HH.mm.ss"
         let folder = Pref.screenshotDirectory
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        // Умная папка: «Снимки экрана/день/программа», текст распознаётся для поиска.
-        let library = ScreenshotLibrary.shared
-        let url = library.destination(fileName: "\(prefix) \(formatter.string(from: Date())).png", root: folder)
-        try png.write(to: url)
-        library.add(url, image: nil, app: library.captureApp)
-        return url
+        return ScreenshotLibrary.shared.destination(fileName: "\(prefix) \(formatter.string(from: Date())).png", root: folder)
     }
 
     func recognizeText(_ image: CGImage) {

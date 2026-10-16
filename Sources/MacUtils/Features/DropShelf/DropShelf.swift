@@ -47,6 +47,38 @@ struct ShakeDetector {
     }
 }
 
+/// Идёт ли сейчас перетаскивание файлов (без системных вызовов — для тестов).
+/// Пастборд `.drag` хранит данные **прошлого** перетаскивания: проверять только его типы нельзя — тогда любое «шарканье»
+/// мышью с зажатой кнопкой после давнего перетаскивания файла открывает полку. Новое перетаскивание пишет пастборд заново,
+/// поэтому его `changeCount` должен измениться после нажатия кнопки мыши.
+enum DragSession {
+    static func isFileDrag(changeCountAtMouseDown: Int?, changeCountNow: Int, hasFileURLs: Bool) -> Bool {
+        guard let down = changeCountAtMouseDown else { return false }
+        return hasFileURLs && changeCountNow != down
+    }
+}
+
+/// Файлы полки: без дублей одного файла под разными путями и без исчезнувших (без UI — для тестов).
+enum ShelfItems {
+    /// `/var/…` и `/private/var/…`, «папка/» и «папка», `a/../b` — один и тот же файл.
+    static func normalized(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
+    /// Добавить файлы к списку: в порядке появления, каждый один раз.
+    static func adding(_ urls: [URL], to items: [URL]) -> [URL] {
+        var result = items
+        var seen = Set(items.map(normalized))
+        for url in urls.map(normalized) where seen.insert(url).inserted { result.append(url) }
+        return result
+    }
+
+    /// Убрать переименованные и удалённые файлы.
+    static func existing(_ items: [URL], exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> [URL] {
+        items.filter(exists)
+    }
+}
+
 /// «Полка»: временное место для файлов. Встряхните мышь, перетаскивая файлы
 /// (или ⌃⌥D), бросьте их на полку, перейдите в нужное место и вытащите обратно.
 @MainActor
@@ -91,16 +123,22 @@ final class DropShelf: ObservableObject {
     private var panel: NSPanel?
     private var dragMonitor: Any?
     private var upMonitor: Any?
+    private var downMonitor: Any?
+    private var localDownMonitor: Any?
     private var shake = ShakeDetector()
+    /// `changeCount` пастборда перетаскивания в момент нажатия кнопки мыши (см. `DragSession`).
+    private var dragChangeAtMouseDown: Int?
 
     func sync() {
         let enabled = UserDefaults.standard.bool(forKey: Pref.dropShelf)
         let center = HotKeyCenter.shared
         center.unregister(id: HotKeyID.dropShelf)
-        if let dragMonitor { NSEvent.removeMonitor(dragMonitor) }
-        if let upMonitor { NSEvent.removeMonitor(upMonitor) }
+        for monitor in [dragMonitor, upMonitor, downMonitor, localDownMonitor].compactMap({ $0 }) { NSEvent.removeMonitor(monitor) }
         dragMonitor = nil
         upMonitor = nil
+        downMonitor = nil
+        localDownMonitor = nil
+        dragChangeAtMouseDown = nil
         guard enabled else {
             hide()
             isRunning = false
@@ -114,17 +152,35 @@ final class DropShelf: ObservableObject {
             MainActor.assumeIsolated { DropShelf.shared.dragged(event) }
         }
         upMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { _ in
-            MainActor.assumeIsolated { DropShelf.shared.shake.reset() }
+            MainActor.assumeIsolated {
+                DropShelf.shared.shake.reset()
+                DropShelf.shared.dragChangeAtMouseDown = nil
+            }
+        }
+        // Запоминаем пастборд перетаскивания при нажатии: в чужих приложениях (глобально) и в своих окнах (локально).
+        downMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { _ in
+            MainActor.assumeIsolated { DropShelf.shared.mouseWentDown() }
+        }
+        localDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            MainActor.assumeIsolated { DropShelf.shared.mouseWentDown() }
+            return event
         }
         isRunning = true
+    }
+
+    private func mouseWentDown() {
+        dragChangeAtMouseDown = NSPasteboard(name: .drag).changeCount
+        shake.reset()
     }
 
     private func dragged(_ event: NSEvent) {
         guard panel?.isVisible != true else { return }
         let location = NSEvent.mouseLocation
         guard shake.add(x: location.x, time: event.timestamp) else { return }
-        // Показываем полку, только если сейчас тащат файлы.
-        guard NSPasteboard(name: .drag).types?.contains(.fileURL) == true else { return }
+        // Показываем полку, только если сейчас тащат файлы — именно в этом перетаскивании, а не в прошлом.
+        let pasteboard = NSPasteboard(name: .drag)
+        guard DragSession.isFileDrag(changeCountAtMouseDown: dragChangeAtMouseDown, changeCountNow: pasteboard.changeCount,
+                                     hasFileURLs: pasteboard.types?.contains(.fileURL) == true) else { return }
         show(near: location)
     }
 
@@ -135,6 +191,7 @@ final class DropShelf: ObservableObject {
     }
 
     func show(near point: NSPoint) {
+        pruneMissing()
         let panel = self.panel ?? make()
         let size = panel.frame.size
         let screen = NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) } ?? NSScreen.main
@@ -153,7 +210,14 @@ final class DropShelf: ObservableObject {
     }
 
     func add(_ urls: [URL]) {
-        for url in urls where !items.contains(url) { items.append(url) }
+        let updated = ShelfItems.adding(urls, to: items)
+        if updated != items { items = updated }
+    }
+
+    /// Переименованные и удалённые файлы убираются: иначе строка остаётся, а перетаскивание тихо ничего не делает.
+    func pruneMissing() {
+        let alive = ShelfItems.existing(items)
+        if alive != items { items = alive }
     }
 
     func remove(_ url: URL) {
@@ -176,19 +240,22 @@ final class DropShelf: ObservableObject {
 
     private func installMoveMonitor() {
         guard moveMonitor == nil else { return }
-        moveMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
-            MainActor.assumeIsolated {
+        moveMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { incoming in
+            let box = UncheckedSendable(incoming)
+            let result: UncheckedSendable<NSEvent?> = MainActor.assumeIsolated {
+                let event = box.value
                 let shelf = DropShelf.shared
-                guard let panel = shelf.panel, event.window === panel else { return event }
+                guard let panel = shelf.panel, event.window === panel else { return UncheckedSendable(event) }
                 let point = event.locationInWindow
                 let height = panel.frame.height
                 // Заголовок — верхние 34 pt без кнопок справа; пустая полка — вся, кроме кнопок.
                 let inHeader = point.y > height - 34 && point.x < panel.frame.width - 90
                 let inEmpty = shelf.items.isEmpty && point.y < height - 34
-                guard inHeader || inEmpty else { return event }
+                guard inHeader || inEmpty else { return UncheckedSendable(event) }
                 panel.performDrag(with: event)
-                return nil
+                return UncheckedSendable(nil)
             }
+            return result.value
         }
     }
 
@@ -384,7 +451,14 @@ final class DragSourceView: NSView, NSDraggingSource {
     override func mouseDragged(with event: NSEvent) {
         guard let downEvent, !urls.isEmpty else { return }
         self.downEvent = nil
-        let items = urls.enumerated().map { index, url -> NSDraggingItem in
+        // Файл могли переименовать или удалить, пока он лежал на полке: тащим только существующие.
+        let alive = ShelfItems.existing(urls)
+        DropShelf.shared.pruneMissing()
+        guard !alive.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        let items = alive.enumerated().map { index, url -> NSDraggingItem in
             let item = NSDraggingItem(pasteboardWriter: url as NSURL)
             let icon = NSWorkspace.shared.icon(forFile: url.path)
             let offset = CGFloat(index) * 4

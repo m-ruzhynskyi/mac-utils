@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Pref.register()
+        BusyRegistry.shared.installDefaultProviders()
+        observeSystemShutdown()
         PanelTabs.migrate()
         MainMenu.install()
         lastTrusted = Permissions.accessibility
@@ -35,8 +37,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ToolsWindowController.shared.show()
         }
 
+        // Чистая установка: «Что нового» не нужно (оно только после обновления). Делаем до `Updater.start()`.
+        let launchDefaults = UserDefaults.standard
+        let firstLaunch = !launchDefaults.bool(forKey: Pref.didShowWelcome)
+        FirstRun.seedChangelog(defaults: launchDefaults, current: Changelog.family(Updater.shared.currentVersion), welcomeShown: !firstLaunch)
+        let plan = FirstRun.plan(firstLaunch: firstLaunch, accessibility: Permissions.accessibility,
+                                 wantsMoveOffer: MoveToApplications.wantsOffer)
         syncFeatures()
-        DispatchQueue.main.async { MoveToApplications.offerIfNeeded() }
+        if plan.offerMove { DispatchQueue.main.async { MoveToApplications.offerIfNeeded() } }
         // Модель не грузим заранее: она держит ~5 ГБ памяти; загрузится при первом запросе.
         Updater.shared.start()
         ToolsLauncher.installIfNeeded()
@@ -48,9 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         RunLoop.main.add(timer, forMode: .common)
         trustTimer = timer
 
-        let defaults = UserDefaults.standard
-        if !defaults.bool(forKey: Pref.didShowWelcome) || !Permissions.accessibility {
-            defaults.set(true, forKey: Pref.didShowWelcome)
+        if plan.showSettings {
+            launchDefaults.set(true, forKey: Pref.didShowWelcome)
             SettingsWindowController.shared.show()
         }
     }
@@ -109,6 +116,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// Выключение, перезагрузка или выход из системы уже запрошены: окон не показываем, человека может не быть рядом.
+    private var shutdownFlag = SystemShutdownFlag()
+    private var systemIsShuttingDown: Bool { shutdownFlag.isActive() }
+    private var terminationReplied = false
+
+    private func observeSystemShutdown() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.shutdownFlag.note() }
+        }
+    }
+
+    /// Выход (⌘Q, «Выйти») во время записи, эфира и т. п.: спросить, остановить штатно и только потом выйти.
+    /// При системном завершении (и после подтверждения перезапуска ради обновления) — без вопроса, с коротким пределом ожидания.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let reasons = BusyRegistry.shared.active
+        // Две независимые проверки: уведомление о выключении (за последние две минуты) и причина в самом событии выхода.
+        let quitCode = NSAppleEventManager.shared().currentAppleEvent?
+            .attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue
+        let systemQuit = systemIsShuttingDown || QuitReason.isSystemShutdown(quitCode)
+        if systemQuit { shutdownFlag.note() }
+        let plan = BusyRegistry.terminationPlan(reasons: reasons, systemShutdown: systemQuit,
+                                                confirmed: BusyRegistry.shared.terminationConfirmed)
+        let silent: Bool
+        switch plan {
+        case .now:
+            return .terminateNow
+        case .windDownSilently:
+            silent = true
+        case .ask(let prompt):
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = prompt.title
+            alert.informativeText = prompt.message
+            alert.addButton(withTitle: prompt.confirm)
+            alert.addButton(withTitle: prompt.cancel)
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+            silent = false
+        }
+        terminationReplied = false
+        func reply() {
+            guard !terminationReplied else { return }
+            terminationReplied = true
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        Task { @MainActor in
+            await Self.windDown(BusyRegistry.windDownOrder(reasons), silent: silent)
+            reply()
+        }
+        if systemQuit {
+            // Система не ждёт: после короткого предела выходим в любом случае.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(BusyRegistry.systemShutdownLimit * 1_000_000_000))
+                reply()
+            }
+        }
+        return .terminateLater
+    }
+
+    /// Штатно завершает идущее: запись сохраняется, эфир закрывается. Ждёт ограниченное время на каждое.
+    private static func windDown(_ reasons: [BusyRegistry.Reason], silent: Bool) async {
+        let registry = BusyRegistry.shared
+        for reason in reasons {
+            switch reason {
+            case .screenRecording:
+                ScreenRecorder.current?.stop()
+            case .meetingRecording:
+                MeetingRecorder.shared.stop()
+            case .scrollCapture:
+                ScrollCapture.current?.finish()
+            case .steps:
+                StepsSession.current?.finish()
+            case .broadcast:
+                ScreenShare.shared.stop()
+            case .viewing:
+                ShareViewer.shared.stopWatching()
+            case .screenshotSaving:
+                break   // останавливать нечего: ждём, пока снимок закодируется и запишется
+            case .meetingProcessing, .uninstalling:
+                continue
+            }
+            // Запись дописывается в файл (GIF собирается долго): даём закончиться, но в рамках предела.
+            for _ in 0..<BusyRegistry.waitAttempts(for: reason, silent: silent) where registry.isActive(reason) {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            // Запись встречи сразу уходит в «обработку», а файл закрывается чуть позже: ждём закрытия, но не расшифровку.
+            if reason == .meetingRecording { try? await Task.sleep(nanoseconds: 2_500_000_000) }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

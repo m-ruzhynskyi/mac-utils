@@ -22,15 +22,45 @@ enum MoveToApplications {
         return function(current as CFURL, nil)?.takeRetainedValue() as URL? ?? current
     }
 
+    static let suppressKey = "moveToApplicationsSuppressed"
+
+    /// Спрашивать ли: не из «Программ», пользователь не отказался навсегда и это не сборка для разработки
+    /// (её запускают из `build/`, вопрос при каждом запуске только мешает).
+    static func shouldOffer(isInApplications: Bool, suppressed: Bool, isDevChannel: Bool) -> Bool {
+        !isInApplications && !suppressed && !isDevChannel
+    }
+
+    /// Нужно ли сейчас задавать вопрос (без самого окна).
+    static var wantsOffer: Bool {
+        shouldOffer(isInApplications: isInApplications, suppressed: UserDefaults.standard.bool(forKey: suppressKey),
+                    isDevChannel: Updater.shared.releaseChannel == .dev)
+    }
+
     static func offerIfNeeded() {
-        guard !isInApplications else { return }
+        guard wantsOffer else { return }
+        presentOffer()
+    }
+
+    /// Плашка в настройках: приложение не в «Программах» (и это не сборка для разработки). Показывается даже после
+    /// «Больше не спрашивать»: отказ касается окна при запуске, а не возможности перенести позже.
+    static var showsBanner: Bool {
+        !isInApplications && Updater.shared.releaseChannel != .dev
+    }
+
+    /// Вопрос по кнопке (без проверки «не спрашивать»).
+    static func presentOffer() {
         let alert = NSAlert()
         alert.messageText = "Перенести Mac Utils в «Программы»?"
         alert.informativeText = "Сейчас приложение запущено не из папки «Программы», поэтому не сможет само обновляться. Mac Utils перенесётся туда и перезапустится."
         alert.addButton(withTitle: "Перенести")
         alert.addButton(withTitle: "Не сейчас")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Больше не спрашивать"
         NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            if alert.suppressionButton?.state == .on { UserDefaults.standard.set(true, forKey: suppressKey) }
+            return
+        }
 
         let source = originalURL()
         let target = URL(fileURLWithPath: "/Applications").appendingPathComponent(source.lastPathComponent)

@@ -1156,6 +1156,12 @@ final class ShareViewer: ObservableObject {
         player.stop()
     }
 
+    /// Остановить просмотр при выходе: подключение закрывается, состояние уходит из «идёт» (окно остаётся до закрытия).
+    func stopWatching() {
+        if BusyRegistry.viewerIsConnected(state) { state = .ended("Просмотр остановлен") }
+        disconnect()
+    }
+
     /// Окно просмотра открыто — Mac Utils виден в Dock и в ⌘Tab.
     private(set) var isWindowOpen = false
 
