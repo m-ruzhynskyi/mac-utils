@@ -271,28 +271,20 @@ struct TaskManagerView: View {
         ProcessMath.Sort.allCases.map { (value: $0, title: $0.title) }
     }
 
-    @ViewBuilder
+    /// Верхняя панель: поиск на всю ширину; под ним — сортировка на всю оставшуюся ширину и фильтр «только программы».
     private var toolbar: some View {
-        if compact {
-            VStack(spacing: DS.Space.s) {
-                HStack(spacing: DS.Space.s) {
-                    ToolsSearchField(prompt: "Поиск", text: $model.search)
-                    Text("Приложения").font(DS.Font.bodyStrong).foregroundStyle(.dsText).lineLimit(1)
-                    Toggle("Приложения", isOn: $model.appsOnly).toggleStyle(.graphite).labelsHidden()
-                }
-                Segmented(selection: $model.sort, options: sortOptions)
-            }
-            .padding(DS.Space.s)
-        } else {
-            HStack(spacing: DS.Space.m) {
-                ToolsSearchField(prompt: "Поиск по имени или PID", text: $model.search)
-                    .frame(maxWidth: 240)
-                Segmented(selection: $model.sort, options: sortOptions)
-                Spacer(minLength: 0)
-                Text("Только приложения").font(DS.Font.bodyStrong).foregroundStyle(.dsText)
-                Toggle("Только приложения", isOn: $model.appsOnly).toggleStyle(.graphite).labelsHidden()
+        VStack(spacing: DS.Space.s) {
+            ToolsSearchField(prompt: compact ? "Поиск" : "Поиск по имени или PID", text: $model.search)
+            HStack(spacing: DS.Space.s) {
+                ToolsSegmented(selection: $model.sort, options: sortOptions)
+                Chip(compact ? "Программы" : "Только программы", selected: model.appsOnly) { model.appsOnly.toggle() }
+                    .fixedSize()
+                    .help("Показывать только программы, без фоновых процессов")
             }
         }
+        .padding(.horizontal, compact ? DS.Space.s : 0)
+        .padding(.top, compact ? DS.Space.s : 0)
+        .padding(.bottom, compact ? DS.Space.s : 0)
     }
 
     private var processList: some View {
@@ -339,7 +331,6 @@ struct TaskManagerView: View {
 
     private var bottomBar: some View {
         ToolsBar(compact: compact) {
-            Spacer()
             if aiOn {
                 if ai.categorizing { ProgressView().controlSize(.small) }
                 IconButton("ИИ: выбран процесс — объяснить, что это и можно ли закрыть; не выбран — разложить список по категориям",
@@ -354,9 +345,11 @@ struct TaskManagerView: View {
                     ProcessExplanation(row: row, ai: ai)
                 }
             }
-            Text(compact ? "\(model.visible.count)" : "Процессов: \(model.visible.count)")
-                .font(DS.Font.mono(13, relativeTo: .callout)).foregroundStyle(.dsMute)
+            Text("\(model.visible.count) \(plural(model.visible.count, "процесс", "процесса", "процессов"))")
+                .font(DS.Font.manrope(13, .semibold, relativeTo: .callout)).foregroundStyle(.dsMute)
+                .lineLimit(1).fixedSize()
                 .help("Процессов в списке")
+            Spacer(minLength: DS.Space.s)
             Button(compact ? "Стоп" : "Завершить") {
                 if let pid = model.selection, let row = model.rows.first(where: { $0.pid == pid }) { model.quit(row, force: false) }
             }

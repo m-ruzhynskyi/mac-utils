@@ -194,6 +194,39 @@ final class UISnapshotTests: XCTestCase {
         }
     }
 
+    /// 1.6.1: вкладка «Трансляция» в поповере (в том числе узком, 420) и в окне «Инструменты» — демо без сети и личного ID.
+    func testShareTabDemo() {
+        suite.set(SettingsSection.share.rawValue, forKey: Pref.toolsTab)
+        suite.set(PanelTabs.value([.share, .screenshot, .monitor]), forKey: Pref.toolsPanelTabs)
+        for width in [DS.Size.popover.width, 420] {
+            let size = NSSize(width: width, height: DS.Size.popover.height)
+            bothThemes("panel-share-demo-\(Int(width))", size: size, settle: 0.6) {
+                ToolsView(inPopover: true).frame(width: size.width, height: size.height).environment(\.uiDemo, true)
+            }
+        }
+        // Вся вкладка целиком в узкой панели: история, звук, ссылка для Windows, сервер.
+        bothThemes("panel-share-demo-420-full", size: NSSize(width: 420, height: 1700), settle: 0.6) {
+            ScreenSharePage(compact: true, demo: true).padding(.horizontal, 6)
+        }
+        bothThemes("tools-window-share-demo", size: NSSize(width: 1000, height: 660), settle: 0.6) {
+            ToolsView().environment(\.uiDemo, true)
+        }
+    }
+
+    /// 1.6.1: окно «Инструменты» — ряд вкладок без «Главной» и без кнопок шапки; сохранённая «Главная» → первая вкладка;
+    /// минимальный размер окна — содержимое вписывается.
+    func testToolsWindow() {
+        suite.set(PanelTabs.value([.screenshot, .shelf, .qr, .wellbeing, .monitor]), forKey: Pref.toolsPanelTabs)
+        suite.set(PanelHome.tab, forKey: Pref.toolsTab)
+        bothThemes("tools-window-from-home", size: NSSize(width: 1000, height: 660), settle: 0.6) { ToolsView() }
+        for section in [SettingsSection.shelf, .qr, .wellbeing, .monitor] {
+            suite.set(section.rawValue, forKey: Pref.toolsTab)
+            bothThemes("tools-window-\(section.rawValue)", size: NSSize(width: 1000, height: 660), settle: 0.6) { ToolsView() }
+        }
+        suite.set(SettingsSection.screenshot.rawValue, forKey: Pref.toolsTab)
+        bothThemes("tools-window-min-screenshot", size: NSSize(width: 760, height: 520), settle: 0.6) { ToolsView() }
+    }
+
     func testShotsLibraryWithDemoRecords() {
         let now = Date()
         let demo = ["Safari", "Xcode", "Terminal", "Figma", "Notes", "Mail"].enumerated().map { index, app in
