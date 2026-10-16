@@ -8,6 +8,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test tests/*.test.js",
     "dist": "electron-builder --win nsis --publish never"
   },
   "dependencies": {
@@ -20,7 +21,7 @@
   "build": {
     "appId": "com.mruzhynskyi.macutils.share",
     "productName": "Mac Utils Share",
-    "files": ["main.js", "preload.js", "overlay.html", "overlay-preload.js", "offline.html", "package.json"],
+    "files": ["main.js", "identity.js", "relay-token.js", "origin-guard.js", "preload.js", "overlay.html", "overlay-preload.js", "offline.html", "package.json"],
     "extraResources": [{ "from": "bin/mu-audio.exe", "to": "mu-audio.exe" }],
     "win": {
       "target": "nsis",
