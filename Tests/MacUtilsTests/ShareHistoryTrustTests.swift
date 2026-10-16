@@ -168,8 +168,10 @@ final class ShareHistoryTrustTests: XCTestCase {
             history.trust(id, name: "x", pub: pub)
             XCTAssertFalse(history.isTrusted(id: id, pub: pub), "\(id.debugDescription) стал доверенным")
         }
-        for bad in ["", String(pub.dropLast()), pub + "A", pub + "=", "+" + pub.dropFirst(), " " + pub.dropFirst(),
-                    String(repeating: "A", count: 42) + "\n"] {
+        let tail = String(pub.dropFirst())
+        let badKeys: [String] = ["", String(pub.dropLast()), pub + "A", pub + "=", "+" + tail, " " + tail,
+                                 String(repeating: "A", count: 42) + "\n"]
+        for bad in badKeys {
             history.trust(ids[0], name: "x", pub: bad)
             XCTAssertFalse(history.isTrusted(id: ids[0], pub: bad), "ключ \(bad.debugDescription) принят")
         }
