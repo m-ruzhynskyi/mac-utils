@@ -176,4 +176,57 @@ final class WindowReliabilityTests: XCTestCase {
         XCTAssertEqual(merge(draft: [], cached: [visible, minimized], seen: ["wV"]), [minimized])
         XCTAssertEqual(merge(draft: [], cached: [], seen: []), [])
     }
+
+    // MARK: - Чьё окно под курсором (сбой 1.5.0: AX-запрос в свой процесс из фона)
+
+    private typealias SW = WindowDragRules.ScreenWindow
+    private let me: pid_t = 100
+
+    func testClickOnOwnWindowIsSkipped() {
+        let windows = [SW(number: 1, pid: me, layer: 0, bounds: CGRect(x: 0, y: 0, width: 400, height: 300)),
+                       SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 0, width: 800, height: 600))]
+        XCTAssertNil(WindowDragRules.ownerUnder(CGPoint(x: 10, y: 10), windows: windows, ownPID: me, ownWindows: [1]),
+                     "клик по нашим настройкам — без AX-запроса к своему процессу")
+    }
+
+    func testOwnPopoverAboveMenuBarIsSkipped() {
+        let windows = [SW(number: 5, pid: me, layer: 101, bounds: CGRect(x: 1000, y: 30, width: 446, height: 546)),
+                       SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 0, width: 1800, height: 1000))]
+        XCTAssertNil(WindowDragRules.ownerUnder(CGPoint(x: 1100, y: 40), windows: windows, ownPID: me, ownWindows: [5]))
+    }
+
+    func testOwnPassThroughOverlayIsLookedUnder() {
+        let windows = [SW(number: 9, pid: me, layer: 1000, bounds: CGRect(x: 0, y: 0, width: 1800, height: 1000)),
+                       SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 100, y: 100, width: 800, height: 600))]
+        XCTAssertEqual(WindowDragRules.ownerUnder(CGPoint(x: 150, y: 110), windows: windows, ownPID: me, ownWindows: []), 200,
+                       "тёплый экран или рисование сквозь клики не мешают раскладке окон")
+    }
+
+    func testTransparentForeignWindowIsLookedUnder() {
+        let windows = [SW(number: 3, pid: 300, layer: 0, alpha: 0, bounds: CGRect(x: 0, y: 0, width: 1800, height: 1000)),
+                       SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 100, y: 100, width: 800, height: 600))]
+        XCTAssertEqual(WindowDragRules.ownerUnder(CGPoint(x: 150, y: 110), windows: windows, ownPID: me, ownWindows: []), 200)
+    }
+
+    func testMenusAndPanelsOfOtherAppsAreSkipped() {
+        let windows = [SW(number: 4, pid: 300, layer: 25, bounds: CGRect(x: 100, y: 100, width: 200, height: 200)),
+                       SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 0, width: 800, height: 600))]
+        XCTAssertNil(WindowDragRules.ownerUnder(CGPoint(x: 150, y: 150), windows: windows, ownPID: me, ownWindows: []))
+    }
+
+    func testFrontmostForeignWindowWins() {
+        let windows = [SW(number: 7, pid: 300, layer: 0, bounds: CGRect(x: 100, y: 100, width: 200, height: 200)),
+                       SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 0, width: 800, height: 600))]
+        XCTAssertEqual(WindowDragRules.ownerUnder(CGPoint(x: 150, y: 150), windows: windows, ownPID: me, ownWindows: []), 300)
+        XCTAssertEqual(WindowDragRules.ownerUnder(CGPoint(x: 500, y: 500), windows: windows, ownPID: me, ownWindows: []), 200)
+        XCTAssertNil(WindowDragRules.ownerUnder(CGPoint(x: 900, y: 900), windows: windows, ownPID: me, ownWindows: []))
+    }
+
+    func testScreenWindowParsesWindowServerInfo() {
+        let info: [String: Any] = [kCGWindowNumber as String: 42, kCGWindowOwnerPID as String: 7, kCGWindowLayer as String: 0,
+                                   kCGWindowAlpha as String: 1.0,
+                                   kCGWindowBounds as String: CGRect(x: 1, y: 2, width: 3, height: 4).dictionaryRepresentation]
+        XCTAssertEqual(SW(info), SW(number: 42, pid: 7, layer: 0, alpha: 1, bounds: CGRect(x: 1, y: 2, width: 3, height: 4)))
+        XCTAssertNil(SW([:]))
+    }
 }
