@@ -19,13 +19,15 @@ enum PanelHome {
 struct PanelSectionView: View {
     let section: SettingsSection
 
+    /// Разделы с быстрой панелью (действия и переключатели); остальные показывают свою страницу в компактном виде
+    /// (со своей прокруткой) — иначе вкладка была бы пустой (так было с «Исключениями» и «Клавишами»).
+    static let quickPanels: Set<SettingsSection> = [
+        .screenshot, .windows, .volume, .layout, .shelf, .cheatSheet, .downloads, .qr, .annotate, .wellbeing, .meetings, .ai,
+        .cutPaste, .smoothScroll, .switcher,
+    ]
+
     /// Раздел показывает свою страницу в компактном виде (со своей прокруткой).
-    static func usesPage(_ section: SettingsSection) -> Bool {
-        switch section {
-        case .music, .share, .textInput, .focus, .uninstaller, .monitor, .tasks, .cleanup, .shots: return true
-        default: return false
-        }
-    }
+    static func usesPage(_ section: SettingsSection) -> Bool { !quickPanels.contains(section) }
 
     var body: some View {
         if Self.usesPage(section) {

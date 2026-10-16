@@ -300,38 +300,52 @@ struct DiskCleanupView: View {
 
     private var actionBar: some View {
         ToolsBar(compact: compact) {
-            Spacer()
-            if model.scanning || model.cleaning || advisor.working { ProgressView().controlSize(.small) }
-            if aiOn {
-                Button {
-                    advisor.review(model.items)
-                    model.expanded = Set(CleanupCategory.Kind.allCases).subtracting([.trash])
-                } label: { Label(compact ? "ИИ" : "Разобрать с ИИ", systemImage: "sparkles") }
-                .buttonStyle(.graphite(.secondary, size: .compact))
-                .disabled(model.scanning || advisor.working || model.items.isEmpty)
-                .help("Локальная модель подскажет, что безопасно удалять: зелёный — безопасно, оранжевый — осторожно, красный — лучше оставить")
-                if let progress = advisor.progress {
-                    Text(progress).font(DS.Font.rowSub).foregroundStyle(.dsMute)
-                } else if let error = advisor.error {
-                    Text(error).font(DS.Font.rowSub).foregroundStyle(Color.dsRec).lineLimit(1)
-                }
-                if !advisor.advice.isEmpty {
-                    Button(compact ? "Безопасное" : "Отметить безопасное") {
-                        model.checked = Set(model.items.filter { advisor.advice[$0.url]?.verdict == .safe }.map(\.url))
-                    }
-                    .buttonStyle(.graphite(.secondary, size: .compact))
-                    .help("Отметить только то, что ИИ считает безопасным")
+            // Не помещается в одну строку (панель из строки меню, кнопки ИИ) — вторая строка, главная кнопка на всю ширину.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DS.Space.s) { Spacer(minLength: 0); secondaryActions; primaryAction }
+                VStack(spacing: DS.Space.s) {
+                    HStack(spacing: DS.Space.s) { Spacer(minLength: 0); secondaryActions }
+                    primaryAction.frame(maxWidth: .infinity)
                 }
             }
-            Button(compact ? "Обновить" : "Пересканировать") { model.scan() }
-                .buttonStyle(.graphite(.secondary, size: .compact))
-                .disabled(model.scanning || model.cleaning)
-            Button("Очистить · \(ByteCountFormatter.string(fromByteCount: model.checkedTotal, countStyle: .file))") {
-                model.clean()
-            }
-            .buttonStyle(.graphite(.primary, size: .compact))
-            .disabled(model.scanning || model.cleaning || model.checked.isEmpty)
         }
+    }
+
+    private var primaryAction: some View {
+        Button("Очистить · \(ByteCountFormatter.string(fromByteCount: model.checkedTotal, countStyle: .file))") {
+            model.clean()
+        }
+        .buttonStyle(.graphite(.primary, size: .compact))
+        .disabled(model.scanning || model.cleaning || model.checked.isEmpty)
+    }
+
+    @ViewBuilder
+    private var secondaryActions: some View {
+        if model.scanning || model.cleaning || advisor.working { ProgressView().controlSize(.small) }
+        if aiOn {
+            Button {
+                advisor.review(model.items)
+                model.expanded = Set(CleanupCategory.Kind.allCases).subtracting([.trash])
+            } label: { Label(compact ? "ИИ" : "Разобрать с ИИ", systemImage: "sparkles") }
+            .buttonStyle(.graphite(.secondary, size: .compact))
+            .disabled(model.scanning || advisor.working || model.items.isEmpty)
+            .help("Локальная модель подскажет, что безопасно удалять: зелёный — безопасно, оранжевый — осторожно, красный — лучше оставить")
+            if let progress = advisor.progress {
+                Text(progress).font(DS.Font.rowSub).foregroundStyle(.dsMute).lineLimit(1)
+            } else if let error = advisor.error {
+                Text(error).font(DS.Font.rowSub).foregroundStyle(Color.dsRec).lineLimit(1)
+            }
+            if !advisor.advice.isEmpty {
+                Button(compact ? "Безопасное" : "Отметить безопасное") {
+                    model.checked = Set(model.items.filter { advisor.advice[$0.url]?.verdict == .safe }.map(\.url))
+                }
+                .buttonStyle(.graphite(.secondary, size: .compact))
+                .help("Отметить только то, что ИИ считает безопасным")
+            }
+        }
+        Button(compact ? "Обновить" : "Пересканировать") { model.scan() }
+            .buttonStyle(.graphite(.secondary, size: .compact))
+            .disabled(model.scanning || model.cleaning)
     }
 
     private func categoryRow(_ category: CleanupCategory) -> some View {

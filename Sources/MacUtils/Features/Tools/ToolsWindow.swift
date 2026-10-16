@@ -75,7 +75,10 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "Инструменты"
-        window.contentViewController = NSHostingController(rootView: ToolsView())
+        let controller = NSHostingController(rootView: ToolsView())
+        // Размер задаёт окно (и его minSize), а не содержимое: содержимое всегда вписывается в окно, в том числе при ресайзе.
+        controller.sizingOptions = []
+        window.contentViewController = controller
         window.setContentSize(NSSize(width: 1000, height: 660))
         window.minSize = NSSize(width: 760, height: 520)
         window.isReleasedWhenClosed = false
@@ -133,11 +136,56 @@ struct ToolsView: View {
                 }
             }
             .padding(.top, DS.Space.l)
-            .background(Color.dsPanel)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.dsPanel.ignoresSafeArea())
             .tint(.dsAccText)
         } else {
-            tabs
+            windowBody
         }
+    }
+
+    // MARK: Окно «Инструменты»
+
+    /// Вкладки окна: как в панели, без «Главной»; инструменты (программы, монитор, задачи, снимки, очистка) — всегда,
+    /// даже если в панели их скрыли.
+    private var windowTabs: [SettingsSection] {
+        let tools = ToolsWindowController.Tab.allCases.compactMap { SettingsSection(rawValue: $0.rawValue) }
+        return visibleTabs + tools.filter { !visibleTabs.contains($0) }
+    }
+
+    /// Выбранная вкладка окна; «Главная» и вкладки не из окна — первая вкладка.
+    private var windowSection: SettingsSection {
+        SettingsSection(rawValue: tab).flatMap { windowTabs.contains($0) ? $0 : nil } ?? windowTabs[0]
+    }
+
+    /// Окно: тот же ряд вкладок (со значком и подписью у каждой), без «Главной» и без кнопок шапки (они — в поповере).
+    private var windowBody: some View {
+        let section = windowSection
+        return VStack(spacing: DS.Space.m) {
+            tabStrip(tabs: windowTabs.map { ($0.rawValue, $0.panelTitle, $0.symbol, $0.title) }, selected: section.rawValue,
+                     showsAllLabels: true)
+            Group {
+                if PanelSectionView.usesPage(section) {
+                    // Инструменты и разделы со своей страницей — в полном виде, как в окне раньше.
+                    SettingsSectionPage(section: section)
+                } else {
+                    PanelSectionView(section: section)
+                        .frame(maxWidth: 640)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .id(section)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if !PanelSectionView.usesPage(section) {
+                footer(section)
+            }
+        }
+        .padding(.top, DS.Space.m)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        // Фон — на всё окно, включая полосу под заголовком.
+        .background(Color.dsBg.ignoresSafeArea())
+        .tint(.dsAccText)
     }
 
     // MARK: Шапка
@@ -179,45 +227,69 @@ struct ToolsView: View {
 
     // MARK: Вкладки
 
-    /// Ряд вкладок как в концепте: выбранная — лайм со значком и подписью, остальные — значки (подпись — в подсказке
-    /// и для VoiceOver). Не помещаются — ряд прокручивается вбок.
+    /// Ряд вкладок поповера: «Главная» и вкладки панели.
     private var tabBar: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: DS.Space.xs) {
-                    tabButton(id: PanelHome.tab, title: PanelHome.title, symbol: PanelHome.symbol, selected: currentSection == nil)
-                    ForEach(visibleTabs) { item in
-                        tabButton(id: item.rawValue, title: item.panelTitle, symbol: item.symbol, selected: item == currentSection,
-                                  accessibility: item.title)
-                    }
-                }
-                .padding(DS.Space.xs)
-                .frame(minWidth: DS.Size.popover.width - 2 * DS.Space.l)
-            }
-            .scrollIndicators(.never)
-            .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
-            .padding(.horizontal, DS.Space.l)
-            .onAppear { proxy.scrollTo(currentSection?.rawValue ?? PanelHome.tab) }
-            .onChange(of: tab) { _, new in
-                withAnimation(DS.Motion.animation(DS.Motion.quick, reduceMotion: reduceMotion)) { proxy.scrollTo(new) }
-            }
-        }
+        tabStrip(tabs: [(PanelHome.tab, PanelHome.title, PanelHome.symbol, PanelHome.title)]
+                    + visibleTabs.map { ($0.rawValue, $0.panelTitle, $0.symbol, $0.title) },
+                 selected: currentSection?.rawValue ?? PanelHome.tab, showsAllLabels: false)
     }
 
-    private func tabButton(id: String, title: String, symbol: String, selected: Bool, accessibility: String? = nil) -> some View {
+    /// Ряд вкладок как в концепте: выбранная — лайм со значком и подписью, остальные — значки `mute` (подпись — в подсказке
+    /// и для VoiceOver; в окне — у всех, места хватает). Не помещаются — ряд прокручивается вбок.
+    private func tabStrip(tabs: [(id: String, title: String, symbol: String, accessibility: String)], selected: String,
+                          showsAllLabels: Bool) -> some View {
+        GeometryReader { geometry in
+            // Подписи у всех (окно) — только если весь ряд помещается; иначе — как в поповере: подпись у выбранной,
+            // ряд прокручивается вбок.
+            ViewThatFits(in: .horizontal) {
+                if showsAllLabels {
+                    tabRow(tabs, selected: selected, labels: true)
+                        .frame(minWidth: geometry.size.width)
+                }
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        tabRow(tabs, selected: selected, labels: false)
+                            .frame(minWidth: geometry.size.width)
+                    }
+                    .scrollIndicators(.never)
+                    .onAppear { proxy.scrollTo(selected) }
+                    .onChange(of: selected) { _, new in
+                        withAnimation(DS.Motion.animation(DS.Motion.quick, reduceMotion: reduceMotion)) { proxy.scrollTo(new) }
+                    }
+                }
+            }
+        }
+        .frame(height: 46)
+        .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+        .padding(.horizontal, DS.Space.l)
+    }
+
+    private func tabRow(_ tabs: [(id: String, title: String, symbol: String, accessibility: String)], selected: String,
+                        labels: Bool) -> some View {
+        HStack(spacing: DS.Space.xs) {
+            ForEach(tabs, id: \.id) { item in
+                tabButton(id: item.id, title: item.title, symbol: item.symbol, selected: item.id == selected,
+                          showsLabel: labels, accessibility: item.accessibility)
+            }
+        }
+        .padding(DS.Space.xs)
+    }
+
+    private func tabButton(id: String, title: String, symbol: String, selected: Bool, showsLabel: Bool = false,
+                           accessibility: String? = nil) -> some View {
         Button {
             withAnimation(DS.Motion.animation(DS.Motion.toggle, reduceMotion: reduceMotion)) { tab = id }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: symbol).font(.system(size: 15, weight: .medium))
-                if selected {
+                if selected || showsLabel {
                     Text(title).font(DS.Font.manrope(13, .bold, relativeTo: .callout)).lineLimit(1).fixedSize()
                 }
             }
             .foregroundStyle(selected ? Color.dsAccInk : Color.dsMute)
             .frame(height: 38)
             .frame(minWidth: selected ? nil : 34, maxWidth: selected ? nil : .infinity)
-            .padding(.horizontal, selected ? DS.Space.m : 0)
+            .padding(.horizontal, selected || showsLabel ? DS.Space.m : 0)
             .background {
                 if selected {
                     RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous).fill(Color.dsAcc)
@@ -270,27 +342,5 @@ struct ToolsView: View {
             .padding(.horizontal, DS.Space.l)
             .frame(height: 40)
         }
-    }
-
-    private var tabs: some View {
-        TabView(selection: $tab) {
-            UninstallerPage()
-                .tabItem { Label(ToolsWindowController.Tab.uninstaller.title, systemImage: ToolsWindowController.Tab.uninstaller.symbol) }
-                .tag(ToolsWindowController.Tab.uninstaller.rawValue)
-            SystemMonitorView(model: .shared)
-                .tabItem { Label(ToolsWindowController.Tab.monitor.title, systemImage: ToolsWindowController.Tab.monitor.symbol) }
-                .tag(ToolsWindowController.Tab.monitor.rawValue)
-            TaskManagerView(model: .shared)
-                .tabItem { Label(ToolsWindowController.Tab.tasks.title, systemImage: ToolsWindowController.Tab.tasks.symbol) }
-                .tag(ToolsWindowController.Tab.tasks.rawValue)
-            ScreenshotLibraryView(library: .shared)
-                .tabItem { Label(ToolsWindowController.Tab.shots.title, systemImage: ToolsWindowController.Tab.shots.symbol) }
-                .tag(ToolsWindowController.Tab.shots.rawValue)
-            DiskCleanupView(model: .shared)
-                .tabItem { Label(ToolsWindowController.Tab.cleanup.title, systemImage: ToolsWindowController.Tab.cleanup.symbol) }
-                .tag(ToolsWindowController.Tab.cleanup.rawValue)
-        }
-        .padding(.top, 6)
-        .frame(minWidth: 740, minHeight: 480)
     }
 }
