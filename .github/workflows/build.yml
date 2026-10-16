@@ -17,7 +17,7 @@ jobs:
   test:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Build
@@ -33,7 +33,7 @@ jobs:
       SIGNING_P12: ${{ secrets.SIGNING_P12 }}
       SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -84,7 +84,7 @@ jobs:
       - name: Zip
         run: cd build && ditto -c -k --keepParent "Mac Utils.app" MacUtils.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: MacUtils-${{ env.VERSION }}
           path: build/MacUtils.zip
