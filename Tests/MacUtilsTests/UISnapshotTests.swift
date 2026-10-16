@@ -54,11 +54,17 @@ final class UISnapshotTests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: "; "))
         UserDefaults.standard.removePersistentDomain(forName: suiteName)
         if directory != nil {
-            let lines = ["# Снято", ""] + taken.map { "- \($0)" } + ["", "# Пропущено / проблемы", ""]
-                + Self.skippedSections.map { "- \($0.key.rawValue): \($0.value)" }
-                + ["- share-request: queue.add выводит настоящую панель на экран", "- toast: ToastView private в Core/Toast.swift", "- first-run: у первого запуска нет отдельного представления (только план FirstRun.plan)"]
-                + failures.map { "- \($0)" }
-            try? lines.joined(separator: "\n").write(to: directory.appendingPathComponent("INDEX.md"), atomically: true, encoding: .utf8)
+            // По частям: одно длинное выражение компилятор CI не успевает вывести.
+            var lines: [String] = ["# Снято", ""]
+            lines += taken.map { "- \($0)" }
+            lines += ["", "# Пропущено / проблемы", ""]
+            lines += Self.skippedSections.map { (key: SettingsSection, value: String) -> String in "- \(key.rawValue): \(value)" }
+            lines.append("- share-request: queue.add выводит настоящую панель на экран")
+            lines.append("- toast: ToastView private в Core/Toast.swift")
+            lines.append("- first-run: у первого запуска нет отдельного представления (только план FirstRun.plan)")
+            lines += failures.map { "- \($0)" }
+            let text: String = lines.joined(separator: "\n")
+            try? text.write(to: directory.appendingPathComponent("INDEX.md"), atomically: true, encoding: String.Encoding.utf8)
         }
     }
 
