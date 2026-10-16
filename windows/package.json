@@ -20,11 +20,25 @@
   "build": {
     "appId": "com.mruzhynskyi.macutils.share",
     "productName": "Mac Utils Share",
-    "files": ["main.js", "preload.js", "overlay.html", "overlay-preload.js", "offline.html", "package.json"],
-    "extraResources": [{ "from": "bin/mu-audio.exe", "to": "mu-audio.exe" }],
+    "files": [
+      "main.js",
+      "preload.js",
+      "overlay.html",
+      "overlay-preload.js",
+      "offline.html",
+      "package.json",
+      "assets/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "bin/mu-audio.exe",
+        "to": "mu-audio.exe"
+      }
+    ],
     "win": {
       "target": "nsis",
-      "artifactName": "MacUtilsShare-Setup.exe"
+      "artifactName": "MacUtilsShare-Setup.exe",
+      "icon": "assets/icon.png"
     },
     "nsis": {
       "oneClick": true,

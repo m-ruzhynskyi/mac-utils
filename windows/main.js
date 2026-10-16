@@ -103,6 +103,7 @@ function createWindow() {
     height: 760,
     backgroundColor: "#111111",
     title: "Mac Utils Share",
+    icon: path.join(__dirname, "assets", "icon.png"),
     autoHideMenuBar: true,
     // backgroundThrottling: false — свёрнутое окно не замедляет таймер кадров трансляции (33 мс) до ~1 раза в секунду.
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, backgroundThrottling: false },
