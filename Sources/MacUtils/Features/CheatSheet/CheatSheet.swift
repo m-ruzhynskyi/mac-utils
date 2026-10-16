@@ -71,7 +71,8 @@ final class CheatSheet: ObservableObject {
         let enabled = UserDefaults.standard.bool(forKey: Pref.cheatSheet) && Permissions.accessibility
         if enabled {
             if tap == nil {
-                tap = EventTap(types: [.flagsChanged, .keyDown, .leftMouseDown, .scrollWheel]) { [weak self] type, event in
+                // Только слушаем: события не поглощаются, и ввод системы не ждёт главный поток Mac Utils.
+                tap = EventTap(types: [.flagsChanged, .keyDown, .leftMouseDown, .scrollWheel], listenOnly: true) { [weak self] type, event in
                     self?.handle(type: type, event: event)
                     return true
                 }
