@@ -387,12 +387,11 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     private static func configure(_ config: SCStreamConfiguration, for filter: SCContentFilter) {
-        // До 1600 точек по ширине — читаемо и не тяжело для сети.
-        let pixels = CGSize(width: filter.contentRect.width * CGFloat(filter.pointPixelScale),
-                            height: filter.contentRect.height * CGFloat(filter.pointPixelScale))
-        let scale = min(1, 1600 / max(pixels.width, 1))
-        config.width = max(2, Int(pixels.width * scale) / 2 * 2)
-        config.height = max(2, Int(pixels.height * scale) / 2 * 2)
+        // До 1920 точек по длинной стороне (ShareVideo.streamSize) — мелкий текст читаем, сети по силам.
+        let size = ShareVideo.streamSize(pixelWidth: filter.contentRect.width * CGFloat(filter.pointPixelScale),
+                                         pixelHeight: filter.contentRect.height * CGFloat(filter.pointPixelScale))
+        config.width = size.width
+        config.height = size.height
     }
 
     /// Сменить, что показываем, не прерывая трансляцию.
@@ -895,26 +894,21 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         lock.unlock()
         queue.async {
             self.pendingBytes = 0
-            self.encoder.setBitrate(Self.startBitrate)
+            self.encoder.setBitrate(ShareVideo.startBitrate)
             self.encoder.requestKeyFrame()
         }
     }
 
-    // Скорость под сеть, как в Discord: очередь растёт — снижаем, свободно — поднимаем.
-    static let minBitrate = 700_000, maxBitrate = 6_000_000, startBitrate = 3_000_000
+    // Скорость под сеть (ShareVideo.adaptedBitrate): очередь растёт — снижаем, свободно — поднимаем.
     private var lastAdapt = Date()
 
     /// Вызывается на queue.
     private func adaptBitrate() {
         let now = Date()
-        let current = encoder.bitrate
-        if pendingBytes > 250_000, now.timeIntervalSince(lastAdapt) > 0.5 {
-            encoder.setBitrate(max(Self.minBitrate, current * 7 / 10))
-            lastAdapt = now
-        } else if pendingBytes < 60_000, now.timeIntervalSince(lastAdapt) > 2, current < Self.maxBitrate {
-            encoder.setBitrate(min(Self.maxBitrate, current * 23 / 20))
-            lastAdapt = now
-        }
+        guard let next = ShareVideo.adaptedBitrate(current: encoder.bitrate, pendingBytes: pendingBytes,
+                                                   secondsSinceLast: now.timeIntervalSince(lastAdapt)) else { return }
+        encoder.setBitrate(next)
+        lastAdapt = now
     }
     /// Сколько байт видео ушло в сокет и ещё не подтверждено: сеть не успевает — пропускаем кадры
     /// и потом начинаем с ключевого (иначе картинка рассыпается).
@@ -1087,7 +1081,8 @@ final class ShareViewer: ObservableObject {
     /// Сервер этого соединения шлёт heartbeat: только тогда тишина что-то значит (старый ретранслятор мог не слать).
     private var sawHeartbeat = false
 
-    private var socket: URLSessionWebSocketTask?
+    /// Проигрыватель видео показывает пакеты только текущего соединения (пакеты оборванного отбрасываются).
+    private var socket: URLSessionWebSocketTask? { didSet { video.attach(socket) } }
     private var window: NSWindow?
     fileprivate let player = SharePlayer()
     /// Видео H.264 (новые версии) — аппаратное декодирование.
@@ -1270,7 +1265,27 @@ final class ShareViewer: ObservableObject {
     }
 
     private func receive(_ socket: URLSessionWebSocketTask) {
+        Self.listen(socket, video: video)
+    }
+
+    /// Чтение сокета. Видео H.264 уходит в проигрыватель прямо из колбэка, и следующее чтение взводится сразу:
+    /// занятый главный поток не тормозит картинку. На главный — только учёт и остальные сообщения.
+    nonisolated private static func listen(_ socket: URLSessionWebSocketTask, video: H264Player) {
         socket.receive { result in
+            if case .success(.data(let data)) = result, data.first == H264Packet.type {
+                video.play(data.dropFirst(), from: socket)
+                listen(socket, video: video)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        let viewer = ShareViewer.shared
+                        guard viewer.socket === socket else { return }
+                        viewer.lastMessage = Date()
+                        if viewer.state != .watching { viewer.state = .watching }
+                        viewer.reconnectsMade = 0
+                    }
+                }
+                return
+            }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     let viewer = ShareViewer.shared
@@ -1283,8 +1298,6 @@ final class ShareViewer: ObservableObject {
                         switch data.first {
                         case ShareProtocol.frame:
                             if let image = NSImage(data: data.dropFirst()) { viewer.frame = image }
-                        case H264Packet.type:
-                            viewer.video.play(data.dropFirst())
                         case ShareProtocol.audio:
                             viewer.player.play(data.dropFirst())
                         default:
