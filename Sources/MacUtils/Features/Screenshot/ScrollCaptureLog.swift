@@ -54,22 +54,47 @@ final class ScrollCaptureLog: @unchecked Sendable {
             }
         } else {
             framesDirectory = nil
+            // Кадры — пиксели экрана: настройку выключили — старые кадры не лежат среди журналов, которые просят прислать.
+            try? files.removeItem(at: directory.appendingPathComponent("scroll-frames", isDirectory: true))
         }
+    }
+
+    /// Журнал в уже открытый файл (тесты: запись, которая падает).
+    init(handle: FileHandle, url: URL) {
+        self.url = url
+        self.handle = handle
+        framesDirectory = nil
     }
 
     deinit { try? handle?.close() }
 
+    /// Строки после предела отбрасываются, кроме итоговой `end`: она самая нужная для разбора.
     func write(_ line: String) {
         queue.async {
-            guard let handle = self.handle else { return }
+            guard self.handle != nil else { return }
             self.lines += 1
-            if self.lines > Self.maxLines {
-                if self.lines == Self.maxLines + 1 { handle.write(Data("truncated\n".utf8)) }
+            if self.lines > Self.maxLines, !line.hasPrefix("end ") {
+                if self.lines == Self.maxLines + 1 { self.emit("truncated") }
                 return
             }
-            handle.write(Data((line + "\n").utf8))
+            self.emit(line)
         }
     }
+
+    /// Запись с ошибкой (диск заполнен, файл удалён) выключает журнал до конца съёмки, съёмка идёт дальше.
+    /// Старый `write(_: Data)` на ошибке бросает ObjC-исключение и роняет приложение — только `write(contentsOf:)`.
+    private func emit(_ line: String) {
+        guard let handle else { return }
+        do {
+            try handle.write(contentsOf: Data((line + "\n").utf8))
+        } catch {
+            try? handle.close()
+            self.handle = nil
+        }
+    }
+
+    /// Журнал ещё пишется (не выключен ошибкой записи) — тесты.
+    var isWriting: Bool { queue.sync { handle != nil } }
 
     /// Кадр в PNG — только при включённой настройке; кодирование на очереди журнала, не на главном потоке.
     func saveFrame(_ image: CGImage, index: Int) {
@@ -137,12 +162,18 @@ final class ScrollCaptureLog: @unchecked Sendable {
 
     // MARK: - Хранение
 
-    /// Оставить `count` самых новых журналов (имена с датой сортируются по времени).
+    /// Оставить `count` самых новых журналов. Имена с датой сортируются по времени; второй журнал той же секунды
+    /// (`…-2.log`) — после первого.
     static func prune(_ directory: URL, keeping count: Int) {
         let files = FileManager.default
+        func order(_ name: String) -> (String, Int) {
+            let base = String(name.dropFirst("scroll-".count).dropLast(".log".count))
+            let stamp = String(base.prefix(19))
+            return (stamp, Int(base.dropFirst(20)) ?? 1)
+        }
         let logs = ((try? files.contentsOfDirectory(atPath: directory.path)) ?? [])
             .filter { $0.hasPrefix("scroll-") && $0.hasSuffix(".log") }
-            .sorted()
+            .sorted { order($0) < order($1) }
         for name in logs.dropLast(max(0, count)) { try? files.removeItem(at: directory.appendingPathComponent(name)) }
     }
 

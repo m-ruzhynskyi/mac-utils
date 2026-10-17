@@ -717,6 +717,46 @@ final class StitcherScenarioTests: XCTestCase {
         for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
     }
 
+    /// Смена направления (ревью 5): вверх в историю, вниз дальше кадра и за первый кадр, снова вверх — с сериями
+    /// одинаковых «Ок», только по изображению и с трекпадом. Было: другая сторона находила ложный «точный» сдвиг
+    /// без общих строк с её дальним кадром и вклеивала сотни уже снятых строк. Лишнего текста нет никогда;
+    /// честный `.lost` допустим.
+    func testChatDirectionChangeNeverDuplicates() {
+        let feed = chatFeed(count: 30, width: 1100)
+        let maxOffset = feed.height - 980
+        let routes: [(String, [Double])] = [("середина↓↑↓", [0.5, 0.8, 0.2, 0.9]), ("конец↑↓↑", [1.0, 0.6, 0.8, 0.0]),
+                                            ("разворот у первого", [0.5, 0.3, 0.5, 0.75, 0.45])]
+        let layouts: [(ChatLayout, String)] = [(ChatLayout(wallpaper: false, sidebar: true, bars: true), "шапка и список"),
+                                               (ChatLayout(wallpaper: false, sidebar: false, bars: false), "без рамок"),
+                                               (ChatLayout(wallpaper: true, sidebar: false, bars: true), "обои")]
+        var runs: [(name: String, layout: ChatLayout, offsets: [Int], motions: [Stitcher.Motion?])] = []
+        for (name, points) in routes {
+            for (layout, layoutName) in layouts { for pixels in [false, true] {
+                var offsets: [Int] = [Int(points[0] * Double(maxOffset))]
+                for point in points.dropFirst() {
+                    let target = Int(point * Double(maxOffset))
+                    while offsets.last! != target {
+                        let last = offsets.last!
+                        offsets.append(last < target ? min(target, last + 240) : max(target, last - 240))
+                    }
+                }
+                let motions: [Stitcher.Motion?] = offsets.indices.map { (i: Int) -> Stitcher.Motion? in
+                    guard pixels else { return nil }
+                    return Stitcher.Motion(pixels: Double(i == 0 ? 0 : offsets[i] - offsets[i - 1]))
+                }
+                runs.append(("\(name), \(layoutName)\(pixels ? ", трекпад" : "")", layout, offsets, motions))
+            } }
+        }
+        var problems = [String?](repeating: nil, count: runs.count)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: runs.count) { (i: Int) in
+            let problem = chatProblem(feed, runs[i].layout, offsets: runs[i].offsets, motions: runs[i].motions, runs[i].name,
+                                      allowLost: true)
+            lock.lock(); problems[i] = problem; lock.unlock()
+        }
+        for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
+    }
+
     /// Журнал съёмки: как решён кадр — сторона склейки, сдвиг, источник.
     func testTraceTellsDirectionAndSource() {
         let page = textPage(width: 1400, lines: prose(seed: 3, count: 120))

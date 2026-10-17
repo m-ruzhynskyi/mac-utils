@@ -76,6 +76,48 @@ final class ScrollCaptureLogTests: XCTestCase {
         XCTAssertEqual(sessions.last, last?.lastPathComponent)
     }
 
+    /// Запись, которая падает (как на заполненном диске), не роняет приложение: журнал выключается, съёмка идёт.
+    func testFailedWriteTurnsTheLogOffInsteadOfCrashing() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("scroll-readonly.log")
+        XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: Data()))
+        let log = ScrollCaptureLog(handle: try FileHandle(forReadingFrom: url), url: url)
+        log.write("frame 0")
+        log.write("frame 1")
+        log.flush()
+        XCTAssertFalse(log.isWriting)
+        log.write("end done")
+        log.close()
+        log.flush()
+        XCTAssertEqual(try Data(contentsOf: url).count, 0)
+    }
+
+    func testSecondLogOfTheSameSecondIsKeptAsTheNewer() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for name in ["scroll-2027-01-01_10-00-00.log", "scroll-2027-01-01_10-00-00-2.log", "scroll-2026-12-31_10-00-00.log"] {
+            FileManager.default.createFile(atPath: directory.appendingPathComponent(name).path, contents: Data())
+        }
+        ScrollCaptureLog.prune(directory, keeping: 1)
+        XCTAssertEqual(try logs(), ["scroll-2027-01-01_10-00-00-2.log"])
+    }
+
+    func testFramesAreRemovedWhenTheSettingIsOff() throws {
+        let on = try XCTUnwrap(ScrollCaptureLog(directory: directory, saveFrames: true))
+        XCTAssertNotNil(on.framesDirectory)
+        _ = try XCTUnwrap(ScrollCaptureLog(directory: directory, saveFrames: false))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("scroll-frames").path))
+    }
+
+    func testEndLineSurvivesTruncation() throws {
+        let log = try XCTUnwrap(ScrollCaptureLog(directory: directory, saveFrames: false))
+        for k in 0..<(ScrollCaptureLog.maxLines + 10) { log.write("ev \(k)") }
+        log.write("end done")
+        log.close()
+        log.flush()
+        let lines = try String(contentsOf: log.url, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(lines.suffix(2).map(String.init), ["truncated", "end done"])
+    }
+
     func testFrameLineHasOnlyNumbersAndModeNames() {
         let trace = Stitcher.Trace(up: true, shift: 240, header: 120, footer: 100, source: .layer, expected: 230, reason: nil)
         let line = ScrollCaptureLog.frameLine(index: 3, time: 1.25, grabMs: 31.4, addMs: 12.06, result: .appended, added: 240,
