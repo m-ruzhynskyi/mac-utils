@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Шрифты интерфейса (Graphite) — до первого окна; не вышло — системный шрифт.
         DSFonts.registerAll()
         Pref.register()
+        KeepAwake.shared.observeWake()
         BusyRegistry.shared.installDefaultProviders()
         observeSystemShutdown()
         PanelTabs.migrate()
@@ -102,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "break": BreakReminder.shared.show()
             case "warm": WarmScreen.shared.preview()
             case "warm-toggle": WarmScreen.shared.toggleManual()
+            case "keep-awake": KeepAwake.shared.toggle()
             case "focus": FocusBlur.shared.toggle()
             default: SettingsWindowController.shared.show()
             }
@@ -215,6 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         WarmScreen.shared.shutdown()
+        KeepAwake.shared.shutdown()
         AppSwitcher.shared.shutdown()
     }
 

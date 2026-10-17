@@ -137,7 +137,7 @@ extension SettingsSection {
         case .downloads: return "загрузки сортировка папки правила корзина"
         case .qr: return "qr код ссылка распознать"
         case .annotate: return "рисование на экране перо стрелка маркер презентация"
-        case .wellbeing: return "перерывы глаза тёплый экран ночной режим 20-20-20"
+        case .wellbeing: return "перерывы глаза тёплый экран ночной режим 20-20-20 не засыпать сон caffeinate кофеин"
         case .meetings: return "записи встреч созвон микрофон расшифровка whisper отчёт"
         case .ai: return "ии ollama модель исправить текст умные имена"
         case .uninstaller: return "удаление программ остатки приложения"

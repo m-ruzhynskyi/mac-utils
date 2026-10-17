@@ -461,6 +461,14 @@ private struct WellbeingPanel: View {
     @AppStorage(Pref.breakReminder) private var breaks = false
 
     var body: some View {
+        QuickGroup("Не засыпать") {
+            KeepAwakeTicker()
+        }
+        Text(KeepAwakeRow.note)
+            .font(DS.Font.rowSub)
+            .foregroundStyle(.dsMute)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, DS.Space.xs)
         QuickGroup("Перерывы и тёплый экран") {
             WarmScreenRow()
             ToggleRow("Напоминать о перерыве", subtitle: breaks ? "Работаете без перерыва: \(reminder.workedMinutes) мин" : nil,

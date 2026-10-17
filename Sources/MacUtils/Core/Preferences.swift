@@ -169,6 +169,8 @@ enum Pref {
     /// Тёплый экран: "schedule" — по времени, "manual" — включается вручную.
     static let warmMode = "warmScreenMode"
     static let warmManualOn = "warmScreenManualOn"
+    /// «Не засыпать»: последний выбранный срок (сама функция после запуска всегда выключена).
+    static let keepAwakeDuration = "keepAwakeDuration"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -231,6 +233,7 @@ enum Pref {
             warmTo: 7,
             warmMode: "schedule",
             warmManualOn: false,
+            keepAwakeDuration: KeepAwakeDuration.indefinite.rawValue,
             annotate: true,
             windowPin: true,
             windowPinOpacity: 1.0,

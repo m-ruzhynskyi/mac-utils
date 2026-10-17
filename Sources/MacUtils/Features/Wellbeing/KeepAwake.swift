@@ -1,0 +1,162 @@
+import AppKit
+import IOKit.pwr_mgt
+
+/// Срок работы «Не засыпать».
+enum KeepAwakeDuration: String, CaseIterable, Identifiable {
+    case indefinite, hour1, hours3, hours8
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .indefinite: return "Пока не выключу"
+        case .hour1: return "1 час"
+        case .hours3: return "3 часа"
+        case .hours8: return "8 часов"
+        }
+    }
+
+    /// nil — без ограничения.
+    var seconds: TimeInterval? {
+        switch self {
+        case .indefinite: return nil
+        case .hour1: return 3_600
+        case .hours3: return 3 * 3_600
+        case .hours8: return 8 * 3_600
+        }
+    }
+}
+
+/// Запрет сна системы (подменяется в тестах).
+protocol SleepAssertionProviding {
+    /// Идентификатор assertion или nil, если система отказала.
+    func create(reason: String) -> UInt32?
+    func release(_ id: UInt32)
+}
+
+/// Настоящий assertion: сон системы запрещён, сон дисплея — нет (как `caffeinate -i`).
+struct IOKitSleepAssertion: SleepAssertionProviding {
+    func create(reason: String) -> UInt32? {
+        var id = IOPMAssertionID(0)
+        let result = IOPMAssertionCreateWithName(kIOPMAssertPreventUserIdleSystemSleep as CFString,
+                                                 IOPMAssertionLevel(kIOPMAssertionLevelOn), reason as CFString, &id)
+        return result == kIOReturnSuccess ? id : nil
+    }
+
+    func release(_ id: UInt32) { IOPMAssertionRelease(id) }
+}
+
+extension Notification.Name {
+    /// «Не засыпать» включили, выключили или сменили срок (значок в строке меню обновляет вид).
+    static let keepAwakeChanged = Notification.Name("MacUtils.keepAwakeChanged")
+}
+
+/// «Не засыпать»: Mac не уходит в сон, экран может гаснуть. Состояние не сохраняется — после запуска выключено.
+@MainActor
+final class KeepAwake: ObservableObject {
+    static let shared = KeepAwake()
+    static let reason = "Mac Utils: не засыпать"
+
+    /// nil — выключено; `.distantFuture` — без срока.
+    @Published private(set) var endsAt: Date?
+    @Published private(set) var failed = false
+    /// Выбранный срок, пока включено.
+    private(set) var currentDuration: KeepAwakeDuration?
+
+    private let provider: SleepAssertionProviding
+    private let now: () -> Date
+    private var assertion: UInt32?
+    private var timer: Timer?
+
+    init(provider: SleepAssertionProviding = IOKitSleepAssertion(), now: @escaping () -> Date = Date.init) {
+        self.provider = provider
+        self.now = now
+    }
+
+    var isActive: Bool { assertion != nil }
+    var isIndefinite: Bool { endsAt == .distantFuture }
+
+    /// Включить (или сменить срок, если уже включено).
+    func start(_ duration: KeepAwakeDuration) {
+        if assertion == nil {
+            guard let id = provider.create(reason: Self.reason) else {
+                failed = true
+                return
+            }
+            assertion = id
+        }
+        failed = false
+        currentDuration = duration
+        endsAt = duration.seconds.map { now().addingTimeInterval($0) } ?? .distantFuture
+        scheduleTimer()
+        changed()
+    }
+
+    /// Включить с последним выбранным сроком или выключить (macutils://keep-awake, пункт меню значка).
+    func toggle() {
+        if isActive { stop(); return }
+        let saved = UserDefaults.standard.string(forKey: Pref.keepAwakeDuration)
+        start(saved.flatMap(KeepAwakeDuration.init(rawValue:)) ?? .indefinite)
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        if let assertion { provider.release(assertion) }
+        assertion = nil
+        endsAt = nil
+        currentDuration = nil
+        changed()
+    }
+
+    /// Выключить, если срок вышел (по таймеру и после пробуждения: таймер мог опоздать).
+    func expireIfNeeded() {
+        guard let endsAt, endsAt != .distantFuture, endsAt <= now() else { return }
+        stop()
+    }
+
+    /// Сколько осталось; nil — выключено или без срока.
+    func remaining() -> TimeInterval? {
+        guard let endsAt, endsAt != .distantFuture else { return nil }
+        return max(0, endsAt.timeIntervalSince(now()))
+    }
+
+    /// «Осталось 2 ч 15 мин», «Осталось 12 мин», «Осталось меньше минуты».
+    static func remainingText(_ seconds: TimeInterval) -> String {
+        let minutes = Int((seconds / 60).rounded(.up))
+        if seconds <= 0 || minutes < 1 { return "Осталось меньше минуты" }
+        if minutes < 60 { return "Осталось \(minutes) мин" }
+        let (hours, rest) = minutes.quotientAndRemainder(dividingBy: 60)
+        return rest == 0 ? "Осталось \(hours) ч" : "Осталось \(hours) ч \(rest) мин"
+    }
+
+    /// Строка состояния для панели и подсказки значка.
+    func statusText() -> String {
+        if let remaining = remaining() { return Self.remainingText(remaining) }
+        return isActive ? "Mac не уснёт, пока вы не выключите" : "Выключено"
+    }
+
+    private func scheduleTimer() {
+        timer?.invalidate()
+        timer = nil
+        guard let endsAt, endsAt != .distantFuture else { return }
+        let timer = Timer(fire: endsAt, interval: 0, repeats: false) { _ in
+            MainActor.assumeIsolated { KeepAwake.shared.expireIfNeeded() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func changed() {
+        NotificationCenter.default.post(name: .keepAwakeChanged, object: nil)
+    }
+
+    /// Один раз при запуске: срок проверяется и после сна.
+    func observeWake() {
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { KeepAwake.shared.expireIfNeeded() }
+        }
+    }
+
+    func shutdown() { stop() }
+}

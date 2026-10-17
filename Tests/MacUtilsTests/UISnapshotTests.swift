@@ -177,6 +177,22 @@ final class UISnapshotTests: XCTestCase {
         bothThemes("components-gallery-surfaces", size: NSSize(width: 1000, height: 1300), settle: 0.8) { ComponentsGallery(part: .surfaces) }
     }
 
+    /// 1.6.6: «Не засыпать» — выключено и включено (демо: осталось 2 ч 15 мин), в узкой и обычной ширине.
+    func testKeepAwakeRow() {
+        for width in [DS.Size.popover.width, 420] {
+            bothThemes("keep-awake-\(Int(width))", size: NSSize(width: width, height: 260), settle: 0.4) {
+                VStack(spacing: DS.Space.m) {
+                    ListCard { KeepAwakeRow() }
+                    ListCard { KeepAwakeRow(demoRemaining: 2 * 3_600 + 15 * 60) }
+                    Text(KeepAwakeRow.note).font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(DS.Space.l)
+                .frame(width: width, height: 260, alignment: .top)
+                .background(Color.dsPanel)
+            }
+        }
+    }
+
     /// Панель в строке меню (концепт `Popover*.dc.html`): вкладки разделов, размер — как у поповера.
     func testMenuBarPanelTabs() {
         let size = NSSize(width: DS.Size.popover.width, height: DS.Size.popover.height)
