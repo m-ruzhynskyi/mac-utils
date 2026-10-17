@@ -105,7 +105,7 @@ function createWindow() {
     title: "Mac Utils Share",
     icon: path.join(__dirname, "assets", "icon.png"),
     autoHideMenuBar: true,
-    // backgroundThrottling: false — свёрнутое окно не замедляет таймер кадров трансляции (33 мс) до ~1 раза в секунду.
+    // backgroundThrottling: false — свёрнутое окно не замедляет захват и кодирование кадров трансляции (до 60/с) до ~1 раза в секунду.
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, backgroundThrottling: false },
   });
   // Закрыли главное окно — выходим совсем (окно меток не должно держать приложение без окна).
