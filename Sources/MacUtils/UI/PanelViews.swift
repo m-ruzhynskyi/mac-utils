@@ -6,14 +6,6 @@ extension Notification.Name {
     static let openSettingsSection = Notification.Name("MacUtils.openSettingsSection")
 }
 
-/// Вкладка «Главная» панели 🔧 (концепт `Popover.dc.html`): сводка быстрых действий всех функций.
-/// В `Pref.toolsTab` хранится как `tab`, остальные вкладки — `SettingsSection.rawValue`.
-enum PanelHome {
-    static let tab = "home"
-    static let title = "Главная"
-    static let symbol = "house"
-}
-
 /// Вкладка панели 🔧: быстрые действия раздела, а не страница настроек. Инструменты (программы, монитор, задачи,
 /// очистка, снимки) и разделы с собственным компактным видом показывают его.
 struct PanelSectionView: View {
@@ -47,7 +39,7 @@ struct PanelSectionView: View {
 
     @ViewBuilder private var content: some View {
         switch section {
-        case .screenshot: CaptureQuick(showsFixText: false)
+        case .screenshot: CaptureQuick()
         case .windows: WindowsPanel()
         case .volume: VolumePanel()
         case .layout: LayoutPanel()
@@ -63,26 +55,6 @@ struct PanelSectionView: View {
         case .smoothScroll: SmoothScrollPanel()
         case .switcher: SwitcherPanel()
         default: EmptyView()
-        }
-    }
-}
-
-/// «Главная»: группы быстрых действий как в концепте и карточка трансляции.
-struct PanelHomeView: View {
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: DS.Space.m) {
-                CaptureQuick(showsFixText: true)
-                WindowsQuick()
-                InputQuick()
-                FilesScreenQuick()
-                MeetingsAIQuick()
-                ShareQuickCard()
-            }
-            .padding(.horizontal, DS.Space.l)
-            .padding(.top, DS.Space.xxs)
-            .padding(.bottom, DS.Space.l)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -162,11 +134,9 @@ private struct QuickGroup<Content: View>: View {
 /// Сочетание переключателя приложений (⌥Tab или ⌘Tab — по настройке).
 private func switcherKeys(_ modifier: String) -> [String] { [modifier == "command" ? "⌘" : "⌥", "Tab"] }
 
-// MARK: - Группы «Главной» (и вкладок разделов)
+// MARK: - Группы вкладок разделов
 
 private struct CaptureQuick: View {
-    let showsFixText: Bool
-
     var body: some View {
         QuickGroup("Захват") {
             QuickAction(title: "Снять область или окно", systemImage: "camera.viewfinder", tile: .accent, hotKey: .screenshot) {
@@ -182,7 +152,6 @@ private struct CaptureQuick: View {
             QuickAction(title: "Открыть папку снимков", systemImage: "folder") {
                 NSWorkspace.shared.open(Pref.screenshotDirectory)
             }
-            if showsFixText { AIFixRow() }
         }
     }
 }
@@ -205,58 +174,6 @@ private struct WindowsQuick: View {
             if AppVolume.isSupported {
                 KeyedToggleRow("Громкость приложений", systemImage: "speaker.wave.2", hotKey: .appVolume, isOn: $appVolume)
             }
-        }
-    }
-}
-
-private struct InputQuick: View {
-    @AppStorage(Pref.layoutFix) private var layoutFix = true
-    @AppStorage(Pref.cheatSheet) private var cheatSheet = true
-    @AppStorage(Pref.cutPaste) private var cutPaste = true
-    @AppStorage(Pref.smoothScroll) private var smoothScroll = true
-
-    var body: some View {
-        QuickGroup("Ввод и прокрутка") {
-            KeyedToggleRow("Исправлять раскладку", subtitle: "ghbdtn → привет", systemImage: "keyboard", hotKey: .layoutFix, isOn: $layoutFix)
-            ToggleRow("Шпаргалка сочетаний", subtitle: "Удерживайте ⌘", systemImage: "command", isOn: $cheatSheet)
-            ToggleRow("Вырезать и вставить в Finder", subtitle: "⌘X → ⌘V", systemImage: "scissors", isOn: $cutPaste)
-            ToggleRow("Плавная прокрутка", subtitle: "Колесо обычной мыши", systemImage: "computermouse", isOn: $smoothScroll)
-        }
-    }
-}
-
-private struct FilesScreenQuick: View {
-    @AppStorage(Pref.downloadsSort) private var downloads = false
-    @AppStorage(Pref.breakReminder) private var breaks = false
-    @ObservedObject private var reminder = BreakReminder.shared
-
-    var body: some View {
-        QuickGroup("Файлы и экран") {
-            QuickAction(title: "Полка для файлов", subtitle: "Или встряхните мышь с файлами", systemImage: "tray.full", hotKey: .dropShelf) {
-                fromPanel { DropShelf.shared.toggle() }
-            }
-            ToggleRow("Сортировать «Загрузки»", subtitle: "Новые файлы по папкам", systemImage: "arrow.down.circle", isOn: $downloads)
-            QuickAction(title: "QR-коды", subtitle: "Прочитать с экрана", systemImage: "qrcode.viewfinder", hotKey: .qr) {
-                fromPanel { QRCodeService.shared.scanScreen() }
-            }
-            QuickAction(title: "Рисовать на экране", subtitle: "1–4 — инструменты, Esc — выйти", systemImage: "pencil.tip.crop.circle",
-                        hotKey: .annotate) {
-                fromPanel { ScreenAnnotator.shared.start() }
-            }
-            WarmScreenRow()
-            ToggleRow("Напоминать о перерыве", subtitle: breaks ? "Работаете без перерыва: \(reminder.workedMinutes) мин" : nil,
-                      systemImage: "figure.walk", isOn: $breaks)
-        }
-    }
-}
-
-private struct MeetingsAIQuick: View {
-    @AppStorage(Pref.ai) private var ai = true
-
-    var body: some View {
-        QuickGroup("Встречи и ИИ") {
-            MeetingRow()
-            ToggleRow("ИИ-функции", subtitle: "Ollama · \(Ollama.model), всё локально", systemImage: "sparkles", isOn: $ai)
         }
     }
 }
@@ -373,76 +290,6 @@ private struct AIFixRow: View {
                 note = error.localizedDescription
             }
         }
-    }
-}
-
-/// Трансляция экрана (концепт): мой ID, просмотр по ID собеседника, своя трансляция, история.
-private struct ShareQuickCard: View {
-    @ObservedObject private var share = ScreenShare.shared
-    @AppStorage(Pref.shareID) private var savedID = ""
-    @State private var code = ""
-
-    private var myID: String { savedID.count == 10 ? savedID : ShareCode.myID }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            GroupLabel("Трансляция экрана").padding(.horizontal, DS.Space.xs)
-            Card(style: .field) {
-                HStack(spacing: DS.Space.m) {
-                    RowTile(systemImage: "dot.radiowaves.left.and.right")
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Мой ID · постоянный").font(DS.Font.rowSub).foregroundStyle(.dsMute)
-                        Text(ShareCode.display(myID)).font(DS.Font.monoLarge).tracking(1).foregroundStyle(.dsText)
-                            .textSelection(.enabled)
-                    }
-                    Spacer(minLength: DS.Space.s)
-                    Button("Копировать") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(myID, forType: .string)
-                        Toast.show("ID скопирован", symbol: "doc.on.doc.fill")
-                    }
-                    .buttonStyle(.graphite(.secondary, size: .compact))
-                }
-                HStack(spacing: DS.Space.s) {
-                    TextField("ID собеседника, 10 цифр", text: $code)
-                        .textFieldStyle(.graphiteMono)
-                        .onSubmit(watch)
-                    Button("Смотреть", action: watch)
-                        .buttonStyle(.graphite(.primary))
-                        .disabled(code.filter(\.isNumber).count != 10)
-                }
-                HStack(spacing: DS.Space.s) {
-                    switch share.state {
-                    case .idle, .failed:
-                        Button("Транслировать мой экран") { fromPanel { ScreenShare.shared.start() } }
-                            .buttonStyle(.graphite(.secondary, fill: true))
-                    case .connecting:
-                        Button("Отмена") { ScreenShare.shared.cancelConnecting() }
-                            .buttonStyle(.graphite(.secondary, fill: true))
-                    case .live:
-                        Button("Остановить трансляцию") { ScreenShare.shared.stop() }
-                            .buttonStyle(.graphite(.danger, fill: true))
-                    }
-                    Button("История") {
-                        AppStatusItem.shared.closeTools()
-                        SettingsWindowController.shared.show(section: .share)
-                    }
-                    .buttonStyle(.graphite(.secondary))
-                }
-                if case .failed(let message) = share.state {
-                    Text(message).font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
-                }
-                Text("Каждого зрителя вы сначала разрешаете. Зрители ставят метки, управлять вашим Mac они не могут.")
-                    .font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private func watch() {
-        guard code.filter(\.isNumber).count == 10 else { return }
-        AppStatusItem.shared.closeTools()
-        ShareViewer.shared.watch(code: code)
-        code = ""
     }
 }
 
@@ -614,6 +461,14 @@ private struct WellbeingPanel: View {
     @AppStorage(Pref.breakReminder) private var breaks = false
 
     var body: some View {
+        QuickGroup("Не засыпать") {
+            KeepAwakeTicker()
+        }
+        Text(KeepAwakeRow.note)
+            .font(DS.Font.rowSub)
+            .foregroundStyle(.dsMute)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, DS.Space.xs)
         QuickGroup("Перерывы и тёплый экран") {
             WarmScreenRow()
             ToggleRow("Напоминать о перерыве", subtitle: breaks ? "Работаете без перерыва: \(reminder.workedMinutes) мин" : nil,

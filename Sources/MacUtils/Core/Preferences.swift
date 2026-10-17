@@ -28,6 +28,8 @@ enum Pref {
     static let screenshotStepsEqualSize = "screenshotStepsEqualSize"
     static let screenshotStepsFrame = "screenshotStepsFrame"
     static let screenshotStepsTitles = "screenshotStepsTitles"
+    static let screenshotStepsBadges = "screenshotStepsBadges"
+    static let screenshotStepsArrows = "screenshotStepsArrows"
     /// Рамка окна macOS для обычных снимков включена по умолчанию (кнопка / F в оверлее).
     static let screenshotFrameDefault = "screenshotFrameDefault"
     /// Фон под рамкой и коллажем: см. ShotBackground.
@@ -169,6 +171,8 @@ enum Pref {
     /// Тёплый экран: "schedule" — по времени, "manual" — включается вручную.
     static let warmMode = "warmScreenMode"
     static let warmManualOn = "warmScreenManualOn"
+    /// «Не засыпать»: последний выбранный срок (сама функция после запуска всегда выключена).
+    static let keepAwakeDuration = "keepAwakeDuration"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -186,6 +190,8 @@ enum Pref {
             screenshotStepsEqualSize: true,
             screenshotStepsFrame: true,
             screenshotStepsTitles: true,
+            screenshotStepsBadges: true,
+            screenshotStepsArrows: false,
             screenshotFrameDefault: false,
             screenshotBackground: "sky",
             screenshotWindowSnap: false,
@@ -231,6 +237,7 @@ enum Pref {
             warmTo: 7,
             warmMode: "schedule",
             warmManualOn: false,
+            keepAwakeDuration: KeepAwakeDuration.indefinite.rawValue,
             annotate: true,
             windowPin: true,
             windowPinOpacity: 1.0,

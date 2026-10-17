@@ -13,6 +13,11 @@ enum FocusReturn {
         }
     }
 
+    /// Фокус остаётся у Mac Utils (открыто своё окно): прошлое приложение больше не возвращать.
+    static func forget() {
+        previous = nil
+    }
+
     static func restore() {
         guard let app = previous, !app.isTerminated else { return }
         previous = nil

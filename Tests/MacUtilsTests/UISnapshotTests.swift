@@ -177,14 +177,31 @@ final class UISnapshotTests: XCTestCase {
         bothThemes("components-gallery-surfaces", size: NSSize(width: 1000, height: 1300), settle: 0.8) { ComponentsGallery(part: .surfaces) }
     }
 
-    /// Панель в строке меню (концепт `Popover*.dc.html`): «Главная» и вкладки разделов, размер — как у поповера.
+    /// 1.6.6: «Не засыпать» — выключено и включено (демо: осталось 2 ч 15 мин), в узкой и обычной ширине.
+    func testKeepAwakeRow() {
+        for width in [DS.Size.popover.width, 420] {
+            bothThemes("keep-awake-\(Int(width))", size: NSSize(width: width, height: 260), settle: 0.4) {
+                VStack(spacing: DS.Space.m) {
+                    ListCard { KeepAwakeRow() }
+                    ListCard { KeepAwakeRow(demoRemaining: 2 * 3_600 + 15 * 60) }
+                    Text(KeepAwakeRow.note).font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(DS.Space.l)
+                .frame(width: width, height: 260, alignment: .top)
+                .background(Color.dsPanel)
+            }
+        }
+    }
+
+    /// Панель в строке меню (концепт `Popover*.dc.html`): вкладки разделов, размер — как у поповера.
     func testMenuBarPanelTabs() {
         let size = NSSize(width: DS.Size.popover.width, height: DS.Size.popover.height)
         let others = PanelTabs.sections(PanelTabs.defaultValue).filter { Self.skippedSections[$0] == nil }
-        // «Главная» с показательным рядом вкладок: разделы по умолчанию в основном личные и в снимках пропускаются.
-        suite.set(PanelHome.tab, forKey: Pref.toolsTab)
+        // Сохранённая «Главная» (1.6.6 её убрала) → первая вкладка; ряд показательный: разделы по умолчанию
+        // в основном личные и в снимках пропускаются.
+        suite.set("home", forKey: Pref.toolsTab)
         suite.set(PanelTabs.value([.screenshot, .shelf, .qr, .annotate, .wellbeing, .monitor]), forKey: Pref.toolsPanelTabs)
-        bothThemes("panel-home", size: size, settle: 0.6) { ToolsView(inPopover: true).frame(width: size.width, height: size.height) }
+        bothThemes("panel-from-home", size: size, settle: 0.6) { ToolsView(inPopover: true).frame(width: size.width, height: size.height) }
         for section in PanelTabs.available where Self.skippedSections[section] == nil {
             suite.set(section.rawValue, forKey: Pref.toolsTab)
             suite.set(PanelTabs.value([section] + others.filter { $0 != section }), forKey: Pref.toolsPanelTabs)
@@ -217,7 +234,7 @@ final class UISnapshotTests: XCTestCase {
     /// минимальный размер окна — содержимое вписывается.
     func testToolsWindow() {
         suite.set(PanelTabs.value([.screenshot, .shelf, .qr, .wellbeing, .monitor]), forKey: Pref.toolsPanelTabs)
-        suite.set(PanelHome.tab, forKey: Pref.toolsTab)
+        suite.set("home", forKey: Pref.toolsTab)
         bothThemes("tools-window-from-home", size: NSSize(width: 1000, height: 660), settle: 0.6) { ToolsView() }
         for section in [SettingsSection.shelf, .qr, .wellbeing, .monitor] {
             suite.set(section.rawValue, forKey: Pref.toolsTab)
@@ -426,7 +443,6 @@ final class UISnapshotTests: XCTestCase {
                 MeetingHUDContent(since: Date().addingTimeInterval(-754), interruption: nil, stalled: false, stop: {})
                 MeetingHUDContent(since: Date().addingTimeInterval(-754), interruption: nil, stalled: true, stop: {})
                 MeetingHUDContent(since: nil, interruption: "Запись прервана: устройство звука отключено", stalled: false, stop: {})
-                StepsHUDContent(count: 3, cancel: {}, next: {}, finish: {})
             }
             .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color.dsBg)
         }
@@ -444,6 +460,68 @@ final class UISnapshotTests: XCTestCase {
                              copy: {}, showRequests: {}, changeSource: {}, stop: {})
             }
             .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).background(Color.dsBg)
+        }
+    }
+
+    /// Демо-«окно приложения» для коллажа: нарисованные блоки и подписи, никаких снимков экрана.
+    private static func demoShot(_ title: String, width: Int, height: Int, hue: CGFloat, unit: CGFloat) -> CGImage {
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        NSColor(white: 0.97, alpha: 1).setFill()
+        NSRect(x: 0, y: 0, width: width, height: height).fill()
+        NSColor(hue: hue, saturation: 0.55, brightness: 0.9, alpha: 1).setFill()
+        NSRect(x: 0, y: CGFloat(height) - 44 * unit, width: CGFloat(width), height: 44 * unit).fill()
+        NSColor(white: 0.88, alpha: 1).setFill()
+        for row in 0..<6 {
+            NSRect(x: 24 * unit, y: CGFloat(height) - (84 + CGFloat(row) * 30) * unit, width: CGFloat(width) * 0.6, height: 12 * unit).fill()
+        }
+        NSColor(hue: hue, saturation: 0.7, brightness: 0.75, alpha: 1).setFill()
+        NSBezierPath(roundedRect: NSRect(x: CGFloat(width) - 150 * unit, y: 24 * unit, width: 126 * unit, height: 36 * unit),
+                     xRadius: 8 * unit, yRadius: 8 * unit).fill()
+        NSAttributedString(string: title, attributes: [.font: NSFont.boldSystemFont(ofSize: 18 * unit), .foregroundColor: NSColor.white])
+            .draw(at: NSPoint(x: 18 * unit, y: CGFloat(height) - 33 * unit))
+        NSGraphicsContext.restoreGraphicsState()
+        return context.makeImage()!
+    }
+
+    private static var demoSteps: [StepShot] {
+        // Разные размеры и плотности: третий шаг снят на обычном (не Retina) экране.
+        [StepShot(image: demoShot("Демо: открыть меню", width: 960, height: 640, hue: 0.58, unit: 2), unit: 2, rect: nil,
+                  caption: "Откройте меню «Файл»"),
+         StepShot(image: demoShot("Демо: настройки", width: 720, height: 760, hue: 0.33, unit: 2), unit: 2, rect: nil,
+                  caption: "Включите «Автосохранение»"),
+         StepShot(image: demoShot("Демо: готово", width: 420, height: 300, hue: 0.08, unit: 1), unit: 1, rect: nil, caption: "")]
+    }
+
+    func testStepsCollageScenes() {
+        let steps = Self.demoSteps
+        let items = steps.map { StepsPanelItem(id: $0.id, thumbnail: $0.thumbnail) }
+        bothThemes("steps-panel", size: NSSize(width: 820, height: 420)) {
+            VStack(alignment: .leading, spacing: 12) {
+                StepsPanelContent(items: items)
+                StepsPanelContent(items: Array(items.prefix(2)), canUndo: true)
+                StepsPanelContent(items: items, confirmingCancel: true)
+            }
+            .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color.dsBg)
+        }
+        suite.set(StepsLayout.auto.rawValue, forKey: Pref.screenshotStepsLayout)
+        suite.set(true, forKey: Pref.screenshotStepsEqualSize)
+        suite.set(true, forKey: Pref.screenshotStepsFrame)
+        suite.set(true, forKey: Pref.screenshotStepsTitles)
+        suite.set(true, forKey: Pref.screenshotStepsBadges)
+        suite.set(true, forKey: Pref.screenshotStepsArrows)
+        suite.set(ShotBackground.sky.rawValue, forKey: Pref.screenshotBackground)
+        let model = StepsPreviewModel(defaults: suite, steps: { steps })
+        bothThemes("steps-preview", size: NSSize(width: 1040, height: 680), settle: 0.5) {
+            StepsPreviewView(model: model)
+        }
+        model.layout = .vertical
+        model.windowFrame = false
+        bothThemes("steps-preview-vertical", size: NSSize(width: 1040, height: 680), settle: 0.5) {
+            StepsPreviewView(model: model)
         }
     }
 

@@ -9,6 +9,7 @@ final class AppStatusItem: NSObject {
 
     private var item: NSStatusItem?
     private var popover: NSPopover?
+    private var keepAwakeObserver: NSObjectProtocol?
 
     func sync() {
         if UserDefaults.standard.bool(forKey: Pref.menuBarIcon) {
@@ -23,8 +24,15 @@ final class AppStatusItem: NSObject {
                 button.setAccessibilityLabel("Mac Utils — инструменты")
                 button.target = self
                 button.action = #selector(clicked)
+                button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             }
             self.item = item
+            if keepAwakeObserver == nil {
+                keepAwakeObserver = NotificationCenter.default.addObserver(forName: .keepAwakeChanged, object: nil, queue: .main) { _ in
+                    MainActor.assumeIsolated { AppStatusItem.shared.updateIcon() }
+                }
+            }
+            updateIcon()
         } else if let item {
             NSStatusBar.system.removeStatusItem(item)
             self.item = nil
@@ -36,8 +44,60 @@ final class AppStatusItem: NSObject {
         modifiers.intersection(.deviceIndependentFlagsMask).contains(.option)
     }
 
+    /// «Не засыпать» включено — на значке чашка и подсказка; иначе обычный значок.
+    func updateIcon() {
+        guard let button = item?.button else { return }
+        let active = KeepAwake.shared.isActive
+        let image = NSImage(systemSymbolName: active ? "cup.and.saucer.fill" : "wrench.and.screwdriver",
+                            accessibilityDescription: active ? "Mac Utils: не засыпать включено" : "Mac Utils")
+        image?.isTemplate = true
+        button.image = image
+        button.toolTip = active ? "Mac Utils — не засыпать включено (правая кнопка — меню)" : "Mac Utils — инструменты (⌥-клик — в окне, правая кнопка — меню)"
+        button.setAccessibilityLabel(active ? "Mac Utils — не засыпать включено" : "Mac Utils — инструменты")
+    }
+
+    /// Меню значка (правая кнопка или ⌃-клик): «Не засыпать» и панель.
+    private func showMenu() {
+        closeTools()
+        let keepAwake = KeepAwake.shared
+        let menu = NSMenu()
+        let title = menu.addItem(withTitle: keepAwake.isActive ? "Не засыпать: \(keepAwake.statusText())" : "Не засыпать", action: nil, keyEquivalent: "")
+        title.isEnabled = false
+        for duration in KeepAwakeDuration.allCases {
+            let entry = menu.addItem(withTitle: duration.title, action: #selector(keepAwakeFor(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = duration.rawValue
+            entry.indentationLevel = 1
+            if keepAwake.isActive, keepAwake.currentDuration == duration { entry.state = .on }
+        }
+        if keepAwake.isActive {
+            let off = menu.addItem(withTitle: "Выключить", action: #selector(keepAwakeOff), keyEquivalent: "")
+            off.target = self
+            off.indentationLevel = 1
+        }
+        menu.addItem(.separator())
+        let open = menu.addItem(withTitle: "Открыть панель", action: #selector(openPanel), keyEquivalent: "")
+        open.target = self
+        item?.menu = menu
+        item?.button?.performClick(nil)
+        item?.menu = nil
+    }
+
+    @objc private func keepAwakeFor(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let duration = KeepAwakeDuration(rawValue: raw) else { return }
+        UserDefaults.standard.set(raw, forKey: Pref.keepAwakeDuration)
+        KeepAwake.shared.start(duration)
+    }
+
+    @objc private func keepAwakeOff() { KeepAwake.shared.stop() }
+
+    @objc private func openPanel() { _ = showTools() }
+
     @objc private func clicked() {
-        if Self.opensWindow(modifiers: NSEvent.modifierFlags) {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || (event?.modifierFlags.contains(.control) == true) {
+            showMenu()
+        } else if Self.opensWindow(modifiers: NSEvent.modifierFlags) {
             ToolsWindowController.shared.showWindow()
         } else if popover?.isShown == true {
             closeTools()

@@ -118,6 +118,16 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     var hasSelection: Bool { selection != nil }
 
+    /// Следующий шаг коллажа: область уже выделена (как у прошлого шага), панель инструментов на месте.
+    func preselect(_ rect: NSRect) {
+        selection = rect.integral.intersection(bounds)
+        hoverRect = nil
+        showToolbar()
+    }
+
+    /// Идёт коллаж шагов: Enter и двойной щелчок добавляют шаг, а не выдают снимок.
+    private var stepsActive: Bool { mode == .edit && StepsSession.current != nil }
+
     func resetSelection() {
         commitTextField()
         selection = nil
@@ -231,7 +241,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             }
             if selection.contains(p) {
                 if event.clickCount == 2 && annotationIndex(at: p) == nil {
-                    confirmResult()
+                    if stepsActive { addStep() } else { confirmResult() }
                     return
                 }
                 // Клик по нарисованному — выбрать и перетаскивать.
@@ -611,7 +621,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 ScreenshotService.shared.close()
             }
         case kVK_Return, kVK_ANSI_KeypadEnter:
-            if selection != nil { confirmResult() }
+            if selection != nil {
+                if stepsActive { addStep() } else { confirmResult() }
+            }
         case kVK_Delete, kVK_ForwardDelete:
             deleteSelected()
         default:
@@ -703,10 +715,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         ScreenshotService.shared.deliver(result)
     }
 
-    /// «Шаг +»: снимок уходит в коллаж шагов, оверлей закрывается.
+    /// «Шаг +»: снимок уходит в коллаж шагов, оверлей закрывается. Область запоминается (в глобальных точках),
+    /// чтобы «Ещё шаг» предложил её снова.
     func addStep() {
         guard let result = renderSelection() else { return }
-        StepsSession.add(result, unit: pixelScale)
+        let global = selection.flatMap { rect in window.map { rect.offsetBy(dx: $0.frame.minX, dy: $0.frame.minY) } }
+        StepsSession.add(result, unit: pixelScale, rect: global)
         ScreenshotService.shared.close()
     }
 
@@ -891,8 +905,29 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
         switch drag {
         case .selecting, .resizing, .movingSelection: drawSizeLabel(for: selection)
-        default: break
+        default:
+            if mode == .edit, let hint = StepsSession.captureHint { drawStepsHint(hint) }
         }
+    }
+
+    /// Подсказка коллажа вверху экрана: какой это шаг и что сделает Enter.
+    private func drawStepsHint(_ hint: String) {
+        let text = NSAttributedString(string: "\(hint) · потяните, чтобы выбрать другую область", attributes: [
+            .font: CaptureFont.manrope(12, .semibold), .foregroundColor: DS.Palette.text,
+        ])
+        let size = text.size()
+        let pill = NSRect(x: bounds.midX - size.width / 2 - 14, y: bounds.maxY - size.height - 60,
+                          width: size.width + 28, height: size.height + 12)
+        // Не поверх выделения: если оно наверху, подсказка — внизу.
+        let rect = selection.map { $0.intersects(pill.insetBy(dx: 0, dy: -8)) } == true
+            ? pill.offsetBy(dx: 0, dy: -(pill.minY - 48)) : pill
+        let shape = NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2)
+        DS.Palette.panel.setFill()
+        shape.fill()
+        DS.Palette.line.setStroke()
+        shape.lineWidth = 1
+        shape.stroke()
+        text.draw(at: NSPoint(x: rect.minX + 14, y: rect.minY + 6))
     }
 
     private func dim(outside rect: NSRect, alpha: CGFloat) {
