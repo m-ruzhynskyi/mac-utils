@@ -314,10 +314,15 @@ $("myId").textContent = display(myId);
 $("myId").onclick = () => navigator.clipboard?.writeText(myId);
 
 // ---- Протокол v2: ключ устройства (.audit/auth-design.md §2.3, §4) ----
-// Ключ есть только в приложении для Windows с `mu.identity` и `mu.sign*`. v2 включается не здесь, а relay:
-// пришёл `challenge` — подписываем; не пришёл (старое приложение, AUTH_MODE=off) — всё как раньше.
-const B64U_KEY = /^[A-Za-z0-9_-]{43}$/;
-function canSign(fn) { return !!(window.mu && typeof window.mu.identity === "function" && typeof window.mu[fn] === "function"); }
+// Ключ Ed25519 даёт приложение с `mu.identity` и `mu.sign*`; иначе — свой ключ страницы (P-256, ниже). v2 включает relay:
+// пришёл `challenge` — подписываем; не пришёл (старый relay, AUTH_MODE=off) — всё как раньше.
+// Ключ: Ed25519 — 43 символа base64url, P-256 (несжатая точка) — 87.
+const B64U_KEY = /^(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{87})$/;
+function appSigns(fn) { return !!(window.mu && typeof window.mu.identity === "function" && typeof window.mu[fn] === "function"); }
+// Подписанный /status — только ключом приложения; вход ведущего и зрителя — и ключом страницы.
+function canSign(fn) { return appSigns(fn) || (fn !== "signStatus" && !!pageKey); }
+// Заголовок клиента ставит приложение (mu-share-1), поэтому проверку ключом страница просит сама: relay без неё не спрашивает.
+function authParam(fn) { return !appSigns(fn) && pageKey ? "auth=v2" : ""; }
 async function myIdentity() {
   const identity = await window.mu.identity();
   if (!identity || !B64U_KEY.test(identity.pub)) throw new Error("no key");
@@ -325,12 +330,90 @@ async function myIdentity() {
 }
 async function sendAuth(ws, signer, args) {
   try {
+    if (!appSigns(signer)) return await sendPageAuth(ws, signer, args);
     const { pub } = await myIdentity();
     const sig = await window.mu[signer](...args);
     if (typeof sig !== "string" || ws.readyState !== 1) return false;
     ws.send(JSON.stringify({ type: "auth", v: 2, alg: "ed25519", pub, sig }));
     return true;
   } catch (_) { return false; }
+}
+
+// ---- Свой ключ страницы: P-256 ECDSA (WebCrypto), когда приложение ключа не даёт (клиент для Windows, браузер) ----
+// Создаётся один раз; приватная часть неэкспортируемая и хранится в IndexedDB этого сайта, наружу уходят только подписи
+// канонических строк. Ed25519 в WebCrypto есть не везде (в Chromium 130 — нет), P-256 — везде.
+// Любая ошибка (нет API, IndexedDB закрыт, ключ испорчен) — pageKey = null и страница работает как раньше, без ключа.
+let pageKey = null; // { pub, sign(text) → подпись base64url }
+const PAGE_KEY_DB = "mu-device-key", PAGE_KEY_STORE = "keys", PAGE_KEY_NAME = "p256";
+function b64u(bytes) {
+  let text = "";
+  for (const b of new Uint8Array(bytes)) text += String.fromCharCode(b);
+  return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function idbDone(request) {
+  return new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+}
+function idbCommitted(tx) {
+  return new Promise((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error); });
+}
+async function openPageKey(subtle) {
+  const open = indexedDB.open(PAGE_KEY_DB, 1);
+  open.onupgradeneeded = () => open.result.createObjectStore(PAGE_KEY_STORE);
+  const db = await idbDone(open);
+  try {
+    const read = () => idbDone(db.transaction(PAGE_KEY_STORE, "readonly").objectStore(PAGE_KEY_STORE).get(PAGE_KEY_NAME));
+    const usable = (v) => v && v.privateKey instanceof CryptoKey && v.publicKey instanceof CryptoKey && typeof v.pub === "string" && /^B[A-Za-z0-9_-]{86}$/.test(v.pub);
+    let saved = await read();
+    if (!usable(saved)) {
+      const pair = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+      const fresh = { v: 1, privateKey: pair.privateKey, publicKey: pair.publicKey,
+                      pub: b64u(await subtle.exportKey("raw", pair.publicKey)) };
+      const tx = db.transaction(PAGE_KEY_STORE, "readwrite");
+      tx.objectStore(PAGE_KEY_STORE).put(fresh, PAGE_KEY_NAME);
+      await idbCommitted(tx);
+      // Другая вкладка могла записать свой ключ одновременно: берём то, что сохранилось.
+      saved = await read();
+      if (!usable(saved)) return null;
+    }
+    const sign = async (text) => b64u(await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, saved.privateKey, new TextEncoder().encode(text)));
+    // Проверка, что ключ живой: подпись сходится с сохранённым публичным ключом.
+    const probe = "mu-share/v2\nprobe", sig = await sign(probe);
+    const bytes = Uint8Array.from(atob(sig.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+    if (bytes.length !== 64 || !(await subtle.verify({ name: "ECDSA", hash: "SHA-256" }, saved.publicKey, bytes, new TextEncoder().encode(probe)))) return null;
+    return { pub: saved.pub, sign };
+  } finally { db.close(); }
+}
+// Может ли здесь вообще быть ключ страницы (приложение с ключом, небезопасный контекст или нет WebCrypto/IndexedDB — нет).
+function pageKeySupported() {
+  try { return !appSigns("signViewer") && !!window.isSecureContext && !!window.crypto && !!window.crypto.subtle && !!window.indexedDB; } catch (_) { return false; }
+}
+// IndexedDB на холодном старте, под антивирусом или на медленном диске отвечает долго: ждём до 10 с. Если хранилище
+// ответило позже, ключ всё равно подхватывается (pageKey выставляется по факту), а не теряется на всю сессию.
+async function loadPageKey() {
+  try {
+    if (!pageKeySupported()) return;
+    const opening = openPageKey(window.crypto.subtle).then((key) => { if (key) pageKey = key; return key; }).catch(() => null);
+    const timeout = new Promise((resolve) => setTimeout(resolve, 10000, null));
+    await Promise.race([opening, timeout]);
+  } catch (_) {}
+}
+let pageKeyReady = loadPageKey();
+// Повторная попытка (после отказа relay): ещё раз открыть хранилище, true — ключ есть.
+async function retryPageKey() {
+  if (pageKey) return true;
+  pageKeyReady = loadPageKey();
+  await pageKeyReady;
+  return !!pageKey;
+}
+async function sendPageAuth(ws, signer, args) {
+  if (!pageKey) return false;
+  const message = signer === "signHost" ? `mu-share/v2\nhost\n${args[0]}\n${args[1]}`
+    : signer === "signViewer" ? `mu-share/v2\nviewer\n${args[0]}\n${args[1]}\n${args[2]}\n${args[3]}` : null;
+  if (!message) return false;
+  const sig = await pageKey.sign(message);
+  if (ws.readyState !== 1) return false;
+  ws.send(JSON.stringify({ type: "auth", v: 2, alg: "es256", pub: pageKey.pub, sig }));
+  return true;
 }
 const AUTH_ERRORS = {
   "bad-signature": "Ключ этого устройства не прошёл проверку на сервере.",
@@ -539,7 +622,9 @@ document.querySelectorAll("#tools .color").forEach((b) => b.onclick = () => {
 });
 
 // ---- Смотреть ----
-function watch() {
+async function watch() {
+  // Ключ страницы загружается за миллисекунды; без него подключение просто идёт как раньше.
+  await pageKeyReady;
   const id = digits($("code").value);
   if (!id) return status("ID — 10 цифр");
   if (id === myId) return status("Это ваш собственный ID");
@@ -549,7 +634,8 @@ function watch() {
   viewHostKey = null; viewError = null;
   $("leave").style.display = "";
   const h264 = typeof VideoDecoder !== "undefined" ? "&h264=1" : "";
-  const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}${h264}`);
+  const auth = authParam("signViewer") ? `&${authParam("signViewer")}` : "";
+  const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}${h264}${auth}`);
   viewSocket.binaryType = "arraybuffer";
   viewSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
@@ -619,7 +705,16 @@ function nalUnits(data) {
   if (start >= 0) units.push(data.subarray(start));
   return units;
 }
-let waitKey = false;
+let waitKey = false, latestFrame = null, paintQueued = false;
+function paintFrame() {
+  paintQueued = false;
+  const frame = latestFrame; latestFrame = null;
+  if (!frame) return;
+  const canvas = $("video");
+  if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
+  canvas.getContext("2d").drawImage(frame, 0, 0); frame.close();
+  if (canvas.style.display !== "block") { canvas.style.display = "block"; $("screen").style.display = "none"; status(""); }
+}
 function playH264(bytes) {
   const key = bytes[0] === 1, data = bytes.subarray(1);
   if (!decoder || decoder.state === "closed") {
@@ -629,10 +724,11 @@ function playH264(bytes) {
     const hex = (n) => n.toString(16).padStart(2, "0");
     const canvas = $("video"), ctx = canvas.getContext("2d");
     decoder = new VideoDecoder({
+      // Кадр ждёт ближайшего requestAnimationFrame; пришло два за такт — старый не рисуем (на 60 Гц кадр = такт).
       output: (frame) => {
-        if (canvas.width !== frame.displayWidth) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
-        ctx.drawImage(frame, 0, 0); frame.close();
-        if (canvas.style.display !== "block") { canvas.style.display = "block"; $("screen").style.display = "none"; status(""); }
+        if (latestFrame) latestFrame.close();
+        latestFrame = frame;
+        if (!paintQueued) { paintQueued = true; requestAnimationFrame(paintFrame); }
       },
       error: () => { decoder = null; },
     });
@@ -650,6 +746,7 @@ function stopWatch(keepStatus) {
   if (game.peer === "host") gamePeerGone("host");
   if (decoder && decoder.state !== "closed") { try { decoder.close(); } catch (_) {} }
   decoder = null;
+  if (latestFrame) { latestFrame.close(); latestFrame = null; }
   $("video").style.display = "none"; $("screen").style.display = "";
   if (viewSocket) { viewSocket.onclose = null; viewSocket.close(1000); viewSocket = null; }
   watching = false; $("tools").style.display = "none";
@@ -854,7 +951,7 @@ async function share() {
   // Звук системы просим, только если он нужен (в приложении для Windows звук без выбранных программ идёт отдельно).
   const wantAudio = window.mu ? $("withAudio").checked && !useHelperAudio : true;
   let stream = null, failure = null;
-  for (const constraints of [{ video: { frameRate: { ideal: 30, max: 30 } }, audio: wantAudio }, { video: true, audio: wantAudio }, { video: true, audio: false }]) {
+  for (const constraints of [{ video: { frameRate: { ideal: 60, max: 60 } }, audio: wantAudio }, { video: true, audio: wantAudio }, { video: true, audio: false }]) {
     try { stream = await navigator.mediaDevices.getDisplayMedia(constraints); break; }
     catch (error) {
       failure = error;
@@ -863,19 +960,37 @@ async function share() {
     }
   }
   if (!stream) return status(`Трансляция не началась${failure ? ` (${failure.name}: ${failure.message})` : ""}`);
-  const ok = await openHost(myId);
+  let ok = await openHost(myId);
+  // ID закреплён за ключом страницы, а ключ не загрузился (медленная или зависшая IndexedDB): сначала грузим ключ ещё раз.
+  if (!ok && !pageKey && pageKeySupported() && (await hostCheckReason()) === "id-claimed" && (await retryPageKey())) ok = await openHost(myId);
   if (!ok) { stream.getTracks().forEach((t) => t.stop()); return explainHostFailure(); }
   startCapture(stream, myId);
 }
 
 // Почему relay не пустил ведущего: WebSocket причины не отдаёт, поэтому спрашиваем лёгким GET (без подключения).
-async function explainHostFailure() {
-  let reason = null;
+// Ответ host-check: "ok" | "id-claimed" | "busy" | "rate-limited" | null (нет связи).
+async function hostCheckReason() {
   try {
-    const res = await fetch(`/room/${myId}/host-check`, { cache: "no-store" });
-    if (res.status === 429) return status("Слишком много попыток подряд. Подождите минуту и попробуйте снова.");
-    if (res.ok) reason = (await res.json()).error || "ok";
+    const auth = authParam("signHost");
+    const res = await fetch(`/room/${myId}/host-check${auth ? `?${auth}` : ""}`, { cache: "no-store" });
+    if (res.status === 429) return "rate-limited";
+    if (res.ok) return (await res.json()).error || "ok";
   } catch (_) {}
+  return null;
+}
+async function explainHostFailure() {
+  const reason = await hostCheckReason();
+  if (reason === "rate-limited") return status("Слишком много попыток подряд. Подождите минуту и попробуйте снова.");
+  if (reason === "id-claimed" && !pageKey && pageKeySupported()) {
+    // Ключ устройства есть, но хранилище браузера его не отдало: это не чужой ID, терять свой пока не нужно.
+    status("Не удалось загрузить ключ этого устройства: хранилище браузера не ответило, поэтому сервер считает ваш ID чужим. " +
+           "Перезагрузите страницу (Ctrl+R) или перезапустите приложение и попробуйте ещё раз. " +
+           "Если так и не заработает — можно получить новый ID (старый ID перестанет работать, новый сообщите зрителям)." +
+           '<br><button id="reloadPage" style="margin-top:8px">Перезагрузить страницу</button>');
+    const reload = $("reloadPage");
+    if (reload) reload.onclick = () => { try { location.reload(); } catch (_) {} };
+    return offerNewId(true);
+  }
   if (reason === "id-claimed") {
     status("Этот ID привязан к ключу устройства из прежней версии приложения. Получите новый ID — трансляция сразу заработает; новый ID сообщите тем, кто вас смотрит.");
     return offerNewId(true);
@@ -887,9 +1002,11 @@ async function explainHostFailure() {
 
 // hostAuth: null — relay не спрашивал ключ (legacy); {keyed, fp} после `authed` (keyed false при AUTH_MODE=off).
 let hostAuth = null, hostError = null;
-function openHost(id) {
+async function openHost(id) {
+  await pageKeyReady;
+  const auth = authParam("signHost");
   return new Promise((resolve) => {
-    const ws = new WebSocket(`${wsBase}/room/${id}?role=host`);
+    const ws = new WebSocket(`${wsBase}/room/${id}?role=host${auth ? `&${auth}` : ""}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = (event) => { if (ws === hostSocket) onHostMessage(ws, event); };
     ws.onopen = () => { hostSocket = ws; hostAuth = null; hostError = null; resolve(true); };
@@ -1011,7 +1128,26 @@ function startCapture(stream, code) {
   // Видео H.264 через аппаратный кодек (WebCodecs), как в Discord; нет кодека — кадры JPEG.
   let encoder = null, frameIndex = 0, encodedSize = "";
   // Скорость под сеть: очередь в сокете растёт — снижаем, свободно — поднимаем.
-  let bitrate = 4_000_000, encodedBitrate = 0, lastAdapt = 0, lastKey = 0;
+  let bitrate = 6_000_000, encodedBitrate = 0, lastAdapt = 0, lastKey = 0;
+  // 60 кадров/с; при перегрузке (очередь в сокете, кодер отстаёт, сглаженная скорость дольше 3 с ниже 5 Мбит/с) — 30,
+  // назад после спокойного окна 8 с и сглаженной скорости не ниже 6 Мбит/с (если перегрузка повторяется скоро после
+  // возврата — окно вдвое дольше, до 60 с). Пороги — по модели канала, как в Mac (ShareVideo.fullRateMinBitrate).
+  let graceUntil = 0, fps = 60, hold = 8_000, lastTrouble = -Infinity, lastRestored = -Infinity, lastEncodedAt = -Infinity;
+  let smooth = 0, lastSample = 0, lowSince = null, lastConfigAt = 0;
+  // Прогрев (2 с после создания кодера и смены fps) гасит только «очередь кодера»: сигналы сети считаются всегда.
+  const trouble = (now, encoderQueue = false) => {
+    if (encoderQueue && now < graceUntil) return;
+    lastTrouble = now;
+    if (fps === 30) return;
+    hold = now - lastRestored < 30_000 ? Math.min(60_000, hold * 2) : 8_000;
+    fps = 30; encodedBitrate = 0; graceUntil = now + 2000;   // перенастроить кодер на 30
+  };
+  const calm = (now) => {
+    if (fps === 30 && now - lastTrouble >= hold && smooth >= 6_000_000) { fps = 60; lastRestored = now; encodedBitrate = 0; graceUntil = now + 2000; }
+  };
+  // Кадры большого экрана (scale < 1) прямо в кодер (он сам масштабирует): null — не проверено, true — кодер отдал
+  // кадр, false — ошибка или тишина, дальше через холст.
+  let scaledDirect = null, scaledTrialAt = 0;
   forceKey = true;
   const canEncode = typeof VideoEncoder !== "undefined";
   // Кадр из захвата (VideoFrame или <video>) → холст до 1920 по длинной стороне → кодер.
@@ -1019,43 +1155,60 @@ function startCapture(stream, code) {
     if (!hostSocket || hostSocket.readyState !== 1 || !sourceWidth) { forceKey = true; return; }
     const now = performance.now(), queued = hostSocket.bufferedAmount;
     if (queued > 250_000 && now - lastAdapt > 500) { bitrate = Math.max(700_000, bitrate * 0.7); lastAdapt = now; }
-    else if (queued < 60_000 && now - lastAdapt > 2000 && bitrate < 8_000_000) { bitrate = Math.min(8_000_000, bitrate * 1.15); lastAdapt = now; }
+    else if (queued < 60_000 && now - lastAdapt > 2000 && bitrate < 12_000_000) { bitrate = Math.min(12_000_000, bitrate * 1.15); lastAdapt = now; }
     // Больше ~1 с в очереди — пропускаем кадры, потом начинаем с ключевого.
-    if (queued > Math.max(400_000, bitrate / 8)) { forceKey = true; return; }
+    // Сглаженная скорость (EMA ~2,5 с): ниже 5 Мбит/с дольше 3 с — перегрузка для 60 кадров/с.
+    smooth = smooth ? smooth + (bitrate - smooth) * (1 - Math.exp(-Math.max(0, now - lastSample) / 2500)) : bitrate;
+    lastSample = now;
+    if (smooth < 5_000_000) { lowSince ??= now; if (now - lowSince > 3000) trouble(now); } else lowSince = null;
+    if (scaledTrialAt && now - scaledTrialAt > 1500) { scaledDirect = false; scaledTrialAt = 0; try { encoder?.close(); } catch (_) {} encoder = null; forceKey = true; }
+    if (queued > Math.max(400_000, bitrate / 8)) { forceKey = true; trouble(now); return; }
+    if (queued < Math.max(60_000, bitrate / 64)) calm(now);
+    // Пониженный режим: каждый второй кадр (по времени, а не по счёту).
+    if (fps === 30 && now - lastEncodedAt < 25) return;
     // До 1920 по длинной стороне (как на Mac); уровень кодека 5.0 (4D4032) — 4.0 не принимает 1920×1200 и выше.
     const scale = Math.min(1, 1920 / Math.max(sourceWidth, sourceHeight));
-    canvas.width = Math.round(sourceWidth * scale / 2) * 2;
-    canvas.height = Math.round(sourceHeight * scale / 2) * 2;
-    ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+    // Кадр захвата уже нужного размера — в кодер напрямую, без копий через холст (иначе 60 кадров/с не успеваем).
+    const direct = canEncode && typeof VideoFrame !== "undefined" && source instanceof VideoFrame &&
+      (scale === 1 ? sourceWidth % 2 === 0 && sourceHeight % 2 === 0 : scaledDirect !== false);
+    const width = Math.round(sourceWidth * scale / 2) * 2, height = Math.round(sourceHeight * scale / 2) * 2;
+    if (!direct) { canvas.width = width; canvas.height = height; ctx.drawImage(source, 0, 0, width, height); }
     if (canEncode) {
-      const size = `${canvas.width}x${canvas.height}`;
-      if (encoder && encoder.state === "configured" && size === encodedSize && Math.abs(bitrate - encodedBitrate) > encodedBitrate * 0.2) {
-        encodedBitrate = bitrate;
-        encoder.configure({ codec: "avc1.4D4032", width: canvas.width, height: canvas.height, bitrate: Math.round(bitrate), framerate: 30,
+      const size = `${width}x${height}`;
+      if (encoder && encoder.state === "configured" && size === encodedSize && (encodedBitrate === 0 || bitrate < encodedBitrate || (bitrate > encodedBitrate * 1.2 && now - lastConfigAt >= 2000))) {
+        encodedBitrate = bitrate; lastConfigAt = now;
+        encoder.configure({ codec: "avc1.4D4032", width, height, bitrate: Math.round(bitrate), framerate: fps,
                             latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: "prefer-hardware" });
         forceKey = true;
       }
       if (!encoder || encoder.state === "closed" || size !== encodedSize) {
         try { encoder?.close(); } catch (_) {}
-        encodedSize = size; forceKey = true;
+        encodedSize = size; forceKey = true; graceUntil = now + 2000; lastConfigAt = now;
         encoder = new VideoEncoder({
           output: (chunk) => {
+            if (scaledTrialAt) { scaledDirect = true; scaledTrialAt = 0; }
             if (!hostSocket || hostSocket.readyState !== 1) return;
             const packet = new Uint8Array(chunk.byteLength + 2);
             packet[0] = 3; packet[1] = chunk.type === "key" ? 1 : 0;
             chunk.copyTo(packet.subarray(2));
             hostSocket.send(packet);
           },
-          error: () => { encoder = null; },
+          error: () => { if (scaledTrialAt) { scaledDirect = false; scaledTrialAt = 0; } encoder = null; forceKey = true; },
         });
         encodedBitrate = bitrate;
-        encoder.configure({ codec: "avc1.4D4032", width: canvas.width, height: canvas.height, bitrate: Math.round(bitrate), framerate: 30,
+        encoder.configure({ codec: "avc1.4D4032", width, height, bitrate: Math.round(bitrate), framerate: fps,
                             latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: "prefer-hardware" });
       }
-      if (encoder.encodeQueueSize > 2) return;
-      const frame = new VideoFrame(canvas, { timestamp: Math.round(performance.now() * 1000) });
+      if (encoder.encodeQueueSize > 2) { trouble(now, true); return; }
+      lastEncodedAt = now;
+      // Метки всегда по performance.now(): и у прямых кадров, и у холста с keep-alive — одни часы.
+      const stamp = { timestamp: Math.round(performance.now() * 1000) };
+      let frame = null;
+      try { frame = direct ? new VideoFrame(source, stamp) : new VideoFrame(canvas, stamp); } catch (_) { return; }
       const keyFrame = forceKey || now - lastKey > 4000;
-      encoder.encode(frame, { keyFrame });
+      if (direct && scale < 1 && scaledDirect === null && !scaledTrialAt) scaledTrialAt = now;
+      try { encoder.encode(frame, { keyFrame }); }
+      catch (_) { if (scaledTrialAt) { scaledDirect = false; scaledTrialAt = 0; } try { encoder?.close(); } catch (_) {} encoder = null; forceKey = true; frame.close(); return; }
       frame.close(); if (keyFrame) lastKey = now; forceKey = false; frameIndex++;
       return;
     }
@@ -1067,7 +1220,7 @@ function startCapture(stream, code) {
       hostSocket.send(packet);
     }, "image/jpeg", 0.55);
   };
-  // Кадры берём по мере прихода от захвата (до 30/с), а не по таймеру; нет MediaStreamTrackProcessor — таймер, как раньше.
+  // Кадры берём по мере прихода от захвата (до 60/с), а не по таймеру; нет MediaStreamTrackProcessor — таймер, как раньше.
   const timer = { cancel() {} };
   const videoTrack = stream.getVideoTracks()[0];
   if (canEncode && typeof MediaStreamTrackProcessor !== "undefined") {
@@ -1089,7 +1242,7 @@ function startCapture(stream, code) {
       } catch (_) {}
     })();
   } else {
-    const interval = setInterval(() => tick(video, video.videoWidth, video.videoHeight), canEncode ? 33 : 125);
+    const interval = setInterval(() => tick(video, video.videoWidth, video.videoHeight), canEncode ? 17 : 125);
     timer.cancel = () => clearInterval(interval);
   }
   let audioContext = null;

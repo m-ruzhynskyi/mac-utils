@@ -1249,3 +1249,159 @@ test('host-check: без заголовка клиента 403, не GET 405, с
   assert.equal((await hostCheck(w, ROOM, { ip: '6.6.6.6', env: limitedEnv })).status, 429);
   assert.equal((await hostCheck(w, ROOM, { ip: '7.7.7.7', env: limitedEnv })).status, 200);
 });
+
+// =====================================================================================================
+// Ключ страницы relay (P-256, alg "es256"): браузер и клиент для Windows без своего ключа (заголовок mu-share-1 + auth=v2)
+// =====================================================================================================
+// Ключ как у WebCrypto: несжатая точка 65 байт (04‖x‖y), подпись r‖s 64 байта (ieee-p1363), SHA-256.
+function p256() {
+  const { privateKey, publicKey } = nodeCrypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const jwk = publicKey.export({ format: 'jwk' });
+  const raw = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]);
+  return { pub: b64u(raw), alg: 'es256',
+    sign: (message) => b64u(nodeCrypto.sign('sha256', Buffer.from(message), { key: privateKey, dsaEncoding: 'ieee-p1363' })) };
+}
+const esFrame = (key, sig) => JSON.stringify({ type: 'auth', v: 2, alg: 'es256', pub: key.pub, sig });
+const PAGE = { token: V1, query: '&auth=v2' };
+async function pageViewer(w, key, id = ROOM, opts = {}) {
+  const viewerId = opts.viewer ?? VIEWER;
+  const { res, socket } = await connect(w, 'viewer', id, { ...PAGE, ...opts });
+  assert.equal(res.status, 101);
+  const ch = msgOf(socket, 'challenge');
+  assert.ok(ch, 'mu-share-1 + auth=v2 — relay спрашивает ключ');
+  await send(w.f(id), socket, esFrame(key, key.sign(viewerMsg(id, viewerId, ch.rid, ch.nonce))));
+  return socket;
+}
+
+test('es256: зритель со страницы (mu-share-1 + auth=v2) проходит проверку, хост видит ключ и idVerified, второй раз — тот же ключ', async () => {
+  const w = world();
+  const host = await hostLogin(w);
+  const page = p256();
+  const first = await pageViewer(w, page);
+  assert.equal(msgOf(first, 'waiting')?.v, 2);
+  const r1 = msgOf(host, 'request');
+  assert.equal(r1.auth, 'key');
+  assert.equal(r1.pub, page.pub);
+  assert.equal(r1.pub.length, 87);
+  assert.equal(r1.idVerified, true, 'ID зрителя закреплён за ключом страницы');
+  assert.match(r1.fp, /^[0-9a-f]{4}(-[0-9a-f]{4}){3}$/);
+  assert.equal(w.f(VIEWER).store.get('owner').pub, page.pub);
+  await accept(w, host, first);
+  assert.ok(msgOf(first, 'accepted'));
+  // Переподключение того же устройства: ключ тот же, ID по-прежнему его — хост с «Всегда» пустит без вопроса.
+  await pageViewer(w, page);
+  const r2 = msgsOf(host, 'request').at(-1);
+  assert.equal(r2.pub, page.pub);
+  assert.equal(r2.idVerified, true);
+  assert.equal(r2.fp, r1.fp);
+  assert.notEqual(r2.rid, r1.rid);
+});
+
+test('es256: другое устройство с тем же ID — idVerified:false; подделки ключа и подписи отвергаются', async () => {
+  const w = world(), f = w.f(ROOM);
+  const host = await hostLogin(w);
+  const page = p256(), other = p256();
+  await pageViewer(w, page);
+  await pageViewer(w, other);
+  assert.equal(msgsOf(host, 'request').at(-1).idVerified, false, 'ID уже за первым ключом');
+
+  const attempt = async (frame) => {
+    const { socket } = await connect(w, 'viewer', ROOM, PAGE);
+    const ch = msgOf(socket, 'challenge');
+    await send(f, socket, frame(ch));
+    return socket;
+  };
+  const message = (ch) => viewerMsg(ROOM, VIEWER, ch.rid, ch.nonce);
+  // Подпись чужим ключом, не та строка, точка не на кривой, DER вместо r‖s, ключ не того размера для алгоритма.
+  const offCurve = (() => { const raw = Buffer.from(page.pub, 'base64url'); raw[64] ^= 1; return b64u(raw); })();
+  const der = (ch) => b64u(nodeCrypto.sign('sha256', Buffer.from(message(ch)), nodeCrypto.createPrivateKey(
+    nodeCrypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ format: 'pem', type: 'pkcs8' }))));
+  const bad = [
+    (ch) => esFrame(page, other.sign(message(ch))),
+    (ch) => esFrame(page, page.sign(message(ch) + 'x')),
+    (ch) => JSON.stringify({ type: 'auth', v: 2, alg: 'es256', pub: offCurve, sig: page.sign(message(ch)) }),
+    (ch) => JSON.stringify({ type: 'auth', v: 2, alg: 'es256', pub: page.pub, sig: der(ch) }),
+    (ch) => JSON.stringify({ type: 'auth', v: 2, alg: 'ed25519', pub: page.pub, sig: page.sign(message(ch)) }),
+    (ch) => JSON.stringify({ type: 'auth', v: 2, alg: 'es256', pub: VIEWER_KEY.pub, sig: VIEWER_KEY.sign(message(ch)) }),
+    (ch) => JSON.stringify({ type: 'auth', v: 2, alg: 'rsa', pub: page.pub, sig: page.sign(message(ch)) }),
+  ];
+  const before = msgsOf(host, 'request').length;
+  for (const frame of bad) {
+    const socket = await attempt(frame);
+    assert.equal(msgOf(socket, 'error')?.code, 'bad-signature');
+    assert.equal(closeCode(socket), 4401);
+  }
+  assert.equal(msgsOf(host, 'request').length, before, 'ни одна подделка до хоста не дошла');
+});
+
+test('es256: без auth=v2 зритель mu-share-1 идёт по-старому (без challenge), Ed25519-зрители не изменились', async () => {
+  const w = world();
+  const host = await hostLogin(w);
+  const { socket } = await connect(w, 'viewer', ROOM, { token: V1 });
+  assert.equal(msgOf(socket, 'challenge'), undefined);
+  assert.equal(msgOf(host, 'request').auth, 'none');
+  for (const query of ['&auth=1', '&auth=V2', '&auth=']) {
+    const { socket: s } = await connect(w, 'viewer', ROOM, { token: V1, query });
+    assert.equal(msgOf(s, 'challenge'), undefined, query);
+  }
+  await viewerLogin(w, VIEWER_KEY, ROOM, { viewer: '5550001112' });
+  assert.equal(msgsOf(host, 'request').at(-1).auth, 'key');
+  assert.equal(msgsOf(host, 'request').at(-1).idVerified, true);
+});
+
+test('es256: ведущий со страницы занимает ID ключом; потом mu-share-1 без ключа — id-claimed, с ключом — снова можно', async () => {
+  const w = world();
+  const page = p256();
+  const { res, socket: host } = await connect(w, 'host', ROOM, PAGE);
+  assert.equal(res.status, 101);
+  const ch = msgOf(host, 'challenge');
+  await send(w.f(ROOM), host, esFrame(page, page.sign(hostMsg(ROOM, ch.nonce))));
+  const authed = msgOf(host, 'authed');
+  assert.equal(authed.claimed, true);
+  assert.equal(w.f(ROOM).store.get('owner').pub, page.pub);
+  // Mac-зритель видит ключ ведущего P-256 в challenge (закрепляет и сравнивает его).
+  const { socket: macViewer } = await connect(w, 'viewer', ROOM, { viewer: '5550001112' });
+  assert.equal(msgOf(macViewer, 'challenge').hostKey, page.pub);
+  assert.equal(msgOf(macViewer, 'challenge').hostFp, authed.fp);
+  await send(w.f(ROOM), host, { type: 'stop' });
+  host.readyState = 3;
+  for (const s of w.f(ROOM).all()) if (s.tag === 'host') s.info = { ...s.info, ended: true };
+
+  // Без ключа (старая страница, ключ потерян) этот ID больше не занять — так же, как у Mac.
+  const plain = await connect(w, 'host', ROOM, { token: V1 });
+  assert.equal(plain.res.status, 409);
+  assert.equal(await plain.res.text(), 'id-claimed', 'не «занято окном», а ID за ключом');
+  const check = await w.worker(new Request(`https://relay.example/room/${ROOM}/host-check`, { headers: { 'x-macutils-client': V1 } }));
+  assert.equal((await check.json()).error, 'id-claimed');
+  const keyedCheck = await w.worker(new Request(`https://relay.example/room/${ROOM}/host-check?auth=v2`, { headers: { 'x-macutils-client': V1 } }));
+  assert.equal((await keyedCheck.json()).ok, true, 'с ключом страница может занять свой ID');
+  const again = await connect(w, 'host', ROOM, PAGE);
+  const ch2 = msgOf(again.socket, 'challenge');
+  await send(w.f(ROOM), again.socket, esFrame(page, page.sign(hostMsg(ROOM, ch2.nonce))));
+  assert.equal(msgOf(again.socket, 'authed').claimed, false);
+});
+
+test('es256: AUTH_MODE=off — auth=v2 игнорируется; required — mu-share-1 пускается только с auth=v2', async () => {
+  const off = world({ AUTH_MODE: 'off' });
+  await connect(off, 'host', ROOM, { token: V1 });
+  const { socket } = await connect(off, 'viewer', ROOM, PAGE);
+  assert.equal(msgOf(socket, 'challenge'), undefined);
+  assert.deepEqual(types(socket), ['waiting']);
+
+  const required = world({ AUTH_MODE: 'required' });
+  await hostLogin(required);
+  assert.equal((await connect(required, 'viewer', ROOM, { token: V1 })).res.status, 426);
+  const page = p256();
+  const viewer = await pageViewer(required, page);
+  assert.equal(msgOf(viewer, 'waiting')?.v, 2);
+});
+
+test('es256: /claim и отпечаток принимают ключ P-256, мусор — нет', async () => {
+  const w = world();
+  const page = p256();
+  const claim = (pub) => w.f('5550001112').room.fetch(new Request('https://room/claim', { method: 'POST', body: JSON.stringify({ pub, ip: '203.0.113.9' }) }));
+  assert.equal((await (await claim(page.pub)).json()).ok, true);
+  for (const bad of [page.pub.slice(1), 'C' + page.pub.slice(1), page.pub + 'A', '']) {
+    assert.equal((await claim(bad)).status, 400, bad);
+  }
+});

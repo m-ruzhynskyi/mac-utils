@@ -3,6 +3,10 @@ main = "src/index.js"
 compatibility_date = "2026-10-01"
 
 # Режим аутентификации share: optional — принимаем и клиентов без ключа; required включают отдельно (.audit/auth-design.md).
+#
+# Аварийный откат — AUTH_MODE = "off" (ключи игнорируются, владельцы ID не проверяются и не стираются, данные целы).
+# Менять ТОЛЬКО здесь и деплоем (или `wrangler deploy --var AUTH_MODE:off`): значение, выставленное в панели Cloudflare,
+# следующий обычный деплой молча вернёт в "optional". Вернув, проверьте GET /version (поле auth). Подробнее: docs/SHARE-PROTOCOL.md §8, §11.
 [vars]
 AUTH_MODE = "optional"
 

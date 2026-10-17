@@ -77,9 +77,17 @@ enum ShareVideo {
     /// Не больше 1920 точек по длинной стороне: текст на экране читаем, поток по силам сети.
     static let maxDimension: CGFloat = 1920
     static let minBitrate = 700_000
-    static let startBitrate = 4_000_000
-    static let maxBitrate = 8_000_000
-    static let frameRate = 30
+    static let startBitrate = 6_000_000
+    static let maxBitrate = 12_000_000
+    /// Целевая частота: 60 кадров/с; при перегрузке — `reducedFrameRate` (см. `ShareRateGovernor`).
+    static let frameRate = 60
+    static let reducedFrameRate = 30
+    /// Сглаженная скорость (EMA ~2,5 с) дольше 3 с ниже этого — 60 кадров/с не держим: на 30 кадрах/с биты идут
+    /// на качество, а не на частоту. Вернуться на 60 можно, когда сглаженная скорость не ниже `fullRateRecoverBitrate`.
+    /// Числа — по модели канала (ведро + адаптация как в коде, 180 с): на 8 Мбит/с ~70% времени на 60, на 4–6 — 30
+    /// почти всё время (без «пилы»), на 10 и выше — 60.
+    static let fullRateMinBitrate = 5_000_000
+    static let fullRateRecoverBitrate = 6_000_000
     /// Ключевой кадр — не реже раза в ~4 с: новый зритель и потерянный кадр восстанавливаются быстро.
     static let keyFrameSeconds = 4
     /// Самый крупный кадр, байт: ретранслятор (Cloudflare) пересылает сообщения WebSocket до 1 МиБ — с запасом.
@@ -119,6 +127,74 @@ enum ShareVideo {
     }
 }
 
+/// Частота кадров под нагрузку: 60 → 30 при перегрузке (очередь в сокете, кодер не успевает, скорость упала ниже
+/// `fullRateMinBitrate`), обратно — после спокойного окна. Если перегрузка повторяется скоро после возврата,
+/// окно удваивается (8 → 16 → 32 → 60 с), чтобы не мигать между режимами. Время — секунды, чистая логика для тестов.
+struct ShareRateGovernor {
+    static let baseHold: TimeInterval = 8
+    static let maxHold: TimeInterval = 60
+    private(set) var fps = ShareVideo.frameRate
+    private var hold = baseHold
+    private var lastTrouble = -TimeInterval.infinity
+    private var lastRestored = -TimeInterval.infinity
+    private var lastEncoded = -TimeInterval.infinity
+    private var graceUntil = -TimeInterval.infinity
+    private var ema: Double?
+    private var lastSample = -TimeInterval.infinity
+    private var lowSince: TimeInterval?
+    static let warmUpSeconds: TimeInterval = 2
+    static let lowSeconds: TimeInterval = 3
+    static let emaSeconds: TimeInterval = 2.5
+
+    /// Старт, переподключение, новая сессия кодера: он прогревается, очередь тогда не считается перегрузкой.
+    mutating func warmUp(now: TimeInterval) { graceUntil = now + Self.warmUpSeconds }
+
+    /// Выборка текущей скорости кодера (на каждый отправленный кадр). Перегрузка — сглаженная скорость ниже порога
+    /// дольше `lowSeconds`. Возвращает true, если режим сменился на пониженный.
+    @discardableResult
+    mutating func bitrateSample(_ bitrate: Int, now: TimeInterval) -> Bool {
+        let value = Double(bitrate)
+        if let current = ema {
+            let alpha = 1 - exp(-max(0, now - lastSample) / Self.emaSeconds)
+            ema = current + (value - current) * alpha
+        } else { ema = value }
+        lastSample = now
+        guard let smooth = ema, smooth < Double(ShareVideo.fullRateMinBitrate) else { lowSince = nil; return false }
+        let since = lowSince ?? now
+        lowSince = since
+        return now - since > Self.lowSeconds ? congested(now: now) : false
+    }
+
+    /// Перегрузка. Возвращает true, если режим сменился на пониженный.
+    @discardableResult
+    mutating func congested(now: TimeInterval) -> Bool {
+        guard now >= graceUntil else { return false }
+        lastTrouble = now
+        guard fps == ShareVideo.frameRate else { return false }
+        hold = now - lastRestored < 30 ? min(Self.maxHold, hold * 2) : Self.baseHold
+        fps = ShareVideo.reducedFrameRate
+        return true
+    }
+
+    /// Всё спокойно. Возвращает true, если вернулись к полной частоте.
+    @discardableResult
+    mutating func calm(now: TimeInterval) -> Bool {
+        guard fps != ShareVideo.frameRate, now - lastTrouble >= hold,
+              (ema ?? .infinity) >= Double(ShareVideo.fullRateRecoverBitrate) else { return false }
+        fps = ShareVideo.frameRate
+        lastRestored = now
+        return true
+    }
+
+    /// Кодировать ли кадр с этой меткой (секунды): в пониженном режиме — каждый второй, по времени, а не по счёту.
+    mutating func shouldEncode(at time: TimeInterval) -> Bool {
+        if fps == ShareVideo.frameRate { return true }
+        guard time - lastEncoded >= 0.025 else { return false }
+        lastEncoded = time
+        return true
+    }
+}
+
 /// Аппаратное кодирование кадров экрана в H.264.
 final class H264Encoder: @unchecked Sendable {
     private var session: VTCompressionSession?
@@ -131,6 +207,21 @@ final class H264Encoder: @unchecked Sendable {
     }
 
     func requestKeyFrame() { forceKey = true }
+
+    /// Кадры, отданные кодеру и ещё не вернувшиеся: растёт — кодер не успевает.
+    private let flightLock = NSLock()
+    private var flight = 0
+    var inFlight: Int { flightLock.lock(); defer { flightLock.unlock() }; return flight }
+    private func flightChanged(_ delta: Int) { flightLock.lock(); flight += delta; flightLock.unlock() }
+
+    /// Ожидаемая частота (подсказка кодеру для распределения скорости).
+    private(set) var frameRate = ShareVideo.frameRate
+    /// Новая сессия кодера создана (первый кадр, смена размера): прогрев.
+    var onSession: (() -> Void)?
+    func setFrameRate(_ value: Int) {
+        frameRate = value
+        if let session { VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: value as CFTypeRef) }
+    }
 
     /// Скорость потока, бит/с: подстраивается под сеть (см. FrameSender).
     private(set) var bitrate = ShareVideo.startBitrate
@@ -150,18 +241,26 @@ final class H264Encoder: @unchecked Sendable {
                              value: ShareVideo.dataRateLimits(bitrate: value) as CFArray)
     }
 
-    func encode(_ pixels: CVPixelBuffer, at time: CMTime) {
+    /// false — кадр не принят: кодер отстаёт больше чем на `maxInFlight` кадров (кадр пропущен, не копим задержку).
+    @discardableResult
+    func encode(_ pixels: CVPixelBuffer, at time: CMTime) -> Bool {
         let width = Int32(CVPixelBufferGetWidth(pixels)), height = Int32(CVPixelBufferGetHeight(pixels))
         if session == nil || size != (width, height) { makeSession(width: width, height: height) }
-        guard let session else { return }
+        guard let session else { return false }
+        guard inFlight < Self.maxInFlight || forceKey else { return false }
         let options: CFDictionary? = forceKey ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary : nil
         forceKey = false
+        flightChanged(1)
         VTCompressionSessionEncodeFrame(session, imageBuffer: pixels, presentationTimeStamp: time, duration: .invalid,
                                         frameProperties: options, infoFlagsOut: nil) { [weak self] status, _, sample in
+            self?.flightChanged(-1)
             guard status == noErr, let sample, let packet = H264Packet.annexB(from: sample) else { return }
             self?.onPacket(packet.data, packet.key)
         }
+        return true
     }
+
+    static let maxInFlight = 4
 
     private func makeSession(width: Int32, height: Int32) {
         invalidate()
@@ -174,7 +273,7 @@ final class H264Encoder: @unchecked Sendable {
         let properties: [CFString: Any] = [
             kVTCompressionPropertyKey_RealTime: true,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
-            kVTCompressionPropertyKey_ExpectedFrameRate: ShareVideo.frameRate,
+            kVTCompressionPropertyKey_ExpectedFrameRate: frameRate,
             kVTCompressionPropertyKey_MaxKeyFrameInterval: ShareVideo.frameRate * ShareVideo.keyFrameSeconds,
             kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: ShareVideo.keyFrameSeconds,
             // Кадр уходит сразу, без очереди внутри кодека.
@@ -202,6 +301,7 @@ final class H264Encoder: @unchecked Sendable {
         session = created
         size = (width, height)
         forceKey = true
+        onSession?()
     }
 
     func invalidate() {
