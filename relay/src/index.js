@@ -7,15 +7,16 @@
 // Текст от пущенных зрителей (метки {"type":"ping"|"stroke"}) — ведущему и остальным зрителям.
 // /status?ids=a,b,c — кто из них сейчас в эфире (для отметок в истории); POST /status — то же с подписью.
 // /version — коммит, принимаемые протоколы и режим проверки ключей.
-// Протокол mu-share-2: устройство доказывает владение ключом Ed25519 (challenge/response, см. auth.js),
+// Протокол mu-share-2: устройство доказывает владение ключом Ed25519 или P-256 (challenge/response, см. auth.js),
 // ID привязывается к ключу в хранилище комнаты. mu-share-1 (без ключей) работает по-старому, пока AUTH_MODE != required.
+// Клиент с заголовком mu-share-1, у страницы которого есть свой ключ (WebCrypto), просит проверку параметром `auth=v2`.
 // Кадры и звук сервер не разбирает — только пересылает.
 
 import page from "./index.html";
 import landing from "./landing.html";
 // Одной строкой каждый: тестовая обвязка вырезает import и склеивает файлы в один скрипт.
 import { MAX_PENDING, MAX_PENDING_PER_IP, MAX_UNAUTH, MAX_UNAUTH_PER_IP, MAX_UNAUTH_VIEWERS_PER_IP, AUTH_TIMEOUT_MS, CLAIM_PER_IP_PER_DAY, ipKey, windowHit, pendingAllowed, declineCooldown, noteDecline } from "./limits.js";
-import { b64uHasLength, hostMessage, viewerMessage, statusMessage, verifyEd25519, fingerprintOf, newNonce } from "./auth.js";
+import { b64uHasLength, isPublicKey, hostMessage, viewerMessage, statusMessage, verifyEd25519, verifyDevice, fingerprintOf, newNonce } from "./auth.js";
 
 // Смотреть и транслировать можно только из приложений Mac Utils (Mac) и Mac Utils Share (Windows):
 // они добавляют этот заголовок к каждому запросу. В обычном браузере — страница со ссылками на приложения.
@@ -119,6 +120,12 @@ function isClient(request) {
   return clientToken(request) !== null;
 }
 
+// Клиент проходит проверку ключом: заголовок mu-share-2 (приложение с ключом) или mu-share-1 и `auth=v2` — страница
+// сама создала ключ (WebCrypto), а приложение заголовок не меняет (клиент для Windows). Старый relay параметр не знает.
+function keyedClient(token, url) {
+  return token === CLIENT_V2 || (token === CLIENT_V1 && url.searchParams.get("auth") === "v2");
+}
+
 // off — ключи игнорируются (аварийный откат); required — только mu-share-2; иначе optional.
 function authMode(env) {
   const mode = env && env.AUTH_MODE;
@@ -202,7 +209,7 @@ export default {
     if (check && ID.test(check[1])) {
       if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
       if (!token) return new Response("Use the Mac Utils app", { status: 403 });
-      if (mode === "required" && token !== CLIENT_V2) return new Response("Update Mac Utils", { status: 426 });
+      if (mode === "required" && !keyedClient(token, url)) return new Response("Update Mac Utils", { status: 426 });
       if (await limited(env.RL_CONNECT, ip)) return jsonError("rate-limited", 429);
       const headers = new Headers(request.headers);
       headers.set("x-relay-ip", ip);
@@ -214,7 +221,7 @@ export default {
       });
     }
     if (!token) return new Response("Use the Mac Utils app", { status: 403 });
-    if (mode === "required" && token !== CLIENT_V2) return new Response("Update Mac Utils", { status: 426 });
+    if (mode === "required" && !keyedClient(token, url)) return new Response("Update Mac Utils", { status: 426 });
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected WebSocket", { status: 426 });
     }
@@ -248,12 +255,12 @@ export class Room {
     const hosts = this.activeHosts();
     if (hosts.length) await this.ensureAlarm();
     if (url.pathname === "/live") return new Response(hosts.length > 0 ? "1" : "0", { headers: { "x-relay-revision": "auth-v2-1" } });
-    if (request.method === "GET" && /^\/room\/\d+\/host-check$/.test(url.pathname)) return this.hostCheck(hosts.length > 0, clientToken(request) === CLIENT_V2 && authMode(this.env) !== "off", authMode(this.env));
+    if (request.method === "GET" && /^\/room\/\d+\/host-check$/.test(url.pathname)) return this.hostCheck(hosts.length > 0, keyedClient(clientToken(request), url) && authMode(this.env) !== "off", authMode(this.env));
 
     const mode = authMode(this.env);
     const token = clientToken(request);
-    if (mode === "required" && token !== CLIENT_V2) return new Response("Update Mac Utils", { status: 426 });
-    const v2 = token === CLIENT_V2 && mode !== "off";
+    if (mode === "required" && !keyedClient(token, url)) return new Response("Update Mac Utils", { status: 426 });
+    const v2 = keyedClient(token, url) && mode !== "off";
     const roomId = (url.pathname.match(/^\/room\/(\d+)$/) || [])[1] || "";
     const ip = ipKey(request.headers.get("x-relay-ip") || "");
     const role = url.searchParams.get("role");
@@ -391,7 +398,7 @@ export class Room {
   async claimRoute(request) {
     let body;
     try { body = await request.json(); } catch (_) { return Response.json({ ok: false, reason: "bad-request" }, { status: 400 }); }
-    if (!body || typeof body.pub !== "string" || !b64uHasLength(body.pub, 32)) {
+    if (!body || typeof body.pub !== "string" || !isPublicKey(body.pub)) {
       return Response.json({ ok: false, reason: "bad-request" }, { status: 400 });
     }
     const result = await this.claimOwner(body.pub, ipKey(typeof body.ip === "string" ? body.ip : ""), true);
@@ -495,11 +502,13 @@ export class Room {
     return info && !info.ended && info.auth === "pending" && socket.readyState === 1 ? info : null;
   }
 
+  // Ed25519 (32 байта) или P-256 (несжатая точка, 65 байт); подпись — 64 байта в обоих случаях.
   parseAuth(command) {
-    if (!command || command.type !== "auth" || command.v !== 2 || command.alg !== "ed25519") return null;
-    if (typeof command.pub !== "string" || typeof command.sig !== "string") return null;
-    if (!b64uHasLength(command.pub, 32) || !b64uHasLength(command.sig, 64)) return null;
-    return { pub: command.pub, sig: command.sig };
+    if (!command || command.type !== "auth" || command.v !== 2) return null;
+    const keyBytes = command.alg === "ed25519" ? 32 : command.alg === "es256" ? 65 : 0;
+    if (!keyBytes || typeof command.pub !== "string" || typeof command.sig !== "string") return null;
+    if (!b64uHasLength(command.pub, keyBytes) || !isPublicKey(command.pub) || !b64uHasLength(command.sig, 64)) return null;
+    return { alg: command.alg, pub: command.pub, sig: command.sig };
   }
 
   // Сокет прислал auth: идёт проверка подписи и привязки (до сотен мс). Такие вытесняются последними (F2).
@@ -513,7 +522,7 @@ export class Room {
     if (!pending) return;
     const info = this.markVerifying(socket, pending);
     const auth = this.parseAuth(command);
-    if (!auth || !(await verifyEd25519(auth.pub, auth.sig, hostMessage(info.roomId, info.nonce)))) {
+    if (!auth || !(await verifyDevice(auth.alg, auth.pub, auth.sig, hostMessage(info.roomId, info.nonce)))) {
       return this.failAuth(socket, "bad-signature");
     }
     // 6-значные ID перебираются за ~10^6 запросов: привязывать ключ к ним нельзя.
@@ -570,7 +579,7 @@ export class Room {
     if (!pending) return;
     const info = this.markVerifying(socket, pending);
     const auth = this.parseAuth(command);
-    if (!auth || !(await verifyEd25519(auth.pub, auth.sig, viewerMessage(info.roomId, info.id, info.rid, info.nonce)))) {
+    if (!auth || !(await verifyDevice(auth.alg, auth.pub, auth.sig, viewerMessage(info.roomId, info.id, info.rid, info.nonce)))) {
       return this.failAuth(socket, "bad-signature");
     }
     const owner = await this.readOwner();
