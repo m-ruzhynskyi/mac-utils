@@ -39,6 +39,12 @@ final class ShareFps60Tests: XCTestCase {
     }
 
     func testEncoderKeepsSixtyFramesPerSecond() throws {
+        // В виртуальной машине (раннеры CI) аппаратного кодера нет, замер скорости там ничего не говорит.
+        var vmm: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        if sysctlbyname("kern.hv_vmm_present", &vmm, &size, nil, 0) == 0, vmm == 1 {
+            throw XCTSkip("виртуальная машина: замер частоты кодера пропущен")
+        }
         for (w, h) in [(1920, 1080), (1920, 1200)] {
             let lock = NSLock()
             var count = 0, bytes = 0, keys = 0, biggest = 0
