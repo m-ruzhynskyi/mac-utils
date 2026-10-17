@@ -45,7 +45,7 @@ final class StepsModelTests: XCTestCase {
         XCTAssertNil(model.index(of: middle))
         XCTAssertTrue(model.undoRemove())
         XCTAssertEqual(model.steps.map(\.id)[1], middle, "«Вернуть» ставит шаг на прежнее место")
-        XCTAssertFalse(model.undoRemove(), "вернуть можно один раз")
+        XCTAssertFalse(model.undoRemove(), "больше возвращать нечего")
         // Удалить последний шаг и вернуть его.
         var single = self.model(1)
         let only = single.steps[0].id
@@ -54,11 +54,36 @@ final class StepsModelTests: XCTestCase {
         XCTAssertNil(single.proposedRect)
         XCTAssertTrue(single.undoRemove())
         XCTAssertEqual(single.steps.map(\.id), [only])
-        // Новое действие забывает удалённое.
-        var other = self.model(2)
-        other.remove(other.steps[0].id)
-        other.add(image(), unit: 2, rect: nil)
-        XCTAssertNil(other.lastRemoved)
+    }
+
+    func testUndoReturnsSeveralRemovedStepsInReverseOrder() {
+        var model = model(4)
+        let ids = model.steps.map(\.id)
+        model.remove(ids[1])
+        model.remove(ids[3])
+        model.remove(ids[0])
+        XCTAssertEqual(model.steps.map(\.id), [ids[2]])
+        XCTAssertTrue(model.undoRemove())
+        XCTAssertTrue(model.undoRemove())
+        XCTAssertTrue(model.undoRemove())
+        XCTAssertEqual(model.steps.map(\.id), ids, "все удалённые шаги вернулись на свои места")
+        XCTAssertFalse(model.canUndo)
+        // Удалённые шаги держат снимки: их не больше `maxRemoved`.
+        var many = self.model(StepsModel.maxSteps)
+        for step in many.steps { many.remove(step.id) }
+        XCTAssertEqual(many.removed.count, StepsModel.maxRemoved)
+        XCTAssertTrue(many.isEmpty)
+    }
+
+    func testMemoryCountsStepsAndRemovedOnes() {
+        var model = StepsModel()
+        model.add(image(100, 50), unit: 2, rect: nil)
+        model.add(image(200, 100), unit: 2, rect: nil)
+        let expected = model.steps.reduce(0) { $0 + $1.image.bytesPerRow * $1.image.height }
+        XCTAssertGreaterThanOrEqual(expected, (100 * 50 + 200 * 100) * 4)
+        XCTAssertEqual(model.memoryBytes, expected)
+        model.remove(model.steps[0].id)
+        XCTAssertEqual(model.memoryBytes, expected, "удалённый шаг ещё можно вернуть — он в памяти")
     }
 
     func testMoveReorders() {
@@ -121,6 +146,10 @@ final class StepsModelTests: XCTestCase {
         XCTAssertEqual(StepsModel.reorderIndex(from: 3, translation: -250, pitch: 120, count: 4), 1)
         XCTAssertEqual(StepsModel.reorderIndex(from: 1, translation: 9_000, pitch: 120, count: 4), 3)
         XCTAssertEqual(StepsModel.reorderIndex(from: 1, translation: -9_000, pitch: 120, count: 4), 0)
+        // Нечисловое смещение не роняет приложение: шаг остаётся на месте.
+        XCTAssertEqual(StepsModel.reorderIndex(from: 2, translation: .nan, pitch: 120, count: 4), 2)
+        XCTAssertEqual(StepsModel.reorderIndex(from: 2, translation: .infinity, pitch: 120, count: 4), 2)
+        XCTAssertEqual(StepsModel.reorderIndex(from: 2, translation: 10, pitch: .nan, count: 4), 2)
     }
 
     func testThumbnailIsSmall() {

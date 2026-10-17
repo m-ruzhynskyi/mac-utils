@@ -2,6 +2,21 @@ import AppKit
 import Combine
 import SwiftUI
 
+/// Откуда начинается захват, куда уходит коллаж и как сообщается результат — подменяется в тестах сессии.
+@MainActor
+struct StepsEnvironment {
+    var startCapture: () -> Bool = { ScreenshotService.shared.start(.edit) }
+    var save: (CGImage, @escaping @MainActor (Result<URL, Error>) -> Void) -> Void = { ScreenshotService.shared.saveCollage($0, done: $1) }
+    var copy: (CGImage, @escaping @MainActor (Bool) -> Void) -> Void = { ScreenshotService.shared.copyCollage($0, done: $1) }
+    /// Выдача без вопросов (выход из приложения): туда же, куда обычные снимки.
+    var deliverQuietly: (CGImage) -> Void = { ScreenshotService.shared.deliver($0) }
+    var toast: (String, String, Color) -> Void = { Toast.show($0, symbol: $1, tint: $2) }
+    /// Идёт запись экрана или длинный снимок: панель и предпросмотр ждут, пока они закончатся.
+    var captureBusy: () -> Bool = { ScreenRecorder.current != nil || ScrollCapture.current != nil }
+    /// Тесты сессии окон не открывают.
+    var showsWindows = true
+}
+
 /// «Коллаж шагов»: несколько снимков подряд складываются в одну картинку с номерами 1, 2, 3.
 ///
 /// Снизу экрана — панель шагов с миниатюрами: шаг можно удалить, переснять, перетащить на другое место.
@@ -11,6 +26,7 @@ import SwiftUI
 @MainActor
 final class StepsSession: ObservableObject {
     private(set) static var current: StepsSession?
+    static var environment = StepsEnvironment()
 
     @Published private(set) var model = StepsModel()
     /// Панель спрашивает «Удалить все шаги?» (отмена при двух шагах и больше).
@@ -21,6 +37,10 @@ final class StepsSession: ObservableObject {
     private var hudPanel: NSPanel?
     private var preview: StepsPreviewWindowController?
     private var resize: AnyCancellable?
+    /// Пока идёт запись экрана или длинный снимок, панель и предпросмотр не показываются; таймер ждёт конца.
+    private var resumeTimer: Timer?
+
+    private var env: StepsEnvironment { Self.environment }
 
     // MARK: - Шаги
 
@@ -30,13 +50,21 @@ final class StepsSession: ObservableObject {
         let session = current ?? StepsSession()
         current = session
         let wasRetake = session.model.retakeNumber
+        let memoryBefore = session.model.memoryBytes
         guard let number = session.model.add(image, unit: unit, rect: rect) else {
-            Toast.show("В коллаже уже \(StepsModel.maxSteps) шагов — больше не поместится",
-                       symbol: "exclamationmark.triangle.fill", tint: .orange)
+            session.env.toast("В коллаже уже \(StepsModel.maxSteps) шагов — больше не поместится",
+                              "exclamationmark.triangle.fill", .orange)
             return
         }
         session.touch()
         Log.capture.info("Коллаж: шаг \(number)\(wasRetake != nil ? " переснят" : "")")
+        // Шаги держатся в памяти полноразмерными: на больших экранах это быстро гигабайт.
+        let memory = session.model.memoryBytes
+        if memoryBefore < StepsModel.memoryWarningBytes, memory >= StepsModel.memoryWarningBytes {
+            let size = ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)
+            session.env.toast("Шаги коллажа занимают \(size) памяти — лучше сохранить коллаж и начать новый",
+                              "memorychip", .orange)
+        }
     }
 
     /// Номер следующего шага и что сделает Enter — для подсказки в режиме снимка; nil — коллажа нет.
@@ -93,27 +121,53 @@ final class StepsSession: ObservableObject {
         return ids
     }
 
-    /// Захват закрыт (снят шаг, Esc, ошибка): пересъёмка без снимка отменяется, панель возвращается.
-    static func captureClosed() {
-        guard let session = current else { return }
+    /// Захват закрыт (снят шаг, Esc, ошибка): пересъёмка без снимка отменяется, панель или предпросмотр
+    /// возвращаются. `resume == false` — захват уступил место записи экрана или длинному снимку: вернутся,
+    /// когда те закончатся. Возвращает true, если показан предпросмотр (ему и остаётся фокус).
+    @discardableResult
+    static func captureClosed(resume: Bool = true) -> Bool {
+        guard let session = current else { return false }
         session.model.cancelRetake()
-        if let preview = session.preview {
+        guard resume else {
+            session.resumeWhenCaptureEnds()
+            return false
+        }
+        return session.reappear()
+    }
+
+    /// Панель или предпросмотр — что было открыто. true — предпросмотр.
+    @discardableResult
+    private func reappear() -> Bool {
+        if let preview {
             // Снимок по ⌘⇧X прямо из предпросмотра: окно возвращается с новым шагом.
-            preview.show()
-        } else {
-            session.showHUD()
+            if env.showsWindows { preview.show() }
+            return true
+        }
+        showHUD()
+        return false
+    }
+
+    private func resumeWhenCaptureEnds() {
+        resumeTimer?.invalidate()
+        let since = Date()
+        resumeTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { return timer.invalidate() }
+                // Запись и длинный снимок стартуют с задержкой: первую секунду просто ждём.
+                guard Date().timeIntervalSince(since) >= 1, !self.env.captureBusy() else { return }
+                timer.invalidate()
+                self.resumeTimer = nil
+                self.reappear()
+            }
         }
     }
 
     func nextStep() {
         confirmingCancel = false
-        // Из предпросмотра «Ещё шаг» (⌘⇧X) — сначала обратно к шагам.
-        let fromPreview = preview != nil
-        closePreview(showHUD: false)
-        guard ScreenshotService.shared.start(.edit) else {
-            // Захват не начался: пересъёмка не висит до следующего снимка, панель — на месте.
+        guard env.startCapture() else {
+            // Захват не начался (идёт запись, нет разрешения): пересъёмка не висит до следующего снимка.
             model.cancelRetake()
-            if fromPreview { showPreview() } else { showHUD() }
+            showHUD()
             return
         }
     }
@@ -121,6 +175,7 @@ final class StepsSession: ObservableObject {
     // MARK: - Панель
 
     private func showHUD() {
+        guard env.showsWindows else { return }
         if hudPanel == nil { makeHUD() }
         placeHUD()
         hudPanel?.orderFrontRegardless()
@@ -162,6 +217,7 @@ final class StepsSession: ObservableObject {
         guard !model.isEmpty else { return }
         confirmingCancel = false
         hudPanel?.orderOut(nil)
+        guard env.showsWindows else { return }
         let controller = preview ?? StepsPreviewWindowController(session: self)
         preview = controller
         controller.show()
@@ -175,25 +231,70 @@ final class StepsSession: ObservableObject {
         if showHUD { self.showHUD() }
     }
 
-    /// Сохранить или скопировать готовый коллаж из предпросмотра.
-    func deliver(_ image: CGImage, action: StepsPreviewModel.Delivery) {
-        Log.capture.info("Коллаж: \(self.model.count) шагов, \(image.width)×\(image.height)")
-        end()
+    /// Сохранить или скопировать собранный коллаж. Шаги закрываются только когда картинка точно на месте:
+    /// если сохранить не вышло, она кладётся в буфер обмена, а шаги, подписи и предпросмотр остаются.
+    /// `done(true)` — коллаж выдан и сессия закрыта.
+    func deliver(_ image: CGImage, action: StepsPreviewModel.Delivery, done: @escaping @MainActor (Bool) -> Void = { _ in }) {
+        let env = self.env
+        let count = model.count
         switch action {
-        case .save: ScreenshotService.shared.save(image)
-        case .copy: ScreenshotService.shared.copy(image)
+        case .save:
+            env.save(image) { [weak self] result in
+                switch result {
+                case .success(let url):
+                    Log.capture.info("Коллаж сохранён: \(count) шагов, \(image.width)×\(image.height)")
+                    self?.end()
+                    env.toast("Коллаж сохранён: \(url.lastPathComponent)", "square.and.arrow.down.fill", .green)
+                    done(true)
+                case .failure(let error):
+                    Log.capture.error("Коллаж не сохранён: \(error.localizedDescription, privacy: .public)")
+                    // Запасной путь: картинка — в буфер обмена, чтобы её можно было вставить куда угодно.
+                    env.copy(image) { copied in
+                        env.toast(copied
+                            ? "Не удалось сохранить коллаж (\(error.localizedDescription)). Он скопирован в буфер обмена, шаги на месте"
+                            : "Не удалось сохранить коллаж: \(error.localizedDescription). Шаги на месте — попробуйте ещё раз",
+                            "exclamationmark.triangle.fill", .orange)
+                        done(false)
+                    }
+                }
+            }
+        case .copy:
+            env.copy(image) { [weak self] copied in
+                if copied {
+                    Log.capture.info("Коллаж скопирован: \(count) шагов, \(image.width)×\(image.height)")
+                    self?.end()
+                    env.toast("Коллаж скопирован", "doc.on.clipboard.fill", .accentColor)
+                } else {
+                    env.toast("Не удалось скопировать коллаж. Шаги на месте — попробуйте ещё раз",
+                              "exclamationmark.triangle.fill", .orange)
+                }
+                done(copied)
+            }
         }
     }
 
     /// Собрать и выдать без вопросов, с сохранёнными настройками (выход из приложения, выключение Mac).
+    /// Если на полный размер не хватило памяти — собирается поменьше; не вышло и так — тост, а не тишина.
     func finish() {
         let steps = model.steps
         end()
-        guard !steps.isEmpty, let collage = ShotComposer.compose(steps: steps.map { ($0.image, $0.unit) },
-                                                                 options: StepsPreviewModel.savedOptions(captions: steps.map(\.caption)))
-        else { return }
+        guard !steps.isEmpty else { return }
+        let images = steps.map { ($0.image, $0.unit) }
+        var options = StepsPreviewModel.savedOptions(captions: steps.map(\.caption))
+        var collage = ShotComposer.compose(steps: images, options: options)
+        if collage == nil {
+            options.maxSide = 8000
+            options.maxPixels = 24_000_000
+            collage = ShotComposer.compose(steps: images, options: options)
+        }
+        guard let collage else {
+            Log.capture.error("Коллаж из \(steps.count) шагов не собрался при выходе")
+            env.toast("Не удалось собрать коллаж из \(steps.count) \(plural(steps.count, "шага", "шагов", "шагов")): не хватило памяти",
+                      "exclamationmark.triangle.fill", .orange)
+            return
+        }
         Log.capture.info("Коллаж: \(steps.count) шагов, \(collage.width)×\(collage.height)")
-        ScreenshotService.shared.deliver(collage)
+        env.deliverQuietly(collage)
     }
 
     /// «Отмена»: при двух шагах и больше — сначала вопрос в самой панели (окна-вопросы мешали бы работе).
@@ -211,11 +312,13 @@ final class StepsSession: ObservableObject {
 
     func discard() {
         end()
-        Toast.show("Коллаж отменён", symbol: "xmark.circle.fill", tint: .secondary)
+        env.toast("Коллаж отменён", "xmark.circle.fill", .secondary)
     }
 
     private func end() {
         resize = nil
+        resumeTimer?.invalidate()
+        resumeTimer = nil
         hudPanel?.orderOut(nil)
         hudPanel = nil
         preview?.dismiss()
@@ -231,7 +334,7 @@ private struct StepsHUD: View {
         StepsPanelContent(
             items: session.model.steps.map { StepsPanelItem(id: $0.id, thumbnail: $0.thumbnail) },
             confirmingCancel: session.confirmingCancel,
-            canUndo: session.model.lastRemoved != nil,
+            canUndo: session.model.canUndo,
             isFull: session.model.isFull,
             actions: StepsPanelActions(
                 cancel: { session.cancel() },

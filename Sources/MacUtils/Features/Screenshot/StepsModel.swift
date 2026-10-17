@@ -9,6 +9,9 @@ struct StepShot: Identifiable {
     var unit: CGFloat
     var rect: CGRect?
     var caption: String
+    /// Сколько памяти держит полноразмерный снимок (4 байта на пиксель).
+    var bytes: Int { image.bytesPerRow * image.height }
+
     /// Уменьшенная копия для панели шагов: панель не держит и не масштабирует полноразмерные снимки при каждой отрисовке.
     var thumbnail: CGImage
 
@@ -41,12 +44,21 @@ struct StepsModel {
     /// Больше шагов коллаж всё равно не уместит читаемо, а память под полноразмерные снимки конечна.
     static let maxSteps = 20
     static let maxCaption = 80
+    /// Сколько удалённых шагов можно вернуть (они держат полноразмерные снимки).
+    static let maxRemoved = 20
+    /// Больше этого шаги вместе занимают заметную часть памяти Mac (шаг 5K-экрана ≈ 59 МБ): коллаж предупреждает.
+    static let memoryWarningBytes = 1_000_000_000
 
     private(set) var steps: [StepShot] = []
     /// Шаг, который сейчас переснимается: следующий снимок заменит его, а не добавится в конец.
     private(set) var retakeTarget: UUID?
-    /// Последний удалённый шаг и его место — для «Вернуть».
-    private(set) var lastRemoved: (step: StepShot, index: Int)?
+    /// Удалённые шаги и их места, последний — в конце: «Вернуть» возвращает их по одному, в обратном порядке.
+    private(set) var removed: [(step: StepShot, index: Int)] = []
+
+    var canUndo: Bool { !removed.isEmpty }
+
+    /// Память под снимки шагов и удалённых шагов, которые ещё можно вернуть.
+    var memoryBytes: Int { (steps + removed.map(\.step)).reduce(0) { $0 + $1.bytes } }
 
     var count: Int { steps.count }
     var isEmpty: Bool { steps.isEmpty }
@@ -71,28 +83,26 @@ struct StepsModel {
             let old = steps[index]
             steps[index] = StepShot(id: old.id, image: image, unit: unit, rect: rect, caption: old.caption)
             self.retakeTarget = nil
-            lastRemoved = nil
             return index + 1
         }
         retakeTarget = nil
         guard !isFull else { return nil }
         steps.append(StepShot(image: image, unit: unit, rect: rect))
-        lastRemoved = nil
         return steps.count
     }
 
     mutating func remove(_ id: UUID) {
         guard let index = index(of: id) else { return }
-        lastRemoved = (steps.remove(at: index), index)
+        removed.append((steps.remove(at: index), index))
+        if removed.count > Self.maxRemoved { removed.removeFirst(removed.count - Self.maxRemoved) }
         if retakeTarget == id { retakeTarget = nil }
     }
 
-    /// Возвращает последний удалённый шаг на его место.
+    /// Возвращает последний удалённый шаг на его место (повторно — предыдущий, и так далее).
     @discardableResult
     mutating func undoRemove() -> Bool {
-        guard let removed = lastRemoved, !isFull else { return false }
-        steps.insert(removed.step, at: min(removed.index, steps.count))
-        lastRemoved = nil
+        guard !isFull, let last = removed.popLast() else { return false }
+        steps.insert(last.step, at: min(last.index, steps.count))
         return true
     }
 
@@ -103,7 +113,6 @@ struct StepsModel {
         guard from != to else { return }
         let step = steps.remove(at: from)
         steps.insert(step, at: to)
-        lastRemoved = nil
     }
 
     mutating func beginRetake(_ id: UUID) {
@@ -129,7 +138,7 @@ struct StepsModel {
     /// Куда встанет шаг `index`, если его протащили по полосе миниатюр на `translation` точек
     /// (шаг полосы — `pitch`: ширина миниатюры и промежуток).
     static func reorderIndex(from index: Int, translation: CGFloat, pitch: CGFloat, count: Int) -> Int {
-        guard count > 0, pitch > 0 else { return index }
+        guard count > 0, pitch > 0, translation.isFinite, pitch.isFinite else { return min(max(index, 0), max(count - 1, 0)) }
         let shift = Int((translation / pitch).rounded())
         return min(max(index + shift, 0), count - 1)
     }

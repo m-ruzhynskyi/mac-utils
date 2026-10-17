@@ -20,6 +20,8 @@ final class StepsPreviewModel: ObservableObject {
     /// Размер итоговой картинки и уменьшена ли она под предел.
     @Published private(set) var outputSize: CGSize = .zero
     @Published private(set) var downscaled = false
+    /// Коллаж собирается и сохраняется (или копируется): кнопки заняты, на «Сохранить» — индикатор.
+    @Published private(set) var delivering: Delivery?
 
     /// Сторона уменьшенной копии для окна: быстро собирается и чётко выглядит на Retina.
     static let previewSide: CGFloat = 2400
@@ -29,12 +31,15 @@ final class StepsPreviewModel: ObservableObject {
     private let onCaption: (String, UUID) -> Void
     private let onMove: (UUID, Int) -> Void
     let back: () -> Void
-    private let onDeliver: (CGImage, Delivery) -> Void
+    private let onDeliver: @MainActor (CGImage, Delivery, @escaping @MainActor (Bool) -> Void) -> Void
     private var renderTask: Task<Void, Never>?
+    /// Номер последней заказанной сборки: результат устаревшей (переключатель уже сдвинули) отбрасывается.
+    private var renderGeneration = 0
 
     init(defaults: UserDefaults = .standard, steps: @escaping () -> [StepShot],
          setCaption: @escaping (String, UUID) -> Void = { _, _ in }, move: @escaping (UUID, Int) -> Void = { _, _ in },
-         back: @escaping () -> Void = {}, deliver: @escaping (CGImage, Delivery) -> Void = { _, _ in }) {
+         back: @escaping () -> Void = {},
+         deliver: @escaping @MainActor (CGImage, Delivery, @escaping @MainActor (Bool) -> Void) -> Void = { _, _, done in done(true) }) {
         self.defaults = defaults
         source = steps
         onCaption = setCaption
@@ -97,17 +102,34 @@ final class StepsPreviewModel: ObservableObject {
         reload()
     }
 
-    /// Полноразмерный коллаж (с пределом размера итога).
-    func export() -> CGImage? {
-        ShotComposer.compose(steps: steps.map { ($0.image, $0.unit) }, options: options)
+    /// Полноразмерный коллаж (с пределом размера итога), собирается вне главного потока.
+    func export() async -> CGImage? {
+        await Self.compose(steps, options: options)
+    }
+
+    /// Сборка в фоне: окно не замирает и на двадцати больших шагах.
+    nonisolated private static func compose(_ steps: [StepShot], options: ShotComposer.Options) async -> CGImage? {
+        let input = UncheckedSendable(steps.map { ($0.image, $0.unit) })
+        let output = await Task.detached(priority: .userInitiated) {
+            UncheckedSendable(ShotComposer.compose(steps: input.value, options: options))
+        }.value
+        return output.value
     }
 
     func deliver(_ action: Delivery) {
-        guard let image = export() else {
-            Toast.show("Не удалось собрать коллаж", symbol: "exclamationmark.triangle.fill", tint: .orange)
-            return
+        guard delivering == nil, !steps.isEmpty else { return }
+        delivering = action
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let image = await self.export() else {
+                self.delivering = nil
+                Toast.show("Не удалось собрать коллаж: не хватило памяти. Шаги на месте",
+                           symbol: "exclamationmark.triangle.fill", tint: .orange)
+                return
+            }
+            // Сессия закроет окно сама, если всё получилось; иначе окно и шаги остаются.
+            self.onDeliver(image, action) { [weak self] _ in self?.delivering = nil }
         }
-        onDeliver(image, action)
     }
 
     private func changed(_ key: String, _ value: Any) {
@@ -119,18 +141,16 @@ final class StepsPreviewModel: ObservableObject {
     /// чтобы не собирать коллаж на каждую букву.
     func scheduleRender(immediately: Bool) {
         renderTask?.cancel()
-        if immediately {
-            render()
-            return
-        }
         renderTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            if !immediately { try? await Task.sleep(nanoseconds: 150_000_000) }
             guard !Task.isCancelled else { return }
-            self?.render()
+            await self?.render()
         }
     }
 
-    private func render() {
+    private func render() async {
+        renderGeneration += 1
+        let generation = renderGeneration
         guard !steps.isEmpty else {
             image = nil
             outputSize = .zero
@@ -144,9 +164,10 @@ final class StepsPreviewModel: ObservableObject {
         var quick = full
         quick.maxSide = min(full.maxSide, Self.previewSide)
         quick.maxPixels = min(full.maxPixels, Self.previewSide * Self.previewSide)
-        if let cg = ShotComposer.compose(steps: steps.map { ($0.image, $0.unit) }, options: quick) {
-            image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-        }
+        let cg = await Self.compose(steps, options: quick)
+        // Пока собиралось, могли заказать новую сборку: тогда эта уже не нужна.
+        guard generation == renderGeneration, !Task.isCancelled, let cg else { return }
+        image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 }
 
@@ -165,7 +186,10 @@ final class StepsPreviewWindowController: NSObject, NSWindowDelegate {
             setCaption: { [weak session] text, id in session?.setCaption(text, for: id) },
             move: { [weak session] id, index in session?.move(id, to: index) },
             back: { [weak session] in session?.closePreview() },
-            deliver: { [weak session] image, action in session?.deliver(image, action: action) })
+            deliver: { [weak session] image, action, done in
+                guard let session else { return done(false) }
+                session.deliver(image, action: action, done: done)
+            })
         super.init()
     }
 
@@ -294,19 +318,31 @@ struct StepsPreviewView: View {
             Button("Назад к шагам", action: model.back)
                 .buttonStyle(.graphite(.ghost))
                 .keyboardShortcut(.cancelAction)
-            Button("Скопировать") { model.deliver(.copy) }
-                .buttonStyle(.graphite(.secondary))
-                .keyboardShortcut("c", modifiers: [.command, .shift])
-                .help("В буфер обмена (⇧⌘C)")
-            Button("Сохранить") { model.deliver(.save) }
-                .buttonStyle(.graphite(.primary))
-                .keyboardShortcut("s", modifiers: .command)
-                .help("В папку снимков (⌘S)")
+            Button { model.deliver(.copy) } label: {
+                busyLabel("Скопировать", busy: model.delivering == .copy)
+            }
+            .buttonStyle(.graphite(.secondary))
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+            .help("В буфер обмена (⇧⌘C)")
+            Button { model.deliver(.save) } label: {
+                busyLabel("Сохранить", busy: model.delivering == .save)
+            }
+            .buttonStyle(.graphite(.primary))
+            .keyboardShortcut("s", modifiers: .command)
+            .help("В папку снимков (⌘S)")
         }
-        .disabled(model.steps.isEmpty)
+        .disabled(model.steps.isEmpty || model.delivering != nil)
         .padding(.horizontal, DS.Space.xl)
         .padding(.vertical, DS.Space.m)
         .background(Color.dsPanel)
+    }
+}
+
+/// Подпись кнопки; пока идёт сборка и запись — с индикатором.
+private func busyLabel(_ title: String, busy: Bool) -> some View {
+    HStack(spacing: DS.Space.s) {
+        if busy { ProgressView().controlSize(.small).accessibilityLabel("Собираю коллаж") }
+        Text(title)
     }
 }
 

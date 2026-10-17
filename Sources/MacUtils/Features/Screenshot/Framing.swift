@@ -47,9 +47,10 @@ extension NSColor {
 /// Шаги бывают разного размера и сняты на разных экранах (Retina и обычный). Сначала все приводятся к одной плотности —
 /// самой высокой среди шагов, — чтобы одинаковый по экрану размер выглядел одинаково. Потом, если нужно, к одному
 /// размеру. Итог не больше `maxSide` по стороне и `maxPixels` по площади: иначе он уменьшается целиком.
-@MainActor
+///
+/// Сборка не привязана к главному потоку (рисует в свой битмап): большой коллаж собирается в фоне.
 enum ShotComposer {
-    struct Options {
+    struct Options: Sendable {
         var layout: StepsLayout = .auto
         var equalSize = false
         var windowFrame = false
@@ -91,11 +92,15 @@ enum ShotComposer {
         }
     }
 
+    /// Тёмная ли тема системы; без приложения (тесты, ранний запуск) — светлая.
+    @MainActor
     static var systemIsDark: Bool {
-        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        guard let app = NSApp else { return false }
+        return app.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     }
 
     /// Один снимок в рамке окна на фоне (кнопка «Рамка» / клавиша F).
+    @MainActor
     static func framedSingle(_ image: CGImage, unit: CGFloat) -> CGImage? {
         var options = Options()
         options.windowFrame = true
