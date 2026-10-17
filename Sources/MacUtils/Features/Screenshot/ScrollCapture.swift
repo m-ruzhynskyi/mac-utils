@@ -11,22 +11,32 @@ final class ScrollCapture: NSObject, ObservableObject {
 
     @Published private(set) var capturedHeight = 0
     @Published private(set) var lostTrack = false
+    /// Место потеряно на одинаковых строках: HUD советует вернуться к отличающемуся месту, а не «медленнее».
+    @Published private(set) var lostOnRepeats = false
 
     private let rect: NSRect
     private let screen: NSScreen
-    private let filter: SCContentFilter
+    /// Фильтр захвата: приходит асинхронно (SCShareableContent), до него кадры не снимаются.
+    private var filter: SCContentFilter?
     private let stitcher = StitchWorker()
     private var timer: Timer?
     private var busy = false
+    /// Съёмка закончена (готово, отмена, ошибка): повторные Enter, «Готово», предел высоты ничего не делают.
+    private var stopped = false
     private var borderPanel: NSPanel?
     private var hudPanel: NSPanel?
-    /// Esc — отмена, Enter — готово; работает без фокуса на панели.
+    /// Esc — отмена, Enter — готово; работает без фокуса на панели. Клавиши прокрутки — подсказка склейке.
     private var keyTap: EventTap?
+    /// Колесо, трекпад и перетаскивание над областью: подсказка склейке, на сколько прокрутилось содержимое.
+    private var inputMonitors: [Any] = []
+    /// События ввода, ещё не отданные склейке (время по `systemUptime`).
+    private var input = ScrollInput()
+    /// Когда кадру последний раз раздавались события: нажатия клавиш без перехвата видны только по времени.
+    private var lastTaken = ProcessInfo.processInfo.systemUptime
 
-    private init(rect: NSRect, screen: NSScreen, filter: SCContentFilter) {
+    private init(rect: NSRect, screen: NSScreen) {
         self.rect = rect
         self.screen = screen
-        self.filter = filter
         super.init()
     }
 
@@ -42,21 +52,37 @@ final class ScrollCapture: NSObject, ObservableObject {
             Log.capture.error("Длинный снимок: экран не найден")
             return
         }
+        // `current` — сразу: второй запуск, пока идёт запрос SCShareableContent, иначе создал бы вторую съёмку.
+        let capture = ScrollCapture(rect: rect.intersection(screen.frame), screen: screen)
+        current = capture
+        // SCShareableContent может не ответить (завис replayd, открыт системный запрос): тогда съёмка без панелей
+        // висела бы в `current`, а новые снимки молча не запускались.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard capture.filter == nil, !capture.stopped else { return }
+            Log.capture.error("Длинный снимок: SCShareableContent не ответил")
+            capture.stop()
+            Toast.show("Не удалось начать длинный снимок: нет ответа от системы захвата экрана",
+                       symbol: "exclamationmark.triangle.fill", tint: .orange)
+        }
         Task { @MainActor in
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard !capture.stopped else { return }
                 guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                     Log.capture.error("Длинный снимок: дисплей \(displayID) не найден в SCShareableContent")
+                    capture.stop()
+                    Toast.show("Не удалось начать длинный снимок: экран не найден (монитор отключён?)",
+                               symbol: "exclamationmark.triangle.fill", tint: .orange)
                     return
                 }
                 let ownPID = ProcessInfo.processInfo.processIdentifier
                 let own = content.applications.filter { $0.processID == ownPID }
-                let filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
-                let capture = ScrollCapture(rect: rect.intersection(screen.frame), screen: screen, filter: filter)
-                current = capture
+                capture.filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
                 capture.begin()
             } catch {
                 Log.capture.error("Длинный снимок: SCShareableContent: \(error.localizedDescription, privacy: .public)")
+                capture.stop()
                 Toast.show("Не удалось начать длинный снимок: \(error.localizedDescription)",
                            symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
@@ -68,6 +94,7 @@ final class ScrollCapture: NSObject, ObservableObject {
     private func begin() {
         showPanels()
         startKeyTap()
+        startInputMonitors()
         tick()
         let timer = Timer(timeInterval: 0.15, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
         RunLoop.main.add(timer, forMode: .common)
@@ -75,6 +102,8 @@ final class ScrollCapture: NSObject, ObservableObject {
     }
 
     func finish() {
+        // Enter, «Готово» и предел высоты могут прийти почти одновременно: второй вызов отдал бы снимок дважды.
+        guard !stopped else { return }
         // `current` обнуляется в stop(): пока склеивается и доставляется результат, занятость держит отдельная причина.
         BusyRegistry.shared.begin(.screenshotSaving)
         stop()
@@ -92,41 +121,50 @@ final class ScrollCapture: NSObject, ObservableObject {
     }
 
     func cancel() {
+        guard !stopped else { return }
         stop()
         Toast.show("Длинный снимок отменён", symbol: "xmark.circle.fill", tint: .secondary)
     }
 
     private func stop() {
+        stopped = true
         keyTap?.stop()
         keyTap = nil
+        inputMonitors.forEach(NSEvent.removeMonitor)
+        inputMonitors = []
         timer?.invalidate()
         timer = nil
         borderPanel?.orderOut(nil)
         hudPanel?.orderOut(nil)
         borderPanel = nil
         hudPanel = nil
-        Self.current = nil
+        if Self.current === self { Self.current = nil }
     }
 
     // MARK: - Кадры
 
     @objc private func tick() {
-        guard !busy, timer != nil || capturedHeight == 0 else { return }
+        guard !busy, !stopped, let filter, timer != nil || capturedHeight == 0 else { return }
         busy = true
         Task { @MainActor in
             defer { self.busy = false }
             let frame: CGImage
+            let requested = ProcessInfo.processInfo.systemUptime
             do {
-                frame = try await self.grab()
+                frame = try await self.grab(filter)
             } catch {
                 Log.capture.error("Длинный снимок: кадр не снят: \(error.localizedDescription, privacy: .public)")
                 return
             }
-            guard Self.current === self else { return }
+            guard !self.stopped else { return }
+            // Кадр снят где-то между запросом и ответом; на экране — события, которые приложение успело отрисовать
+            // (~кадр дисплея назад). Остальные события достанутся следующему кадру.
+            let shown = (requested + ProcessInfo.processInfo.systemUptime) / 2 - 0.016
+            let motion = self.takeMotion(upTo: shown)
             let before = self.capturedHeight
             // Подписи строк и поиск сдвига — на отдельной очереди: главный поток во время прокрутки свободен.
-            let (result, height, isFull) = await self.stitcher.add(frame)
-            guard Self.current === self else { return }
+            let (result, height, isFull, repeats) = await self.stitcher.addReporting(frame, motion: motion)
+            guard !self.stopped else { return }
             Log.capture.debug("Кадр \(frame.width)×\(frame.height): \(String(describing: result), privacy: .public), +\(height - before) px")
             switch result {
             case .appended, .first:
@@ -135,13 +173,18 @@ final class ScrollCapture: NSObject, ObservableObject {
                 break
             case .lost:
                 self.lostTrack = true
+                self.lostOnRepeats = repeats
             }
             self.capturedHeight = height
-            if isFull { self.finish() }
+            if isFull {
+                Log.capture.info("Длинный снимок: предел высоты, \(height) px")
+                Toast.show("Достигнут предел длинного снимка: сохраняю снятое", symbol: "scroll.fill", tint: .orange)
+                self.finish()
+            }
         }
     }
 
-    private func grab() async throws -> CGImage {
+    private func grab(_ filter: SCContentFilter) async throws -> CGImage {
         let config = SCStreamConfiguration()
         let scale = screen.backingScaleFactor
         // sourceRect — в точках дисплея, начало координат сверху слева.
@@ -155,15 +198,79 @@ final class ScrollCapture: NSObject, ObservableObject {
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
     }
 
-    // MARK: - Клавиши
+    // MARK: - Ввод (подсказка склейке)
+
+    /// Колесо и трекпад над областью съёмки: точные дельты (трекпад, плавная прокрутка) — в пикселях кадра,
+    /// колесо без точных дельт — в строках. Перетаскивание и щелчки (ползунок, его дорожка, выделение) — прокрутка
+    /// неизвестной величины. Глобальный монитор мыши разрешений не требует и видит то, что доставлено окнам, —
+    /// уже после «Плавной прокрутки» Mac Utils, без двойного счёта.
+    private func startInputMonitors() {
+        if let wheel = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.noteScroll(event) }
+        }) { inputMonitors.append(wheel) }
+        if let pointer = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged, .otherMouseDragged, .leftMouseDown, .otherMouseDown],
+                                                           handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.noteInput(Stitcher.Motion(unknown: 1), animated: true) }
+        }) { inputMonitors.append(pointer) }
+        if inputMonitors.isEmpty { Log.capture.error("Длинный снимок: нет монитора прокрутки, склейка только по изображению") }
+    }
+
+    private func noteScroll(_ event: NSEvent) {
+        let overArea = NSMouseInRect(NSEvent.mouseLocation, rect, false)
+        guard let wheel = ScrollInput.wheel(deltaY: event.scrollingDeltaY, precise: event.hasPreciseScrollingDeltas,
+                                            scale: screen.backingScaleFactor, overArea: overArea) else { return }
+        noteInput(wheel.motion, anywhere: true, animated: wheel.animated)
+    }
+
+    /// `anywhere` — клавиши и колесо: у клавиш нет места, колесо мимо области учтено в `ScrollInput.wheel`.
+    /// `animated` — после события приложение может ещё прокручивать само (см. `ScrollInput.animationTail`).
+    private func noteInput(_ motion: Stitcher.Motion, anywhere: Bool = false, animated: Bool = false) {
+        // Перетаскивание или щелчок над другим окном к области не относится.
+        guard !stopped, anywhere || NSMouseInRect(NSEvent.mouseLocation, rect, false) else { return }
+        input.note(motion, at: ProcessInfo.processInfo.systemUptime, animated: animated)
+    }
+
+    /// События до момента `time` — для очередного кадра; nil, пока событий не было (склейка только по изображению).
+    private func takeMotion(upTo time: TimeInterval) -> Stitcher.Motion? {
+        // Без перехвата клавиш (нет «Универсального доступа») нажатия видны только по времени последнего нажатия —
+        // без кода клавиши. Любое нажатие — «могла быть прокрутка» (PageDown, пробел, стрелки): иначе после первого
+        // события колеса прокрутка клавишами навсегда считалась бы «прокрутки нет».
+        if keyTap?.isRunning != true {
+            let sinceKey = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+            let now = ProcessInfo.processInfo.systemUptime
+            if !stopped, sinceKey < now - lastTaken { input.note(Stitcher.Motion(unknown: 1), at: now - sinceKey, animated: true) }
+            lastTaken = now
+        }
+        return input.take(upTo: time)
+    }
+
+    /// Стрелки, Home/End — прокрутка неизвестной величины; пробел и Page Up/Down — на страницу.
+    private static let scrollKeys: Set<Int64> = [125, 126, 115, 119]
+
+    /// PageDown и пробел — страница вниз, PageUp и Shift+пробел — вверх.
+    private static func pages(_ code: Int64, _ flags: CGEventFlags) -> Double? {
+        switch code {
+        case 121: return 1
+        case 116: return -1
+        case 49: return flags.contains(.maskShift) ? -1 : 1
+        default: return nil
+        }
+    }
 
     private func startKeyTap() {
         let tap = EventTap(types: [.keyDown]) { [weak self] _, event in
             guard let self else { return true }
-            switch event.getIntegerValueField(.keyboardEventKeycode) {
+            let code = event.getIntegerValueField(.keyboardEventKeycode)
+            switch code {
             case 53: self.cancel()          // Esc
             case 36, 76: self.finish()      // Return / Enter
-            default: return true
+            default:
+                if let pages = Self.pages(code, event.flags) {
+                    self.noteInput(Stitcher.Motion(pages: pages), anywhere: true, animated: true)
+                } else if Self.scrollKeys.contains(code) {
+                    self.noteInput(Stitcher.Motion(unknown: 1), anywhere: true, animated: true)
+                }
+                return true
             }
             return false
         }
@@ -248,7 +355,10 @@ private struct ScrollCaptureHUD: View {
             Image(systemName: capture.lostTrack ? "exclamationmark.triangle.fill" : "scroll")
                 .foregroundStyle(capture.lostTrack ? Color.orange : Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
-                Text(capture.lostTrack ? "Слишком быстро: прокрутите чуть назад" : "Медленно прокручивайте вниз")
+                // Не только «быстро»: так же выглядят повторяющиеся строки, переход на другую страницу и рывок.
+                Text(!capture.lostTrack ? "Медленно прокручивайте вниз"
+                     : capture.lostOnRepeats ? "Одинаковые строки: прокрутите назад, к последнему отличающемуся месту"
+                     : "Потерял место: прокрутите чуть назад и медленнее")
                     .font(.system(size: 12, weight: .semibold))
                 Text("Снято: \(capture.capturedHeight) px")
                     .font(.system(size: 11))
@@ -275,12 +385,18 @@ final class StitchWorker: @unchecked Sendable {
     private let queue = DispatchQueue(label: "macutils.stitch", qos: .userInitiated)
     private var stitcher = Stitcher()
 
-    func add(_ frame: CGImage) async -> (Stitcher.Result, Int, Bool) {
+    func add(_ frame: CGImage, motion: Stitcher.Motion? = nil) async -> (Stitcher.Result, Int, Bool) {
+        let (result, height, isFull, _) = await addReporting(frame, motion: motion)
+        return (result, height, isFull)
+    }
+
+    /// Результат, высота, предел достигнут и `.lost` ли из-за одинаковых строк.
+    func addReporting(_ frame: CGImage, motion: Stitcher.Motion? = nil) async -> (Stitcher.Result, Int, Bool, Bool) {
         let boxed = UncheckedSendable(frame)
         return await withCheckedContinuation { continuation in
             queue.async {
-                let result = self.stitcher.add(boxed.value)
-                continuation.resume(returning: (result, self.stitcher.height, self.stitcher.isFull))
+                let result = self.stitcher.add(boxed.value, motion: motion)
+                continuation.resume(returning: (result, self.stitcher.height, self.stitcher.isFull, self.stitcher.lostOnRepeats))
             }
         }
     }
@@ -289,142 +405,5 @@ final class StitchWorker: @unchecked Sendable {
         await withCheckedContinuation { continuation in
             queue.async { continuation.resume(returning: self.stitcher.makeImage().map(UncheckedSendable.init)) }
         }?.value
-    }
-}
-
-/// Склеивает кадры одной области по вертикали. Каждый кадр сжимается до
-/// 64 колонок в оттенках серого; полоса строк нового кадра ищется в прошлом
-/// кадре, и найденный сдвиг — это сколько новых строк появилось снизу.
-struct Stitcher {
-    enum Result { case first, appended, unchanged, lost }
-
-    private static let columns = 64
-    private static let maxHeight = 40_000
-
-    private(set) var height = 0
-    private var chunks: [CGImage] = []
-    private var previous: [UInt8]?
-    private var rows = 0
-
-    var isFull: Bool { height >= Self.maxHeight }
-
-    mutating func add(_ frame: CGImage) -> Result {
-        guard let signature = Self.signature(frame) else { return .unchanged }
-        guard let previous, frame.height == rows else {
-            if chunks.isEmpty {
-                chunks = [frame]
-                height = frame.height
-            }
-            self.previous = signature
-            rows = frame.height
-            return .first
-        }
-        guard let shift = Self.shift(previous: previous, current: signature, rows: rows) else { return .lost }
-        // Прокрутка вверх или без движения — ждём, пока снова пойдут новые строки.
-        guard shift > 0 else { return .unchanged }
-        let piece = min(shift, Self.maxHeight - height)
-        guard piece > 0,
-              let cropped = frame.cropping(to: CGRect(x: 0, y: frame.height - piece,
-                                                      width: frame.width, height: piece)) else { return .unchanged }
-        chunks.append(cropped)
-        height += piece
-        self.previous = signature
-        return .appended
-    }
-
-    func makeImage() -> CGImage? {
-        guard let first = chunks.first, height > 0 else { return nil }
-        let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
-        let space = first.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? sRGB
-        let info = CGImageAlphaInfo.premultipliedLast.rawValue
-        guard let context = CGContext(data: nil, width: first.width, height: height, bitsPerComponent: 8,
-                                      bytesPerRow: 0, space: space, bitmapInfo: info)
-                ?? CGContext(data: nil, width: first.width, height: height, bitsPerComponent: 8,
-                             bytesPerRow: 0, space: sRGB, bitmapInfo: info) else { return nil }
-        var top = 0
-        for chunk in chunks {
-            context.draw(chunk, in: CGRect(x: 0, y: height - top - chunk.height,
-                                           width: chunk.width, height: chunk.height))
-            top += chunk.height
-        }
-        return context.makeImage()
-    }
-
-    /// Кадр, сжатый до 64 колонок (строки сохранены), в оттенках серого.
-    /// Первая строка буфера — верх изображения.
-    private static func signature(_ image: CGImage) -> [UInt8]? {
-        let width = columns, height = image.height
-        guard height > 0 else { return nil }
-        var data = [UInt8](repeating: 0, count: width * height)
-        let ok = data.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height,
-                                          bitsPerComponent: 8, bytesPerRow: width,
-                                          space: CGColorSpaceCreateDeviceGray(),
-                                          bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
-            context.interpolationQuality = .medium
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
-        }
-        return ok ? data : nil
-    }
-
-    /// На сколько строк содержимое уехало вверх (> 0 — прокрутка вниз).
-    /// nil — совпадение не найдено (слишком быстрая прокрутка или пустая полоса).
-    private static func shift(previous: [UInt8], current: [UInt8], rows h: Int) -> Int? {
-        let w = columns
-        let band = min(48, h / 4)
-        guard band >= 8 else { return nil }
-
-        // Полоса с текстурой, ближе к верху (так ловятся большие сдвиги),
-        // но ниже возможной закреплённой шапки.
-        var start: Int?
-        for fraction in [0.15, 0.3, 0.45] {
-            let a = min(max(0, Int(Double(h) * fraction)), h - band)
-            if variance(current, from: a * w, count: band * w) > 25 {
-                start = a
-                break
-            }
-        }
-        guard let a = start else { return nil }
-
-        let count = band * w
-        var bestOffset: Int?
-        var bestDiff = Int.max
-        var d = 0
-        while d <= h {
-            let candidates = d == 0 ? [a] : [a + d, a - d]
-            for m in candidates where m >= 0 && m <= h - band {
-                // Дальний сдвиг выигрывает, только если заметно лучше ближнего.
-                let limit = bestDiff == Int.max ? Int.max : bestDiff * 9 / 10
-                var diff = 0
-                var k = 0
-                let base = m * w, ours = a * w
-                while k < count {
-                    diff += abs(Int(previous[base + k]) - Int(current[ours + k]))
-                    if diff >= limit { break }
-                    k += 1
-                }
-                if diff < limit {
-                    bestDiff = diff
-                    bestOffset = m
-                }
-            }
-            if a - d < 0 && a + d > h - band { break }
-            d += 1
-        }
-        guard let m = bestOffset, bestDiff <= count * 6 else { return nil }
-        return m - a
-    }
-
-    private static func variance(_ data: [UInt8], from start: Int, count: Int) -> Double {
-        guard count > 0, start + count <= data.count else { return 0 }
-        var sum = 0.0, sumSquares = 0.0
-        for i in start..<(start + count) {
-            let v = Double(data[i])
-            sum += v
-            sumSquares += v * v
-        }
-        let mean = sum / Double(count)
-        return sumSquares / Double(count) - mean * mean
     }
 }
