@@ -383,15 +383,28 @@ async function openPageKey(subtle) {
     return { pub: saved.pub, sign };
   } finally { db.close(); }
 }
+// Может ли здесь вообще быть ключ страницы (приложение с ключом, небезопасный контекст или нет WebCrypto/IndexedDB — нет).
+function pageKeySupported() {
+  try { return !appSigns("signViewer") && !!window.isSecureContext && !!window.crypto && !!window.crypto.subtle && !!window.indexedDB; } catch (_) { return false; }
+}
+// IndexedDB на холодном старте, под антивирусом или на медленном диске отвечает долго: ждём до 10 с. Если хранилище
+// ответило позже, ключ всё равно подхватывается (pageKey выставляется по факту), а не теряется на всю сессию.
 async function loadPageKey() {
   try {
-    if (appSigns("signViewer") || !window.isSecureContext || !window.crypto || !window.crypto.subtle || !window.indexedDB) return;
-    // IndexedDB может не ответить вовсе (повреждённый профиль): не ждём дольше 3 с.
-    const timeout = new Promise((resolve) => setTimeout(resolve, 3000, null));
-    pageKey = (await Promise.race([openPageKey(window.crypto.subtle).catch(() => null), timeout])) || null;
-  } catch (_) { pageKey = null; }
+    if (!pageKeySupported()) return;
+    const opening = openPageKey(window.crypto.subtle).then((key) => { if (key) pageKey = key; return key; }).catch(() => null);
+    const timeout = new Promise((resolve) => setTimeout(resolve, 10000, null));
+    await Promise.race([opening, timeout]);
+  } catch (_) {}
 }
-const pageKeyReady = loadPageKey();
+let pageKeyReady = loadPageKey();
+// Повторная попытка (после отказа relay): ещё раз открыть хранилище, true — ключ есть.
+async function retryPageKey() {
+  if (pageKey) return true;
+  pageKeyReady = loadPageKey();
+  await pageKeyReady;
+  return !!pageKey;
+}
 async function sendPageAuth(ws, signer, args) {
   if (!pageKey) return false;
   const message = signer === "signHost" ? `mu-share/v2\nhost\n${args[0]}\n${args[1]}`
@@ -947,20 +960,37 @@ async function share() {
     }
   }
   if (!stream) return status(`Трансляция не началась${failure ? ` (${failure.name}: ${failure.message})` : ""}`);
-  const ok = await openHost(myId);
+  let ok = await openHost(myId);
+  // ID закреплён за ключом страницы, а ключ не загрузился (медленная или зависшая IndexedDB): сначала грузим ключ ещё раз.
+  if (!ok && !pageKey && pageKeySupported() && (await hostCheckReason()) === "id-claimed" && (await retryPageKey())) ok = await openHost(myId);
   if (!ok) { stream.getTracks().forEach((t) => t.stop()); return explainHostFailure(); }
   startCapture(stream, myId);
 }
 
 // Почему relay не пустил ведущего: WebSocket причины не отдаёт, поэтому спрашиваем лёгким GET (без подключения).
-async function explainHostFailure() {
-  let reason = null;
+// Ответ host-check: "ok" | "id-claimed" | "busy" | "rate-limited" | null (нет связи).
+async function hostCheckReason() {
   try {
     const auth = authParam("signHost");
     const res = await fetch(`/room/${myId}/host-check${auth ? `?${auth}` : ""}`, { cache: "no-store" });
-    if (res.status === 429) return status("Слишком много попыток подряд. Подождите минуту и попробуйте снова.");
-    if (res.ok) reason = (await res.json()).error || "ok";
+    if (res.status === 429) return "rate-limited";
+    if (res.ok) return (await res.json()).error || "ok";
   } catch (_) {}
+  return null;
+}
+async function explainHostFailure() {
+  const reason = await hostCheckReason();
+  if (reason === "rate-limited") return status("Слишком много попыток подряд. Подождите минуту и попробуйте снова.");
+  if (reason === "id-claimed" && !pageKey && pageKeySupported()) {
+    // Ключ устройства есть, но хранилище браузера его не отдало: это не чужой ID, терять свой пока не нужно.
+    status("Не удалось загрузить ключ этого устройства: хранилище браузера не ответило, поэтому сервер считает ваш ID чужим. " +
+           "Перезагрузите страницу (Ctrl+R) или перезапустите приложение и попробуйте ещё раз. " +
+           "Если так и не заработает — можно получить новый ID (старый ID перестанет работать, новый сообщите зрителям)." +
+           '<br><button id="reloadPage" style="margin-top:8px">Перезагрузить страницу</button>');
+    const reload = $("reloadPage");
+    if (reload) reload.onclick = () => { try { location.reload(); } catch (_) {} };
+    return offerNewId(true);
+  }
   if (reason === "id-claimed") {
     status("Этот ID привязан к ключу устройства из прежней версии приложения. Получите новый ID — трансляция сразу заработает; новый ID сообщите тем, кто вас смотрит.");
     return offerNewId(true);

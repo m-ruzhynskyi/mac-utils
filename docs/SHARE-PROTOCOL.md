@@ -181,7 +181,7 @@ HTTP до апгрейда WebSocket:
 |---|---|
 | `off` | Аварийный откат. `mu-share-2` обслуживается как legacy: хосту сразу `{"type":"authed","v":2,"mode":"off"}`, зрителю `waiting` без challenge, владельцы не проверяются (но не стираются), `POST /status` → 404 |
 | `optional` | По умолчанию и для любого неизвестного значения. `mu-share-2` проходит проверку, `mu-share-1` работает (кроме legacy-хоста на ID с владельцем → 409) |
-| `required` | `mu-share-1` → 426 на `/room/*`, `GET /status` и `POST /status`. В `/version` только `mu-share-2` |
+| `required` | `mu-share-1` без `auth=v2` → 426 на `/room/*` (в том числе `host-check`), `GET /status` и `POST /status`. `mu-share-1` с `auth=v2` (страница со своим ключом, §3.1) на `/room/*` пускается, но через challenge; `GET /status` ему всё равно 426. В `/version` только `mu-share-2` |
 
 Переключение — `[vars] AUTH_MODE` в `relay/wrangler.toml` и деплой. Код не меняется, данные (владельцы ID, квота) сохраняются:
 ```
@@ -190,6 +190,11 @@ npm test
 npx wrangler deploy --var RELAY_COMMIT:$(git rev-parse --short HEAD)
 ```
 Для разовой смены без правки файла: `npx wrangler deploy --var AUTH_MODE:off` (до следующего обычного деплоя).
+
+**Аварийный откат: где менять `AUTH_MODE`.** Значение берётся из `[vars]` в `wrangler.toml` при каждом деплое.
+- Меняйте его **в `wrangler.toml` и деплоем** (или `--var`). Значение, выставленное руками в панели Cloudflare, следующий обычный деплой молча вернёт в `optional`.
+- После аварии верните `optional` тем же путём и убедитесь по `GET /version` (`auth`).
+- Порядок: сначала `AUTH_MODE=off`, потом (если нужно) откат кода. Откат кода без `off` оставляет закреплённые владельцы ID, и клиент без ключа на таком ID получает 409 `id-claimed` (§11).
 `RELAY_COMMIT` relay показывает в `/version`. В скрипт `npm run deploy` он пока не встроен, передавать руками.
 
 ## 9. Порядок выката
@@ -208,6 +213,7 @@ npx wrangler deploy --var RELAY_COMMIT:$(git rev-parse --short HEAD)
 
 Все условия сразу (VERSIONING §3 + `.audit/auth-design.md` §5.3):
 - прошло ≥ 30 дней после релиза **и** Mac, и Windows с `mu-share-2`;
+- Windows со страницей-ключом (`auth=v2`, §3.1) в `required` работает на `/room/*`, но `GET /status` и `POST /status` ему недоступны (426 / только Ed25519): в истории не будет точек «в эфире». Либо принять это, либо дать страничному ключу `/status` до перехода;
 - после этого вышел ещё один релиз обоих клиентов;
 - legacy-подключений меньше 1 % за последние 14 дней.
 
