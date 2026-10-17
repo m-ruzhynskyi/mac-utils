@@ -76,6 +76,8 @@ struct Stitcher {
         /// Строка с рисунком, единственная в кадре целиком (одинаковые строки подряд — одна): строка лога, кода,
         /// текста. Сдвиг, при котором такие строки не совпадают целиком, объясняет кадр лишь повторяющимися местами.
         let uniqueRow: [Bool]
+        /// Отпечаток строки целиком (по всем полосам): одинаковые строки в разных местах кадров.
+        let rowKeys: [UInt64]
         /// Редкие полосы (не больше `rareLimit` повторов в колонке) по колонкам, отсортированы по отпечатку:
         /// колонка `j` — `indexStart[j]..<indexStart[j + 1]`. Для голосования за сдвиг.
         let indexKeys: [UInt64]
@@ -133,6 +135,12 @@ struct Stitcher {
     /// Была склейка по точному совпадению: захват точный, поиск по похожести больше не нужен (и опасен —
     /// похожие строки лога при нём совпадают).
     private var exactCapture = false
+    /// Последний `.lost` — из-за одинаковых строк (несколько сдвигов объясняют кадр одинаково), а не из-за
+    /// быстрой прокрутки или другого содержимого: HUD подсказывает другое.
+    private(set) var lostOnRepeats = false
+
+    /// Отметка неоднозначности из поиска: несколько настоящих совпадений, подсказка их не развела.
+    final class Ambiguity { var repeated = false }
 
     /// `motion` — события ввода после прошлого кадра (nil — неизвестно: склейка только по изображению).
     @discardableResult
@@ -164,8 +172,15 @@ struct Stitcher {
         // на месте стоят строки и сверху, и снизу — 2/3: так выглядит панорама или карусель посреди стоящей
         // страницы), а не полоса посреди стоящего окна. С подсказкой правило действует, когда изображение с ней спорит.
         let sizeRule = scrollSpan.map { $0 * 6 / 10 } ?? rows / 2
+        let ambiguity = Ambiguity()
         guard let found = Self.match(previous: previous, current: signature, expected: expected, hintError: hintError,
-                                     minSpan: sizeRule, spanKnown: scrollSpan != nil, allowFuzzy: !exactCapture) else { return lose() }
+                                     minSpan: sizeRule, spanKnown: scrollSpan != nil, allowFuzzy: !exactCapture,
+                                     allowBlank: !lostSinceAppend, ambiguity: ambiguity) else {
+            // Одинаковые строки — и когда «ничья», и когда большая часть строк с рисунком в кадре повторяется.
+            let textured = (0..<rows).filter { signature.textured[$0] != 0 }.count
+            let repeated = textured - signature.uniqueRow.filter { $0 }.count
+            return lose(repeats: ambiguity.repeated || textured > 0 && repeated * 2 > textured)
+        }
         let match = found.match
         guard match.shift > 0 else {
             // Без движения или прокрутка вверх: ждём, пока снизу снова пойдут новые строки.
@@ -218,8 +233,9 @@ struct Stitcher {
         return .appended
     }
 
-    private mutating func lose() -> Result {
+    private mutating func lose(repeats: Bool = false) -> Result {
         lostSinceAppend = true
+        lostOnRepeats = repeats
         return .lost
     }
 
@@ -488,11 +504,11 @@ struct Stitcher {
         }
         let textured = segmentTexture(fine, fineColumns: fineColumns, rows: height)
         let (distinct, unique, keys, rowsIndex, start) = segmentIndex(hashes: hashes, textured: textured, rows: height)
-        let uniqueRow = uniqueRows(hashes: hashes, textured: textured, rows: height)
+        let (uniqueRow, rowKeys) = uniqueRows(hashes: hashes, textured: textured, rows: height)
         var fineValues = [Float](repeating: 0, count: fine.count)
         vDSP_vfltu8(fine, 1, &fineValues, 1, vDSP_Length(fine.count))
         return Signature(rows: height, fineValues: fineValues, fineColumns: fineColumns, coarse: coarse, detail: detail,
-                         hashes: hashes, textured: textured, distinct: distinct, unique: unique, uniqueRow: uniqueRow,
+                         hashes: hashes, textured: textured, distinct: distinct, unique: unique, uniqueRow: uniqueRow, rowKeys: rowKeys,
                          indexKeys: keys, indexRows: rowsIndex, indexStart: start)
     }
 
@@ -574,7 +590,7 @@ struct Stitcher {
     }
 
     /// Строки, единственные в кадре целиком (по отпечаткам всех полос); серия одинаковых строк подряд — одна.
-    private static func uniqueRows(hashes: [UInt64], textured: [UInt64], rows: Int) -> [Bool] {
+    private static func uniqueRows(hashes: [UInt64], textured: [UInt64], rows: Int) -> (unique: [Bool], keys: [UInt64]) {
         var keys = [UInt64](repeating: 0, count: rows)
         for r in 0..<rows {
             var h: UInt64 = 0xCBF2_9CE4_8422_2325
@@ -584,7 +600,7 @@ struct Stitcher {
         var counts: [UInt64: Int] = [:]
         counts.reserveCapacity(rows)
         for r in 0..<rows where textured[r] != 0 && (r == 0 || keys[r - 1] != keys[r]) { counts[keys[r], default: 0] += 1 }
-        return (0..<rows).map { textured[$0] != 0 && counts[keys[$0]] == 1 }
+        return ((0..<rows).map { textured[$0] != 0 && counts[keys[$0]] == 1 }, keys)
     }
 
     // MARK: - Поиск сдвига
@@ -607,16 +623,17 @@ struct Stitcher {
     /// `minSpan` — без подсказки (или когда изображение с ней спорит) движущаяся часть меньше этого — не прокрутка.
     /// `allowFuzzy` — разрешён ли поиск по похожести, когда точных совпадений нет вовсе (шумный захват).
     static func match(previous p: Signature, current c: Signature, expected: Int? = nil, hintError: Double = 0.25,
-                      minSpan: Int = 0, spanKnown: Bool = true, allowFuzzy: Bool = true) -> Found? {
+                      minSpan: Int = 0, spanKnown: Bool = true, allowFuzzy: Bool = true, allowBlank: Bool = true,
+                      ambiguity: Ambiguity? = nil) -> Found? {
         // Закреплённые строки сначала ищутся мягко: в шапке меняются часы, значки, подсветка. Но так же «почти не
         // меняются» строки лога или таблицы в одном и том же месте при прокрутке (отличаются цифры) — и мягкое правило
         // принимает их за закреплённый низ. Если так сдвига не нашлось, повтор со строгим правилом: закреплены только
         // строки, точно совпавшие на месте.
         let loose = search(previous: p, current: c, expected: expected, hintError: hintError, minSpan: minSpan,
-                           spanKnown: spanKnown, allowFuzzy: allowFuzzy, exactStatic: false)
+                           spanKnown: spanKnown, allowFuzzy: allowFuzzy, allowBlank: allowBlank, ambiguity: ambiguity, exactStatic: false)
         if let loose, loose.match.shift != 0 { return loose }
         let exact = search(previous: p, current: c, expected: expected, hintError: hintError, minSpan: minSpan,
-                           spanKnown: spanKnown, allowFuzzy: allowFuzzy, exactStatic: true)
+                           spanKnown: spanKnown, allowFuzzy: allowFuzzy, allowBlank: allowBlank, ambiguity: ambiguity, exactStatic: true)
         if let exact, exact.match.shift != 0 { return exact }
         // Мягкое правило сочло кадр неподвижным целиком, а точное — нет, и сдвиг не найден: строки на тех же местах
         // отличаются (цифры в логе, номера в JSON после рывка на период разметки). Это не «без изменений», а потеря
@@ -626,7 +643,8 @@ struct Stitcher {
     }
 
     private static func search(previous p: Signature, current c: Signature, expected: Int?, hintError: Double,
-                               minSpan: Int, spanKnown: Bool, allowFuzzy: Bool, exactStatic: Bool) -> Found? {
+                               minSpan: Int, spanKnown: Bool, allowFuzzy: Bool, allowBlank: Bool, ambiguity: Ambiguity?,
+                               exactStatic: Bool) -> Found? {
         let w = columns, h = p.rows
         guard h > 0, c.rows == h, p.fineColumns == c.fineColumns else { return nil }
         let pc = p.coarse, cc = c.coarse
@@ -657,7 +675,13 @@ struct Stitcher {
         // Изменилась узкая полоса посреди неподвижного кадра (подсветка, анимация) — это не прокрутка.
         // Без подсказки событий — и полоса меньше половины кадра (см. `minSpan`).
         let sizeRule = max(16, h / 10, minSpan, !spanKnown && header >= 16 && footer >= 16 ? h * 2 / 3 : 0)
-        guard span >= (expected == nil ? sizeRule : max(16, h / 10)) else { return still(header, footer) }
+        if span < (expected == nil ? sizeRule : max(16, h / 10)) {
+            // Узкая изменившаяся полоса — анимация в стоящем окне. Но если неподвижные строки сверху и снизу пусты, а
+            // строка с текстом целиком переехала на другое место, это редкая страница (заголовок среди пустоты) прокрутилась:
+            // «без изменений» здесь молча теряло бы заголовки.
+            guard span >= 16, Self.staticRowsBlank(c, header: header, footer: footer), Self.textMoved(p, c, rows: lo..<hi)
+            else { return still(header, footer) }
+        }
 
         let frame = Frame(p: p, c: c, header: header, footer: footer, sizeRule: sizeRule)
         switch frame.exactSearch(expected: expected, hintError: hintError) {
@@ -666,13 +690,27 @@ struct Stitcher {
             // содержимым (строки лога в одном месте отличаются лишь цифрами): тогда — строгое правило.
             if !exactStatic, found.match.shift != 0, frame.staticRowsMoved(by: found.match.shift) { return nil }
             return found
-        case .ambiguous:
+        case .ambiguous(let repeated):
+            if repeated { ambiguity?.repeated = true }
             return nil
         case .noExactMatch:
-            if let neutral = frame.blankShift(expected: expected) { return neutral }
+            // После `.lost` через пустоту не перескакиваем: пока место потеряно, мимо могли проехать строки текста.
+            if allowBlank, let neutral = frame.blankShift(expected: expected) { return neutral }
             guard allowFuzzy else { return nil }
             return frame.fuzzySearch(expected: expected, hintError: hintError)
         }
+    }
+
+    /// В неподвижных строках сверху и снизу нет рисунка.
+    private static func staticRowsBlank(_ c: Signature, header: Int, footer: Int) -> Bool {
+        !(0..<header).contains { c.textured[$0] != 0 } && !((c.rows - footer)..<c.rows).contains { c.textured[$0] != 0 }
+    }
+
+    /// Строка с рисунком из `rows` нового кадра есть в прошлом кадре целиком, но в другом месте.
+    private static func textMoved(_ p: Signature, _ c: Signature, rows: Range<Int>) -> Bool {
+        var where_: [UInt64: Int] = [:]
+        for r in 0..<p.rows where p.textured[r] != 0 { where_[p.rowKeys[r]] = r }
+        return rows.contains { r in c.textured[r] != 0 && where_[c.rowKeys[r]].map { $0 != r } == true }
     }
 
     /// Пара кадров и их неподвижные шапка и низ: точный поиск сдвига и запасной — по похожести.
@@ -687,7 +725,7 @@ struct Stitcher {
         var hi: Int { p.rows - footer }
         var span: Int { hi - lo }
 
-        enum Decision { case found(Found), ambiguous, noExactMatch }
+        enum Decision { case found(Found), ambiguous(repeated: Bool), noExactMatch }
 
         /// Точные совпадения при сдвиге `shift`: по строкам нового кадра — совпавшие полосы-доводы; по колонкам —
         /// сколько полос с рисунком сравнено и сколько совпало.
@@ -903,7 +941,8 @@ struct Stitcher {
             let minimum = 16
             // Кандидаты по доле совпавших полос: сдвиг «на период» повторяющейся разметки при большом перекрытии
             // набирает много совпадений, но лишь повторяющихся мест.
-            let ranked = moving.filter { $0.hits >= minimum }.sorted { a, b in
+            // Маленький предмет (линия, значок) среди пустоты без единого промаха во всём перекрытии — тоже довод.
+            let ranked = moving.filter { $0.hits >= minimum || $0.misses == 0 && $0.hits >= 4 }.sorted { a, b in
                 a.rate != b.rate ? a.rate > b.rate : a.hits != b.hits ? a.hits > b.hits : abs(a.e.shift) < abs(b.e.shift)
             }
             guard !ranked.isEmpty else {
@@ -959,7 +998,11 @@ struct Stitcher {
             // Сдвиг, который подтверждают события, обходится и одной серией: уникальных строк мало в блоке одинаковых.
             let confirmed = expected.map { e in window.map { abs(best.e.shift - e) <= $0 } ?? false } ?? false
             // Уникальных строк нет вовсе (всё перекрытие — блок одинаковых строк): различать нечем, дальше решает подсказка.
-            guard uniqueRows == 0 || cleanRows >= 8 && (cleanRuns >= 2 || cleanRows >= 48 || confirmed) && cleanRows * 20 >= uniqueRows
+            // Одна серия годится и когда перекрытие объяснено целиком: все уникальные строки совпали, промахов нет —
+            // заголовок среди пустоты (лендинг, слайды, письмо).
+            let whole = cleanRows == uniqueRows && best.misses == 0
+            guard uniqueRows == 0 || whole && cleanRows >= 2
+                    || cleanRows >= 8 && (cleanRuns >= 2 || cleanRows >= 48 || confirmed) && cleanRows * 20 >= uniqueRows
             else { return .noExactMatch }
 
             if tied.count == 1, !zeroTied {
@@ -969,7 +1012,7 @@ struct Stitcher {
                     // анимацию посреди стоящей страницы (колесо у конца страницы).
                     let ratio = Double(best.e.shift) / Double(expected == 0 ? 1 : expected)
                     if best.rate >= 0.5, span >= sizeRule, (0.25...4).contains(ratio) { return found(best.e.shift, true) }
-                    guard span < sizeRule else { return .ambiguous }
+                    guard span < sizeRule else { return .ambiguous(repeated: false) }
                     var refuted = Found(match: Match(shift: 0, header: header, footer: footer), confident: true)
                     refuted.refutesMotion = true
                     return .found(refuted)
@@ -980,9 +1023,11 @@ struct Stitcher {
             // 4. Несколько сдвигов объясняют кадр одинаково (повторяющиеся строки). Подсказка выбирает ближайший,
             // только если все они — настоящие совпадения (а не случайные полосы чужого содержимого) и подсказка
             // точнее, чем расстояние между ними. Иначе — `.lost`, а не угадывание.
-            guard let expected, let window else { return .ambiguous }
             var options = tied.map { (shift: $0.e.shift, rate: $0.rate) }
             if zeroTied { options.append((0, still.rate)) }
+            // Настоящих совпадений два и больше — это одинаковые строки (HUD подскажет вернуться к отличающимся).
+            let repeated = options.filter { $0.rate >= 0.75 }.count >= 2
+            guard let expected, let window else { return .ambiguous(repeated: repeated) }
             // Ни один вариант не похож на то, что говорят события, а движется малая часть кадра: события не про это
             // содержимое (колесо у конца страницы, а меняется анимация).
             if span < sizeRule, options.allSatisfy({ abs($0.shift - expected) > window }) {
@@ -993,12 +1038,12 @@ struct Stitcher {
             // Альтернативы — только настоящие совпадения (доля ≥ 0,75): сдвиг, с которым нечем сравнить (перекрытия не
             // пересекаются), но совпавший лишь местами, не вариант. Если настоящих нет — это чужое содержимое.
             options = options.filter { $0.rate >= 0.75 }
-            guard !options.isEmpty else { return .ambiguous }
+            guard !options.isEmpty else { return .ambiguous(repeated: false) }
             options.sort { abs($0.shift - expected) < abs($1.shift - expected) }
             let accuracy = max(4, Int(2 * hintError * Double(max(abs(expected), 50))))
-            guard abs(options[0].shift - expected) <= accuracy else { return .ambiguous }
+            guard abs(options[0].shift - expected) <= accuracy else { return .ambiguous(repeated: repeated) }
             if options.count >= 2, abs(options[1].shift - expected) < abs(options[0].shift - expected) + max(8, accuracy) {
-                return .ambiguous
+                return .ambiguous(repeated: repeated)
             }
             return found(options[0].shift, false)
         }
@@ -1035,22 +1080,31 @@ struct Stitcher {
         func blankShift(expected: Int?) -> Found? {
             let limit = span - min(span, max(16, span / 5))
             guard limit >= 0 else { return nil }
+            // Строка с рисунком есть в обоих кадрах — значит, текст виден в обоих и сдвиг должен был найтись точно.
+            // Раз не нашёлся, это неоднозначность, а не пустота: `.lost`, а не сдвиг наугад (повтор или потеря заголовка).
+            var seen = Set<UInt64>()
+            for r in 0..<h where p.textured[r] != 0 { seen.insert(p.rowKeys[r]) }
+            if (0..<h).contains(where: { c.textured[$0] != 0 && seen.contains(c.rowKeys[$0]) }) { return nil }
             var cPrefix = [0], pPrefix = [0]
             for r in 0..<h {
                 cPrefix.append(cPrefix[r] + (c.detail[r] ? 1 : 0))
                 pPrefix.append(pPrefix[r] + (p.detail[r] ? 1 : 0))
             }
-            var neutral: [Int] = []
-            for d in 0...limit {
-                for s in d == 0 ? [0] : [d, -d] {
-                    let r0 = max(lo, lo - s), r1 = min(hi, hi - s)
-                    guard r0 < r1, cPrefix[r1] - cPrefix[r0] + pPrefix[r1 + s] - pPrefix[r0 + s] <= 2 else { continue }
-                    if (r0..<r1).allSatisfy({ r in !(c.detail[r] || p.detail[r + s]) || blankRowsMatch(r + s, r) }) { neutral.append(s) }
+            func neutral(_ s: Int) -> Bool {
+                guard abs(s) <= limit else { return false }
+                let r0 = max(lo, lo - s), r1 = min(hi, hi - s)
+                guard r0 < r1, cPrefix[r1] - cPrefix[r0] + pPrefix[r1 + s] - pPrefix[r0 + s] <= 2 else { return false }
+                return (r0..<r1).allSatisfy { r in !(c.detail[r] || p.detail[r + s]) || blankRowsMatch(r + s, r) }
+            }
+            // По порядку близости к подсказке (без неё — к нулю): первый подходящий и есть ответ, без перебора всех
+            // сдвигов (на пустом кадре 5K это миллионы проверок).
+            let center = expected.map { min(max($0, -limit), limit) } ?? 0
+            for d in 0...(2 * limit) {
+                for s in d == 0 ? [center] : [center + d, center - d] where neutral(s) {
+                    return Found(match: Match(shift: s, header: header, footer: footer), confident: false, exact: false)
                 }
             }
-            // Только если в перекрытии нового кадра правда пусто (а не другая страница с текстом в другом месте).
-            let pick = expected.flatMap { e in neutral.min(by: { abs($0 - e) < abs($1 - e) }) } ?? neutral.first
-            return pick.map { Found(match: Match(shift: $0, header: header, footer: footer), confident: false, exact: false) }
+            return nil
         }
 
         // MARK: Запасной поиск — по похожести

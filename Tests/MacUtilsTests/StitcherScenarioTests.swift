@@ -313,4 +313,123 @@ final class StitcherScenarioTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - Ревью 3: редкий текст среди пустоты
+
+    /// Строки итога и эталона с рисунком (не однотонные): лишние — уже снятые строки, вклеенные повторно; пропавшие —
+    /// строки страницы, которых нет в итоге.
+    private func textRows(_ got: CGImage, _ want: CGImage) -> (extra: Int, lost: Int) {
+        // Строки — как `Data` (хеш и сравнение в библиотеке, быстро и в отладочной сборке); однотонная строка — та, что
+        // совпадает сама с собой со сдвигом на пиксель.
+        func rows(_ image: CGImage) -> [Data] {
+            let data = Data(pixels(image)), stride = image.width * 4
+            return (0..<image.height).compactMap { r in
+                let row = data.subdata(in: r * stride..<(r + 1) * stride)
+                let plain = row.withUnsafeBytes { memcmp($0.baseAddress!, $0.baseAddress! + 4, stride - 4) == 0 }
+                return plain ? nil : row
+            }
+        }
+        var count: [Data: Int] = [:]
+        for row in rows(want) { count[row, default: 0] += 1 }
+        var extra = 0
+        for row in rows(got) {
+            count[row, default: 0] -= 1
+            if count[row]! < 0 { extra += 1 }
+        }
+        return (extra, count.values.filter { $0 > 0 }.reduce(0, +))
+    }
+
+    /// Прокрутка шагом `step` в режиме `mode`: строк текста не прибавилось и не пропало — или был честный `.lost`.
+    /// nil — всё в порядке, иначе — что не так.
+    private func textKept(_ page: CGImage, step: Int, mode: String, _ name: String) -> String? {
+        var stitcher = Stitcher()
+        var results: [Stitcher.Result] = []
+        let offsets = Array(Swift.stride(from: 0, through: page.height - 1200, by: step))
+        for (k, offset) in offsets.enumerated() {
+            let motion: Stitcher.Motion? = switch mode {
+            case "unknown": k == 0 ? Stitcher.Motion() : Stitcher.Motion(unknown: 1)
+            case "lines": k == 0 ? Stitcher.Motion() : Stitcher.Motion(lines: Double(step) / 40)
+            default: nil
+            }
+            results.append(stitcher.add(makeFrame(page, offset: offset, height: 1200), motion: motion))
+        }
+        guard let image = stitcher.makeImage() else { return "нет изображения: \(name)" }
+        let reference = makeContext(width: page.width, height: offsets.last! + 1200)
+        reference.draw(page, in: CGRect(x: 0, y: offsets.last! + 1200 - page.height, width: page.width, height: page.height))
+        let rows = textRows(image, reference.makeImage()!)
+        if rows.extra > 0 { return "повторено строк текста \(rows.extra): \(name), шаг \(step), \(mode)" }
+        if rows.lost > 0, !results.contains(.lost) { return "пропало строк текста \(rows.lost) без .lost: \(name), шаг \(step), \(mode)" }
+        return nil
+    }
+
+    /// Прогоны независимы — параллельно (отладочная сборка медленная), проверки — после.
+    private func assertTextKept(_ runs: [(page: CGImage, step: Int, mode: String, name: String)], file: StaticString = #filePath, line: UInt = #line) {
+        var problems = [String?](repeating: nil, count: runs.count)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: runs.count) { i in
+            let run = runs[i]
+            let problem = textKept(run.page, step: run.step, mode: run.mode, run.name)
+            lock.lock(); problems[i] = problem; lock.unlock()
+        }
+        for problem in problems.compactMap({ $0 }) { XCTFail(problem, file: file, line: line) }
+    }
+
+    /// Заголовки через `gap` пустых строк (лендинг, слайды, письмо): было — заголовки повторялись (до +58% высоты) или
+    /// пропадали, кадры `.appended` и `.unchanged` без предупреждения.
+    func testSparseHeadingsAmongBlankSpace() {
+        var runs: [(page: CGImage, step: Int, mode: String, name: String)] = []
+        for gap in [10, 12, 15, 18] {
+            var lines: [String] = []
+            for i in 0..<6 { lines.append("Раздел \(i + 1). Заголовок с уникальным текстом \(i * 37 % 91)"); lines += Array(repeating: "", count: gap) }
+            let page = textPage(width: 1400, lines: lines)
+            for step in [120, 150, 200, 300, 450] {
+                for mode in ["изображение", "unknown", "lines"] { runs.append((page, step, mode, "редкий текст, промежуток \(gap)")) }
+            }
+        }
+        assertTextKept(runs)
+    }
+
+    /// Проза, 80 пустых строк с двумя бледными строками и тонкой линией, снова проза (было: +609 лишних строк).
+    func testFaintTextAndRuleInBlankStretch() {
+        let prose = (0..<60).map { "Строка прозы номер \($0): быстрая коричневая лиса перепрыгивает ленивую собаку \($0 * 7919 % 1000)" }
+        var lines = Array(prose.prefix(30)) + Array(repeating: "", count: 80) + Array(prose.suffix(30))
+        lines[50] = "ФАНТОМ: бледная подпись, которую нельзя потерять 1234"
+        lines[80] = "ФАНТОМ-2: ещё одна бледная строка 5678"
+        let text = textPage(width: 1400, lines: lines)
+        var runs: [(page: CGImage, step: Int, mode: String, name: String)] = []
+        for rule in [false, true] {
+            let context = makeContext(width: text.width, height: text.height)
+            context.draw(text, in: CGRect(x: 0, y: 0, width: text.width, height: text.height))
+            for i in [50, 80] {
+                context.setFillColor(CGColor(gray: 1, alpha: 0.6))
+                context.fill(CGRect(x: 0, y: CGFloat(text.height) - (16 + CGFloat(i) * 20) * 2 - 40, width: 1400, height: 44))
+            }
+            if rule {
+                context.setFillColor(CGColor(gray: 0.85, alpha: 1))
+                context.fill(CGRect(x: 48, y: CGFloat(text.height) - (16 + 65 * 20) * 2, width: 1400 - 96, height: 2))
+            }
+            let page = context.makeImage()!
+            for step in [150, 300] {
+                for mode in ["изображение", "unknown", "lines"] { runs.append((page, step, mode, "бледный текст, линия \(rule)")) }
+            }
+        }
+        assertTextKept(runs)
+    }
+
+    /// `.lost` на блоке одинаковых строк помечен — HUD советует вернуться к отличающемуся месту, а не «медленнее».
+    func testLossOnIdenticalLinesIsReported() {
+        let lines = prose(seed: 7, count: 30) + Array(repeating: "2026-10-17 09:41:39.123 INFO  heartbeat ok", count: 45) + prose(seed: 8, count: 40)
+        let page = textPage(width: 1400, lines: lines, font: mono)
+        var stitcher = Stitcher()
+        var reported = false
+        for offset in Swift.stride(from: 0, through: page.height - 1200, by: 300) where stitcher.add(makeFrame(page, offset: offset, height: 1200)) == .lost {
+            reported = reported || stitcher.lostOnRepeats
+        }
+        XCTAssertTrue(reported)
+        // Рывок на другую страницу — не «одинаковые строки».
+        var jump = Stitcher()
+        jump.add(makeFrame(page, offset: 0, height: 1200))
+        XCTAssertEqual(jump.add(makeFrame(textPage(width: 1400, lines: prose(seed: 99, count: 80)), offset: 0, height: 1200)), .lost)
+        XCTAssertFalse(jump.lostOnRepeats)
+    }
 }

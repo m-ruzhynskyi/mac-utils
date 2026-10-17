@@ -11,6 +11,8 @@ final class ScrollCapture: NSObject, ObservableObject {
 
     @Published private(set) var capturedHeight = 0
     @Published private(set) var lostTrack = false
+    /// Место потеряно на одинаковых строках: HUD советует вернуться к отличающемуся месту, а не «медленнее».
+    @Published private(set) var lostOnRepeats = false
 
     private let rect: NSRect
     private let screen: NSScreen
@@ -70,6 +72,8 @@ final class ScrollCapture: NSObject, ObservableObject {
                 guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                     Log.capture.error("Длинный снимок: дисплей \(displayID) не найден в SCShareableContent")
                     capture.stop()
+                    Toast.show("Не удалось начать длинный снимок: экран не найден (монитор отключён?)",
+                               symbol: "exclamationmark.triangle.fill", tint: .orange)
                     return
                 }
                 let ownPID = ProcessInfo.processInfo.processIdentifier
@@ -159,7 +163,7 @@ final class ScrollCapture: NSObject, ObservableObject {
             let motion = self.takeMotion(upTo: shown)
             let before = self.capturedHeight
             // Подписи строк и поиск сдвига — на отдельной очереди: главный поток во время прокрутки свободен.
-            let (result, height, isFull) = await self.stitcher.add(frame, motion: motion)
+            let (result, height, isFull, repeats) = await self.stitcher.addReporting(frame, motion: motion)
             guard !self.stopped else { return }
             Log.capture.debug("Кадр \(frame.width)×\(frame.height): \(String(describing: result), privacy: .public), +\(height - before) px")
             switch result {
@@ -169,6 +173,7 @@ final class ScrollCapture: NSObject, ObservableObject {
                 break
             case .lost:
                 self.lostTrack = true
+                self.lostOnRepeats = repeats
             }
             self.capturedHeight = height
             if isFull {
@@ -351,7 +356,9 @@ private struct ScrollCaptureHUD: View {
                 .foregroundStyle(capture.lostTrack ? Color.orange : Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
                 // Не только «быстро»: так же выглядят повторяющиеся строки, переход на другую страницу и рывок.
-                Text(capture.lostTrack ? "Потерял место: прокрутите чуть назад и медленнее" : "Медленно прокручивайте вниз")
+                Text(!capture.lostTrack ? "Медленно прокручивайте вниз"
+                     : capture.lostOnRepeats ? "Одинаковые строки: прокрутите назад, к последнему отличающемуся месту"
+                     : "Потерял место: прокрутите чуть назад и медленнее")
                     .font(.system(size: 12, weight: .semibold))
                 Text("Снято: \(capture.capturedHeight) px")
                     .font(.system(size: 11))
@@ -379,11 +386,17 @@ final class StitchWorker: @unchecked Sendable {
     private var stitcher = Stitcher()
 
     func add(_ frame: CGImage, motion: Stitcher.Motion? = nil) async -> (Stitcher.Result, Int, Bool) {
+        let (result, height, isFull, _) = await addReporting(frame, motion: motion)
+        return (result, height, isFull)
+    }
+
+    /// Результат, высота, предел достигнут и `.lost` ли из-за одинаковых строк.
+    func addReporting(_ frame: CGImage, motion: Stitcher.Motion? = nil) async -> (Stitcher.Result, Int, Bool, Bool) {
         let boxed = UncheckedSendable(frame)
         return await withCheckedContinuation { continuation in
             queue.async {
                 let result = self.stitcher.add(boxed.value, motion: motion)
-                continuation.resume(returning: (result, self.stitcher.height, self.stitcher.isFull))
+                continuation.resume(returning: (result, self.stitcher.height, self.stitcher.isFull, self.stitcher.lostOnRepeats))
             }
         }
     }
