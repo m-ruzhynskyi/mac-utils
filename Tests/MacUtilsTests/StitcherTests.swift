@@ -448,8 +448,10 @@ final class StitcherRealPageTests: XCTestCase {
         XCTAssertEqual(result.height, height, "высота", file: file, line: line)
         guard result.height == height else { return }
         let got = pixels(result), want = pixels(page), stride = page.width * 4
-        let bad = (0..<height).first { r in
-            !(ignoring?.contains(r) ?? false) && got[r * stride..<(r + 1) * stride] != want[r * stride..<(r + 1) * stride]
+        let bad = (0..<height).first { (r: Int) -> Bool in
+            if let ignoring, ignoring.contains(r) { return false }
+            let row: Range<Int> = r * stride..<(r + 1) * stride
+            return got[row] != want[row]
         }
         XCTAssertNil(bad, "первая несовпавшая строка", file: file, line: line)
     }
