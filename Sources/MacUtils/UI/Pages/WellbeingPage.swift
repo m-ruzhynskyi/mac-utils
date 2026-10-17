@@ -24,6 +24,9 @@ struct WellbeingPage: View {
 
     var body: some View {
         SettingsPage(.wellbeing) {
+            GroupLabel("Не засыпать")
+            ListCard { KeepAwakeTicker() }
+            Footnote(KeepAwakeRow.note + " Выключено при каждом запуске приложения; быстро: значок в строке меню (правая кнопка) или macutils://keep-awake.")
             GroupLabel("Напоминание о перерыве")
             ListCard {
                 ToggleRow("Напоминать о перерыве",

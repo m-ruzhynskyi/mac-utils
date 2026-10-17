@@ -47,36 +47,43 @@ final class ScreenshotService: ObservableObject {
 
     // MARK: - Захват
 
-    func start(_ mode: Mode) {
+    /// false — захват не начался (идёт запись или длинный снимок, нет разрешения, уже открыт).
+    @discardableResult
+    func start(_ mode: Mode) -> Bool {
         // ⌘⇧X во время записи экрана — остановить её.
         if let recorder = ScreenRecorder.current {
             recorder.stop()
-            return
+            return false
         }
-        guard windows.isEmpty, !capturing, ScrollCapture.current == nil else { return }
+        guard windows.isEmpty, !capturing, ScrollCapture.current == nil else { return false }
         guard Permissions.screenRecording else {
             Permissions.requestScreenRecording()
             Toast.show("Разрешите Mac Utils «Запись экрана» в настройках конфиденциальности",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
-            return
+            return false
         }
         capturing = true
         // Запоминаем программу до того, как оверлей заберёт фокус.
         ScreenshotLibrary.shared.captureApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
-        StepsSession.hideHUD()
+        // Панель шагов и предпросмотр коллажа прячутся и исключаются из кадра.
+        let hidden = StepsSession.prepareForCapture()
         let snapFrames = WindowSnap.visibleWindowFrames()
         Task { @MainActor in
             defer { self.capturing = false }
             do {
-                let shots = try await ScreenGrabber.captureAllScreens()
-                guard !shots.isEmpty else { return }
+                let shots = try await ScreenGrabber.captureAllScreens(excluding: hidden)
+                guard !shots.isEmpty else {
+                    StepsSession.captureClosed()
+                    return
+                }
                 self.present(shots: shots, snapFrames: snapFrames, mode: mode)
             } catch {
-                StepsSession.showHUD()
+                StepsSession.captureClosed()
                 Toast.show("Не удалось сделать снимок: \(error.localizedDescription)",
                            symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
         }
+        return true
     }
 
     private func present(shots: [ScreenShot], snapFrames: [CGRect], mode: Mode) {
@@ -89,7 +96,16 @@ final class ScreenshotService: ObservableObject {
         if !SettingsWindowController.shared.isVisible { FocusReturn.remember() }
         NSApp.activate()
         if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
-        let keyWindow = windows.first { NSMouseInRect(mouse, $0.frame, false) } ?? windows.first
+        var keyWindow = windows.first { NSMouseInRect(mouse, $0.frame, false) } ?? windows.first
+        // Следующий шаг коллажа: область прошлого шага (или переснимаемого) уже выделена — Enter снимает её.
+        if mode == .edit, let proposed = StepsSession.proposedRect,
+           let window = windows.first(where: { $0.frame.contains(CGPoint(x: proposed.midX, y: proposed.midY)) }) {
+            let local = proposed.offsetBy(dx: -window.frame.minX, dy: -window.frame.minY).intersection(window.captureView.bounds)
+            if local.width >= 4, local.height >= 4 {
+                window.captureView.preselect(local)
+                keyWindow = window
+            }
+        }
         keyWindow?.makeKeyAndOrderFront(nil)
         NSCursor.crosshair.set()
         startKeyTap()
@@ -134,16 +150,21 @@ final class ScreenshotService: ObservableObject {
         }
     }
 
-    func close() {
+    /// `resumeSteps` — вернуть панель шагов или предпросмотр коллажа; не нужно, когда захват уступает место
+    /// записи экрана или длинному снимку (тогда они вернутся сами, когда те закончатся).
+    func close(resumeSteps: Bool = true) {
         keyTap?.stop()
         for window in windows {
             window.orderOut(nil)
         }
         windows.removeAll()
         NSCursor.arrow.set()
-        StepsSession.showHUD()
-        // Возвращаем фокус приложению, которое было активно до снимка.
-        if !SettingsWindowController.shared.isVisible {
+        // Если вернулся предпросмотр коллажа, фокус остаётся у него: иначе он ушёл бы за окно прошлого приложения.
+        let previewShown = StepsSession.captureClosed(resume: resumeSteps)
+        if previewShown {
+            FocusReturn.forget()
+        } else if !SettingsWindowController.shared.isVisible {
+            // Возвращаем фокус приложению, которое было активно до снимка.
             FocusReturn.restore()
         }
     }
@@ -185,9 +206,27 @@ final class ScreenshotService: ObservableObject {
         }
     }
 
+    // MARK: - Коллаж шагов
+
+    /// Сохранить коллаж в папку снимков. Захват не закрывается (его нет), тостов нет: результат — в `done`,
+    /// и коллаж решает сам — закрыть шаги или оставить их и положить картинку в буфер.
+    func saveCollage(_ image: CGImage, done: @escaping @MainActor (Result<URL, Error>) -> Void) {
+        complete(image, prefix: "Коллаж шагов", clipboard: false, folder: true,
+                 encodeFailed: { done(.failure(CollageEncodingError())) }) { saved, _ in
+            done(saved ?? .failure(CollageEncodingError()))
+        }
+    }
+
+    /// Скопировать коллаж в буфер обмена. `done(false)` — не получилось (не закодировался, или за это время
+    /// в буфер скопировали что-то новее).
+    func copyCollage(_ image: CGImage, done: @escaping @MainActor (Bool) -> Void) {
+        complete(image, prefix: "Коллаж шагов", clipboard: true, folder: false,
+                 encodeFailed: { done(false) }) { _, copied in done(copied) }
+    }
+
     /// Запись экрана: оверлей закрывается, область снимается видео.
     func startRecording(rect: NSRect) {
-        close()
+        close(resumeSteps: false)
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 200_000_000)
             ScreenRecorder.start(rect: rect)
@@ -196,7 +235,7 @@ final class ScreenshotService: ObservableObject {
 
     /// Длинный снимок: закрываем оверлей, пользователь прокручивает, мы склеиваем кадры.
     func startScrollCapture(rect: NSRect) {
-        close()
+        close(resumeSteps: false)
         Task { @MainActor in
             // Даём оверлею исчезнуть, а фокусу вернуться к прокручиваемому окну.
             try? await Task.sleep(nanoseconds: 250_000_000)
@@ -250,7 +289,9 @@ final class ScreenshotService: ObservableObject {
     /// а TIFF кодируется лениво, только если приложение его запросит. Занятое имя файла не перезаписывается.
     /// `done(saved, copied)`: `saved` — результат записи (nil, если в папку не писали); `copied` — снимок лежит в буфере
     /// (false, если за время кодирования пользователь скопировал более новый: в буфере остаётся последний, а не самый медленный).
+    /// `encodeFailed` — вместо общего тоста, когда PNG не получился (вызывающий сам решает, что делать).
     private func complete(_ image: CGImage, prefix: String, clipboard: Bool, folder: Bool,
+                          encodeFailed: (@MainActor () -> Void)? = nil,
                           done: @escaping @MainActor (Result<URL, Error>?, Bool) -> Void) {
         let library = ScreenshotLibrary.shared
         // Скопированное только в буфер тоже может попасть в умную папку и в «Мои снимки».
@@ -268,7 +309,11 @@ final class ScreenshotService: ObservableObject {
             defer { BusyRegistry.shared.end(.screenshotSaving) }
             let png = await Task.detached(priority: .userInitiated) { ScreenshotEncoding.png(boxed.value) }.value
             guard let png else {
-                Toast.show("Не удалось закодировать снимок", symbol: "exclamationmark.triangle.fill", tint: .orange)
+                if let encodeFailed {
+                    encodeFailed()
+                } else {
+                    Toast.show("Не удалось закодировать снимок", symbol: "exclamationmark.triangle.fill", tint: .orange)
+                }
                 return
             }
             let copied = clipboard && Self.clipboardTickets.isLatest(ticket)
@@ -332,6 +377,10 @@ final class ScreenshotService: ObservableObject {
 
 // MARK: - Снимок экранов
 
+struct CollageEncodingError: LocalizedError {
+    var errorDescription: String? { "не удалось закодировать картинку" }
+}
+
 struct ScreenShot {
     let screen: NSScreen
     let image: CGImage
@@ -339,13 +388,15 @@ struct ScreenShot {
 
 @MainActor
 enum ScreenGrabber {
-    static func captureAllScreens() async throws -> [ScreenShot] {
+    /// `excluding` — номера своих окон, которых не должно быть в кадре (панель шагов, предпросмотр коллажа).
+    static func captureAllScreens(excluding hidden: [CGWindowID] = []) async throws -> [ScreenShot] {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let excluded = content.windows.filter { hidden.contains($0.windowID) }
         var shots: [ScreenShot] = []
         for screen in NSScreen.screens {
             guard let id = screen.displayID,
                   let display = content.displays.first(where: { $0.displayID == id }) else { continue }
-            let filter = SCContentFilter(display: display, excludingWindows: [])
+            let filter = SCContentFilter(display: display, excludingWindows: excluded)
             let config = SCStreamConfiguration()
             let scale = screen.backingScaleFactor
             config.width = Int(screen.frame.width * scale)

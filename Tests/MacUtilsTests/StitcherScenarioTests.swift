@@ -341,7 +341,8 @@ final class StitcherScenarioTests: XCTestCase {
 
     /// Прокрутка шагом `step` в режиме `mode`: строк текста не прибавилось и не пропало — или был честный `.lost`.
     /// nil — всё в порядке, иначе — что не так.
-    private func textKept(_ page: CGImage, step: Int, mode: String, _ name: String) -> String? {
+    /// `full` — склеено целиком: ни одной пропавшей строки текста, даже с `.lost`.
+    private func textKept(_ page: CGImage, step: Int, mode: String, _ name: String, full: Bool = false) -> String? {
         var stitcher = Stitcher()
         var results: [Stitcher.Result] = []
         let offsets = Array(Swift.stride(from: 0, through: page.height - 1200, by: step))
@@ -349,6 +350,8 @@ final class StitcherScenarioTests: XCTestCase {
             let motion: Stitcher.Motion? = switch mode {
             case "unknown": k == 0 ? Stitcher.Motion() : Stitcher.Motion(unknown: 1)
             case "lines": k == 0 ? Stitcher.Motion() : Stitcher.Motion(lines: Double(step) / 40)
+            case "pixels": k == 0 ? Stitcher.Motion() : Stitcher.Motion(pixels: Double(step))
+            case "pages": k == 0 ? Stitcher.Motion() : Stitcher.Motion(pages: 1)
             default: nil
             }
             results.append(stitcher.add(makeFrame(page, offset: offset, height: 1200), motion: motion))
@@ -358,20 +361,32 @@ final class StitcherScenarioTests: XCTestCase {
         reference.draw(page, in: CGRect(x: 0, y: offsets.last! + 1200 - page.height, width: page.width, height: page.height))
         let rows = textRows(image, reference.makeImage()!)
         if rows.extra > 0 { return "повторено строк текста \(rows.extra): \(name), шаг \(step), \(mode)" }
-        if rows.lost > 0, !results.contains(.lost) { return "пропало строк текста \(rows.lost) без .lost: \(name), шаг \(step), \(mode)" }
+        if rows.lost > 0, full || !results.contains(.lost) {
+            return "пропало строк текста \(rows.lost)\(results.contains(.lost) ? "" : " без .lost"): \(name), шаг \(step), \(mode)"
+        }
         return nil
     }
 
     /// Прогоны независимы — параллельно (отладочная сборка медленная), проверки — после.
-    private func assertTextKept(_ runs: [(page: CGImage, step: Int, mode: String, name: String)], file: StaticString = #filePath, line: UInt = #line) {
+    private func assertTextKept(_ runs: [(page: CGImage, step: Int, mode: String, name: String)], full: Bool = false,
+                                file: StaticString = #filePath, line: UInt = #line) {
         var problems = [String?](repeating: nil, count: runs.count)
         let lock = NSLock()
-        DispatchQueue.concurrentPerform(iterations: runs.count) { i in
+        DispatchQueue.concurrentPerform(iterations: runs.count) { (i: Int) in
             let run = runs[i]
-            let problem = textKept(run.page, step: run.step, mode: run.mode, run.name)
+            let problem = textKept(run.page, step: run.step, mode: run.mode, run.name, full: full)
             lock.lock(); problems[i] = problem; lock.unlock()
         }
         for problem in problems.compactMap({ $0 }) { XCTFail(problem, file: file, line: line) }
+    }
+
+    private func sparsePage(gap: Int, count: Int = 6) -> CGImage {
+        var lines: [String] = []
+        for i in 0..<count {
+            lines.append("Раздел \(i + 1). Заголовок с уникальным текстом \(i * 37 % 91)")
+            lines += Array(repeating: "", count: gap)
+        }
+        return textPage(width: 1400, lines: lines)
     }
 
     /// Заголовки через `gap` пустых строк (лендинг, слайды, письмо): было — заголовки повторялись (до +58% высоты) или
@@ -379,9 +394,7 @@ final class StitcherScenarioTests: XCTestCase {
     func testSparseHeadingsAmongBlankSpace() {
         var runs: [(page: CGImage, step: Int, mode: String, name: String)] = []
         for gap in [10, 12, 15, 18] {
-            var lines: [String] = []
-            for i in 0..<6 { lines.append("Раздел \(i + 1). Заголовок с уникальным текстом \(i * 37 % 91)"); lines += Array(repeating: "", count: gap) }
-            let page = textPage(width: 1400, lines: lines)
+            let page = sparsePage(gap: gap)
             for step in [120, 150, 200, 300, 450] {
                 for mode in ["изображение", "unknown", "lines"] { runs.append((page, step, mode, "редкий текст, промежуток \(gap)")) }
             }
@@ -431,5 +444,337 @@ final class StitcherScenarioTests: XCTestCase {
         jump.add(makeFrame(page, offset: 0, height: 1200))
         XCTAssertEqual(jump.add(makeFrame(textPage(width: 1400, lines: prose(seed: 99, count: 80)), offset: 0, height: 1200)), .lost)
         XCTAssertFalse(jump.lostOnRepeats)
+    }
+
+    // MARK: - Повторное ревью 3 (R1, R2): пустота не короче кадра
+
+    /// Пустота между заголовками не короче кадра (30 и 60 строк = 1200 и 2400 px при кадре 1200), медленная прокрутка
+    /// и PageDown: было — после первого пустого кадра «без изменений» до конца, все следующие заголовки пропадали
+    /// молча. Теперь склейка идёт через пустоту (она сжимается), и каждый заголовок — один раз.
+    func testBlankAtLeastAFrameTallKeepsEveryHeading() {
+        var runs: [(page: CGImage, step: Int, mode: String, name: String)] = []
+        for gap in [30, 60] {
+            let page = sparsePage(gap: gap, count: 5)
+            for step in [120, 300] {
+                for mode in ["изображение", "pixels"] { runs.append((page, step, mode, "пустота \(gap) строк")) }
+            }
+            for step in [700, 1120] {
+                for mode in ["unknown", "pages"] { runs.append((page, step, mode, "пустота \(gap) строк, PageDown")) }
+            }
+        }
+        assertTextKept(runs, full: true)
+    }
+
+    /// Пустота 25 строк (1000 px) и быстрая прокрутка с подсказкой: было (f520651) — `.lost` с 4–5-го кадра до конца.
+    func testBlankShorterThanFrameWithFastHintedScroll() {
+        let page = sparsePage(gap: 25, count: 8)
+        var runs: [(page: CGImage, step: Int, mode: String, name: String)] = []
+        for step in [300, 450] {
+            for mode in ["pixels", "lines"] { runs.append((page, step, mode, "пустота 25 строк")) }
+        }
+        assertTextKept(runs, full: true)
+    }
+
+    // MARK: - Чат: прокрутка вверх, обои, колесо
+
+    private struct ChatLayout {
+        var wallpaper: Bool
+        var sidebar: Bool
+        var bars: Bool
+    }
+
+    /// Лента сообщений на прозрачном фоне: пузыри слева и справа, время, серии одинаковых «Ок».
+    private func chatFeed(count: Int, width: Int) -> CGImage {
+        var generator = SeededGenerator(seed: 11)
+        let words = ["привет", "как дела", "созвонимся", "завтра", "в пятницу", "отправил файл", "посмотри", "отлично", "спасибо"]
+        var messages: [(mine: Bool, lines: [String], time: String)] = []
+        for i in 0..<count {
+            if i % 9 == 4 {
+                for _ in 0..<3 { messages.append((true, ["Ок"], "12:00")) }
+                continue
+            }
+            let lines: [String] = (0..<Int.random(in: 1...3, using: &generator)).map { (k: Int) -> String in
+                let text = (0..<Int.random(in: 2...5, using: &generator)).map { (_: Int) -> String in words.randomElement(using: &generator)! }
+                return text.joined(separator: " ") + (k == 0 ? " #\(i)" : "")
+            }
+            messages.append((Bool.random(using: &generator), lines, String(format: "%02d:%02d", 9 + i / 60, i % 60)))
+        }
+        let font = NSFont.systemFont(ofSize: 26)
+        let heights: [Int] = messages.map { (m: (mine: Bool, lines: [String], time: String)) -> Int in m.lines.count * 40 + 60 }
+        let total = heights.reduce(0, +) + 20 * messages.count + 40
+        let context = makeContext(width: width, height: total)
+        context.clear(CGRect(x: 0, y: 0, width: width, height: total))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        var y = 20
+        for (message, height) in zip(messages, heights) {
+            let textWidth = message.lines.map { (line: String) -> CGFloat in (line as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+            let bubble = max(200, Int(textWidth) + 120)
+            let x = message.mine ? width - bubble - 30 : 90
+            context.setFillColor(message.mine ? CGColor(red: 0.86, green: 0.97, blue: 0.8, alpha: 1) : CGColor(gray: 1, alpha: 1))
+            context.addPath(CGPath(roundedRect: CGRect(x: x, y: total - y - height, width: bubble, height: height),
+                                   cornerWidth: 18, cornerHeight: 18, transform: nil))
+            context.fillPath()
+            for (k, line) in message.lines.enumerated() {
+                (line as NSString).draw(at: NSPoint(x: CGFloat(x + 20), y: CGFloat(total - y - 16 - (k + 1) * 40)),
+                                        withAttributes: [.font: font, .foregroundColor: NSColor.black])
+            }
+            (message.time as NSString).draw(at: NSPoint(x: CGFloat(x + bubble - 90), y: CGFloat(total - y - height + 8)),
+                                            withAttributes: [.font: NSFont.systemFont(ofSize: 20), .foregroundColor: NSColor(white: 0.35, alpha: 1)])
+            y += height + 20
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        return context.makeImage()!
+    }
+
+    /// Неподвижные обои с узором (как в Telegram): светлые завитки, стоят на месте, пока едут пузыри.
+    private func wallpaper(width: Int, height: Int) -> CGImage {
+        let context = makeContext(width: width, height: height)
+        context.setFillColor(CGColor(red: 0.8, green: 0.87, blue: 0.75, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        var generator = SeededGenerator(seed: 99)
+        context.setStrokeColor(CGColor(red: 0.7, green: 0.8, blue: 0.66, alpha: 1))
+        context.setLineWidth(3)
+        for _ in 0..<500 {
+            let x = CGFloat(Int.random(in: 0..<width, using: &generator)), y = CGFloat(Int.random(in: 0..<height, using: &generator))
+            context.strokeEllipse(in: CGRect(x: x, y: y, width: CGFloat(Int.random(in: 30...60, using: &generator)),
+                                             height: CGFloat(Int.random(in: 24...40, using: &generator))))
+        }
+        return context.makeImage()!
+    }
+
+    /// Окно мессенджера 1400×1200: шапка 120 px (имя), поле ввода 100 px, слева список чатов 300 px; лента — строки
+    /// `[offset, offset + видимая)`. `wall == nil` — сплошной фон.
+    private func chatFrame(_ feed: CGImage, offset: Int, _ layout: ChatLayout, wall: CGImage?, background: Bool = true) -> CGImage {
+        let width = 1400, height = 1200, left = layout.sidebar ? 300 : 0
+        let top = layout.bars ? 120 : 0, bottom = layout.bars ? 100 : 0
+        let context = makeContext(width: width, height: height)
+        if let wall, background {
+            context.draw(wall, in: CGRect(x: left, y: 0, width: wall.width, height: wall.height))
+        } else {
+            context.setFillColor(background ? CGColor(red: 0.93, green: 0.9, blue: 0.86, alpha: 1) : CGColor(gray: 1, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        context.saveGState()
+        context.clip(to: CGRect(x: left, y: bottom, width: width - left, height: height - top - bottom))
+        context.draw(feed, in: CGRect(x: left, y: height - top + offset - feed.height, width: feed.width, height: feed.height))
+        context.restoreGState()
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        if layout.sidebar {
+            context.setFillColor(CGColor(gray: 0.95, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: left, height: height))
+            for i in 0..<14 {
+                ("Чат \(i + 1)" as NSString).draw(at: NSPoint(x: 90, y: height - 60 - i * 84),
+                                                  withAttributes: [.font: NSFont.boldSystemFont(ofSize: 26), .foregroundColor: NSColor.black])
+            }
+        }
+        if layout.bars {
+            context.setFillColor(CGColor(gray: 0.97, alpha: 1))
+            context.fill(CGRect(x: 0, y: height - top, width: width, height: top))
+            context.fill(CGRect(x: 0, y: 0, width: width, height: bottom))
+            ("Анна Петрова" as NSString).draw(at: NSPoint(x: left + 120, y: height - 70),
+                                              withAttributes: [.font: NSFont.boldSystemFont(ofSize: 30), .foregroundColor: NSColor.black])
+            ("Сообщение" as NSString).draw(at: NSPoint(x: left + 50, y: 35),
+                                           withAttributes: [.font: NSFont.systemFont(ofSize: 24), .foregroundColor: NSColor.darkGray])
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        return context.makeImage()!
+    }
+
+    /// Строки колонки чата с тёмными пикселями (текст, время): ключ строки — их места и яркость. Обои и пузыри светлые
+    /// и не входят — эталон без обоев сравним с итогом поверх обоев.
+    private func darkRows(_ image: CGImage, from left: Int) -> [Int: Int] {
+        let data = pixels(image), stride = image.width * 4
+        var out: [Int: Int] = [:]
+        for r in 0..<image.height {
+            var key = 5381, dark = false
+            for x in left..<image.width {
+                let i = r * stride + x * 4
+                let value = (Int(data[i]) + 2 * Int(data[i + 1]) + Int(data[i + 2])) / 4
+                if value < 110 {
+                    dark = true
+                    key = (key &* 33) &+ x &* 7 &+ value
+                }
+            }
+            if dark { out[key, default: 0] += 1 }
+        }
+        return out
+    }
+
+    /// Съёмка чата: смещения ленты и события кадров; итог — каждая строка текста ленты, шапки и поля ввода ровно один раз.
+    /// `allowLost` — недостача допустима, только если о ней предупредил `.lost` (повторов нет никогда).
+    private func chatProblem(_ feed: CGImage, _ layout: ChatLayout, offsets: [Int], motions: [Stitcher.Motion?], _ name: String,
+                             allowLost: Bool = false) -> String? {
+        let wall: CGImage? = layout.wallpaper ? wallpaper(width: layout.sidebar ? 1100 : 1400, height: 1200) : nil
+        var stitcher = Stitcher()
+        var warned = false
+        for (offset, motion) in zip(offsets, motions) {
+            if stitcher.add(chatFrame(feed, offset: offset, layout, wall: wall), motion: motion) == .lost { warned = true }
+        }
+        guard let image = stitcher.makeImage() else { return "нет изображения: \(name)" }
+        let span = 1200 - (layout.bars ? 220 : 0)
+        let low = offsets.min()!, high = offsets.max()! + span
+        // Эталон: шапка, лента [low, high), поле ввода — без обоев и фона.
+        let tall = chatTall(feed, rows: low..<high, layout)
+        let left = layout.sidebar ? 300 : 0
+        var want = darkRows(tall, from: left)
+        for (key, count) in darkRows(image, from: left) { want[key, default: 0] -= count }
+        let extra = -want.values.filter { $0 < 0 }.reduce(0, +), lost = want.values.filter { $0 > 0 }.reduce(0, +)
+        if extra > 0 || lost > 0 && !(allowLost && warned) { return "\(name): лишних строк текста \(extra), пропало \(lost), высота \(image.height)/\(tall.height)" }
+        return nil
+    }
+
+    private func chatTall(_ feed: CGImage, rows: Range<Int>, _ layout: ChatLayout) -> CGImage {
+        let top = layout.bars ? 120 : 0, bottom = layout.bars ? 100 : 0
+        let window = chatFrame(feed, offset: rows.lowerBound, layout, wall: nil, background: false)
+        let context = makeContext(width: 1400, height: top + rows.count + bottom)
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 1400, height: context.height))
+        let left = layout.sidebar ? 300 : 0
+        context.saveGState()
+        context.clip(to: CGRect(x: left, y: bottom, width: 1400 - left, height: rows.count))
+        context.draw(feed, in: CGRect(x: left, y: context.height - top + rows.lowerBound - feed.height, width: feed.width, height: feed.height))
+        context.restoreGState()
+        // Шапка и поле ввода — из кадра окна.
+        if layout.bars {
+            context.draw(window.cropping(to: CGRect(x: 0, y: 0, width: 1400, height: top))!,
+                         in: CGRect(x: 0, y: context.height - top, width: 1400, height: top))
+            context.draw(window.cropping(to: CGRect(x: 0, y: 1200 - bottom, width: 1400, height: bottom))!,
+                         in: CGRect(x: 0, y: 0, width: 1400, height: bottom))
+        }
+        return context.makeImage()!
+    }
+
+    /// Колесо мыши: щелчки по 1–3 строки (40 px) без точных дельт, приложение доезжает анимацией 0,3 с; события —
+    /// через `ScrollInput`, как в `ScrollCapture`. Вверх — от конца переписки к началу.
+    private func wheelScroll(maxOffset: Int, up: Bool) -> (offsets: [Int], motions: [Stitcher.Motion?]) {
+        var input = ScrollInput()
+        var generator = SeededGenerator(seed: 5)
+        var position = Double(up ? maxOffset : 0), target = position, click = 0.2
+        var animation: (start: Double, from: Double, to: Double)?
+        var offsets = [Int(position)], motions: [Stitcher.Motion?] = [Stitcher.Motion()]
+        let end = up ? 0.0 : Double(maxOffset)
+        var time = 0.15
+        while offsets.count < 400 {
+            while click < time, target != end {
+                let lines = Int.random(in: 1...3, using: &generator)
+                let next = min(Double(maxOffset), max(0, target + Double(lines * 40) * (up ? -1 : 1)))
+                animation = (click, target, next)
+                target = next
+                input.note(Stitcher.Motion(lines: Double(lines) * (up ? -1 : 1)), at: click, animated: true)
+                click += Double.random(in: 0.08...0.3, using: &generator)
+            }
+            if let animation {
+                let progress = min(1, (time - animation.start) / 0.3)
+                position = animation.from + (animation.to - animation.from) * (1 - pow(1 - progress, 3))
+            }
+            offsets.append(Int(position.rounded()))
+            motions.append(input.take(upTo: time))
+            if position == end, target == end { break }
+            time += 0.15
+        }
+        return (offsets, motions)
+    }
+
+    /// Главный сценарий чата: колесо мыши вверх, в историю, — по сплошному фону и по неподвижным обоям, со списком
+    /// чатов слева, шапкой и полем ввода. Было (1.6.5): склейка росла только вниз — «ничего не происходит».
+    func testChatScrolledUpWithMouseWheel() {
+        let feed = chatFeed(count: 24, width: 1100)
+        let layouts: [(ChatLayout, String)] = [(ChatLayout(wallpaper: false, sidebar: true, bars: true), "сплошной фон"),
+                                               (ChatLayout(wallpaper: true, sidebar: true, bars: true), "обои")]
+        var problems = [String?](repeating: nil, count: layouts.count * 2)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: problems.count) { (i: Int) in
+            let (layout, name) = layouts[i / 2]
+            let up = i % 2 == 0
+            let scroll = wheelScroll(maxOffset: feed.height - 980, up: up)
+            let problem = chatProblem(feed, layout, offsets: scroll.offsets, motions: scroll.motions, "\(name), колесо \(up ? "вверх" : "вниз")")
+            lock.lock(); problems[i] = problem; lock.unlock()
+        }
+        for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
+    }
+
+    /// Только по изображению (монитор событий не работает), шаг 240 px: обои стоят, едут только пузыри — большая
+    /// часть кадра неподвижна. Было: «без изменений» и вниз, и вверх. Обои вместе со списком чатов без событий в
+    /// начале съёмки бывают нераспознаны (модель обоев ещё пуста) — тогда честный `.lost`, но не повтор и не тишина.
+    func testChatOverStaticWallpaperByImageOnly() {
+        let feed = chatFeed(count: 24, width: 1100)
+        let maxOffset = feed.height - 980
+        let layouts: [ChatLayout] = [ChatLayout(wallpaper: true, sidebar: false, bars: true), ChatLayout(wallpaper: true, sidebar: true, bars: true)]
+        var problems = [String?](repeating: nil, count: layouts.count * 2)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: problems.count) { (i: Int) in
+            let up = i % 2 == 0
+            var offsets: [Int] = up ? Array(Swift.stride(from: maxOffset, through: 0, by: -240)) : Array(Swift.stride(from: 0, through: maxOffset, by: 240))
+            if offsets.last != (up ? 0 : maxOffset) { offsets.append(up ? 0 : maxOffset) }
+            let motions = [Stitcher.Motion?](repeating: nil, count: offsets.count)
+            let problem = chatProblem(feed, layouts[i / 2], offsets: offsets, motions: motions,
+                                      "обои\(layouts[i / 2].sidebar ? " и список" : ""), \(up ? "вверх" : "вниз")",
+                                      allowLost: layouts[i / 2].sidebar)
+            lock.lock(); problems[i] = problem; lock.unlock()
+        }
+        for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
+    }
+
+    /// Смена направления (ревью 5): вверх в историю, вниз дальше кадра и за первый кадр, снова вверх — с сериями
+    /// одинаковых «Ок», только по изображению и с трекпадом. Было: другая сторона находила ложный «точный» сдвиг
+    /// без общих строк с её дальним кадром и вклеивала сотни уже снятых строк. Лишнего текста нет никогда;
+    /// честный `.lost` допустим.
+    func testChatDirectionChangeNeverDuplicates() {
+        let feed = chatFeed(count: 30, width: 1100)
+        let maxOffset = feed.height - 980
+        let routes: [(String, [Double])] = [("середина↓↑↓", [0.5, 0.8, 0.2, 0.9]), ("конец↑↓↑", [1.0, 0.6, 0.8, 0.0]),
+                                            ("разворот у первого", [0.5, 0.3, 0.5, 0.75, 0.45])]
+        let layouts: [(ChatLayout, String)] = [(ChatLayout(wallpaper: false, sidebar: true, bars: true), "шапка и список"),
+                                               (ChatLayout(wallpaper: false, sidebar: false, bars: false), "без рамок"),
+                                               (ChatLayout(wallpaper: true, sidebar: false, bars: true), "обои")]
+        var runs: [(name: String, layout: ChatLayout, offsets: [Int], motions: [Stitcher.Motion?])] = []
+        for (name, points) in routes {
+            for (layout, layoutName) in layouts { for pixels in [false, true] {
+                var offsets: [Int] = [Int(points[0] * Double(maxOffset))]
+                for point in points.dropFirst() {
+                    let target = Int(point * Double(maxOffset))
+                    while offsets.last! != target {
+                        let last = offsets.last!
+                        offsets.append(last < target ? min(target, last + 240) : max(target, last - 240))
+                    }
+                }
+                let motions: [Stitcher.Motion?] = offsets.indices.map { (i: Int) -> Stitcher.Motion? in
+                    guard pixels else { return nil }
+                    return Stitcher.Motion(pixels: Double(i == 0 ? 0 : offsets[i] - offsets[i - 1]))
+                }
+                runs.append(("\(name), \(layoutName)\(pixels ? ", трекпад" : "")", layout, offsets, motions))
+            } }
+        }
+        var problems = [String?](repeating: nil, count: runs.count)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: runs.count) { (i: Int) in
+            let problem = chatProblem(feed, runs[i].layout, offsets: runs[i].offsets, motions: runs[i].motions, runs[i].name,
+                                      allowLost: true)
+            lock.lock(); problems[i] = problem; lock.unlock()
+        }
+        for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
+    }
+
+    /// Журнал съёмки: как решён кадр — сторона склейки, сдвиг, источник.
+    func testTraceTellsDirectionAndSource() {
+        let page = textPage(width: 1400, lines: prose(seed: 3, count: 120))
+        var stitcher = Stitcher()
+        XCTAssertEqual(stitcher.add(makeFrame(page, offset: 1200, height: 1200)), .first)
+        XCTAssertEqual(stitcher.add(makeFrame(page, offset: 1500, height: 1200)), .appended)
+        XCTAssertEqual(stitcher.trace.up, false)
+        XCTAssertEqual(stitcher.trace.shift, 300)
+        XCTAssertEqual(stitcher.trace.source, .exact)
+        // Назад, внутрь снятого, — не новое.
+        XCTAssertEqual(stitcher.add(makeFrame(page, offset: 1300, height: 1200)), .unchanged)
+        XCTAssertEqual(stitcher.trace.reason, .back)
+        // Дальше назад, за первый кадр, — склейка вверх.
+        XCTAssertEqual(stitcher.add(makeFrame(page, offset: 900, height: 1200)), .appended)
+        XCTAssertEqual(stitcher.trace.up, true)
+        XCTAssertEqual(stitcher.trace.shift, 300)
+        XCTAssertEqual(stitcher.add(makeFrame(page, offset: 900, height: 1200), motion: Stitcher.Motion()), .unchanged)
+        XCTAssertEqual(stitcher.trace.reason, .noMotion)
+        assertSeamless(stitcher, page.cropping(to: CGRect(x: 0, y: 900, width: 1400, height: 1800))!, height: 1800)
     }
 }
