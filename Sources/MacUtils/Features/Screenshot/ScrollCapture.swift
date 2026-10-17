@@ -28,10 +28,9 @@ final class ScrollCapture: NSObject, ObservableObject {
     /// Колесо, трекпад и перетаскивание над областью: подсказка склейке, на сколько прокрутилось содержимое.
     private var inputMonitors: [Any] = []
     /// События ввода, ещё не отданные склейке (время по `systemUptime`).
-    private var pendingMotion: [(time: TimeInterval, motion: Stitcher.Motion)] = []
-    /// Хоть одно событие уже было: с этого момента «событий нет» значит «прокрутки нет» (видео, анимация не клеятся).
-    /// До первого события — только по изображению: монитор мог не заработать, а прокручивать можно и скриптом.
-    private var sawInput = false
+    private var input = ScrollInput()
+    /// Когда кадру последний раз раздавались события: нажатия клавиш без перехвата видны только по времени.
+    private var lastTaken = ProcessInfo.processInfo.systemUptime
 
     private init(rect: NSRect, screen: NSScreen) {
         self.rect = rect
@@ -54,6 +53,16 @@ final class ScrollCapture: NSObject, ObservableObject {
         // `current` — сразу: второй запуск, пока идёт запрос SCShareableContent, иначе создал бы вторую съёмку.
         let capture = ScrollCapture(rect: rect.intersection(screen.frame), screen: screen)
         current = capture
+        // SCShareableContent может не ответить (завис replayd, открыт системный запрос): тогда съёмка без панелей
+        // висела бы в `current`, а новые снимки молча не запускались.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard capture.filter == nil, !capture.stopped else { return }
+            Log.capture.error("Длинный снимок: SCShareableContent не ответил")
+            capture.stop()
+            Toast.show("Не удалось начать длинный снимок: нет ответа от системы захвата экрана",
+                       symbol: "exclamationmark.triangle.fill", tint: .orange)
+        }
         Task { @MainActor in
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -187,45 +196,61 @@ final class ScrollCapture: NSObject, ObservableObject {
     // MARK: - Ввод (подсказка склейке)
 
     /// Колесо и трекпад над областью съёмки: точные дельты (трекпад, плавная прокрутка) — в пикселях кадра,
-    /// колесо без точных дельт — в строках. Перетаскивание (ползунок, выделение) — прокрутка неизвестной величины.
-    /// Глобальный монитор видит то, что доставлено окнам, — уже после «Плавной прокрутки» Mac Utils, без двойного счёта.
+    /// колесо без точных дельт — в строках. Перетаскивание и щелчки (ползунок, его дорожка, выделение) — прокрутка
+    /// неизвестной величины. Глобальный монитор мыши разрешений не требует и видит то, что доставлено окнам, —
+    /// уже после «Плавной прокрутки» Mac Utils, без двойного счёта.
     private func startInputMonitors() {
         if let wheel = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] event in
             MainActor.assumeIsolated { self?.noteScroll(event) }
         }) { inputMonitors.append(wheel) }
-        if let drag = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged, .otherMouseDragged], handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.noteInput(Stitcher.Motion(keys: 1)) }
-        }) { inputMonitors.append(drag) }
+        if let pointer = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged, .otherMouseDragged, .leftMouseDown, .otherMouseDown],
+                                                           handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.noteInput(Stitcher.Motion(unknown: 1), animated: true) }
+        }) { inputMonitors.append(pointer) }
         if inputMonitors.isEmpty { Log.capture.error("Длинный снимок: нет монитора прокрутки, склейка только по изображению") }
     }
 
     private func noteScroll(_ event: NSEvent) {
-        guard event.scrollingDeltaY != 0 else { return }
-        // Положительная дельта — к началу документа; сдвиг склейки положителен при прокрутке вниз.
-        let motion = event.hasPreciseScrollingDeltas
-            ? Stitcher.Motion(pixels: -event.scrollingDeltaY * screen.backingScaleFactor)
-            : Stitcher.Motion(lines: -event.scrollingDeltaY)
-        noteInput(motion)
+        let overArea = NSMouseInRect(NSEvent.mouseLocation, rect, false)
+        guard let wheel = ScrollInput.wheel(deltaY: event.scrollingDeltaY, precise: event.hasPreciseScrollingDeltas,
+                                            scale: screen.backingScaleFactor, overArea: overArea) else { return }
+        noteInput(wheel.motion, anywhere: true, animated: wheel.animated)
     }
 
-    /// `anywhere` — клавиши: у них нет места, прокручивается окно в фокусе.
-    private func noteInput(_ motion: Stitcher.Motion, anywhere: Bool = false) {
-        // Колесо или перетаскивание над другим окном (прокрутили соседнее) к области не относится.
+    /// `anywhere` — клавиши и колесо: у клавиш нет места, колесо мимо области учтено в `ScrollInput.wheel`.
+    /// `animated` — после события приложение может ещё прокручивать само (см. `ScrollInput.animationTail`).
+    private func noteInput(_ motion: Stitcher.Motion, anywhere: Bool = false, animated: Bool = false) {
+        // Перетаскивание или щелчок над другим окном к области не относится.
         guard !stopped, anywhere || NSMouseInRect(NSEvent.mouseLocation, rect, false) else { return }
-        sawInput = true
-        pendingMotion.append((ProcessInfo.processInfo.systemUptime, motion))
+        input.note(motion, at: ProcessInfo.processInfo.systemUptime, animated: animated)
     }
 
     /// События до момента `time` — для очередного кадра; nil, пока событий не было (склейка только по изображению).
     private func takeMotion(upTo time: TimeInterval) -> Stitcher.Motion? {
-        guard sawInput else { return nil }
-        let taken = pendingMotion.prefix { $0.time <= time }
-        pendingMotion.removeFirst(taken.count)
-        return taken.reduce(Stitcher.Motion()) { $0 + $1.motion }
+        // Без перехвата клавиш (нет «Универсального доступа») нажатия видны только по времени последнего нажатия —
+        // без кода клавиши. Любое нажатие — «могла быть прокрутка» (PageDown, пробел, стрелки): иначе после первого
+        // события колеса прокрутка клавишами навсегда считалась бы «прокрутки нет».
+        if keyTap?.isRunning != true {
+            let sinceKey = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+            let now = ProcessInfo.processInfo.systemUptime
+            if !stopped, sinceKey < now - lastTaken { input.note(Stitcher.Motion(unknown: 1), at: now - sinceKey, animated: true) }
+            lastTaken = now
+        }
+        return input.take(upTo: time)
     }
 
-    /// Стрелки, пробел, Page Up/Down, Home/End.
-    private static let scrollKeys: Set<Int64> = [125, 126, 49, 116, 121, 115, 119]
+    /// Стрелки, Home/End — прокрутка неизвестной величины; пробел и Page Up/Down — на страницу.
+    private static let scrollKeys: Set<Int64> = [125, 126, 115, 119]
+
+    /// PageDown и пробел — страница вниз, PageUp и Shift+пробел — вверх.
+    private static func pages(_ code: Int64, _ flags: CGEventFlags) -> Double? {
+        switch code {
+        case 121: return 1
+        case 116: return -1
+        case 49: return flags.contains(.maskShift) ? -1 : 1
+        default: return nil
+        }
+    }
 
     private func startKeyTap() {
         let tap = EventTap(types: [.keyDown]) { [weak self] _, event in
@@ -235,7 +260,11 @@ final class ScrollCapture: NSObject, ObservableObject {
             case 53: self.cancel()          // Esc
             case 36, 76: self.finish()      // Return / Enter
             default:
-                if Self.scrollKeys.contains(code) { self.noteInput(Stitcher.Motion(keys: 1), anywhere: true) }
+                if let pages = Self.pages(code, event.flags) {
+                    self.noteInput(Stitcher.Motion(pages: pages), anywhere: true, animated: true)
+                } else if Self.scrollKeys.contains(code) {
+                    self.noteInput(Stitcher.Motion(unknown: 1), anywhere: true, animated: true)
+                }
                 return true
             }
             return false

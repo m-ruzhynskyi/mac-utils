@@ -609,7 +609,7 @@ final class StitcherRealPageTests: XCTestCase {
         XCTAssertEqual(stitcher.add(makeFrame(page: page, offset: 600, height: 1200), motion: Stitcher.Motion()), .unchanged)
         XCTAssertEqual(stitcher.height, 1500)
         // Клавиши прокрутки (величина неизвестна) — снова по изображению.
-        XCTAssertEqual(stitcher.add(makeFrame(page: page, offset: 600, height: 1200), motion: Stitcher.Motion(keys: 1)), .appended)
+        XCTAssertEqual(stitcher.add(makeFrame(page: page, offset: 600, height: 1200), motion: Stitcher.Motion(unknown: 1)), .appended)
         XCTAssertEqual(stitcher.height, 1800)
     }
 
