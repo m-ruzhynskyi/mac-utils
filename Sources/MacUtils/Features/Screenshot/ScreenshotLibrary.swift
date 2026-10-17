@@ -154,6 +154,13 @@ final class ScreenshotLibrary: ObservableObject {
     private var watchedFolder: URL?
     private var cleanupTimer: Timer?
     private var wakeObserver: NSObjectProtocol?
+    /// Последняя проверка срока и срок, с которым она шла: `sync()` на каждую запись в настройки не обходит диск.
+    private var lastCheck: Date?
+    private var lastCheckDays: Int?
+    /// Когда в последний раз писали в журнал про файлы, не ушедшие в Корзину.
+    private var lastFailureLog: Date?
+    static let checkInterval: TimeInterval = 600
+    static let failureLogInterval: TimeInterval = 3600
 
     /// Файл индекса; nil — индекс не пишется (тесты, снимки интерфейса).
     private let indexFile: URL?
@@ -201,14 +208,25 @@ final class ScreenshotLibrary: ObservableObject {
 
     var enabled: Bool { UserDefaults.standard.bool(forKey: Pref.screenshotLibrary) }
 
+    /// Проверка из `sync()`: сразу при включении и смене срока, иначе не чаще `checkInterval`. Возвращает, была ли проверка.
+    @discardableResult
+    func checkIfDue(now: Date = Date(), days: Int? = nil) -> Bool {
+        let days = days ?? UserDefaults.standard.integer(forKey: Pref.screenshotLibraryTrashDays)
+        if let lastCheck, lastCheckDays == days, now >= lastCheck, now.timeIntervalSince(lastCheck) < Self.checkInterval {
+            return false
+        }
+        removeExpired(now: now, days: days)
+        return true
+    }
+
     func sync() {
         watcher?.cancel()
         watcher = nil
         cleanupTimer?.invalidate()
         cleanupTimer = nil
-        // sync() вызывается и при любой смене настроек, в том числе срока: проверка — сразу.
-        // При сроке 0 ничего не удаляется, но пропавшие файлы уходят из индекса, а пустые папки — с диска.
-        if enabled { removeExpired() }
+        // sync() вызывается при любой записи в UserDefaults: проверка — только при включении и смене срока
+        // или не чаще раза в 10 минут. Таймер и пробуждение проверяют сами.
+        if enabled { checkIfDue() } else { lastCheck = nil }
         if enabled, UserDefaults.standard.integer(forKey: Pref.screenshotLibraryTrashDays) > 0 {
             let timer = Timer(timeInterval: 3600, repeats: true) { _ in
                 MainActor.assumeIsolated { _ = ScreenshotLibrary.shared.removeExpired() }
@@ -343,13 +361,30 @@ final class ScreenshotLibrary: ObservableObject {
     @discardableResult
     func removeExpired(now: Date = Date(), days: Int? = nil) -> Int {
         let days = days ?? UserDefaults.standard.integer(forKey: Pref.screenshotLibraryTrashDays)
+        lastCheck = now
+        lastCheckDays = days
         let manager = FileManager.default
-        var gone = Set(records.filter { !manager.fileExists(atPath: $0.path) }.map(\.path))
+        // Нет файла — запись уходит из индекса, но только если корень умной папки на месте: иначе том не
+        // смонтирован (внешний диск, сеть после пробуждения), и записи нужны, когда он вернётся.
+        var rootExists: [String: Bool] = [:]
+        func isAvailable(_ record: ShotRecord) -> Bool {
+            let root = (ShotLibraryRules.smartRoot(of: record) ?? record.url.deletingLastPathComponent()).path
+            if let known = rootExists[root] { return known }
+            var isDirectory: ObjCBool = false
+            let exists = manager.fileExists(atPath: root, isDirectory: &isDirectory) && isDirectory.boolValue
+            rootExists[root] = exists
+            return exists
+        }
+        var gone = Set<String>(), unavailable = Set<String>()
+        for record in records where !manager.fileExists(atPath: record.path) {
+            if isAvailable(record) { gone.insert(record.path) } else { unavailable.insert(record.path) }
+        }
         let missing = gone.count
         var roots = Set(records.filter { gone.contains($0.path) }.compactMap(ShotLibraryRules.smartRoot(of:)))
         var trashed = 0, failed = 0
         var lastError: NSError?
-        for record in records where !gone.contains(record.path) && ShotLibraryRules.isExpired(record, days: days, now: now) {
+        for record in records where !gone.contains(record.path) && !unavailable.contains(record.path)
+            && ShotLibraryRules.isExpired(record, days: days, now: now) {
             do {
                 try trash(record.url)
                 trashed += 1
@@ -366,7 +401,8 @@ final class ScreenshotLibrary: ObservableObject {
         }
         if trashed > 0 { Log.capture.info("Умная папка: в Корзину \(trashed) старых снимков и видео") }
         if missing > 0 { Log.capture.info("Умная папка: \(missing) записей без файла убрано из индекса") }
-        if failed > 0, let lastError {
+        if failed > 0, let lastError, lastFailureLog.map({ now < $0 || now.timeIntervalSince($0) >= Self.failureLogInterval }) ?? true {
+            lastFailureLog = now
             Log.capture.error("Умная папка: \(failed) снимков не ушло в Корзину, повторим позже (\(lastError.domain, privacy: .public) \(lastError.code))")
         }
         removeEmptyFolders(roots.union(folderRoots()), now: now)

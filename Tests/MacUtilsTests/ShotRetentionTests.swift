@@ -130,7 +130,7 @@ final class ShotRetentionTests: XCTestCase {
 
     func testTodayAndYesterdayFoldersStay() throws {
         // Снимок получает папку раньше, чем файл записан: сегодняшнюю и вчерашнюю пустые папки не трогаем.
-        let today = ShotLibraryRules.dayName(now), yesterday = ShotLibraryRules.dayName(now.addingTimeInterval(-days(1)))
+        let today = ShotLibraryRules.dayName(now), yesterday = ShotLibraryRules.dayName(Calendar.current.date(byAdding: .day, value: -1, to: now)!)
         try folder("\(today)/Safari")
         try folder("\(yesterday)/Safari")
         try folder("2026-10-10/Safari")
@@ -220,6 +220,42 @@ final class ShotRetentionTests: XCTestCase {
         XCTAssertTrue(library.records.isEmpty)
         XCTAssertFalse(exists(shotURL.url.deletingLastPathComponent().deletingLastPathComponent()), "папка дня убрана")
         XCTAssertTrue(exists(root))
+    }
+
+    func testSyncCheckIsThrottled() throws {
+        let library = library([])
+        XCTAssertTrue(library.checkIfDue(now: now, days: 7), "первая проверка — сразу")
+        XCTAssertFalse(library.checkIfDue(now: now.addingTimeInterval(60), days: 7), "запись в настройки не обходит диск")
+        XCTAssertFalse(library.checkIfDue(now: now.addingTimeInterval(599), days: 7))
+        XCTAssertTrue(library.checkIfDue(now: now.addingTimeInterval(601), days: 7), "через 10 минут — снова")
+        XCTAssertTrue(library.checkIfDue(now: now.addingTimeInterval(602), days: 30), "смена срока — сразу")
+        XCTAssertFalse(library.checkIfDue(now: now.addingTimeInterval(603), days: 30))
+    }
+
+    func testFailedTrashLogThrottleDoesNotStopRetries() throws {
+        let old = try shot(age: days(10))
+        var attempts = 0
+        let failing = ScreenshotLibrary(records: [old], folderRoots: [root]) { _ in attempts += 1; throw CocoaError(.fileWriteNoPermission) }
+        for minute in 0..<5 { failing.removeExpired(now: now.addingTimeInterval(Double(minute) * 60), days: 7) }
+        XCTAssertEqual(attempts, 5, "повтор — на каждой проверке; не чаще раза в час только строка журнала")
+        XCTAssertEqual(failing.records.count, 1)
+    }
+
+    func testUnmountedRootKeepsRecords() throws {
+        let shotRecord = try shot(age: days(3))
+        let library = library([shotRecord])
+        // Том «отмонтировали»: корня умной папки нет.
+        let hidden = temp.appendingPathComponent("hidden-root")
+        try manager.moveItem(at: root, to: hidden)
+        XCTAssertEqual(library.removeExpired(now: now, days: 7), 0)
+        XCTAssertEqual(library.records.count, 1, "корня нет — записи не трогаем")
+        XCTAssertEqual(library.removeExpired(now: now, days: 1), 0, "просроченную тоже не пытаемся отправить в Корзину")
+        XCTAssertEqual(library.records.count, 1)
+        // Том вернулся, файла нет — запись уходит.
+        try manager.moveItem(at: hidden, to: root)
+        try manager.removeItem(at: shotRecord.url)
+        library.removeExpired(now: now, days: 7)
+        XCTAssertTrue(library.records.isEmpty)
     }
 
     func testSmartRootOfRecord() {
