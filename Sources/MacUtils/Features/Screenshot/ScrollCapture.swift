@@ -14,28 +14,19 @@ final class ScrollCapture: NSObject, ObservableObject {
 
     private let rect: NSRect
     private let screen: NSScreen
-    /// Фильтр захвата: приходит асинхронно (SCShareableContent), до него кадры не снимаются.
-    private var filter: SCContentFilter?
+    private let filter: SCContentFilter
     private let stitcher = StitchWorker()
     private var timer: Timer?
     private var busy = false
-    /// Съёмка закончена (готово, отмена, ошибка): повторные Enter, «Готово», предел высоты ничего не делают.
-    private var stopped = false
     private var borderPanel: NSPanel?
     private var hudPanel: NSPanel?
-    /// Esc — отмена, Enter — готово; работает без фокуса на панели. Клавиши прокрутки — подсказка склейке.
+    /// Esc — отмена, Enter — готово; работает без фокуса на панели.
     private var keyTap: EventTap?
-    /// Колесо, трекпад и перетаскивание над областью: подсказка склейке, на сколько прокрутилось содержимое.
-    private var inputMonitors: [Any] = []
-    /// События ввода, ещё не отданные склейке (время по `systemUptime`).
-    private var pendingMotion: [(time: TimeInterval, motion: Stitcher.Motion)] = []
-    /// Хоть одно событие уже было: с этого момента «событий нет» значит «прокрутки нет» (видео, анимация не клеятся).
-    /// До первого события — только по изображению: монитор мог не заработать, а прокручивать можно и скриптом.
-    private var sawInput = false
 
-    private init(rect: NSRect, screen: NSScreen) {
+    private init(rect: NSRect, screen: NSScreen, filter: SCContentFilter) {
         self.rect = rect
         self.screen = screen
+        self.filter = filter
         super.init()
     }
 
@@ -51,25 +42,21 @@ final class ScrollCapture: NSObject, ObservableObject {
             Log.capture.error("Длинный снимок: экран не найден")
             return
         }
-        // `current` — сразу: второй запуск, пока идёт запрос SCShareableContent, иначе создал бы вторую съёмку.
-        let capture = ScrollCapture(rect: rect.intersection(screen.frame), screen: screen)
-        current = capture
         Task { @MainActor in
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard !capture.stopped else { return }
                 guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                     Log.capture.error("Длинный снимок: дисплей \(displayID) не найден в SCShareableContent")
-                    capture.stop()
                     return
                 }
                 let ownPID = ProcessInfo.processInfo.processIdentifier
                 let own = content.applications.filter { $0.processID == ownPID }
-                capture.filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
+                let filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
+                let capture = ScrollCapture(rect: rect.intersection(screen.frame), screen: screen, filter: filter)
+                current = capture
                 capture.begin()
             } catch {
                 Log.capture.error("Длинный снимок: SCShareableContent: \(error.localizedDescription, privacy: .public)")
-                capture.stop()
                 Toast.show("Не удалось начать длинный снимок: \(error.localizedDescription)",
                            symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
@@ -81,7 +68,6 @@ final class ScrollCapture: NSObject, ObservableObject {
     private func begin() {
         showPanels()
         startKeyTap()
-        startInputMonitors()
         tick()
         let timer = Timer(timeInterval: 0.15, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
         RunLoop.main.add(timer, forMode: .common)
@@ -90,7 +76,7 @@ final class ScrollCapture: NSObject, ObservableObject {
 
     func finish() {
         // Enter, «Готово» и предел высоты могут прийти почти одновременно: второй вызов отдал бы снимок дважды.
-        guard !stopped else { return }
+        guard Self.current === self else { return }
         // `current` обнуляется в stop(): пока склеивается и доставляется результат, занятость держит отдельная причина.
         BusyRegistry.shared.begin(.screenshotSaving)
         stop()
@@ -108,50 +94,42 @@ final class ScrollCapture: NSObject, ObservableObject {
     }
 
     func cancel() {
-        guard !stopped else { return }
+        guard Self.current === self else { return }
         stop()
         Toast.show("Длинный снимок отменён", symbol: "xmark.circle.fill", tint: .secondary)
     }
 
     private func stop() {
-        stopped = true
         keyTap?.stop()
         keyTap = nil
-        inputMonitors.forEach(NSEvent.removeMonitor)
-        inputMonitors = []
         timer?.invalidate()
         timer = nil
         borderPanel?.orderOut(nil)
         hudPanel?.orderOut(nil)
         borderPanel = nil
         hudPanel = nil
-        if Self.current === self { Self.current = nil }
+        Self.current = nil
     }
 
     // MARK: - Кадры
 
     @objc private func tick() {
-        guard !busy, !stopped, let filter, timer != nil || capturedHeight == 0 else { return }
+        guard !busy, timer != nil || capturedHeight == 0 else { return }
         busy = true
         Task { @MainActor in
             defer { self.busy = false }
             let frame: CGImage
-            let requested = ProcessInfo.processInfo.systemUptime
             do {
-                frame = try await self.grab(filter)
+                frame = try await self.grab()
             } catch {
                 Log.capture.error("Длинный снимок: кадр не снят: \(error.localizedDescription, privacy: .public)")
                 return
             }
-            guard !self.stopped else { return }
-            // Кадр снят где-то между запросом и ответом; на экране — события, которые приложение успело отрисовать
-            // (~кадр дисплея назад). Остальные события достанутся следующему кадру.
-            let shown = (requested + ProcessInfo.processInfo.systemUptime) / 2 - 0.016
-            let motion = self.takeMotion(upTo: shown)
+            guard Self.current === self else { return }
             let before = self.capturedHeight
             // Подписи строк и поиск сдвига — на отдельной очереди: главный поток во время прокрутки свободен.
-            let (result, height, isFull) = await self.stitcher.add(frame, motion: motion)
-            guard !self.stopped else { return }
+            let (result, height, isFull) = await self.stitcher.add(frame)
+            guard Self.current === self else { return }
             Log.capture.debug("Кадр \(frame.width)×\(frame.height): \(String(describing: result), privacy: .public), +\(height - before) px")
             switch result {
             case .appended, .first:
@@ -162,15 +140,11 @@ final class ScrollCapture: NSObject, ObservableObject {
                 self.lostTrack = true
             }
             self.capturedHeight = height
-            if isFull {
-                Log.capture.info("Длинный снимок: предел высоты, \(height) px")
-                Toast.show("Достигнут предел длинного снимка: сохраняю снятое", symbol: "scroll.fill", tint: .orange)
-                self.finish()
-            }
+            if isFull { self.finish() }
         }
     }
 
-    private func grab(_ filter: SCContentFilter) async throws -> CGImage {
+    private func grab() async throws -> CGImage {
         let config = SCStreamConfiguration()
         let scale = screen.backingScaleFactor
         // sourceRect — в точках дисплея, начало координат сверху слева.
@@ -184,59 +158,15 @@ final class ScrollCapture: NSObject, ObservableObject {
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
     }
 
-    // MARK: - Ввод (подсказка склейке)
-
-    /// Колесо и трекпад над областью съёмки: точные дельты (трекпад, плавная прокрутка) — в пикселях кадра,
-    /// колесо без точных дельт — в строках. Перетаскивание (ползунок, выделение) — прокрутка неизвестной величины.
-    /// Глобальный монитор видит то, что доставлено окнам, — уже после «Плавной прокрутки» Mac Utils, без двойного счёта.
-    private func startInputMonitors() {
-        if let wheel = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] event in
-            MainActor.assumeIsolated { self?.noteScroll(event) }
-        }) { inputMonitors.append(wheel) }
-        if let drag = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged, .otherMouseDragged], handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.noteInput(Stitcher.Motion(keys: 1)) }
-        }) { inputMonitors.append(drag) }
-        if inputMonitors.isEmpty { Log.capture.error("Длинный снимок: нет монитора прокрутки, склейка только по изображению") }
-    }
-
-    private func noteScroll(_ event: NSEvent) {
-        guard event.scrollingDeltaY != 0 else { return }
-        // Положительная дельта — к началу документа; сдвиг склейки положителен при прокрутке вниз.
-        let motion = event.hasPreciseScrollingDeltas
-            ? Stitcher.Motion(pixels: -event.scrollingDeltaY * screen.backingScaleFactor)
-            : Stitcher.Motion(lines: -event.scrollingDeltaY)
-        noteInput(motion)
-    }
-
-    /// `anywhere` — клавиши: у них нет места, прокручивается окно в фокусе.
-    private func noteInput(_ motion: Stitcher.Motion, anywhere: Bool = false) {
-        // Колесо или перетаскивание над другим окном (прокрутили соседнее) к области не относится.
-        guard !stopped, anywhere || NSMouseInRect(NSEvent.mouseLocation, rect, false) else { return }
-        sawInput = true
-        pendingMotion.append((ProcessInfo.processInfo.systemUptime, motion))
-    }
-
-    /// События до момента `time` — для очередного кадра; nil, пока событий не было (склейка только по изображению).
-    private func takeMotion(upTo time: TimeInterval) -> Stitcher.Motion? {
-        guard sawInput else { return nil }
-        let taken = pendingMotion.prefix { $0.time <= time }
-        pendingMotion.removeFirst(taken.count)
-        return taken.reduce(Stitcher.Motion()) { $0 + $1.motion }
-    }
-
-    /// Стрелки, пробел, Page Up/Down, Home/End.
-    private static let scrollKeys: Set<Int64> = [125, 126, 49, 116, 121, 115, 119]
+    // MARK: - Клавиши
 
     private func startKeyTap() {
         let tap = EventTap(types: [.keyDown]) { [weak self] _, event in
             guard let self else { return true }
-            let code = event.getIntegerValueField(.keyboardEventKeycode)
-            switch code {
+            switch event.getIntegerValueField(.keyboardEventKeycode) {
             case 53: self.cancel()          // Esc
             case 36, 76: self.finish()      // Return / Enter
-            default:
-                if Self.scrollKeys.contains(code) { self.noteInput(Stitcher.Motion(keys: 1), anywhere: true) }
-                return true
+            default: return true
             }
             return false
         }
@@ -321,8 +251,7 @@ private struct ScrollCaptureHUD: View {
             Image(systemName: capture.lostTrack ? "exclamationmark.triangle.fill" : "scroll")
                 .foregroundStyle(capture.lostTrack ? Color.orange : Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
-                // Не только «быстро»: так же выглядят повторяющиеся строки, переход на другую страницу и рывок.
-                Text(capture.lostTrack ? "Потерял место: прокрутите чуть назад и медленнее" : "Медленно прокручивайте вниз")
+                Text(capture.lostTrack ? "Слишком быстро: прокрутите чуть назад" : "Медленно прокручивайте вниз")
                     .font(.system(size: 12, weight: .semibold))
                 Text("Снято: \(capture.capturedHeight) px")
                     .font(.system(size: 11))
@@ -349,11 +278,11 @@ final class StitchWorker: @unchecked Sendable {
     private let queue = DispatchQueue(label: "macutils.stitch", qos: .userInitiated)
     private var stitcher = Stitcher()
 
-    func add(_ frame: CGImage, motion: Stitcher.Motion? = nil) async -> (Stitcher.Result, Int, Bool) {
+    func add(_ frame: CGImage) async -> (Stitcher.Result, Int, Bool) {
         let boxed = UncheckedSendable(frame)
         return await withCheckedContinuation { continuation in
             queue.async {
-                let result = self.stitcher.add(boxed.value, motion: motion)
+                let result = self.stitcher.add(boxed.value)
                 continuation.resume(returning: (result, self.stitcher.height, self.stitcher.isFull))
             }
         }
