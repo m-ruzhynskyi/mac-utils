@@ -57,9 +57,10 @@ final class ScreenShareVideoTests: XCTestCase {
 
     func testBitrateRange() {
         XCTAssertEqual(ShareVideo.minBitrate, 700_000)
-        XCTAssertEqual(ShareVideo.startBitrate, 4_000_000)
-        XCTAssertEqual(ShareVideo.maxBitrate, 8_000_000)
-        XCTAssertEqual(ShareVideo.frameRate, 30)
+        XCTAssertEqual(ShareVideo.startBitrate, 6_000_000)
+        XCTAssertEqual(ShareVideo.maxBitrate, 12_000_000)
+        XCTAssertEqual(ShareVideo.frameRate, 60)
+        XCTAssertEqual(ShareVideo.reducedFrameRate, 30)
         XCTAssertEqual(ShareVideo.keyFrameSeconds, 4)
     }
 
@@ -94,8 +95,8 @@ final class ScreenShareVideoTests: XCTestCase {
     func testAdaptRaisesWhenFreeUpToCeiling() {
         XCTAssertEqual(ShareVideo.adaptedBitrate(current: 4_000_000, pendingBytes: 0, secondsSinceLast: 3), 4_600_000)
         XCTAssertNil(ShareVideo.adaptedBitrate(current: 4_000_000, pendingBytes: 0, secondsSinceLast: 1), "не чаще раза в 2 с")
-        XCTAssertEqual(ShareVideo.adaptedBitrate(current: 7_500_000, pendingBytes: 0, secondsSinceLast: 3), 8_000_000)
-        XCTAssertNil(ShareVideo.adaptedBitrate(current: 8_000_000, pendingBytes: 0, secondsSinceLast: 3), "потолок 8 Мбит/с")
+        XCTAssertEqual(ShareVideo.adaptedBitrate(current: 11_000_000, pendingBytes: 0, secondsSinceLast: 3), 12_000_000)
+        XCTAssertNil(ShareVideo.adaptedBitrate(current: 12_000_000, pendingBytes: 0, secondsSinceLast: 3), "потолок 12 Мбит/с")
         XCTAssertNil(ShareVideo.adaptedBitrate(current: 4_000_000, pendingBytes: 100_000, secondsSinceLast: 3),
                      "очередь не пуста — держим")
     }
@@ -107,6 +108,37 @@ final class ScreenShareVideoTests: XCTestCase {
         var down = ShareVideo.startBitrate
         for _ in 0..<20 { down = ShareVideo.adaptedBitrate(current: down, pendingBytes: 2_000_000, secondsSinceLast: 1) ?? down }
         XCTAssertEqual(down, ShareVideo.minBitrate)
+    }
+
+    func testRateGovernorFallsToHalfAndRecovers() {
+        var g = ShareRateGovernor()
+        XCTAssertEqual(g.fps, 60)
+        XCTAssertTrue(g.shouldEncode(at: 0.000))
+        XCTAssertTrue(g.shouldEncode(at: 0.0167), "на 60 кадров/с — все кадры")
+        XCTAssertTrue(g.congested(now: 100))
+        XCTAssertEqual(g.fps, 30)
+        // В пониженном режиме проходит каждый второй кадр 60-кадрового входа.
+        var passed = 0
+        for i in 0..<60 where g.shouldEncode(at: 200 + Double(i) / 60) { passed += 1 }
+        XCTAssertEqual(passed, 30)
+        XCTAssertFalse(g.calm(now: 105), "окно 8 с ещё не прошло")
+        XCTAssertFalse(g.congested(now: 106), "уже на 30")
+        XCTAssertFalse(g.calm(now: 110), "перегрузка в 106 — окно считается от неё")
+        XCTAssertTrue(g.calm(now: 114.5))
+        XCTAssertEqual(g.fps, 60)
+    }
+
+    func testRateGovernorBacksOffWhenFlapping() {
+        var g = ShareRateGovernor()
+        g.congested(now: 0); XCTAssertTrue(g.calm(now: 9))
+        g.congested(now: 20)                       // скоро после возврата — окно 16 с
+        XCTAssertFalse(g.calm(now: 30))
+        XCTAssertTrue(g.calm(now: 36.5))
+        g.congested(now: 50)                       // окно 32 с
+        XCTAssertFalse(g.calm(now: 80))
+        XCTAssertTrue(g.calm(now: 82.5))
+        g.congested(now: 400)                      // давно — окно снова 8 с
+        XCTAssertTrue(g.calm(now: 408.5))
     }
 
     func testProfile() {

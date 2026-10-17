@@ -777,7 +777,8 @@ export class Room {
         if (command && command.type === "auth") return this.handleHostAuth(socket, command);
         return;
       }
-      socket.serializeAttachment({ ...info, lastSeen: Date.now() });
+      // Кадры идут десятки раз в секунду: метку «жив» обновляем не чаще раза в секунду (таймаут — минуты).
+      if (typeof message === "string" || Date.now() - (info.lastSeen ?? 0) > 1000) socket.serializeAttachment({ ...info, lastSeen: Date.now() });
       if (typeof message === "string") return this.hostCommand(message, socket);
       for (const viewer of this.approvedViewers()) {
         try { viewer.send(message); } catch (_) { /* зритель отвалился */ }
