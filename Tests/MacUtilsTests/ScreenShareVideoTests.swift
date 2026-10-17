@@ -141,6 +141,31 @@ final class ScreenShareVideoTests: XCTestCase {
         XCTAssertTrue(g.calm(now: 408.5))
     }
 
+    func testRateGovernorLowBitrateNeedsSustainedSmoothedLow() {
+        var g = ShareRateGovernor()
+        for t in stride(from: 0.0, to: 5.0, by: 0.1) { g.bitrateSample(8_000_000, now: t) }
+        for t in stride(from: 5.0, to: 7.0, by: 0.1) { XCTAssertFalse(g.bitrateSample(2_000_000, now: t), "короткий провал — не перегрузка") }
+        for t in stride(from: 7.0, to: 10.0, by: 0.1) { XCTAssertFalse(g.bitrateSample(8_000_000, now: t)) }
+        XCTAssertEqual(g.fps, 60)
+        var switched = false
+        for t in stride(from: 10.0, to: 20.0, by: 0.1) where g.bitrateSample(2_000_000, now: t) { switched = true }
+        XCTAssertTrue(switched, "сглаженная скорость держится ниже порога дольше 3 с")
+        XCTAssertEqual(g.fps, 30)
+        // На 5,5 Мбит/с (ниже порога возврата) остаёмся на 30 без «пилы».
+        for t in stride(from: 20.0, to: 90.0, by: 0.1) { g.bitrateSample(5_500_000, now: t); g.calm(now: t) }
+        XCTAssertEqual(g.fps, 30)
+        for t in stride(from: 90.0, to: 120.0, by: 0.1) { g.bitrateSample(8_000_000, now: t); g.calm(now: t) }
+        XCTAssertEqual(g.fps, 60, "скорость выросла — вернулись")
+    }
+
+    func testRateGovernorWarmUpIgnoresCongestion() {
+        var g = ShareRateGovernor()
+        g.warmUp(now: 0)
+        XCTAssertFalse(g.congested(now: 1))
+        XCTAssertEqual(g.fps, 60)
+        XCTAssertTrue(g.congested(now: 2.1))
+    }
+
     func testProfile() {
         XCTAssertEqual(ShareVideo.profile(hardware: true), kVTProfileLevel_H264_High_AutoLevel)
         XCTAssertEqual(ShareVideo.profile(hardware: false), kVTProfileLevel_H264_Main_AutoLevel)

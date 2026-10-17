@@ -894,7 +894,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         lock.unlock()
         queue.async {
             self.pendingBytes = 0
-            self.rateGraceUntil = ProcessInfo.processInfo.systemUptime + 2
+            self.governor.warmUp(now: ProcessInfo.processInfo.systemUptime)
             self.encoder.setBitrate(ShareVideo.startBitrate)
             self.encoder.requestKeyFrame()
         }
@@ -910,17 +910,16 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
                                                    secondsSinceLast: now.timeIntervalSince(lastAdapt)) else { return }
         encoder.setBitrate(next)
         lastAdapt = now
-        if next < ShareVideo.fullRateMinBitrate { noteCongestion() }
     }
 
     /// 60 → 30 кадров/с при перегрузке и обратно после спокойного окна (ShareRateGovernor). Вызывается на queue.
-    private var governor = ShareRateGovernor()
-    /// Первые 2 с после старта и переподключения кодер прогревается — очередь тогда не считается перегрузкой.
-    private var rateGraceUntil = ProcessInfo.processInfo.systemUptime + 2
+    private var governor: ShareRateGovernor = {
+        var governor = ShareRateGovernor()
+        governor.warmUp(now: ProcessInfo.processInfo.systemUptime)
+        return governor
+    }()
     private func noteCongestion() {
-        let now = ProcessInfo.processInfo.systemUptime
-        guard now >= rateGraceUntil else { return }
-        if governor.congested(now: now) { rateChanged() }
+        if governor.congested(now: ProcessInfo.processInfo.systemUptime) { rateChanged() }
     }
     private func noteCalm() {
         if governor.calm(now: ProcessInfo.processInfo.systemUptime) { rateChanged() }
@@ -949,9 +948,15 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     private var lastPixels: CVPixelBuffer?
     /// Метки времени кадров для кодера (на queue): строго растут, даже вперемешку с повтором последнего кадра.
     private var clock = ShareFrameClock()
-    private lazy var encoder = H264Encoder { [weak self] data, key in
-        self?.queue.async { self?.sendVideo(data, key: key) }
-    }
+    private lazy var encoder: H264Encoder = {
+        let encoder = H264Encoder { [weak self] data, key in
+            self?.queue.async { self?.sendVideo(data, key: key) }
+        }
+        // Новая сессия (старт, смена размера) — прогрев; частота — текущая, а не всегда 60.
+        encoder.setFrameRate(governor.fps)
+        encoder.onSession = { [weak self] in self?.governor.warmUp(now: ProcessInfo.processInfo.systemUptime) }
+        return encoder
+    }()
 
     init(socket: URLSessionWebSocketTask) {
         currentSocket = socket
@@ -1023,7 +1028,8 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
             noteCongestion()
             return
         }
-        if pendingBytes < max(60_000, encoder.bitrate / 64), encoder.bitrate >= ShareVideo.fullRateMinBitrate { noteCalm() }
+        if governor.bitrateSample(encoder.bitrate, now: ProcessInfo.processInfo.systemUptime) { rateChanged() }
+        if pendingBytes < max(60_000, encoder.bitrate / 64) { noteCalm() }
         if skipping {
             guard key else { return }
             skipping = false

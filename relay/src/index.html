@@ -1129,69 +1129,87 @@ function startCapture(stream, code) {
   let encoder = null, frameIndex = 0, encodedSize = "";
   // Скорость под сеть: очередь в сокете растёт — снижаем, свободно — поднимаем.
   let bitrate = 6_000_000, encodedBitrate = 0, lastAdapt = 0, lastKey = 0;
-  // 60 кадров/с; при перегрузке (очередь в сокете, кодер отстаёт, скорость ниже 4 Мбит/с) — 30, назад после спокойного окна 8 с
-  // (если перегрузка повторяется скоро после возврата — окно вдвое дольше, до 60 с).
+  // 60 кадров/с; при перегрузке (очередь в сокете, кодер отстаёт, сглаженная скорость дольше 3 с ниже 5 Мбит/с) — 30,
+  // назад после спокойного окна 8 с и сглаженной скорости не ниже 6 Мбит/с (если перегрузка повторяется скоро после
+  // возврата — окно вдвое дольше, до 60 с). Пороги — по модели канала, как в Mac (ShareVideo.fullRateMinBitrate).
   let graceUntil = 0, fps = 60, hold = 8_000, lastTrouble = -Infinity, lastRestored = -Infinity, lastEncodedAt = -Infinity;
-  // Первые 2 с после (пере)настройки кодер прогревается и очередь у него растёт — это не перегрузка.
-  const trouble = (now) => {
-    if (now < graceUntil) return;
+  let smooth = 0, lastSample = 0, lowSince = null, lastConfigAt = 0;
+  // Прогрев (2 с после создания кодера и смены fps) гасит только «очередь кодера»: сигналы сети считаются всегда.
+  const trouble = (now, encoderQueue = false) => {
+    if (encoderQueue && now < graceUntil) return;
     lastTrouble = now;
     if (fps === 30) return;
     hold = now - lastRestored < 30_000 ? Math.min(60_000, hold * 2) : 8_000;
-    fps = 30; encodedBitrate = 0;   // перенастроить кодер на 30
+    fps = 30; encodedBitrate = 0; graceUntil = now + 2000;   // перенастроить кодер на 30
   };
-  const calm = (now) => { if (fps === 30 && now - lastTrouble >= hold) { fps = 60; lastRestored = now; encodedBitrate = 0; } };
+  const calm = (now) => {
+    if (fps === 30 && now - lastTrouble >= hold && smooth >= 6_000_000) { fps = 60; lastRestored = now; encodedBitrate = 0; graceUntil = now + 2000; }
+  };
+  // Кадры большого экрана (scale < 1) прямо в кодер (он сам масштабирует): null — не проверено, true — кодер отдал
+  // кадр, false — ошибка или тишина, дальше через холст.
+  let scaledDirect = null, scaledTrialAt = 0;
   forceKey = true;
   const canEncode = typeof VideoEncoder !== "undefined";
   // Кадр из захвата (VideoFrame или <video>) → холст до 1920 по длинной стороне → кодер.
   const tick = (source, sourceWidth, sourceHeight) => {
     if (!hostSocket || hostSocket.readyState !== 1 || !sourceWidth) { forceKey = true; return; }
     const now = performance.now(), queued = hostSocket.bufferedAmount;
-    if (queued > 250_000 && now - lastAdapt > 500) { bitrate = Math.max(700_000, bitrate * 0.7); lastAdapt = now; if (bitrate < 4_000_000) trouble(now); }
+    if (queued > 250_000 && now - lastAdapt > 500) { bitrate = Math.max(700_000, bitrate * 0.7); lastAdapt = now; }
     else if (queued < 60_000 && now - lastAdapt > 2000 && bitrate < 12_000_000) { bitrate = Math.min(12_000_000, bitrate * 1.15); lastAdapt = now; }
     // Больше ~1 с в очереди — пропускаем кадры, потом начинаем с ключевого.
+    // Сглаженная скорость (EMA ~2,5 с): ниже 5 Мбит/с дольше 3 с — перегрузка для 60 кадров/с.
+    smooth = smooth ? smooth + (bitrate - smooth) * (1 - Math.exp(-Math.max(0, now - lastSample) / 2500)) : bitrate;
+    lastSample = now;
+    if (smooth < 5_000_000) { lowSince ??= now; if (now - lowSince > 3000) trouble(now); } else lowSince = null;
+    if (scaledTrialAt && now - scaledTrialAt > 1500) { scaledDirect = false; scaledTrialAt = 0; encoder = null; forceKey = true; }
     if (queued > Math.max(400_000, bitrate / 8)) { forceKey = true; trouble(now); return; }
-    if (queued < Math.max(60_000, bitrate / 64) && bitrate >= 4_000_000) calm(now);
+    if (queued < Math.max(60_000, bitrate / 64)) calm(now);
     // Пониженный режим: каждый второй кадр (по времени, а не по счёту).
     if (fps === 30 && now - lastEncodedAt < 25) return;
     // До 1920 по длинной стороне (как на Mac); уровень кодека 5.0 (4D4032) — 4.0 не принимает 1920×1200 и выше.
     const scale = Math.min(1, 1920 / Math.max(sourceWidth, sourceHeight));
     // Кадр захвата уже нужного размера — в кодер напрямую, без копий через холст (иначе 60 кадров/с не успеваем).
-    const direct = canEncode && typeof VideoFrame !== "undefined" && source instanceof VideoFrame && scale === 1 &&
-      sourceWidth % 2 === 0 && sourceHeight % 2 === 0;
+    const direct = canEncode && typeof VideoFrame !== "undefined" && source instanceof VideoFrame &&
+      (scale === 1 ? sourceWidth % 2 === 0 && sourceHeight % 2 === 0 : scaledDirect !== false);
     const width = Math.round(sourceWidth * scale / 2) * 2, height = Math.round(sourceHeight * scale / 2) * 2;
     if (!direct) { canvas.width = width; canvas.height = height; ctx.drawImage(source, 0, 0, width, height); }
     if (canEncode) {
       const size = `${width}x${height}`;
-      if (encoder && encoder.state === "configured" && size === encodedSize && (encodedBitrate === 0 || Math.abs(bitrate - encodedBitrate) > encodedBitrate * 0.2)) {
-        encodedBitrate = bitrate; graceUntil = now + 2000;
+      if (encoder && encoder.state === "configured" && size === encodedSize && (encodedBitrate === 0 || (Math.abs(bitrate - encodedBitrate) > encodedBitrate * 0.2 && now - lastConfigAt >= 2000))) {
+        encodedBitrate = bitrate; lastConfigAt = now;
         encoder.configure({ codec: "avc1.4D4032", width, height, bitrate: Math.round(bitrate), framerate: fps,
                             latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: "prefer-hardware" });
         forceKey = true;
       }
       if (!encoder || encoder.state === "closed" || size !== encodedSize) {
         try { encoder?.close(); } catch (_) {}
-        encodedSize = size; forceKey = true; graceUntil = now + 2000;
+        encodedSize = size; forceKey = true; graceUntil = now + 2000; lastConfigAt = now;
         encoder = new VideoEncoder({
           output: (chunk) => {
+            if (scaledTrialAt) { scaledDirect = true; scaledTrialAt = 0; }
             if (!hostSocket || hostSocket.readyState !== 1) return;
             const packet = new Uint8Array(chunk.byteLength + 2);
             packet[0] = 3; packet[1] = chunk.type === "key" ? 1 : 0;
             chunk.copyTo(packet.subarray(2));
             hostSocket.send(packet);
           },
-          error: () => { encoder = null; },
+          error: () => { if (scaledTrialAt) { scaledDirect = false; scaledTrialAt = 0; } encoder = null; forceKey = true; },
         });
         encodedBitrate = bitrate;
         encoder.configure({ codec: "avc1.4D4032", width, height, bitrate: Math.round(bitrate), framerate: fps,
                             latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: "prefer-hardware" });
       }
-      if (encoder.encodeQueueSize > 2) { trouble(now); return; }
+      if (encoder.encodeQueueSize > 2) { trouble(now, true); return; }
       lastEncodedAt = now;
-      const frame = direct ? source : new VideoFrame(canvas, { timestamp: Math.round(performance.now() * 1000) });
+      // Метки всегда по performance.now(): и у прямых кадров, и у холста с keep-alive — одни часы.
+      const stamp = { timestamp: Math.round(performance.now() * 1000) };
+      let frame = null;
+      try { frame = direct ? new VideoFrame(source, stamp) : new VideoFrame(canvas, stamp); } catch (_) { return; }
       const keyFrame = forceKey || now - lastKey > 4000;
-      encoder.encode(frame, { keyFrame });
-      if (!direct) frame.close(); if (keyFrame) lastKey = now; forceKey = false; frameIndex++;
+      if (direct && scale < 1 && scaledDirect === null && !scaledTrialAt) scaledTrialAt = now;
+      try { encoder.encode(frame, { keyFrame }); }
+      catch (_) { if (scaledTrialAt) { scaledDirect = false; scaledTrialAt = 0; } encoder = null; forceKey = true; frame.close(); return; }
+      frame.close(); if (keyFrame) lastKey = now; forceKey = false; frameIndex++;
       return;
     }
     canvas.toBlob(async (blob) => {

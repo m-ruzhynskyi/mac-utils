@@ -82,8 +82,12 @@ enum ShareVideo {
     /// Целевая частота: 60 кадров/с; при перегрузке — `reducedFrameRate` (см. `ShareRateGovernor`).
     static let frameRate = 60
     static let reducedFrameRate = 30
-    /// Ниже этой скорости 60 кадров/с уже не держим: на 30 кадрах/с биты идут на качество, а не на частоту.
-    static let fullRateMinBitrate = 4_000_000
+    /// Сглаженная скорость (EMA ~2,5 с) дольше 3 с ниже этого — 60 кадров/с не держим: на 30 кадрах/с биты идут
+    /// на качество, а не на частоту. Вернуться на 60 можно, когда сглаженная скорость не ниже `fullRateRecoverBitrate`.
+    /// Числа — по модели канала (ведро + адаптация как в коде, 180 с): на 8 Мбит/с ~70% времени на 60, на 4–6 — 30
+    /// почти всё время (без «пилы»), на 10 и выше — 60.
+    static let fullRateMinBitrate = 5_000_000
+    static let fullRateRecoverBitrate = 6_000_000
     /// Ключевой кадр — не реже раза в ~4 с: новый зритель и потерянный кадр восстанавливаются быстро.
     static let keyFrameSeconds = 4
     /// Самый крупный кадр, байт: ретранслятор (Cloudflare) пересылает сообщения WebSocket до 1 МиБ — с запасом.
@@ -134,10 +138,37 @@ struct ShareRateGovernor {
     private var lastTrouble = -TimeInterval.infinity
     private var lastRestored = -TimeInterval.infinity
     private var lastEncoded = -TimeInterval.infinity
+    private var graceUntil = -TimeInterval.infinity
+    private var ema: Double?
+    private var lastSample = -TimeInterval.infinity
+    private var lowSince: TimeInterval?
+    static let warmUpSeconds: TimeInterval = 2
+    static let lowSeconds: TimeInterval = 3
+    static let emaSeconds: TimeInterval = 2.5
+
+    /// Старт, переподключение, новая сессия кодера: он прогревается, очередь тогда не считается перегрузкой.
+    mutating func warmUp(now: TimeInterval) { graceUntil = now + Self.warmUpSeconds }
+
+    /// Выборка текущей скорости кодера (на каждый отправленный кадр). Перегрузка — сглаженная скорость ниже порога
+    /// дольше `lowSeconds`. Возвращает true, если режим сменился на пониженный.
+    @discardableResult
+    mutating func bitrateSample(_ bitrate: Int, now: TimeInterval) -> Bool {
+        let value = Double(bitrate)
+        if let current = ema {
+            let alpha = 1 - exp(-max(0, now - lastSample) / Self.emaSeconds)
+            ema = current + (value - current) * alpha
+        } else { ema = value }
+        lastSample = now
+        guard let smooth = ema, smooth < Double(ShareVideo.fullRateMinBitrate) else { lowSince = nil; return false }
+        let since = lowSince ?? now
+        lowSince = since
+        return now - since > Self.lowSeconds ? congested(now: now) : false
+    }
 
     /// Перегрузка. Возвращает true, если режим сменился на пониженный.
     @discardableResult
     mutating func congested(now: TimeInterval) -> Bool {
+        guard now >= graceUntil else { return false }
         lastTrouble = now
         guard fps == ShareVideo.frameRate else { return false }
         hold = now - lastRestored < 30 ? min(Self.maxHold, hold * 2) : Self.baseHold
@@ -148,7 +179,8 @@ struct ShareRateGovernor {
     /// Всё спокойно. Возвращает true, если вернулись к полной частоте.
     @discardableResult
     mutating func calm(now: TimeInterval) -> Bool {
-        guard fps != ShareVideo.frameRate, now - lastTrouble >= hold else { return false }
+        guard fps != ShareVideo.frameRate, now - lastTrouble >= hold,
+              (ema ?? .infinity) >= Double(ShareVideo.fullRateRecoverBitrate) else { return false }
         fps = ShareVideo.frameRate
         lastRestored = now
         return true
@@ -183,7 +215,11 @@ final class H264Encoder: @unchecked Sendable {
     private func flightChanged(_ delta: Int) { flightLock.lock(); flight += delta; flightLock.unlock() }
 
     /// Ожидаемая частота (подсказка кодеру для распределения скорости).
+    private(set) var frameRate = ShareVideo.frameRate
+    /// Новая сессия кодера создана (первый кадр, смена размера): прогрев.
+    var onSession: (() -> Void)?
     func setFrameRate(_ value: Int) {
+        frameRate = value
         if let session { VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: value as CFTypeRef) }
     }
 
@@ -237,7 +273,7 @@ final class H264Encoder: @unchecked Sendable {
         let properties: [CFString: Any] = [
             kVTCompressionPropertyKey_RealTime: true,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
-            kVTCompressionPropertyKey_ExpectedFrameRate: ShareVideo.frameRate,
+            kVTCompressionPropertyKey_ExpectedFrameRate: frameRate,
             kVTCompressionPropertyKey_MaxKeyFrameInterval: ShareVideo.frameRate * ShareVideo.keyFrameSeconds,
             kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: ShareVideo.keyFrameSeconds,
             // Кадр уходит сразу, без очереди внутри кодека.
@@ -265,6 +301,7 @@ final class H264Encoder: @unchecked Sendable {
         session = created
         size = (width, height)
         forceKey = true
+        onSession?()
     }
 
     func invalidate() {
