@@ -103,8 +103,8 @@ final class ToolsWindow: NSWindow {
 }
 
 struct ToolsView: View {
-    /// Выбранная вкладка панели: `PanelHome.tab` или `SettingsSection.rawValue`. Окно «Инструменты» хранит здесь же свою.
-    @AppStorage(Pref.toolsTab) private var tab = PanelHome.tab
+    /// Выбранная вкладка панели: `SettingsSection.rawValue`. Окно «Инструменты» хранит здесь же свою.
+    @AppStorage(Pref.toolsTab) private var tab = ""
     @AppStorage(Pref.toolsPanelTabs) private var panelTabs = PanelTabs.defaultValue
     @AppStorage(Pref.warmScreen) private var warmEnabled = false
     @AppStorage(Pref.warmMode) private var warmMode = "schedule"
@@ -116,9 +116,9 @@ struct ToolsView: View {
 
     private var visibleTabs: [SettingsSection] { PanelTabs.sections(panelTabs) }
 
-    /// Выбранный раздел; nil — «Главная» (или выбранная вкладка скрыта).
-    private var currentSection: SettingsSection? {
-        SettingsSection(rawValue: tab).flatMap { visibleTabs.contains($0) ? $0 : nil }
+    /// Выбранный раздел; сохранённая «Главная» (её больше нет) и скрытая вкладка — первая вкладка.
+    private var currentSection: SettingsSection {
+        SettingsSection(rawValue: tab).flatMap { visibleTabs.contains($0) ? $0 : nil } ?? visibleTabs[0]
     }
 
     /// В панели из строки меню — шапка, вкладки, нижняя панель.
@@ -131,8 +131,8 @@ struct ToolsView: View {
                 tabBar
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if let section = currentSection, !PanelSectionView.usesPage(section) {
-                    footer(section)
+                if !PanelSectionView.usesPage(currentSection) {
+                    footer(currentSection)
                 }
             }
             .padding(.top, DS.Space.l)
@@ -146,19 +146,19 @@ struct ToolsView: View {
 
     // MARK: Окно «Инструменты»
 
-    /// Вкладки окна: как в панели, без «Главной»; инструменты (программы, монитор, задачи, снимки, очистка) — всегда,
+    /// Вкладки окна: как в панели; инструменты (программы, монитор, задачи, снимки, очистка) — всегда,
     /// даже если в панели их скрыли.
     private var windowTabs: [SettingsSection] {
         let tools = ToolsWindowController.Tab.allCases.compactMap { SettingsSection(rawValue: $0.rawValue) }
         return visibleTabs + tools.filter { !visibleTabs.contains($0) }
     }
 
-    /// Выбранная вкладка окна; «Главная» и вкладки не из окна — первая вкладка.
+    /// Выбранная вкладка окна; сохранённая «Главная» и вкладки не из окна — первая вкладка.
     private var windowSection: SettingsSection {
         SettingsSection(rawValue: tab).flatMap { windowTabs.contains($0) ? $0 : nil } ?? windowTabs[0]
     }
 
-    /// Окно: тот же ряд вкладок (со значком и подписью у каждой), без «Главной» и без кнопок шапки (они — в поповере).
+    /// Окно: тот же ряд вкладок (со значком и подписью у каждой) и без кнопок шапки (они — в поповере).
     private var windowBody: some View {
         let section = windowSection
         return VStack(spacing: DS.Space.m) {
@@ -224,11 +224,10 @@ struct ToolsView: View {
 
     // MARK: Вкладки
 
-    /// Ряд вкладок поповера: «Главная» и вкладки панели.
+    /// Ряд вкладок поповера: вкладки панели.
     private var tabBar: some View {
-        tabStrip(tabs: [(PanelHome.tab, PanelHome.title, PanelHome.symbol, PanelHome.title)]
-                    + visibleTabs.map { ($0.rawValue, $0.panelTitle, $0.symbol, $0.title) },
-                 selected: currentSection?.rawValue ?? PanelHome.tab, showsAllLabels: false)
+        tabStrip(tabs: visibleTabs.map { ($0.rawValue, $0.panelTitle, $0.symbol, $0.title) },
+                 selected: currentSection.rawValue, showsAllLabels: false)
     }
 
     /// Ряд вкладок как в концепте: выбранная — лайм со значком и подписью, остальные — значки `mute` (подпись — в подсказке
@@ -308,14 +307,8 @@ struct ToolsView: View {
     private var content: some View {
         // Содержимое вкладки сменяется мягким переходом, без рывка (без анимации при «Уменьшить движение»).
         ZStack {
-            Group {
-                if let section = currentSection {
-                    PanelSectionView(section: section)
-                } else {
-                    PanelHomeView()
-                }
-            }
-            .id(currentSection?.rawValue ?? PanelHome.tab)
+            PanelSectionView(section: currentSection)
+                .id(currentSection.rawValue)
             .transition(.opacity)
         }
         .animation(DS.Motion.animation(DS.Motion.standard, reduceMotion: reduceMotion), value: tab)

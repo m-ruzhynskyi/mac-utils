@@ -177,14 +177,15 @@ final class UISnapshotTests: XCTestCase {
         bothThemes("components-gallery-surfaces", size: NSSize(width: 1000, height: 1300), settle: 0.8) { ComponentsGallery(part: .surfaces) }
     }
 
-    /// Панель в строке меню (концепт `Popover*.dc.html`): «Главная» и вкладки разделов, размер — как у поповера.
+    /// Панель в строке меню (концепт `Popover*.dc.html`): вкладки разделов, размер — как у поповера.
     func testMenuBarPanelTabs() {
         let size = NSSize(width: DS.Size.popover.width, height: DS.Size.popover.height)
         let others = PanelTabs.sections(PanelTabs.defaultValue).filter { Self.skippedSections[$0] == nil }
-        // «Главная» с показательным рядом вкладок: разделы по умолчанию в основном личные и в снимках пропускаются.
-        suite.set(PanelHome.tab, forKey: Pref.toolsTab)
+        // Сохранённая «Главная» (1.6.6 её убрала) → первая вкладка; ряд показательный: разделы по умолчанию
+        // в основном личные и в снимках пропускаются.
+        suite.set("home", forKey: Pref.toolsTab)
         suite.set(PanelTabs.value([.screenshot, .shelf, .qr, .annotate, .wellbeing, .monitor]), forKey: Pref.toolsPanelTabs)
-        bothThemes("panel-home", size: size, settle: 0.6) { ToolsView(inPopover: true).frame(width: size.width, height: size.height) }
+        bothThemes("panel-from-home", size: size, settle: 0.6) { ToolsView(inPopover: true).frame(width: size.width, height: size.height) }
         for section in PanelTabs.available where Self.skippedSections[section] == nil {
             suite.set(section.rawValue, forKey: Pref.toolsTab)
             suite.set(PanelTabs.value([section] + others.filter { $0 != section }), forKey: Pref.toolsPanelTabs)
@@ -217,7 +218,7 @@ final class UISnapshotTests: XCTestCase {
     /// минимальный размер окна — содержимое вписывается.
     func testToolsWindow() {
         suite.set(PanelTabs.value([.screenshot, .shelf, .qr, .wellbeing, .monitor]), forKey: Pref.toolsPanelTabs)
-        suite.set(PanelHome.tab, forKey: Pref.toolsTab)
+        suite.set("home", forKey: Pref.toolsTab)
         bothThemes("tools-window-from-home", size: NSSize(width: 1000, height: 660), settle: 0.6) { ToolsView() }
         for section in [SettingsSection.shelf, .qr, .wellbeing, .monitor] {
             suite.set(section.rawValue, forKey: Pref.toolsTab)
