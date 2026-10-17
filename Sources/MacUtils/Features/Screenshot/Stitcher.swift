@@ -274,10 +274,13 @@ struct Stitcher {
         let first = feed(up: upward, frame, signature, &flipped, input,
                          reach: sinceKnown > 0 || turning ? reach(up: upward) : nil)
         let active = upward ? up : down
-        // Место — только по принятому кадру: сдвиг, найденный и отвергнутый (`otherSide`), — не место.
-        if first != .lost, let shift = active.trace.shift {
+        // Место — только по принятому кадру: сдвиг, найденный и отвергнутый (`otherSide`), — не место. «Кадр стоит»
+        // после потери места — тоже нет: на обоях с сериями одинаковых пузырей неподвижный узор перевешивает, и место
+        // сбросилось бы на дальний кадр, хотя кадр далеко от него.
+        let stillAfterLoss = active.trace.reason == .still && sinceKnown > 0
+        if first != .lost, !stillAfterLoss, let shift = active.trace.shift {
             locate(upward ? far.up - shift : far.down + shift)
-        } else if first == .lost {
+        } else if first == .lost || stillAfterLoss {
             sinceKnown += 1
         }
         // Другая сторона — только если кадр может быть по ту сторону первого кадра.
@@ -543,21 +546,30 @@ struct Stitcher {
                 trace.reason = .otherSide
                 return lose()
             }
-            if match.shift > 0, hint == nil {
-                let span = rows - match.header - match.footer
+            // Сдвиг вперёд после потери места — и сдвиг назад после неё: ложное «назад» стало бы местом, и от него прошло
+            // бы ложное «вперёд» (обои с сериями одинаковых пузырей).
+            let checked = match.shift > 0 || match.shift < 0 && (strict || lostSinceAppend)
+            if checked, hint == nil {
+                let span = rows - match.header - match.footer, distance = abs(match.shift)
+                let lost = strict || lostSinceAppend
                 // После потери места перекрытие из одних повторов (серия «Ок», края пузырей) ничего не доказывает:
                 // нужно место, известное точнее кадра, — или совпавшие целиком строки, единственные в кадре. У слоя
-                // обоев в ключах строк обои, у похожести (до первой точной склейки) строки не совпадают побайтно:
-                // своей стороне хватает перекрытия и достижимости, другой — только места.
+                // обоев в ключах строк обои — ему только место (на обоях с сериями одинаковых пузырей он находит и
+                // ложное «назад», и ложное «вперёд»). У похожести (до первой точной склейки) строки не совпадают
+                // побайтно: своей стороне хватает перекрытия и достижимости, другой — только места.
                 var unique = 0
-                for r in match.header..<max(match.header, rows - match.footer - match.shift)
-                where signature.uniqueRow[r] && previous.rowKeys[r + match.shift] == signature.rowKeys[r] { unique += 1 }
+                let overlap = max(match.header, match.header - match.shift)..<max(match.header, min(rows - match.footer, rows - match.footer - match.shift))
+                for r in overlap where signature.uniqueRow[r] && previous.rowKeys[r + match.shift] == signature.rowKeys[r] { unique += 1 }
                 let near = (reach?.count ?? Int.max) <= 2 * rows + 1
-                let strictOK = !(strict || lostSinceAppend)
-                    || found.source != .blank && (span - match.shift) * (strict ? 3 : 4) >= span
-                       && (!strict || (events ?? 0) >= 0)
-                    && (near || (found.source == .layer || found.source == .fuzzy ? !strict : unique >= 2))
-                guard strictOK, reach?.contains(match.shift) ?? true else {
+                let evidence = near || (found.source == .fuzzy ? !strict : found.source != .layer && unique >= 2)
+                let ok: Bool
+                if match.shift > 0 {
+                    ok = !lost || found.source != .blank && (span - distance) * (strict ? 3 : 4) >= span
+                        && (!strict || (events ?? 0) >= 0) && evidence
+                } else {
+                    ok = found.source != .blank && (span - distance) * 4 >= span && (!lost || evidence)
+                }
+                guard ok, reach?.contains(match.shift) ?? true else {
                     trace.reason = .otherSide
                     return lose()
                 }

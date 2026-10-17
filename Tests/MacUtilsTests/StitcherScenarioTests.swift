@@ -484,13 +484,13 @@ final class StitcherScenarioTests: XCTestCase {
     }
 
     /// Лента сообщений на прозрачном фоне: пузыри слева и справа, время, серии одинаковых «Ок».
-    private func chatFeed(count: Int, width: Int) -> CGImage {
-        var generator = SeededGenerator(seed: 11)
+    private func chatFeed(count: Int, width: Int, run: Int = 3, seed: UInt64 = 11) -> CGImage {
+        var generator = SeededGenerator(seed: seed)
         let words = ["привет", "как дела", "созвонимся", "завтра", "в пятницу", "отправил файл", "посмотри", "отлично", "спасибо"]
         var messages: [(mine: Bool, lines: [String], time: String)] = []
         for i in 0..<count {
             if i % 9 == 4 {
-                for _ in 0..<3 { messages.append((true, ["Ок"], "12:00")) }
+                for _ in 0..<run { messages.append((true, ["Ок"], "12:00")) }
                 continue
             }
             let lines: [String] = (0..<Int.random(in: 1...3, using: &generator)).map { (k: Int) -> String in
@@ -605,8 +605,8 @@ final class StitcherScenarioTests: XCTestCase {
     /// Съёмка чата: смещения ленты и события кадров; итог — каждая строка текста ленты, шапки и поля ввода ровно один раз.
     /// `allowLost` — недостача допустима, только если о ней предупредил `.lost` (повторов нет никогда).
     private func chatProblem(_ feed: CGImage, _ layout: ChatLayout, offsets: [Int], motions: [Stitcher.Motion?], _ name: String,
-                             allowLost: Bool = false) -> String? {
-        let wall: CGImage? = layout.wallpaper ? wallpaper(width: layout.sidebar ? 1100 : 1400, height: 1200) : nil
+                             allowLost: Bool = false, wall given: CGImage? = nil) -> String? {
+        let wall: CGImage? = layout.wallpaper ? given ?? wallpaper(width: layout.sidebar ? 1100 : 1400, height: 1200) : nil
         var stitcher = Stitcher()
         var warned = false
         for (offset, motion) in zip(offsets, motions) {
@@ -752,6 +752,115 @@ final class StitcherScenarioTests: XCTestCase {
         DispatchQueue.concurrentPerform(iterations: runs.count) { (i: Int) in
             let problem = chatProblem(feed, runs[i].layout, offsets: runs[i].offsets, motions: runs[i].motions, runs[i].name,
                                       allowLost: true)
+            lock.lock(); problems[i] = problem; lock.unlock()
+        }
+        for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
+    }
+
+    /// Генератор стенда ревью (`rev5/zz2`): тот же псевдослучайный ряд, что и там, — кадры совпадают с найденным случаем.
+    private struct ReviewRandom {
+        var state: UInt64
+        mutating func next(_ n: Int) -> Int {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            return Int(state >> 33) % n
+        }
+    }
+
+    /// Лента стенда ревью: каждые 5 сообщений — серия из `run` одинаковых «Ок 12:00».
+    private func reviewFeed(count: Int, run: Int, seed: UInt64) -> CGImage {
+        var random = ReviewRandom(state: seed)
+        let words = ["привет", "как дела", "созвонимся", "завтра", "в пятницу", "отправил файл", "посмотри", "отлично"]
+        var messages: [(mine: Bool, lines: [String], time: String)] = []
+        for i in 0..<count {
+            if i % 5 == 2 {
+                for _ in 0..<run { messages.append((true, ["Ок"], "12:00")) }
+                continue
+            }
+            let n = 1 + random.next(2)
+            let lines: [String] = (0..<n).map { (k: Int) -> String in
+                let count = 2 + random.next(3)
+                let text: [String] = (0..<count).map { (_: Int) -> String in words[random.next(words.count)] }
+                return text.joined(separator: " ") + (k == 0 ? " #\(i)" : "")
+            }
+            messages.append((random.next(2) == 0, lines, String(format: "%02d:%02d", 9 + i / 60 % 12, i % 60)))
+        }
+        let width = 1100, font = NSFont.systemFont(ofSize: 26)
+        let heights: [Int] = messages.map { (m: (mine: Bool, lines: [String], time: String)) -> Int in m.lines.count * 40 + 60 }
+        let total = heights.reduce(0, +) + 20 * messages.count + 40
+        let context = makeContext(width: width, height: total)
+        context.clear(CGRect(x: 0, y: 0, width: width, height: total))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        var y = 20
+        for (message, height) in zip(messages, heights) {
+            let textWidth = message.lines.map { (line: String) -> CGFloat in (line as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+            let bubble = max(200, Int(textWidth) + 120)
+            let x = message.mine ? width - bubble - 30 : 90
+            context.setFillColor(message.mine ? CGColor(red: 0.86, green: 0.97, blue: 0.8, alpha: 1) : CGColor(gray: 1, alpha: 1))
+            context.addPath(CGPath(roundedRect: CGRect(x: x, y: total - y - height, width: bubble, height: height),
+                                   cornerWidth: 18, cornerHeight: 18, transform: nil))
+            context.fillPath()
+            for (k, line) in message.lines.enumerated() {
+                (line as NSString).draw(at: NSPoint(x: CGFloat(x + 20), y: CGFloat(total - y - 16 - k * 40) - 26 * 1.3),
+                                        withAttributes: [.font: font, .foregroundColor: NSColor.black])
+            }
+            (message.time as NSString).draw(at: NSPoint(x: CGFloat(x + bubble - 90), y: CGFloat(total - y - height + 40) - 20 * 1.3),
+                                            withAttributes: [.font: NSFont.systemFont(ofSize: 20), .foregroundColor: NSColor(white: 0.35, alpha: 1)])
+            y += height + 20
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        return context.makeImage()!
+    }
+
+    /// Обои стенда ревью.
+    private func reviewWallpaper() -> CGImage {
+        let width = 1100, height = 1200
+        let context = makeContext(width: width, height: height)
+        context.setFillColor(CGColor(red: 0.8, green: 0.87, blue: 0.75, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        var state: UInt64 = 99
+        context.setStrokeColor(CGColor(red: 0.7, green: 0.8, blue: 0.66, alpha: 1))
+        context.setLineWidth(3)
+        for _ in 0..<500 {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            let x = CGFloat(state >> 40 & 2047) / 2047 * CGFloat(width), y = CGFloat(state >> 20 & 2047) / 2047 * CGFloat(height)
+            context.strokeEllipse(in: CGRect(x: x, y: y, width: 30 + CGFloat(state & 31), height: 24 + CGFloat(state >> 8 & 15)))
+        }
+        return context.makeImage()!
+    }
+
+    /// Повторное ревью 5 (R1): обои, шапка и список чатов, серии по 5 одинаковых «Ок», вниз, вверх за первый кадр и вниз
+    /// за дальний, шаг 180, по изображению и с трекпадом; в каждой точке разворота — кадр без движения. Было (320c540):
+    /// после потери места слой обоев находил ложное «назад», оно становилось местом, и от него проходило ложное
+    /// «вперёд» — +1213 уже снятых строк. Лишнего текста нет; честный `.lost` допустим.
+    func testWallpaperWithRepeatedBubblesNeverDuplicatesAfterLoss() {
+        let feed = reviewFeed(count: 80, run: 5, seed: 59), wall = reviewWallpaper()
+        let maxOffset = feed.height - 980
+        // «Качели» (Z9) ловят то же, но вдвое дольше в отладочной сборке; они — на стенде.
+        let routes: [(String, [Double])] = [("середина↓↑↓", [0.5, 0.75, 0.25, 0.95])]
+        let layout = ChatLayout(wallpaper: true, sidebar: true, bars: true)
+        var runs: [(name: String, offsets: [Int], motions: [Stitcher.Motion?])] = []
+        for (name, points) in routes {
+            for pixels in [false, true] {
+                let targets: [Int] = points.map { (point: Double) -> Int in Int(point * Double(maxOffset)) }
+                var offsets = [targets[0]], motions: [Stitcher.Motion?] = [pixels ? Stitcher.Motion() : nil]
+                for target in targets.dropFirst() {
+                    while offsets.last! != target {
+                        let last = offsets.last!, next = last < target ? min(target, last + 180) : max(target, last - 180)
+                        offsets.append(next)
+                        motions.append(pixels ? Stitcher.Motion(pixels: Double(next - last)) : nil)
+                    }
+                    offsets.append(target)
+                    motions.append(pixels ? Stitcher.Motion() : nil)
+                }
+                runs.append(("\(name)\(pixels ? ", трекпад" : "")", offsets, motions))
+            }
+        }
+        var problems = [String?](repeating: nil, count: runs.count)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: runs.count) { (i: Int) in
+            let problem = chatProblem(feed, layout, offsets: runs[i].offsets, motions: runs[i].motions, "обои, «Ок» × 5, " + runs[i].name,
+                                      allowLost: true, wall: wall)
             lock.lock(); problems[i] = problem; lock.unlock()
         }
         for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
