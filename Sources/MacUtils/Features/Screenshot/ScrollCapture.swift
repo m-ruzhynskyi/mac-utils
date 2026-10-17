@@ -75,6 +75,8 @@ final class ScrollCapture: NSObject, ObservableObject {
     }
 
     func finish() {
+        // Enter, «Готово» и предел высоты могут прийти почти одновременно: второй вызов отдал бы снимок дважды.
+        guard Self.current === self else { return }
         // `current` обнуляется в stop(): пока склеивается и доставляется результат, занятость держит отдельная причина.
         BusyRegistry.shared.begin(.screenshotSaving)
         stop()
@@ -92,6 +94,7 @@ final class ScrollCapture: NSObject, ObservableObject {
     }
 
     func cancel() {
+        guard Self.current === self else { return }
         stop()
         Toast.show("Длинный снимок отменён", symbol: "xmark.circle.fill", tint: .secondary)
     }
@@ -289,142 +292,5 @@ final class StitchWorker: @unchecked Sendable {
         await withCheckedContinuation { continuation in
             queue.async { continuation.resume(returning: self.stitcher.makeImage().map(UncheckedSendable.init)) }
         }?.value
-    }
-}
-
-/// Склеивает кадры одной области по вертикали. Каждый кадр сжимается до
-/// 64 колонок в оттенках серого; полоса строк нового кадра ищется в прошлом
-/// кадре, и найденный сдвиг — это сколько новых строк появилось снизу.
-struct Stitcher {
-    enum Result { case first, appended, unchanged, lost }
-
-    private static let columns = 64
-    private static let maxHeight = 40_000
-
-    private(set) var height = 0
-    private var chunks: [CGImage] = []
-    private var previous: [UInt8]?
-    private var rows = 0
-
-    var isFull: Bool { height >= Self.maxHeight }
-
-    mutating func add(_ frame: CGImage) -> Result {
-        guard let signature = Self.signature(frame) else { return .unchanged }
-        guard let previous, frame.height == rows else {
-            if chunks.isEmpty {
-                chunks = [frame]
-                height = frame.height
-            }
-            self.previous = signature
-            rows = frame.height
-            return .first
-        }
-        guard let shift = Self.shift(previous: previous, current: signature, rows: rows) else { return .lost }
-        // Прокрутка вверх или без движения — ждём, пока снова пойдут новые строки.
-        guard shift > 0 else { return .unchanged }
-        let piece = min(shift, Self.maxHeight - height)
-        guard piece > 0,
-              let cropped = frame.cropping(to: CGRect(x: 0, y: frame.height - piece,
-                                                      width: frame.width, height: piece)) else { return .unchanged }
-        chunks.append(cropped)
-        height += piece
-        self.previous = signature
-        return .appended
-    }
-
-    func makeImage() -> CGImage? {
-        guard let first = chunks.first, height > 0 else { return nil }
-        let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
-        let space = first.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? sRGB
-        let info = CGImageAlphaInfo.premultipliedLast.rawValue
-        guard let context = CGContext(data: nil, width: first.width, height: height, bitsPerComponent: 8,
-                                      bytesPerRow: 0, space: space, bitmapInfo: info)
-                ?? CGContext(data: nil, width: first.width, height: height, bitsPerComponent: 8,
-                             bytesPerRow: 0, space: sRGB, bitmapInfo: info) else { return nil }
-        var top = 0
-        for chunk in chunks {
-            context.draw(chunk, in: CGRect(x: 0, y: height - top - chunk.height,
-                                           width: chunk.width, height: chunk.height))
-            top += chunk.height
-        }
-        return context.makeImage()
-    }
-
-    /// Кадр, сжатый до 64 колонок (строки сохранены), в оттенках серого.
-    /// Первая строка буфера — верх изображения.
-    private static func signature(_ image: CGImage) -> [UInt8]? {
-        let width = columns, height = image.height
-        guard height > 0 else { return nil }
-        var data = [UInt8](repeating: 0, count: width * height)
-        let ok = data.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height,
-                                          bitsPerComponent: 8, bytesPerRow: width,
-                                          space: CGColorSpaceCreateDeviceGray(),
-                                          bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
-            context.interpolationQuality = .medium
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
-        }
-        return ok ? data : nil
-    }
-
-    /// На сколько строк содержимое уехало вверх (> 0 — прокрутка вниз).
-    /// nil — совпадение не найдено (слишком быстрая прокрутка или пустая полоса).
-    private static func shift(previous: [UInt8], current: [UInt8], rows h: Int) -> Int? {
-        let w = columns
-        let band = min(48, h / 4)
-        guard band >= 8 else { return nil }
-
-        // Полоса с текстурой, ближе к верху (так ловятся большие сдвиги),
-        // но ниже возможной закреплённой шапки.
-        var start: Int?
-        for fraction in [0.15, 0.3, 0.45] {
-            let a = min(max(0, Int(Double(h) * fraction)), h - band)
-            if variance(current, from: a * w, count: band * w) > 25 {
-                start = a
-                break
-            }
-        }
-        guard let a = start else { return nil }
-
-        let count = band * w
-        var bestOffset: Int?
-        var bestDiff = Int.max
-        var d = 0
-        while d <= h {
-            let candidates = d == 0 ? [a] : [a + d, a - d]
-            for m in candidates where m >= 0 && m <= h - band {
-                // Дальний сдвиг выигрывает, только если заметно лучше ближнего.
-                let limit = bestDiff == Int.max ? Int.max : bestDiff * 9 / 10
-                var diff = 0
-                var k = 0
-                let base = m * w, ours = a * w
-                while k < count {
-                    diff += abs(Int(previous[base + k]) - Int(current[ours + k]))
-                    if diff >= limit { break }
-                    k += 1
-                }
-                if diff < limit {
-                    bestDiff = diff
-                    bestOffset = m
-                }
-            }
-            if a - d < 0 && a + d > h - band { break }
-            d += 1
-        }
-        guard let m = bestOffset, bestDiff <= count * 6 else { return nil }
-        return m - a
-    }
-
-    private static func variance(_ data: [UInt8], from start: Int, count: Int) -> Double {
-        guard count > 0, start + count <= data.count else { return 0 }
-        var sum = 0.0, sumSquares = 0.0
-        for i in start..<(start + count) {
-            let v = Double(data[i])
-            sum += v
-            sumSquares += v * v
-        }
-        let mean = sum / Double(count)
-        return sumSquares / Double(count) - mean * mean
     }
 }
