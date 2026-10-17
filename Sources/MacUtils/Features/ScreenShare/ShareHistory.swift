@@ -68,9 +68,10 @@ final class ShareHistory: ObservableObject {
         id.utf8.count == 10 && id.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 }
     }
 
-    /// Публичный ключ Ed25519 в base64url без `=`: 43 символа, 32 байта.
+    /// Публичный ключ устройства в base64url без `=`: Ed25519 (43 символа, 32 байта) или P-256 со страницы relay
+    /// (87 символов, 65 байт, точка на кривой).
     static func isPublicKey(_ pub: String) -> Bool {
-        pub.utf8.count == 43 && ShareIdentity.data(fromBase64url: pub)?.count == 32
+        ShareIdentity.keyKind(ofBase64urlKey: pub) != nil
     }
 
     var visitedEntries: [Entry] { entries.filter { !$0.incomingOnly }.sorted { $0.lastSeen > $1.lastSeen } }

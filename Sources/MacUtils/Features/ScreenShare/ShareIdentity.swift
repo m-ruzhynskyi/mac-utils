@@ -232,11 +232,35 @@ final class ShareIdentity: @unchecked Sendable {
 
     // MARK: - Статические (без состояния)
 
+    /// Вид публичного ключа устройства. Ed25519 — Mac и приложение для Windows (32 байта); P-256 ECDSA — страница
+    /// ретранслятора (браузер, Windows-клиент без своего ключа): WebCrypto отдаёт его несжатым (65 байт, `04‖x‖y`),
+    /// подпись — `r‖s` по 32 байта, хеш SHA-256 (алгоритм `es256` в протоколе).
+    enum KeyKind: Equatable { case ed25519, p256 }
+
+    static func keyKind(ofPublicKey raw: Data) -> KeyKind? {
+        if raw.count == 32 { return .ed25519 }
+        if raw.count == 65, raw.first == 0x04, (try? P256.Signing.PublicKey(x963Representation: raw)) != nil { return .p256 }
+        return nil
+    }
+
+    /// Вид ключа в base64url (строго: 43 символа для Ed25519, 87 для P-256); nil — это не ключ.
+    static func keyKind(ofBase64urlKey pub: String) -> KeyKind? {
+        guard pub.utf8.count == 43 || pub.utf8.count == 87, let raw = data(fromBase64url: pub) else { return nil }
+        return keyKind(ofPublicKey: raw)
+    }
+
     static func verify(pub: String, sig: String, message: String) -> Bool {
-        guard let pubData = data(fromBase64url: pub), pubData.count == 32,
-              let sigData = data(fromBase64url: sig), sigData.count == 64,
-              let key = try? Curve25519.Signing.PublicKey(rawRepresentation: pubData) else { return false }
-        return key.isValidSignature(sigData, for: Data(message.utf8))
+        guard let kind = keyKind(ofBase64urlKey: pub), let pubData = data(fromBase64url: pub),
+              let sigData = data(fromBase64url: sig), sigData.count == 64 else { return false }
+        switch kind {
+        case .ed25519:
+            guard let key = try? Curve25519.Signing.PublicKey(rawRepresentation: pubData) else { return false }
+            return key.isValidSignature(sigData, for: Data(message.utf8))
+        case .p256:
+            guard let key = try? P256.Signing.PublicKey(x963Representation: pubData),
+                  let signature = try? P256.Signing.ECDSASignature(rawRepresentation: sigData) else { return false }
+            return key.isValidSignature(signature, for: Data(message.utf8))
+        }
     }
 
     static func fingerprint(ofPublicKey raw: Data) -> String {
@@ -247,9 +271,9 @@ final class ShareIdentity: @unchecked Sendable {
         }.joined(separator: "-")
     }
 
-    /// Отпечаток по публичному ключу в base64url; nil, если это не ключ.
+    /// Отпечаток по публичному ключу в base64url (Ed25519 или P-256, как у relay: SHA-256 сырых байт); nil, если это не ключ.
     static func fingerprint(ofBase64urlKey pub: String) -> String? {
-        guard let raw = data(fromBase64url: pub), raw.count == 32 else { return nil }
+        guard keyKind(ofBase64urlKey: pub) != nil, let raw = data(fromBase64url: pub) else { return nil }
         return fingerprint(ofPublicKey: raw)
     }
 

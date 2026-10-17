@@ -401,10 +401,10 @@ final class ScreenShare: NSObject, ObservableObject {
             guard let filter else { return }
             let config = SCStreamConfiguration()
             Self.configure(config, for: filter)
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+            config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(ShareVideo.frameRate))
             config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
             config.showsCursor = true
-            config.queueDepth = 3
+            config.queueDepth = 5
             ShareMarksOverlay.shared.attach(to: filter)
             Task {
                 let filter = await self.prepared(filter)
@@ -465,11 +465,11 @@ final class ScreenShare: NSObject, ObservableObject {
         let filter = await prepared(filter)
         let config = SCStreamConfiguration()
         Self.configure(config, for: filter)
-        // H.264 (аппаратно): 30 кадров в секунду и формат, который кодек берёт без пересчёта.
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        // H.264 (аппаратно): 60 кадров в секунду (при перегрузке FrameSender снижает до 30) и формат, который кодек берёт без пересчёта.
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(ShareVideo.frameRate))
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         config.showsCursor = true
-        config.queueDepth = 3
+        config.queueDepth = 5
         guard let socket else { throw CocoaError(.featureUnsupported) }
         let sender = FrameSender(socket: socket)
         let stream = SCStream(filter: filter, configuration: config, delegate: sender)
@@ -894,6 +894,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         lock.unlock()
         queue.async {
             self.pendingBytes = 0
+            self.governor.warmUp(now: ProcessInfo.processInfo.systemUptime)
             self.encoder.setBitrate(ShareVideo.startBitrate)
             self.encoder.requestKeyFrame()
         }
@@ -909,6 +910,23 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
                                                    secondsSinceLast: now.timeIntervalSince(lastAdapt)) else { return }
         encoder.setBitrate(next)
         lastAdapt = now
+    }
+
+    /// 60 → 30 кадров/с при перегрузке и обратно после спокойного окна (ShareRateGovernor). Вызывается на queue.
+    private var governor: ShareRateGovernor = {
+        var governor = ShareRateGovernor()
+        governor.warmUp(now: ProcessInfo.processInfo.systemUptime)
+        return governor
+    }()
+    private func noteCongestion() {
+        if governor.congested(now: ProcessInfo.processInfo.systemUptime) { rateChanged() }
+    }
+    private func noteCalm() {
+        if governor.calm(now: ProcessInfo.processInfo.systemUptime) { rateChanged() }
+    }
+    private func rateChanged() {
+        encoder.setFrameRate(governor.fps)
+        Log.capture.info("Трансляция: \(self.governor.fps) кадров/с")
     }
     /// Сколько байт видео ушло в сокет и ещё не подтверждено: сеть не успевает — пропускаем кадры
     /// и потом начинаем с ключевого (иначе картинка рассыпается).
@@ -930,9 +948,15 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     private var lastPixels: CVPixelBuffer?
     /// Метки времени кадров для кодера (на queue): строго растут, даже вперемешку с повтором последнего кадра.
     private var clock = ShareFrameClock()
-    private lazy var encoder = H264Encoder { [weak self] data, key in
-        self?.queue.async { self?.sendVideo(data, key: key) }
-    }
+    private lazy var encoder: H264Encoder = {
+        let encoder = H264Encoder { [weak self] data, key in
+            self?.queue.async { self?.sendVideo(data, key: key) }
+        }
+        // Новая сессия (старт, смена размера) — прогрев; частота — текущая, а не всегда 60.
+        encoder.setFrameRate(governor.fps)
+        encoder.onSession = { [weak self] in self?.governor.warmUp(now: ProcessInfo.processInfo.systemUptime) }
+        return encoder
+    }()
 
     init(socket: URLSessionWebSocketTask) {
         currentSocket = socket
@@ -964,7 +988,9 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
               let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         lastPixels = pixels
         guard !isPaused else { return }
-        encoder.encode(pixels, at: clock.next(sampleBuffer.presentationTimeStamp))
+        if governor.shouldEncode(at: sampleBuffer.presentationTimeStamp.seconds) {
+            if !encoder.encode(pixels, at: clock.next(sampleBuffer.presentationTimeStamp)) { noteCongestion() }
+        }
         sendLegacyFrame(pixels, force: false)
     }
 
@@ -999,8 +1025,11 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         if pendingBytes > max(400_000, encoder.bitrate / 8) {
             skipping = true
             encoder.requestKeyFrame()
+            noteCongestion()
             return
         }
+        if governor.bitrateSample(encoder.bitrate, now: ProcessInfo.processInfo.systemUptime) { rateChanged() }
+        if pendingBytes < max(60_000, encoder.bitrate / 64) { noteCalm() }
         if skipping {
             guard key else { return }
             skipping = false
