@@ -46,6 +46,8 @@ struct ScreenshotPage: View {
     @AppStorage(Pref.screenshotStepsEqualSize) private var stepsEqualSize = true
     @AppStorage(Pref.screenshotStepsFrame) private var stepsFrame = true
     @AppStorage(Pref.screenshotStepsTitles) private var stepsTitles = true
+    @AppStorage(Pref.screenshotStepsBadges) private var stepsBadges = true
+    @AppStorage(Pref.screenshotStepsArrows) private var stepsArrows = false
     @AppStorage(Pref.screenshotFrameDefault) private var frameDefault = false
     @AppStorage(Pref.screenshotWindowSnap) private var windowSnap = false
     @AppStorage(Pref.screenshotBackground) private var background = ShotBackground.sky.rawValue
@@ -200,10 +202,13 @@ struct ScreenshotPage: View {
                 ToggleRow("Рамка окна macOS", systemImage: "macwindow", isOn: $stepsFrame)
                 ToggleRow("Подпись «Шаг N» в заголовке окна", systemImage: "textformat", isOn: $stepsTitles)
                     .disabled(!stepsFrame)
+                ToggleRow("Номера шагов", systemImage: "list.number", isOn: $stepsBadges)
+                ToggleRow("Стрелки между шагами", systemImage: "arrow.right", isOn: $stepsArrows)
                 HintRow(keys: ["A"], text: "В режиме снимка — «Шаг +»: область с разметкой добавляется в коллаж.")
+                HintRow(action: .screenshot, text: "Во время коллажа — ещё шаг: та же область уже выделена, Enter снимает её.")
             }
             .disabled(!enabled)
-            Footnote("Внизу экрана появится панель: «Ещё шаг» (или ⌘⇧X) — следующий снимок, «Готово» — собрать одну картинку с номерами 1, 2, 3 и сохранить её по настройке «Куда сохранять», «Отмена» — сбросить.")
+            Footnote("Внизу экрана — панель с миниатюрами шагов: шаг можно переснять, удалить или перетащить на другое место. «Готово» открывает предпросмотр: раскладка, оформление, подписи к шагам, «Сохранить» и «Скопировать». Панель и предпросмотр в снимок не попадают. Отмена при двух шагах и больше переспрашивает.")
 
             GroupLabel("Горячие клавиши")
             ListCard {

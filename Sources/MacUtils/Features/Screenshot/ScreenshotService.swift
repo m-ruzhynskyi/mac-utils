@@ -47,36 +47,43 @@ final class ScreenshotService: ObservableObject {
 
     // MARK: - Захват
 
-    func start(_ mode: Mode) {
+    /// false — захват не начался (идёт запись или длинный снимок, нет разрешения, уже открыт).
+    @discardableResult
+    func start(_ mode: Mode) -> Bool {
         // ⌘⇧X во время записи экрана — остановить её.
         if let recorder = ScreenRecorder.current {
             recorder.stop()
-            return
+            return false
         }
-        guard windows.isEmpty, !capturing, ScrollCapture.current == nil else { return }
+        guard windows.isEmpty, !capturing, ScrollCapture.current == nil else { return false }
         guard Permissions.screenRecording else {
             Permissions.requestScreenRecording()
             Toast.show("Разрешите Mac Utils «Запись экрана» в настройках конфиденциальности",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
-            return
+            return false
         }
         capturing = true
         // Запоминаем программу до того, как оверлей заберёт фокус.
         ScreenshotLibrary.shared.captureApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
-        StepsSession.hideHUD()
+        // Панель шагов и предпросмотр коллажа прячутся и исключаются из кадра.
+        let hidden = StepsSession.prepareForCapture()
         let snapFrames = WindowSnap.visibleWindowFrames()
         Task { @MainActor in
             defer { self.capturing = false }
             do {
-                let shots = try await ScreenGrabber.captureAllScreens()
-                guard !shots.isEmpty else { return }
+                let shots = try await ScreenGrabber.captureAllScreens(excluding: hidden)
+                guard !shots.isEmpty else {
+                    StepsSession.captureClosed()
+                    return
+                }
                 self.present(shots: shots, snapFrames: snapFrames, mode: mode)
             } catch {
-                StepsSession.showHUD()
+                StepsSession.captureClosed()
                 Toast.show("Не удалось сделать снимок: \(error.localizedDescription)",
                            symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
         }
+        return true
     }
 
     private func present(shots: [ScreenShot], snapFrames: [CGRect], mode: Mode) {
@@ -89,7 +96,16 @@ final class ScreenshotService: ObservableObject {
         if !SettingsWindowController.shared.isVisible { FocusReturn.remember() }
         NSApp.activate()
         if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
-        let keyWindow = windows.first { NSMouseInRect(mouse, $0.frame, false) } ?? windows.first
+        var keyWindow = windows.first { NSMouseInRect(mouse, $0.frame, false) } ?? windows.first
+        // Следующий шаг коллажа: область прошлого шага (или переснимаемого) уже выделена — Enter снимает её.
+        if mode == .edit, let proposed = StepsSession.proposedRect,
+           let window = windows.first(where: { $0.frame.contains(CGPoint(x: proposed.midX, y: proposed.midY)) }) {
+            let local = proposed.offsetBy(dx: -window.frame.minX, dy: -window.frame.minY).intersection(window.captureView.bounds)
+            if local.width >= 4, local.height >= 4 {
+                window.captureView.preselect(local)
+                keyWindow = window
+            }
+        }
         keyWindow?.makeKeyAndOrderFront(nil)
         NSCursor.crosshair.set()
         startKeyTap()
@@ -141,7 +157,7 @@ final class ScreenshotService: ObservableObject {
         }
         windows.removeAll()
         NSCursor.arrow.set()
-        StepsSession.showHUD()
+        StepsSession.captureClosed()
         // Возвращаем фокус приложению, которое было активно до снимка.
         if !SettingsWindowController.shared.isVisible {
             FocusReturn.restore()
@@ -339,13 +355,15 @@ struct ScreenShot {
 
 @MainActor
 enum ScreenGrabber {
-    static func captureAllScreens() async throws -> [ScreenShot] {
+    /// `excluding` — номера своих окон, которых не должно быть в кадре (панель шагов, предпросмотр коллажа).
+    static func captureAllScreens(excluding hidden: [CGWindowID] = []) async throws -> [ScreenShot] {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let excluded = content.windows.filter { hidden.contains($0.windowID) }
         var shots: [ScreenShot] = []
         for screen in NSScreen.screens {
             guard let id = screen.displayID,
                   let display = content.displays.first(where: { $0.displayID == id }) else { continue }
-            let filter = SCContentFilter(display: display, excludingWindows: [])
+            let filter = SCContentFilter(display: display, excludingWindows: excluded)
             let config = SCStreamConfiguration()
             let scale = screen.backingScaleFactor
             config.width = Int(screen.frame.width * scale)

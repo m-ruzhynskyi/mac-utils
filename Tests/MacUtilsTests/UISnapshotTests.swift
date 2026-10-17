@@ -443,7 +443,6 @@ final class UISnapshotTests: XCTestCase {
                 MeetingHUDContent(since: Date().addingTimeInterval(-754), interruption: nil, stalled: false, stop: {})
                 MeetingHUDContent(since: Date().addingTimeInterval(-754), interruption: nil, stalled: true, stop: {})
                 MeetingHUDContent(since: nil, interruption: "Запись прервана: устройство звука отключено", stalled: false, stop: {})
-                StepsHUDContent(count: 3, cancel: {}, next: {}, finish: {})
             }
             .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color.dsBg)
         }
@@ -461,6 +460,68 @@ final class UISnapshotTests: XCTestCase {
                              copy: {}, showRequests: {}, changeSource: {}, stop: {})
             }
             .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).background(Color.dsBg)
+        }
+    }
+
+    /// Демо-«окно приложения» для коллажа: нарисованные блоки и подписи, никаких снимков экрана.
+    private static func demoShot(_ title: String, width: Int, height: Int, hue: CGFloat, unit: CGFloat) -> CGImage {
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        NSColor(white: 0.97, alpha: 1).setFill()
+        NSRect(x: 0, y: 0, width: width, height: height).fill()
+        NSColor(hue: hue, saturation: 0.55, brightness: 0.9, alpha: 1).setFill()
+        NSRect(x: 0, y: CGFloat(height) - 44 * unit, width: CGFloat(width), height: 44 * unit).fill()
+        NSColor(white: 0.88, alpha: 1).setFill()
+        for row in 0..<6 {
+            NSRect(x: 24 * unit, y: CGFloat(height) - (84 + CGFloat(row) * 30) * unit, width: CGFloat(width) * 0.6, height: 12 * unit).fill()
+        }
+        NSColor(hue: hue, saturation: 0.7, brightness: 0.75, alpha: 1).setFill()
+        NSBezierPath(roundedRect: NSRect(x: CGFloat(width) - 150 * unit, y: 24 * unit, width: 126 * unit, height: 36 * unit),
+                     xRadius: 8 * unit, yRadius: 8 * unit).fill()
+        NSAttributedString(string: title, attributes: [.font: NSFont.boldSystemFont(ofSize: 18 * unit), .foregroundColor: NSColor.white])
+            .draw(at: NSPoint(x: 18 * unit, y: CGFloat(height) - 33 * unit))
+        NSGraphicsContext.restoreGraphicsState()
+        return context.makeImage()!
+    }
+
+    private static var demoSteps: [StepShot] {
+        // Разные размеры и плотности: третий шаг снят на обычном (не Retina) экране.
+        [StepShot(image: demoShot("Демо: открыть меню", width: 960, height: 640, hue: 0.58, unit: 2), unit: 2, rect: nil,
+                  caption: "Откройте меню «Файл»"),
+         StepShot(image: demoShot("Демо: настройки", width: 720, height: 760, hue: 0.33, unit: 2), unit: 2, rect: nil,
+                  caption: "Включите «Автосохранение»"),
+         StepShot(image: demoShot("Демо: готово", width: 420, height: 300, hue: 0.08, unit: 1), unit: 1, rect: nil, caption: "")]
+    }
+
+    func testStepsCollageScenes() {
+        let steps = Self.demoSteps
+        let items = steps.map { StepsPanelItem(id: $0.id, thumbnail: $0.thumbnail) }
+        bothThemes("steps-panel", size: NSSize(width: 820, height: 420)) {
+            VStack(alignment: .leading, spacing: 12) {
+                StepsPanelContent(items: items)
+                StepsPanelContent(items: Array(items.prefix(2)), canUndo: true)
+                StepsPanelContent(items: items, confirmingCancel: true)
+            }
+            .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Color.dsBg)
+        }
+        suite.set(StepsLayout.auto.rawValue, forKey: Pref.screenshotStepsLayout)
+        suite.set(true, forKey: Pref.screenshotStepsEqualSize)
+        suite.set(true, forKey: Pref.screenshotStepsFrame)
+        suite.set(true, forKey: Pref.screenshotStepsTitles)
+        suite.set(true, forKey: Pref.screenshotStepsBadges)
+        suite.set(true, forKey: Pref.screenshotStepsArrows)
+        suite.set(ShotBackground.sky.rawValue, forKey: Pref.screenshotBackground)
+        let model = StepsPreviewModel(defaults: suite, steps: { steps })
+        bothThemes("steps-preview", size: NSSize(width: 1040, height: 680), settle: 0.5) {
+            StepsPreviewView(model: model)
+        }
+        model.layout = .vertical
+        model.windowFrame = false
+        bothThemes("steps-preview-vertical", size: NSSize(width: 1040, height: 680), settle: 0.5) {
+            StepsPreviewView(model: model)
         }
     }
 
