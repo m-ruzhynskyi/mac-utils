@@ -75,6 +75,42 @@ final class KeepAwakeTests: XCTestCase {
         XCTAssertEqual(fake.released, [101])
     }
 
+    func testWakeRearmsTimerOnEndsAt() {
+        let fake = FakeAssertions()
+        let keepAwake = make(fake)
+        keepAwake.start(.hour1)
+        let endsAt = keepAwake.endsAt
+        XCTAssertEqual(keepAwake.timerFireDate, endsAt)
+        // Имитация: за время сна таймер «уехал» (здесь — потерян).
+        keepAwake.simulateLostTimerForTests()
+        XCTAssertNil(keepAwake.timerFireDate)
+        clock.addTimeInterval(600)
+        keepAwake.handleWake()
+        XCTAssertTrue(keepAwake.isActive)
+        XCTAssertEqual(keepAwake.timerFireDate, endsAt, "после сна таймер снова стоит на endsAt")
+        keepAwake.stop()
+    }
+
+    func testWakeAfterDeadlineExpiresImmediately() {
+        let fake = FakeAssertions()
+        let keepAwake = make(fake)
+        keepAwake.start(.hour1)
+        clock.addTimeInterval(3 * 3_600)
+        keepAwake.handleWake()
+        XCTAssertFalse(keepAwake.isActive)
+        XCTAssertNil(keepAwake.timerFireDate)
+        XCTAssertEqual(fake.released, [101])
+    }
+
+    func testObserveWakeIsIdempotentAndShutdownRemovesIt() {
+        let keepAwake = make(FakeAssertions())
+        keepAwake.observeWake()
+        keepAwake.observeWake()
+        keepAwake.shutdown()
+        keepAwake.observeWake()
+        keepAwake.shutdown()
+    }
+
     func testIndefiniteNeverExpires() {
         let fake = FakeAssertions()
         let keepAwake = make(fake)

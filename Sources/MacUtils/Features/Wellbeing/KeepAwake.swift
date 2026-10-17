@@ -67,6 +67,7 @@ final class KeepAwake: ObservableObject {
     private let now: () -> Date
     private var assertion: UInt32?
     private var timer: Timer?
+    private var wakeObserver: NSObjectProtocol?
 
     init(provider: SleepAssertionProviding = IOKitSleepAssertion(), now: @escaping () -> Date = Date.init) {
         self.provider = provider
@@ -140,8 +141,8 @@ final class KeepAwake: ObservableObject {
         timer?.invalidate()
         timer = nil
         guard let endsAt, endsAt != .distantFuture else { return }
-        let timer = Timer(fire: endsAt, interval: 0, repeats: false) { _ in
-            MainActor.assumeIsolated { KeepAwake.shared.expireIfNeeded() }
+        let timer = Timer(fire: endsAt, interval: 0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.expireIfNeeded() }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -151,12 +152,31 @@ final class KeepAwake: ObservableObject {
         NotificationCenter.default.post(name: .keepAwakeChanged, object: nil)
     }
 
-    /// Один раз при запуске: срок проверяется и после сна.
+    /// Один раз при запуске: срок проверяется и после сна. Повторный вызов ничего не делает.
     func observeWake() {
-        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { KeepAwake.shared.expireIfNeeded() }
+        guard wakeObserver == nil else { return }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil,
+                                                                         queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleWake() }
         }
     }
 
-    func shutdown() { stop() }
+    /// После сна: просроченное выключаем, иначе таймер ставим заново на `endsAt` (таймеры run loop время сна не считают
+    /// и сработали бы позже срока).
+    func handleWake() {
+        expireIfNeeded()
+        if isActive { scheduleTimer() }
+    }
+
+    /// Когда сработает таймер окончания (nil — таймера нет: выключено или без срока).
+    var timerFireDate: Date? { timer?.isValid == true ? timer?.fireDate : nil }
+
+    /// Только для тестов: таймер потерян (как после сна).
+    func simulateLostTimerForTests() { timer?.invalidate(); timer = nil }
+
+    func shutdown() {
+        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        wakeObserver = nil
+        stop()
+    }
 }
