@@ -64,6 +64,8 @@ struct Stitcher {
         /// Строка — довод для сдвига по похожести: в ней есть рисунок (не однотонная), и она не фон — почти такая
         /// же строка не встречается в кадре часто (пустые строки, полоса сайдбара).
         let detail: [Bool]
+        /// Строка однотонная целиком (разброс яркости не больше 2): пустота, а не бледный край букв.
+        let flat: [Bool]
         /// Отпечатки полос: `columns` на строку, по пикселям полного разрешения.
         let hashes: [UInt64]
         /// Полосы с рисунком: бит `j` — полоса `j`.
@@ -83,6 +85,40 @@ struct Stitcher {
         let indexKeys: [UInt64]
         let indexRows: [Int32]
         let indexStart: [Int]
+
+        /// Та же подпись перевёрнутого по вертикали кадра (для склейки вверх): строки в обратном порядке, индекс
+        /// и серии одинаковых строк пересчитаны.
+        func flipped() -> Signature {
+            func reversed<T>(_ values: [T], _ stride: Int) -> [T] {
+                var out: [T] = []
+                out.reserveCapacity(values.count)
+                for r in (0..<rows).reversed() { out.append(contentsOf: values[(r * stride)..<((r + 1) * stride)]) }
+                return out
+            }
+            let hashes = reversed(self.hashes, Stitcher.columns), textured = Array(self.textured.reversed())
+            let (distinct, unique, keys, indexRows, start) = Stitcher.segmentIndex(hashes: hashes, textured: textured, rows: rows)
+            let (uniqueRow, rowKeys) = Stitcher.uniqueRows(hashes: hashes, textured: textured, rows: rows)
+            return Signature(rows: rows, fineValues: reversed(fineValues, fineColumns), fineColumns: fineColumns,
+                             coarse: reversed(coarse, Stitcher.columns), detail: Array(detail.reversed()), flat: Array(flat.reversed()),
+                             hashes: hashes,
+                             textured: textured, distinct: distinct, unique: unique, uniqueRow: uniqueRow, rowKeys: rowKeys,
+                             indexKeys: keys, indexRows: indexRows, indexStart: start)
+        }
+
+        /// Подпись без полос `mask` и соседних с ними в строках `range`: остаётся только движущийся слой
+        /// (см. `layerSearch`). Строки сравниваются целиком лишь по оставшимся полосам.
+        func without(_ mask: [UInt64], rows range: Range<Int>) -> Signature {
+            var textured = self.textured
+            for r in range {
+                let m = mask[r]
+                textured[r] &= ~(m | m << 1 | m >> 1)
+            }
+            let (uniqueRow, rowKeys) = Stitcher.uniqueRows(hashes: hashes, textured: textured, rows: rows, texturedOnly: true)
+            return Signature(rows: rows, fineValues: fineValues, fineColumns: fineColumns, coarse: coarse, detail: detail, flat: flat,
+                             hashes: hashes, textured: textured, distinct: zip(distinct, textured).map { $0 & $1 },
+                             unique: zip(unique, textured).map { $0 & $1 }, uniqueRow: uniqueRow, rowKeys: rowKeys,
+                             indexKeys: indexKeys, indexRows: indexRows, indexStart: indexStart)
+        }
     }
 
     static let columns = 64
@@ -96,184 +132,185 @@ struct Stitcher {
     /// Полоса, которая встречается в колонке чаще, — не голосует за сдвиг.
     private static let rareLimit = 8
 
-    /// Высота итога в пикселях: склеенное тело и закреплённый низ.
-    var height: Int { bodyHeight + footerRows }
-    private(set) var isFull = false
+    /// Неподвижный фон с рисунком (обои чата) по месту в кадре: полосы, которые при прокрутке совпали на своём месте.
+    /// Копится за съёмку: позади сообщений обои то видны, то закрыты, и по одной паре кадров их не отличить от текста.
+    struct Background {
+        var hashes: [UInt64]
+        /// Бит `j` строки `r` — отпечаток полосы известен.
+        var known: [UInt64]
 
-    private var heightLimit: Int { min(Self.maxHeight, Self.maxPixels / max(width, 1)) }
-    private var width = 0
-    private var rows = 0
-    /// Склеенное содержимое без закреплённого низа. Каждый кусочек — своя копия, а не вырезка из кадра:
-    /// вырезка держала бы буфер всего кадра.
-    private var chunks: [CGImage] = []
-    private var bodyHeight = 0
-    private var footer: CGImage?
-    private var footerRows = 0
-    /// Подпись самого дальнего кадра; кадры после прокрутки назад сравниваются с ним.
-    private var previous: Signature?
-    /// Тело кончается на этой строке дальнего кадра; ниже — его закреплённый низ.
-    private var bottom = 0
-    /// Насколько содержимое сейчас вернулось назад от дальнего кадра (отскок в конце страницы)
-    /// и подпись последнего кадра: по ней виден настоящий закреплённый низ.
-    private var retreat: (rows: Int, latest: Signature?) = (0, nil)
-    /// События ввода с дальнего кадра (он — точка отсчёта сдвига).
-    private var motion = Motion()
-    /// Хоть раз приходили сведения о вводе: тогда «событий нет» значит «прокрутки нет».
-    private var tracksMotion = false
-    /// Пиксели кадра на единицу события, по уверенным склейкам (знак тоже узнаётся).
-    private var pixelGain = 1.0
-    private var lineGain: Double?
-    private var pageGain: Double?
-    /// Высота прокручиваемой части по последней уверенной склейке (между шапкой и низом).
-    private var scrollSpan: Int?
-    /// Обычная относительная ошибка подсказки: насколько ожидаемый сдвиг расходился с найденным по изображению
-    /// (доля от ожидаемого; за серию потерянных кадров ошибка копится вместе со сдвигом).
-    private var hintError = 0.25
-    /// После `.lost` и до следующей склейки: содержимое могло уехать без событий (клавиши, ползунок, ссылка),
-    /// поэтому сдвиг от дальнего кадра по событиям ничего не значит — решает только изображение.
-    private var lostSinceAppend = false
-    /// Была склейка по точному совпадению: захват точный, поиск по похожести больше не нужен (и опасен —
-    /// похожие строки лога при нём совпадают).
-    private var exactCapture = false
+        init(rows: Int) {
+            hashes = [UInt64](repeating: 0, count: rows * Stitcher.columns)
+            known = [UInt64](repeating: 0, count: rows)
+        }
+
+        /// Полосы подписи, совпавшие с фоном на своём месте.
+        func mask(_ s: Signature) -> [UInt64] {
+            (0..<s.rows).map { r in
+                var bits = known[r] & s.textured[r], out: UInt64 = 0
+                while bits != 0 {
+                    let j = bits.trailingZeroBitCount
+                    bits &= bits - 1
+                    if hashes[r * Stitcher.columns + j] == s.hashes[r * Stitcher.columns + j] { out |= 1 << UInt64(j) }
+                }
+                return out
+            }
+        }
+
+        /// Содержимое сдвинулось, а полоса осталась на месте — это фон.
+        mutating func learn(_ p: Signature, _ c: Signature, rows range: Range<Int>) {
+            let w = Stitcher.columns
+            for r in range {
+                var bits = p.textured[r] & c.textured[r]
+                while bits != 0 {
+                    let j = bits.trailingZeroBitCount
+                    bits &= bits - 1
+                    guard p.hashes[r * w + j] == c.hashes[r * w + j] else { continue }
+                    hashes[r * w + j] = c.hashes[r * w + j]
+                    known[r] |= 1 << UInt64(j)
+                }
+            }
+        }
+    }
+
+    /// Отметка неоднозначности из поиска: несколько настоящих совпадений, подсказка их не развела.
+    final class Ambiguity {
+        var repeated = false
+        /// Строгое правило увидело, что текст сдвинулся (узкая полоса, но строка переехала или появилась), а сдвиг не
+        /// нашёлся: это потеря места, а не «кадр стоит» мягкого правила.
+        var textMoved = false
+    }
+
+    /// Чем найден сдвиг: точное совпадение, выбор подсказкой среди одинаковых, точное совпадение движущегося слоя
+    /// поверх неподвижных обоев, шаг через пустоту, похожесть,
+    /// кадр на месте, изображение опровергло события.
+    enum Source: String { case exact, hint, layer, blank, fuzzy, still, refuted }
+
+    /// Почему кадр не приклеен.
+    enum Reason: String { case full, noMotion, frameSize, noMatch, still, back, hidden, limit, copy }
+
+    /// Как решён последний кадр — для журнала съёмки: только числа и имена, без пикселей.
+    struct Trace: Equatable {
+        /// Решала склейка вверх (сдвиг — в её перевёрнутом кадре: > 0 — содержимое ушло вниз).
+        var up = false
+        var shift: Int?
+        var header = 0
+        var footer = 0
+        var source: Source?
+        /// Сдвиг по событиям; nil — подсказки нет (величина неизвестна или место потеряно).
+        var expected: Int?
+        var reason: Reason?
+    }
+    /// Высота итога в пикселях (без строк за концом страницы, которые `makeImage` ещё вырежет).
+    var height: Int {
+        // Как в `makeImage`: прирост вверх — только со строками с рисунком; если вниз приросла лишь пустота, а вверх —
+        // текст, итог — склейка вверх.
+        let above = up.addedText ? max(0, up.grown) : 0, below = down.addedText || !up.addedText ? max(0, down.grown) : 0
+        return down.rows + above + below
+    }
+    private(set) var isFull = false
     /// Последний `.lost` — из-за одинаковых строк (несколько сдвигов объясняют кадр одинаково), а не из-за
     /// быстрой прокрутки или другого содержимого: HUD подсказывает другое.
     private(set) var lostOnRepeats = false
+    /// Как решён последний кадр (той стороной склейки, которая его приклеила или нашла).
+    private(set) var trace = Trace()
 
-    /// Отметка неоднозначности из поиска: несколько настоящих совпадений, подсказка их не развела.
-    final class Ambiguity { var repeated = false }
+    /// Склейка растёт от первого кадра в обе стороны: вниз и вверх — в историю чата, к началу документа. Вверх — та же
+    /// склейка над перевёрнутыми кадрами: строки, пришедшие сверху, в перевёрнутом кадре приходят снизу.
+    private var down = Strip(flipped: false)
+    private var up = Strip(flipped: true)
+    /// Последней росла склейка вверх: кадр сначала проверяется ею.
+    private var upward = false
 
     /// `motion` — события ввода после прошлого кадра (nil — неизвестно: склейка только по изображению).
     @discardableResult
     mutating func add(_ frame: CGImage, motion input: Motion? = nil) -> Result {
-        guard !isFull, let signature = Self.signature(frame) else { return .unchanged }
-        guard let previous else {
-            guard let copy = Self.copy(frame, rows: 0..<frame.height) else { return .unchanged }
-            width = frame.width
-            rows = frame.height
-            chunks = [copy]
-            bodyHeight = rows
-            bottom = rows
-            self.previous = signature
-            motion = Motion()
-            tracksMotion = input != nil
+        trace = Trace()
+        guard !isFull, let signature = Self.signature(frame) else {
+            trace.reason = isFull ? .full : .copy
+            return .unchanged
+        }
+        guard down.started else {
+            guard down.start(frame, signature, tracksMotion: input != nil),
+                  up.start(frame, signature.flipped(), tracksMotion: input != nil) else { return .unchanged }
             return .first
         }
-        if let input {
-            motion = motion + input
-            tracksMotion = true
+        var flipped: Signature?
+        let first = feed(up: upward, frame, signature, &flipped, input)
+        let active = upward ? up : down
+        // Другая сторона — только если кадр может быть по ту сторону первого кадра: эта сторона ещё не росла или
+        // последним видела движение назад. Потеря места на ходу вперёд (слишком быстро) — кадр дальше, а не по ту
+        // сторону: ползунок полосы прокрутки и похожие строки там дали бы ложную склейку.
+        let otherSide: Bool
+        switch first {
+        case .lost: otherSide = active.heading <= 0
+        case .unchanged: otherSide = active.trace.reason == .back
+        case .appended, .first: otherSide = false
         }
-        // Размер кадра задан при старте; кадр другого размера к склейке не подходит.
-        guard frame.width == width, frame.height == rows else { return lose() }
-        // Событий прокрутки не было — содержимое на месте: видео, анимация, подсветка не прокрутка.
-        if tracksMotion, motion.isEmpty { return .unchanged }
-        let expected = lostSinceAppend ? nil : expectedShift
-        // Без подсказки прокрутку от анимации отличает только размер: движется почти вся область прокрутки
-        // (после первой склейки — не меньше 60% уже известной прокручиваемой части, до неё — половина кадра, а если
-        // на месте стоят строки и сверху, и снизу — 2/3: так выглядит панорама или карусель посреди стоящей
-        // страницы), а не полоса посреди стоящего окна. С подсказкой правило действует, когда изображение с ней спорит.
-        let sizeRule = scrollSpan.map { $0 * 6 / 10 } ?? rows / 2
-        let ambiguity = Ambiguity()
-        guard let found = Self.match(previous: previous, current: signature, expected: expected, hintError: hintError,
-                                     minSpan: sizeRule, spanKnown: scrollSpan != nil, allowFuzzy: !exactCapture,
-                                     allowBlank: !lostSinceAppend, ambiguity: ambiguity) else {
-            // Одинаковые строки — и когда «ничья», и когда большая часть строк с рисунком в кадре повторяется.
-            let textured = (0..<rows).filter { signature.textured[$0] != 0 }.count
-            let repeated = textured - signature.uniqueRow.filter { $0 }.count
-            return lose(repeats: ambiguity.repeated || textured > 0 && repeated * 2 > textured)
-        }
-        let match = found.match
-        guard match.shift > 0 else {
-            // Без движения или прокрутка вверх: ждём, пока снизу снова пойдут новые строки.
-            retreat = (-match.shift, match.shift < 0 ? signature : nil)
-            // Кадр не изменился, а события были: страница упёрлась в конец (или ещё не отрисовалась). Величина
-            // событий дальше не подсказка — копилась бы впустую, — но «прокрутка могла быть» остаётся.
-            if match.shift == 0, match.header == rows || found.refutesMotion, motion.unknown == 0, !motion.isEmpty {
-                motion = Motion(unknown: 1)
+        var result = first
+        if first == .appended {
+            // Кадр приклеен с одной стороны — с другой он заведомо не новый: там только копятся события.
+            if upward { down.skip(input) } else { up.skip(input) }
+            trace = upward ? up.trace : down.trace
+        } else if !otherSide {
+            if upward { down.skip(input) } else { up.skip(input) }
+            trace = active.trace
+            if first == .lost { lostOnRepeats = active.lostOnRepeats }
+        } else {
+            let second = feed(up: !upward, frame, signature, &flipped, input)
+            if second == .appended {
+                upward.toggle()
+                trace = upward ? up.trace : down.trace
+                result = .appended
+            } else if first == .lost, second == .lost {
+                // Кадр не нашёлся ни с одной стороны. Иначе он внутри уже снятого (прокрутка назад) — не потеря.
+                trace = upward ? up.trace : down.trace
+                lostOnRepeats = upward ? up.lostOnRepeats : down.lostOnRepeats
+            } else {
+                trace = first == .unchanged ? (upward ? up.trace : down.trace) : (upward ? down.trace : up.trace)
+                result = .unchanged
             }
-            return .unchanged
         }
-        let end = rows - match.footer            // конец движущейся части нового кадра
-        let start = min(bottom, end)             // строка дальнего кадра, с которой продолжается тело
-        var from = start - match.shift           // та же строка в новом кадре
-        // Прошлый кадр счёл строки ниже `bottom` закреплённым низом, а теперь они двигаются и успели уехать
-        // под шапку: их берём из того низа. Так бывает, только когда низ стал меньше (start == bottom).
-        let hidden = max(0, match.header - from)
-        guard hidden <= footerRows else { return lose() }
-        var patch: CGImage?
-        if hidden > 0 {
-            guard let footer, let piece = Self.copy(footer, rows: 0..<min(hidden, footer.height)) else { return lose() }
-            patch = piece
-            from += hidden
-        }
-        let room = heightLimit - bodyHeight - match.footer - hidden + (bottom - start)
-        guard room > 0, from < end else {
-            isFull = room <= 0
-            return .unchanged
-        }
-        let count = min(end - from, room)
-        guard let piece = Self.copy(frame, rows: from..<(from + count)) else { return .unchanged }
-        let tail = match.footer > 0 ? Self.copy(frame, rows: end..<rows) : nil
-        trimBody(bottom - start)
-        if let patch { append(patch) }
-        append(piece)
-        footer = tail
-        footerRows = tail?.height ?? 0
-        bottom = from + count
-        retreat = (0, nil)
-        isFull = count < end - from || height >= heightLimit
-        if found.confident {
-            scrollSpan = rows - match.header - match.footer
-            if let expected { hintError = hintError * 0.7 + Double(abs(match.shift - expected)) / Double(max(abs(expected), 50)) * 0.3 }
-            learnGain(shift: match.shift)
-            if found.exact { exactCapture = true }
-        }
-        self.previous = signature
-        motion = Motion()
-        lostSinceAppend = false
-        return .appended
+        isFull = down.isFull || up.isFull
+        return result
     }
 
-    private mutating func lose(repeats: Bool = false) -> Result {
-        lostSinceAppend = true
-        lostOnRepeats = repeats
-        return .lost
-    }
-
-    /// Ожидаемый сдвиг по событиям с дальнего кадра; nil — величина неизвестна (клавиши, колесо без коэффициента).
-    private var expectedShift: Int? {
-        guard tracksMotion, motion.unknown == 0 else { return nil }
-        var shift = motion.pixels * pixelGain
-        if motion.lines != 0 {
-            guard let lineGain else { return nil }
-            shift += motion.lines * lineGain
+    private mutating func feed(up isUp: Bool, _ frame: CGImage, _ signature: Signature, _ flipped: inout Signature?,
+                               _ input: Motion?) -> Result {
+        let exact = down.exactCapture || up.exactCapture
+        let limit = min(Self.maxHeight, Self.maxPixels / max(frame.width, 1))
+        if isUp {
+            if flipped == nil { flipped = signature.flipped() }
+            guard let flipped else { return .unchanged }
+            return up.add(frame, flipped, input, limit: limit - max(0, down.grown), exactCapture: exact)
         }
-        if motion.pages != 0 {
-            guard let pageGain else { return nil }
-            shift += motion.pages * pageGain
-        }
-        return Int(shift.rounded())
-    }
-
-    /// Коэффициент «события → пиксели» по уверенной склейке (сдвиг однозначен по изображению).
-    private mutating func learnGain(shift: Int) {
-        guard tracksMotion, motion.unknown == 0, shift >= 16 else { return }
-        if motion.lines == 0, motion.pages == 0, abs(motion.pixels) >= 8 {
-            let ratio = Double(shift) / motion.pixels
-            if (0.25...4).contains(abs(ratio)) { pixelGain = pixelGain * 0.5 + ratio * 0.5 }
-        } else if abs(motion.pixels) < 0.5, motion.pages == 0, motion.lines != 0 {
-            let ratio = Double(shift) / motion.lines
-            if (1...400).contains(abs(ratio)) { lineGain = lineGain.map { $0 * 0.5 + ratio * 0.5 } ?? ratio }
-        } else if abs(motion.pixels) < 0.5, motion.lines == 0, motion.pages != 0 {
-            let ratio = Double(shift) / motion.pages
-            if (16...Double(rows) * 1.5).contains(abs(ratio)) { pageGain = pageGain.map { $0 * 0.5 + ratio * 0.5 } ?? ratio }
-        }
+        return down.add(frame, signature, input, limit: limit - max(0, up.grown), exactCapture: exact)
     }
 
     func makeImage() -> CGImage? {
-        guard let first = chunks.first, bodyHeight > 0 else { return nil }
-        // Отскок в конце: однотонные строки за концом страницы не рисуются (сразу, без второго холста).
-        let cut = overscroll()
-        let height = bodyHeight + footerRows - (cut?.count ?? 0)
+        guard down.started else { return nil }
+        let below = down.pieces()
+        // Сверху приросли только однотонные строки (отскок у начала страницы) — их не рисуем.
+        guard up.addedText else { return Self.draw(below.map { ($0.image, $0.rows, false) }) }
+        let above = up.pieces()
+        guard down.addedText else { return Self.draw(above.reversed().map { ($0.image, $0.rows, true) }) }
+        // Обе стороны: сверху — то, что приросло вверх (с шапкой последнего кадра), ниже — первый кадр без строк,
+        // которые склейка вверх сочла шапкой, и то, что приросло вниз.
+        guard let kept = up.firstRows, down.firstRows != nil else { return Self.draw(below.map { ($0.image, $0.rows, false) }) }
+        let header = down.rows - kept
+        var parts = above.filter { !$0.first }.reversed().map { ($0.image, $0.rows, true) }
+        for piece in below {
+            let rows = piece.first ? max(piece.rows.lowerBound, header)..<max(piece.rows.upperBound, header) : piece.rows
+            if !rows.isEmpty { parts.append((piece.image, rows, false)) }
+        }
+        return Self.draw(parts)
+    }
+
+    /// Кусочки сверху вниз: изображение, его строки, хранится ли оно перевёрнутым.
+    private static func draw(_ parts: [(image: CGImage, rows: Range<Int>, flipped: Bool)]) -> CGImage? {
+        guard let first = parts.first?.image else { return nil }
+        let height = parts.reduce(0) { $0 + $1.rows.count }
+        guard height > 0 else { return nil }
         let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
         let space = first.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? sRGB
         let info = CGImageAlphaInfo.premultipliedLast.rawValue
@@ -281,23 +318,23 @@ struct Stitcher {
                                       bytesPerRow: 0, space: space, bitmapInfo: info)
                 ?? CGContext(data: nil, width: first.width, height: height, bitsPerComponent: 8,
                              bytesPerRow: 0, space: sRGB, bitmapInfo: info) else { return nil }
-        // Итог кончается строками дальнего кадра подряд: его строка y — строка (bodyHeight + footerRows) - (rows - y).
-        let skip = cut.map { (bodyHeight + footerRows - (rows - $0.lowerBound))..<(bodyHeight + footerRows - (rows - $0.upperBound)) }
-        var top = 0          // строка итога без вырезки
-        var drawn = 0        // строка итога с вырезкой
-        func draw(_ image: CGImage) {
-            let range = top..<(top + image.height)
-            top += image.height
-            for part in Self.subtract(skip, from: range) {
-                let rows = (part.lowerBound - range.lowerBound)..<(part.upperBound - range.lowerBound)
-                guard let piece = rows.count == image.height ? image
-                        : image.cropping(to: CGRect(x: 0, y: rows.lowerBound, width: image.width, height: rows.count)) else { continue }
-                context.draw(piece, in: CGRect(x: 0, y: height - drawn - piece.height, width: piece.width, height: piece.height))
-                drawn += piece.height
+        var drawn = 0
+        for (image, rows, flipped) in parts {
+            // Строки перевёрнутого кусочка считаются в нём самом; на итоге он рисуется зеркально.
+            guard let piece = rows.count == image.height ? image
+                    : image.cropping(to: CGRect(x: 0, y: rows.lowerBound, width: image.width, height: rows.count)) else { continue }
+            let y = height - drawn - piece.height
+            if flipped {
+                context.saveGState()
+                context.translateBy(x: 0, y: CGFloat(y + piece.height))
+                context.scaleBy(x: 1, y: -1)
+                context.draw(piece, in: CGRect(x: 0, y: 0, width: piece.width, height: piece.height))
+                context.restoreGState()
+            } else {
+                context.draw(piece, in: CGRect(x: 0, y: y, width: piece.width, height: piece.height))
             }
+            drawn += piece.height
         }
-        chunks.forEach(draw)
-        if let footer { draw(footer) }
         return context.makeImage()
     }
 
@@ -308,56 +345,316 @@ struct Stitcher {
             .filter { !$0.isEmpty }
     }
 
-    private mutating func append(_ piece: CGImage) {
-        chunks.append(piece)
-        bodyHeight += piece.height
-    }
+    // MARK: - Склейка в одну сторону
 
-    /// Убирает `count` нижних строк тела: они оказались закреплённым низом окна.
-    private mutating func trimBody(_ count: Int) {
-        var left = min(count, bodyHeight)
-        while left > 0, let last = chunks.last {
-            if last.height <= left {
-                chunks.removeLast()
-                bodyHeight -= last.height
-                left -= last.height
-            } else {
-                guard let kept = Self.copy(last, rows: 0..<(last.height - left)) else { return }
-                chunks[chunks.count - 1] = kept
-                bodyHeight -= left
-                left = 0
+    /// Склейка от первого кадра в одну сторону: новые строки приходят снизу. Склейка вверх получает перевёрнутые
+    /// кадры (`flipped`) — и подписи, и кусочки итога у неё перевёрнуты.
+    private struct Strip {
+        let flipped: Bool
+        var started: Bool { previous != nil }
+        /// Насколько итог вырос с этой стороны от первого кадра.
+        var grown: Int { bodyHeight + footerRows - rows }
+        private(set) var isFull = false
+        private(set) var rows = 0
+        /// Склеенное содержимое без закреплённого низа. Каждый кусочек — своя копия, а не вырезка из кадра:
+        /// вырезка держала бы буфер всего кадра.
+        private var chunks: [CGImage] = []
+        /// Первый кусочек — первый кадр (быть может, без закреплённого низа); nil — его срезали целиком.
+        var firstRows: Int? { firstIntact ? chunks.first?.height : nil }
+        private var firstIntact = true
+        /// Приклеены строки с рисунком (а не только однотонный фон за концом страницы).
+        private(set) var addedText = false
+        private var bodyHeight = 0
+        private var footer: CGImage?
+        private var footerRows = 0
+        /// Подпись самого дальнего кадра; кадры после прокрутки назад сравниваются с ним.
+        private var previous: Signature?
+        /// Тело кончается на этой строке дальнего кадра; ниже — его закреплённый низ.
+        private var bottom = 0
+        /// Насколько содержимое сейчас вернулось назад от дальнего кадра (отскок в конце страницы)
+        /// и подпись последнего кадра: по ней виден настоящий закреплённый низ.
+        private var retreat: (rows: Int, latest: Signature?) = (0, nil)
+        /// События ввода с дальнего кадра (он — точка отсчёта сдвига).
+        private var motion = Motion()
+        /// Хоть раз приходили сведения о вводе: тогда «событий нет» значит «прокрутки нет».
+        private var tracksMotion = false
+        /// Пиксели кадра на единицу события, по уверенным склейкам (знак тоже узнаётся).
+        private var pixelGain = 1.0
+        private var lineGain: Double?
+        private var pageGain: Double?
+        /// Высота прокручиваемой части по последней уверенной склейке (между шапкой и низом).
+        private var scrollSpan: Int?
+        /// Обычная относительная ошибка подсказки: насколько ожидаемый сдвиг расходился с найденным по изображению
+        /// (доля от ожидаемого; за серию потерянных кадров ошибка копится вместе со сдвигом).
+        private var hintError = 0.25
+        /// После `.lost` и до следующей склейки: содержимое могло уехать без событий (клавиши, ползунок, ссылка),
+        /// поэтому сдвиг от дальнего кадра по событиям ничего не значит — решает только изображение.
+        private var lostSinceAppend = false
+        /// Была склейка по точному совпадению: захват точный, поиск по похожести больше не нужен (и опасен —
+        /// похожие строки лога при нём совпадают).
+        private(set) var exactCapture = false
+        private(set) var lostOnRepeats = false
+        /// Куда последним двигалось содержимое: 1 — вперёд (приклеено), −1 — назад, 0 — ещё никуда.
+        private(set) var heading = 0
+        /// Обои позади содержимого, по уверенным склейкам (см. `Background`).
+        private var background: Background?
+        private(set) var trace = Trace()
+
+        init(flipped: Bool) { self.flipped = flipped }
+
+        mutating func start(_ frame: CGImage, _ signature: Signature, tracksMotion: Bool) -> Bool {
+            guard let copy = cut(frame, rows: 0..<frame.height) else { return false }
+            rows = frame.height
+            chunks = [copy]
+            bodyHeight = rows
+            bottom = rows
+            previous = signature
+            self.tracksMotion = tracksMotion
+            return true
+        }
+
+        /// События склейки вверх — в её перевёрнутом кадре: прокрутка вверх для неё — «вниз».
+        private func oriented(_ input: Motion) -> Motion {
+            flipped ? Motion(pixels: -input.pixels, lines: -input.lines, pages: -input.pages, unknown: input.unknown) : input
+        }
+
+        /// Кадр приклеен с другой стороны: события копятся, но сдвиг от дальнего кадра этой стороны по ним уже
+        /// не подсказка — место отсюда «потеряно», пока изображение снова не найдёт его.
+        mutating func skip(_ input: Motion?) {
+            if let input {
+                motion = motion + oriented(input)
+                tracksMotion = true
+            }
+            lostSinceAppend = true
+        }
+
+        mutating func add(_ frame: CGImage, _ signature: Signature, _ input: Motion?, limit heightLimit: Int,
+                          exactCapture shared: Bool) -> Result {
+            trace = Trace(up: flipped)
+            guard let previous else { return .unchanged }
+            if let input {
+                motion = motion + oriented(input)
+                tracksMotion = true
+            }
+            // Размер кадра задан при старте; кадр другого размера к склейке не подходит.
+            guard frame.height == rows, signature.rows == rows, frame.width == chunks.first?.width else {
+                trace.reason = .frameSize
+                return lose()
+            }
+            // Событий прокрутки не было — содержимое на месте: видео, анимация, подсветка не прокрутка.
+            if tracksMotion, motion.isEmpty {
+                trace.reason = .noMotion
+                return .unchanged
+            }
+            let expected = lostSinceAppend ? nil : expectedShift
+            trace.expected = expected
+            // Без подсказки прокрутку от анимации отличает только размер: движется почти вся область прокрутки
+            // (после первой склейки — не меньше 60% уже известной прокручиваемой части, до неё — половина кадра, а
+            // если на месте стоят строки и сверху, и снизу — 2/3: так выглядит панорама или карусель посреди стоящей
+            // страницы), а не полоса посреди стоящего окна. С подсказкой правило действует, когда изображение с ней
+            // спорит.
+            let sizeRule = scrollSpan.map { $0 * 6 / 10 } ?? rows / 2
+            let ambiguity = Ambiguity()
+            guard let found = Stitcher.match(previous: previous, current: signature, expected: expected, hintError: hintError,
+                                             minSpan: sizeRule, spanKnown: scrollSpan != nil, allowFuzzy: !shared,
+                                             allowBlank: !lostSinceAppend, background: background,
+                                             partialHint: motion.lines != 0 || motion.pages != 0, minColumns: flipped ? 3 : 1,
+                                             ambiguity: ambiguity) else {
+                // Одинаковые строки — и когда «ничья», и когда большая часть строк с рисунком в кадре повторяется.
+                let textured = (0..<rows).filter { signature.textured[$0] != 0 }.count
+                let repeated = textured - signature.uniqueRow.filter { $0 }.count
+                trace.reason = .noMatch
+                return lose(repeats: ambiguity.repeated || textured > 0 && repeated * 2 > textured)
+            }
+            let match = found.match
+            trace.shift = match.shift
+            trace.header = match.header
+            trace.footer = match.footer
+            trace.source = found.source
+            guard match.shift > 0 else {
+                trace.reason = match.shift == 0 ? .still : .back
+                if match.shift < 0 { heading = -1 }
+                // Без движения или прокрутка назад: ждём, пока снова пойдут новые строки.
+                retreat = (-match.shift, match.shift < 0 ? signature : nil)
+                // Кадр не изменился, а события были: страница упёрлась в конец (или ещё не отрисовалась). Величина
+                // событий дальше не подсказка — копилась бы впустую, — но «прокрутка могла быть» остаётся.
+                if match.shift == 0, match.header == rows || found.refutesMotion, motion.unknown == 0, !motion.isEmpty {
+                    motion = Motion(unknown: 1)
+                }
+                return .unchanged
+            }
+            let end = rows - match.footer            // конец движущейся части нового кадра
+            let start = min(bottom, end)             // строка дальнего кадра, с которой продолжается тело
+            var from = start - match.shift           // та же строка в новом кадре
+            // Прошлый кадр счёл строки ниже `bottom` закреплённым низом, а теперь они двигаются и успели уехать
+            // под шапку: их берём из того низа. Так бывает, только когда низ стал меньше (start == bottom).
+            let hidden = max(0, match.header - from)
+            guard hidden <= footerRows else {
+                trace.reason = .hidden
+                return lose()
+            }
+            var patch: CGImage?
+            if hidden > 0 {
+                guard let footer, let piece = Stitcher.copy(footer, rows: 0..<min(hidden, footer.height)) else {
+                    trace.reason = .hidden
+                    return lose()
+                }
+                patch = piece
+                from += hidden
+            }
+            let room = heightLimit - bodyHeight - match.footer - hidden + (bottom - start)
+            guard room > 0, from < end else {
+                isFull = room <= 0
+                trace.reason = isFull ? .full : .limit
+                return .unchanged
+            }
+            let count = min(end - from, room)
+            guard let piece = cut(frame, rows: from..<(from + count)) else {
+                trace.reason = .copy
+                return .unchanged
+            }
+            let tail = match.footer > 0 ? cut(frame, rows: end..<rows) : nil
+            trimBody(bottom - start)
+            if let patch { append(patch) }
+            append(piece)
+            if (from..<(from + count)).contains(where: { signature.textured[$0] != 0 }) { addedText = true }
+            footer = tail
+            footerRows = tail?.height ?? 0
+            bottom = from + count
+            retreat = (0, nil)
+            isFull = count < end - from || bodyHeight + footerRows >= heightLimit
+            if found.confident {
+                if found.exact {
+                    var known = background ?? Background(rows: rows)
+                    known.learn(previous, signature, rows: match.header..<(rows - match.footer))
+                    background = known
+                }
+                scrollSpan = rows - match.header - match.footer
+                if let expected { hintError = hintError * 0.7 + Double(abs(match.shift - expected)) / Double(max(abs(expected), 50)) * 0.3 }
+                learnGain(shift: match.shift)
+                if found.exact { exactCapture = true }
+            }
+            self.previous = signature
+            motion = Motion()
+            lostSinceAppend = false
+            heading = 1
+            return .appended
+        }
+
+        private mutating func lose(repeats: Bool = false) -> Result {
+            lostSinceAppend = true
+            lostOnRepeats = repeats
+            return .lost
+        }
+
+        /// Строки кадра в собственный буфер — в ориентации этой склейки (`rows` — строки перевёрнутого кадра).
+        private func cut(_ frame: CGImage, rows range: Range<Int>) -> CGImage? {
+            guard flipped else { return Stitcher.copy(frame, rows: range) }
+            return Stitcher.copy(frame, rows: (frame.height - range.upperBound)..<(frame.height - range.lowerBound), flipped: true)
+        }
+
+        /// Ожидаемый сдвиг по событиям с дальнего кадра; nil — величина неизвестна (клавиши, колесо без коэффициента).
+        private var expectedShift: Int? {
+            guard tracksMotion, motion.unknown == 0 else { return nil }
+            var shift = motion.pixels * pixelGain
+            if motion.lines != 0 {
+                guard let lineGain else { return nil }
+                shift += motion.lines * lineGain
+            }
+            if motion.pages != 0 {
+                guard let pageGain else { return nil }
+                shift += motion.pages * pageGain
+            }
+            return Int(shift.rounded())
+        }
+
+        /// Коэффициент «события → пиксели» по уверенной склейке (сдвиг однозначен по изображению).
+        private mutating func learnGain(shift: Int) {
+            guard tracksMotion, motion.unknown == 0, shift >= 16 else { return }
+            if motion.lines == 0, motion.pages == 0, abs(motion.pixels) >= 8 {
+                let ratio = Double(shift) / motion.pixels
+                if (0.25...4).contains(abs(ratio)) { pixelGain = pixelGain * 0.5 + ratio * 0.5 }
+            } else if abs(motion.pixels) < 0.5, motion.pages == 0, motion.lines != 0 {
+                let ratio = Double(shift) / motion.lines
+                if (1...400).contains(abs(ratio)) { lineGain = lineGain.map { $0 * 0.5 + ratio * 0.5 } ?? ratio }
+            } else if abs(motion.pixels) < 0.5, motion.lines == 0, motion.pages != 0 {
+                let ratio = Double(shift) / motion.pages
+                if (16...Double(rows) * 1.5).contains(abs(ratio)) { pageGain = pageGain.map { $0 * 0.5 + ratio * 0.5 } ?? ratio }
             }
         }
+
+        /// Кусочки итога этой стороны по порядку (в её ориентации): тело и закреплённый низ, без однотонных строк
+        /// за концом страницы. `first` — строки первого кадра.
+        func pieces() -> [(image: CGImage, rows: Range<Int>, first: Bool)] {
+            // Отскок в конце: однотонные строки за концом страницы не рисуются.
+            let total = bodyHeight + footerRows
+            let skip = overscroll().map { (total - (rows - $0.lowerBound))..<(total - (rows - $0.upperBound)) }
+            var top = 0
+            var out: [(image: CGImage, rows: Range<Int>, first: Bool)] = []
+            for (index, image) in (chunks + [footer].compactMap { $0 }).enumerated() {
+                let range = top..<(top + image.height)
+                top += image.height
+                for part in Stitcher.subtract(skip, from: range) {
+                    out.append((image, (part.lowerBound - range.lowerBound)..<(part.upperBound - range.lowerBound),
+                                index == 0 && firstIntact))
+                }
+            }
+            return out
+        }
+
+        private mutating func append(_ piece: CGImage) {
+            chunks.append(piece)
+            bodyHeight += piece.height
+        }
+
+        /// Убирает `count` нижних строк тела: они оказались закреплённым низом окна.
+        private mutating func trimBody(_ count: Int) {
+            var left = min(count, bodyHeight)
+            while left > 0, let last = chunks.last {
+                if last.height <= left {
+                    chunks.removeLast()
+                    if chunks.isEmpty { firstIntact = false }
+                    bodyHeight -= last.height
+                    left -= last.height
+                } else {
+                    guard let kept = Stitcher.copy(last, rows: 0..<(last.height - left)) else { return }
+                    chunks[chunks.count - 1] = kept
+                    bodyHeight -= left
+                    left = 0
+                }
+            }
+        }
+
+        /// Отскок в конце страницы: содержимое прокрутили за конец, и оно вернулось назад. Строки дальнего кадра
+        /// за концом (над его настоящим закреплённым низом) — однотонный фон под страницей, в итог они не идут.
+        /// Строки с текстом не трогаются никогда. Возвращает строки дальнего кадра, которые надо вырезать.
+        private func overscroll() -> Range<Int>? {
+            guard retreat.rows > 0, let previous = previous?.coarse, let latest = retreat.latest?.coarse else { return nil }
+            let w = Stitcher.columns
+            // Закреплённый низ здесь — только строки, совпавшие точно: фон под страницей бывает почти белым.
+            var footer = 0
+            while footer < rows {
+                let r = rows - 1 - footer
+                var diff = 0
+                for k in (r * w)..<((r + 1) * w) { diff += abs(Int(previous[k]) - Int(latest[k])) }
+                guard diff <= w * 2 else { break }
+                footer += 1
+            }
+            let end = rows - footer, cut = (end - retreat.rows)..<end
+            guard cut.lowerBound > 0, rows - cut.lowerBound < bodyHeight + footerRows else { return nil }
+            let reference = Int(previous[(end - 1) * w])
+            for r in cut {
+                let row = previous[(r * w)..<((r + 1) * w)]
+                guard let low = row.min(), let high = row.max(), Int(high) - Int(low) <= 6,
+                      abs(Int(low) - reference) <= 6 else { return nil }
+            }
+            return cut
+        }
     }
 
-    /// Отскок в конце страницы: содержимое прокрутили за конец, и оно вернулось назад. Строки дальнего кадра
-    /// за концом (над его настоящим закреплённым низом) — однотонный фон под страницей, в итог они не идут.
-    /// Строки с текстом не трогаются никогда. Возвращает строки дальнего кадра, которые надо вырезать.
-    private func overscroll() -> Range<Int>? {
-        guard retreat.rows > 0, let previous = previous?.coarse, let latest = retreat.latest?.coarse else { return nil }
-        let w = Self.columns
-        // Закреплённый низ здесь — только строки, совпавшие точно: фон под страницей бывает почти белым.
-        var footer = 0
-        while footer < rows {
-            let r = rows - 1 - footer
-            var diff = 0
-            for k in (r * w)..<((r + 1) * w) { diff += abs(Int(previous[k]) - Int(latest[k])) }
-            guard diff <= w * 2 else { break }
-            footer += 1
-        }
-        let end = rows - footer, cut = (end - retreat.rows)..<end
-        guard cut.lowerBound > 0, rows - cut.lowerBound < height else { return nil }
-        let reference = Int(previous[(end - 1) * w])
-        for r in cut {
-            let row = previous[(r * w)..<((r + 1) * w)]
-            guard let low = row.min(), let high = row.max(), Int(high) - Int(low) <= 6,
-                  abs(Int(low) - reference) <= 6 else { return nil }
-        }
-        return cut
-    }
-
-    /// Копия строк `rows` в собственный буфер, в цветовом пространстве кадра.
-    private static func copy(_ image: CGImage, rows: Range<Int>) -> CGImage? {
+    /// Копия строк `rows` в собственный буфер, в цветовом пространстве кадра. `flipped` — зеркально по вертикали
+    /// (для склейки вверх).
+    private static func copy(_ image: CGImage, rows: Range<Int>, flipped: Bool = false) -> CGImage? {
         guard !rows.isEmpty,
               let cropped = image.cropping(to: CGRect(x: 0, y: rows.lowerBound, width: image.width, height: rows.count))
         else { return nil }
@@ -365,6 +662,10 @@ struct Stitcher {
         guard let context = CGContext(data: nil, width: cropped.width, height: cropped.height, bitsPerComponent: 8,
                                       bytesPerRow: 0, space: space,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        if flipped {
+            context.translateBy(x: 0, y: CGFloat(cropped.height))
+            context.scaleBy(x: 1, y: -1)
+        }
         context.draw(cropped, in: CGRect(x: 0, y: 0, width: cropped.width, height: cropped.height))
         return context.makeImage()
     }
@@ -503,11 +804,21 @@ struct Stitcher {
             }
         }
         let textured = segmentTexture(fine, fineColumns: fineColumns, rows: height)
+        let flat = fine.withUnsafeBufferPointer { f in
+            (0..<height).map { r -> Bool in
+                var low = f[r * fineColumns], high = low
+                for k in (r * fineColumns)..<((r + 1) * fineColumns) {
+                    let v = f[k]
+                    if v < low { low = v } else if v > high { high = v }
+                }
+                return high - low <= 2
+            }
+        }
         let (distinct, unique, keys, rowsIndex, start) = segmentIndex(hashes: hashes, textured: textured, rows: height)
         let (uniqueRow, rowKeys) = uniqueRows(hashes: hashes, textured: textured, rows: height)
         var fineValues = [Float](repeating: 0, count: fine.count)
         vDSP_vfltu8(fine, 1, &fineValues, 1, vDSP_Length(fine.count))
-        return Signature(rows: height, fineValues: fineValues, fineColumns: fineColumns, coarse: coarse, detail: detail,
+        return Signature(rows: height, fineValues: fineValues, fineColumns: fineColumns, coarse: coarse, detail: detail, flat: flat,
                          hashes: hashes, textured: textured, distinct: distinct, unique: unique, uniqueRow: uniqueRow, rowKeys: rowKeys,
                          indexKeys: keys, indexRows: rowsIndex, indexStart: start)
     }
@@ -590,11 +901,15 @@ struct Stitcher {
     }
 
     /// Строки, единственные в кадре целиком (по отпечаткам всех полос); серия одинаковых строк подряд — одна.
-    private static func uniqueRows(hashes: [UInt64], textured: [UInt64], rows: Int) -> (unique: [Bool], keys: [UInt64]) {
+    /// `texturedOnly` — строка сравнивается только по полосам с рисунком (без неподвижного слоя, см. `without`).
+    private static func uniqueRows(hashes: [UInt64], textured: [UInt64], rows: Int, texturedOnly: Bool = false)
+        -> (unique: [Bool], keys: [UInt64]) {
         var keys = [UInt64](repeating: 0, count: rows)
         for r in 0..<rows {
             var h: UInt64 = 0xCBF2_9CE4_8422_2325
-            for j in 0..<columns { h = (h ^ hashes[r * columns + j]) &* 0x0000_0100_0000_01B3 }
+            for j in 0..<columns where !texturedOnly || textured[r] & (1 << UInt64(j)) != 0 {
+                h = (h ^ hashes[r * columns + j] ^ UInt64(j)) &* 0x0000_0100_0000_01B3
+            }
             keys[r] = h
         }
         var counts: [UInt64: Int] = [:]
@@ -614,6 +929,7 @@ struct Stitcher {
         /// Изображение опровергло события: содержимое сдвинулось не так, как они говорят (колесо у конца страницы,
         /// а движется анимация).
         var refutesMotion = false
+        var source = Source.exact
     }
 
     /// Сдвиг содержимого между подписями двух кадров. nil — совпадение не найдено или неоднозначно
@@ -624,27 +940,43 @@ struct Stitcher {
     /// `allowFuzzy` — разрешён ли поиск по похожести, когда точных совпадений нет вовсе (шумный захват).
     static func match(previous p: Signature, current c: Signature, expected: Int? = nil, hintError: Double = 0.25,
                       minSpan: Int = 0, spanKnown: Bool = true, allowFuzzy: Bool = true, allowBlank: Bool = true,
-                      ambiguity: Ambiguity? = nil) -> Found? {
+                      background: Background? = nil, partialHint: Bool = false, minColumns: Int = 1,
+                      ambiguity given: Ambiguity? = nil) -> Found? {
+        let ambiguity = given ?? Ambiguity()
         // Закреплённые строки сначала ищутся мягко: в шапке меняются часы, значки, подсветка. Но так же «почти не
         // меняются» строки лога или таблицы в одном и том же месте при прокрутке (отличаются цифры) — и мягкое правило
         // принимает их за закреплённый низ. Если так сдвига не нашлось, повтор со строгим правилом: закреплены только
         // строки, точно совпавшие на месте.
         let loose = search(previous: p, current: c, expected: expected, hintError: hintError, minSpan: minSpan,
-                           spanKnown: spanKnown, allowFuzzy: allowFuzzy, allowBlank: allowBlank, ambiguity: ambiguity, exactStatic: false)
+                           spanKnown: spanKnown, allowFuzzy: allowFuzzy, allowBlank: allowBlank, background: background,
+                           partialHint: partialHint, minColumns: minColumns, ambiguity: ambiguity, exactStatic: false)
         if let loose, loose.match.shift != 0 { return loose }
         let exact = search(previous: p, current: c, expected: expected, hintError: hintError, minSpan: minSpan,
-                           spanKnown: spanKnown, allowFuzzy: allowFuzzy, allowBlank: allowBlank, ambiguity: ambiguity, exactStatic: true)
+                           spanKnown: spanKnown, allowFuzzy: allowFuzzy, allowBlank: allowBlank, background: background,
+                           partialHint: partialHint, minColumns: minColumns, ambiguity: ambiguity, exactStatic: true)
         if let exact, exact.match.shift != 0 { return exact }
-        // Мягкое правило сочло кадр неподвижным целиком, а точное — нет, и сдвиг не найден: строки на тех же местах
-        // отличаются (цифры в логе, номера в JSON после рывка на период разметки). Это не «без изменений», а потеря
-        // места — с предупреждением.
-        if let loose, loose.match.header == p.rows, exact == nil { return nil }
+        // Пустые строки у краёв совпадают и на месте, и при любом сдвиге — оба правила считают их шапкой и низом окна,
+        // и на редкой странице (заголовок среди пустоты) от движущейся части остаётся узкая полоса, в которой сдвиг
+        // не помещается. Ещё раз — без пустых «шапки» и «низа»; принимается лишь точное совпадение.
+        if let trimmed = search(previous: p, current: c, expected: expected, hintError: hintError, minSpan: minSpan,
+                                spanKnown: spanKnown, allowFuzzy: false, allowBlank: false, background: nil,
+                                partialHint: partialHint, minColumns: minColumns, ambiguity: nil, exactStatic: true,
+                                trimBlankStatic: true),
+           trimmed.match.shift != 0 {
+            return trimmed
+        }
+        // Мягкое правило сочло кадр неподвижным, а точное — нет, и сдвиг не найден: строки на тех же местах
+        // отличаются (цифры в логе, номера в JSON после рывка на период разметки, заголовок въехал после пустоты).
+        // Это не «без изменений», а потеря места — с предупреждением.
+        if let loose, !loose.refutesMotion, exact == nil { return nil }
+        if exact == nil, ambiguity.textMoved { return nil }
         return loose ?? exact
     }
 
     private static func search(previous p: Signature, current c: Signature, expected: Int?, hintError: Double,
-                               minSpan: Int, spanKnown: Bool, allowFuzzy: Bool, allowBlank: Bool, ambiguity: Ambiguity?,
-                               exactStatic: Bool) -> Found? {
+                               minSpan: Int, spanKnown: Bool, allowFuzzy: Bool, allowBlank: Bool, background: Background?,
+                               partialHint: Bool, minColumns: Int, ambiguity: Ambiguity?, exactStatic: Bool,
+                               trimBlankStatic: Bool = false) -> Found? {
         let w = columns, h = p.rows
         guard h > 0, c.rows == h, p.fineColumns == c.fineColumns else { return nil }
         let pc = p.coarse, cc = c.coarse
@@ -667,24 +999,52 @@ struct Stitcher {
         }
         var header = 0
         while header < h, isStatic(header) { header += 1 }
-        let still = { (header: Int, footer: Int) in Found(match: Match(shift: 0, header: header, footer: footer), confident: true) }
+        let still = { (header: Int, footer: Int) in
+            Found(match: Match(shift: 0, header: header, footer: footer), confident: true, source: .still)
+        }
         if header == h { return still(h, 0) }
         var footer = 0
         while isStatic(h - 1 - footer) { footer += 1 }
+        if trimBlankStatic {
+            // Только пустые целиком: шапка или низ окна с надписью — настоящие, их поля не трогаем.
+            let blank = { (rows: Range<Int>) in !rows.contains { p.textured[$0] != 0 || c.textured[$0] != 0 } }
+            let headerBlank = header > 0 && blank(0..<header), footerBlank = footer > 0 && blank((h - footer)..<h)
+            guard headerBlank || footerBlank else { return nil }
+            if headerBlank { header = 0 }
+            if footerBlank { footer = 0 }
+        }
         let lo = header, hi = h - footer, span = hi - lo
         // Изменилась узкая полоса посреди неподвижного кадра (подсветка, анимация) — это не прокрутка.
         // Без подсказки событий — и полоса меньше половины кадра (см. `minSpan`).
         let sizeRule = max(16, h / 10, minSpan, !spanKnown && header >= 16 && footer >= 16 ? h * 2 / 3 : 0)
         if span < (expected == nil ? sizeRule : max(16, h / 10)) {
             // Узкая изменившаяся полоса — анимация в стоящем окне. Но если неподвижные строки сверху и снизу пусты, а
-            // строка с текстом целиком переехала на другое место, это редкая страница (заголовок среди пустоты) прокрутилась:
-            // «без изменений» здесь молча теряло бы заголовки.
-            guard span >= 16, Self.staticRowsBlank(c, header: header, footer: footer), Self.textMoved(p, c, rows: lo..<hi)
+            // строка с текстом целиком переехала на другое место — или в новом кадре появился другой текст там, где в
+            // прошлом было пусто (заголовок ушёл вверх, следующий въехал после пустоты), — это редкая страница
+            // прокрутилась: «без изменений» здесь молча теряло бы заголовки. Текст, сменившийся на том же месте
+            // (часы, счётчик), — не прокрутка.
+            guard span >= 16, Self.staticRowsBlank(c, header: header, footer: footer),
+                  Self.textAppeared(p, c, rows: lo..<hi) || Self.textMoved(p, c, rows: lo..<hi)
             else { return still(header, footer) }
+            if exactStatic { ambiguity?.textMoved = true }
         }
 
-        let frame = Frame(p: p, c: c, header: header, footer: footer, sizeRule: sizeRule)
-        switch frame.exactSearch(expected: expected, hintError: hintError) {
+        let frame = Frame(p: p, c: c, header: header, footer: footer, sizeRule: sizeRule, partialHint: partialHint,
+                          minColumns: minColumns)
+        let decision = frame.exactSearch(expected: expected, hintError: hintError)
+        if trimBlankStatic {
+            guard case .found(let found) = decision, found.match.shift != 0 else { return nil }
+            return found
+        }
+        // Сдвига нет или кадр «стоит» — а может, стоят только обои позади сообщений.
+        var stands = false
+        switch decision {
+        case .noExactMatch: stands = true
+        case .found(let found): stands = found.match.shift == 0 && found.source == .still
+        case .ambiguous: break
+        }
+        if stands, let layer = frame.layerSearch(expected: expected, hintError: hintError, background: background) { return layer }
+        switch decision {
         case .found(let found):
             // Мягкое правило могло принять за шапку или низ строки, которые на самом деле уехали вместе с
             // содержимым (строки лога в одном месте отличаются лишь цифрами): тогда — строгое правило.
@@ -706,6 +1066,19 @@ struct Stitcher {
         !(0..<header).contains { c.textured[$0] != 0 } && !((c.rows - footer)..<c.rows).contains { c.textured[$0] != 0 }
     }
 
+    /// В `rows` нового кадра есть строки с рисунком, и ни одной из них нет в прошлом кадре — ни на том же месте,
+    /// ни в другом, — а там, где они стоят, прошлый кадр пуст.
+    private static func textAppeared(_ p: Signature, _ c: Signature, rows: Range<Int>) -> Bool {
+        var seen = Set<UInt64>()
+        for r in 0..<p.rows where p.textured[r] != 0 { seen.insert(p.rowKeys[r]) }
+        var any = false
+        for r in rows where c.textured[r] != 0 {
+            guard p.textured[r] == 0, !seen.contains(c.rowKeys[r]) else { return false }
+            any = true
+        }
+        return any
+    }
+
     /// Строка с рисунком из `rows` нового кадра есть в прошлом кадре целиком, но в другом месте.
     private static func textMoved(_ p: Signature, _ c: Signature, rows: Range<Int>) -> Bool {
         var where_: [UInt64: Int] = [:]
@@ -720,6 +1093,12 @@ struct Stitcher {
         let header: Int
         let footer: Int
         let sizeRule: Int
+        /// Подсказка — лишь верхняя граница: колесо и PageDown прокручиваются анимацией, и кадр мог застать её
+        /// в начале.
+        var partialHint = false
+        /// Совпавшие полосы должны быть хотя бы в стольких колонках: ползунок полосы прокрутки (одна колонка) движется
+        /// навстречу содержимому, и склейка вверх иначе приняла бы его за прокрутку.
+        var minColumns = 1
         var h: Int { p.rows }
         var lo: Int { header }
         var hi: Int { p.rows - footer }
@@ -948,7 +1327,9 @@ struct Stitcher {
             guard !ranked.isEmpty else {
                 // Содержимое не сдвинулось: на месте совпало большинство полос (меняется только видео, анимация).
                 let still = score(zero, mask: 0)
-                if still.hits >= minimum, still.rate >= 0.5 { return found(0, true) }
+                if still.hits >= minimum, still.rate >= 0.5 {
+                    return .found(Found(match: Match(shift: 0, header: header, footer: footer), confident: true, source: .still))
+                }
                 return .noExactMatch
             }
 
@@ -983,6 +1364,9 @@ struct Stitcher {
                 possible += (union[r] & ~best.mask).nonzeroBitCount
             }
             guard possible > 0, covered * 10 >= possible * 6 else { return .noExactMatch }
+            var columns: UInt64 = 0
+            for r in overlap(best.e.shift) { columns |= best.e.matched[r] & ~best.mask }
+            guard columns.nonzeroBitCount >= minColumns else { return .noExactMatch }
             // Уникальные строки нового кадра должны хоть заметной частью совпасть целиком. У настоящего сдвига так и
             // есть: не совпадают лишь строки с видео, анимацией. У похожего чужого содержимого — нет: строки лога после
             // рывка на минуту совпадут секундами, но не минутами, ни одна строка не совпадёт целиком. Серия совпавших
@@ -999,9 +1383,10 @@ struct Stitcher {
             let confirmed = expected.map { e in window.map { abs(best.e.shift - e) <= $0 } ?? false } ?? false
             // Уникальных строк нет вовсе (всё перекрытие — блок одинаковых строк): различать нечем, дальше решает подсказка.
             // Одна серия годится и когда перекрытие объяснено целиком: все уникальные строки совпали, промахов нет —
-            // заголовок среди пустоты (лендинг, слайды, письмо).
+            // заголовок среди пустоты (лендинг, слайды, письмо). Даже одна строка пикселей — верхушки букв заголовка,
+            // въезжающего снизу после пустоты, — если совпала она одна и больше ни одного промаха.
             let whole = cleanRows == uniqueRows && best.misses == 0
-            guard uniqueRows == 0 || whole && cleanRows >= 2
+            guard uniqueRows == 0 || whole && (cleanRows >= 2 || best.hits >= 4)
                     || cleanRows >= 8 && (cleanRuns >= 2 || cleanRows >= 48 || confirmed) && cleanRows * 20 >= uniqueRows
             else { return .noExactMatch }
 
@@ -1009,12 +1394,14 @@ struct Stitcher {
                 if let expected, let window, abs(best.e.shift - expected) > window {
                     // Изображение спорит с событиями. Верим ему, только если совпадение сильное, движется большая часть
                     // кадра и расхождение похоже на другой масштаб прокрутки (приложение прокручивает не 1:1), а не на
-                    // анимацию посреди стоящей страницы (колесо у конца страницы).
+                    // анимацию посреди стоящей страницы (колесо у конца страницы). После щелчка колеса или PageDown
+                    // содержимое доезжает анимацией: кадр застаёт любую её часть — от начала до конца.
                     let ratio = Double(best.e.shift) / Double(expected == 0 ? 1 : expected)
-                    if best.rate >= 0.5, span >= sizeRule, (0.25...4).contains(ratio) { return found(best.e.shift, true) }
+                    let plausible = (0.25...4).contains(ratio) || partialHint && ratio > 0 && ratio < 0.25
+                    if best.rate >= 0.5, span >= sizeRule, plausible { return found(best.e.shift, true) }
                     guard span < sizeRule else { return .ambiguous(repeated: false) }
-                    var refuted = Found(match: Match(shift: 0, header: header, footer: footer), confident: true)
-                    refuted.refutesMotion = true
+                    let refuted = Found(match: Match(shift: 0, header: header, footer: footer), confident: true,
+                                        refutesMotion: true, source: .refuted)
                     return .found(refuted)
                 }
                 return found(best.e.shift, true)
@@ -1031,8 +1418,8 @@ struct Stitcher {
             // Ни один вариант не похож на то, что говорят события, а движется малая часть кадра: события не про это
             // содержимое (колесо у конца страницы, а меняется анимация).
             if span < sizeRule, options.allSatisfy({ abs($0.shift - expected) > window }) {
-                var refuted = Found(match: Match(shift: 0, header: header, footer: footer), confident: true)
-                refuted.refutesMotion = true
+                let refuted = Found(match: Match(shift: 0, header: header, footer: footer), confident: true,
+                                    refutesMotion: true, source: .refuted)
                 return .found(refuted)
             }
             // Альтернативы — только настоящие совпадения (доля ≥ 0,75): сдвиг, с которым нечем сравнить (перекрытия не
@@ -1045,7 +1432,59 @@ struct Stitcher {
             if options.count >= 2, abs(options[1].shift - expected) < abs(options[0].shift - expected) + max(8, accuracy) {
                 return .ambiguous(repeated: repeated)
             }
-            return found(options[0].shift, false)
+            return .found(Found(match: Match(shift: options[0].shift, header: header, footer: footer), confident: false, source: .hint))
+        }
+
+        /// Неподвижный слой с рисунком позади движущегося содержимого: обои чата, узор фона. Полосы обоев совпадают
+        /// на месте, пузыри сообщений — при сдвиге, а края пузырей (в полосе и пузырь, и обои) — нигде: ни одна строка
+        /// не совпадает целиком, и обычный поиск сдвиг отвергает (или считает кадр стоящим — по обоям). Тогда сдвиг
+        /// ищется ещё раз — без неподвижных полос и соседних с ними — и принимается, только если движущийся слой
+        /// занимает большую часть высоты, а не полосу посреди стоящего окна.
+        func layerSearch(expected: Int?, hintError: Double, background: Background?) -> Found? {
+            let w = Stitcher.columns
+            // Неподвижное: совпало на месте в этой паре кадров или с обоями, известными по прошлым склейкам.
+            var stillP = background?.mask(p) ?? [UInt64](repeating: 0, count: h)
+            var stillC = background?.mask(c) ?? [UInt64](repeating: 0, count: h)
+            var stillCount = 0, total = 0
+            var columnTextured = [Int](repeating: 0, count: w), columnStill = [Int](repeating: 0, count: w)
+            var columnUnique = [Int](repeating: 0, count: w)
+            for r in lo..<hi {
+                var bits = c.textured[r] & p.textured[r], same: UInt64 = 0
+                while bits != 0 {
+                    let j = bits.trailingZeroBitCount
+                    bits &= bits - 1
+                    if c.hashes[r * w + j] == p.hashes[r * w + j] { same |= 1 << UInt64(j) }
+                }
+                stillP[r] |= same
+                stillC[r] |= same
+                total += c.textured[r].nonzeroBitCount
+                stillCount += (stillC[r] & c.textured[r]).nonzeroBitCount
+                for j in 0..<w where c.textured[r] & (1 << UInt64(j)) != 0 {
+                    columnTextured[j] += 1
+                    if stillC[r] & (1 << UInt64(j)) != 0 { columnStill[j] += 1 }
+                    if stillC[r] & c.unique[r] & (1 << UInt64(j)) != 0 { columnUnique[j] += 1 }
+                }
+            }
+            // Неподвижный слой — заметная часть рисунка, но не весь: иначе кадр просто стоит. Движущегося бывает мало
+            // (короткие «Ок» в конце переписки), решают проверки точного поиска и высота движущегося слоя.
+            guard total > 0, stillCount * 5 >= total, total - stillCount >= max(64, total / 20) else { return nil }
+            // Обои — узор, полосы которого в своей колонке не повторяются. Одинаковые слова соседних строк лога или JSON
+            // («INFO [worker-3] GET», `"active": true`) тоже совпадают на месте, но повторяются по всей колонке: это не
+            // фон, а текст, и сдвиг по оставшимся цифрам после рывка вклеил бы чужое. Колонки, неподвижные целиком
+            // (список чатов слева, сайдбар), не в счёт: обои видны там, где поверх них едут сообщения.
+            let layered = (0..<w).filter { columnStill[$0] * 20 < columnTextured[$0] * 19 }
+            let unique = layered.reduce(0) { $0 + columnUnique[$1] }, still = layered.reduce(0) { $0 + columnStill[$1] }
+            guard unique * 4 >= still else { return nil }
+            let layer = Frame(p: p.without(stillP, rows: lo..<hi), c: c.without(stillC, rows: lo..<hi),
+                              header: header, footer: footer, sizeRule: sizeRule, partialHint: partialHint,
+                              minColumns: minColumns)
+            guard case .found(var found) = layer.exactSearch(expected: expected, hintError: hintError), found.match.shift != 0
+            else { return nil }
+            let e = layer.evaluate(found.match.shift)
+            guard let first = e.matched.firstIndex(where: { $0 != 0 }), let last = e.matched.lastIndex(where: { $0 != 0 }),
+                  last - first >= min(sizeRule, span) / 2 else { return nil }
+            found.source = .layer
+            return found
         }
 
         /// Строки, принятые мягким правилом за шапку или низ, при найденном сдвиге совпадают точнее, чем на месте:
@@ -1080,28 +1519,41 @@ struct Stitcher {
         func blankShift(expected: Int?) -> Found? {
             let limit = span - min(span, max(16, span / 5))
             guard limit >= 0 else { return nil }
-            // Строка с рисунком есть в обоих кадрах — значит, текст виден в обоих и сдвиг должен был найтись точно.
+            // Строки с рисунком есть в обоих кадрах — значит, текст виден в обоих и сдвиг должен был найтись точно.
             // Раз не нашёлся, это неоднозначность, а не пустота: `.lost`, а не сдвиг наугад (повтор или потеря заголовка).
+            // Несколько совпавших строк пикселей при другом тексте — не то: у похожих заголовков («Раздел 2…»,
+            // «Раздел 3…») совпадают строки, где нет цифр.
             var seen = Set<UInt64>()
             for r in 0..<h where p.textured[r] != 0 { seen.insert(p.rowKeys[r]) }
-            if (0..<h).contains(where: { c.textured[$0] != 0 && seen.contains(c.rowKeys[$0]) }) { return nil }
-            var cPrefix = [0], pPrefix = [0]
+            let textured = (0..<h).filter { c.textured[$0] != 0 }
+            let shared = textured.filter { seen.contains(c.rowKeys[$0]) }.count
+            if shared > 0, shared * 3 >= textured.count { return nil }
+            // В перекрытии — только однотонные строки (иначе сдвиг срезал бы бледные края букв заголовка) и не больше
+            // двух строк-«деталей» (граница однотонных полос разного цвета), совпадающих с допуском.
+            var cPrefix = [0], pPrefix = [0], cText = [0], pText = [0]
             for r in 0..<h {
                 cPrefix.append(cPrefix[r] + (c.detail[r] ? 1 : 0))
                 pPrefix.append(pPrefix[r] + (p.detail[r] ? 1 : 0))
+                cText.append(cText[r] + (c.flat[r] ? 0 : 1))
+                pText.append(pText[r] + (p.flat[r] ? 0 : 1))
             }
             func neutral(_ s: Int) -> Bool {
                 guard abs(s) <= limit else { return false }
                 let r0 = max(lo, lo - s), r1 = min(hi, hi - s)
-                guard r0 < r1, cPrefix[r1] - cPrefix[r0] + pPrefix[r1 + s] - pPrefix[r0 + s] <= 2 else { return false }
+                guard r0 < r1, cText[r1] == cText[r0], pText[r1 + s] == pText[r0 + s],
+                      cPrefix[r1] - cPrefix[r0] + pPrefix[r1 + s] - pPrefix[r0 + s] <= 2 else { return false }
                 return (r0..<r1).allSatisfy { r in !(c.detail[r] || p.detail[r + s]) || blankRowsMatch(r + s, r) }
             }
             // По порядку близости к подсказке (без неё — к нулю): первый подходящий и есть ответ, без перебора всех
-            // сдвигов (на пустом кадре 5K это миллионы проверок).
+            // сдвигов (на пустом кадре 5K это миллионы проверок). Через пустоту — только в ту сторону, куда растёт
+            // склейка (назад — лишь по событиям): шаг назад здесь значил бы «кадр не новый», и следующий заголовок,
+            // въехавший после пустоты, пропал бы молча.
             let center = expected.map { min(max($0, -limit), limit) } ?? 0
+            let back = (expected ?? 0) < 0
             for d in 0...(2 * limit) {
-                for s in d == 0 ? [center] : [center + d, center - d] where neutral(s) {
-                    return Found(match: Match(shift: s, header: header, footer: footer), confident: false, exact: false)
+                for s in d == 0 ? [center] : [center + d, center - d] where (back ? s <= 0 : s >= 0) && neutral(s) {
+                    return Found(match: Match(shift: s, header: header, footer: footer), confident: false, exact: false,
+                                 source: .blank)
                 }
             }
             return nil
@@ -1131,7 +1583,7 @@ struct Stitcher {
             let active = (0..<w).filter { !masked[$0] }
             let match = { (shift: Int) in Match(shift: shift, header: header, footer: footer) }
             // Почти всё стоит на месте — это не прокрутка содержимого.
-            guard active.count * 4 >= w else { return Found(match: match(0), confident: true, exact: false) }
+            guard active.count * 4 >= w else { return Found(match: match(0), confident: true, exact: false, source: .still) }
 
             let fw = p.fineColumns
             let fineActive = (0..<fw).filter { !masked[$0 * w / fw] }.count
@@ -1299,7 +1751,9 @@ struct Stitcher {
                 }
                 return own >= min(8, matched)
             }
-            let found = { (shift: Int, confident: Bool) in Found(match: match(shift), confident: confident, exact: false) }
+            let found = { (shift: Int, confident: Bool) in
+                Found(match: match(shift), confident: confident, exact: false, source: .fuzzy)
+            }
             guard let expected, let window else {
                 return unique(best) ? found(best.shift, true) : nil
             }
