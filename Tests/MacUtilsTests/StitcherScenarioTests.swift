@@ -648,7 +648,7 @@ final class StitcherScenarioTests: XCTestCase {
 
     /// Колесо мыши: щелчки по 1–3 строки (40 px) без точных дельт, приложение доезжает анимацией 0,3 с; события —
     /// через `ScrollInput`, как в `ScrollCapture`. Вверх — от конца переписки к началу.
-    private func wheelScroll(maxOffset: Int, up: Bool) -> (offsets: [Int], motions: [Stitcher.Motion?]) {
+    private func wheelScroll(maxOffset: Int, up: Bool, line: Int = 40) -> (offsets: [Int], motions: [Stitcher.Motion?]) {
         var input = ScrollInput()
         var generator = SeededGenerator(seed: 5)
         var position = Double(up ? maxOffset : 0), target = position, click = 0.2
@@ -659,7 +659,7 @@ final class StitcherScenarioTests: XCTestCase {
         while offsets.count < 400 {
             while click < time, target != end {
                 let lines = Int.random(in: 1...3, using: &generator)
-                let next = min(Double(maxOffset), max(0, target + Double(lines * 40) * (up ? -1 : 1)))
+                let next = min(Double(maxOffset), max(0, target + Double(lines * line) * (up ? -1 : 1)))
                 animation = (click, target, next)
                 target = next
                 input.note(Stitcher.Motion(lines: Double(lines) * (up ? -1 : 1)), at: click, animated: true)
@@ -832,9 +832,9 @@ final class StitcherScenarioTests: XCTestCase {
     /// Повторное ревью 5 (R1): обои, шапка и список чатов, серии по 5 одинаковых «Ок», вниз, вверх за первый кадр и вниз
     /// за дальний, шаг 180, по изображению и с трекпадом; в каждой точке разворота — кадр без движения. Было (320c540):
     /// после потери места слой обоев находил ложное «назад», оно становилось местом, и от него проходило ложное
-    /// «вперёд» — +1213 уже снятых строк. Лишнего текста нет; честный `.lost` допустим.
+    /// «вперёд» — +1213 уже снятых строк (на ленте из 40 сообщений — +182). Лишнего текста нет; честный `.lost` допустим.
     func testWallpaperWithRepeatedBubblesNeverDuplicatesAfterLoss() {
-        let feed = reviewFeed(count: 80, run: 5, seed: 59), wall = reviewWallpaper()
+        let feed = reviewFeed(count: 40, run: 5, seed: 59), wall = reviewWallpaper()
         let maxOffset = feed.height - 980
         // «Качели» (Z9) ловят то же, но вдвое дольше в отладочной сборке; они — на стенде.
         let routes: [(String, [Double])] = [("середина↓↑↓", [0.5, 0.75, 0.25, 0.95])]
@@ -864,6 +864,40 @@ final class StitcherScenarioTests: XCTestCase {
             lock.lock(); problems[i] = problem; lock.unlock()
         }
         for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
+    }
+
+    // MARK: - Ревью 7: после потери места склейка снова находит его
+
+    /// Страница колесом вниз, возврат вверх на 1,1 экрана (дальше кадра от дальнего — перекрытия с ним нет) и снова
+    /// вниз. Было (d4b8c99): «назад» после потери места проверялось и по верхней границе хода, рассчитанной на «вперёд»,
+    /// и до конца страницы не склеилось ни строки. Снимок — полный.
+    func testWheelBackMoreThanAScreenAndDownAgainKeepsEverything() {
+        let page = textPage(width: 1400, lines: prose(seed: 5, count: 200))
+        let height = 1200, click = 120
+        var offsets = [0], motions: [Stitcher.Motion?] = [Stitcher.Motion()]
+        for target in [3000, 3000 - height * 11 / 10, page.height - height] {
+            while offsets.last! != target {
+                let last = offsets.last!, next = last < target ? min(target, last + click) : max(target, last - click)
+                offsets.append(next)
+                motions.append(Stitcher.Motion(lines: Double(next - last) / 40))
+            }
+        }
+        var stitcher = Stitcher()
+        for (offset, motion) in zip(offsets, motions) { stitcher.add(makeFrame(page, offset: offset, height: height), motion: motion) }
+        guard let image = stitcher.makeImage() else { return XCTFail("нет изображения") }
+        let rows = textRows(image, page)
+        XCTAssertEqual(rows.extra, 0, "лишние строки")
+        XCTAssertEqual(rows.lost, 0, "пропавшие строки")
+    }
+
+    /// Чат на обоях с сериями «Ок»: колесом с анимацией вверх от конца, по 1–3 щелчка по 80 px. Первый ход на обоях
+    /// не находится (модель обоев ещё пуста), так бывает и на 320c540. Было (d4b8c99): после этой потери слой обоев не
+    /// принимался — `.lost` до конца, снимок из одного кадра. Снимок — полный.
+    func testWallpaperChatWithRepeatsUpByAnimatedWheelIsComplete() {
+        let feed = chatFeed(count: 30, width: 1100, run: 3, seed: 11)
+        let layout = ChatLayout(wallpaper: true, sidebar: false, bars: true)
+        let scroll = wheelScroll(maxOffset: feed.height - 980, up: true, line: 80)
+        XCTAssertNil(chatProblem(feed, layout, offsets: scroll.offsets, motions: scroll.motions, "обои, «Ок», колесо вверх"))
     }
 
     // MARK: - Терминал: кадр посреди перерисовки
