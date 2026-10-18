@@ -108,8 +108,10 @@ final class ScrollCapture: NSObject, ObservableObject {
                    + "listenEvents=\(CGPreflightListenEventAccess() ? 1 : 0) "
                    + "smoothScroll=\(UserDefaults.standard.bool(forKey: Pref.smoothScroll) ? 1 : 0)/\(SmoothScroll.shared.isRunning ? 1 : 0)")
         log?.write(ScrollCaptureLog.frameColumns)
-        tick()
-        let timer = Timer(timeInterval: 0.15, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
+        // Первый кадр — не сразу: только что выведенное окно система может показать анимацией, а её кадры рисует не
+        // наше приложение, и фильтр их не исключает (1.6.6: рамка в нижнем куске снимка, кадр 0 через 0,09 с).
+        let timer = Timer(fireAt: Date(timeIntervalSinceNow: Self.firstFrameDelay), interval: 0.15, target: self,
+                          selector: #selector(tick), userInfo: nil, repeats: true)
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
@@ -348,19 +350,32 @@ final class ScrollCapture: NSObject, ObservableObject {
 
     // MARK: - Панели
 
-    private func showPanels() {
-        let border = NSPanel(contentRect: rect.insetBy(dx: -3, dy: -3),
+    /// Через сколько секунд после показа панелей снимается первый кадр.
+    static let firstFrameDelay: TimeInterval = 0.3
+    /// Рамка лежит снаружи области съёмки: линия — в полях панели, внутри области — ни одной точки.
+    static let borderMargin: CGFloat = 3
+
+    /// Рамка вокруг области: без анимации появления — анимацию рисует система, а не наше приложение (её кадры фильтр
+    /// захвата не исключает), и рамка в ней меньше настоящей, то есть внутри области.
+    static func makeBorderPanel(around rect: NSRect) -> NSPanel {
+        let border = NSPanel(contentRect: rect.insetBy(dx: -borderMargin, dy: -borderMargin),
                              styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         border.isOpaque = false
         border.backgroundColor = .clear
         border.ignoresMouseEvents = true
         border.hasShadow = false
+        border.animationBehavior = .none
         border.level = .statusBar
         border.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         border.contentView = NSHostingView(rootView:
-            RoundedRectangle(cornerRadius: 3)
+            RoundedRectangle(cornerRadius: borderMargin)
                 .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
                 .foregroundStyle(Color.red))
+        return border
+    }
+
+    private func showPanels() {
+        let border = Self.makeBorderPanel(around: rect)
         border.orderFrontRegardless()
         borderPanel = border
 
@@ -371,6 +386,7 @@ final class ScrollCapture: NSObject, ObservableObject {
         hud.isOpaque = false
         hud.backgroundColor = .clear
         hud.hasShadow = true
+        hud.animationBehavior = .none
         hud.level = .statusBar
         hud.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         hud.contentView = host
