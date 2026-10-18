@@ -252,6 +252,8 @@ struct Stitcher {
         let state: Stitcher
         let upward: Bool
         var motion: Motion?
+        /// Кадров после той склейки.
+        var age = 0
         /// Последний кадр, не нашедшийся после той склейки.
         var failed: Signature?
         init(state: Stitcher, upward: Bool, motion: Motion?) {
@@ -284,6 +286,10 @@ struct Stitcher {
         }
         guard let undo else { return result }
         if let input { undo.motion = (undo.motion ?? Motion()) + input }
+        // Откат — только сразу после склейки: пока ни один кадр после неё не нашёл место и не дольше 8 кадров.
+        // Иначе возврат на несколько экранов с паузой «откатывал» давнюю склейку и вклеивал снятое заново.
+        undo.age += 1
+        if undo.age > 8 || (result != .lost && trace.shift != nil) { self.undo = nil; return result }
         // Разрыв внутри новых строк (терминал дорисовал верх экрана на новом месте, низ — ещё на старом, а перекрытие
         // целиком в старой части) при склейке не виден: кадр приклеен, его верх — строки с другого места (на шве
         // «перетёртая» строка), и с ним больше не совпадает ни один кадр — место потеряно до конца съёмки (1.6.6,
@@ -301,7 +307,7 @@ struct Stitcher {
         defer { undo.failed = signature }
         guard let failed = undo.failed, Self.same(failed, signature) else { return result }
         var trial = undo.state
-        trial.sinceKnown += 1
+        trial.sinceKnown += undo.age
         if undo.upward { trial.up.skip(nil) } else { trial.down.skip(nil) }
         guard trial.place(frame, signature, undo.motion) == .appended, trial.upward == undo.upward,
               trial.trace.source == .exact else { return result }
