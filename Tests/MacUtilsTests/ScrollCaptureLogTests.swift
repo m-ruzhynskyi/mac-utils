@@ -127,6 +127,10 @@ final class ScrollCaptureLogTests: XCTestCase {
         let lost = ScrollCaptureLog.frameLine(index: 4, time: 1.4, grabMs: 30, addMs: 9, result: .lost, added: 0, height: 2400,
                                               trace: Stitcher.Trace(reason: .noMatch), motion: nil)
         XCTAssertEqual(lost, "frame 4 1.400 30.0 9.0 lost +0 2400 down - 0 0 - - noMatch none")
+        // Откат склейки рваного кадра: прирост может быть отрицательным.
+        let undone = ScrollCaptureLog.frameLine(index: 5, time: 1.55, grabMs: 30, addMs: 9, result: .appended, added: -33, height: 2367,
+                                                trace: Stitcher.Trace(up: true, shift: 297, source: .exact, undone: true), motion: Stitcher.Motion())
+        XCTAssertEqual(undone, "frame 5 1.550 30.0 9.0 appended -33 2367 up 297 0 0 exact - - 0")
     }
 
     func testMotionDescription() {
