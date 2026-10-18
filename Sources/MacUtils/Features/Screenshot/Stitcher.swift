@@ -189,7 +189,8 @@ struct Stitcher {
     /// Почему кадр не приклеен.
     /// `otherSide` — склейка другой стороны отвергла сдвиг: не совпал с местом, известным по первой стороне, мало
     /// перекрытия после потери места или против событий.
-    enum Reason: String { case full, noMotion, frameSize, noMatch, still, back, hidden, limit, copy, otherSide }
+    /// `torn` — кадр снят посреди перерисовки (у края новых строк перекрытие не совпадает) и пропущен.
+    enum Reason: String { case full, noMotion, frameSize, noMatch, still, back, hidden, limit, copy, otherSide, torn }
 
     /// Как решён последний кадр — для журнала съёмки: только числа и имена, без пикселей.
     struct Trace: Equatable {
@@ -202,6 +203,8 @@ struct Stitcher {
         /// Сдвиг по событиям; nil — подсказки нет (величина неизвестна или место потеряно).
         var expected: Int?
         var reason: Reason?
+        /// Прошлая склейка откачена: кадр, приклеенный последним, был снят посреди перерисовки (см. `add`).
+        var undone = false
     }
     /// Высота итога в пикселях (без строк за концом страницы, которые `makeImage` ещё вырежет).
     var height: Int {
@@ -241,6 +244,21 @@ struct Stitcher {
         sinceKnown = 0
     }
 
+    /// Склейка до последнего приклеенного кадра, какой стороной он приклеен, и события с него (см. `add`).
+    private final class Undo {
+        let state: Stitcher
+        let upward: Bool
+        var motion: Motion?
+        /// Последний кадр, не нашедшийся после той склейки.
+        var failed: Signature?
+        init(state: Stitcher, upward: Bool, motion: Motion?) {
+            self.state = state
+            self.upward = upward
+            self.motion = motion
+        }
+    }
+    private var undo: Undo?
+
     /// `motion` — события ввода после прошлого кадра (nil — неизвестно: склейка только по изображению).
     @discardableResult
     mutating func add(_ frame: CGImage, motion input: Motion? = nil) -> Result {
@@ -254,6 +272,49 @@ struct Stitcher {
                   up.start(frame, signature.flipped(), tracksMotion: input != nil) else { return .unchanged }
             return .first
         }
+        var before = self
+        before.undo = nil
+        let result = place(frame, signature, input)
+        if result == .appended {
+            undo = Undo(state: before, upward: upward, motion: input)
+            return result
+        }
+        guard let undo else { return result }
+        if let input { undo.motion = (undo.motion ?? Motion()) + input }
+        // Разрыв внутри новых строк (терминал дорисовал верх экрана на новом месте, низ — ещё на старом, а перекрытие
+        // целиком в старой части) при склейке не виден: кадр приклеен, его верх — строки с другого места (на шве
+        // «перетёртая» строка), и с ним больше не совпадает ни один кадр — место потеряно до конца съёмки (1.6.6,
+        // терминал колесом вверх). Кадр не нашёлся после последней склейки, а без неё находится — та склейка
+        // откатывается, как если бы кадра не было. Кадр после неё — как после потери места (перекрытие, достижимость,
+        // совпавшие единственные строки, сам не рваный), только точным совпадением и той же стороной: если бы
+        // откаченный кадр был цел, этот совпал бы и с ним — перекрытие с ним больше.
+        // Рваным может быть и сам этот кадр (тогда он не нашёлся бы ни с той склейкой, ни без неё, но без неё — с
+        // другим сдвигом мог бы найтись): откат — только когда экран стоит, два кадра подряд почти одинаковы и оба
+        // не нашлись после склейки.
+        guard result == .lost, trace.reason == .noMatch || trace.reason == .torn else {
+            undo.failed = nil
+            return result
+        }
+        defer { undo.failed = signature }
+        guard let failed = undo.failed, Self.same(failed, signature) else { return result }
+        var trial = undo.state
+        trial.sinceKnown += 1
+        if undo.upward { trial.up.skip(nil) } else { trial.down.skip(nil) }
+        guard trial.place(frame, signature, undo.motion) == .appended, trial.upward == undo.upward,
+              trial.trace.source == .exact else { return result }
+        self = trial
+        trace.undone = true
+        return .appended
+    }
+
+    /// Кадры почти одинаковы: содержимое стоит (строки, изменившиеся на месте, — спиннер, часы — не в счёт).
+    private static func same(_ a: Signature, _ b: Signature) -> Bool {
+        guard a.rows == b.rows else { return false }
+        let changed = (0..<a.rows).filter { a.rowKeys[$0] != b.rowKeys[$0] && (a.textured[$0] != 0 || b.textured[$0] != 0) }.count
+        return changed <= a.rows / 20
+    }
+
+    private mutating func place(_ frame: CGImage, _ signature: Signature, _ input: Motion?) -> Result {
         var flipped: Signature?
         // Дальние кадры сторон — на сколько строк от первого кадра (вниз > 0): кадр, найденный одной стороной, —
         // известное место и для другой.
@@ -457,6 +518,10 @@ struct Stitcher {
         /// похожие строки лога при нём совпадают).
         private(set) var exactCapture = false
         private(set) var lostOnRepeats = false
+        /// Прошлый кадр пропущен как снятый посреди перерисовки (см. `torn`); в перекрытии видео или анимация — разрыв
+        /// не проверяется.
+        private var skippedTorn = false
+        private var animated = false
         /// Куда последним двигалось содержимое: 1 — вперёд (приклеено), −1 — назад, 0 — ещё никуда.
         private(set) var heading = 0
         /// Обои позади содержимого, по уверенным склейкам (см. `Background`).
@@ -546,6 +611,23 @@ struct Stitcher {
                 trace.reason = .otherSide
                 return lose()
             }
+            // Кадр снят посреди перерисовки: часть экрана терминал уже нарисовал на новом месте, часть — ещё на старом.
+            // Его новые строки — с другого места, чем перекрытие (на шве «перетёртая» строка), и с ним самим не совпал бы
+            // больше ни один кадр — место потеряно до конца съёмки (1.6.6, терминал колесом вверх). Кадр пропускается, а
+            // не теряет место: события копятся, следующий кадр сравнивается с прошлым. Рваный кадр — один: второй подряд
+            // так же «рваный» — это видео или анимация в перекрытии, а не перерисовка; тогда проверка до конца съёмки
+            // выключена (иначе место терялось бы до конца или через кадр).
+            if match.shift > 0, !animated, found.source == .exact || found.source == .hint, Self.torn(match, previous, signature) {
+                if skippedTorn {
+                    animated = true
+                } else {
+                    skippedTorn = true
+                    trace.reason = .torn
+                    lostOnRepeats = false
+                    return .lost
+                }
+            }
+            skippedTorn = false
             // Сдвиг вперёд после потери места — и сдвиг назад после неё: ложное «назад» стало бы местом, и от него прошло
             // бы ложное «вперёд» (обои с сериями одинаковых пузырей).
             let checked = match.shift > 0 || match.shift < 0 && (strict || lostSinceAppend)
@@ -643,6 +725,32 @@ struct Stitcher {
             heading = 1
             advanced += match.shift
             return .appended
+        }
+
+        /// У края новых строк перекрытие не совпадает: от края подряд больше строки текста — строки, в которых заметная
+        /// часть полос с рисунком не та же, что в прошлом кадре, ни на этом сдвиге, ни на своём месте (неподвижный список
+        /// чатов, обои), а дальше от края строки совпадают. Одна изменившаяся строка (курсор, счётчик) — не разрыв.
+        private static func torn(_ match: Match, _ previous: Signature, _ current: Signature) -> Bool {
+            let w = Stitcher.columns, rows = current.rows
+            func differs(_ r: Int) -> Bool {
+                let moved = (r + match.shift) * w, here = r * w
+                var textured = 0, wrong = 0
+                for j in 0..<w where current.textured[r] >> UInt64(j) & 1 != 0 {
+                    textured += 1
+                    let hash = current.hashes[here + j]
+                    if hash != previous.hashes[moved + j], hash != previous.hashes[here + j] { wrong += 1 }
+                }
+                return wrong >= max(2, textured / 4)
+            }
+            var band = 0, r = rows - match.footer - match.shift - 1
+            while r >= match.header {
+                if current.textured[r] != 0 {
+                    if !differs(r) { break }
+                    band += 1
+                }
+                r -= 1
+            }
+            return r >= match.header && band >= max(16, rows / 32)
         }
 
         private mutating func lose(repeats: Bool = false) -> Result {

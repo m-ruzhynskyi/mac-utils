@@ -866,6 +866,63 @@ final class StitcherScenarioTests: XCTestCase {
         for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
     }
 
+    // MARK: - Терминал: кадр посреди перерисовки
+
+    /// Кадр, снятый посреди перерисовки: верх `tear` строк — уже на месте `upper`, остальное — ещё на месте `lower`.
+    private func tornFrame(_ page: CGImage, lower: Int, upper: Int, tear: Int, height: Int,
+                           overlay: @escaping (CGContext, Int, Int) -> Void) -> CGImage {
+        let all = CGRect(x: 0, y: 0, width: page.width, height: height)
+        let context = makeContext(width: page.width, height: height)
+        context.draw(makeFrame(page, offset: lower, height: height, overlay: overlay), in: all)
+        context.clip(to: CGRect(x: 0, y: height - tear, width: page.width, height: tear))
+        context.draw(makeFrame(page, offset: upper, height: height, overlay: overlay), in: all)
+        return context.makeImage()!
+    }
+
+    /// Терминал (1.6.6, журнал пользователя): колесом вверх, в историю, внизу неподвижное поле ввода. Один кадр снят
+    /// посреди перерисовки: верх экрана уже на новом месте, остальное ещё на старом, и разрыв — внутри его новых строк
+    /// (перекрытие целиком в старой части, при склейке не видно). Было: кадр приклеен со сдвигом 264 при 528 по
+    /// событиям, его верх — строки с другого места (на шве «перетёртая» строка), дальше чуть прокрутили и остановились —
+    /// и `.lost noMatch` до конца съёмки. Теперь та склейка откатывается: каждая строка ровно один раз, место найдено.
+    func testTornFrameMidRedrawIsUndone() {
+        let page = textPage(width: 1400, lines: prose(seed: 21, count: 80), font: mono)
+        let height = 1000, step = 264, torn = 4
+        let box: (CGContext, Int, Int) -> Void = { (context: CGContext, _: Int, _: Int) in
+            context.setFillColor(CGColor(gray: 0.2, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: 1400, height: 140))
+            context.setFillColor(CGColor(gray: 0.9, alpha: 1))
+            for i in 0..<20 { context.fill(CGRect(x: 40 + i * 64, y: 40 + i % 3 * 24, width: 36, height: 14)) }
+        }
+        // Кадр: низ на месте `lower`, верх (200 строк) — на `upper`, настоящем месте. После рваного кадра — ещё строка
+        // вверх, и экран стоит.
+        let offsets: [Int] = (0...torn + 1).map { page.height - height - $0 * step }
+        var frames: [(lower: Int, upper: Int)] = offsets.prefix(torn).map { ($0, $0) }
+        frames.append((offsets[torn], offsets[torn + 1]))
+        frames.append((offsets[torn + 1], offsets[torn + 1]))
+        frames += [(lower: Int, upper: Int)](repeating: (offsets[torn + 1] - 33, offsets[torn + 1] - 33), count: 3)
+        let top = frames.last!.upper
+        let want = makeFrame(page.cropping(to: CGRect(x: 0, y: top, width: page.width, height: page.height - top))!, offset: 0,
+                             height: page.height - top, overlay: box)
+        for events in [true, false] {
+            var stitcher = Stitcher()
+            var undone = 0, last = Stitcher.Result.first
+            for (i, shown) in frames.enumerated() {
+                let frame = shown.lower == shown.upper ? makeFrame(page, offset: shown.upper, height: height, overlay: box)
+                    : tornFrame(page, lower: shown.lower, upper: shown.upper, tear: 200, height: height, overlay: box)
+                let moved: Double = i == 0 ? 0 : Double(shown.upper - frames[i - 1].upper)
+                last = stitcher.add(frame, motion: events ? Stitcher.Motion(pixels: moved) : nil)
+                if stitcher.trace.undone { undone += 1 }
+            }
+            let name = events ? "с событиями" : "по изображению"
+            guard let image = stitcher.makeImage() else { XCTFail("нет изображения: \(name)"); continue }
+            let rows = textRows(image, want)
+            XCTAssertEqual(rows.extra, 0, "лишние строки: \(name)")
+            XCTAssertEqual(rows.lost, 0, "пропавшие строки: \(name)")
+            XCTAssertNotEqual(last, .lost, "место потеряно до конца: \(name)")
+            if events { XCTAssertEqual(undone, 1, "откат") }
+        }
+    }
+
     /// Журнал съёмки: как решён кадр — сторона склейки, сдвиг, источник.
     func testTraceTellsDirectionAndSource() {
         let page = textPage(width: 1400, lines: prose(seed: 3, count: 120))

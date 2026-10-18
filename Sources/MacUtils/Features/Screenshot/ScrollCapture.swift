@@ -199,6 +199,8 @@ final class ScrollCapture: NSObject, ObservableObject {
             let result = report.result, height = report.height, isFull = report.isFull
             guard !self.stopped else { return }
             self.counts[result, default: 0] += 1
+            // Откат склейки рваного кадра: высота до него — в строке кадра прирост считается от неё.
+            if report.trace.undone { self.log?.write("undo height=\(before)") }
             self.log?.write(ScrollCaptureLog.frameLine(index: index, time: requested - self.started,
                                                        grabMs: (grabbed - requested) * 1000, addMs: report.milliseconds,
                                                        result: result, added: height - before, height: height,
