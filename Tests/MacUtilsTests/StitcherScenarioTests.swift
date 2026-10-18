@@ -484,13 +484,13 @@ final class StitcherScenarioTests: XCTestCase {
     }
 
     /// Лента сообщений на прозрачном фоне: пузыри слева и справа, время, серии одинаковых «Ок».
-    private func chatFeed(count: Int, width: Int) -> CGImage {
-        var generator = SeededGenerator(seed: 11)
+    private func chatFeed(count: Int, width: Int, run: Int = 3, seed: UInt64 = 11) -> CGImage {
+        var generator = SeededGenerator(seed: seed)
         let words = ["привет", "как дела", "созвонимся", "завтра", "в пятницу", "отправил файл", "посмотри", "отлично", "спасибо"]
         var messages: [(mine: Bool, lines: [String], time: String)] = []
         for i in 0..<count {
             if i % 9 == 4 {
-                for _ in 0..<3 { messages.append((true, ["Ок"], "12:00")) }
+                for _ in 0..<run { messages.append((true, ["Ок"], "12:00")) }
                 continue
             }
             let lines: [String] = (0..<Int.random(in: 1...3, using: &generator)).map { (k: Int) -> String in
@@ -605,8 +605,8 @@ final class StitcherScenarioTests: XCTestCase {
     /// Съёмка чата: смещения ленты и события кадров; итог — каждая строка текста ленты, шапки и поля ввода ровно один раз.
     /// `allowLost` — недостача допустима, только если о ней предупредил `.lost` (повторов нет никогда).
     private func chatProblem(_ feed: CGImage, _ layout: ChatLayout, offsets: [Int], motions: [Stitcher.Motion?], _ name: String,
-                             allowLost: Bool = false) -> String? {
-        let wall: CGImage? = layout.wallpaper ? wallpaper(width: layout.sidebar ? 1100 : 1400, height: 1200) : nil
+                             allowLost: Bool = false, wall given: CGImage? = nil) -> String? {
+        let wall: CGImage? = layout.wallpaper ? given ?? wallpaper(width: layout.sidebar ? 1100 : 1400, height: 1200) : nil
         var stitcher = Stitcher()
         var warned = false
         for (offset, motion) in zip(offsets, motions) {
@@ -648,7 +648,7 @@ final class StitcherScenarioTests: XCTestCase {
 
     /// Колесо мыши: щелчки по 1–3 строки (40 px) без точных дельт, приложение доезжает анимацией 0,3 с; события —
     /// через `ScrollInput`, как в `ScrollCapture`. Вверх — от конца переписки к началу.
-    private func wheelScroll(maxOffset: Int, up: Bool) -> (offsets: [Int], motions: [Stitcher.Motion?]) {
+    private func wheelScroll(maxOffset: Int, up: Bool, line: Int = 40) -> (offsets: [Int], motions: [Stitcher.Motion?]) {
         var input = ScrollInput()
         var generator = SeededGenerator(seed: 5)
         var position = Double(up ? maxOffset : 0), target = position, click = 0.2
@@ -659,7 +659,7 @@ final class StitcherScenarioTests: XCTestCase {
         while offsets.count < 400 {
             while click < time, target != end {
                 let lines = Int.random(in: 1...3, using: &generator)
-                let next = min(Double(maxOffset), max(0, target + Double(lines * 40) * (up ? -1 : 1)))
+                let next = min(Double(maxOffset), max(0, target + Double(lines * line) * (up ? -1 : 1)))
                 animation = (click, target, next)
                 target = next
                 input.note(Stitcher.Motion(lines: Double(lines) * (up ? -1 : 1)), at: click, animated: true)
@@ -755,6 +755,206 @@ final class StitcherScenarioTests: XCTestCase {
             lock.lock(); problems[i] = problem; lock.unlock()
         }
         for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
+    }
+
+    /// Генератор стенда ревью (`rev5/zz2`): тот же псевдослучайный ряд, что и там, — кадры совпадают с найденным случаем.
+    private struct ReviewRandom {
+        var state: UInt64
+        mutating func next(_ n: Int) -> Int {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            return Int(state >> 33) % n
+        }
+    }
+
+    /// Лента стенда ревью: каждые 5 сообщений — серия из `run` одинаковых «Ок 12:00».
+    private func reviewFeed(count: Int, run: Int, seed: UInt64) -> CGImage {
+        var random = ReviewRandom(state: seed)
+        let words = ["привет", "как дела", "созвонимся", "завтра", "в пятницу", "отправил файл", "посмотри", "отлично"]
+        var messages: [(mine: Bool, lines: [String], time: String)] = []
+        for i in 0..<count {
+            if i % 5 == 2 {
+                for _ in 0..<run { messages.append((true, ["Ок"], "12:00")) }
+                continue
+            }
+            let n = 1 + random.next(2)
+            let lines: [String] = (0..<n).map { (k: Int) -> String in
+                let count = 2 + random.next(3)
+                let text: [String] = (0..<count).map { (_: Int) -> String in words[random.next(words.count)] }
+                return text.joined(separator: " ") + (k == 0 ? " #\(i)" : "")
+            }
+            messages.append((random.next(2) == 0, lines, String(format: "%02d:%02d", 9 + i / 60 % 12, i % 60)))
+        }
+        let width = 1100, font = NSFont.systemFont(ofSize: 26)
+        let heights: [Int] = messages.map { (m: (mine: Bool, lines: [String], time: String)) -> Int in m.lines.count * 40 + 60 }
+        let total = heights.reduce(0, +) + 20 * messages.count + 40
+        let context = makeContext(width: width, height: total)
+        context.clear(CGRect(x: 0, y: 0, width: width, height: total))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        var y = 20
+        for (message, height) in zip(messages, heights) {
+            let textWidth = message.lines.map { (line: String) -> CGFloat in (line as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+            let bubble = max(200, Int(textWidth) + 120)
+            let x = message.mine ? width - bubble - 30 : 90
+            context.setFillColor(message.mine ? CGColor(red: 0.86, green: 0.97, blue: 0.8, alpha: 1) : CGColor(gray: 1, alpha: 1))
+            context.addPath(CGPath(roundedRect: CGRect(x: x, y: total - y - height, width: bubble, height: height),
+                                   cornerWidth: 18, cornerHeight: 18, transform: nil))
+            context.fillPath()
+            for (k, line) in message.lines.enumerated() {
+                (line as NSString).draw(at: NSPoint(x: CGFloat(x + 20), y: CGFloat(total - y - 16 - k * 40) - 26 * 1.3),
+                                        withAttributes: [.font: font, .foregroundColor: NSColor.black])
+            }
+            (message.time as NSString).draw(at: NSPoint(x: CGFloat(x + bubble - 90), y: CGFloat(total - y - height + 40) - 20 * 1.3),
+                                            withAttributes: [.font: NSFont.systemFont(ofSize: 20), .foregroundColor: NSColor(white: 0.35, alpha: 1)])
+            y += height + 20
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        return context.makeImage()!
+    }
+
+    /// Обои стенда ревью.
+    private func reviewWallpaper() -> CGImage {
+        let width = 1100, height = 1200
+        let context = makeContext(width: width, height: height)
+        context.setFillColor(CGColor(red: 0.8, green: 0.87, blue: 0.75, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        var state: UInt64 = 99
+        context.setStrokeColor(CGColor(red: 0.7, green: 0.8, blue: 0.66, alpha: 1))
+        context.setLineWidth(3)
+        for _ in 0..<500 {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            let x = CGFloat(state >> 40 & 2047) / 2047 * CGFloat(width), y = CGFloat(state >> 20 & 2047) / 2047 * CGFloat(height)
+            context.strokeEllipse(in: CGRect(x: x, y: y, width: 30 + CGFloat(state & 31), height: 24 + CGFloat(state >> 8 & 15)))
+        }
+        return context.makeImage()!
+    }
+
+    /// Повторное ревью 5 (R1): обои, шапка и список чатов, серии по 5 одинаковых «Ок», вниз, вверх за первый кадр и вниз
+    /// за дальний, шаг 180, по изображению и с трекпадом; в каждой точке разворота — кадр без движения. Было (320c540):
+    /// после потери места слой обоев находил ложное «назад», оно становилось местом, и от него проходило ложное
+    /// «вперёд» — +1213 уже снятых строк (на ленте из 40 сообщений — +182). Лишнего текста нет; честный `.lost` допустим.
+    func testWallpaperWithRepeatedBubblesNeverDuplicatesAfterLoss() {
+        let feed = reviewFeed(count: 40, run: 5, seed: 59), wall = reviewWallpaper()
+        let maxOffset = feed.height - 980
+        // «Качели» (Z9) ловят то же, но вдвое дольше в отладочной сборке; они — на стенде.
+        let routes: [(String, [Double])] = [("середина↓↑↓", [0.5, 0.75, 0.25, 0.95])]
+        let layout = ChatLayout(wallpaper: true, sidebar: true, bars: true)
+        var runs: [(name: String, offsets: [Int], motions: [Stitcher.Motion?])] = []
+        for (name, points) in routes {
+            for pixels in [false, true] {
+                let targets: [Int] = points.map { (point: Double) -> Int in Int(point * Double(maxOffset)) }
+                var offsets = [targets[0]], motions: [Stitcher.Motion?] = [pixels ? Stitcher.Motion() : nil]
+                for target in targets.dropFirst() {
+                    while offsets.last! != target {
+                        let last = offsets.last!, next = last < target ? min(target, last + 180) : max(target, last - 180)
+                        offsets.append(next)
+                        motions.append(pixels ? Stitcher.Motion(pixels: Double(next - last)) : nil)
+                    }
+                    offsets.append(target)
+                    motions.append(pixels ? Stitcher.Motion() : nil)
+                }
+                runs.append(("\(name)\(pixels ? ", трекпад" : "")", offsets, motions))
+            }
+        }
+        var problems = [String?](repeating: nil, count: runs.count)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: runs.count) { (i: Int) in
+            let problem = chatProblem(feed, layout, offsets: runs[i].offsets, motions: runs[i].motions, "обои, «Ок» × 5, " + runs[i].name,
+                                      allowLost: true, wall: wall)
+            lock.lock(); problems[i] = problem; lock.unlock()
+        }
+        for problem in problems.compactMap({ $0 }) { XCTFail(problem) }
+    }
+
+    // MARK: - Ревью 7: после потери места склейка снова находит его
+
+    /// Страница колесом вниз, возврат вверх на 1,1 экрана (дальше кадра от дальнего — перекрытия с ним нет) и снова
+    /// вниз. Было (d4b8c99): «назад» после потери места проверялось и по верхней границе хода, рассчитанной на «вперёд»,
+    /// и до конца страницы не склеилось ни строки. Снимок — полный.
+    func testWheelBackMoreThanAScreenAndDownAgainKeepsEverything() {
+        let page = textPage(width: 1400, lines: prose(seed: 5, count: 200))
+        let height = 1200, click = 120
+        var offsets = [0], motions: [Stitcher.Motion?] = [Stitcher.Motion()]
+        for target in [3000, 3000 - height * 11 / 10, page.height - height] {
+            while offsets.last! != target {
+                let last = offsets.last!, next = last < target ? min(target, last + click) : max(target, last - click)
+                offsets.append(next)
+                motions.append(Stitcher.Motion(lines: Double(next - last) / 40))
+            }
+        }
+        var stitcher = Stitcher()
+        for (offset, motion) in zip(offsets, motions) { stitcher.add(makeFrame(page, offset: offset, height: height), motion: motion) }
+        guard let image = stitcher.makeImage() else { return XCTFail("нет изображения") }
+        let rows = textRows(image, page)
+        XCTAssertEqual(rows.extra, 0, "лишние строки")
+        XCTAssertEqual(rows.lost, 0, "пропавшие строки")
+    }
+
+    /// Чат на обоях с сериями «Ок»: колесом с анимацией вверх от конца, по 1–3 щелчка по 80 px. Первый ход на обоях
+    /// не находится (модель обоев ещё пуста), так бывает и на 320c540. Было (d4b8c99): после этой потери слой обоев не
+    /// принимался — `.lost` до конца, снимок из одного кадра. Снимок — полный.
+    func testWallpaperChatWithRepeatsUpByAnimatedWheelIsComplete() {
+        let feed = chatFeed(count: 30, width: 1100, run: 3, seed: 11)
+        let layout = ChatLayout(wallpaper: true, sidebar: false, bars: true)
+        let scroll = wheelScroll(maxOffset: feed.height - 980, up: true, line: 80)
+        XCTAssertNil(chatProblem(feed, layout, offsets: scroll.offsets, motions: scroll.motions, "обои, «Ок», колесо вверх"))
+    }
+
+    // MARK: - Терминал: кадр посреди перерисовки
+
+    /// Кадр, снятый посреди перерисовки: верх `tear` строк — уже на месте `upper`, остальное — ещё на месте `lower`.
+    private func tornFrame(_ page: CGImage, lower: Int, upper: Int, tear: Int, height: Int,
+                           overlay: @escaping (CGContext, Int, Int) -> Void) -> CGImage {
+        let all = CGRect(x: 0, y: 0, width: page.width, height: height)
+        let context = makeContext(width: page.width, height: height)
+        context.draw(makeFrame(page, offset: lower, height: height, overlay: overlay), in: all)
+        context.clip(to: CGRect(x: 0, y: height - tear, width: page.width, height: tear))
+        context.draw(makeFrame(page, offset: upper, height: height, overlay: overlay), in: all)
+        return context.makeImage()!
+    }
+
+    /// Терминал (1.6.6, журнал пользователя): колесом вверх, в историю, внизу неподвижное поле ввода. Один кадр снят
+    /// посреди перерисовки: верх экрана уже на новом месте, остальное ещё на старом, и разрыв — внутри его новых строк
+    /// (перекрытие целиком в старой части, при склейке не видно). Было: кадр приклеен со сдвигом 264 при 528 по
+    /// событиям, его верх — строки с другого места (на шве «перетёртая» строка), дальше чуть прокрутили и остановились —
+    /// и `.lost noMatch` до конца съёмки. Теперь та склейка откатывается: каждая строка ровно один раз, место найдено.
+    func testTornFrameMidRedrawIsUndone() {
+        let page = textPage(width: 1400, lines: prose(seed: 21, count: 80), font: mono)
+        let height = 1000, step = 264, torn = 4
+        let box: (CGContext, Int, Int) -> Void = { (context: CGContext, _: Int, _: Int) in
+            context.setFillColor(CGColor(gray: 0.2, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: 1400, height: 140))
+            context.setFillColor(CGColor(gray: 0.9, alpha: 1))
+            for i in 0..<20 { context.fill(CGRect(x: 40 + i * 64, y: 40 + i % 3 * 24, width: 36, height: 14)) }
+        }
+        // Кадр: низ на месте `lower`, верх (200 строк) — на `upper`, настоящем месте. После рваного кадра — ещё строка
+        // вверх, и экран стоит.
+        let offsets: [Int] = (0...torn + 1).map { page.height - height - $0 * step }
+        var frames: [(lower: Int, upper: Int)] = offsets.prefix(torn).map { ($0, $0) }
+        frames.append((offsets[torn], offsets[torn + 1]))
+        frames.append((offsets[torn + 1], offsets[torn + 1]))
+        frames += [(lower: Int, upper: Int)](repeating: (offsets[torn + 1] - 33, offsets[torn + 1] - 33), count: 3)
+        let top = frames.last!.upper
+        let want = makeFrame(page.cropping(to: CGRect(x: 0, y: top, width: page.width, height: page.height - top))!, offset: 0,
+                             height: page.height - top, overlay: box)
+        for events in [true, false] {
+            var stitcher = Stitcher()
+            var undone = 0, last = Stitcher.Result.first
+            for (i, shown) in frames.enumerated() {
+                let frame = shown.lower == shown.upper ? makeFrame(page, offset: shown.upper, height: height, overlay: box)
+                    : tornFrame(page, lower: shown.lower, upper: shown.upper, tear: 200, height: height, overlay: box)
+                let moved: Double = i == 0 ? 0 : Double(shown.upper - frames[i - 1].upper)
+                last = stitcher.add(frame, motion: events ? Stitcher.Motion(pixels: moved) : nil)
+                if stitcher.trace.undone { undone += 1 }
+            }
+            let name = events ? "с событиями" : "по изображению"
+            guard let image = stitcher.makeImage() else { XCTFail("нет изображения: \(name)"); continue }
+            let rows = textRows(image, want)
+            XCTAssertEqual(rows.extra, 0, "лишние строки: \(name)")
+            XCTAssertEqual(rows.lost, 0, "пропавшие строки: \(name)")
+            XCTAssertNotEqual(last, .lost, "место потеряно до конца: \(name)")
+            if events { XCTAssertEqual(undone, 1, "откат") }
+        }
     }
 
     /// Журнал съёмки: как решён кадр — сторона склейки, сдвиг, источник.

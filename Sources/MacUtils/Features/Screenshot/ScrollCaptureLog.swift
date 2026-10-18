@@ -154,7 +154,7 @@ final class ScrollCaptureLog: @unchecked Sendable {
     static func frameLine(index: Int, time: Double, grabMs: Double, addMs: Double, result: Stitcher.Result, added: Int,
                           height: Int, trace: Stitcher.Trace, motion: Stitcher.Motion?) -> String {
         [
-            "frame", "\(index)", number(time, digits: 3), number(grabMs), number(addMs), "\(result)", "+\(added)", "\(height)",
+            "frame", "\(index)", number(time, digits: 3), number(grabMs), number(addMs), "\(result)", added < 0 ? "\(added)" : "+\(added)", "\(height)",
             trace.up ? "up" : "down", trace.shift.map { "\($0)" } ?? "-", "\(trace.header)", "\(trace.footer)", trace.source?.rawValue ?? "-",
             trace.expected.map { "\($0)" } ?? "-", trace.reason?.rawValue ?? "-", describe(motion),
         ].joined(separator: " ")
