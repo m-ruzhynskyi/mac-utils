@@ -1,7 +1,8 @@
 // Видео ведущего на странице relay (клиент для Windows и браузер): кодер WebCodecs подменён моделью, и проверяется, что
 // зритель (Mac, страница) получает кадры, по которым может начать показ: ключевой H.264 с SPS и PPS или JPEG.
 // Модели — поведение кодера Chromium на Windows, при котором зритель Mac висел в «Жду картинку…»: нет аппаратного
-// кодера, не создаётся ни один, кадры захвата напрямую не принимаются, SPS/PPS только в первом ключевом кадре.
+// кодера, не создаётся ни один, кадры захвата напрямую не принимаются, SPS/PPS только в первом ключевом кадре; и экран
+// крупнее 1920, который должен уменьшать холст (масштаб кодера Windows не проверить, обрезка сдвигает точки зрителей).
 // Из index.html берутся блок <host-video> и функция startCapture целиком.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -35,7 +36,7 @@ function page(behaviour) {
   class VideoEncoder {
     constructor({ output, error }) { this.output = output; this.error = error; this.state = 'unconfigured'; this.encodeQueueSize = 0; this.keys = 0; }
     configure(config) {
-      configs.push(config);
+      configs.push(config); this.config = `${config.width}x${config.height}`;
       const works = behaviour.any !== false && (config.hardwareAcceleration !== 'prefer-hardware' || behaviour.hardware !== false);
       if (works) { this.state = 'configured'; return; }
       const fail = () => { this.state = 'closed'; this.error(new Error('Encoder creation error.')); };
@@ -44,6 +45,7 @@ function page(behaviour) {
     encode(frame, { keyFrame }) {
       if (this.state !== 'configured') throw new Error('InvalidStateError');
       const direct = frame.source instanceof VideoFrame;
+      (behaviour.fed ??= []).push({ direct, width: frame.source?.width ?? frame.displayWidth, config: this.config });
       if (direct && behaviour.direct === 'throw') throw new Error('EncodingError');
       if (direct && behaviour.direct === 'silent') return;
       const sets = keyFrame && (!behaviour.spsOnce || this.keys === 0);
@@ -90,7 +92,8 @@ function page(behaviour) {
         clock += 1000 / 60;
         for (let k = 0; k < 5 && !wake; k++) await new Promise(setImmediate);
         const resolve = wake; wake = null;
-        resolve?.({ value: new VideoFrame(null, { displayWidth: 1920, displayHeight: 1080 }), done: false });
+        const [width, height] = behaviour.size ?? [1920, 1080];
+        resolve?.({ value: new VideoFrame(null, { displayWidth: width, displayHeight: height }), done: false });
         await new Promise(setImmediate);
       }
     },
@@ -166,6 +169,16 @@ test('кодер с задержкой в кадр на неподвижном �
   await p.run(1);
   assert.ok(p.configs.every((c) => c.hardwareAcceleration === 'prefer-hardware'), 'остался аппаратный кодер');
   assert.ok(viewer(p.sent).h264 > 30);
+});
+
+test('экран крупнее 1920 (2560×1440): кадры уменьшает холст, а не кодер; поток 1920×1080', async () => {
+  const behaviour = { size: [2560, 1440] };
+  const p = page(behaviour);
+  await p.run(1);
+  assert.ok(viewer(p.sent).canShow);
+  assert.ok(behaviour.fed.length > 30);
+  assert.ok(behaviour.fed.every((f) => !f.direct), 'ни одного кадра захвата напрямую в кодер');
+  assert.ok(p.configs.every((c) => c.width === 1920 && c.height === 1080));
 });
 
 test('SPS/PPS только в первом ключевом кадре: зритель, пришедший позже, всё равно получает их', async () => {
