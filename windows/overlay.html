@@ -2,16 +2,20 @@
 <html><head><meta charset="utf-8">
 <style>html,body{margin:0;background:transparent;overflow:hidden}canvas{position:fixed;inset:0;width:100vw;height:100vh}</style>
 </head><body><canvas id="c"></canvas>
+<script src="overlay-place.js"></script>
 <script>
 // Метки и рисунки зрителей поверх экрана ведущего (Windows). Логика рисования — как на странице трансляции.
+// Точка зрителя — доля транслируемой области; где эта область в окне меток, присылает приложение (region).
 const COLORS = { red: "#ff453a", yellow: "#ffd60a", green: "#30d158", blue: "#0a84ff", white: "#ffffff" };
 const marks = [];
+let area = null;
 const canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
+window.overlay.onRegion((r) => { area = r; });
 window.overlay.onMark((m) => { m.born = performance.now(); marks.push(m); if (marks.length === 1) requestAnimationFrame(render); });
 function render() {
   const dpr = devicePixelRatio || 1, w = innerWidth, h = innerHeight;
   canvas.width = w * dpr; canvas.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
-  const now = performance.now(), map = (p) => [p[0] * w, p[1] * h];
+  const now = performance.now(), map = (p) => overlayPlace.markPoint(p, area || { x: 0, y: 0, w, h });
   for (let i = marks.length - 1; i >= 0; i--) {
     const m = marks[i], age = (now - m.born) / 1000, life = m.type === "ping" ? 1.6 : 5;
     if (age > life) { marks.splice(i, 1); continue; }

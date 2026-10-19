@@ -6,6 +6,7 @@ const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
+const place = require("./overlay-place");
 
 const RELAY = "https://mac-utils-relay.mako-62d.workers.dev/";
 let window = null;
@@ -20,18 +21,31 @@ const hasHelper = () => fs.existsSync(HELPER);
 
 // Окно для меток: поверх того, что транслируется (экран или окно), сквозь него кликается.
 // В саму трансляцию оно не попадает — иначе зритель видел бы свою метку дважды (свою и в видео).
-// Какой монитор транслируется: по display_id источника, иначе по номеру в названии («Screen 2»), иначе основной.
-function sharedDisplay() {
-  const displays = screen.getAllDisplays();
-  const source = chosen?.source;
-  const byId = displays.find((d) => String(d.id) === String(source?.display_id || ""));
-  if (byId) return byId;
-  const index = /^screen:/.test(source?.id || "") ? Number((/(\d+)\s*$/.exec(source.name || "") || [])[1]) : NaN;
-  if (index >= 1 && index <= displays.length) {
-    // Порядок «Screen 1, 2…» у Windows — слева направо, как у мониторов по координатам.
-    return [...displays].sort((a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y)[index - 1];
-  }
-  return screen.getPrimaryDisplay();
+// Окно меток накрывает монитор транслируемой области (`target`), а метки ставятся в саму область (overlay-place.js):
+// так они не зависят от того, куда Windows на самом деле поставила окно меток. Готовится в начале трансляции, а не
+// по первой метке: иначе первые метки терялись (страница меток ещё грузилась) или ложились на весь основной экран,
+// пока помощник не сообщил, где окно.
+let overlayReady = false; // страница меток загружена
+let target = null; // транслируемая область, DIP; null — ещё не известна (окно: ждём помощника)
+let trackedRect = null; // последняя рамка окна от помощника, физические пиксели
+let overlayShown = false;
+let sourceHidden = false; // транслируемое окно свёрнуто или скрыто: меток не показываем
+const pendingMarks = [];
+
+const sharedDisplay = () => place.sharedDisplay(chosen?.source, screen.getAllDisplays(), screen.getPrimaryDisplay());
+
+// Числа для разбора, если метки лягут не туда: мониторы, область, окно меток. Без содержимого экрана и имён окон.
+function logPlacement(event) {
+  try {
+    const file = path.join(app.getPath("logs"), "overlay.log");
+    if (fs.existsSync(file) && fs.statSync(file).size > 256 * 1024) fs.rmSync(file);
+    const rect = (r) => (r ? `${r.x},${r.y},${r.width}x${r.height}` : "-");
+    const displays = screen.getAllDisplays().map((d) => `${d.id}:${rect(d.bounds)}@${d.scaleFactor}`).join(" ");
+    const kind = /^window:/.test(chosen?.source?.id || "") ? "window" : "screen";
+    const bounds = overlay && !overlay.isDestroyed() ? overlay.getContentBounds() : null;
+    fs.appendFileSync(file, `${new Date().toISOString()} ${event} ${kind} displays=[${displays}] source=${chosen?.source?.display_id || "-"} ` +
+      `target=${rect(target)} tracked=${rect(trackedRect)} overlay=${rect(bounds)}\n`);
+  } catch (_) {}
 }
 
 // Окно на мониторе с другим масштабом Windows ставит не туда и не того размера — задаём границы ещё раз.
@@ -41,29 +55,64 @@ function placeOverlay(bounds) {
   setTimeout(() => { if (overlay && !overlay.isDestroyed()) overlay.setBounds(bounds); }, 50);
 }
 
-function showOverlay() {
-  const display = sharedDisplay();
-  if (!overlay || overlay.isDestroyed()) {
-    overlay = new BrowserWindow({
-      ...display.bounds,
-      transparent: true, frame: false, resizable: false, movable: false, focusable: false,
-      skipTaskbar: true, hasShadow: false, alwaysOnTop: true,
-      webPreferences: { contextIsolation: true, preload: path.join(__dirname, "overlay-preload.js") },
-    });
-    overlay.setAlwaysOnTop(true, "screen-saver");
-    overlay.setIgnoreMouseEvents(true);
-    overlay.setContentProtection(true);
-    overlay.loadFile(path.join(__dirname, "overlay.html"));
-  }
-  overlay.showInactive();
-  if (!/^window:/.test(chosen?.source?.id || "")) placeOverlay(display.bounds);
-  trackWindow();
+// Область изменилась (или окно меток сдвинулось): окно меток — на её монитор, странице меток — где область.
+function layout() {
+  if (!overlay || overlay.isDestroyed() || !target) return;
+  const display = screen.getDisplayMatching(target);
+  if (!place.same(overlay.getBounds(), display.bounds)) placeOverlay(display.bounds);
+  sendRegion();
+}
+
+function sendRegion() {
+  if (!overlay || overlay.isDestroyed() || !overlayReady || !target) return;
+  overlay.webContents.send("region", place.region(target, overlay.getContentBounds()));
+  flushMarks();
+}
+
+function flushMarks() {
+  if (!overlayReady || !target || !pendingMarks.length) return;
+  if (sourceHidden) { pendingMarks.length = 0; return; }
+  if (!overlayShown) { overlay.showInactive(); overlayShown = true; }
+  for (const mark of pendingMarks.splice(0)) overlay.webContents.send("mark", mark);
+}
+
+function setTarget(rect, event) {
+  target = rect;
+  logPlacement(event);
+  layout();
+}
+
+// Окно меток — в начале трансляции; область экрана известна сразу, область окна — после первой строки помощника.
+function prepareOverlay() {
+  if (overlay && !overlay.isDestroyed()) return;
+  overlayReady = false; overlayShown = false; sourceHidden = false; target = null; trackedRect = null;
+  const display = sharedDisplay() || screen.getPrimaryDisplay();
+  overlay = new BrowserWindow({
+    ...display.bounds,
+    show: false, transparent: true, frame: false, resizable: false, movable: false, focusable: false,
+    skipTaskbar: true, hasShadow: false, alwaysOnTop: true,
+    webPreferences: { contextIsolation: true, preload: path.join(__dirname, "overlay-preload.js") },
+  });
+  overlay.setAlwaysOnTop(true, "screen-saver");
+  overlay.setIgnoreMouseEvents(true);
+  overlay.setContentProtection(true);
+  overlay.on("move", sendRegion);
+  overlay.on("resize", sendRegion);
+  overlay.webContents.once("did-finish-load", () => { overlayReady = true; sendRegion(); });
+  overlay.loadFile(path.join(__dirname, "overlay.html"));
+  if (sharedDisplay()) setTarget(sharedDisplay().bounds, "screen");
+  else trackWindow();
 }
 
 // Транслируется окно — держим метки ровно над ним (id источника: «window:<HWND>:0»).
 function trackWindow() {
   const match = /^window:(\d+):/.exec(chosen?.source?.id || "");
-  if (!match || tracker || !hasHelper()) return;
+  if (!match || tracker) return;
+  if (!hasHelper()) {
+    // Без помощника рамку окна не узнать: метки на весь монитор — лучше, чем ничего, но в журнале видно почему.
+    setTarget(screen.getPrimaryDisplay().bounds, "no-helper");
+    return;
+  }
   tracker = spawn(HELPER, ["track", match[1]], { windowsHide: true });
   let rest = "";
   tracker.stdout.on("data", (chunk) => {
@@ -71,11 +120,13 @@ function trackWindow() {
     rest = lines.pop();
     for (const line of lines) {
       if (!overlay || overlay.isDestroyed()) return;
+      if (line.startsWith("hidden") || line.startsWith("gone")) { overlay.hide(); overlayShown = false; sourceHidden = true; continue; }
       const [x, y, width, height] = line.trim().split(" ").map(Number);
-      if (line.startsWith("hidden") || line.startsWith("gone")) { overlay.hide(); continue; }
       if (!width || !height) continue;
-      overlay.showInactive();
-      placeOverlay(screen.screenToDipRect(null, { x, y, width, height }));
+      trackedRect = { x, y, width, height };
+      sourceHidden = false;
+      setTarget(screen.screenToDipRect(null, trackedRect), "window");
+      flushMarks();
     }
   });
   tracker.on("exit", () => { tracker = null; });
@@ -84,7 +135,8 @@ function trackWindow() {
 function hideOverlay() {
   if (tracker) { tracker.kill(); tracker = null; }
   if (overlay && !overlay.isDestroyed()) overlay.close();
-  overlay = null;
+  overlay = null; overlayReady = false; overlayShown = false; target = null; trackedRect = null;
+  pendingMarks.length = 0;
 }
 
 function cleanNames(list) {
@@ -138,12 +190,16 @@ app.whenReady().then(() => {
     // С помощником звук всегда идёт через него — так список «не передавать» можно менять прямо в эфире.
     const audio = chosen.audio && !hasHelper() && request.audioRequested;
     callback(audio ? { video: chosen.source, audio: "loopback" } : { video: chosen.source });
+    prepareOverlay();
   });
 
   // Мониторы подключили, отключили или поменяли масштаб — метки снова на нужном экране.
+  // У окна физическая рамка та же, а DIP после смены масштаба — другие: пересчитываем из последней рамки помощника.
   for (const event of ["display-added", "display-removed", "display-metrics-changed"]) {
     screen.on(event, () => {
-      if (overlay && !overlay.isDestroyed() && !/^window:/.test(chosen?.source?.id || "")) placeOverlay(sharedDisplay().bounds);
+      if (!overlay || overlay.isDestroyed()) return;
+      if (sharedDisplay()) setTarget(sharedDisplay().bounds, event);
+      else if (trackedRect) setTarget(screen.screenToDipRect(null, trackedRect), event);
     });
   }
 
@@ -156,9 +212,13 @@ app.whenReady().then(() => {
     window.flashFrame(true);
     window.show();
   });
+  // Метка ждёт, пока окно меток загрузится и станет известна область (не больше 50, иначе старые отбрасываются).
   ipcMain.on("mark", (_event, mark) => {
-    if (!overlay || overlay.isDestroyed()) showOverlay();
-    overlay.webContents.send("mark", mark);
+    if (!chosen) return;
+    if (!overlay || overlay.isDestroyed()) prepareOverlay();
+    pendingMarks.push(mark);
+    if (pendingMarks.length > 50) pendingMarks.splice(0, pendingMarks.length - 50);
+    flushMarks();
   });
   ipcMain.on("stopped", () => { hideOverlay(); stopAudio(); });
 
