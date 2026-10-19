@@ -235,4 +235,55 @@ final class ScreenShareVideoTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         XCTAssertNil(other.size, "пакет не того соединения не показывается")
     }
+
+    /// Зритель Mac настраивает декодер только по SPS/PPS из потока: ключевой кадр без них (зритель пришёл позже
+    /// единственного кадра с SPS) картинки не даёт, и счётчики для журнала это показывают. Поэтому страница ведущего
+    /// подставляет SPS/PPS в каждый ключевой кадр (relay/tests/page-video.test.cjs).
+    func testKeyFrameWithoutParameterSetsGivesNoPictureAndIsCounted() throws {
+        var pixels: CVPixelBuffer?
+        let attrs = [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
+        guard CVPixelBufferCreate(nil, 640, 360, kCVPixelFormatType_32BGRA, attrs, &pixels) == kCVReturnSuccess,
+              let pixels else { throw XCTSkip("нет буфера") }
+        let got = expectation(description: "ключевой кадр")
+        let lock = NSLock()
+        var keyPacket: Data?
+        let encoder = H264Encoder { data, key in
+            lock.lock(); defer { lock.unlock() }
+            if key, keyPacket == nil { keyPacket = data; got.fulfill() }
+        }
+        encoder.requestKeyFrame()
+        encoder.encode(pixels, at: CMTime(value: 0, timescale: 30))
+        wait(for: [got], timeout: 10)
+        let annexB = try XCTUnwrap(lock.withLock { keyPacket })
+        let start = Data([0, 0, 0, 1])
+        let stripped = H264Packet.units(annexB).filter { ($0[$0.startIndex] & 0x1F) != 7 && ($0[$0.startIndex] & 0x1F) != 8 }
+            .reduce(Data()) { (out: Data, unit: Data) -> Data in out + start + unit }
+
+        let player = H264Player()
+        let socket = NSObject()
+        player.attach(socket)
+        player.play(Data([1]) + stripped, from: socket)
+        player.play(Data([0]) + stripped, from: socket)
+        let first = expectation(description: "счётчики")
+        var counts = H264Player.Received()
+        player.received { (value: H264Player.Received) in counts = value; first.fulfill() }
+        wait(for: [first], timeout: 5)
+        XCTAssertEqual(counts, H264Player.Received(packets: 2, keys: 1, withParameterSets: 0))
+        XCTAssertNil(player.size, "без SPS/PPS декодер не настроить")
+
+        player.play(Data([1]) + annexB, from: socket)
+        let deadline = Date().addingTimeInterval(5)
+        while player.size == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        XCTAssertEqual(player.size, CGSize(width: 640, height: 360))
+        let second = expectation(description: "счётчики после SPS")
+        player.received { (value: H264Player.Received) in counts = value; second.fulfill() }
+        wait(for: [second], timeout: 5)
+        XCTAssertEqual(counts, H264Player.Received(packets: 3, keys: 2, withParameterSets: 1))
+
+        player.reset()
+        let third = expectation(description: "сброс")
+        player.received { (value: H264Player.Received) in counts = value; third.fulfill() }
+        wait(for: [third], timeout: 5)
+        XCTAssertEqual(counts, H264Player.Received(), "новый просмотр — счётчики с нуля")
+    }
 }

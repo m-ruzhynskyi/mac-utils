@@ -694,17 +694,6 @@ async function viewerChallenge(ws, id, m) {
 
 // ---- Видео H.264: аппаратное декодирование WebCodecs ----
 let decoder = null;
-function nalUnits(data) {
-  const units = []; let start = -1;
-  for (let i = 0; i + 3 <= data.length; i++) {
-    if (data[i] === 0 && data[i + 1] === 0 && (data[i + 2] === 1 || (data[i + 2] === 0 && data[i + 3] === 1))) {
-      if (start >= 0) units.push(data.subarray(start, i));
-      i += data[i + 2] === 1 ? 2 : 3; start = i + 1;
-    }
-  }
-  if (start >= 0) units.push(data.subarray(start));
-  return units;
-}
 let waitKey = false, latestFrame = null, paintQueued = false;
 function paintFrame() {
   paintQueued = false;
@@ -1112,6 +1101,56 @@ $("allow").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer,
 $("always").onclick = () => { const r = requests.shift(); if (r) { trust(r.viewer, r.kind === "key" ? r.pub : null, r.fp); answer(r.viewer, true, r.rid); } showRequest(); };
 $("decline").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, false, r.rid); showRequest(); };
 
+// ---- Кодер ведущего: запасные пути (relay/tests/page-video.test.cjs берёт код между метками) ----
+// <host-video>
+// Режимы кодера H.264 по порядку: аппаратный; любой, в том числе программный (OpenH264 в Chromium). Когда не работает ни
+// один, кадры идут JPEG. Аппаратного кодера может не быть (на Windows: драйвер, удалённый рабочий стол, виртуальная машина,
+// упавший GPU-процесс). Тогда `prefer-hardware` при каждом создании кодера даёт ошибку, и без запасного пути зрители
+// ждали картинку вечно.
+const ENCODER_MODES = ["prefer-hardware", "no-preference"];
+function nalUnits(data) {
+  const units = []; let start = -1;
+  for (let i = 0; i + 3 <= data.length; i++) {
+    if (data[i] === 0 && data[i + 1] === 0 && (data[i + 2] === 1 || (data[i + 2] === 0 && data[i + 3] === 1))) {
+      if (start >= 0) units.push(data.subarray(start, i));
+      i += data[i + 2] === 1 ? 2 : 3; start = i + 1;
+    }
+  }
+  if (start >= 0) units.push(data.subarray(start));
+  return units;
+}
+// Ключевой кадр без SPS/PPS: annexb обещает их только «периодически», а зритель (Mac, страница) настраивает декодер по
+// ключевому кадру, с которого начал смотреть. Последние SPS и PPS запоминаются в `cache` и подставляются перед таким кадром.
+function withParameterSets(data, cache) {
+  const units = nalUnits(data);
+  const sps = units.find((u) => (u[0] & 0x1f) === 7), pps = units.find((u) => (u[0] & 0x1f) === 8);
+  if (sps && pps) { cache.sps = sps.slice(); cache.pps = pps.slice(); return data; }
+  if (!cache.sps || !cache.pps) return data;
+  const out = new Uint8Array(8 + cache.sps.length + cache.pps.length + data.length);
+  out.set([0, 0, 0, 1], 0); out.set(cache.sps, 4);
+  out.set([0, 0, 0, 1], 4 + cache.sps.length); out.set(cache.pps, 8 + cache.sps.length);
+  out.set(data, 8 + cache.sps.length + cache.pps.length);
+  return out;
+}
+// Что работает у этого ведущего. `direct`: кадры захвата прямо в кодер, null — не проверено, true — кодер их отдал,
+// false — через холст. `mode`: индекс в ENCODER_MODES, ENCODER_MODES.length — JPEG.
+function encoderLadder() {
+  return {
+    mode: 0, direct: null, failures: 0,
+    get jpeg() { return this.mode >= ENCODER_MODES.length; },
+    get acceleration() { return ENCODER_MODES[this.mode]; },
+    output(fedDirect) { this.failures = 0; if (fedDirect && this.direct === null) this.direct = true; },
+    // Кодер не отдал ни одного кадра (ошибка, исключение, тишина). Получал кадры захвата напрямую — сначала холст;
+    // иначе после двух неудач подряд — следующий режим.
+    failed(fedDirect) {
+      if (fedDirect && this.direct !== true) { this.direct = false; return; }
+      if (++this.failures < 2) return;
+      this.failures = 0; this.mode++;
+    },
+  };
+}
+// </host-video>
+
 function startCapture(stream, code) {
   const video = document.createElement("video");
   video.srcObject = stream;
@@ -1125,15 +1164,17 @@ function startCapture(stream, code) {
   if (!watching) status("");
   hostSocket.onclose = (event) => hostClosed(code, event);
   $("share").style.display = "none";
-  // Видео H.264 через аппаратный кодек (WebCodecs), как в Discord; нет кодека — кадры JPEG.
-  let encoder = null, frameIndex = 0, encodedSize = "";
+  // Видео H.264 через WebCodecs, как в Discord: аппаратный кодек, нет его — программный, не работает и он — кадры JPEG.
+  // `session` — текущий кодер: сколько кадров отдал и получил, когда получил первый, были ли кадры захвата напрямую, SPS/PPS.
+  let encoder = null, session = null, frameIndex = 0, encodedSize = "";
+  const ladder = encoderLadder();
   // Скорость под сеть: очередь в сокете растёт — снижаем, свободно — поднимаем.
   let bitrate = 6_000_000, encodedBitrate = 0, lastAdapt = 0, lastKey = 0;
   // 60 кадров/с; при перегрузке (очередь в сокете, кодер отстаёт, сглаженная скорость дольше 3 с ниже 5 Мбит/с) — 30,
   // назад после спокойного окна 8 с и сглаженной скорости не ниже 6 Мбит/с (если перегрузка повторяется скоро после
   // возврата — окно вдвое дольше, до 60 с). Пороги — по модели канала, как в Mac (ShareVideo.fullRateMinBitrate).
   let graceUntil = 0, fps = 60, hold = 8_000, lastTrouble = -Infinity, lastRestored = -Infinity, lastEncodedAt = -Infinity;
-  let smooth = 0, lastSample = 0, lowSince = null, lastConfigAt = 0;
+  let smooth = 0, lastSample = 0, lowSince = null, lastConfigAt = 0, softwareCap = false;
   // Прогрев (2 с после создания кодера и смены fps) гасит только «очередь кодера»: сигналы сети считаются всегда.
   const trouble = (now, encoderQueue = false) => {
     if (encoderQueue && now < graceUntil) return;
@@ -1143,13 +1184,26 @@ function startCapture(stream, code) {
     fps = 30; encodedBitrate = 0; graceUntil = now + 2000;   // перенастроить кодер на 30
   };
   const calm = (now) => {
-    if (fps === 30 && now - lastTrouble >= hold && smooth >= 6_000_000) { fps = 60; lastRestored = now; encodedBitrate = 0; graceUntil = now + 2000; }
+    if (fps === 30 && !softwareCap && now - lastTrouble >= hold && smooth >= 6_000_000) { fps = 60; lastRestored = now; encodedBitrate = 0; graceUntil = now + 2000; }
   };
-  // Кадры большого экрана (scale < 1) прямо в кодер (он сам масштабирует): null — не проверено, true — кодер отдал
-  // кадр, false — ошибка или тишина, дальше через холст.
-  let scaledDirect = null, scaledTrialAt = 0;
   forceKey = true;
-  const canEncode = typeof VideoEncoder !== "undefined";
+  let canEncode = typeof VideoEncoder !== "undefined";
+  const encoderConfig = (width, height) => ({ codec: "avc1.4D4032", width, height, bitrate: Math.round(bitrate), framerate: fps,
+                                              latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: ladder.acceleration });
+  // Кодер не отдал ни одного кадра (ошибка, исключение, тишина) — следующий путь по `ladder`. Программный кодер — 30
+  // кадров/с без возврата на 60 (60 ему не по силам), JPEG — до 8 кадров/с.
+  const encoderFailed = (mine) => {
+    if (!mine || mine !== session) return;
+    try { encoder?.close(); } catch (_) {}
+    encoder = null; session = null; forceKey = true;
+    if (mine.outputs) return;
+    const before = ladder.mode;
+    ladder.failed(mine.direct);
+    if (ladder.mode === before) return;
+    encodedSize = "";
+    if (ladder.jpeg) canEncode = false;
+    else { fps = 30; softwareCap = true; }
+  };
   // Кадр из захвата (VideoFrame или <video>) → холст до 1920 по длинной стороне → кодер.
   const tick = (source, sourceWidth, sourceHeight) => {
     if (!hostSocket || hostSocket.readyState !== 1 || !sourceWidth) { forceKey = true; return; }
@@ -1161,44 +1215,51 @@ function startCapture(stream, code) {
     smooth = smooth ? smooth + (bitrate - smooth) * (1 - Math.exp(-Math.max(0, now - lastSample) / 2500)) : bitrate;
     lastSample = now;
     if (smooth < 5_000_000) { lowSince ??= now; if (now - lowSince > 3000) trouble(now); } else lowSince = null;
-    if (scaledTrialAt && now - scaledTrialAt > 1500) { scaledDirect = false; scaledTrialAt = 0; try { encoder?.close(); } catch (_) {} encoder = null; forceKey = true; }
+    // Тишина: кадры поданы, а кодер не отдал ни одного. Не меньше 5 кадров — кодеру с задержкой в кадр на неподвижном
+    // экране следующий кадр может прийти нескоро, это не поломка.
+    if (session && !session.outputs && session.fed >= 5 && now - session.fedAt > 1500) encoderFailed(session);
     if (queued > Math.max(400_000, bitrate / 8)) { forceKey = true; trouble(now); return; }
     if (queued < Math.max(60_000, bitrate / 64)) calm(now);
     // Пониженный режим: каждый второй кадр (по времени, а не по счёту).
     if (fps === 30 && now - lastEncodedAt < 25) return;
+    if (!canEncode && now - lastEncodedAt < 125) return;
     // До 1920 по длинной стороне (как на Mac); уровень кодека 5.0 (4D4032) — 4.0 не принимает 1920×1200 и выше.
     const scale = Math.min(1, 1920 / Math.max(sourceWidth, sourceHeight));
     // Кадр захвата уже нужного размера — в кодер напрямую, без копий через холст (иначе 60 кадров/с не успеваем).
-    const direct = canEncode && typeof VideoFrame !== "undefined" && source instanceof VideoFrame &&
-      (scale === 1 ? sourceWidth % 2 === 0 && sourceHeight % 2 === 0 : scaledDirect !== false);
+    // Кодер не принял такие кадры (ошибка или тишина) — дальше через холст (`ladder.direct`).
+    const direct = canEncode && typeof VideoFrame !== "undefined" && source instanceof VideoFrame && ladder.direct !== false &&
+      (scale === 1 ? sourceWidth % 2 === 0 && sourceHeight % 2 === 0 : true);
     const width = Math.round(sourceWidth * scale / 2) * 2, height = Math.round(sourceHeight * scale / 2) * 2;
     if (!direct) { canvas.width = width; canvas.height = height; ctx.drawImage(source, 0, 0, width, height); }
     if (canEncode) {
       const size = `${width}x${height}`;
       if (encoder && encoder.state === "configured" && size === encodedSize && (encodedBitrate === 0 || bitrate < encodedBitrate || (bitrate > encodedBitrate * 1.2 && now - lastConfigAt >= 2000))) {
         encodedBitrate = bitrate; lastConfigAt = now;
-        encoder.configure({ codec: "avc1.4D4032", width, height, bitrate: Math.round(bitrate), framerate: fps,
-                            latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: "prefer-hardware" });
+        try { encoder.configure(encoderConfig(width, height)); } catch (_) { encoderFailed(session); return; }
         forceKey = true;
       }
       if (!encoder || encoder.state === "closed" || size !== encodedSize) {
         try { encoder?.close(); } catch (_) {}
         encodedSize = size; forceKey = true; graceUntil = now + 2000; lastConfigAt = now;
+        const mine = session = { outputs: 0, fed: 0, fedAt: 0, direct: false };
         encoder = new VideoEncoder({
           output: (chunk) => {
-            if (scaledTrialAt) { scaledDirect = true; scaledTrialAt = 0; }
+            mine.outputs++; ladder.output(mine.direct);
             if (!hostSocket || hostSocket.readyState !== 1) return;
-            const packet = new Uint8Array(chunk.byteLength + 2);
-            packet[0] = 3; packet[1] = chunk.type === "key" ? 1 : 0;
-            chunk.copyTo(packet.subarray(2));
+            const key = chunk.type === "key";
+            let body = new Uint8Array(chunk.byteLength);
+            chunk.copyTo(body);
+            if (key) body = withParameterSets(body, mine);
+            const packet = new Uint8Array(body.length + 2);
+            packet[0] = 3; packet[1] = key ? 1 : 0; packet.set(body, 2);
             hostSocket.send(packet);
           },
-          error: () => { if (scaledTrialAt) { scaledDirect = false; scaledTrialAt = 0; } encoder = null; forceKey = true; },
+          error: () => encoderFailed(mine),
         });
         encodedBitrate = bitrate;
-        encoder.configure({ codec: "avc1.4D4032", width, height, bitrate: Math.round(bitrate), framerate: fps,
-                            latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: "prefer-hardware" });
+        try { encoder.configure(encoderConfig(width, height)); } catch (_) { encoderFailed(mine); return; }
       }
+      if (!encoder || !session) return;   // ошибка кодера пришла прямо из configure
       if (encoder.encodeQueueSize > 2) { trouble(now, true); return; }
       lastEncodedAt = now;
       // Метки всегда по performance.now(): и у прямых кадров, и у холста с keep-alive — одни часы.
@@ -1206,12 +1267,13 @@ function startCapture(stream, code) {
       let frame = null;
       try { frame = direct ? new VideoFrame(source, stamp) : new VideoFrame(canvas, stamp); } catch (_) { return; }
       const keyFrame = forceKey || now - lastKey > 4000;
-      if (direct && scale < 1 && scaledDirect === null && !scaledTrialAt) scaledTrialAt = now;
+      session.fedAt ||= now; session.fed++; if (direct) session.direct = true;
       try { encoder.encode(frame, { keyFrame }); }
-      catch (_) { if (scaledTrialAt) { scaledDirect = false; scaledTrialAt = 0; } try { encoder?.close(); } catch (_) {} encoder = null; forceKey = true; frame.close(); return; }
+      catch (_) { frame.close(); encoderFailed(session); return; }
       frame.close(); if (keyFrame) lastKey = now; forceKey = false; frameIndex++;
       return;
     }
+    lastEncodedAt = now;
     canvas.toBlob(async (blob) => {
       if (!blob || !hostSocket || hostSocket.readyState !== 1) return;
       const body = new Uint8Array(await blob.arrayBuffer());
@@ -1237,7 +1299,8 @@ function startCapture(stream, code) {
           const { value: frame, done } = await reader.read();
           if (done) break;
           lastFrameAt = performance.now();
-          try { tick(frame, frame.displayWidth, frame.displayHeight); } finally { frame.close(); }
+          // Исключение в одном кадре не должно останавливать чтение: иначе остаются только кадры keep-alive раз в 0,5 с.
+          try { tick(frame, frame.displayWidth, frame.displayHeight); } catch (_) {} finally { frame.close(); }
         }
       } catch (_) {}
     })();
