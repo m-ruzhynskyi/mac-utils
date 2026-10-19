@@ -1078,6 +1078,8 @@ final class ShareViewer: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var frame: NSImage?
+    /// Кадров JPEG с начала просмотра (для журнала, когда картинки нет).
+    private var jpegFrames = 0
     @Published private(set) var code = ""
     /// Ключ ведущего не совпал с запомненным: ждём решения пользователя (раздел 4.3 дизайна).
     @Published private(set) var keyChange: KeyChange?
@@ -1153,6 +1155,7 @@ final class ShareViewer: ObservableObject {
         self.code = code
         keyChange = nil
         frame = nil
+        jpegFrames = 0
         video.reset()
         state = .connecting
         showWindow()
@@ -1326,6 +1329,7 @@ final class ShareViewer: ObservableObject {
                         viewer.reconnectsMade = 0
                         switch data.first {
                         case ShareProtocol.frame:
+                            viewer.jpegFrames += 1
                             if let image = NSImage(data: data.dropFirst()) { viewer.frame = image }
                         case ShareProtocol.audio:
                             viewer.player.play(data.dropFirst())
@@ -1371,6 +1375,7 @@ final class ShareViewer: ObservableObject {
                             }
                             viewer.state = .watching
                             viewer.reconnectsMade = 0
+                            viewer.watchForPicture(socket)
                             viewer.hostName = json?["name"] as? String ?? ""
                             ShareHistory.shared.visited(viewer.code, name: json?["name"] as? String ?? "")
                             if let key = viewer.hostKey { ShareHistory.shared.pinHost(id: viewer.code, key: key) }
@@ -1404,6 +1409,24 @@ final class ShareViewer: ObservableObject {
                     @unknown default:
                         viewer.receive(socket)
                     }
+                }
+            }
+        }
+    }
+
+    /// Ведущий принял, а картинки нет через `pictureWait`: в журнал — что пришло (только числа). Так видно, где поток
+    /// теряется: пакетов нет совсем (ведущий не кодирует) или ключевые кадры без SPS/PPS (декодер не настроить).
+    static let pictureWait: TimeInterval = 10
+
+    private func watchForPicture(_ socket: URLSessionWebSocketTask) {
+        Log.capture.info("Просмотр: ведущий принял, жду картинку")
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pictureWait) {
+            MainActor.assumeIsolated {
+                let viewer = ShareViewer.shared
+                guard viewer.socket === socket, viewer.state == .watching, viewer.frame == nil, viewer.video.size == nil else { return }
+                let jpeg = viewer.jpegFrames
+                viewer.video.received { counts in
+                    Log.capture.info("Просмотр: нет картинки \(Int(Self.pictureWait)) с: H.264 пакетов \(counts.packets), ключевых \(counts.keys), с SPS/PPS \(counts.withParameterSets), JPEG \(jpeg)")
                 }
             }
         }
