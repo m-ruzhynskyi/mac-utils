@@ -28,10 +28,17 @@
     return [area.x + point[0] * area.w, area.y + point[1] * area.h];
   }
 
+  // Где точка `drawn` (физические пиксели) в захваченной области `capture` (физические пиксели), в долях. Совпадает
+  // с точкой зрителя — метка у ведущего на месте; нет — видно, на сколько и куда она ушла.
+  function share(drawn, capture) {
+    return [(drawn.x - capture.x) / capture.width, (drawn.y - capture.y) / capture.height];
+  }
+
   const same = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 
   exports.sharedDisplay = sharedDisplay;
   exports.region = region;
   exports.markPoint = markPoint;
   exports.same = same;
+  exports.share = share;
 })(typeof module !== "undefined" ? module.exports : (window.overlayPlace = {}));

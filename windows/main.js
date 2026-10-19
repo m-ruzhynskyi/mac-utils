@@ -48,6 +48,38 @@ function logPlacement(event) {
   } catch (_) {}
 }
 
+// Разбор метки (первые 10 за трансляцию): точка зрителя, где её нарисовала страница меток (её screenX/Y, масштаб,
+// точка на холсте), в физических пикселях — и в долях захваченной области. Доля `q` должна совпасть с точкой
+// зрителя `p`; совпала, а у зрителя метка не там — захватывается не та область, что мы отслеживаем (сравнить
+// `thumb` — пропорции захвата по Chromium — с `capture`); не совпала — видно, какая из рамок ушла.
+let marksLogged = 0;
+function logMark(report) {
+  if (marksLogged >= 10 || !overlay || overlay.isDestroyed() || !report) return;
+  marksLogged++;
+  try {
+    const rect = (r) => (r ? `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)}x${Math.round(r.height)}` : "-");
+    const pair = (a) => (a ? a.map((v) => (typeof v === "number" ? +v.toFixed(4) : v)).join(";") : "-");
+    const content = overlay.getContentBounds();
+    const toPhysRect = (r) => (screen.dipToScreenRect ? screen.dipToScreenRect(overlay, r) : r);
+    const overlayPhys = toPhysRect(content);
+    const display = sharedDisplay();
+    const capture = display ? (screen.dipToScreenRect ? screen.dipToScreenRect(null, display.bounds) : display.bounds) : trackedRect;
+    const [cx, cy] = report.point || [0, 0];
+    // Как точку видит страница меток (её положение на экране) и как её видит приложение (границы окна меток).
+    const byPage = screen.dipToScreenPoint ? screen.dipToScreenPoint({ x: report.screenX + cx, y: report.screenY + cy }) : null;
+    const byApp = { x: overlayPhys.x + cx * (report.dpr || 1), y: overlayPhys.y + cy * (report.dpr || 1) };
+    const thumb = chosen?.source?.thumbnail?.getSize?.();
+    const protectedNow = typeof overlay.isContentProtected === "function" ? overlay.isContentProtected() : "-";
+    const line = `${new Date().toISOString()} mark ${display ? "screen" : "window"} p=${pair(report.mark)} ` +
+      `q=${capture && byPage ? pair(place.share(byPage, capture)) : "-"} qApp=${capture ? pair(place.share(byApp, capture)) : "-"} ` +
+      `capture=${rect(capture)} thumb=${thumb ? `${thumb.width}x${thumb.height}` : "-"} target=${rect(target)} ` +
+      `overlay=${rect(content)} overlayPhys=${rect(overlayPhys)} page=${report.screenX},${report.screenY},${report.innerWidth}x${report.innerHeight}@${report.dpr} ` +
+      `area=${report.area ? `${Math.round(report.area.x)},${Math.round(report.area.y)},${Math.round(report.area.w)}x${Math.round(report.area.h)}` : "-"} ` +
+      `point=${pair(report.point)} source=${chosen?.source?.id?.split(":")[0] || "-"}:${chosen?.source?.id?.split(":")[1] || "-"} display_id=${chosen?.source?.display_id || "-"} protected=${protectedNow}`;
+    fs.appendFileSync(path.join(app.getPath("logs"), "overlay.log"), line + "\n");
+  } catch (_) {}
+}
+
 // Окно на мониторе с другим масштабом Windows ставит не туда и не того размера — задаём границы ещё раз.
 function placeOverlay(bounds) {
   if (!overlay || overlay.isDestroyed()) return;
@@ -72,7 +104,12 @@ function sendRegion() {
 function flushMarks() {
   if (!overlayReady || !target || !pendingMarks.length) return;
   if (sourceHidden) { pendingMarks.length = 0; return; }
-  if (!overlayShown) { overlay.showInactive(); overlayShown = true; }
+  if (!overlayShown) {
+    overlay.showInactive(); overlayShown = true;
+    // Исключение из захвата ставим после показа: заданное скрытому окну (show: false) Windows может не применить,
+    // и тогда метки видны в самом видео (1.1.16).
+    overlay.setContentProtection(true);
+  }
   for (const mark of pendingMarks.splice(0)) overlay.webContents.send("mark", mark);
 }
 
@@ -86,7 +123,7 @@ function setTarget(rect, event) {
 function prepareOverlay() {
   // Окно от прошлой трансляции (отказ после выбора источника, перезагрузка страницы) — с его областью и помощником.
   hideOverlay();
-  overlayReady = false; overlayShown = false; sourceHidden = false; target = null; trackedRect = null;
+  overlayReady = false; overlayShown = false; sourceHidden = false; target = null; trackedRect = null; marksLogged = 0;
   const display = sharedDisplay() || screen.getPrimaryDisplay();
   overlay = new BrowserWindow({
     ...display.bounds,
@@ -223,6 +260,7 @@ app.whenReady().then(() => {
     flushMarks();
   });
   ipcMain.on("stopped", () => { hideOverlay(); stopAudio(); });
+  ipcMain.on("overlay-report", (event, report) => { if (overlay && !overlay.isDestroyed() && event.sender === overlay.webContents) logMark(report); });
 
   // Программы, у которых сейчас есть звук, — для списка «Не передавать звук программ».
   ipcMain.handle("audioApps", () => new Promise((resolve) => {
