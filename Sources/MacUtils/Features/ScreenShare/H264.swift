@@ -326,6 +326,9 @@ final class H264Player: ObservableObject, @unchecked Sendable {
     /// Сокет, чьи пакеты показываем: пакеты оборванного соединения отбрасываются.
     private let sourceLock = NSLock()
     private var source: AnyObject?
+    /// Что пришло с начала просмотра (для журнала, когда картинки нет): пакеты, ключевые, ключевые с SPS и PPS.
+    struct Received: Equatable { var packets = 0, keys = 0, withParameterSets = 0 }
+    private var counts = Received()
 
     init() {
         layer.videoGravity = .resizeAspect
@@ -345,6 +348,15 @@ final class H264Player: ObservableObject, @unchecked Sendable {
         queue.async {
             self.layer.flushAndRemoveImage()
             self.format = nil
+            self.counts = Received()
+        }
+    }
+
+    /// Счётчики пакетов с начала просмотра; `done` — на главном потоке.
+    func received(_ done: @escaping @MainActor (Received) -> Void) {
+        queue.async {
+            let counts = self.counts
+            DispatchQueue.main.async { MainActor.assumeIsolated { done(counts) } }
         }
     }
 
@@ -362,13 +374,17 @@ final class H264Player: ObservableObject, @unchecked Sendable {
         guard payload.count > 1 else { return }
         let units = H264Packet.units(payload.dropFirst())
         var frame: [Data] = []
+        var sets = 0
         for unit in units {
             switch unit[unit.startIndex] & 0x1F {
-            case 7: sps = unit
-            case 8: pps = unit
+            case 7: sps = unit; sets |= 1
+            case 8: pps = unit; sets |= 2
             default: frame.append(unit)
             }
         }
+        counts.packets += 1
+        if payload.first == 1 { counts.keys += 1 }
+        if sets == 3 { counts.withParameterSets += 1 }
         if let sps, let pps, format == nil || payload.first == 1 { makeFormat(sps: sps, pps: pps) }
         guard let format, !frame.isEmpty else { return }
         // Annex B → AVCC (4 байта длины перед каждым NAL).
