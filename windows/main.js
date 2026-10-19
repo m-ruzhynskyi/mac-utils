@@ -84,7 +84,8 @@ function setTarget(rect, event) {
 
 // Окно меток — в начале трансляции; область экрана известна сразу, область окна — после первой строки помощника.
 function prepareOverlay() {
-  if (overlay && !overlay.isDestroyed()) return;
+  // Окно от прошлой трансляции (отказ после выбора источника, перезагрузка страницы) — с его областью и помощником.
+  hideOverlay();
   overlayReady = false; overlayShown = false; sourceHidden = false; target = null; trackedRect = null;
   const display = sharedDisplay() || screen.getPrimaryDisplay();
   overlay = new BrowserWindow({
@@ -113,9 +114,10 @@ function trackWindow() {
     setTarget(screen.getPrimaryDisplay().bounds, "no-helper");
     return;
   }
-  tracker = spawn(HELPER, ["track", match[1]], { windowsHide: true });
+  const mine = tracker = spawn(HELPER, ["track", match[1]], { windowsHide: true });
   let rest = "";
-  tracker.stdout.on("data", (chunk) => {
+  mine.stdout.on("data", (chunk) => {
+    if (mine !== tracker) return; // строки остановленного помощника
     const lines = (rest + chunk.toString()).split("\n");
     rest = lines.pop();
     for (const line of lines) {
@@ -129,7 +131,7 @@ function trackWindow() {
       flushMarks();
     }
   });
-  tracker.on("exit", () => { tracker = null; });
+  mine.on("exit", () => { if (tracker === mine) tracker = null; });
 }
 
 function hideOverlay() {
