@@ -159,10 +159,8 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         if pagesView.pages.isEmpty { addPage(section: 0) }
         // Разделы страниц и номера — по завершении раскладки (`finishPagination`): спрашивать раскладку всех страниц
         // на каждое нажатие — это разложить весь документ заново.
-        if force || headersChanged {
-            updatePageSections()
-            updateHeaders()
-        }
+        // Колонтитулы — сразу (по уже известным страницам); разделы страниц уточнятся, когда раскладка дойдёт до конца.
+        if force || headersChanged { updateHeaders() }
         let target = select?(next) ?? {
             let start = next.map.unit(forSource: sourceStart)
             let end = max(start, next.map.unit(forSource: sourceEnd))
@@ -210,6 +208,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
             return self.doubleClick(event, on: page)
         }
         page.number = pagesView.pages.count + 1
+        page.firstInSection = pagesView.pages.last.map { $0.section != section } ?? true
         pagesView.append(page)
         if pageCount != pagesView.pages.count { pageCount = pagesView.pages.count }
         layoutManager.addTextContainer(page.container)
@@ -507,10 +506,39 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
             return false
         }
         let caret = result.caretSource
-        return apply(result.edits, actionName: text.isEmpty ? "Удаление" : "Ввод") { rendering in
+        let single = result.edits.count == 1 && result.edits[0].range.length == 0 && !text.isEmpty
+        // Набор подряд — один шаг отмены, как в Word: прошлый шаг отменяется и применяется вместе с новым символом.
+        if single, let burst = typingBurst, burst.revision == tab.sourceRevision, tab.undo.canUndo, tab.undo.undoActionName == "Ввод",
+           result.edits[0].range.location == burst.source + (burst.text as NSString).length,
+           Date().timeIntervalSince(burst.time) < Self.typingBurstPause, (burst.text as NSString).length < 512 {
+            let combined = burst.text + result.edits[0].text
+            tab.undo.undo()
+            let end = burst.source + (combined as NSString).length
+            let done = apply([DocEdit(range: NSRange(location: burst.source, length: 0), text: combined)], actionName: "Ввод") { rendering in
+                NSRange(location: rendering.map.firstUnit(atOrAfter: end), length: 0)
+            }
+            typingBurst = done ? TypingBurst(source: burst.source, text: combined, revision: tab.sourceRevision, time: Date()) : nil
+            return done
+        }
+        let done = apply(result.edits, actionName: text.isEmpty ? "Удаление" : "Ввод") { rendering in
             NSRange(location: rendering.map.firstUnit(atOrAfter: caret), length: 0)
         }
+        typingBurst = done && single
+            ? TypingBurst(source: result.edits[0].range.location, text: result.edits[0].text, revision: tab.sourceRevision, time: Date()) : nil
+        return done
     }
+
+    /// Серия набора для склейки отмены: куда, что набрано, ревизия исходника после последнего символа, когда.
+    private struct TypingBurst {
+        var source: Int
+        var text: String
+        var revision: Int
+        var time: Date
+    }
+
+    private var typingBurst: TypingBurst?
+    /// Пауза, после которой набор — уже новый шаг отмены.
+    static let typingBurstPause: TimeInterval = 2
 
     /// Курсор не встаёт внутрь номера страницы (поле неделимо) — переносится за поле.
     nonisolated func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,

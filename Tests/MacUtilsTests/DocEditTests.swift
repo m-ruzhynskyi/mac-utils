@@ -48,10 +48,14 @@ final class DocEditTests: XCTestCase {
             let typed = Array(DocEditTests.shownForm(text).utf16)
             expected.insert(contentsOf: typed, at: min(expected.count, max(0, result.insertionUnit - removedBefore)))
             let (now, newMap) = display()
-            XCTAssertEqual(now, String(utf16CodeUnits: expected, count: expected.count), "видимый текст после правки", file: file, line: line)
+            // Разрывы «\f» сравниваем отдельно: ↩ в абзаце с `\pagebb` даёт разрыв и новому абзацу (свойства переходят, как в Word).
+            let expectedText = String(utf16CodeUnits: expected, count: expected.count)
+            XCTAssertEqual(now.replacingOccurrences(of: "\u{0C}", with: ""), expectedText.replacingOccurrences(of: "\u{0C}", with: ""),
+                           "видимый текст после правки", file: file, line: line)
             // Курсор — сразу после набранного.
             let caret = newMap.firstUnit(atOrAfter: result.caretSource)
-            XCTAssertEqual(caret, min(newMap.count, max(0, result.insertionUnit - removedBefore) + typed.count), "курсор", file: file, line: line)
+            let addedBreaks = now.utf16.filter { $0 == 0x0C }.count - expectedText.utf16.filter { $0 == 0x0C }.count
+            XCTAssertEqual(caret - max(0, addedBreaks), min(newMap.count, max(0, result.insertionUnit - removedBefore) + typed.count), "курсор", file: file, line: line)
             // Отмена (обратная правка) — байт в байт.
             let restored = NSMutableString(string: source)
             for (range, text) in undo.reversed() { restored.replaceCharacters(in: range, with: text) }

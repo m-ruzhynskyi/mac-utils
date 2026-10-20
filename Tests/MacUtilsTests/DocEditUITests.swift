@@ -87,6 +87,29 @@ final class DocEditUITests: XCTestCase {
         XCTAssertFalse(document.storage.string.contains("Демоградск"))
     }
 
+    /// Набор подряд — один шаг отмены (как в Word); пауза или переход курсора — новый шаг.
+    func testTypingBurstIsOneUndoStep() throws {
+        let (tab, document, _) = try open(Data(DocDemo.expertReport.utf8))
+        let original = tab.text as String
+        let view = try page(document)
+        let city = (document.storage.string as NSString).range(of: "Демоград")
+        view.setSelectedRange(NSRange(location: NSMaxRange(city), length: 0))
+        for letter in ["с", "к", "и", "й"] { view.insertText(letter, replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        XCTAssertTrue(document.storage.string.contains("Демоградский"))
+        XCTAssertTrue((tab.text as String).contains(DocDemo.rtf("Демоградский")))
+        tab.undo.undo()
+        XCTAssertEqual(tab.text as String, original, "одна отмена — весь набор")
+        tab.undo.redo()
+        XCTAssertTrue((tab.text as String).contains(DocDemo.rtf("Демоградский")))
+        // Курсор в другом месте — новый шаг.
+        let start = (document.storage.string as NSString).range(of: "Эксперт").location
+        settle()
+        view.setSelectedRange(NSRange(location: start, length: 0))
+        view.insertText("!", replacementRange: NSRange(location: NSNotFound, length: 0))
+        tab.undo.undo()
+        XCTAssertTrue((tab.text as String).contains(DocDemo.rtf("Демоградский")), "отменён только «!»")
+    }
+
     func testBackspaceAtParagraphStartMergesParagraphs() throws {
         let (tab, document, _) = try open(Data(DocDemo.expertReport.utf8))
         let view = try page(document)
