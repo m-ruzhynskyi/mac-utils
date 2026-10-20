@@ -151,9 +151,7 @@ final class WindowSnapStandTests: XCTestCase {
     /// Нажатие взяло окно стенда, а не чужое окно над ним: иначе отпускаем кнопку без движения (раскладки нет) и стоп.
     private func requireStandWindow() throws {
         let tiler = WindowTiler.shared
-        var pid: pid_t = 0
-        if let window = tiler.dragWindow { AXUIElementGetPid(window, &pid) }
-        guard pid == stand?.processIdentifier else {
+        guard tiler.dragWindow?.pid == stand?.processIdentifier else {
             tiler.handleMouse(.up, at: .zero)
             throw XCTSkip("окно стенда перекрыто другим окном")
         }
