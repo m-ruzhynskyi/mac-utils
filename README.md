@@ -143,9 +143,13 @@ Tests/MacUtilsTests/     модульные тесты
 
 Журнал для отладки: `log stream --predicate 'subsystem == "com.mruzhynskyi.macutils"' --level debug`.
 
-## Ссылки macutils://
+## «Команды» и ссылки macutils://
 
-Для «Команд» и скриптов: `macutils://tools`, `settings`, `annotate`, `pin`, `fix-text`, `meeting`, `break`, `warm`, `focus`, `share` (трансляция экрана под курсором без выбора) — то же, что горячие клавиши.
+В приложении «Команды» у Mac Utils свои действия с параметрами (App Intents): окна, снимки, QR, рисование, трансляция, текстовый редактор (открыть файл, «Убрать значения $ в файле» и «Найти значения $» без окна, кодировка и переводы строк файла), встречи, перерыв, тёплый экран, «Не засыпать», исправление текста, полка, громкость, «Загрузки». Частые — фразами Siri и в Spotlight («Снимок экрана в Mac Utils»).
+
+Те же действия — ссылками для «Открыть URL» и скриптов (`open "macutils://snap?left"`): `settings`, `tools`, `editor[?path=…]`, `snap?left|right|top|bottom|topLeft|…|maximize|center|restore`, `pin`, `focus`, `screenshot`, `ocr`, `screenshots-folder`, `qr`, `qr-screen`, `annotate`, `share[?screen]`, `share-start[?screen]`, `share-stop`, `watch?ID`, `viewer-monitor?N`, `meeting`, `meeting-start`, `meeting-stop`, `fix-text`, `layout-fix`, `break`, `warm`, `warm-toggle`, `keep-awake[?on|1h|3h|8h|off]`, `shelf`, `app-volume`, `downloads-sort`, `downloads-open`, `dollars-find?path=…`, `dollars-remove?path=…[&skip=N|off]`, `encoding?path=…&to=utf8[&from=windows1251]`, `line-endings?path=…&to=crlf|lf|cr`. Ссылки, которые меняют файлы, сначала спрашивают. Полный список с копированием — в настройках, «Команды и ссылки».
+
+Метаданные действий (`Contents/Resources/Metadata.appintents`) для сборки SwiftPM делает `scripts/appintents-metadata.sh` (его зовёт `build.sh`).
 
 ## Ретранслятор трансляции
 
