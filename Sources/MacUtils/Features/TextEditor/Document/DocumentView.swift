@@ -112,6 +112,43 @@ final class DocTextView: NSTextView {
         if rich { controller?.show(notice: "Вставлено без части форматирования") }
     }
 
+    // MARK: Меню и перетаскивание
+
+    /// Контекстное меню: «Показать в коде» — то же место в исходнике.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        let item = NSMenuItem(title: "Показать в коде", action: #selector(showInCode(_:)), keyEquivalent: "")
+        item.target = self
+        menu.insertItem(item, at: 0)
+        menu.insertItem(.separator(), at: 1)
+        return menu
+    }
+
+    @objc func showInCode(_ sender: Any?) {
+        guard let controller, let tab = controller.tab else { return }
+        tab.showInCode(controller.sourceSelection)
+    }
+
+    private func fileURLs(_ info: NSDraggingInfo) -> [URL] {
+        (info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        fileURLs(sender).isEmpty ? super.draggingEntered(sender) : .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        fileURLs(sender).isEmpty ? super.draggingUpdated(sender) : .copy
+    }
+
+    /// Брошенные на страницу файлы открываются вкладками (как в «Коде»), а не вставляются путём.
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = fileURLs(sender)
+        guard !urls.isEmpty else { return super.performDragOperation(sender) }
+        MainActor.assumeIsolated { EditorWindowController.shared.open(urls) }
+        return true
+    }
+
     // В документе нет «умных» замен: набранное должно попадать в исходник как есть.
     func disableSubstitutions() {
         isAutomaticQuoteSubstitutionEnabled = false
