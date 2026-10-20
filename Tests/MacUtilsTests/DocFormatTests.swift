@@ -363,6 +363,7 @@ final class DocFormatTests: XCTestCase {
 
     /// Случайные команды форматирования и колонтитулов на копиях: каждая либо проходит все проверки, либо отказывается.
     /// Колонтитул добавить и удалить — файл байт в байт как был.
+    @MainActor
     func testRealFilesFormatting() throws {
         var generator = SeededGenerator(seed: 1_020)
         var files = 0, applied = 0, refused = 0, roundTrips = 0, slowest = 0.0, tabRoundTrips = 0, tabRefused = 0
