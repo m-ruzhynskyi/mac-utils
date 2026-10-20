@@ -84,22 +84,33 @@ enum TextEncoding: String, CaseIterable, Codable {
         switch self {
         case .utf8, .utf8BOM:
             let bytes = self == .utf8BOM && data.starts(with: Self.bomUTF8) ? data.dropFirst(3) : data[...]
-            let text = String(decoding: bytes, as: UTF8.self)
+            var text = String(decoding: bytes, as: UTF8.self)
             // Неверный UTF-8 заменился бы на U+FFFD — тогда байты обратно не совпадут.
-            return text.utf8.elementsEqual(bytes) ? text : nil
+            let same = text.withUTF8 { utf8 in
+                bytes.withUnsafeBytes { raw in
+                    utf8.count == raw.count && (raw.count == 0 || memcmp(utf8.baseAddress!, raw.baseAddress!, raw.count) == 0)
+                }
+            }
+            return same ? text : nil
         case .utf16LE, .utf16BE:
             let bom = self == .utf16LE ? Self.bomUTF16LE : Self.bomUTF16BE
             let bytes = data.starts(with: bom) ? data.dropFirst(2) : data[...]
             guard bytes.count % 2 == 0 else { return nil }
-            var units = [UInt16](repeating: 0, count: bytes.count / 2)
-            var index = bytes.startIndex
-            for i in units.indices {
-                let a = UInt16(bytes[index]), b = UInt16(bytes[index + 1])
-                units[i] = self == .utf16LE ? a | b << 8 : a << 8 | b
-                index += 2
+            let count = bytes.count / 2
+            var units = [UInt16](repeating: 0, count: count)
+            let little = self == .utf16LE
+            bytes.withUnsafeBytes { raw in
+                let source = raw.bindMemory(to: UInt8.self)
+                units.withUnsafeMutableBufferPointer { target in
+                    for i in 0..<count {
+                        let a = UInt16(source[2 * i]), b = UInt16(source[2 * i + 1])
+                        target[i] = little ? a | b << 8 : a << 8 | b
+                    }
+                }
             }
-            let text = String(decoding: units, as: UTF16.self)
-            return text.utf16.elementsEqual(units) ? text : nil
+            // Одинокие половинки суррогатных пар обратно не закодируются — такие байты не UTF-16.
+            guard Self.validSurrogates(units) else { return nil }
+            return units.withUnsafeBufferPointer { NSString(characters: $0.baseAddress!, length: count) } as String
         default:
             guard let table = SingleByteTable.table(for: self) else { return nil }
             return table.decode(data)
@@ -112,13 +123,21 @@ enum TextEncoding: String, CaseIterable, Codable {
         case .utf8: return Data(text.utf8)
         case .utf8BOM: return Self.bomUTF8 + Data(text.utf8)
         case .utf16LE, .utf16BE:
-            var data = self == .utf16LE ? Self.bomUTF16LE : Self.bomUTF16BE
-            data.reserveCapacity(2 + text.utf16.count * 2)
-            for unit in text.utf16 {
-                let high = UInt8(unit >> 8), low = UInt8(unit & 0xFF)
-                if self == .utf16LE { data.append(low); data.append(high) } else { data.append(high); data.append(low) }
+            let units = Self.units(text)
+            var bytes = [UInt8](repeating: 0, count: 2 + units.count * 2)
+            let little = self == .utf16LE
+            bytes.withUnsafeMutableBufferPointer { target in
+                target[0] = little ? 0xFF : 0xFE
+                target[1] = little ? 0xFE : 0xFF
+                units.withUnsafeBufferPointer { source in
+                    for i in 0..<source.count {
+                        let high = UInt8(source[i] >> 8), low = UInt8(source[i] & 0xFF)
+                        target[2 + 2 * i] = little ? low : high
+                        target[3 + 2 * i] = little ? high : low
+                    }
+                }
             }
-            return data
+            return Data(bytes)
         default:
             return SingleByteTable.table(for: self)?.encode(text)
         }
@@ -128,12 +147,59 @@ enum TextEncoding: String, CaseIterable, Codable {
     func unrepresentable(in text: String, limit: Int = 10) -> [Character] {
         guard let table = SingleByteTable.table(for: self) else { return [] }
         var found: [Character] = []
-        for scalar in text.unicodeScalars where table.byte(for: scalar) == nil {
+        for scalar in text.unicodeScalars where table.byte(for: scalar.value) == nil {
             let character = Character(scalar)
             if !found.contains(character) { found.append(character) }
             if found.count >= limit { break }
         }
         return found
+    }
+
+    /// UTF-16 текста одним куском (у `NSString` из редактора — без перекодирования).
+    static func units(_ text: String) -> [UInt16] {
+        let string = text as NSString
+        var units = [UInt16](repeating: 0, count: string.length)
+        units.withUnsafeMutableBufferPointer { buffer in
+            guard let base = buffer.baseAddress else { return }
+            string.getCharacters(base, range: NSRange(location: 0, length: buffer.count))
+        }
+        return units
+    }
+
+    /// Каждая половинка суррогатной пары стоит в паре.
+    static func validSurrogates(_ units: [UInt16]) -> Bool {
+        units.withUnsafeBufferPointer { buffer in
+            var i = 0
+            while i < buffer.count {
+                let unit = buffer[i]
+                if unit & 0xFC00 == 0xD800 {
+                    guard i + 1 < buffer.count, buffer[i + 1] & 0xFC00 == 0xDC00 else { return false }
+                    i += 2
+                } else if unit & 0xFC00 == 0xDC00 {
+                    return false
+                } else {
+                    i += 1
+                }
+            }
+            return true
+        }
+    }
+
+    /// Есть ли байты ≥ 0x80 (по 8 байт за шаг).
+    static func hasHighBytes(_ data: Data) -> Bool {
+        data.withUnsafeBytes { raw in
+            let count = raw.count
+            var i = 0
+            while i + 8 <= count {
+                if raw.loadUnaligned(fromByteOffset: i, as: UInt64.self) & 0x8080_8080_8080_8080 != 0 { return true }
+                i += 8
+            }
+            while i < count {
+                if raw[i] >= 0x80 { return true }
+                i += 1
+            }
+            return false
+        }
     }
 
     static let bomUTF8 = Data([0xEF, 0xBB, 0xBF])
@@ -143,7 +209,7 @@ enum TextEncoding: String, CaseIterable, Codable {
     // MARK: - Автоопределение
 
     enum Reason: Equatable {
-        case bom, validUTF8, rtfCodePage(Int), fallback
+        case bom, validUTF8, rtfCodePage(Int), fallback, manual
 
         var title: String {
             switch self {
@@ -151,6 +217,7 @@ enum TextEncoding: String, CaseIterable, Codable {
             case .validUTF8: return "текст — правильный UTF-8"
             case .rtfCodePage(let page): return "по \\ansicpg\(page)"
             case .fallback: return "по умолчанию"
+            case .manual: return "выбрана вручную"
             }
         }
     }
@@ -161,11 +228,13 @@ enum TextEncoding: String, CaseIterable, Codable {
         if data.starts(with: bomUTF8) { return (.utf8BOM, .bom) }
         if data.starts(with: bomUTF16LE) { return (.utf16LE, .bom) }
         if data.starts(with: bomUTF16BE) { return (.utf16BE, .bom) }
-        let ascii = !data.contains { $0 >= 0x80 }
-        if !ascii, utf8.decode(data) != nil { return (.utf8, .validUTF8) }
+        let ascii = !hasHighBytes(data)
+        let validUTF8 = ascii || utf8.decode(data) != nil
+        if !ascii, validUTF8 { return (.utf8, .validUTF8) }
         if let page = rtfCodePage(data), let encoding = TextEncoding(codePage: page) {
-            // `\ansicpg65001` у файла с неверным UTF-8 не помогает — дальше по умолчанию.
-            if encoding.decode(data) != nil { return (encoding, .rtfCodePage(page)) }
+            // Однобайтовая кодировка читает любые байты; `\ansicpg65001` у файла с неверным UTF-8 не помогает — дальше по умолчанию.
+            let readable = encoding.group == .unicode ? encoding.decode(data) != nil : true
+            if readable { return (encoding, .rtfCodePage(page)) }
         }
         if ascii { return (.utf8, .validUTF8) }
         return (.windows1252, .fallback)
@@ -191,7 +260,8 @@ enum TextEncoding: String, CaseIterable, Codable {
 /// становится символом U+00XX (как делает Windows для 0x81 в 1252) — так у каждого байта свой символ.
 struct SingleByteTable {
     let decodeTable: [UInt16]
-    private let encodeTable: [UInt32: UInt8]
+    /// Символ BMP → байт; −1 — символа в кодировке нет. Все символы таблицы — из BMP (U+F700… тоже).
+    private let encodeTable: [Int16]
 
     private init(cfEncoding: CFStringEncoding) {
         var decode = [UInt16](repeating: 0, count: 256)
@@ -215,28 +285,48 @@ struct SingleByteTable {
             used.insert(unit)
         }
         decodeTable = decode
-        var encode: [UInt32: UInt8] = [:]
-        for (byte, unit) in decode.enumerated() { encode[UInt32(unit)] = UInt8(byte) }
+        var encode = [Int16](repeating: -1, count: 0x10000)
+        for (byte, unit) in decode.enumerated() { encode[Int(unit)] = Int16(byte) }
         encodeTable = encode
     }
 
+    /// Текст сразу в `NSString` (UTF-16): редактор и скан `$` читают его без перекодирования.
     func decode(_ data: Data) -> String {
-        var units = [UInt16](repeating: 0, count: data.count)
+        let count = data.count
+        guard count > 0 else { return "" }
+        let units = UnsafeMutablePointer<UInt16>.allocate(capacity: count)
         data.withUnsafeBytes { raw in
-            for (i, byte) in raw.enumerated() { units[i] = decodeTable[Int(byte)] }
+            let bytes = raw.bindMemory(to: UInt8.self)
+            decodeTable.withUnsafeBufferPointer { table in
+                for i in 0..<count { units[i] = table[Int(bytes[i])] }
+            }
         }
-        return String(decoding: units, as: UTF16.self)
+        return NSString(charactersNoCopy: units, length: count, freeWhenDone: true) as String
     }
 
-    func byte(for scalar: Unicode.Scalar) -> UInt8? { encodeTable[scalar.value] }
+    func byte(for scalar: UInt32) -> UInt8? {
+        guard scalar < 0x10000 else { return nil }
+        let byte = encodeTable[Int(scalar)]
+        return byte < 0 ? nil : UInt8(byte)
+    }
 
     func encode(_ text: String) -> Data? {
-        var data = Data(capacity: text.utf16.count)
-        for scalar in text.unicodeScalars {
-            guard let byte = encodeTable[scalar.value] else { return nil }
-            data.append(byte)
+        let units = TextEncoding.units(text)
+        var bytes = [UInt8](repeating: 0, count: units.count)
+        let ok = encodeTable.withUnsafeBufferPointer { table in
+            units.withUnsafeBufferPointer { source in
+                bytes.withUnsafeMutableBufferPointer { target in
+                    for i in 0..<source.count {
+                        // Половинки суррогатных пар в таблице не встречаются — символы вне BMP непредставимы.
+                        let byte = table[Int(source[i])]
+                        if byte < 0 { return false }
+                        target[i] = UInt8(byte)
+                    }
+                    return true
+                }
+            }
         }
-        return data
+        return ok ? Data(bytes) : nil
     }
 
     /// Таблицы строятся один раз при первом обращении (`static let` ленив и потокобезопасен).
