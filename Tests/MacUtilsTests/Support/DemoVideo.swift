@@ -1,4 +1,5 @@
 import AVFoundation
+import VideoToolbox
 import CoreMedia
 import CoreText
 import Foundation
@@ -151,6 +152,66 @@ enum DemoVideo {
             try appendNeroChapters(options.neroChapters, to: url)
         }
         return url
+    }
+
+    /// HDR-демо: HEVC Main10, HLG, BT.2020, 1 с. Левая половина — пик HLG (100 % сигнала), правая — 75 %
+    /// (опорный белый SDR). Без тональной компрессии обе стали бы белыми. nil — кодер HEVC 10 бит недоступен.
+    static func makeHLG(in folder: URL, name: String = "hlg.mov", width: Int = 320, height: Int = 180) async throws -> URL? {
+        let url = folder.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: url)
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let settings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.hevc,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
+            AVVideoCompressionPropertiesKey: [AVVideoProfileLevelKey: kVTProfileLevel_HEVC_Main10_AutoLevel as String],
+            AVVideoColorPropertiesKey: [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
+            ],
+        ]
+        guard writer.canApply(outputSettings: settings, forMediaType: .video) else { return nil }
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
+        input.expectsMediaDataInRealTime = false
+        let format = kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: format, kCVPixelBufferWidthKey as String: width,
+            kCVPixelBufferHeightKey as String: height,
+        ])
+        writer.add(input)
+        guard writer.startWriting() else { return nil }
+        writer.startSession(atSourceTime: .zero)
+        let frames = 24
+        var frame = 0
+        while frame < frames {
+            guard input.isReadyForMoreMediaData else { try await Task.sleep(nanoseconds: 1_000_000); continue }
+            guard let pool = adaptor.pixelBufferPool else { return nil }
+            var buffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+            guard let buffer else { return nil }
+            CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_2020, .shouldPropagate)
+            CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_2100_HLG, .shouldPropagate)
+            CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_2020, .shouldPropagate)
+            CVPixelBufferLockBaseAddress(buffer, [])
+            // Яркость 10 бит в старших битах 16-битного слова; цветность — нейтральная (512).
+            let luma = CVPixelBufferGetBaseAddressOfPlane(buffer, 0)!.assumingMemoryBound(to: UInt16.self)
+            let lumaRow = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) / 2
+            for y in 0..<height {
+                for x in 0..<width { luma[y * lumaRow + x] = UInt16(x < width / 2 ? 940 : 721) << 6 }
+            }
+            let chroma = CVPixelBufferGetBaseAddressOfPlane(buffer, 1)!.assumingMemoryBound(to: UInt16.self)
+            let chromaRow = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1) / 2
+            for y in 0..<(height / 2) {
+                for x in 0..<width { chroma[y * chromaRow + x] = UInt16(512) << 6 }
+            }
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 24)) else { return nil }
+            frame += 1
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        return writer.status == .completed ? url : nil
     }
 
     enum DemoError: Error {

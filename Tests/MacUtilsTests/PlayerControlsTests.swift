@@ -175,6 +175,17 @@ final class PlayerEntryPointTests: XCTestCase {
         XCTAssertFalse(utis.contains { $0.contains("matroska") || $0.contains("webm") || $0 == "public.avi" }, "MKV/WebM/AVI — во второй версии")
     }
 
+    /// Номер MINOR согласуется при слиянии: запись есть, но без номера и пока не в списке выпусков.
+    func testWhatsNewEntryWithoutVersionNumber() {
+        XCTAssertEqual(Changelog.videoPlayer.version, "Видеоплеер")
+        XCTAssertFalse(Changelog.videoPlayer.items.isEmpty)
+        XCTAssertFalse(Changelog.releases.contains { $0.version == Changelog.videoPlayer.version })
+        let numbered = try! NSRegularExpression(pattern: #"\b\d+\.\d+(\.\d+)?\b"#)
+        for item in Changelog.videoPlayer.items {
+            XCTAssertNil(numbered.firstMatch(in: item, range: NSRange(item.startIndex..., in: item)), "без номеров версий: \(item)")
+        }
+    }
+
     func testPanelTabIsOffByDefaultButSectionExists() {
         XCTAssertFalse(PanelTabs.defaultValue.split(separator: ",").contains("videoPlayer"), "вкладка «Плеер» в панели по умолчанию выключена")
         XCTAssertTrue(PanelTabs.available.contains(.videoPlayer))
