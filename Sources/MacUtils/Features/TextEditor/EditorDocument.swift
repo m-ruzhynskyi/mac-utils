@@ -55,7 +55,9 @@ struct FileStamp: Codable, Equatable {
         self.headHash = headHash
     }
 
-    init?(url: URL) {
+    init?(url link: URL) {
+        // По символической ссылке — отпечаток самого файла, а не ссылки.
+        let url = link.resolvingSymlinksInPath()
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = (attributes[.size] as? NSNumber)?.intValue,
               let modified = attributes[.modificationDate] as? Date,
@@ -134,7 +136,20 @@ struct EditorDocument {
         fileStamp = url.flatMap(FileStamp.init(url:))
     }
 
+    enum OpenError: LocalizedError {
+        case notRegularFile(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notRegularFile(let reason): return "Открываются только обычные файлы: \(reason)."
+            }
+        }
+    }
+
+    /// Читает только обычный файл: устройство (`/dev/zero`) или канал читались бы бесконечно.
     static func open(_ url: URL) throws -> EditorDocument {
+        let values = try url.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey])
+        guard values.isRegularFile == true else { throw OpenError.notRegularFile("это не обычный файл") }
         let data = try Data(contentsOf: url)
         return EditorDocument(data: data, url: url)
     }

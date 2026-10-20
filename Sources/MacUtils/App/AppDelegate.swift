@@ -87,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // macutils://editor — открыть редактор; macutils://editor?path=/путь/к/файлу — открыть файл.
                 let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "path" }?.value
                 if let path, !path.isEmpty {
-                    EditorWindowController.shared.open([URL(fileURLWithPath: (path as NSString).expandingTildeInPath)])
+                    EditorWindowController.shared.openFromLink(URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
                 } else {
                     EditorWindowController.shared.show()
                 }

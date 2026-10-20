@@ -155,6 +155,14 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
                 workspace.selectedID = existing.id
                 continue
             }
+            switch Self.openCheck(url) {
+            case .ok: break
+            case .large(let bytes):
+                guard confirmLargeFile(url, bytes: bytes) else { continue }
+            case .unreadable(let reason):
+                showError("Не удалось открыть «\(url.lastPathComponent)»", EditorDocument.OpenError.notRegularFile(reason))
+                continue
+            }
             do {
                 let document = try EditorDocument.open(url)
                 let replaceEmpty = workspace.tabs.count == 1 && workspace.tabs[0].document.url == nil
@@ -169,6 +177,47 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
                 showError("Не удалось открыть «\(url.lastPathComponent)»", error)
             }
         }
+    }
+
+    /// Что можно открыть: только обычный файл (не папка, устройство, канал); большой — после вопроса.
+    enum OpenCheck: Equatable {
+        case ok
+        case large(Int)
+        case unreadable(String)
+    }
+
+    static let largeFileBytes = 100 * 1024 * 1024
+
+    static func openCheck(_ url: URL) -> OpenCheck {
+        let values = try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .fileSizeKey])
+        guard let values else { return .unreadable("файл не найден") }
+        if values.isDirectory == true { return .unreadable("это папка") }
+        guard values.isRegularFile == true else { return .unreadable("это не обычный файл (устройство или канал)") }
+        let size = values.fileSize ?? 0
+        return size > largeFileBytes ? .large(size) : .ok
+    }
+
+    private func confirmLargeFile(_ url: URL, bytes: Int) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Открыть большой файл «\(url.lastPathComponent)»?"
+        alert.informativeText = "Размер — \(DS.Format.bytes(Int64(bytes))). Файл целиком читается в память, это может занять время."
+        alert.addButton(withTitle: "Открыть")
+        alert.addButton(withTitle: "Отмена")
+        NSApp.activate()
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// `macutils://editor?path=…` может вызвать любая программа или страница — сначала показать путь и спросить.
+    func openFromLink(_ url: URL) {
+        let alert = NSAlert()
+        alert.messageText = "Открыть файл в текстовом редакторе?"
+        alert.informativeText = "Ссылка просит открыть:\n\(url.path)"
+        alert.addButton(withTitle: "Открыть")
+        alert.addButton(withTitle: "Отмена")
+        NSApp.activate()
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        open([url])
     }
 
     func openDropped(_ providers: [NSItemProvider]) {
@@ -191,7 +240,45 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         }
         // Без правок — файл не трогаем (время изменения остаётся прежним).
         if !tab.isDirty, !tab.changedOnDisk { done?(true); return }
-        write(tab, to: url, done: done)
+        // Свежая сверка с диском прямо перед записью: файл могли переписать, пока окно было в фокусе
+        // (баннер появляется только при возврате в окно), — молча затирать чужую версию нельзя.
+        guard tab.document.isChangedOnDisk else { return write(tab, to: url, done: done) }
+        tab.changedOnDisk = true
+        externalChangePrompt(tab) { [weak self] choice in
+            guard let self else { done?(false); return }
+            switch choice {
+            case .overwrite: self.write(tab, to: url, done: done)
+            case .reload:
+                self.reloadFromDisk(tab)
+                done?(false)
+            case .cancel: done?(false)
+            }
+        }
+    }
+
+    enum ExternalChangeChoice { case overwrite, reload, cancel }
+
+    /// Вопрос «Файл изменён другой программой: Перезаписать / Перезагрузить / Отмена» (в тестах подменяется).
+    lazy var externalChangePrompt: (EditorTab, @escaping (ExternalChangeChoice) -> Void) -> Void = { [weak self] tab, answer in
+        guard let self, let window = self.window else { return answer(.cancel) }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Файл изменён другой программой"
+        alert.informativeText = "«\(self.workspace.displayTitle(tab))» изменили на диске после того, как он был открыт здесь. "
+            + "«Перезаписать» заменит ту версию вашей, «Перезагрузить» покажет её вместо вашей"
+            + (tab.isDirty ? " (ваши правки пропадут)." : ".")
+        alert.addButton(withTitle: "Перезаписать")
+        alert.addButton(withTitle: "Перезагрузить")
+        alert.addButton(withTitle: "Отмена")
+        alert.beginSheetModal(for: window) { response in
+            MainActor.assumeIsolated {
+                switch response {
+                case .alertFirstButtonReturn: answer(.overwrite)
+                case .alertSecondButtonReturn: answer(.reload)
+                default: answer(.cancel)
+                }
+            }
+        }
     }
 
     private func saveAs(_ tab: EditorTab, done: ((Bool) -> Void)?) {
@@ -246,7 +333,9 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
 
     /// Запись целиком: новый файл — атомарно; существующий — через замену (права, метки Finder и дата создания
     /// остаются, при сбое на диске остаётся прежний файл).
-    static func writeFile(_ data: Data, to url: URL) throws {
+    static func writeFile(_ data: Data, to link: URL) throws {
+        // Пишем в настоящий файл: `replaceItemAt` по символической ссылке заменил бы саму ссылку обычным файлом.
+        let url = link.resolvingSymlinksInPath()
         let manager = FileManager.default
         guard manager.fileExists(atPath: url.path) else { return try data.write(to: url, options: .atomic) }
         let folder = try manager.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: url, create: true)

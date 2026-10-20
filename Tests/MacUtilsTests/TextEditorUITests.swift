@@ -420,3 +420,117 @@ final class TextEditorUITests: XCTestCase {
         try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: url)
     }
 }
+
+/// По ревью: ⌘S сверяется с диском, открываются только обычные файлы, запись не рвёт символическую ссылку.
+@MainActor
+final class EditorSaveSafetyTests: XCTestCase {
+    private var folder: URL!
+    private var savedPrompt: ((EditorTab, @escaping (EditorWindowController.ExternalChangeChoice) -> Void) -> Void)!
+    private var asked = 0
+
+    override func setUpWithError() throws {
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("editor-save-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        savedPrompt = EditorWindowController.shared.externalChangePrompt
+        asked = 0
+    }
+
+    override func tearDown() {
+        EditorWindowController.shared.externalChangePrompt = savedPrompt
+        try? FileManager.default.removeItem(at: folder)
+        super.tearDown()
+    }
+
+    private func answer(_ choice: EditorWindowController.ExternalChangeChoice) {
+        EditorWindowController.shared.externalChangePrompt = { [weak self] _, reply in
+            self?.asked += 1
+            reply(choice)
+        }
+    }
+
+    private func file(_ name: String, _ text: String) throws -> URL {
+        let url = folder.appendingPathComponent(name)
+        try Data(text.utf8).write(to: url)
+        return url
+    }
+
+    private func save(_ tab: EditorTab) -> Bool {
+        var result: Bool?
+        EditorWindowController.shared.save(tab) { result = $0 }
+        return result ?? false
+    }
+
+    /// Сценарий B: правят в окне, а файл тем временем переписала другая программа — без согласия не пишем.
+    func testEditedTabDoesNotOverwriteExternalChange() throws {
+        let url = try file("form.frm", "one $A\n")
+        let tab = EditorTab(document: try EditorDocument.open(url))
+        tab.textView.insertText("my ", replacementRange: NSRange(location: 0, length: 0))
+        try Data("external version $B\n".utf8).write(to: url)
+
+        answer(.cancel)
+        XCTAssertFalse(save(tab))
+        XCTAssertEqual(asked, 1)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "external version $B\n", "отмена — чужая версия на месте")
+        XCTAssertTrue(tab.isDirty)
+
+        answer(.overwrite)
+        XCTAssertTrue(save(tab))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "my one $A\n", "явное «Перезаписать»")
+        XCTAssertFalse(tab.isDirty)
+        // После записи отпечаток новый — следующий ⌘S без вопроса.
+        tab.textView.insertText("!", replacementRange: NSRange(location: 0, length: 0))
+        XCTAssertTrue(save(tab))
+        XCTAssertEqual(asked, 2)
+    }
+
+    /// Сценарий A: файл не правили, появился баннер «изменён на диске», ⌘S по привычке — старые байты не пишутся.
+    func testUneditedTabWithBannerAsksAndReloads() throws {
+        let url = try file("form.frm", "old $A\n")
+        let tab = EditorTab(document: try EditorDocument.open(url))
+        try Data("new from git $B\n".utf8).write(to: url)
+        tab.changedOnDisk = tab.document.isChangedOnDisk
+        XCTAssertTrue(tab.changedOnDisk)
+
+        answer(.reload)
+        XCTAssertFalse(save(tab))
+        XCTAssertEqual(asked, 1)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "new from git $B\n", "файл не тронут")
+        XCTAssertEqual(tab.text as String, "new from git $B\n", "«Перезагрузить» показывает версию с диска")
+        XCTAssertFalse(tab.changedOnDisk)
+        XCTAssertFalse(tab.isDirty)
+    }
+
+    func testSaveThroughSymlinkKeepsLink() throws {
+        let target = try file("real.txt", "abc")
+        let link = folder.appendingPathComponent("link.txt")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        let tab = EditorTab(document: try EditorDocument.open(link))
+        tab.textView.insertText("x", replacementRange: NSRange(location: 3, length: 0))
+        answer(.cancel)
+        XCTAssertTrue(save(tab))
+        XCTAssertEqual(asked, 0, "своя запись через ссылку — не «изменён снаружи»")
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), target.path, "ссылка осталась ссылкой")
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "abcx")
+        XCTAssertFalse(tab.document.isChangedOnDisk)
+    }
+
+    func testOpensOnlyRegularFiles() throws {
+        let regular = try file("a.txt", "a")
+        XCTAssertEqual(EditorWindowController.openCheck(regular), .ok)
+        guard case .unreadable = EditorWindowController.openCheck(folder) else { return XCTFail("папка") }
+        guard case .unreadable = EditorWindowController.openCheck(URL(fileURLWithPath: "/dev/zero")) else { return XCTFail("устройство") }
+        guard case .unreadable = EditorWindowController.openCheck(folder.appendingPathComponent("missing.txt")) else { return XCTFail("нет файла") }
+        let fifo = folder.appendingPathComponent("pipe")
+        XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
+        guard case .unreadable = EditorWindowController.openCheck(fifo) else { return XCTFail("канал") }
+        XCTAssertThrowsError(try EditorDocument.open(URL(fileURLWithPath: "/dev/zero")), "модель тоже не читает устройства")
+        XCTAssertThrowsError(try EditorDocument.open(fifo))
+        // Большой файл — с вопросом (порог проверяется по размеру, файл не читается).
+        let big = folder.appendingPathComponent("big.log")
+        FileManager.default.createFile(atPath: big.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: big)
+        try handle.truncate(atOffset: UInt64(EditorWindowController.largeFileBytes + 1))
+        try handle.close()
+        XCTAssertEqual(EditorWindowController.openCheck(big), .large(EditorWindowController.largeFileBytes + 1))
+    }
+}
