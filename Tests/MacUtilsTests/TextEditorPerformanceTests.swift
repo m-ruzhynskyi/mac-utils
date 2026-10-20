@@ -30,11 +30,11 @@ final class TextEditorPerformanceTests: XCTestCase {
         return (Data(out), n, lines)
     }
 
-    /// Порог с запасом: ×1,5 в оптимизированной сборке (как у приложения), ×10 в отладочной — там циклы по байтам
-    /// медленнее в разы, и тест ловит только грубый регресс. Замер для отчёта:
+    /// Порог с запасом ×1,5 — только в оптимизированной сборке (как у приложения). В отладочной время только печатается:
+    /// под нагрузкой (параллельные сборки, CI) оно скачет в разы, и тест падал бы без регресса. Замер для отчёта:
     ///   swift test -c release -Xswiftc -enable-testing -Xswiftc -DDEBUG --filter TextEditorPerformance
     static func limit(_ milliseconds: Double) -> Double {
-        milliseconds * (_isDebugAssertConfiguration() ? 10 : 1.5)
+        _isDebugAssertConfiguration() ? .infinity : milliseconds * 1.5
     }
 
     static var build: String { _isDebugAssertConfiguration() ? "debug" : "release" }
