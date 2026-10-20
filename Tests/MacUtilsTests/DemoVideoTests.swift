@@ -23,7 +23,11 @@ final class DemoVideoTests: XCTestCase {
         XCTAssertEqual(Set(audible.options.compactMap { $0.extendedLanguageTag }), ["ru", "en"])
         let legibleGroup = try await asset.loadMediaSelectionGroup(for: .legible)
         let legible = try XCTUnwrap(legibleGroup, "tx3g — в группе субтитров")
-        XCTAssertEqual(Set(legible.options.compactMap { $0.extendedLanguageTag }), ["ru", "en"])
+        // Обе дорожки tx3g — в группе субтитров. macOS может добавить в группу свои варианты на языках пользователя
+        // (видели «uk-UA», «ru-RU»), поэтому проверяем, что наши есть, а не что других нет. Плеер берёт дорожки файла.
+        XCTAssertTrue(Set(legible.options.compactMap { $0.extendedLanguageTag }).isSuperset(of: ["ru", "en"]))
+        let subtitleTracks = try await asset.loadTracks(withMediaType: .subtitle)
+        XCTAssertEqual(subtitleTracks.count, 2)
     }
 
     func testEveryFrameCarriesItsNumber() async throws {
