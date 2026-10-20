@@ -616,7 +616,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
 
     /// Заглушка «Открыть в Word»: Word открывает файл с диска — несохранённые правки сначала сохранить или оставить.
     func openInWord(_ tab: EditorTab?) {
-        guard let tab, let url = tab.document.url else { return NSSound.beep() }
+        guard let tab, let url = tab.document.url else { return Feedback.beep() }
         guard let word = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.wordBundleID) else {
             let alert = NSAlert()
             alert.messageText = "Microsoft Word не найден"

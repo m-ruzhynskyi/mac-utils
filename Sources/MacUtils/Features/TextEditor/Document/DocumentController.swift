@@ -484,7 +484,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         MainActor.assumeIsolated {
             if composing { return true }
             guard ranges.count == 1, let replacement = replacementStrings?.first else {
-                NSSound.beep()
+                Feedback.beep()
                 return false
             }
             perform(replacing: ranges[0].rangeValue, with: replacement)
@@ -499,11 +499,11 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         let result = DocTextEditor.replace(units, with: text, model: model, map: rendering.map, source: tab.text)
         if let refusal = result.refusal {
             show(notice: refusal)
-            NSSound.beep()
+            Feedback.beep()
             return false
         }
         guard !result.edits.isEmpty else {
-            if units.length > 0 || !text.isEmpty { NSSound.beep() }
+            if units.length > 0 || !text.isEmpty { Feedback.beep() }
             return false
         }
         let caret = result.caretSource

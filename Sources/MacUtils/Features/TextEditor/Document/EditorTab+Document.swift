@@ -15,7 +15,7 @@ extension EditorTab {
     func setMode(_ newMode: EditorViewMode) {
         guard newMode != mode else { return }
         if newMode == .document {
-            guard canShowDocument else { return NSSound.beep() }
+            guard canShowDocument else { return Feedback.beep() }
             let selection = textView.selectedRange()
             let top = codeTopSourceLocation
             let controller = documentController ?? DocumentController(tab: self)
@@ -70,7 +70,7 @@ extension EditorTab {
         guard mode == .document, let controller = documentController else { return reveal(entry.mark.whole) }
         let map = controller.rendering.map
         let dollar = map.unit(forSource: entry.mark.dollar)
-        guard dollar < map.count, NSLocationInRange(entry.mark.dollar, map.range(at: dollar)) else { return NSSound.beep() }
+        guard dollar < map.count, NSLocationInRange(entry.mark.dollar, map.range(at: dollar)) else { return Feedback.beep() }
         let parts = entry.mark.parts.flatMap { map.units(inside: $0) }
         let end = parts.last.map(NSMaxRange) ?? dollar + 1
         let range = NSRange(location: dollar, length: max(1, end - dollar))
