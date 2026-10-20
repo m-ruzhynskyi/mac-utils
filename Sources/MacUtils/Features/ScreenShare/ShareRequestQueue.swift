@@ -158,6 +158,12 @@ final class ShareRequestQueue: ObservableObject {
         }
     }
 
+    /// Транслируется другой экран (зритель переключил монитор, «Сменить источник»): видимая панель — туда же.
+    func screenChanged() {
+        guard let panel, panel.isVisible else { return }
+        layout(force: true)
+    }
+
     private func refreshPanel() {
         if items.isEmpty {
             panel?.orderOut(nil)

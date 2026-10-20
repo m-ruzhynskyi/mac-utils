@@ -1,0 +1,116 @@
+{
+  "about": "Мониторы ведущего (SHARE-PROTOCOL §4.1). valid — что шлёт ведущий и что relay передаёт зрителям; invalid — relay отбрасывает целиком; numbering — раскладки и номера n (сортировка по x, затем по y); requests/results — switch-request и switch-result. Читают compat.test.cjs (relay), ShareCompatTests (Mac) и windows/tests/displays.test.cjs (Windows).",
+  "valid": [
+    {
+      "about": "три монитора Кати: 100 % слева, основной 4K при 175 %, 100 % справа",
+      "message": "{\"type\":\"displays\",\"v\":1,\"rev\":7,\"current\":2,\"list\":[{\"n\":1,\"primary\":false,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[-1920,154,1920,1080]},{\"n\":2,\"primary\":true,\"w\":3840,\"h\":2160,\"scale\":1.75,\"at\":[0,0,2194,1234]},{\"n\":3,\"primary\":false,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[2194,154,1920,1080]}]}",
+      "expected": {"type": "displays", "v": 1, "rev": 7, "current": 2, "list": [
+        {"n": 1, "primary": false, "w": 1920, "h": 1080, "scale": 1, "at": [-1920, 154, 1920, 1080]},
+        {"n": 2, "primary": true, "w": 3840, "h": 2160, "scale": 1.75, "at": [0, 0, 2194, 1234]},
+        {"n": 3, "primary": false, "w": 1920, "h": 1080, "scale": 1, "at": [2194, 154, 1920, 1080]}]}
+    },
+    {
+      "about": "один монитор Retina",
+      "message": "{\"type\":\"displays\",\"v\":1,\"rev\":0,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":3024,\"h\":1964,\"scale\":2,\"at\":[0,0,1512,982]}]}",
+      "expected": {"type": "displays", "v": 1, "rev": 0, "current": 1, "list": [
+        {"n": 1, "primary": true, "w": 3024, "h": 1964, "scale": 2, "at": [0, 0, 1512, 982]}]}
+    },
+    {
+      "about": "восемь мониторов в ряд — предел",
+      "message": "{\"type\":\"displays\",\"v\":1,\"rev\":2147483647,\"current\":8,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]},{\"n\":2,\"primary\":false,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[1920,0,1920,1080]},{\"n\":3,\"primary\":false,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[3840,0,1920,1080]},{\"n\":4,\"primary\":false,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[5760,0,1920,1080]},{\"n\":5,\"primary\":false,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[7680,0,1920,1080]},{\"n\":6,\"primary\":false,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[9600,0,1920,1080]},{\"n\":7,\"primary\":false,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[11520,0,1920,1080]},{\"n\":8,\"primary\":false,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[13440,0,1920,1080]}]}",
+      "expected": {"type": "displays", "v": 1, "rev": 2147483647, "current": 8, "list": [
+        {"n": 1, "primary": true, "w": 1920, "h": 1080, "scale": 1, "at": [0, 0, 1920, 1080]},
+        {"n": 2, "primary": false, "w": 1920, "h": 1080, "scale": 1, "at": [1920, 0, 1920, 1080]},
+        {"n": 3, "primary": false, "w": 1920, "h": 1080, "scale": 1, "at": [3840, 0, 1920, 1080]},
+        {"n": 4, "primary": false, "w": 1920, "h": 1080, "scale": 1, "at": [5760, 0, 1920, 1080]},
+        {"n": 5, "primary": false, "w": 1920, "h": 1080, "scale": 1, "at": [7680, 0, 1920, 1080]},
+        {"n": 6, "primary": false, "w": 1920, "h": 1080, "scale": 1, "at": [9600, 0, 1920, 1080]},
+        {"n": 7, "primary": false, "w": 1920, "h": 1080, "scale": 1, "at": [11520, 0, 1920, 1080]},
+        {"n": 8, "primary": false, "w": 1920, "h": 1080, "scale": 1, "at": [13440, 0, 1920, 1080]}]}
+    },
+    {
+      "about": "пустой список: переключать нельзя (настройка выключена или показывается окно), current нет",
+      "message": "{\"type\":\"displays\",\"v\":1,\"rev\":8,\"list\":[]}",
+      "expected": {"type": "displays", "v": 1, "rev": 8, "list": []}
+    },
+    {
+      "about": "пустой список с лишним current — current убирается",
+      "message": "{\"type\":\"displays\",\"v\":1,\"rev\":9,\"current\":1,\"list\":[]}",
+      "expected": {"type": "displays", "v": 1, "rev": 9, "list": []}
+    },
+    {
+      "about": "имена и ID устройств вырезаются, масштаб — до двух знаков",
+      "message": "{\"type\":\"displays\",\"v\":1,\"rev\":3,\"current\":1,\"name\":\"Kate PC\",\"list\":[{\"n\":1,\"primary\":true,\"w\":2560,\"h\":1440,\"scale\":1.254,\"at\":[0,0,2041.5,1148.4],\"name\":\"DELL U2720Q\",\"id\":\"2779098405\",\"display_id\":\"2779098405\"}]}",
+      "expected": {"type": "displays", "v": 1, "rev": 3, "current": 1, "list": [
+        {"n": 1, "primary": true, "w": 2560, "h": 1440, "scale": 1.25, "at": [0, 0, 2041.5, 1148.4]}]}
+    }
+  ],
+  "invalid": [
+    {"about": "девять мониторов", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1,\"h\":1,\"scale\":1,\"at\":[0,0,1,1]},{\"n\":2,\"primary\":false,\"w\":1,\"h\":1,\"scale\":1,\"at\":[1,0,1,1]},{\"n\":3,\"primary\":false,\"w\":1,\"h\":1,\"scale\":1,\"at\":[2,0,1,1]},{\"n\":4,\"primary\":false,\"w\":1,\"h\":1,\"scale\":1,\"at\":[3,0,1,1]},{\"n\":5,\"primary\":false,\"w\":1,\"h\":1,\"scale\":1,\"at\":[4,0,1,1]},{\"n\":6,\"primary\":false,\"w\":1,\"h\":1,\"scale\":1,\"at\":[5,0,1,1]},{\"n\":7,\"primary\":false,\"w\":1,\"h\":1,\"scale\":1,\"at\":[6,0,1,1]},{\"n\":8,\"primary\":false,\"w\":1,\"h\":1,\"scale\":1,\"at\":[7,0,1,1]},{\"n\":8,\"primary\":false,\"w\":1,\"h\":1,\"scale\":1,\"at\":[8,0,1,1]}]}"},
+    {"about": "повтор n", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]},{\"n\":1,\"primary\":false,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[1920,0,1920,1080]}]}"},
+    {"about": "current не из списка", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":3,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "нет current при непустом списке", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "n = 0", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":0,\"list\":[{\"n\":0,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "n = 9", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":9,\"list\":[{\"n\":9,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "w: 0", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":0,\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "h больше 32768", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":32769,\"scale\":1,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "дробные пиксели", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920.5,\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "scale: 9", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":9,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "scale: 0.25", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":0.25,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "at с NaN (в JSON — null)", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,null,1920,1080]}]}"},
+    {"about": "at из трёх чисел", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,0,1920]}]}"},
+    {"about": "ширина на схеме 0", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,0,0,1080]}]}"},
+    {"about": "координата больше 10^6", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[1000001,0,1920,1080]}]}"},
+    {"about": "строковые числа", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":\"1\",\"primary\":true,\"w\":\"1920\",\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "primary не bool", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":1,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "неизвестная версия формата", "message": "{\"type\":\"displays\",\"v\":2,\"rev\":1,\"current\":1,\"list\":[{\"n\":1,\"primary\":true,\"w\":1920,\"h\":1080,\"scale\":1,\"at\":[0,0,1920,1080]}]}"},
+    {"about": "rev отрицательный", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":-1,\"list\":[]}"},
+    {"about": "rev больше 2^31-1", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":2147483648,\"list\":[]}"},
+    {"about": "list не массив", "message": "{\"type\":\"displays\",\"v\":1,\"rev\":1,\"list\":{}}"}
+  ],
+  "numbering": [
+    {"about": "Катя: A @1 слева, B @1.75 основной, C @1 справа (DIP Windows)",
+     "screens": [{"key": "B", "primary": true, "at": [0, 0, 2194, 1234]}, {"key": "C", "primary": false, "at": [2194, 154, 1920, 1080]}, {"key": "A", "primary": false, "at": [-1920, 154, 1920, 1080]}],
+     "expected": ["A", "B", "C"]},
+    {"about": "два монитора один над другим: верхний первый",
+     "screens": [{"key": "low", "primary": true, "at": [0, 0, 1512, 982]}, {"key": "high", "primary": false, "at": [0, -1080, 1920, 1080]}],
+     "expected": ["high", "low"]},
+    {"about": "основной не первый слева",
+     "screens": [{"key": "main", "primary": true, "at": [0, 0, 1728, 1117]}, {"key": "left", "primary": false, "at": [-2560, -200, 2560, 1440]}],
+     "expected": ["left", "main"]},
+    {"about": "отрицательные координаты и одна колонка x",
+     "screens": [{"key": "c", "primary": false, "at": [-1920, 1080, 1920, 1080]}, {"key": "a", "primary": false, "at": [-3840, 0, 1920, 1080]}, {"key": "b", "primary": false, "at": [-1920, 0, 1920, 1080]}, {"key": "d", "primary": true, "at": [0, 0, 2560, 1440]}],
+     "expected": ["a", "b", "c", "d"]}
+  ],
+  "requests": {
+    "valid": [
+      {"message": "{\"type\":\"switch-request\",\"display\":3,\"rev\":7}", "expected": {"type": "switch-request", "display": 3, "rev": 7}},
+      {"message": "{\"type\":\"switch-request\",\"display\":1,\"rev\":0,\"from\":\"9999999999\",\"name\":\"Apple Support\",\"fp\":\"xxxx\"}", "expected": {"type": "switch-request", "display": 1, "rev": 0}}
+    ],
+    "invalid": [
+      "{\"type\":\"switch-request\",\"display\":0,\"rev\":7}",
+      "{\"type\":\"switch-request\",\"display\":9,\"rev\":7}",
+      "{\"type\":\"switch-request\",\"display\":\"3\",\"rev\":7}",
+      "{\"type\":\"switch-request\",\"display\":2.5,\"rev\":7}",
+      "{\"type\":\"switch-request\",\"display\":3}",
+      "{\"type\":\"switch-request\",\"display\":3,\"rev\":-1}",
+      "{\"type\":\"switch-request\",\"display\":3,\"rev\":\"7\"}"
+    ]
+  },
+  "results": {
+    "valid": [
+      {"message": "{\"type\":\"switch-result\",\"to\":\"1111111111\",\"display\":3,\"result\":\"ok\"}", "expected": {"type": "switch-result", "display": 3, "result": "ok"}},
+      {"message": "{\"type\":\"switch-result\",\"to\":\"1111111111\",\"display\":1,\"result\":\"off\"}", "expected": {"type": "switch-result", "display": 1, "result": "off"}},
+      {"message": "{\"type\":\"switch-result\",\"to\":\"1111111111\",\"display\":2,\"result\":\"stale\"}", "expected": {"type": "switch-result", "display": 2, "result": "stale"}},
+      {"message": "{\"type\":\"switch-result\",\"to\":\"1111111111\",\"display\":2,\"result\":\"busy\",\"text\":\"<b>x</b>\"}", "expected": {"type": "switch-result", "display": 2, "result": "busy"}},
+      {"message": "{\"type\":\"switch-result\",\"to\":\"1111111111\",\"display\":8,\"result\":\"failed\"}", "expected": {"type": "switch-result", "display": 8, "result": "failed"}}
+    ],
+    "invalid": [
+      "{\"type\":\"switch-result\",\"display\":3,\"result\":\"ok\"}",
+      "{\"type\":\"switch-result\",\"to\":\"\",\"display\":3,\"result\":\"ok\"}",
+      "{\"type\":\"switch-result\",\"to\":\"1111111111\",\"display\":3,\"result\":\"maybe\"}",
+      "{\"type\":\"switch-result\",\"to\":\"1111111111\",\"display\":0,\"result\":\"ok\"}",
+      "{\"type\":\"switch-result\",\"to\":\"1111111111\",\"result\":\"ok\"}"
+    ]
+  }
+}

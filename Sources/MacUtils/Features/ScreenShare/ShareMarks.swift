@@ -156,20 +156,25 @@ struct ShareMarksLayer: View {
 // MARK: - Метки на экране ведущего
 
 /// Прозрачная панель поверх того, что транслируется (экран или окно): клики проходят сквозь неё.
+/// В ней же — уведомление ведущему «‹имя› переключает на монитор N»: панель исключена из захвата, зрители его не видят.
 @MainActor
 final class ShareMarksOverlay {
     static let shared = ShareMarksOverlay()
 
     let store = ShareMarkStore()
+    let notices = ShareHostNotices()
     private var panel: NSPanel?
     private var filter: SCContentFilter?
+    /// Транслируемый экран, если известен: рамка по нему, а не по экрану под курсором (macOS до 15.2).
+    private var display: CGDirectDisplayID?
     private var follow: Timer?
 
     /// Окно меток — его в трансляцию не берём.
     var windowNumber: Int? { panel?.windowNumber }
 
-    func attach(to filter: SCContentFilter) {
+    func attach(to filter: SCContentFilter, display: CGDirectDisplayID? = nil) {
         self.filter = filter
+        self.display = filter.style == .display ? display : nil
         updateFrame()
         if follow == nil {
             // Окно могут двигать — догоняем.
@@ -187,7 +192,21 @@ final class ShareMarksOverlay {
         panel?.orderOut(nil)
         panel = nil
         filter = nil
+        display = nil
         store.clear()
+        notices.hide()
+    }
+
+    /// Зритель переключил монитор: короткое уведомление в правом верхнем углу нового монитора, 4 с, без кнопок и звука.
+    /// Показывается и при выключенных метках.
+    func notice(name: String, monitor: Int, displays: [ShareDisplay]) {
+        guard filter != nil else { return }
+        if panel == nil { updateFrame() }
+        let screen = display.flatMap { id in NSScreen.screens.first { $0.displayID == id } }
+        // Под строкой меню и индикатором «Эфир».
+        let top = screen.map { $0.frame.maxY - $0.visibleFrame.maxY } ?? 0
+        notices.show(ShareHostNotice(name: name, monitor: monitor, displays: displays), top: top + 44)
+        panel?.orderFrontRegardless()
     }
 
     func show(_ mark: ShareMark) {
@@ -216,7 +235,11 @@ final class ShareMarksOverlay {
         panel.level = .screenSaver
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         let host = NSHostingView(rootView: GeometryReader { proxy in
-            ShareMarksLayer(store: ShareMarksOverlay.shared.store, rect: CGRect(origin: .zero, size: proxy.size))
+            ZStack(alignment: .topTrailing) {
+                ShareMarksLayer(store: ShareMarksOverlay.shared.store, rect: CGRect(origin: .zero, size: proxy.size))
+                ShareHostNoticeLayer(notices: ShareMarksOverlay.shared.notices)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topTrailing)
         })
         panel.contentView = host
         self.panel = panel
@@ -231,6 +254,7 @@ final class ShareMarksOverlay {
         func cocoa(_ rect: CGRect) -> NSRect {
             NSRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
         }
+        if let display { return cocoa(CGDisplayBounds(display)) }
         if #available(macOS 15.2, *) {
             if filter.style == .window, let window = filter.includedWindows.first {
                 // Актуальная рамка окна — из списка окон (оно могло сдвинуться).
