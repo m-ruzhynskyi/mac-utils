@@ -142,6 +142,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         // Колонтитулы перерисовываются, только если изменились их группы (иначе — по кэшу).
         var hasher = Hasher()
         let source = tab.text
+        hasher.combine(fresh.facingPages)
         for section in fresh.sections {
             hasher.combine(section.props)
             for (kind, header) in section.headers.sorted(by: { $0.key.rawValue < $1.key.rawValue }) where NSMaxRange(header.group) <= source.length {
