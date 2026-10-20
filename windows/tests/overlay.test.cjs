@@ -647,3 +647,36 @@ test("switchTo даёт странице активацию (скрипт «с �
     assert.equal(calls.length, 1, "нет такого монитора — без активации");
   } finally { host.stop(); }
 });
+
+test("захват после switchTo не удался (getDisplayMedia уже отдал новый экран): switchTo(0) возвращает источник и окно меток", async () => {
+  const k = katya();
+  const host = await start(world([k.a, k.b, k.c], k.sources));
+  try {
+    await host.share("screen:2:0");
+    assert.equal(await switchTo(host, 3), true);
+    assert.deepEqual(host.overlay.phys, k.c.phys, "обработчик уже переставил окно меток на C");
+    assert.equal(await host.fake.handles.get("switchTo")({}, 0), false);
+    await tick(80);
+    assert.equal((await host.fake.handles.get("displays")()).current, 2, "источник — снова B");
+    host.mark(0.5, 0.5);
+    await tick(80);
+    assert.deepEqual(host.overlay.phys, k.b.phys, "окно меток вернулось на B");
+    near(host.landed(), expected(k.b.phys, 0.5, 0.5), "метка на B");
+    // Повторная отмена ничего не трогает: возвращаться уже не на что.
+    assert.equal(await host.fake.handles.get("switchTo")({}, 0), false);
+    assert.equal((await host.fake.handles.get("displays")()).current, 2);
+  } finally { host.stop(); }
+});
+
+test("удачное переключение не откатывается поздней отменой следующего (новый switchTo забывает прежний экран)", async () => {
+  const k = katya();
+  const host = await start(world([k.a, k.b, k.c], k.sources));
+  try {
+    await host.share("screen:2:0");
+    await switchTo(host, 3);
+    // Следующий запрос: страница не дошла до getDisplayMedia (обработчик не вызывался) и отменила выбор.
+    assert.equal(await host.fake.handles.get("switchTo")({}, 1), true);
+    assert.equal(await host.fake.handles.get("switchTo")({}, 0), false);
+    assert.equal((await host.fake.handles.get("displays")()).current, 3, "остаётся C — последний удачный");
+  } finally { host.stop(); }
+});

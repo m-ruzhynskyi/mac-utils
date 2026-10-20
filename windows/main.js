@@ -13,6 +13,7 @@ const RELAY = "https://mac-utils-relay.mako-62d.workers.dev/";
 let window = null;
 let chosen = null; // { source, audio }
 let nextSource = null; // монитор, выбранный зрителем (switchTo): его отдаст следующий getDisplayMedia страницы
+let previousSource = null; // экран до этого переключения: страница не получила поток (switchTo(0)) — возвращаемся на него
 let pendingNotice = null; // уведомление «‹имя› переключает на монитор N» — ждёт окна меток, как метки
 let overlay = null; // прозрачное окно поверх экрана ведущего: метки и рисунки зрителей
 let tracker = null; // следит, где транслируемое окно, — метки ложатся точно на него
@@ -352,7 +353,7 @@ app.whenReady().then(() => {
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     if (!chosen) return callback({});
     // Зритель переключил монитор: тот же эфир, другой экран; окно меток (prepareOverlay) — на него.
-    if (nextSource) { chosen.source = nextSource; nextSource = null; }
+    if (nextSource) { previousSource = chosen.source; chosen.source = nextSource; nextSource = null; }
     // Звук без выбранных программ идёт через помощник (mu-audio.exe), а не через общий loopback.
     // Звук отдаём, только если страница его просила, — иначе Chromium отменяет захват.
     // С помощником звук всегда идёт через него — так список «не передавать» можно менять прямо в эфире.
@@ -392,7 +393,7 @@ app.whenReady().then(() => {
     if (pendingMarks.length > 50) pendingMarks.splice(0, pendingMarks.length - 50);
     flushMarks();
   });
-  ipcMain.on("stopped", () => { hideOverlay(); stopAudio(); });
+  ipcMain.on("stopped", () => { nextSource = null; previousSource = null; hideOverlay(); stopAudio(); });
   ipcMain.on("overlay-report", (event, report) => { if (overlay && !overlay.isDestroyed() && event.sender === overlay.webContents) logMark(report); });
 
   // Программы, у которых сейчас есть звук, — для списка «Не передавать звук программ».
@@ -440,7 +441,7 @@ app.whenReady().then(() => {
     const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
     const source = sources.find((s) => s.id === id);
     chosen = source ? { source, audio: !!audio, muted: cleanNames(muted) } : null;
-    nextSource = null;
+    nextSource = null; previousSource = null;
     return !!source;
   });
 
@@ -453,9 +454,20 @@ app.whenReady().then(() => {
     return { list, current };
   });
 
-  // Зритель выбрал монитор n: источник запоминается, страница берёт его новым getDisplayMedia. 0 — отменить выбор.
+  // Зритель выбрал монитор n: источник запоминается, страница берёт его новым getDisplayMedia. 0 — переключение не
+  // состоялось: выбор забывается, а если обработчик getDisplayMedia уже отдал новый экран (и переставил окно меток), а
+  // поток страница так и не получила, — источник и окно меток возвращаются на прежний экран.
   ipcMain.handle("switchTo", async (event, n) => {
     nextSource = null;
+    if (n === 0) {
+      if (previousSource && chosen) {
+        chosen.source = previousSource;
+        previousSource = null;
+        prepareOverlay();
+      }
+      return false;
+    }
+    previousSource = null;
     if (!Number.isInteger(n) || n < 1 || !/^screen:/.test(chosen?.source?.id || "")) return false;
     const sources = await desktopCapturer.getSources({ types: ["screen"] });
     const source = monitorsList.sourceFor(n, sources, screen.getAllDisplays());
@@ -463,6 +475,7 @@ app.whenReady().then(() => {
     nextSource = source;
     // Chromium пускает getDisplayMedia только по действию пользователя, а переключение приходит от зрителя по сети:
     // пустой скрипт «с жестом» даёт странице активацию на несколько секунд — её новый getDisplayMedia проходит.
+    // Это единственное место, где странице выдаётся активация без действия пользователя; из других обработчиков — нет.
     try { await event?.sender?.executeJavaScript("void 0", true); } catch (_) {}
     return true;
   });
