@@ -329,6 +329,24 @@ final class EditorSessionTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: EditorSession.sessionURL.appendingPathExtension("broken").path))
     }
 
+    /// Автосохранение: через 2 с после правки черновик на диске (после `kill -9` теряется не больше 2 с ввода).
+    func testAutosaveAfterTwoSeconds() throws {
+        let workspace = EditorWorkspace()
+        workspace.onChange = { EditorSession.scheduleSave(workspace) }
+        let tab = workspace.newDocument()
+        tab.textView.insertText("demo $x", replacementRange: NSRange(location: 0, length: 0))
+        tab.textDidChange(Notification(name: NSText.didChangeNotification))
+        XCTAssertNil(tab.draftID)
+        RunLoop.main.run(until: Date().addingTimeInterval(EditorSession.autosaveDelay + 0.5))
+        let draft = try XCTUnwrap(tab.draftID)
+        XCTAssertEqual(try String(contentsOf: EditorSession.draftURL(draft), encoding: .utf8), "demo $x")
+        let state = try XCTUnwrap(EditorSession.load())
+        XCTAssertEqual(state.tabs.first?.draftID, draft)
+        // Сохранили или закрыли без сохранения — черновик удаляется.
+        EditorSession.discardDraft(of: tab)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EditorSession.draftURL(draft).path))
+    }
+
     func testClosePlan() {
         XCTAssertEqual(EditorWindowController.closePlan(dirtyCount: 0, autosaveDrafts: false), .close)
         XCTAssertEqual(EditorWindowController.closePlan(dirtyCount: 0, autosaveDrafts: true), .close)
@@ -380,5 +398,42 @@ final class DollarPanelModelTests: XCTestCase {
         XCTAssertEqual(model.entries.map(\.value), ["a", "b"])
         XCTAssertEqual(model.entries.map(\.line), [1, 1])
         XCTAssertEqual(model.entries(in: NSRange(location: 3, length: 2)).map(\.value), ["b"])
+    }
+}
+
+@MainActor
+final class EditorWorkspaceTests: XCTestCase {
+    private func tab(_ path: String?) -> EditorTab {
+        var document = EditorDocument(newWith: .utf8)
+        document.url = path.map { URL(fileURLWithPath: $0) }
+        return EditorTab(document: document)
+    }
+
+    func testTabsOrderSwitchingAndTitles() {
+        let workspace = EditorWorkspace()
+        let a = tab("/tmp/one/form.frm"), b = tab("/tmp/two/form.frm"), c = tab("/tmp/notes.txt")
+        for item in [a, b, c] { workspace.add(item) }
+        XCTAssertEqual(workspace.current?.id, c.id)
+        XCTAssertEqual(workspace.displayTitle(a), "form.frm — one", "одноимённые различаются папкой")
+        XCTAssertEqual(workspace.displayTitle(c), "notes.txt")
+        workspace.select(offset: 1)
+        XCTAssertEqual(workspace.current?.id, a.id, "по кругу")
+        workspace.select(offset: -1)
+        XCTAssertEqual(workspace.current?.id, c.id)
+        workspace.move(c.id, to: a.id)
+        XCTAssertEqual(workspace.tabs.map(\.id), [c.id, a.id, b.id])
+        XCTAssertEqual(workspace.tab(for: URL(fileURLWithPath: "/tmp/two/../two/form.frm"))?.id, b.id, "тот же файл — та же вкладка")
+        workspace.remove(c)
+        XCTAssertEqual(workspace.current?.id, a.id, "после закрытия — соседняя")
+    }
+
+    func testUntitledNames() {
+        let workspace = EditorWorkspace()
+        let first = workspace.newDocument(), second = workspace.newDocument()
+        XCTAssertEqual(first.title, "Без имени 1")
+        XCTAssertEqual(second.title, "Без имени 2")
+        workspace.remove(first)
+        XCTAssertEqual(workspace.newDocument().title, "Без имени 1")
+        XCTAssertEqual(second.textView.lineBreak, EditorPrefs.newLineEnding.string)
     }
 }
