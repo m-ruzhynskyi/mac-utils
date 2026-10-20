@@ -7,11 +7,30 @@ final class EditorLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
     var showsInvisibles = false {
         didSet {
             guard showsInvisibles != oldValue, let storage = textStorage else { return }
-            // Ширина бейджей неопределённых байтов меняется — раскладка заново.
-            invalidateGlyphs(forCharacterRange: NSRange(location: 0, length: storage.length), changeInLength: 0, actualCharacterRange: nil)
-            invalidateLayout(forCharacterRange: NSRange(location: 0, length: storage.length), actualCharacterRange: nil)
+            // Ширина меняется только у неопределённых байтов — раскладываем заново лишь их строки; остальное — перерисовка
+            // (на 10 МБ со строками по 20 000 символов раскладка всего текста занимала секунды).
+            for range in Self.undefinedByteRanges(in: storage.mutableString) {
+                invalidateGlyphs(forCharacterRange: range, changeInLength: 0, actualCharacterRange: nil)
+                invalidateLayout(forCharacterRange: range, actualCharacterRange: nil)
+            }
             for container in textContainers { container.textView?.needsDisplay = true }
         }
+    }
+
+    /// Где в тексте неопределённые байты (U+0080…U+009F) — подряд идущие склеены.
+    static func undefinedByteRanges(in text: NSString) -> [NSRange] {
+        var ranges: [NSRange] = []
+        var offset = 0
+        LineEnding.forEachChunk(text) { units in
+            for (i, unit) in units.enumerated() where isUndefinedByte(unit) {
+                let location = offset + i
+                if let last = ranges.last, NSMaxRange(last) == location { ranges[ranges.count - 1].length += 1 } else {
+                    ranges.append(NSRange(location: location, length: 1))
+                }
+            }
+            offset += units.count
+        }
+        return ranges
     }
 
     override init() {
@@ -55,7 +74,15 @@ final class EditorLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
         guard showsInvisibles, let storage = textStorage else { return }
         let text = storage.mutableString
-        let chars = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        // Только видимая часть: у строк в 20 000 символов отрисовка получает их целиком, а знаков на экране — сотни.
+        var glyphs = glyphsToShow
+        if let container = textContainers.first, let view = container.textView {
+            let visible = view.visibleRect.offsetBy(dx: -view.textContainerOrigin.x, dy: -view.textContainerOrigin.y)
+            let onScreen = glyphRange(forBoundingRectWithoutAdditionalLayout: visible, in: container)
+            glyphs = NSIntersectionRange(glyphs, onScreen)
+            guard glyphs.length > 0 else { return }
+        }
+        let chars = characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
         guard chars.length > 0 else { return }
         var units = [UInt16](repeating: 0, count: chars.length)
         units.withUnsafeMutableBufferPointer { text.getCharacters($0.baseAddress!, range: chars) }
@@ -63,6 +90,9 @@ final class EditorLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: EditorStyle.invisible]
         let badgeAttributes: [NSAttributedString.Key: Any] = [.font: badgeFont(at: chars.location), .foregroundColor: EditorStyle.escape]
         let advance = ("0" as NSString).size(withAttributes: [.font: font]).width
+        let visibleSpan = textContainers.first?.textView.map {
+            $0.visibleRect.offsetBy(dx: -$0.textContainerOrigin.x, dy: -$0.textContainerOrigin.y)
+        }
         for (offset, unit) in units.enumerated() {
             let mark: String
             var shift: CGFloat = 0
@@ -83,6 +113,7 @@ final class EditorLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
             let fragment = lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil, withoutAdditionalLayout: true)
             guard fragment.height > 0 else { continue }
             let location = self.location(forGlyphAt: glyph)
+            if let visible = visibleSpan, fragment.minX + location.x < visible.minX - advance || fragment.minX + location.x > visible.maxX { continue }
             let style = mark.count > 1 ? badgeAttributes : attributes
             let size = (mark as NSString).size(withAttributes: style)
             let point = NSPoint(x: origin.x + fragment.minX + location.x + shift + (unit == 0x20 ? (advance - size.width) / 2 : 0),
