@@ -182,7 +182,7 @@ final class WindowTiler: ObservableObject {
     enum MouseStep { case down, dragged, up }
 
     /// Событие глобального монитора: точка — в координатах CG (как у AX и WindowServer), из самого события,
-    /// а не текущее положение курсора.
+    /// а не текущее положение курсора. Нет точки у события или она вне всех экранов — положение курсора.
     private func handleMouse(_ event: NSEvent) {
         let step: MouseStep
         switch event.type {
@@ -191,7 +191,9 @@ final class WindowTiler: ObservableObject {
         case .leftMouseUp: step = .up
         default: return
         }
-        handleMouse(step, at: event.cgEvent?.location ?? Self.axPoint(fromCocoa: NSEvent.mouseLocation))
+        let screens = NSScreen.screens.map { Self.axRect(fromCocoa: $0.frame) }
+        handleMouse(step, at: WindowDragRules.eventPoint(event.cgEvent?.location, mouse: Self.axPoint(fromCocoa: NSEvent.mouseLocation),
+                                                         screens: screens))
     }
 
     /// Только запоминает события и отдаёт Accessibility фоновой очереди.
@@ -203,6 +205,9 @@ final class WindowTiler: ObservableObject {
             // Наши окна, которые принимают мышь (настройки, панель в строке меню). Узнаём здесь, на главном потоке:
             // к своему процессу из фона через AX обращаться нельзя — AppKit отвечает на такой запрос в фоновом потоке и падает.
             let ownWindows = Set(NSApp.windows.filter { $0.isVisible && !$0.ignoresMouseEvents }.map(\.windowNumber))
+            // Для журнала при отказе: точка события и положение курсора (CG) — расходятся, если точка события не та.
+            let mouse = Self.axPoint(fromCocoa: NSEvent.mouseLocation)
+            let points = "cg=\(Int(point.x)),\(Int(point.y)) mouse=\(Int(mouse.x)),\(Int(mouse.y))"
             // Окно под курсором и его рамка — вне обработчика: AX-запрос к зависшей программе не держит клики системы.
             axQueue.async { [weak self] in
                 let hit = Self.window(at: point, ownWindows: ownWindows)
@@ -213,8 +218,8 @@ final class WindowTiler: ObservableObject {
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard let self, self.dragGeneration == generation else { return }
-                        guard let window = box.value else { return self.noteDown("отклонено: \(hit.reason)") }
-                        guard let frame else { return self.noteDown("отклонено: нет рамки AX") }
+                        guard let window = box.value else { return self.noteDown("отклонено: \(hit.reason) \(points)") }
+                        guard let frame else { return self.noteDown("отклонено: нет рамки AX \(points)") }
                         // Только за заголовок или панель инструментов: верхняя полоса окна.
                         let height = Int((point.y - frame.minY).rounded())
                         guard WindowDragRules.isTitleBarPoint(point, in: frame) else {
@@ -224,7 +229,7 @@ final class WindowTiler: ObservableObject {
                         self.dragStartFrame = frame
                         self.dragWindowID = id
                         self.dragStartBounds = bounds
-                        self.noteDown("принято y=\(height) окно=\(Int(frame.width))x\(Int(frame.height)) ws=\(bounds != nil ? 1 : 0)")
+                        self.noteDown("принято y=\(height) окно=\(Int(frame.width))x\(Int(frame.height)) ws=\(bounds != nil ? 1 : 0) путь=\(hit.path)")
                     }
                 }
             }
@@ -435,17 +440,41 @@ final class WindowTiler: ObservableObject {
     /// Окно под точкой (координаты CG/AX), не наше и не рабочий стол.
     /// Чья программа под курсором, узнаём по списку окон WindowServer, а AX спрашиваем уже у неё самой: system-wide запрос
     /// попадал и в наш процесс (клик по настройкам или панели), и AppKit отвечал на него в фоновом потоке — сбой и подвисания.
-    /// `reason` — почему окна нет (для журнала): только названия шагов и коды AX.
-    nonisolated static func window(at point: CGPoint, ownWindows: Set<Int>) -> (window: AXUIElement?, reason: String) {
+    /// Список не нашёл чужого обычного окна — запасной путь, как в Rectangle: system-wide AX. Только если над точкой нет
+    /// нашего окна (иначе запрос ушёл бы в наш процесс), а элемент своего процесса дальше не расспрашиваем.
+    /// `reason` — почему окна нет (для журнала): только числа, названия шагов и коды AX; `path` — каким путём нашлось окно.
+    nonisolated static func window(at point: CGPoint, ownWindows: Set<Int>) -> (window: AXUIElement?, reason: String, path: String) {
         let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         let windows = info.compactMap(WindowDragRules.ScreenWindow.init)
-        guard let pid = WindowDragRules.ownerUnder(point, windows: windows, ownPID: ProcessInfo.processInfo.processIdentifier,
-                                                   ownWindows: ownWindows) else { return (nil, "не чужое обычное окно") }
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.3)
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        if let pid = WindowDragRules.ownerUnder(point, windows: windows, ownPID: ownPID, ownWindows: ownWindows) {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, 0.3)
+            var element: AXUIElement?
+            let result = AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &element)
+            guard result == .success, let element else { return (nil, "AX hit=\(result.rawValue)", "ws") }
+            let hit = window(of: element)
+            return (hit.window, hit.reason, "ws")
+        }
+        let under = "не чужое обычное окно " + WindowDragRules.underNote(point, windows: windows, ownPID: ownPID, ownWindows: ownWindows)
+        guard WindowDragRules.systemWideAllowed(at: point, windows: windows, ownPID: ownPID) else {
+            return (nil, "\(under) ax=- pid=своё", "")
+        }
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.3)
         var element: AXUIElement?
-        let result = AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &element)
-        guard result == .success, let element else { return (nil, "AX hit=\(result.rawValue)") }
+        let result = AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &element)
+        var pid: pid_t = 0
+        if let element { AXUIElementGetPid(element, &pid) }
+        let note = "\(under) ax=\(result.rawValue) pid=\(element == nil ? "-" : pid == ownPID ? "своё" : "чужое")"
+        guard result == .success, let element, pid != ownPID else { return (nil, note, "") }
+        AXUIElementSetMessagingTimeout(element, 0.3)
+        let hit = window(of: element)
+        return (hit.window, hit.window == nil ? "\(note) \(hit.reason)" : "", "ax")
+    }
+
+    /// Окно, которому принадлежит элемент под точкой, — если это обычное окно.
+    private nonisolated static func window(of element: AXUIElement) -> (window: AXUIElement?, reason: String) {
         if role(of: element) == kAXWindowRole as String { return standard(element) }
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &value) == .success,
@@ -622,19 +651,48 @@ enum WindowDragRules {
     /// Обычные окна и окна «поверх всех» (kCGFloatingWindowLevel). Меню, Dock, строка меню и панели (≥ 8) не трогаем.
     static let draggableLayers: Set<Int> = [Int(CGWindowLevelForKey(.normalWindow)), Int(CGWindowLevelForKey(.floatingWindow))]
 
+    /// Уровень курсора и выше. На macOS 27 (трансляция экрана, удалённый доступ) WindowServer рисует курсор отдельным окном
+    /// этого уровня, левый верхний угол — ровно в точке курсора: оно первым в списке накрывало каждое нажатие (1.6.10).
+    /// Клики такие окна не забирают.
+    static let passThroughLayer = Int(CGWindowLevelForKey(.cursorWindow))
+
     /// Программа, обычному окну которой достался клик (список окон — спереди назад). nil — клик не по чужому обычному окну:
-    /// по нашему окну, меню, панели или вообще мимо. Прозрачные окна и наши окна, пропускающие мышь (тёплый экран,
-    /// рисование «сквозь клики»), клик не забирают — смотрим под них.
+    /// по нашему окну, меню, панели или вообще мимо. Прозрачные окна, окно курсора и наши окна, пропускающие мышь
+    /// (тёплый экран, рисование «сквозь клики»), клик не забирают — смотрим под них.
     static func ownerUnder(_ point: CGPoint, windows: [ScreenWindow], ownPID: pid_t, ownWindows: Set<Int>) -> pid_t? {
         for window in windows where window.bounds.contains(point) {
             if window.pid == ownPID {
                 if ownWindows.contains(window.number) { return nil }
                 continue
             }
-            if window.alpha <= 0 { continue }
+            if window.alpha <= 0 || window.layer >= passThroughLayer { continue }
             return draggableLayers.contains(window.layer) ? window.pid : nil
         }
         return nil
+    }
+
+    /// Можно ли спросить system-wide AX: над первым чужим обычным окном под точкой нет нашего окна (даже пропускающего
+    /// мышь) — иначе запрос мог бы уйти в наш процесс, а AppKit отвечает на него в фоновом потоке и падает.
+    static func systemWideAllowed(at point: CGPoint, windows: [ScreenWindow], ownPID: pid_t) -> Bool {
+        for window in windows where window.bounds.contains(point) {
+            if window.pid == ownPID { return false }
+            if draggableLayers.contains(window.layer) { return true }
+        }
+        return true
+    }
+
+    /// Для журнала при отказе: первое окно под точкой и сколько их всего. Только числа: наше ли, уровень, прозрачность, размер.
+    static func underNote(_ point: CGPoint, windows: [ScreenWindow], ownPID: pid_t, ownWindows: Set<Int>) -> String {
+        let under = windows.filter { $0.bounds.contains(point) }
+        guard let first = under.first else { return "первое=- окон=0" }
+        return "первое own=\(first.pid == ownPID ? 1 : 0) inOwn=\(ownWindows.contains(first.number) ? 1 : 0) layer=\(first.layer) " +
+            "alpha=\(String(format: "%.2f", first.alpha)) \(Int(first.bounds.width))x\(Int(first.bounds.height)) окон=\(under.count)"
+    }
+
+    /// Точка нажатия (CG): из события; нет её или она вне всех экранов (`screens`, CG) — положение курсора.
+    static func eventPoint(_ event: CGPoint?, mouse: CGPoint, screens: [CGRect]) -> CGPoint {
+        guard let event, screens.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(event) }) else { return mouse }
+        return event
     }
 
     /// Окно сдвинулось, а размер прежний — его тащат за заголовок, а не меняют размер.
