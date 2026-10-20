@@ -2,23 +2,43 @@ import AppKit
 import SwiftUI
 
 /// Поиск и замена в папке: запуск в фоне, отмена, итог и список «файл: строка — фрагмент».
+/// Список всегда соответствует запросу, опциям, папке и маске, по которым он получен: при любой их смене он сбрасывается,
+/// а замена идёт строго по параметрам найденного списка.
 @MainActor
 final class FolderSearchModel: ObservableObject {
     @Published var folder: URL? = UserDefaults.standard.string(forKey: Pref.editorFolderSearchPath).map { URL(fileURLWithPath: $0) } {
-        didSet { UserDefaults.standard.set(folder?.path, forKey: Pref.editorFolderSearchPath) }
+        didSet {
+            UserDefaults.standard.set(folder?.path, forKey: Pref.editorFolderSearchPath)
+            parametersChanged()
+        }
     }
     @Published var mask = UserDefaults.standard.string(forKey: Pref.editorFolderSearchMask) ?? "*.frm; *.rtf; *.txt" {
-        didSet { UserDefaults.standard.set(mask, forKey: Pref.editorFolderSearchMask) }
+        didSet {
+            UserDefaults.standard.set(mask, forKey: Pref.editorFolderSearchMask)
+            parametersChanged()
+        }
     }
-    @Published var query = ""
+    @Published var query = "" { didSet { parametersChanged() } }
     @Published var replacement = ""
-    @Published var options = SearchOptions()
+    @Published var options = SearchOptions() { didSet { parametersChanged() } }
     @Published private(set) var summary: FolderSearch.Summary?
-    @Published private(set) var running = false
+    @Published private(set) var phase = Phase.idle
     @Published private(set) var error: String?
     @Published private(set) var note: String?
 
+    enum Phase { case idle, searching, replacing }
+
+    /// По чему получен `summary`.
+    struct Key: Equatable {
+        let folder: URL
+        let mask: String
+        let query: String
+        let options: SearchOptions
+    }
+
+    private var searchedKey: Key?
     private var cancel: TextSearch.Cancellation?
+    private var replaceCancel: TextSearch.Cancellation?
     private var generation = 0
     private let queue = DispatchQueue(label: "macutils.editor.folder", qos: .userInitiated)
 
@@ -27,24 +47,46 @@ final class FolderSearchModel: ObservableObject {
     var dirtyOpenFiles: () -> Set<String> = { [] }
     var reloadOpenFiles: ([URL]) -> Void = { _ in }
 
+    var running: Bool { phase != .idle }
+    var replacing: Bool { phase == .replacing }
     var canSearch: Bool { folder != nil && !query.isEmpty && !running }
 
+    private var currentKey: Key? {
+        folder.map { Key(folder: $0, mask: mask, query: query, options: options) }
+    }
+
+    /// Заменять можно только найденное по тем же параметрам и только полный список (без «10 000+»).
+    var canReplace: Bool {
+        guard phase == .idle, let summary, !summary.files.isEmpty, !summary.truncated else { return false }
+        return searchedKey != nil && searchedKey == currentKey
+    }
+
+    /// Запрос, опции, папка или маска изменились — список больше не про них: сбрасываем (идущий поиск — останавливаем).
+    private func parametersChanged() {
+        guard phase != .replacing, let searchedKey, searchedKey != currentKey else { return }
+        if phase == .searching { stop() }
+        self.searchedKey = nil
+        summary = nil
+        note = nil
+    }
+
     func start() {
-        guard let folder, !query.isEmpty else { return }
+        guard let key = currentKey, !query.isEmpty, phase != .replacing else { return }
         stop()
         generation += 1
         let generation = self.generation
-        let query = self.query, options = self.options, mask = self.mask
         let cancel = TextSearch.Cancellation(timeout: 600)
         self.cancel = cancel
-        running = true
+        phase = .searching
         error = nil
         note = nil
+        searchedKey = key
         summary = FolderSearch.Summary()
         var lastProgress: TimeInterval = 0
         queue.async { [weak self] in
             let outcome = Result {
-                try FolderSearch.search(query, options: options, in: folder, mask: mask, isCancelled: { cancel.isCancelled }) { partial in
+                try FolderSearch.search(key.query, options: key.options, in: key.folder, mask: key.mask,
+                                        isCancelled: { cancel.isCancelled }) { partial in
                     // Ход поиска — не чаще 10 раз в секунду.
                     let now = ProcessInfo.processInfo.systemUptime
                     guard now - lastProgress > 0.1 else { return }
@@ -52,7 +94,7 @@ final class FolderSearchModel: ObservableObject {
                     let snapshot = partial
                     DispatchQueue.main.async {
                         MainActor.assumeIsolated {
-                            guard let self, self.generation == generation, self.running else { return }
+                            guard let self, self.generation == generation, self.phase == .searching else { return }
                             self.summary = snapshot
                         }
                     }
@@ -61,74 +103,117 @@ final class FolderSearchModel: ObservableObject {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self, self.generation == generation else { return }
-                    self.running = false
+                    self.phase = .idle
                     self.cancel = nil
                     switch outcome {
                     case .success(let summary): self.summary = summary
-                    case .failure(TextSearch.Failure.cancelled): self.note = "Поиск остановлен"
-                    case .failure(let failure): self.error = failure.localizedDescription
+                    case .failure(TextSearch.Failure.cancelled):
+                        self.note = "Поиск остановлен"
+                        self.summary = nil
+                        self.searchedKey = nil
+                    case .failure(let failure):
+                        self.error = failure.localizedDescription
+                        self.summary = nil
+                        self.searchedKey = nil
                     }
                 }
             }
         }
     }
 
+    /// «Стоп»: поиск прерывается сразу (неполный список отбрасывается); замена — после текущего файла, каждый файл
+    /// пишется целиком или не пишется вовсе. Итог замены и перечитывание вкладок — в обоих случаях.
     func stop() {
-        cancel?.cancel()
-        cancel = nil
-        if running {
-            running = false
+        switch phase {
+        case .idle:
+            break
+        case .searching:
+            cancel?.cancel()
+            cancel = nil
+            generation += 1
+            phase = .idle
             note = "Поиск остановлен"
+            summary = nil
+            searchedKey = nil
+        case .replacing:
+            replaceCancel?.cancel()
+            note = "Останавливаю замену…"
         }
-        generation += 1
     }
 
-    /// «Заменить в папке» по найденным файлам: каждый перечитывается и пишется в своей кодировке; файлы, открытые
-    /// с несохранёнными правками, и те, где символа замены нет в кодировке, не трогаются.
+    /// «Заменить в папке» по найденным файлам — по запросу и опциям найденного списка. Каждый файл перечитывается и
+    /// пишется в своей кодировке; не трогаются: открытые с несохранёнными правками, изменённые после поиска и те, где
+    /// символа замены нет в кодировке.
     func replaceAll() {
-        guard let summary, !summary.files.isEmpty, !running else { return }
-        stop()
-        generation += 1
-        let generation = self.generation
-        let query = self.query, template = replacement, options = self.options
-        let files = summary.files.map(\.url)
+        guard canReplace, let summary, let key = searchedKey else { return }
+        let template = replacement
+        let files = summary.files.map { (url: $0.url, stamp: $0.stamp) }
         let dirty = dirtyOpenFiles()
-        running = true
+        let cancel = TextSearch.Cancellation(timeout: 3_600)
+        replaceCancel = cancel
+        phase = .replacing
         note = nil
         error = nil
         queue.async { [weak self] in
             var report = FolderSearch.ReplaceReport()
-            for url in files {
+            report.total = files.count
+            for file in files {
+                if cancel.isCancelled {
+                    report.stopped = true
+                    break
+                }
+                let url = file.url
                 if dirty.contains(url.standardizedFileURL.resolvingSymlinksInPath().path) {
                     report.openWithEdits.append(url)
                     continue
                 }
+                // Изменён после поиска — найденное в списке уже не про него.
+                if let stamp = file.stamp, FileStamp(url: url) != stamp {
+                    report.changedSinceSearch.append(url)
+                    continue
+                }
                 guard case .text(let data) = FolderSearch.read(url) else { report.failed.append(url); continue }
                 do {
-                    guard let plan = try FolderSearch.replacement(in: data, query: query, template: template, options: options) else { continue }
+                    guard let plan = try FolderSearch.replacement(in: data, query: key.query, template: template, options: key.options,
+                                                                 isCancelled: { cancel.isCancelled }) else { continue }
                     try EditorWindowController.writeFile(plan.data, to: url)
                     report.replacedFiles.append(url)
                     report.replacements += plan.count
+                } catch TextSearch.Failure.cancelled {
+                    // Остановили посреди файла — он не записан.
+                    report.stopped = true
+                    break
                 } catch is EditorDocument.SaveError {
                     report.unrepresentable.append(url)
                 } catch {
                     report.failed.append(url)
                 }
             }
+            let result = report
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    guard let self, self.generation == generation else { return }
-                    self.running = false
-                    self.reloadOpenFiles(report.replacedFiles)
-                    self.note = Self.describe(report)
-                    self.summary = nil
+                    guard let self else { return }
+                    self.finishReplace(result)
                 }
             }
         }
     }
 
+    /// Итог замены — всегда, и после «Стоп»: вкладки уже заменённых файлов перечитываются, список сбрасывается
+    /// (повторная замена по нему удвоила бы правку).
+    private func finishReplace(_ report: FolderSearch.ReplaceReport) {
+        phase = .idle
+        replaceCancel = nil
+        reloadOpenFiles(report.replacedFiles)
+        summary = nil
+        searchedKey = nil
+        note = Self.describe(report)
+    }
+
     static func describe(_ report: FolderSearch.ReplaceReport) -> String {
         var parts = ["Заменено: \(report.replacements) в \(report.replacedFiles.count) \(plural(report.replacedFiles.count, "файле", "файлах", "файлах"))"]
+        if report.stopped { parts[0] += " из \(report.total) — остановлено" }
+        if !report.changedSinceSearch.isEmpty { parts.append("изменены после поиска, не тронуты: \(report.changedSinceSearch.count)") }
         if !report.openWithEdits.isEmpty { parts.append("не тронуты открытые с правками: \(report.openWithEdits.count)") }
         if !report.unrepresentable.isEmpty { parts.append("нет символов в кодировке: \(report.unrepresentable.count)") }
         if !report.failed.isEmpty { parts.append("не удалось записать: \(report.failed.count)") }
@@ -141,6 +226,7 @@ final class FolderSearchModel: ObservableObject {
         if summary.skippedBinary > 0 { parts.append("двоичных пропущено: \(summary.skippedBinary)") }
         if summary.skippedLarge > 0 { parts.append("больше 50 МБ: \(summary.skippedLarge)") }
         if summary.unreadable > 0 { parts.append("не прочитано: \(summary.unreadable)") }
+        if summary.truncated, phase == .idle { parts.append("список неполный — сузьте поиск, чтобы заменить") }
         return parts.joined(separator: " · ")
     }
 }
@@ -179,7 +265,8 @@ struct FolderSearchPanel: View {
                 option("ab", "Слово целиком", $model.options.wholeWord)
                 option(".*", "Регулярное выражение", $model.options.regex)
                 if model.running {
-                    Button("Стоп") { model.stop() }.buttonStyle(.graphite(.secondary, size: .compact))
+                    Button(model.replacing ? "Остановить замену" : "Стоп") { model.stop() }
+                        .buttonStyle(.graphite(.secondary, size: .compact))
                 } else {
                     Button("Найти") { model.start() }.buttonStyle(.graphite(.primary, size: .compact)).disabled(!model.canSearch)
                 }
@@ -190,7 +277,8 @@ struct FolderSearchPanel: View {
                     .font(DS.Font.mono(13, relativeTo: .body))
                 Button("Заменить в папке…", action: confirmReplace)
                     .buttonStyle(.graphite(.secondary, size: .compact))
-                    .disabled(model.running || (model.summary?.files.isEmpty ?? true))
+                    .disabled(!model.canReplace)
+                    .help(model.canReplace ? "Заменить найденное во всех файлах списка" : "Сначала «Найти» с этим запросом и опциями")
             }
             HStack(spacing: DS.Space.s) {
                 if model.running { ProgressView().controlSize(.small) }

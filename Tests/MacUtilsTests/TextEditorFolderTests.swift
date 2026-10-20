@@ -114,6 +114,133 @@ final class FolderSearchTests: XCTestCase {
     }
 }
 
+/// Ревью 1.7.1, п. 1.1–1.2: замена — строго по найденному списку; «Стоп» во время замены действительно останавливает её.
+@MainActor
+final class FolderReplaceSafetyTests: XCTestCase {
+    private var folder: URL!
+    private var savedPath: Any?
+    private var savedMask: Any?
+
+    override func setUpWithError() throws {
+        savedPath = UserDefaults.standard.object(forKey: Pref.editorFolderSearchPath)
+        savedMask = UserDefaults.standard.object(forKey: Pref.editorFolderSearchMask)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("editor-replace-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: folder)
+        UserDefaults.standard.set(savedPath, forKey: Pref.editorFolderSearchPath)
+        UserDefaults.standard.set(savedMask, forKey: Pref.editorFolderSearchMask)
+        super.tearDown()
+    }
+
+    private func wait(_ model: FolderSearchModel) {
+        let deadline = Date().addingTimeInterval(20)
+        while model.running, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+    }
+
+    private func model(query: String) -> FolderSearchModel {
+        let model = FolderSearchModel()
+        model.folder = folder
+        model.mask = "*.txt"
+        model.query = query
+        return model
+    }
+
+    /// Найдено «$A», в поле поиска потом «$» без «Найти» — заменить нельзя, список сброшен; `$B` цел.
+    func testReplaceUsesSearchedQueryOnly() throws {
+        let file = folder.appendingPathComponent("keep.txt")
+        try Data("keep $A and $B".utf8).write(to: file)
+        let model = model(query: "$A")
+        model.start()
+        wait(model)
+        XCTAssertEqual(model.summary?.matchCount, 1)
+        XCTAssertTrue(model.canReplace)
+        model.query = "$"
+        XCTAssertNil(model.summary, "запрос сменили — список про другой запрос сброшен")
+        XCTAssertFalse(model.canReplace)
+        model.replacement = "#"
+        model.replaceAll()
+        wait(model)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "keep $A and $B", "ничего не заменено")
+        // Смена опций — тоже.
+        model.query = "$A"
+        model.start()
+        wait(model)
+        XCTAssertTrue(model.canReplace)
+        model.options.regex = true
+        XCTAssertFalse(model.canReplace)
+        model.options.regex = false
+        XCTAssertFalse(model.canReplace, "вернули ту же опцию — список всё равно нужно найти заново")
+        // Поиск и замена по одним параметрам — только найденное.
+        model.start()
+        wait(model)
+        model.replaceAll()
+        wait(model)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "keep # and $B")
+        XCTAssertNil(model.summary, "после замены список сброшен")
+    }
+
+    /// «Стоп» во время замены: замена останавливается между файлами, каждый файл — целиком или никак; итог и
+    /// перечитывание вкладок — и после остановки; повторно заменить по старому списку нельзя.
+    func testStopDuringReplaceReallyStops() throws {
+        let count = 400
+        for i in 0..<count { try Data("x $A y".utf8).write(to: folder.appendingPathComponent("f\(i).txt")) }
+        let model = model(query: "$A")
+        var reloaded: [URL] = []
+        model.reloadOpenFiles = { reloaded = $0 }
+        model.start()
+        wait(model)
+        XCTAssertEqual(model.summary?.files.count, count)
+        model.replacement = "$A$A"
+        model.replaceAll()
+        XCTAssertTrue(model.replacing)
+        model.stop()
+        wait(model)
+        XCTAssertFalse(model.running)
+        XCTAssertNil(model.summary, "список сброшен и после остановки")
+        XCTAssertFalse(model.canReplace, "повторная замена по старому списку удвоила бы правку")
+        var changed = 0
+        for i in 0..<count {
+            let text = try String(contentsOf: folder.appendingPathComponent("f\(i).txt"), encoding: .utf8)
+            XCTAssertTrue(text == "x $A y" || text == "x $A$A y", "файл целиком или никак: \(text)")
+            if text != "x $A y" { changed += 1 }
+        }
+        XCTAssertLessThan(changed, count, "замена остановилась")
+        XCTAssertEqual(reloaded.count, changed, "перечитаны ровно заменённые")
+        XCTAssertTrue(model.note?.contains("остановлено") ?? false, model.note ?? "")
+        XCTAssertTrue(model.note?.contains("Заменено: \(changed) в \(changed)") ?? false, model.note ?? "")
+    }
+
+    /// Файл изменили после поиска — не трогаем; неполный список (10 000+) — заменять нельзя.
+    func testChangedAfterSearchAndTruncatedList() throws {
+        let file = folder.appendingPathComponent("a.txt")
+        try Data("$A".utf8).write(to: file)
+        let model = model(query: "$A")
+        model.start()
+        wait(model)
+        try Data("$A $A changed".utf8).write(to: file)
+        model.replacement = "#"
+        model.replaceAll()
+        wait(model)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "$A $A changed")
+        XCTAssertTrue(model.note?.contains("изменены после поиска, не тронуты: 1") ?? false, model.note ?? "")
+
+        try Data(String(repeating: "$A ", count: FolderSearch.maxMatches + 5).utf8).write(to: file)
+        model.start()
+        wait(model)
+        XCTAssertEqual(model.summary?.truncated, true)
+        XCTAssertFalse(model.canReplace, "список неполный — сначала сузить поиск")
+        XCTAssertTrue(model.status.contains("список неполный"))
+    }
+
+    func testStopInterruptsFolderWalk() throws {
+        try Data("x".utf8).write(to: folder.appendingPathComponent("one.txt"))
+        XCTAssertThrowsError(try FolderSearch.files(in: folder, mask: "*", isCancelled: { true }))
+    }
+}
+
 @MainActor
 final class EditorMultiCaretTests: XCTestCase {
     private var window: NSWindow!

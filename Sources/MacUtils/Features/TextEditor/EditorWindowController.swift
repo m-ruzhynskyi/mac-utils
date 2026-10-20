@@ -494,7 +494,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         let model = workspace.folderSearch
         if model.query.isEmpty { model.query = workspace.search.query }
         if model.folder == nil { model.folder = workspace.current?.document.url?.deletingLastPathComponent() }
-        model.options = workspace.search.options
+        // Опции панели поиска — только для нового списка: найденный список остаётся со своими.
+        if model.summary == nil { model.options = workspace.search.options }
         model.dirtyOpenFiles = { [weak self] in
             Set((self?.workspace.tabs ?? []).filter(\.isDirty).compactMap { $0.document.url?.standardizedFileURL.resolvingSymlinksInPath().path })
         }
@@ -516,13 +517,13 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
     /// «Заменить в папке…» — файлы на диске перезаписываются, отменить нельзя: сначала вопрос.
     func confirmFolderReplace() {
         let model = workspace.folderSearch
-        guard let summary = model.summary, !summary.files.isEmpty, let window else { return }
+        guard model.canReplace, let summary = model.summary, let window else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Заменить \(summary.matchCount) \(plural(summary.matchCount, "совпадение", "совпадения", "совпадений")) "
             + "в \(summary.files.count) \(plural(summary.files.count, "файле", "файлах", "файлах"))?"
-        alert.informativeText = "Файлы перезапишутся на диске в своих кодировках — ⌘Z это не отменит. "
-            + "Открытые вкладки с несохранёнными правками не тронутся."
+        alert.informativeText = "Заменяется «\(model.query)» → «\(model.replacement)». Файлы перезапишутся на диске в своих кодировках — "
+            + "⌘Z это не отменит. Не тронутся открытые вкладки с несохранёнными правками и файлы, изменённые после поиска."
         alert.addButton(withTitle: "Заменить")
         alert.addButton(withTitle: "Отмена")
         alert.beginSheetModal(for: window) { response in

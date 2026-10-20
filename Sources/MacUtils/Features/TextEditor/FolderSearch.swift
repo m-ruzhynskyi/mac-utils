@@ -23,6 +23,8 @@ enum FolderSearch {
         let url: URL
         let encoding: TextEncoding
         let matches: [Match]
+        /// Отпечаток файла на момент поиска: изменённый после поиска «Заменить в папке» не трогает.
+        var stamp: FileStamp?
         var id: URL { url }
     }
 
@@ -55,12 +57,18 @@ enum FolderSearch {
 
     /// Обычные файлы папки (вложенные тоже), без скрытых и без содержимого пакетов (.app и т. п.), по маске.
     static func files(in folder: URL, mask: String) -> [URL] {
+        (try? files(in: folder, mask: mask, isCancelled: { false })) ?? []
+    }
+
+    static func files(in folder: URL, mask: String, isCancelled: () -> Bool) throws -> [URL] {
         let patterns = patterns(mask)
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .isPackageKey]
         guard let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys,
                                                               options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [] }
         var result: [URL] = []
         for case let url as URL in enumerator {
+            // Огромная папка (вся домашняя): «Стоп» прерывает и сам обход, а не только поиск по файлам.
+            if isCancelled() { throw TextSearch.Failure.cancelled }
             guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true,
                   matches(url.lastPathComponent, patterns: patterns) else { continue }
             result.append(url)
@@ -97,7 +105,7 @@ enum FolderSearch {
         options.inSelection = false
         // Ошибка выражения — сразу, а не на каждом файле.
         if options.regex { _ = try TextSearch.expression(query, options: options) }
-        for url in files(in: folder, mask: mask) {
+        for url in try files(in: folder, mask: mask, isCancelled: isCancelled) {
             if isCancelled() { throw TextSearch.Failure.cancelled }
             summary.scanned += 1
             switch read(url) {
@@ -116,7 +124,7 @@ enum FolderSearch {
                         return Match(range: range, line: position.line, column: position.column,
                                      preview: preview(text, line: position.line, lines: lines, around: range))
                     }
-                    summary.files.append(FileResult(url: url, encoding: encoding, matches: matches))
+                    summary.files.append(FileResult(url: url, encoding: encoding, matches: matches, stamp: FileStamp(url: url)))
                 }
                 if found.truncated || summary.matchCount >= maxMatches {
                     summary.truncated = true
@@ -146,6 +154,9 @@ enum FolderSearch {
     // MARK: - Замена
 
     struct ReplaceReport: Equatable {
+        /// Файлов в списке и остановлена ли замена до конца.
+        var total = 0
+        var stopped = false
         var replacedFiles: [URL] = []
         var replacements = 0
         /// Файл изменился после поиска — не трогали.
@@ -158,12 +169,13 @@ enum FolderSearch {
     }
 
     /// План замены в одном файле: новый текст в той же кодировке. `nil` — совпадений нет.
-    static func replacement(in data: Data, query: String, template: String, options: SearchOptions) throws -> (data: Data, count: Int)? {
+    static func replacement(in data: Data, query: String, template: String, options: SearchOptions,
+                            isCancelled: (() -> Bool)? = nil) throws -> (data: Data, count: Int)? {
         let document = EditorDocument(data: data)
         let text = document.decodedText as NSString
         var options = options
         options.inSelection = false
-        let plan = try TextSearch.replacements(query, template: template, in: text, options: options)
+        let plan = try TextSearch.replacements(query, template: template, in: text, options: options, isCancelled: isCancelled)
         guard !plan.ranges.isEmpty else { return nil }
         let result = NSMutableString(string: text)
         for (range, string) in zip(plan.ranges, plan.strings).reversed() { result.replaceCharacters(in: range, with: string) }
