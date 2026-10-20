@@ -56,7 +56,7 @@ enum MoveToApplications {
         alert.addButton(withTitle: "Не сейчас")
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = "Больше не спрашивать"
-        NSApp.activate(ignoringOtherApps: true)
+        ScreenOutput.activateApp(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else {
             if alert.suppressionButton?.state == .on { UserDefaults.standard.set(true, forKey: suppressKey) }
             return

@@ -19,7 +19,7 @@ final class SwitcherPanelController {
                                   width: size.width, height: size.height),
                            display: true)
         }
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
     }
 
     func hide() {

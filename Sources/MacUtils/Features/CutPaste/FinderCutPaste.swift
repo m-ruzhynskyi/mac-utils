@@ -171,7 +171,7 @@ final class FinderCutPaste: NSObject, ObservableObject {
             Toast.show(message, symbol: "exclamationmark.triangle.fill", tint: .orange)
         case .success(let urls):
             guard !urls.isEmpty else {
-                NSSound.beep()
+                Feedback.beep()
                 return
             }
             items = urls

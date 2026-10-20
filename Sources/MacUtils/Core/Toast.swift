@@ -84,7 +84,7 @@ enum Toast {
                                          y: frame.maxY - size.height - 40))
         }
         panel.alphaValue = 0
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
         NSAnimationContext.runAnimationGroup { $0.duration = 0.15; panel.animator().alphaValue = 1 }
         self.panel = panel
         // VoiceOver: уведомление объявляется, а не просто появляется.

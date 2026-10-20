@@ -302,7 +302,7 @@ final class VolumeHUDController {
     func show() {
         let panel = self.panel ?? make()
         relayout()
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
         outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             MainActor.assumeIsolated { self?.hide() }
         }

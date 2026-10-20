@@ -160,7 +160,7 @@ final class BreakReminder: ObservableObject {
             panel.contentView = FirstMouseHostingView(rootView: BreakView(reminder: self))
             panel.setFrame(screen.frame, display: true)
             panel.alphaValue = 0
-            panel.orderFrontRegardless()
+            panel.orderFrontRegardlessOnScreen()
             // Клавиатура — панели на экране с курсором: Esc закрывает перерыв, VoiceOver попадает в оверлей.
             if NSMouseInRect(mouse, screen.frame, false) { panel.makeKey() }
             NSAnimationContext.runAnimationGroup { $0.duration = 0.6; panel.animator().alphaValue = 1 }

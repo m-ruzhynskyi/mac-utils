@@ -146,8 +146,8 @@ final class WhatsNewWindowController {
 
     func show() {
         let window = self.window ?? make()
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        ScreenOutput.activateApp()
+        window.makeKeyAndOrderFrontOnScreen()
     }
 
     private func make() -> NSWindow {

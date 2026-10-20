@@ -66,8 +66,8 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
         AppStatusItem.shared.closeTools()
         let window = self.window ?? make()
         if !window.isVisible { FocusReturn.remember() }
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        ScreenOutput.activateApp()
+        window.makeKeyAndOrderFrontOnScreen()
     }
 
     private func make() -> NSWindow {

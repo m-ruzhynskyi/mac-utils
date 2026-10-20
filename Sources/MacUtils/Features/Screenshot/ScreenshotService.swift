@@ -91,11 +91,11 @@ final class ScreenshotService: ObservableObject {
         for shot in shots {
             let window = CaptureWindow.make(shot: shot, snapFrames: snapFrames, mode: mode)
             windows.append(window)
-            window.orderFrontRegardless()
+            window.orderFrontRegardlessOnScreen()
         }
         if !SettingsWindowController.shared.isVisible { FocusReturn.remember() }
-        NSApp.activate()
-        if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
+        ScreenOutput.activateApp()
+        if !NSApp.isActive { ScreenOutput.activateApp(ignoringOtherApps: true) }
         var keyWindow = windows.first { NSMouseInRect(mouse, $0.frame, false) } ?? windows.first
         // Следующий шаг коллажа: область прошлого шага (или переснимаемого) уже выделена — Enter снимает её.
         if mode == .edit, let proposed = StepsSession.proposedRect,
@@ -106,7 +106,7 @@ final class ScreenshotService: ObservableObject {
                 keyWindow = window
             }
         }
-        keyWindow?.makeKeyAndOrderFront(nil)
+        keyWindow?.makeKeyAndOrderFrontOnScreen()
         NSCursor.crosshair.set()
         startKeyTap()
     }

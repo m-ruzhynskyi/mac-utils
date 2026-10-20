@@ -42,7 +42,7 @@ final class ShareRequestQueue: ObservableObject {
         startTimer(for: item)
         present()
         // Панель не забирает фокус: о первом запросе сообщаем звуком (остальные видны в счётчике «Запросов: N»).
-        if wasEmpty, playsSound { NSSound(named: "Ping")?.play() }
+        if wasEmpty, playsSound { Feedback.play("Ping") }
         return true
     }
 
@@ -83,7 +83,7 @@ final class ShareRequestQueue: ObservableObject {
         makePanel()
         guard let panel else { return }
         panel.alphaValue = 0
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
         panel.orderOut(nil)
     }
 
@@ -137,7 +137,7 @@ final class ShareRequestQueue: ObservableObject {
         makePanel()
         panel?.alphaValue = 1
         layout(force: true)
-        panel?.orderFrontRegardless()
+        panel?.orderFrontRegardlessOnScreen()
         NSApp.requestUserAttention(.informationalRequest)
         // Окно запроса не должно попасть в картинку для зрителей.
         ScreenShare.shared.refreshVideoFilter()

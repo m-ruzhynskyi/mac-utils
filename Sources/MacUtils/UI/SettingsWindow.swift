@@ -20,8 +20,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     func show() {
         let window = self.window ?? makeWindow()
         if !window.isVisible { FocusReturn.remember() }
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        ScreenOutput.activateApp()
+        window.makeKeyAndOrderFrontOnScreen()
         PermissionsModel.shared.refresh()
     }
 
