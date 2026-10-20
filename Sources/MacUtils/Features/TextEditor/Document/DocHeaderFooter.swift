@@ -1,0 +1,335 @@
+import AppKit
+
+/// Текст колонтитула при правке: свой вид поверх поля страницы. Изменения текста не идут в хранилище показа —
+/// они превращаются в точечные правки исходника, после чего колонтитул перерисовывается.
+final class DocHeaderTextView: NSTextView {
+    weak var session: DocHeaderSession?
+
+    override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
+        guard let replacementString else { return false }
+        MainActor.assumeIsolated { session?.replace(affectedCharRange, with: replacementString) }
+        return false
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        MainActor.assumeIsolated { session?.formatter?.endHeaderEditing() }
+    }
+
+    override func doCommand(by selector: Selector) {
+        if selector == #selector(cancelOperation(_:)) { return cancelOperation(nil) }
+        super.doCommand(by: selector)
+    }
+}
+
+/// Правка одного колонтитула (`d11`): вид текста на странице, его карта «символ ↔ исходник» и история модели.
+@MainActor
+final class DocHeaderSession: NSObject, NSTextViewDelegate {
+    weak var formatter: DocFormatter?
+    weak var controller: DocumentController?
+    weak var page: DocPageView?
+    let isHeader: Bool
+    /// Раздел, в котором записан колонтитул (страница может наследовать его от предыдущего раздела).
+    private(set) var section: Int
+    private(set) var kind: RTFHeaderKind
+    let storage = NSTextStorage()
+    let layoutManager = DocLayoutManager()
+    let container = NSTextContainer(size: NSSize(width: 400, height: 10_000))
+    let textView: DocHeaderTextView
+    private(set) var map = DocSourceMap()
+    private var observer: NSObjectProtocol?
+    private var reloadScheduled = false
+
+    var story: DocStoryRef { .header(section: section, kind: kind) }
+
+    init(formatter: DocFormatter, controller: DocumentController, page: DocPageView, isHeader: Bool, section: Int, kind: RTFHeaderKind) {
+        self.formatter = formatter
+        self.controller = controller
+        self.page = page
+        self.isHeader = isHeader
+        self.section = section
+        self.kind = kind
+        storage.addLayoutManager(layoutManager)
+        container.lineFragmentPadding = 0
+        container.widthTracksTextView = false
+        layoutManager.addTextContainer(container)
+        textView = DocHeaderTextView(frame: .zero, textContainer: container)
+        super.init()
+        textView.session = self
+        textView.delegate = self
+        textView.drawsBackground = true
+        textView.backgroundColor = .white
+        textView.textContainerInset = .zero
+        textView.isRichText = true
+        textView.importsGraphics = false
+        textView.allowsUndo = false
+        textView.usesFontPanel = false
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.insertionPointColor = .black
+        textView.selectedTextAttributes = [.backgroundColor: NSColor(srgbRed: 0.7, green: 0.82, blue: 1, alpha: 1)]
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.smartInsertDeleteEnabled = false
+        layoutManager.showsInvisibles = controller.showsInvisibles
+        // Исходник меняется (правка, отмена, «Код») — перерисовать после того, как контроллер перечитал модель.
+        if let tab = controller.tab {
+            observer = NotificationCenter.default.addObserver(forName: NSTextStorage.didProcessEditingNotification, object: tab.storage,
+                                                              queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scheduleReload() }
+            }
+        }
+    }
+
+    func invalidate() {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        observer = nil
+        textView.removeFromSuperview()
+    }
+
+    // MARK: - Показ
+
+    func install() {
+        guard let page else { return }
+        page.addSubview(textView)
+        reload(selectSource: nil)
+        textView.window?.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: storage.length > 0 ? storage.length - 1 : 0, length: 0))
+    }
+
+    private func scheduleReload() {
+        guard !reloadScheduled else { return }
+        reloadScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.reloadScheduled = false
+                self.controller?.refresh()
+                self.reload(selectSource: self.selectedSource)
+            }
+        }
+    }
+
+    /// Перерисовать с тем же показанным выделением (команда оформления не меняет текст).
+    func reload(selectUnits units: NSRange) {
+        reload(selectSource: nil)
+        let location = min(units.location, storage.length)
+        textView.setSelectedRange(NSRange(location: location, length: min(units.length, storage.length - location)))
+    }
+
+    /// Показанный текст колонтитула по модели контроллера; `selectSource` — выделение после правки.
+    func reload(selectSource: NSRange?) {
+        guard let controller, let page else { return }
+        guard let header = controller.model.sections[safe: section]?.headers[kind] else {
+            // Колонтитула больше нет (отмена его добавления) — правка закончилась.
+            formatter?.endHeaderEditing()
+            return
+        }
+        let total = controller.pageCount
+        let sectionTotal = controller.pagesView.pages.filter { $0.section == page.section }.count
+        let (string, map) = controller.renderer.renderStory(header.story, model: controller.model) { field in
+            switch field {
+            case .page: return "\(page.number)"
+            case .numPages: return "\(total)"
+            case .sectionPages: return "\(sectionTotal)"
+            case .other: return nil
+            }
+        }
+        self.map = map
+        storage.setAttributedString(string)
+        layoutManager.showsInvisibles = controller.showsInvisibles
+        layout()
+        if let selectSource {
+            let start = map.unit(forSource: selectSource.location)
+            let end = selectSource.length > 0 ? max(start, map.firstUnit(atOrAfter: NSMaxRange(selectSource))) : start
+            let location = min(start, storage.length)
+            textView.setSelectedRange(NSRange(location: location, length: min(end, storage.length) - location))
+        }
+        formatter?.updateState()
+    }
+
+    /// Рамка текста: ширина — поле страницы, высота — по тексту; нижний колонтитул прижат к низу, как на странице.
+    private func layout() {
+        guard let page else { return }
+        let area = isHeader ? page.headerRect : page.footerRect
+        container.size = NSSize(width: area.width, height: 10_000)
+        layoutManager.ensureLayout(for: container)
+        let height = max(16, ceil(layoutManager.usedRect(for: container).height))
+        let y = isHeader ? area.minY : max(area.minY, page.bounds.height - CGFloat(max(page.props.footerY, 0)) / 20 - height)
+        textView.frame = NSRect(x: area.minX, y: y, width: area.width, height: height)
+        page.headerFrame = (textView.frame.insetBy(dx: -8, dy: -6), title)
+    }
+
+    /// Подпись над рамкой: «— чётные» и «— нечётные» — только когда они и правда разные (`\facingp`).
+    var title: String {
+        let facing = controller?.model.facingPages ?? false
+        if !facing, kind.page == .even || kind.page == .odd { return RTFHeaderKind.kind(header: isHeader, page: .all).title }
+        return kind.title
+    }
+
+    // MARK: - Выделение
+
+    /// Выделение колонтитула → кусок исходника.
+    var selectedSource: NSRange {
+        let selection = textView.selectedRange()
+        if selection.length == 0 { return NSRange(location: map.sourceLocation(beforeUnit: selection.location), length: 0) }
+        return map.sourceRange(ofUnits: selection)
+    }
+
+    func target() -> DocFormatter.Target? {
+        guard let controller, let story = controller.model.story(self.story) else { return nil }
+        let selection = textView.selectedRange()
+        var units = selection
+        if units.length == 0 { units = LineCommands.word(storage.mutableString, at: selection.location) }
+        let span = units.length > 0 ? map.sourceRange(ofUnits: units) : NSRange(location: map.sourceLocation(beforeUnit: selection.location), length: 0)
+        let whole = selection.length > 0 ? map.sourceRange(ofUnits: selection) : NSRange(location: map.sourceLocation(beforeUnit: selection.location), length: 0)
+        let first = DocHeaderFooterEdits.position(of: whole.location, in: story).paragraph
+        let last = DocHeaderFooterEdits.position(of: max(whole.location, NSMaxRange(whole) - 1), in: story).paragraph
+        return DocFormatter.Target(story: self.story, span: span, paragraphs: Array(first...max(first, last)), hasCharacters: units.length > 0)
+    }
+
+    nonisolated func textViewDidChangeSelection(_ notification: Notification) {
+        MainActor.assumeIsolated { formatter?.updateState() }
+    }
+
+    nonisolated func undoManager(for view: NSTextView) -> UndoManager? {
+        MainActor.assumeIsolated { controller?.tab?.undo }
+    }
+
+    // MARK: - Ввод текста
+
+    /// Набранный текст (или удаление) в колонтитуле → правка исходника генератором ввода режима «Документ».
+    func replace(_ units: NSRange, with text: String) {
+        guard let controller else { return }
+        controller.show(notice: "Текст колонтитула пока меняется в режиме «Код»; оформление и номер страницы — здесь")
+        _ = units
+        _ = text
+    }
+
+    /// Номер колонтитула меняется вместе с переключателями (первая страница, чётные) — правка переходит на нужный.
+    func retarget(section: Int, kind: RTFHeaderKind) {
+        self.section = section
+        self.kind = kind
+        reload(selectSource: nil)
+    }
+}
+
+extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}
+
+// MARK: - Вход, выход и команды вкладки «Колонтитулы»
+
+extension DocFormatter {
+    /// Двойной клик по странице: по верхнему или нижнему полю — правка колонтитула, по тексту во время правки — выход.
+    func pageDoubleClick(_ event: NSEvent, on page: DocPageView) -> Bool {
+        let point = page.convert(event.locationInWindow, from: nil)
+        let body = page.bodyRect
+        if point.y < body.minY { beginHeaderEditing(page: page, header: true); return true }
+        if point.y > body.maxY { beginHeaderEditing(page: page, header: false); return true }
+        guard headerSession != nil else { return false }
+        endHeaderEditing()
+        return true
+    }
+
+    /// Какой колонтитул показан на странице и в каком разделе он записан; нет — какой создать.
+    func headerPlace(page: DocPageView, header: Bool) -> (section: Int, kind: RTFHeaderKind, exists: Bool)? {
+        guard let controller, page.section < controller.model.sections.count else { return nil }
+        let model = controller.model
+        if let kind = controller.headerKind(for: page, header: header) {
+            if let section = (0...page.section).reversed().first(where: { model.sections[$0].headers[kind] != nil }) {
+                return (section, kind, true)
+            }
+            return (page.section, kind, false)
+        }
+        let props = model.sections[page.section].props
+        let kind: RTFHeaderKind
+        if props.titlePage, page.firstInSection {
+            kind = .kind(header: header, page: .first)
+        } else if model.facingPages {
+            kind = .kind(header: header, page: page.number % 2 == 0 ? .even : .odd)
+        } else {
+            kind = .kind(header: header, page: .all)
+        }
+        return (page.section, kind, false)
+    }
+
+    func beginHeaderEditing(page: DocPageView, header: Bool) {
+        guard let controller, let tab = controller.tab, var place = headerPlace(page: page, header: header) else { return }
+        if headerSession?.page === page, headerSession?.isHeader == header { return }
+        endHeaderEditing()
+        if !place.exists {
+            let result = DocHeaderFooterEdits.add([place.kind], section: place.section, source: tab.text, model: controller.model)
+            perform(result, name: header ? "Добавить верхний колонтитул" : "Добавить нижний колонтитул")
+            guard controller.model.sections[safe: place.section]?.headers[place.kind] != nil else { return }
+            place.exists = true
+        }
+        let session = DocHeaderSession(formatter: self, controller: controller, page: page, isHeader: header, section: place.section, kind: place.kind)
+        headerSession = session
+        for other in controller.pagesView.pages { other.faded = true }
+        session.install()
+        updateState()
+    }
+
+    func endHeaderEditing() {
+        guard let session = headerSession else { return }
+        headerSession = nil
+        session.invalidate()
+        guard let controller else { return }
+        for page in controller.pagesView.pages {
+            page.faded = false
+            page.headerFrame = nil
+        }
+        if let view = controller.textViews.first { view.window?.makeFirstResponder(view) }
+        updateState()
+    }
+
+    /// После переключателя (первая страница, чётные/нечётные) страница может показывать другой колонтитул.
+    private func retargetSession() {
+        guard let session = headerSession, let page = session.page, let place = headerPlace(page: page, header: session.isHeader) else { return }
+        guard let controller, let tab = controller.tab else { return }
+        if !place.exists {
+            perform(DocHeaderFooterEdits.add([place.kind], section: place.section, source: tab.text, model: controller.model), name: "Добавить колонтитул")
+        }
+        guard let fresh = headerPlace(page: page, header: session.isHeader), fresh.exists else { return endHeaderEditing() }
+        session.retarget(section: fresh.section, kind: fresh.kind)
+    }
+
+    var titlePageOn: Bool {
+        guard let controller, let page = headerSession?.page else { return false }
+        return controller.model.sections[safe: page.section]?.props.titlePage ?? false
+    }
+
+    var facingPagesOn: Bool { controller?.model.facingPages ?? false }
+
+    func setTitlePage(_ on: Bool) {
+        guard let controller, let tab = controller.tab, let page = headerSession?.page else { return }
+        let inherited: Set<RTFHeaderKind> = page.section > 0 ? Set(controller.headers(of: page.section - 1).keys) : []
+        perform(DocHeaderFooterEdits.titlePage(on, section: page.section, inherited: inherited, source: tab.text, model: controller.model),
+                name: "Другой колонтитул первой страницы")
+        retargetSession()
+    }
+
+    func setFacingPages(_ on: Bool) {
+        guard let controller, let tab = controller.tab else { return }
+        perform(DocHeaderFooterEdits.facingPages(on, source: tab.text, model: controller.model), name: "Чётные и нечётные колонтитулы")
+        retargetSession()
+    }
+
+    func insertPageNumber(_ number: DocHeaderFooterEdits.PageNumber) {
+        guard let controller, let tab = controller.tab, let session = headerSession else { return }
+        let unit = session.textView.selectedRange().location
+        let result = DocHeaderFooterEdits.insertPageNumber(number, story: session.story, unit: unit, map: session.map, source: tab.text,
+                                                           model: controller.model)
+        perform(result, name: "Номер страницы")
+    }
+
+    func removeHeader() {
+        guard let controller, let tab = controller.tab, let session = headerSession else { return }
+        let result = DocHeaderFooterEdits.remove(session.kind, section: session.section, source: tab.text, model: controller.model)
+        endHeaderEditing()
+        perform(result, name: session.isHeader ? "Удалить верхний колонтитул" : "Удалить нижний колонтитул")
+    }
+}
