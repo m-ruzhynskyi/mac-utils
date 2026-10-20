@@ -30,21 +30,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyCode: kVK_ANSI_Comma,
             modifiers: cmdKey | optionKey | controlKey
         ) {
-            SettingsWindowController.shared.show()
+            AppAction(hotKey: .settings).run()
         }
         HotKeyCenter.shared.register(
             id: HotKeyID.tools,
             keyCode: kVK_ANSI_T,
             modifiers: cmdKey | optionKey | controlKey
         ) {
-            ToolsWindowController.shared.show()
+            AppAction(hotKey: .tools).run()
         }
         HotKeyCenter.shared.register(
             id: HotKeyID.textEditor,
             keyCode: kVK_ANSI_E,
             modifiers: cmdKey | optionKey | controlKey
         ) {
-            EditorWindowController.shared.show()
+            AppAction(hotKey: .textEditor).run()
         }
 
         // Чистая установка: «Что нового» не нужно (оно только после обновления). Делаем до `Updater.start()`.
@@ -79,39 +79,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// macutils://tools — значок «Инструменты»; macutils://settings — настройки;
-    /// annotate, pin, fix-text, meeting, break, warm, snap?left… — то же, что горячие клавиши (для «Команд»).
-    /// Файлы («Открыть с помощью», перетаскивание на значок в Dock) открываются вкладками текстового редактора.
+    /// Ссылки `macutils://…` — те же действия, что горячие клавиши, панель и «Команды» (`AppAction`, список — страница
+    /// «Команды и ссылки»). Файлы («Открыть с помощью», перетаскивание на значок в Dock) открываются вкладками редактора.
     func application(_ application: NSApplication, open urls: [URL]) {
         let files = urls.filter(\.isFileURL)
         if !files.isEmpty { EditorWindowController.shared.open(files) }
         for url in urls where url.scheme == "macutils" {
+            if let action = AppAction(url: url) {
+                action.run()
+                continue
+            }
             switch url.host {
-            case "tools": ToolsWindowController.shared.show()
-            case "editor":
-                // macutils://editor — открыть редактор; macutils://editor?path=/путь/к/файлу — открыть файл.
-                let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "path" }?.value
-                if let path, !path.isEmpty {
-                    EditorWindowController.shared.openFromLink(URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
-                } else {
-                    EditorWindowController.shared.show()
-                }
-            case "snap":
-                // macutils://snap?left — left/right/top/bottom/topLeft/…/maximize/center/restore.
-                let targets: [String: WindowTiler.Target] = [
-                    "left": .left, "right": .right, "top": .top, "bottom": .bottom, "topLeft": .topLeft,
-                    "topRight": .topRight, "bottomLeft": .bottomLeft, "bottomRight": .bottomRight,
-                    "maximize": .maximize, "center": .center,
-                ]
-                if url.query == "restore" { WindowTiler.shared.perform(.restore) }
-                else if let target = targets[url.query ?? ""] { WindowTiler.shared.perform(.snap(target)) }
-            case "share": ScreenShare.shared.isLive ? ScreenShare.shared.stop() : ScreenShare.shared.start(screen: url.query == "screen")
-            case "watch": if let code = url.query { ShareViewer.shared.watch(code: code) }
             case "share-drop": ScreenShare.shared.simulateDrop()
-            case "annotate": ScreenAnnotator.shared.toggle()
-            case "pin": WindowPin.shared.toggleFocused()
-            case "fix-text": TextFixer.shared.fix()
-            case "meeting": MeetingRecorder.shared.toggle()
             case "meeting-report":
                 if let name = url.query?.removingPercentEncoding {
                     let folder = MeetingRecorder.root.appendingPathComponent(name, isDirectory: true)
@@ -123,11 +102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let folder = MeetingRecorder.root.appendingPathComponent(name, isDirectory: true)
                     Task { await MeetingRecorder.shared.process(.init(folder: folder)) }
                 }
-            case "break": BreakReminder.shared.show()
-            case "warm": WarmScreen.shared.preview()
-            case "warm-toggle": WarmScreen.shared.toggleManual()
-            case "keep-awake": KeepAwake.shared.toggle()
-            case "focus": FocusBlur.shared.toggle()
             default: SettingsWindowController.shared.show()
             }
         }

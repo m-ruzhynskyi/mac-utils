@@ -28,13 +28,13 @@ final class ScreenshotService: ObservableObject {
             if !center.isRegistered(id: HotKeyID.screenshot) {
                 center.register(id: HotKeyID.screenshot, keyCode: kVK_ANSI_X,
                                 modifiers: cmdKey | shiftKey) {
-                    ScreenshotService.shared.start(.edit)
+                    AppAction(hotKey: .screenshot).run()
                 }
             }
             if !center.isRegistered(id: HotKeyID.screenshotOCR) {
                 center.register(id: HotKeyID.screenshotOCR, keyCode: kVK_ANSI_X,
                                 modifiers: cmdKey | shiftKey | optionKey) {
-                    ScreenshotService.shared.start(.ocr)
+                    AppAction(hotKey: .screenshotOCR).run()
                 }
             }
             isRunning = center.isRegistered(id: HotKeyID.screenshot)

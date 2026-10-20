@@ -92,7 +92,7 @@ final class TextFixer {
             return
         }
         center.register(id: HotKeyID.fixText, keyCode: kVK_ANSI_E, modifiers: controlKey | optionKey) {
-            TextFixer.shared.fix()
+            AppAction(hotKey: .fixText).run()
         }
     }
 
