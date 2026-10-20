@@ -28,8 +28,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         let wasVisible = window.isVisible
         if !wasVisible { FocusReturn.remember() }
         AppDelegate.syncDock(editorOpen: true)
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        ScreenOutput.activateApp()
+        window.makeKeyAndOrderFrontOnScreen()
         window.centerTrafficLights()
         if !wasVisible { checkDisk() }
     }
@@ -207,7 +207,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         alert.informativeText = "Размер — \(DS.Format.bytes(Int64(bytes))). Файл целиком читается в память, это может занять время."
         alert.addButton(withTitle: "Открыть")
         alert.addButton(withTitle: "Отмена")
-        NSApp.activate()
+        ScreenOutput.activateApp()
         return alert.runModal() == .alertFirstButtonReturn
     }
 
@@ -218,7 +218,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         alert.informativeText = "Ссылка просит открыть:\n\(url.path)"
         alert.addButton(withTitle: "Открыть")
         alert.addButton(withTitle: "Отмена")
-        NSApp.activate()
+        ScreenOutput.activateApp()
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         open([url])
     }
@@ -660,7 +660,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         alert.informativeText = "Выйти без сохранения? Правки пропадут. Чтобы не терять их, включите «Автосохранение черновиков» в настройках редактора."
         alert.addButton(withTitle: "Отмена")
         alert.addButton(withTitle: "Выйти без сохранения")
-        NSApp.activate()
+        ScreenOutput.activateApp()
         return alert.runModal() == .alertSecondButtonReturn
     }
 

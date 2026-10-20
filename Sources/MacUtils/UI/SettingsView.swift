@@ -105,7 +105,7 @@ final class PermissionsModel: NSObject, ObservableObject {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            NSSound.beep()
+            Feedback.beep()
         }
         refresh()
     }

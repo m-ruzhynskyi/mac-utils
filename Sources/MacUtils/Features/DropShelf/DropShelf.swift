@@ -209,7 +209,7 @@ final class DropShelf: ObservableObject {
             origin.y = min(max(origin.y, visible.minY + 8), visible.maxY - size.height - 8)
         }
         panel.setFrameOrigin(origin)
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
     }
 
     func hide() {
@@ -487,7 +487,7 @@ final class DragSourceView: NSView, NSDraggingSource {
         let alive = ShelfItems.existing(urls)
         DropShelf.shared.pruneMissing()
         guard !alive.isEmpty else {
-            NSSound.beep()
+            Feedback.beep()
             return
         }
         let items = alive.enumerated().map { index, url -> NSDraggingItem in

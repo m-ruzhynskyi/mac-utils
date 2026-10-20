@@ -190,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.informativeText = prompt.message
             alert.addButton(withTitle: prompt.confirm)
             alert.addButton(withTitle: prompt.cancel)
-            NSApp.activate(ignoringOtherApps: true)
+            ScreenOutput.activateApp(ignoringOtherApps: true)
             guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
             silent = false
         }

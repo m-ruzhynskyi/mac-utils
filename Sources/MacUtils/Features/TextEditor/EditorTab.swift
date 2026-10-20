@@ -358,7 +358,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     /// F2 / ⇧F2: к следующей или предыдущей закладке, по кругу.
     func goToBookmark(backwards: Bool) {
         let sorted = bookmarks.filter { $0 <= lines.lineCount }.sorted()
-        guard !sorted.isEmpty else { return NSSound.beep() }
+        guard !sorted.isEmpty else { return Feedback.beep() }
         let current = caret.line
         let target = backwards ? (sorted.last { $0 < current } ?? sorted.last!) : (sorted.first { $0 > current } ?? sorted.first!)
         goTo(line: target)
@@ -454,7 +454,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         // что совпало с новым списком; не совпало — ничего не трогаем.
         if !dollars.isCurrent { dollars.scanNow(text) }
         guard let fresh = dollars.current(entries.filter { !$0.isHidden }) else {
-            NSSound.beep()
+            Feedback.beep()
             return 0
         }
         let ranges = DollarMarks.valueRanges(fresh.map(\.mark))

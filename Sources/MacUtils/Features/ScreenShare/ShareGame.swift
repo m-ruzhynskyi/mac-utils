@@ -88,7 +88,7 @@ final class ShareGame: ObservableObject {
             begin(peer: peer, name: name, transport: transport, inviter: false)
             phase = .invited
             ShareGameWindow.shared.show()
-            NSSound(named: "Glass")?.play()
+            Feedback.play("Glass")
         case "accept" where phase == .inviting:
             phase = .playing
         case "decline" where phase == .inviting:
@@ -177,7 +177,7 @@ final class ShareGameWindow {
 
     func show() {
         let panel = self.panel ?? make()
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
         panel.makeKey()
     }
 

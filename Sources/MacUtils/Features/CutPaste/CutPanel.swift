@@ -19,7 +19,7 @@ final class CutPanelController {
                                display: true)
             }
         }
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
     }
 
     func hide() {

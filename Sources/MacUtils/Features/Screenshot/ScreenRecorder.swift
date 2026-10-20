@@ -220,7 +220,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         alert.addButton(withTitle: "Удалить запись")
         alert.buttons[0].keyEquivalent = "\u{1b}"  // Esc = «Продолжить запись»
         alert.buttons[1].hasDestructiveAction = true
-        NSApp.activate()
+        ScreenOutput.activateApp()
         if alert.runModal() == .alertSecondButtonReturn { cancel() }
     }
 
@@ -372,7 +372,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         border.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         border.contentView = NSHostingView(rootView:
             RoundedRectangle(cornerRadius: 3).strokeBorder(Color.red, lineWidth: 2))
-        border.orderFrontRegardless()
+        border.orderFrontRegardlessOnScreen()
         borderPanel = border
 
         let host = FirstMouseHostingView(rootView: RecordingHUD(recorder: self))
@@ -391,7 +391,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         if origin.y + size.height > visible.maxY { origin.y = rect.minY + 12 }
         origin.x = min(max(visible.minX + 8, origin.x), visible.maxX - size.width - 8)
         hud.setFrameOrigin(origin)
-        hud.orderFrontRegardless()
+        hud.orderFrontRegardlessOnScreen()
         hudPanel = hud
     }
 }
