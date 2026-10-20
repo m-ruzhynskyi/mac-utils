@@ -251,9 +251,12 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         MainActor.assumeIsolated {
             guard !bulkLoading else { return }
             let editLine = lines.line(at: editedRange.location)
+            // Вставка в самом начале строки (Enter перед текстом) сдвигает и саму эту строку.
+            let atLineStart = lines.starts[editLine - 1] == editedRange.location
             let oldLineCount = lines.lineCount
             lines.update(textStorage.mutableString, editedRange: editedRange, delta: delta)
-            bookmarks = Self.shiftBookmarks(bookmarks, editLine: editLine, lineDelta: lines.lineCount - oldLineCount)
+            let lineDelta = lines.lineCount - oldLineCount
+            bookmarks = Self.shiftBookmarks(bookmarks, editLine: atLineStart && lineDelta > 0 ? editLine - 1 : editLine, lineDelta: lineDelta)
             // Временные атрибуты подсветки сдвигаются вместе с текстом — запоминаем, где они теперь.
             let oldEnd = editedRange.location + editedRange.length - delta
             highlighted = highlighted.map { range in

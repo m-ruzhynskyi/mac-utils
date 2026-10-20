@@ -159,8 +159,16 @@ final class EditorMultiSelectionTests: XCTestCase {
         tab.textView.setSelectedRange(NSRange(location: 0, length: 0))
         tab.textView.insertText("0\n", replacementRange: NSRange(location: 0, length: 0))
         XCTAssertEqual(tab.bookmarks, [3, 5])
-        tab.toggleBookmark(line: 3)
-        XCTAssertEqual(tab.bookmarks, [5])
+        // Enter в самом начале строки с закладкой — строка уезжает вниз вместе с закладкой (замечание тестировщика).
+        tab.textView.setSelectedRange(NSRange(location: tab.lines.starts[2], length: 0))
+        tab.textView.insertNewline(nil)
+        XCTAssertEqual(tab.bookmarks, [4, 6])
+        // Enter в середине строки — закладка остаётся на ней.
+        tab.textView.setSelectedRange(NSRange(location: tab.lines.starts[3] + 1, length: 0))
+        tab.textView.insertNewline(nil)
+        XCTAssertEqual(tab.bookmarks, [4, 7])
+        tab.toggleBookmark(line: 4)
+        XCTAssertEqual(tab.bookmarks, [7])
         tab.clearBookmarks()
         XCTAssertTrue(tab.bookmarks.isEmpty)
     }
