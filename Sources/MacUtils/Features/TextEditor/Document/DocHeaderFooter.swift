@@ -5,6 +5,9 @@ import AppKit
 final class DocHeaderTextView: NSTextView {
     weak var session: DocHeaderSession?
 
+    // Вставка — обычным текстом.
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { [.string] }
+
     override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
         guard let replacementString else { return false }
         MainActor.assumeIsolated { session?.replace(affectedCharRange, with: replacementString) }
@@ -200,12 +203,26 @@ final class DocHeaderSession: NSObject, NSTextViewDelegate {
 
     // MARK: - Ввод текста
 
-    /// Набранный текст (или удаление) в колонтитуле → правка исходника генератором ввода режима «Документ».
+    /// Набранный текст (или удаление) в колонтитуле → правка исходника генератором ввода режима «Документ» (D-3).
     func replace(_ units: NSRange, with text: String) {
-        guard let controller else { return }
-        controller.show(notice: "Текст колонтитула пока меняется в режиме «Код»; оформление и номер страницы — здесь")
-        _ = units
-        _ = text
+        guard let controller, let tab = controller.tab, let story = controller.model.story(self.story) else { return }
+        let result = DocTextEditor.replace(units, with: text, model: controller.model, story: story, map: map, source: tab.text)
+        if let refusal = result.refusal { return controller.show(notice: refusal) }
+        guard !result.edits.isEmpty else { return }
+        guard controller.apply(result.edits, actionName: text.isEmpty ? "Удаление" : "Ввод") else { return }
+        reload(selectSource: NSRange(location: result.caretSource, length: 0))
+    }
+
+    /// Курсор не встаёт внутрь номера страницы (поле неделимо) — переносится за поле.
+    nonisolated func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,
+                              toCharacterRange new: NSRange) -> NSRange {
+        MainActor.assumeIsolated {
+            guard new.length == 0, new.location > 0, new.location < map.count, map.kind(at: new.location - 1) == .field,
+                  map.kind(at: new.location) == .field, map.range(at: new.location - 1) == map.range(at: new.location) else { return new }
+            var end = new.location
+            while end < map.count, map.kind(at: end) == .field, map.range(at: end) == map.range(at: new.location) { end += 1 }
+            return NSRange(location: end, length: 0)
+        }
     }
 
     /// Номер колонтитула меняется вместе с переключателями (первая страница, чётные) — правка переходит на нужный.

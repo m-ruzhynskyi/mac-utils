@@ -62,9 +62,11 @@ struct ParaChange: Equatable {
     var spaceAfter: Int?
     /// `\sl` и `\slmult`: 0 — авто (одинарный).
     var lineSpacing: (value: Int, multiple: Bool)?
+    /// Табуляции с линейки (`FormatEdits.tabs`).
+    var tabs: TabEdit?
 
     static func == (lhs: ParaChange, rhs: ParaChange) -> Bool {
-        lhs.alignment == rhs.alignment && lhs.left == rhs.left && lhs.right == rhs.right && lhs.firstLine == rhs.firstLine
+        lhs.tabs == rhs.tabs && lhs.alignment == rhs.alignment && lhs.left == rhs.left && lhs.right == rhs.right && lhs.firstLine == rhs.firstLine
             && lhs.spaceBefore == rhs.spaceBefore && lhs.spaceAfter == rhs.spaceAfter
             && lhs.lineSpacing?.value == rhs.lineSpacing?.value && lhs.lineSpacing?.multiple == rhs.lineSpacing?.multiple
     }
@@ -122,6 +124,12 @@ struct ParaChange: Equatable {
         if let lineSpacing {
             props.lineSpacing = lineSpacing.value
             props.lineMultiple = lineSpacing.multiple
+        }
+        switch tabs {
+        case .add(let stop): props.tabs.append(stop)
+        case .move(let index, let position) where props.tabs.indices.contains(index): props.tabs[index].position = position
+        case .remove(let index) where props.tabs.indices.contains(index): props.tabs.remove(at: index)
+        default: break
         }
         return props
     }

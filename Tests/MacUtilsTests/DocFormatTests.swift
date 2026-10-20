@@ -262,6 +262,30 @@ final class DocFormatTests: XCTestCase {
         XCTAssertTrue(plan.edits.isEmpty)
     }
 
+    func testTabStopsFromRuler() throws {
+        var source = DocDemo.expertReport
+        var model = RTFReader.read(source)
+        let index = try XCTUnwrap(model.body.paragraphs.firstIndex { $0.plainText.hasPrefix("г. Демоград") })
+        XCTAssertEqual(model.body.paragraphs[index].props.tabs, [RTFTabStop(position: 9355, kind: .right)])
+        let move = try FormatEdits.tabs(.move(0, to: 8000), paragraphs: [index], source: source as NSString, model: model).get()
+        source = try applyChecked(move, to: source, family: ["tx"])
+        model = RTFReader.read(source)
+        XCTAssertEqual(model.body.paragraphs[index].props.tabs, [RTFTabStop(position: 8000, kind: .right)])
+        let add = try FormatEdits.tabs(.add(RTFTabStop(position: 2268)), paragraphs: [index], source: source as NSString, model: model).get()
+        source = try applyChecked(add, to: source)
+        model = RTFReader.read(source)
+        XCTAssertEqual(model.body.paragraphs[index].props.tabs.map(\.position), [8000, 2268])
+        XCTAssertTrue(source.contains(#"\tqr\tx8000\tx2268 \sa120"#), source)
+        let remove = try FormatEdits.tabs(.remove(0), paragraphs: [index], source: source as NSString, model: model).get()
+        source = try applyChecked(remove, to: source, wholeGroups: true)
+        XCTAssertEqual(RTFReader.read(source).body.paragraphs[index].props.tabs, [RTFTabStop(position: 2268)])
+        // Абзац без своего `\pard` наследует позиции — их не тронуть без потерь.
+        let inherited = RTFReader.read(Self.letter)
+        if case .success = FormatEdits.tabs(.add(RTFTabStop(position: 1000)), paragraphs: [1], source: Self.letter as NSString, model: inherited) {
+            XCTFail("наследованные табуляции правятся только в коде")
+        }
+    }
+
     // MARK: - Колонтитулы и демо-документ
 
     func testFormatInsideHeaderStory() throws {
@@ -341,7 +365,7 @@ final class DocFormatTests: XCTestCase {
     /// Колонтитул добавить и удалить — файл байт в байт как был.
     func testRealFilesFormatting() throws {
         var generator = SeededGenerator(seed: 1_020)
-        var files = 0, applied = 0, refused = 0, roundTrips = 0, slowest = 0.0
+        var files = 0, applied = 0, refused = 0, roundTrips = 0, slowest = 0.0, tabRoundTrips = 0, tabRefused = 0
         var reasons: [String: Int] = [:]
         for url in try DocRealFilesTests.copies() {
             let document = EditorDocument(data: try Data(contentsOf: url))
@@ -378,6 +402,22 @@ final class DocFormatTests: XCTestCase {
                     reasons[failure.reason, default: 0] += 1
                 }
             }
+            // Табуляция: добавить и убрать — у абзацев со своим `\pard`; остальные честно отказываются.
+            let tabModel = RTFReader.read(source as NSString, fallback: document.encoding)
+            for _ in 0..<5 {
+                let paragraph = Int.random(in: 0..<tabModel.body.paragraphs.count, using: &generator)
+                switch FormatEdits.tabs(.add(RTFTabStop(position: 1701)), paragraphs: [paragraph], source: source as NSString, model: tabModel) {
+                case .success(let plan):
+                    let added = try applyChecked(plan, to: source)
+                    let fresh = RTFReader.read(added as NSString, fallback: document.encoding)
+                    let last = fresh.body.paragraphs[paragraph].props.tabs.count - 1
+                    if case .success(let remove) = FormatEdits.tabs(.remove(last), paragraphs: [paragraph], source: added as NSString, model: fresh),
+                       try applyChecked(remove, to: added, wholeGroups: true) == source {
+                        tabRoundTrips += 1
+                    }
+                case .failure: tabRefused += 1
+                }
+            }
             // Нижний колонтитул: добавить и удалить — исходник как был.
             let model = RTFReader.read(source as NSString, fallback: document.encoding)
             let kind = RTFHeaderKind.footerFirst
@@ -392,7 +432,7 @@ final class DocFormatTests: XCTestCase {
             }
         }
         print("[real-frm] формат: файлов \(files), команд выполнено \(applied), отказов \(refused), колонтитул туда-обратно \(roundTrips), "
-              + "самая долгая команда \(Int(slowest)) мс (debug)")
+              + "самая долгая команда \(Int(slowest)) мс (debug); табуляция туда-обратно \(tabRoundTrips), отказов \(tabRefused)")
         for (reason, count) in reasons.sorted(by: { $0.value > $1.value }) { print("[real-frm] отказ: \(reason) — \(count)") }
     }
 }

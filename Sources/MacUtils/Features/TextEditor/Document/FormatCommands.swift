@@ -169,6 +169,18 @@ final class DocFormatter: ObservableObject {
         apply(ParaChange(left: left, right: right, firstLine: firstLine), name: "Отступы")
     }
 
+    /// Позиция табуляции с линейки: добавить, сдвинуть, убрать.
+    func editTabs(_ edit: TabEdit) {
+        guard let controller, let tab = controller.tab, let target = target(), !target.paragraphs.isEmpty else { return }
+        let names: String
+        switch edit {
+        case .add: names = "Добавить табуляцию"
+        case .move: names = "Сдвинуть табуляцию"
+        case .remove: names = "Убрать табуляцию"
+        }
+        perform(FormatEdits.tabs(edit, paragraphs: target.paragraphs, story: target.story, source: tab.text, model: controller.model), name: names)
+    }
+
     // MARK: - Состояние панели
 
     func updateState() {

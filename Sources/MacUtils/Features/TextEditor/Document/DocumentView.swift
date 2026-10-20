@@ -103,10 +103,11 @@ final class DocTextView: NSTextView {
         controller?.cancelComposition()
     }
 
-    // Вставка — обычным текстом (форматированная — этап D-4).
+    // Вставка: форматированная (RTF/HTML) — `DocFormatter` (D-4), иначе обычным текстом.
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { [.string] }
 
     override func paste(_ sender: Any?) {
+        if let controller, DocFormatter.of(controller).pasteFormatted(in: self) { return }
         let rich = NSPasteboard.general.availableType(from: [.rtf, .rtfd, .html]) != nil
         pasteAsPlainText(sender)
         if rich { controller?.show(notice: "Вставлено без части форматирования") }

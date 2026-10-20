@@ -220,6 +220,70 @@ final class DocFormatViewTests: XCTestCase {
         XCTAssertNil(formatter.headerSession)
     }
 
+    func testTypingInHeaderEditsItsGroupAndUndoes() throws {
+        let (tab, document, formatter) = try open()
+        let original = tab.text as String
+        formatter.beginHeaderEditing(page: try XCTUnwrap(document.pagesView.pages.first), header: true)
+        let session = try XCTUnwrap(formatter.headerSession)
+        session.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        session.textView.insertText("Демо: ", replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertTrue(session.storage.string.hasPrefix("Демо: ООО"), session.storage.string)
+        XCTAssertTrue(document.model.sections[0].headers[.headerRight]?.story.paragraphs[0].plainText.hasPrefix("Демо: ООО") ?? false)
+        XCTAssertEqual(session.textView.selectedRange().location, 6, "курсор — за набранным")
+        XCTAssertEqual(document.pagesView.pages[1].header?.string.hasPrefix("Демо: "), true, "и на других страницах")
+        session.textView.deleteBackward(nil)
+        XCTAssertTrue(session.storage.string.hasPrefix("Демо:ООО"))
+        tab.undo.undo()
+        tab.undo.undo()
+        settle(0.1)
+        XCTAssertEqual(tab.text as String, original, "отмена — байт в байт")
+    }
+
+    func testFormattedPasteKeepsKnownFormattingInOneUndoStep() throws {
+        let (tab, document, formatter) = try open()
+        let original = tab.text as String
+        select("Демоград", in: document)
+        let pasted = NSMutableAttributedString(string: "Жирный ", attributes: [.font: NSFont(name: "Times New Roman Bold", size: 12)!])
+        pasted.append(NSAttributedString(string: "красный", attributes: [.font: NSFont(name: "Times New Roman", size: 12)!,
+                                                                         .foregroundColor: NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)]))
+        formatter.paste(pasted)
+        let text = document.storage.string as NSString
+        XCTAssertTrue(text.contains("г. Жирный красный"), text as String)
+        let bold = try XCTUnwrap(font(at: "Жирный", in: document))
+        XCTAssertTrue(NSFontManager.shared.traits(of: bold).contains(.boldFontMask))
+        XCTAssertFalse(NSFontManager.shared.traits(of: try XCTUnwrap(font(at: "красный", in: document))).contains(.boldFontMask))
+        let red = document.storage.attribute(.foregroundColor, at: text.range(of: "красный").location, effectiveRange: nil) as? NSColor
+        XCTAssertEqual(red?.usingColorSpace(.sRGB)?.redComponent ?? 0, 1, accuracy: 0.01)
+        XCTAssertEqual(document.selectedUnits, NSRange(location: NSMaxRange(text.range(of: "красный")), length: 0), "курсор — после вставленного")
+        tab.undo.undo()
+        settle(0.1)
+        XCTAssertEqual(tab.text as String, original, "вставка с форматом — один шаг отмены")
+    }
+
+    func testShortcutsReachPanelFromPageText() throws {
+        let (_, document, formatter) = try open()
+        select("Демоград", in: document)
+        let view = try XCTUnwrap(document.textViews.first)
+        let window = try XCTUnwrap(view.window)
+        window.makeFirstResponder(view)
+        settle(0.3)
+        func press(_ key: String, _ modifiers: NSEvent.ModifierFlags = .command) {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: window.windowNumber,
+                                         context: nil, characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0)!
+            if !(NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false) { _ = window.performKeyEquivalent(with: event) }
+            settle(0.1)
+            formatter.updateState()
+        }
+        press("b")
+        XCTAssertTrue(formatter.state.bold, "⌘B")
+        press("i")
+        XCTAssertTrue(formatter.state.italic, "⌘I")
+        press("u")
+        XCTAssertTrue(formatter.state.underline, "⌘U")
+        press("e")
+        XCTAssertEqual(formatter.state.alignment, .center, "⌘E")
+    }
+
     // MARK: - Вид
 
     /// Снимки панели для сверки с макетами (`d01`, `d06`, `d11`) — в каталог из `MU_DOC_FORMAT_SNAPSHOTS`, без экрана.

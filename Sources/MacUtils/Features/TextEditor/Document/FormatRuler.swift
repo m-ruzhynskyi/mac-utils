@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 
 /// Линейка под панелью форматирования (`d01`): поля страницы (серые края), отступы абзаца у курсора — треугольники
-/// Word (первая строка сверху, левый и правый снизу) — и позиции табуляции. Отступы тянутся мышью: шаг 0,25 см,
-/// с ⌥ — без шага. Отпустили — одна правка абзацев выделения.
+/// Word (первая строка сверху, левый и правый снизу) — и позиции табуляции. Отступы и позиции тянутся мышью: шаг
+/// 0,25 см, с ⌥ — без шага. Щелчок по линейке — новая позиция табуляции, позицию стащить вниз — убрать. Отпустили —
+/// одна правка абзацев выделения.
 struct FormatRuler: NSViewRepresentable {
     @ObservedObject var document: DocumentController
     @ObservedObject var formatter: DocFormatter
@@ -27,6 +28,8 @@ final class FormatRulerView: NSView {
     var paragraph: RTFParaProps?
     private var observers: [NSObjectProtocol] = []
     private var drag: (marker: Marker, left: Int, firstLine: Int, right: Int)?
+    /// Перетаскивание позиции табуляции (или щелчок для новой): номер, новая позиция, убрать ли.
+    private var tabDrag: (index: Int?, position: Int, removing: Bool, moved: Bool)?
 
     enum Marker { case firstLine, left, right }
 
@@ -122,7 +125,11 @@ final class FormatRulerView: NSView {
     }
 
     private func drawTabs(_ geometry: Geometry, band: NSRect) {
-        guard let tabs = paragraph?.tabs, !tabs.isEmpty else { return }
+        var tabs = paragraph?.tabs ?? []
+        if let tabDrag, let index = tabDrag.index, tabs.indices.contains(index) {
+            if tabDrag.removing { tabs.remove(at: index) } else { tabs[index].position = tabDrag.position }
+        }
+        guard !tabs.isEmpty else { return }
         DS.Palette.text.setFill()
         for tab in tabs {
             let x = geometry.x(tab.position)
@@ -167,8 +174,13 @@ final class FormatRulerView: NSView {
 
     // MARK: - Перетаскивание отступов
 
+    private func snapped(_ point: NSPoint, geometry: Geometry, free: Bool) -> Int {
+        let twips = Double((point.x - geometry.body.lowerBound) / geometry.perTwip)
+        return free ? Int(twips.rounded()) : Int(((twips / (Self.centimetre / 4)).rounded() * (Self.centimetre / 4)).rounded())
+    }
+
     override func mouseDown(with event: NSEvent) {
-        guard paragraph != nil, let geometry = geometry() else { return }
+        guard paragraph != nil, let geometry = geometry(), geometry.perTwip > 0 else { return }
         let point = convert(event.locationInWindow, from: nil)
         let props = current
         let candidates: [(Marker, CGFloat, Bool)] = [
@@ -178,20 +190,36 @@ final class FormatRulerView: NSView {
         ]
         // Верхний треугольник — над серединой полосы, нижние — под ней.
         let top = point.y < bounds.midY
-        guard let hit = candidates.filter({ $0.2 == top || abs($0.1 - point.x) < 3 }).min(by: { abs($0.1 - point.x) < abs($1.1 - point.x) }),
-              abs(hit.1 - point.x) <= 7 else { return }
-        drag = (hit.0, props.left, props.firstLine, props.right)
+        if let hit = candidates.filter({ $0.2 == top || abs($0.1 - point.x) < 3 }).min(by: { abs($0.1 - point.x) < abs($1.1 - point.x) }),
+           abs(hit.1 - point.x) <= 7 {
+            drag = (hit.0, props.left, props.firstLine, props.right)
+            return
+        }
+        // Позиция табуляции под мышью — тянуть; иначе щелчок по тексту линейки — новая позиция.
+        let tabs = paragraph?.tabs ?? []
+        if let index = tabs.indices.min(by: { abs(geometry.x(tabs[$0].position) - point.x) < abs(geometry.x(tabs[$1].position) - point.x) }),
+           abs(geometry.x(tabs[index].position) - point.x) <= 5 {
+            tabDrag = (index, tabs[index].position, false, false)
+        } else if geometry.body.contains(point.x) {
+            tabDrag = (nil, snapped(point, geometry: geometry, free: event.modifierFlags.contains(.option)), false, false)
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard var drag, let geometry = geometry(), geometry.perTwip > 0 else { return }
+        guard let geometry = geometry(), geometry.perTwip > 0 else { return }
         let point = convert(event.locationInWindow, from: nil)
         let free = event.modifierFlags.contains(.option)
-        let snap = { (twips: Double) -> Int in
-            free ? Int(twips.rounded()) : Int(((twips / (Self.centimetre / 4)).rounded() * (Self.centimetre / 4)).rounded())
+        if var tabDrag {
+            tabDrag.position = max(0, snapped(point, geometry: geometry, free: free))
+            tabDrag.removing = tabDrag.index != nil && point.y > bounds.maxY + 10
+            tabDrag.moved = true
+            self.tabDrag = tabDrag
+            needsDisplay = true
+            return
         }
+        guard var drag else { return }
         let width = Int((geometry.body.upperBound - geometry.body.lowerBound) / geometry.perTwip)
-        let fromLeft = snap(Double((point.x - geometry.body.lowerBound) / geometry.perTwip))
+        let fromLeft = snapped(point, geometry: geometry, free: free)
         let marginLeft = geometry.props.marginLeft, marginRight = geometry.props.marginRight
         switch drag.marker {
         case .firstLine:
@@ -206,6 +234,18 @@ final class FormatRulerView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let tabDrag {
+            self.tabDrag = nil
+            needsDisplay = true
+            let edit: TabEdit?
+            switch (tabDrag.index, tabDrag.removing) {
+            case (let index?, true): edit = .remove(index)
+            case (let index?, false): edit = tabDrag.moved && paragraph?.tabs[safe: index]?.position != tabDrag.position ? .move(index, to: tabDrag.position) : nil
+            case (nil, _): edit = .add(RTFTabStop(position: tabDrag.position))
+            }
+            if let edit { MainActor.assumeIsolated { formatter?.editTabs(edit) } }
+            return
+        }
         guard let drag else { return }
         self.drag = nil
         needsDisplay = true
