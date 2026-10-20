@@ -473,11 +473,14 @@ struct ScreenshotLibraryView: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: compact ? 104 : 150), spacing: DS.Space.m)], spacing: DS.Space.m) {
                             ForEach(results) { record in
                                 ShotThumbnail(record: record, compact: compact)
-                                    .onTapGesture(count: 2) { NSWorkspace.shared.open(record.url) }
+                                    .onTapGesture(count: 2) { Self.open(record) }
                                     .onDrag { NSItemProvider(contentsOf: record.url) ?? NSItemProvider() }
                                     .contextMenu {
                                         Button("Скопировать") { Self.copy(record) }
-                                        Button("Открыть") { NSWorkspace.shared.open(record.url) }
+                                        Button("Открыть") { Self.open(record) }
+                                        if record.isVideo, record.url.pathExtension.lowercased() != "gif", !PlayerPrefs.opensShots {
+                                            Button("Открыть в плеере Mac Utils") { PlayerWindowController.open([record.url]) }
+                                        }
                                         Button("Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([record.url]) }
                                         Button("Скопировать текст") {
                                             NSPasteboard.general.clearContents()
@@ -533,6 +536,15 @@ struct ScreenshotLibraryView: View {
 }
 
 extension ScreenshotLibraryView {
+    /// Видео (кроме GIF) — в плеере Mac Utils, если так выбрано в настройках плеера; остальное — программой по умолчанию.
+    static func open(_ record: ShotRecord) {
+        if record.isVideo, record.url.pathExtension.lowercased() != "gif", PlayerPrefs.opensShots {
+            PlayerWindowController.open([record.url])
+        } else {
+            NSWorkspace.shared.open(record.url)
+        }
+    }
+
     /// В буфер — и файл (вставка в Finder, Telegram, почту), и картинка (вставка в редакторы и чаты).
     static func copy(_ record: ShotRecord) {
         let pasteboard = NSPasteboard.general

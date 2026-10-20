@@ -108,7 +108,10 @@ enum EditorMenus {
 @MainActor
 private final class EditorMenuActions: NSObject, NSMenuDelegate, NSMenuItemValidation {
     @objc func newDocument() { EditorWindowController.shared.newDocument() }
-    @objc func open() { EditorWindowController.shared.openPanel() }
+    /// «Файл → Открыть…» из окна плеера — видео в плеер (⌘O с клавиатуры плеер перехватывает раньше меню).
+    @objc func open() {
+        if PlayerWindowController.isKey { PlayerWindowController.openPanel() } else { EditorWindowController.shared.openPanel() }
+    }
 
     @objc func openRecent(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }

@@ -364,6 +364,7 @@ struct SettingsSectionPage: View {
             case .cleanup: DiskCleanupView(model: .shared, compact: compact).navigationTitle("Очистка диска")
             case .shots: ScreenshotLibraryView(library: .shared, compact: compact).navigationTitle("Мои снимки")
             case .textEditor: TextEditorPage()
+            case .videoPlayer: VideoPlayerPage()
         }
     }
 }

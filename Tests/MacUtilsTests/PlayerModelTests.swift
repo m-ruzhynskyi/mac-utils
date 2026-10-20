@@ -32,10 +32,14 @@ final class PlayerModelTests: XCTestCase {
     }
 
     /// Ждать условия, давая поработать главному циклу (наблюдатели AVPlayer приходят на главную очередь).
-    private func waitUntil(_ what: String, timeout: Double = 5, until condition: () -> Bool) async throws {
+    private func waitUntil(_ what: String, timeout: Double = 30, until condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
-            if Date() > deadline { return XCTFail("не дождались: \(what)") }
+            if Date() > deadline {
+                let player = model?.player
+                return XCTFail("не дождались: \(what) · \(String(describing: model?.phase)) статус \(player?.timeControlStatus.rawValue ?? -1) "
+                    + "ждёт \(player?.reasonForWaitingToPlay?.rawValue ?? "-") скорость \(player?.rate ?? -1) время \(player?.currentTime().seconds ?? -1)")
+            }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
     }

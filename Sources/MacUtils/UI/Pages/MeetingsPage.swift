@@ -130,6 +130,13 @@ struct MeetingsPage: View {
         }
     }
 
+    /// Готовые дорожки встречи («Собеседники.m4a», «Микрофон.m4a»), без незаконченных кусков.
+    static func audioFiles(_ meeting: MeetingRecorder.Meeting) -> [URL] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: meeting.folder.path)) ?? []
+        return names.filter { $0.hasSuffix(".m4a") && !$0.contains(".part-") && !$0.contains(".merging") }.sorted()
+            .map { meeting.folder.appendingPathComponent($0) }
+    }
+
     private func meetingRow(_ meeting: MeetingRecorder.Meeting) -> some View {
         Row(meeting.title, systemImage: meeting.hasReport ? "doc.text.fill" : "waveform") {
             HStack(spacing: DS.Space.s) {
@@ -148,6 +155,10 @@ struct MeetingsPage: View {
                     Task { await recorder.process(meeting) }
                 }
                 .disabled(recorder.state != .idle)
+                let audio = Self.audioFiles(meeting)
+                if !audio.isEmpty {
+                    IconButton("Слушать в плеере Mac Utils", systemImage: "play.circle", compact: true) { PlayerWindowController.open(audio) }
+                }
                 IconButton("Показать в Finder", systemImage: "folder", compact: true) { NSWorkspace.shared.open(meeting.folder) }
                 IconButton(recorder.busyFolder == meeting.folder ? "Сейчас расшифровывается" : "Удалить запись (в Корзину)",
                            systemImage: "trash", compact: true) { deleting = meeting }

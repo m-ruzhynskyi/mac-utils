@@ -26,16 +26,29 @@ final class PlayerModel: ObservableObject {
         case failed(String)
     }
 
+    struct AudioOption: Identifiable, Equatable {
+        let id: Int
+        let title: String
+        let detail: String
+        let language: String?
+    }
+
     struct MediaInfo: Equatable {
         var title = ""
         var codecs = ""
         var hasVideo = false
         var size = CGSize.zero
         var fps: Double = 0
+        /// Поворот кадра (видео с телефона) — для снимка.
+        var transform = CGAffineTransform.identity
+        /// HLG или PQ: снимок кадра сводится в SDR с тональной компрессией.
+        var isHDR = false
     }
 
     let player = AVPlayer()
     let clock = PlayerClock()
+    private(set) lazy var subtitles = SubtitleController(model: self)
+    private(set) lazy var skip = SkipController(model: self)
 
     @Published private(set) var playlist = Playlist()
     @Published private(set) var phase: Phase = .empty
@@ -64,6 +77,9 @@ final class PlayerModel: ObservableObject {
     @Published var resumedFrom: Double?
     /// Файл доиграл до конца и следующего нет: пробел начнёт сначала.
     @Published private(set) var reachedEnd = false
+    @Published private(set) var audioOptions: [AudioOption] = []
+    @Published private(set) var selectedAudio: Int?
+    private var audibleGroup: AVMediaSelectionGroup?
 
     /// Для снимка кадра и проверки шага: ровно показанный кадр.
     private(set) var videoOutput: AVPlayerItemVideoOutput?
@@ -85,6 +101,7 @@ final class PlayerModel: ObservableObject {
     var onPlayingChange: ((Bool) -> Void)?
     /// Файл доиграл сам; `true` — модель уже перешла к следующему.
     var onFinish: ((Bool) -> Void)?
+    var onSeek: (() -> Void)?
 
     /// Сколько наблюдателей сейчас стоит (для `IdleCPUTests`).
     var activeObserverCount: Int { (timeObserver == nil ? 0 : 1) + observations.count + (endObserver == nil ? 0 : 1) }
@@ -95,6 +112,8 @@ final class PlayerModel: ObservableObject {
         player.volume = volume
         player.isMuted = silent
         player.actionAtItemEnd = .pause
+        // Субтитры рисует плеер сам (один вид для встроенных и внешних); системный выбор дорожек — тоже свой.
+        player.appliesMediaSelectionCriteriaAutomatically = false
         // Обычный плеер: экран не гаснет — своим утверждением (`PlayerSystem`), не системным для внешнего видео.
         player.preventsDisplaySleepDuringVideoPlayback = false
     }
@@ -191,7 +210,12 @@ final class PlayerModel: ObservableObject {
                 }
                 self.info = info
                 self.duration = duration.seconds.isFinite ? duration.seconds : 0
-                self.attach(AVPlayerItem(asset: asset), autoplay: autoplay)
+                let item = AVPlayerItem(asset: asset)
+                await self.prepareTracks(asset: asset, item: item)
+                guard !Task.isCancelled, self.currentURL == url else { return }
+                self.attach(item, autoplay: autoplay)
+                await self.subtitles.load(asset: asset, url: url)
+                await self.skip.load(asset: asset, url: url, duration: self.duration)
             } catch {
                 guard let self, !Task.isCancelled, self.currentURL == url else { return }
                 Log.player.error("Файл не открылся: \((error as NSError).code, privacy: .public)")
@@ -202,7 +226,9 @@ final class PlayerModel: ObservableObject {
 
     private func attach(_ item: AVPlayerItem, autoplay: Bool) {
         item.audioTimePitchAlgorithm = pitchAlgorithm
-        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        // HDR — в 10 битах: тональную компрессию делает снимок (в 8-битном BGRA яркое уже обрезано).
+        let format = info.isHDR ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : kCVPixelFormatType_32BGRA
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: format])
         item.add(output)
         videoOutput = output
         observe(item)
@@ -228,7 +254,11 @@ final class PlayerModel: ObservableObject {
         // ≈ 30 раз в секунду: субтитры и шкала. Во время паузы AVPlayer этот наблюдатель не вызывает.
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
             let seconds = time.seconds
-            MainActor.assumeIsolated { self?.clock.time = seconds.isFinite ? seconds : 0 }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.clock.time = seconds.isFinite ? seconds : 0
+                self.skip.tick(self.clock.time)
+            }
         }
         endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item,
                                                              queue: .main) { [weak self] _ in
@@ -259,7 +289,10 @@ final class PlayerModel: ObservableObject {
         guard playing != isPlaying else { return }
         isPlaying = playing
         onPlayingChange?(playing)
-        if !playing { savePosition() }
+        if !playing {
+            savePosition()
+            skip.notePause()
+        }
     }
 
     /// Файл доиграл: следующий по плейлисту (повтор одного — тот же сначала) или стоп в конце.
@@ -294,6 +327,11 @@ final class PlayerModel: ObservableObject {
         player.pause()
         player.replaceCurrentItem(with: nil)
         videoOutput = nil
+        audibleGroup = nil
+        audioOptions = []
+        selectedAudio = nil
+        subtitles.reset()
+        skip.reset()
         boostRate = nil
         resumedFrom = nil
         duration = 0
@@ -373,7 +411,10 @@ final class PlayerModel: ObservableObject {
         let before = toleranceBefore.map { CMTime(seconds: $0, preferredTimescale: 600) } ?? (exact ? .zero : CMTime(value: 1, timescale: 10))
         let after = exact || toleranceBefore != nil ? CMTime.zero : CMTime(value: 1, timescale: 10)
         clock.time = target
-        player.seek(to: time, toleranceBefore: before, toleranceAfter: after)
+        skip.noteSeek()
+        player.seek(to: time, toleranceBefore: before, toleranceAfter: after) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onSeek?() }
+        }
     }
 
     func seek(by delta: Double) { seek(to: currentTime + delta) }
@@ -394,6 +435,52 @@ final class PlayerModel: ObservableObject {
     var frameNumber: Int {
         let fps = info.fps > 0 ? info.fps : 25
         return Int((currentTime * fps + 0.001).rounded(.down))
+    }
+
+    // MARK: - Аудиодорожки
+
+    /// Аудиодорожки из группы `.audible`; выбрана — на языке, выбранном в прошлый раз, или по умолчанию файла.
+    /// Системный рендер субтитров выключен: в группе `.legible` ничего не выбрано.
+    private func prepareTracks(asset: AVURLAsset, item: AVPlayerItem) async {
+        if let legible = try? await asset.loadMediaSelectionGroup(for: .legible) { item.select(nil, in: legible) }
+        guard let group = try? await asset.loadMediaSelectionGroup(for: .audible), group.options.count > 0 else { return }
+        let tracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
+        var details: [String] = []
+        for track in tracks {
+            let format = (try? await track.load(.formatDescriptions))?.first
+            var parts: [String] = []
+            if let format { parts.append(CodecDescription.audio(format.mediaSubType.rawValue)) }
+            if let channels = format?.audioStreamBasicDescription.flatMap({ CodecDescription.channels($0.mChannelsPerFrame) }) {
+                parts.append(channels)
+            }
+            if let rate = try? await track.load(.estimatedDataRate), rate > 0 { parts.append("\(Int((rate / 1000).rounded())) кбит/с") }
+            details.append(parts.joined(separator: " · "))
+        }
+        audibleGroup = group
+        audioOptions = group.options.enumerated().map { index, option in
+            let language = option.extendedLanguageTag ?? option.locale?.language.languageCode?.identifier
+            let title = SubtitleController.languageName(language) ?? option.displayName
+            let detail = group.options.count == details.count ? details[index]
+                : option.mediaSubTypes.first.map { CodecDescription.audio($0.uint32Value) } ?? ""
+            return AudioOption(id: index, title: title, detail: detail, language: language)
+        }
+        let remembered = PlayerPrefs.audioLanguage
+        let preferred = audioOptions.first { option in
+            remembered != nil && option.language.map(SubtitleFinder.languageCode) == remembered
+        }
+        let index = preferred?.id ?? group.defaultOption.flatMap { group.options.firstIndex(of: $0) } ?? 0
+        item.select(group.options[index], in: group)
+        selectedAudio = index
+    }
+
+    /// Переключить дорожку без паузы; язык запоминается.
+    func selectAudio(_ id: Int) {
+        guard let group = audibleGroup, id < group.options.count, let item = player.currentItem else { return }
+        item.select(group.options[id], in: group)
+        selectedAudio = id
+        if let language = audioOptions[id].language {
+            UserDefaults.standard.set(SubtitleFinder.languageCode(language), forKey: Pref.playerAudioLanguage)
+        }
     }
 
     // MARK: - Позиции
@@ -425,10 +512,17 @@ final class PlayerModel: ObservableObject {
                                                                          .nominalFrameRate)) ?? ([], .zero, .identity, Float(0))
             let rect = CGRect(origin: .zero, size: size).applying(transform)
             info.size = CGSize(width: abs(rect.width), height: abs(rect.height))
+            info.transform = transform
             info.fps = Double(fps)
-            if let format = formats.first { parts.append(CodecDescription.video(format.mediaSubType.rawValue)) }
+            if let format = formats.first {
+                parts.append(CodecDescription.video(format.mediaSubType.rawValue))
+                let transfer = format.extensions[.transferFunction].flatMap { $0.propertyListRepresentation as? String }
+                info.isHDR = [kCVImageBufferTransferFunction_ITU_R_2100_HLG, kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ]
+                    .map { $0 as String }.contains(transfer ?? "")
+            }
             if info.size.width > 0 { parts.append("\(Int(info.size.width)) × \(Int(info.size.height))") }
             if let rate = CodecDescription.frameRate(fps) { parts.append(rate) }
+            if info.isHDR { parts.append("HDR") }
         }
         if let audio = tracks.first(where: { $0.mediaType == .audio }),
            let format = (try? await audio.load(.formatDescriptions))?.first {
