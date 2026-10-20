@@ -74,7 +74,8 @@ function electron(world) {
     loadURL() { return Promise.resolve(); }
     showInactive() { this.visible = true; if (world.protectionLostOnShow) this.affinity = 0; this.calls.push("show"); }
     // world.layeredBlocks: защита, заданная после setIgnoreMouseEvents(true), не встаёт (проверка второго порядка).
-    setContentProtection(on) { this.calls.push(`protect:${on}`); if (!(world.layeredBlocks && this.ignoring)) this.affinity = on ? 0x11 : 0; }
+    // world.oldWindows: Windows 10 до 2004 — WDA_EXCLUDEFROMCAPTURE встаёт как WDA_MONITOR (0x1, в захвате чёрное).
+    setContentProtection(on) { this.calls.push(`protect:${on}`); if (!(world.layeredBlocks && this.ignoring)) this.affinity = on ? (world.oldWindows ? 0x1 : 0x11) : 0; }
     setIgnoreMouseEvents(on) { this.ignoring = on; this.calls.push(`ignore:${on}`); }
     show() { this.visible = true; }
     hide() { this.visible = false; }
@@ -93,8 +94,19 @@ function electron(world) {
     if (!win) return setImmediate(() => done(new Error("no window"), ""));
     // world.helperBroken: помощник старой версии или упал — place/protect не отвечают.
     if (world.helperBroken) return setImmediate(() => done(new Error("exit 2"), ""));
+    if (command === "place" && world.placeDenied) {
+      // Отказ Windows (UIPI: помощник без повышенных прав): окно не сдвинулось, помощник читает, где оно.
+      return setImmediate(() => done(null, `${win.phys.x} ${win.phys.y} ${win.phys.width} ${win.phys.height} ${Math.round(96 * win.scale)}\n`));
+    }
     if (command === "place") {
       const [x, y, width, height] = rest.map(Number);
+      // world.driftAfterPlace: Chromium каждый раз меняет рамку уже после ответа помощника (и сообщает resize).
+      // world.badPlace: на этом по счёту place помощник видит окно на 1 px уже (рамку тут же снова поменял Chromium).
+      if (world.badPlace === helperCalls.filter(([c]) => c === "place").length) {
+        win.phys = { x, y, width: width - 1, height };
+        return setImmediate(() => done(null, `${x} ${y} ${width - 1} ${height} ${Math.round(96 * win.scale)}\n`));
+      }
+      if (world.driftAfterPlace) setTimeout(() => { win.phys = { ...win.phys, width: win.phys.width + 7 }; win.emit("resize"); }, 5);
       const to = world.displays.find((d) => contains(d.phys, x, y));
       const k = to && to.scaleFactor !== win.scale ? to.scaleFactor / win.scale : 1;
       win.phys = { x, y, width: Math.round(width * k), height: Math.round(height * k) };
@@ -193,6 +205,7 @@ async function start(world) {
       const [cx, cy] = place.markPoint([mark.x, mark.y], place.areaIn(region, page.w, page.h));
       return [Math.round(o.phys.x + cx * page.dpr), Math.round(o.phys.y + cy * page.dpr)];
     },
+    log() { const file = path.join(world.logs, "overlay.log"); return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : ""; },
     marksSent() { return this.overlay.sent.filter(([c]) => c === "mark").length; },
     places() { return fake.helperCalls.filter(([c]) => c === "place").map((a) => a.slice(2).map(Number)); },
   };
@@ -421,8 +434,103 @@ test("помощник не ответил на place и protect: метки н�
     assert.equal(host.marksSent(), 1);
     assert.equal(host.places().length, 2, "одна повторная попытка, не больше");
     assert.match(host.markLog()[0], / phys=- .* affinity=- order=2$/);
-    const log = fs.readFileSync(path.join(host.fake.module.app.getPath("logs"), "overlay.log"), "utf8");
-    assert.match(log, / place-mismatch /);
+    assert.match(host.log(), / place-dip /, "помощник не поставил окно — по-старому, в DIP");
+    assert.ok(host.overlay.calls.includes("setBounds"));
+  } finally { host.stop(); }
+});
+
+test("рамка окна меток ушла после ответа помощника (поздний WM_DPICHANGED): контрольная сверка ставит заново", async () => {
+  const a = layoutA(), b = layoutB();
+  const host = await start(world([a, b], [screenSource(a, 1)], { createScale: 1.75 }));
+  try {
+    await host.share("screen:1:0");
+    host.mark(0.5, 0.5);
+    await tick(80);
+    const o = host.overlay;
+    assert.deepEqual(o.phys, a.phys);
+    o.phys = { ...o.phys, width: 3360, height: 1890 }; // Chromium применил размер по прежнему DPI уже после сверки
+    o.emit("resize");
+    await tick(700);
+    assert.deepEqual(o.phys, a.phys, "окно меток снова на физической рамке монитора A");
+    assert.match(host.log(), / place-check /, "контрольная сверка была и её видно в журнале");
+    host.mark(...P);
+    await tick(20);
+    near(host.landed(), expected(a.phys, ...P), "после контрольной сверки");
+  } finally { host.stop(); }
+});
+
+test("контрольная сверка не сошлась: окно меток ставится заново (place-drift) и снова сверяется", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1.25, [0, 0], true);
+  const host = await start(world([d], [screenSource(d, 1)], { badPlace: 2 }));
+  try {
+    await host.share("screen:1:0");
+    host.mark(0.5, 0.5);
+    await tick(1300);
+    const log = host.log();
+    assert.ok(log.indexOf(" place-drift ") > 0 && log.indexOf(" place-check ") > log.indexOf(" place-drift "), log);
+    assert.equal(host.places().length, 4, "постановка, неудачная сверка, постановка заново, сверка");
+    assert.deepEqual(host.overlay.phys, d.phys);
+  } finally { host.stop(); }
+});
+
+test("рамка уходит после каждой постановки: контрольных сверок не больше трёх, без бесконечного цикла", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1.25, [0, 0], true);
+  const host = await start(world([d], [screenSource(d, 1)], { driftAfterPlace: true }));
+  try {
+    await host.share("screen:1:0");
+    host.mark(0.5, 0.5);
+    await tick(2200);
+    const count = host.places().length;
+    assert.equal(count, 1 + 3, "первая постановка и три контрольные");
+    assert.equal(host.log().split(" place-check ").length - 1, 3);
+    await tick(700);
+    assert.equal(host.places().length, count, "после трёх сверок помощника больше не зовут");
+  } finally { host.stop(); }
+});
+
+test("отказ Windows в place (окно не сдвинулось): окно меток ставится по-старому, в DIP, метки показываются", async () => {
+  const a = layoutA(), b = layoutB();
+  const host = await start(world([a, b], [screenSource(a, 1)], { createScale: 1.75, placeDenied: true }));
+  try {
+    await host.share("screen:1:0");
+    host.mark(...P);
+    await tick(120);
+    host.overlay.emit("resize"); // setBounds DIP-пути двигает окно — контрольные сверки не нужны
+    await tick(700);
+    assert.equal(host.places().length, 2, "две попытки place, потом DIP и без контрольных сверок");
+    assert.match(host.log(), / place-dip /);
+    assert.ok(host.overlay.calls.includes("setBounds"));
+    assert.equal(host.marksSent(), 1);
+  } finally { host.stop(); }
+});
+
+test("старая Windows 10 (affinity 0x1 — в видео чёрное): защита снимается, в журнале order=0", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1.25, [0, 0], true);
+  const host = await start(world([d], [screenSource(d, 1)], { oldWindows: true }));
+  try {
+    await host.share("screen:1:0");
+    host.mark(0.5, 0.5);
+    await tick(80);
+    const calls = host.overlay.calls.filter((c) => c.startsWith("protect:"));
+    assert.equal(calls.at(-1), "protect:false", `защита снята: ${calls}`);
+    assert.equal(host.overlay.affinity, 0);
+    assert.ok(!host.fake.helperCalls.some(([c], i, all) => c === "protect" && all.slice(0, i).some(([p]) => p === "protect")), "второй порядок не нужен");
+    assert.match(host.log(), / unprotected .* affinity=0x1 order=0\n/);
+    assert.match(host.markLog()[0], / affinity=0x1 order=0$/);
+    assert.equal(host.marksSent(), 1, "метка показана");
+  } finally { host.stop(); }
+});
+
+test("журнал размещения: мониторы номерами по порядку, без ID устройств", async () => {
+  const a = layoutA(), b = layoutB(), c = layoutC();
+  const host = await start(world([a, b, c], [screenSource(a, 1)]));
+  try {
+    await host.share("screen:1:0");
+    host.mark(0.5, 0.5);
+    await tick(80);
+    const line = host.log().split("\n").find((l) => / placed /.test(l));
+    assert.match(line, / displays=\[1:-1920,248,1920x1080@1 2:0,0,2195x1235@1\.75 3:2195,258,1920x1080@1\] primary=2 source=1 /);
+    assert.doesNotMatch(host.log(), /\b1[123]:|=1[123]\b/, "ID мониторов (11, 12, 13) в журнал не попадают");
   } finally { host.stop(); }
 });
 

@@ -32,13 +32,17 @@ let placedOn = null; // монитор, на который окно меток 
 let placing = null; // монитор, на который окно меток ставится сейчас (ждём помощника)
 let placed = null; // где окно меток по словам помощника: { x, y, width, height, dpi }
 let affinity = null; // исключение из захвата на окне меток по словам помощника (0x11 — исключено)
-let protectOrder = 1; // 1 — защита после setIgnoreMouseEvents, 2 — до него (если первый порядок не встал)
+let protectOrder = 1; // 1 — защита после setIgnoreMouseEvents, 2 — до него (если первый порядок не встал), 0 — снята (0x1)
 let shielded = false; // защита после показа проверена помощником: до этого метки ждут, чтобы не попасть в видео
+let checks = 0; // контрольных сверок рамки окна меток на этом мониторе (не больше MAX_CHECKS — без бесконечных циклов)
+let checkTimer = null;
 let trackedRect = null; // последняя рамка окна от помощника, физические пиксели
 let overlayShown = false;
 let sourceHidden = false; // транслируемое окно свёрнуто или скрыто: меток не показываем
 const pendingMarks = [];
 const EXCLUDE_FROM_CAPTURE = 0x11;
+const MONITOR_ONLY = 0x1; // Windows 10 до 2004: вместо исключения окно в захвате чёрное
+const CHECK_MS = 500, MAX_CHECKS = 3;
 
 const sharedDisplay = () => place.sharedDisplay(chosen?.source, screen.getAllDisplays(), screen.getPrimaryDisplay());
 const physOf = (display) => screen.dipToScreenRect(null, display.bounds);
@@ -56,16 +60,23 @@ function runHelper(args, done) {
 
 const rect = (r) => (r ? `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)}x${Math.round(r.height)}` : "-");
 const hex = (n) => (n == null ? "-" : `0x${n.toString(16)}`);
+const parsePlaced = (out) => {
+  const [x, y, width, height, dpi] = out.trim().split(/\s+/).map(Number);
+  return width && height ? { x, y, width, height, dpi } : null;
+};
 const fr = (f) => (f ? [f.fx, f.fy, f.fw, f.fh].map((v) => +v.toFixed(4)).join(";") : "-");
 
-// Числа для разбора, если метки лягут не туда: мониторы, область, окно меток. Без содержимого экрана и имён окон.
+// Числа для разбора, если метки лягут не туда: мониторы, область, окно меток. Без содержимого экрана, имён окон и
+// ID устройств: мониторы — номерами по порядку (1…), основной и транслируемый — их номера.
 function logPlacement(event) {
   try {
     const file = path.join(app.getPath("logs"), "overlay.log");
     if (fs.existsSync(file) && fs.statSync(file).size > 256 * 1024) fs.rmSync(file);
-    const displays = screen.getAllDisplays().map((d) => `${d.id}:${rect(d.bounds)}@${d.scaleFactor}`).join(" ");
+    const all = screen.getAllDisplays(), primary = screen.getPrimaryDisplay(), shared = sharedDisplay();
+    const number = (d) => (d ? all.findIndex((x) => x.id === d.id) + 1 || "-" : "-"); // id — только для сравнения
+    const displays = all.map((d, i) => `${i + 1}:${rect(d.bounds)}@${d.scaleFactor}`).join(" ");
     const kind = /^window:/.test(chosen?.source?.id || "") ? "window" : "screen";
-    fs.appendFileSync(file, `${new Date().toISOString()} ${event} ${kind} displays=[${displays}] source=${chosen?.source?.display_id || "-"} ` +
+    fs.appendFileSync(file, `${new Date().toISOString()} ${event} ${kind} displays=[${displays}] primary=${number(primary)} source=${number(shared)} ` +
       `target=${rect(target)} monitor=${rect(monitor)} phys=${placed ? `${rect(placed)}@${placed.dpi}` : "-"} affinity=${hex(affinity)} order=${protectOrder}\n`);
   } catch (_) {}
 }
@@ -94,30 +105,66 @@ function logMark(report) {
   } catch (_) {}
 }
 
+// По-старому, в DIP Electron (дважды: первый раз Windows считает размер по прежнему монитору).
+function placeByDip(mine, want) {
+  const bounds = screen.getDisplayMatching(screen.screenToDipRect(null, want)).bounds;
+  mine.setBounds(bounds);
+  setTimeout(() => { if (!mine.isDestroyed()) mine.setBounds(bounds); }, 50);
+}
+
 // Окно меток — на физический прямоугольник монитора. Переезд на монитор с другим DPI Windows сопровождает WM_DPICHANGED,
 // и окно получает размер по новому DPI, — поэтому ответ помощника сверяется и при расхождении ставим ещё раз.
-function placeOverlay() {
+// fresh — новый монитор (а не исправление после контрольной сверки): счётчик сверок заново.
+function placeOverlay(fresh = true) {
   if (!overlay || overlay.isDestroyed() || !monitor) return;
   const mine = overlay, want = monitor;
   placedOn = null; placing = want;
+  if (fresh) checks = 0;
   if (!hasHelper()) {
-    // Без помощника — по-старому, в DIP Electron (дважды: первый раз Windows считает размер по прежнему монитору).
-    const bounds = screen.getDisplayMatching(screen.screenToDipRect(null, want)).bounds;
-    mine.setBounds(bounds);
-    setTimeout(() => { if (!mine.isDestroyed()) mine.setBounds(bounds); }, 50);
+    placeByDip(mine, want);
     placedOn = want; placing = null; flushMarks();
     return;
   }
   const attempt = (n) => runHelper(["place", hwndOf(mine), want.x, want.y, want.width, want.height], (out) => {
     if (mine !== overlay || mine.isDestroyed() || placing !== want) return; // окно закрыто или ставится уже на другой монитор
-    const [x, y, width, height, dpi] = out.trim().split(/\s+/).map(Number);
-    placed = width && height ? { x, y, width, height, dpi } : null;
+    placed = parsePlaced(out);
     if (!place.same(placed, want) && n < 2) return attempt(n + 1);
     placedOn = want; placing = null;
-    logPlacement(place.same(placed, want) ? "placed" : "place-mismatch");
+    if (place.same(placed, want)) {
+      logPlacement("placed");
+      scheduleCheck();
+    } else {
+      // Помощник окно на монитор не поставил (нет ответа, старый помощник, отказ Windows) — по-старому, в DIP.
+      const away = !placed || !place.same(place.monitorOf(placed, monitors()), want);
+      if (away) { placeByDip(mine, want); checks = MAX_CHECKS; } // сверять нечего: помощник окно не двигает
+      logPlacement(away ? "place-dip" : "place-mismatch");
+    }
     flushMarks();
   });
   attempt(1);
+}
+
+// Контрольная сверка: Chromium может поменять рамку окна меток уже после ответа помощника (WM_DPICHANGED обработан
+// позже, move/resize окна). Через CHECK_MS после постановки или последнего move/resize помощник ставит окно ещё раз и
+// сверяет; ушло — ставим заново. Не больше MAX_CHECKS сверок на монитор: без бесконечных циклов.
+function scheduleCheck() {
+  if (!hasHelper() || checks >= MAX_CHECKS || !overlay || overlay.isDestroyed()) return;
+  const mine = overlay;
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(() => {
+    if (mine !== overlay || mine.isDestroyed() || !overlayShown || placing || !placedOn) return;
+    const want = placedOn;
+    checks++;
+    runHelper(["place", hwndOf(mine), want.x, want.y, want.width, want.height], (out) => {
+      if (mine !== overlay || mine.isDestroyed() || placing || placedOn !== want) return;
+      // place сама ставит окно на место: сошлось — сверка в журнал (place-check), нет — ставим заново (place-drift).
+      const got = parsePlaced(out);
+      if (place.same(got, want)) return logPlacement("place-check");
+      placed = got;
+      logPlacement("place-drift");
+      placeOverlay(false);
+    });
+  }, CHECK_MS);
 }
 
 // Исключение из захвата ставит само приложение: SetWindowDisplayAffinity принимает только окна своего процесса.
@@ -134,13 +181,18 @@ function protectOverlay() {
     const match = /affinity=0x([0-9a-f]+)/i.exec(out);
     affinity = match ? parseInt(match[1], 16) : null;
     protectOrder = order;
-    if (affinity !== EXCLUDE_FROM_CAPTURE && order === 1) {
+    if (affinity === MONITOR_ONLY) {
+      // Windows 10 до 2004: окно меток на весь монитор было бы в видео чёрным — вся трансляция чёрная. Лучше метка
+      // в видео (зритель видит её дважды), чем чёрный экран: защиту снимаем, в журнале order=0.
+      mine.setContentProtection(false);
+      protectOrder = 0;
+    } else if (affinity !== EXCLUDE_FROM_CAPTURE && order === 1) {
       mine.setIgnoreMouseEvents(false);
       mine.setContentProtection(true);
       mine.setIgnoreMouseEvents(true);
       return check(2);
     }
-    logPlacement("protect");
+    logPlacement(protectOrder === 0 ? "unprotected" : "protect");
     shielded = true;
     flushMarks();
   });
@@ -200,6 +252,8 @@ function prepareOverlay() {
   });
   overlay.setAlwaysOnTop(true, "screen-saver");
   overlay.setIgnoreMouseEvents(true);
+  overlay.on("move", scheduleCheck);
+  overlay.on("resize", scheduleCheck);
   overlay.webContents.once("did-finish-load", () => { overlayReady = true; sendRegion(); });
   overlay.loadFile(path.join(__dirname, "overlay.html"));
   if (sharedDisplay()) setTarget(physOf(sharedDisplay()), "screen");
@@ -237,6 +291,7 @@ function trackWindow() {
 
 function hideOverlay() {
   if (tracker) { tracker.kill(); tracker = null; }
+  clearTimeout(checkTimer); checkTimer = null;
   if (overlay && !overlay.isDestroyed()) overlay.close();
   overlay = null; overlayReady = false; overlayShown = false; target = null; monitor = null; trackedRect = null;
   placedOn = null; placing = null; placed = null;
