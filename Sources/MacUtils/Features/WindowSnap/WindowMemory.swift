@@ -60,6 +60,7 @@ final class WindowMemory: ObservableObject {
             let timer = Timer(timeInterval: 20, repeats: true) { _ in
                 MainActor.assumeIsolated { WindowMemory.shared.snapshot() }
             }
+            timer.tolerance = 4
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
             observer = NotificationCenter.default.addObserver(
@@ -108,7 +109,10 @@ final class WindowMemory: ObservableObject {
         }
         guard !frames.isEmpty else { return }
         // Окна закрытых программ не забываем — вдруг их откроют снова.
+        let before = layouts[signature]
         layouts[signature, default: [:]].merge(frames) { $1 }
+        // Окна не двигались — файл не переписываем (снимок раз в 20 с).
+        guard layouts[signature] != before else { return }
         save()
     }
 

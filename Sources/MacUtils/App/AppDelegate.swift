@@ -54,12 +54,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Спрашиваем не посреди запуска (там и так «Перенести?»/разрешения), а чуть позже.
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { MainActor.assumeIsolated { ToolsLauncher.start() } }
 
-        // Пока нет доступа к «Универсальному доступу», периодически проверяем:
-        // как только пользователь выдаст разрешение, утилиты включатся сами.
-        let timer = Timer(timeInterval: 2, target: self, selector: #selector(checkTrust),
-                          userInfo: nil, repeats: true)
-        RunLoop.main.add(timer, forMode: .common)
-        trustTimer = timer
+        // Выдали или отозвали «Универсальный доступ» — утилиты включаются и выключаются сами. Система сообщает об этом
+        // уведомлением; опрос — запасной: раз в 2 с, пока доступа нет, и раз в 5 с, когда он есть (отзыв доступа
+        // при живом перехвате клавиш не должен затягиваться).
+        DistributedNotificationCenter.default().addObserver(forName: Notification.Name("com.apple.accessibility.api"),
+                                                            object: nil, queue: .main) { _ in
+            // Список доверенных программ система обновляет чуть позже уведомления.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                MainActor.assumeIsolated { (NSApp.delegate as? AppDelegate)?.checkTrust() }
+            }
+        }
+        scheduleTrustCheck()
 
         if plan.showSettings {
             launchDefaults.set(true, forKey: Pref.didShowWelcome)
@@ -235,7 +240,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard trusted != lastTrusted else { return }
         lastTrusted = trusted
         syncFeatures()
+        scheduleTrustCheck()
     }
+
+    /// Запасной опрос доступа: чаще, пока его ждём, реже — когда он есть.
+    private func scheduleTrustCheck() {
+        trustTimer?.invalidate()
+        let interval = AppDelegate.trustCheckInterval(trusted: lastTrusted)
+        let timer = Timer(timeInterval: interval, target: self, selector: #selector(checkTrust), userInfo: nil, repeats: true)
+        timer.tolerance = interval * 0.2
+        RunLoop.main.add(timer, forMode: .common)
+        trustTimer = timer
+    }
+
+    static func trustCheckInterval(trusted: Bool) -> TimeInterval { trusted ? 5 : 2 }
 
     private func syncFeatures() {
         FinderCutPaste.shared.sync()

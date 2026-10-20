@@ -42,6 +42,7 @@ final class WarmScreen: ObservableObject {
                 let timer = Timer(timeInterval: 30, repeats: true) { _ in
                     MainActor.assumeIsolated { WarmScreen.shared.apply() }
                 }
+                timer.tolerance = 5
                 RunLoop.main.add(timer, forMode: .common)
                 self.timer = timer
                 NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,

@@ -56,6 +56,11 @@ struct SettingsRootView: View {
     @State private var onboarding = FirstRun.needsOnboarding(done: UserDefaults.standard.object(forKey: Pref.onboardingDone) as? Bool)
 
     var body: some View {
+        // Разрешения на страницах настроек обновляются, только пока окно на экране.
+        main.onScreen { PermissionsModel.shared.viewerChanged($0) }
+    }
+
+    @ViewBuilder private var main: some View {
         if onboarding {
             OnboardingView {
                 UserDefaults.standard.set(true, forKey: Pref.onboardingDone)

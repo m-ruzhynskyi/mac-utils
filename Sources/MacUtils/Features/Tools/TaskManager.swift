@@ -112,17 +112,28 @@ final class TaskManagerModel: ObservableObject {
         return ProcessMath.sorted(filtered, by: sort)
     }
 
-    func start() {
+    /// Сколько видов «Задач» на экране (`onScreen`): настройки, окно «Инструменты», панель. Выборка — только пока > 0:
+    /// onDisappear при закрытии окна не приходит, и раньше перебор процессов шёл раз в 2 с и с закрытыми настройками.
+    private(set) var viewers = ViewerCount()
+    var isSampling: Bool { timer != nil }
+
+    func viewerChanged(_ shown: Bool) {
+        viewers.update(shown)
+        viewers.any ? start() : stop()
+    }
+
+    private func start() {
         guard !isDemo, timer == nil else { return }
         sample()
         let timer = Timer(timeInterval: 2, repeats: true) { _ in
             MainActor.assumeIsolated { TaskManagerModel.shared.sample() }
         }
+        timer.tolerance = 0.3
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
 
-    func stop() {
+    private func stop() {
         timer?.invalidate()
         timer = nil
     }
@@ -275,8 +286,7 @@ struct TaskManagerView: View {
                 bottomBar
             }
         }
-        .onAppear { model.start() }
-        .onDisappear { model.stop() }
+        .onScreen { model.viewerChanged($0) }
         .alert(item: $confirmForce) { row in
             Alert(title: Text("Завершить «\(row.name)» принудительно?"),
                   message: Text("Несохранённые данные будут потеряны."),

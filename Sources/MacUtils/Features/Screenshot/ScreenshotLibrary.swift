@@ -231,6 +231,7 @@ final class ScreenshotLibrary: ObservableObject {
             let timer = Timer(timeInterval: 3600, repeats: true) { _ in
                 MainActor.assumeIsolated { _ = ScreenshotLibrary.shared.removeExpired() }
             }
+            timer.tolerance = 300
             RunLoop.main.add(timer, forMode: .common)
             cleanupTimer = timer
         }

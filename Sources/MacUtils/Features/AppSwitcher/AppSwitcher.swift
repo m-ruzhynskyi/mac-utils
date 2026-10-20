@@ -53,6 +53,11 @@ final class AppSwitcher: NSObject, ObservableObject {
                            name: NSWorkspace.didActivateApplicationNotification, object: nil)
         center.addObserver(self, selector: #selector(appTerminated(_:)),
                            name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+        // Новая программа, скрытая или снова показанная — в кэше её окна и их состояние.
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didHideApplicationNotification,
+                     NSWorkspace.didUnhideApplicationNotification] {
+            center.addObserver(self, selector: #selector(appsChanged(_:)), name: name, object: nil)
+        }
         // Исключённая программа вышла на передний план или ушла с него — системный ⌘Tab включаем и выключаем.
         NotificationCenter.default.addObserver(forName: AppExclusions.didChangeNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { AppSwitcher.shared.exclusionChanged() }
@@ -124,6 +129,10 @@ final class AppSwitcher: NSObject, ObservableObject {
         refreshItems()
     }
 
+    @objc private func appsChanged(_ note: Notification) {
+        refreshItems()
+    }
+
     @objc private func appTerminated(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         recent.removeAll { $0 == app.processIdentifier }
@@ -132,13 +141,18 @@ final class AppSwitcher: NSObject, ObservableObject {
 
     // MARK: - Кэш списка окон (вне обработчика tap)
 
-    /// Список окон обновляется в фоне (смена программы, раз в 5 секунд), чтобы ⌥Tab не ждал Accessibility.
+    /// Список окон обновляется в фоне, чтобы ⌥Tab не ждал Accessibility: по событиям программ (активация, запуск,
+    /// завершение, скрытие) и при открытии панели. Порядок окон панель всё равно берёт свежим из CG, а таймер — запасной,
+    /// для заголовков и свёрнутых окон внутри одной программы: раз в минуту (было раз в 5 с — перебор окон через AX).
+    static let cacheRefreshInterval: TimeInterval = 60
+
     private func startCacheRefresh() {
         refreshItems()
         guard cacheTimer == nil else { return }
-        let timer = Timer(timeInterval: 5, repeats: true) { _ in
+        let timer = Timer(timeInterval: Self.cacheRefreshInterval, repeats: true) { _ in
             MainActor.assumeIsolated { AppSwitcher.shared.refreshItems() }
         }
+        timer.tolerance = 10
         RunLoop.main.add(timer, forMode: .common)
         cacheTimer = timer
     }

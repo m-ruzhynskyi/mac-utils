@@ -382,6 +382,7 @@ final class ScreenShare: NSObject, ObservableObject {
         let timer = Timer(timeInterval: 10, repeats: true) { _ in
             MainActor.assumeIsolated { ScreenShare.shared.refreshAudioFilter() }
         }
+        timer.tolerance = 2
         RunLoop.main.add(timer, forMode: .common)
         audioRefresh = timer
     }
@@ -530,6 +531,7 @@ final class ScreenShare: NSObject, ObservableObject {
                 }
             }
         }
+        timer.tolerance = 2
         RunLoop.main.add(timer, forMode: .common)
         heartbeat = timer
     }
@@ -1240,6 +1242,7 @@ final class ShareViewer: ObservableObject {
                 viewer.socket?.cancel(with: .goingAway, reason: nil)
             }
         }
+        timer.tolerance = 3
         RunLoop.main.add(timer, forMode: .common)
         silenceWatch = timer
     }
@@ -2080,8 +2083,7 @@ private struct ShareHistoryRows: View {
                 .help(live ? "Сейчас в эфире" : "Сейчас не транслирует")
             }
         }
-        .onAppear { history.startPolling() }
-        .onDisappear { history.stopPolling() }
+        .onScreen { $0 ? history.startPolling() : history.stopPolling() }
         .alert("Подпись для \(renaming.map { ShareCode.display($0.id) } ?? "")", isPresented: Binding(
             get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Например, Саша — работа", text: $newLabel)

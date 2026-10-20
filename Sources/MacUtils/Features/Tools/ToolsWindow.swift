@@ -125,6 +125,11 @@ struct ToolsView: View {
     var inPopover = false
 
     var body: some View {
+        // Разрешения на вкладках панели и окна обновляются, только пока они на экране.
+        main.onScreen { PermissionsModel.shared.viewerChanged($0) }
+    }
+
+    @ViewBuilder private var main: some View {
         if inPopover {
             VStack(spacing: DS.Space.m) {
                 header
