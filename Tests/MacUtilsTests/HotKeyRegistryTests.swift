@@ -23,7 +23,7 @@ final class HotKeyRegistryTests: XCTestCase {
         let expected: [HotKeyAction: String] = [
             .settings: "⌃⌥⌘,", .tools: "⌃⌥⌘T", .screenshot: "⇧⌘X", .screenshotOCR: "⌥⇧⌘X",
             .dropShelf: "⌃⌥D", .annotate: "⌃⌥A", .windowPin: "⌃⌥P (З)", .fixText: "⌃⌥E", .meeting: "⌃⌥M",
-            .focus: "⌃⌥F", .qr: "⌃⌥Q", .appVolume: "⌃⌥V", .layoutFix: "⌘] (Ъ)",
+            .focus: "⌃⌥F", .qr: "⌃⌥Q", .appVolume: "⌃⌥V", .layoutFix: "⌘] (Ъ)", .textEditor: "⌃⌥⌘E",
         ]
         for action in HotKeyAction.allCases {
             XCTAssertEqual(HotKeyRegistry.combo(for: action, defaults: defaults).title, expected[action], action.rawValue)

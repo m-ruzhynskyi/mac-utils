@@ -39,8 +39,12 @@ enum MainMenu {
         editMenu.addItem(withTitle: "Копировать", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Вставить", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Выбрать все", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        EditorMenus.addEditItems(to: editMenu)
         editItem.submenu = editMenu
+        // «Файл» — перед «Правкой», остальные меню редактора — после неё (видны, пока открыт редактор).
+        main.insertItem(EditorMenus.file(), at: 1)
         main.addItem(editItem)
+        for item in EditorMenus.trailing() { main.addItem(item) }
 
         return main
     }

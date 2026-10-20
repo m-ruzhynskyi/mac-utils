@@ -39,6 +39,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) {
             ToolsWindowController.shared.show()
         }
+        HotKeyCenter.shared.register(
+            id: HotKeyID.textEditor,
+            keyCode: kVK_ANSI_E,
+            modifiers: cmdKey | optionKey | controlKey
+        ) {
+            EditorWindowController.shared.show()
+        }
 
         // Чистая установка: «Что нового» не нужно (оно только после обновления). Делаем до `Updater.start()`.
         let launchDefaults = UserDefaults.standard
@@ -74,10 +81,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// macutils://tools — значок «Инструменты»; macutils://settings — настройки;
     /// annotate, pin, fix-text, meeting, break, warm, snap?left… — то же, что горячие клавиши (для «Команд»).
+    /// Файлы («Открыть с помощью», перетаскивание на значок в Dock) открываются вкладками текстового редактора.
     func application(_ application: NSApplication, open urls: [URL]) {
+        let files = urls.filter(\.isFileURL)
+        if !files.isEmpty { EditorWindowController.shared.open(files) }
         for url in urls where url.scheme == "macutils" {
             switch url.host {
             case "tools": ToolsWindowController.shared.show()
+            case "editor":
+                // macutils://editor — открыть редактор; macutils://editor?path=/путь/к/файлу — открыть файл.
+                let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "path" }?.value
+                if let path, !path.isEmpty {
+                    EditorWindowController.shared.openFromLink(URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
+                } else {
+                    EditorWindowController.shared.show()
+                }
             case "snap":
                 // macutils://snap?left — left/right/top/bottom/topLeft/…/maximize/center/restore.
                 let targets: [String: WindowTiler.Target] = [
@@ -121,6 +139,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ShareViewer.shared.showWindow()
             return false
         }
+        // Значок в Dock появился из-за редактора — к нему.
+        if EditorWindowController.shared.isOpen {
+            EditorWindowController.shared.show()
+            return false
+        }
         SettingsWindowController.shared.show()
         return false
     }
@@ -144,6 +167,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Выход (⌘Q, «Выйти») во время записи, эфира и т. п.: спросить, остановить штатно и только потом выйти.
     /// При системном завершении (и после подтверждения перезапуска ради обновления) — без вопроса, с коротким пределом ожидания.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Редактор: черновики и сессия записываются сразу; без автосохранения — вопрос о несохранённом.
+        guard EditorWindowController.shared.prepareForTermination() else { return .terminateCancel }
         let reasons = BusyRegistry.shared.active
         // Две независимые проверки: уведомление о выключении (за последние две минуты) и причина в самом событии выхода.
         let quitCode = NSAppleEventManager.shared().currentAppleEvent?
@@ -284,9 +309,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// В Dock — обычное приложение (клик по значку открывает настройки), иначе — фоновое.
     private func syncDock() { Self.syncDock() }
 
-    /// В Dock — если так выбрано в настройках или открыт просмотр трансляции (чтобы окно было легко найти).
-    static func syncDock() {
+    /// В Dock — если так выбрано в настройках, открыт просмотр трансляции (чтобы окно было легко найти) или окно
+    /// текстового редактора (у него строка меню «Файл / Правка / … / Кодировка»). `editorOpen` — пока окно открывается
+    /// или закрывается.
+    static func syncDock(editorOpen: Bool? = nil) {
         let visible = UserDefaults.standard.bool(forKey: Pref.showInDock) || ShareViewer.shared.isWindowOpen
+            || (editorOpen ?? EditorWindowController.shared.isOpen)
         let policy: NSApplication.ActivationPolicy = visible ? .regular : .accessory
         guard NSApp.activationPolicy() != policy else { return }
         NSApp.setActivationPolicy(policy)
@@ -313,4 +341,5 @@ enum HotKeyID {
     static let windowPin: UInt32 = 31
     static let meeting: UInt32 = 32
     static let focus: UInt32 = 33
+    static let textEditor: UInt32 = 34
 }

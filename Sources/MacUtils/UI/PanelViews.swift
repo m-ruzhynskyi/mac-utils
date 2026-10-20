@@ -15,7 +15,7 @@ struct PanelSectionView: View {
     /// (со своей прокруткой) — иначе вкладка была бы пустой (так было с «Исключениями» и «Клавишами»).
     static let quickPanels: Set<SettingsSection> = [
         .screenshot, .windows, .volume, .layout, .shelf, .cheatSheet, .downloads, .qr, .annotate, .wellbeing, .meetings, .ai,
-        .cutPaste, .smoothScroll, .switcher,
+        .cutPaste, .smoothScroll, .switcher, .textEditor,
     ]
 
     /// Раздел показывает свою страницу в компактном виде (со своей прокруткой).
@@ -54,6 +54,7 @@ struct PanelSectionView: View {
         case .cutPaste: CutPastePanel()
         case .smoothScroll: SmoothScrollPanel()
         case .switcher: SwitcherPanel()
+        case .textEditor: EditorPanel()
         default: EmptyView()
         }
     }
@@ -564,3 +565,45 @@ private struct SwitcherPanel: View {
         }
     }
 }
+
+private struct EditorPanel: View {
+    @State private var recent = EditorRecent.urls
+
+    var body: some View {
+        QuickGroup("Текстовый редактор") {
+            QuickAction(title: "Открыть редактор", subtitle: "Вкладки прошлого сеанса вернутся", systemImage: "doc.plaintext",
+                        tile: .accent, hotKey: .textEditor) {
+                fromPanel { EditorWindowController.shared.show() }
+            }
+            QuickAction(title: "Открыть файл…", subtitle: ".frm, .rtf, .txt, .json, .xml… или перетащите сюда", systemImage: "folder",
+                        keys: ["⌘", "O"]) {
+                fromPanel { EditorWindowController.shared.openPanel() }
+            }
+            QuickAction(title: "Новый документ", systemImage: "plus", keys: ["⌘", "N"]) {
+                fromPanel { EditorWindowController.shared.newDocument() }
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            AppStatusItem.shared.closeTools()
+            EditorWindowController.shared.openDropped(providers)
+            return true
+        }
+        Group {
+            if !recent.isEmpty {
+            QuickGroup("Недавние") {
+                ForEach(recent.prefix(6), id: \.self) { url in
+                    QuickAction(title: url.lastPathComponent, subtitle: EditorRecent.folderTitle(url),
+                                systemImage: DocumentTab.symbol(EditorLanguage.detect(url: url, head: Data()), url: url)) {
+                        fromPanel { EditorWindowController.shared.open([url]) }
+                    }
+                }
+            }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            let now = EditorRecent.urls
+            if now != recent { recent = now }
+        }
+    }
+}
+

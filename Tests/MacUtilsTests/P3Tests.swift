@@ -38,7 +38,8 @@ final class P3Tests: XCTestCase {
         XCTAssertEqual(settings?.keyEquivalent, ",")
         XCTAssertTrue(titles.contains("Закрыть окно"))
         XCTAssertTrue(titles.contains("Выйти из Mac Utils"))
-        XCTAssertEqual(menu.items.count, 2) // приложение и «Правка»
+        // Приложение, «Файл», «Правка» и меню текстового редактора (видны, пока открыт редактор).
+        XCTAssertEqual(menu.items.compactMap(\.submenu?.title), ["", "Файл", "Правка", "Поиск", "Вид", "Кодировка", "Синтаксис"])
     }
 
     // T7

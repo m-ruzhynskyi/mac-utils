@@ -1,0 +1,1473 @@
+{
+ "files": {
+  "01-three-dollars.frm": {
+   "bytes_sha256": "4827705a1918775929b6fb3a1b176c510c65c58323207284d2446f69b32033ac",
+   "description": "\u0420\u043e\u0432\u043d\u043e 3 \u0437\u043d\u0430\u043a\u0430 $: \u043f\u0440\u0438 \u043f\u0440\u043e\u043f\u0443\u0441\u043a\u0435 3 \u043f\u043e\u0434\u0441\u0432\u0435\u0447\u0435\u043d\u043d\u044b\u0445 \u043d\u0435\u0442.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 3,
+   "encoding": "windows-1252",
+   "eol": "CRLF",
+   "highlighted_all": [
+    0,
+    1,
+    2
+   ],
+   "highlighted_skip3": [],
+   "line_count": 5,
+   "occurrences": [
+    {
+     "column": 13,
+     "index": 0,
+     "line": 2,
+     "offset": 427,
+     "skipped_by_default": true,
+     "value": "FIRST"
+    },
+    {
+     "column": 7,
+     "index": 1,
+     "line": 3,
+     "offset": 446,
+     "skipped_by_default": true,
+     "value": "CITY"
+    },
+    {
+     "column": 6,
+     "index": 2,
+     "line": 4,
+     "offset": 462,
+     "skipped_by_default": true,
+     "value": "ZIP91000"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "FIRST",
+    "CITY",
+    "ZIP91000"
+   ],
+   "size_bytes": 478,
+   "strip_all_bytes_sha256": "8501efa699cedf861e65badbe5c548ccd9404cf9c5c3243f24fc10883f8c43ff",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $ \\par\r\nCity: $\\par\r\nZip: $\\par\r\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $ \\par\r\nCity: $CITY\\par\r\nZip: $ZIP91000\\par\r\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $FIRST \\par\r\nCity: $\\par\r\nZip: $ZIP91000\\par\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $FIRST \\par\r\nCity: $CITY\\par\r\nZip: $\\par\r\n}"
+   },
+   "strip_skip3_bytes_sha256": "4827705a1918775929b6fb3a1b176c510c65c58323207284d2446f69b32033ac",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $FIRST \\par\r\nCity: $CITY\\par\r\nZip: $ZIP91000\\par\r\n}",
+   "text_length": 478
+  },
+  "02-four-dollars.frm": {
+   "bytes_sha256": "df1581e800310bd35bbfa8b1661ca34691f8eb79d05ebb569f20484c2c3c345f",
+   "description": "4 \u0437\u043d\u0430\u043a\u0430 $: \u043f\u0440\u0438 \u043f\u0440\u043e\u043f\u0443\u0441\u043a\u0435 3 \u043f\u043e\u0434\u0441\u0432\u0435\u0447\u0435\u043d \u0442\u043e\u043b\u044c\u043a\u043e \u0447\u0435\u0442\u0432\u0451\u0440\u0442\u044b\u0439.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 4,
+   "encoding": "windows-1252",
+   "eol": "CRLF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "highlighted_skip3": [
+    3
+   ],
+   "line_count": 6,
+   "occurrences": [
+    {
+     "column": 7,
+     "index": 0,
+     "line": 2,
+     "offset": 421,
+     "skipped_by_default": true,
+     "value": "A1"
+    },
+    {
+     "column": 1,
+     "index": 1,
+     "line": 3,
+     "offset": 431,
+     "skipped_by_default": true,
+     "value": "B2"
+    },
+    {
+     "column": 1,
+     "index": 2,
+     "line": 4,
+     "offset": 440,
+     "skipped_by_default": true,
+     "value": "C3"
+    },
+    {
+     "column": 1,
+     "index": 3,
+     "line": 5,
+     "offset": 446,
+     "skipped_by_default": false,
+     "value": "D4"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "A1",
+    "B2",
+    "C3",
+    ""
+   ],
+   "size_bytes": 458,
+   "strip_all_bytes_sha256": "3cbae6145fc7b2d6dc86e3bae6c3de9b81736ee41e1b275858340b39c372501c",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $ \\par\r\n$\\par\r\n$;\r\n${}\\par\r\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $ \\par\r\n$B2\\par\r\n$C3;\r\n$D4{}\\par\r\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$\\par\r\n$C3;\r\n$D4{}\\par\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$B2\\par\r\n$;\r\n$D4{}\\par\r\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$B2\\par\r\n$C3;\r\n${}\\par\r\n}"
+   },
+   "strip_skip3_bytes_sha256": "146953a68df24e62ecfa100dcb44c60cba817bba1154539f1e5c57f65fc2b9e7",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$B2\\par\r\n$C3;\r\n${}\\par\r\n}",
+   "text_length": 458
+  },
+  "03-zero-dollars.frm": {
+   "bytes_sha256": "dab2b3787820bf58a5d1b991d568de2235fb898d057e73a07fbdfa95271d770c",
+   "description": "\u041d\u0435\u0442 \u043d\u0438 \u043e\u0434\u043d\u043e\u0433\u043e $.",
+   "dimmed_skip3": [],
+   "dollar_count": 0,
+   "encoding": "windows-1252",
+   "eol": "CRLF",
+   "highlighted_all": [],
+   "highlighted_skip3": [],
+   "line_count": 4,
+   "occurrences": [],
+   "rescan_after_strip_all": [],
+   "rescan_after_strip_skip3": [],
+   "size_bytes": 476,
+   "strip_all_bytes_sha256": "dab2b3787820bf58a5d1b991d568de2235fb898d057e73a07fbdfa95271d770c",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Plain form without any markers \\par\r\nSecond line\\par\r\n}",
+   "strip_single_text": {},
+   "strip_skip3_bytes_sha256": "dab2b3787820bf58a5d1b991d568de2235fb898d057e73a07fbdfa95271d770c",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Plain form without any markers \\par\r\nSecond line\\par\r\n}",
+   "text_length": 476
+  },
+  "04-dollar-at-eof.frm": {
+   "bytes_sha256": "ccd70739d257f88981d9f03dfd77bae7318f5f0d2a67d59d6fbebefb7a2cdf94",
+   "description": "\u0424\u0430\u0439\u043b \u0437\u0430\u043a\u0430\u043d\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044f \u043d\u0430 '$' (\u043f\u0443\u0441\u0442\u043e\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0432 \u043a\u043e\u043d\u0446\u0435).",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 5,
+   "encoding": "windows-1252",
+   "eol": "LF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "highlighted_skip3": [
+    3,
+    4
+   ],
+   "line_count": 7,
+   "occurrences": [
+    {
+     "column": 7,
+     "index": 0,
+     "line": 2,
+     "offset": 420,
+     "skipped_by_default": true,
+     "value": "A"
+    },
+    {
+     "column": 1,
+     "index": 1,
+     "line": 3,
+     "offset": 428,
+     "skipped_by_default": true,
+     "value": "B"
+    },
+    {
+     "column": 1,
+     "index": 2,
+     "line": 4,
+     "offset": 436,
+     "skipped_by_default": true,
+     "value": "C"
+    },
+    {
+     "column": 1,
+     "index": 3,
+     "line": 5,
+     "offset": 444,
+     "skipped_by_default": false,
+     "value": "D"
+    },
+    {
+     "column": 1,
+     "index": 4,
+     "line": 7,
+     "offset": 454,
+     "skipped_by_default": false,
+     "value": ""
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "A",
+    "B",
+    "C",
+    "",
+    ""
+   ],
+   "size_bytes": 455,
+   "strip_all_bytes_sha256": "2e6d32d1661d3da32b5bbb4aae8d97ec7f46fda231df4d09b0752b942481e6f6",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $ \\par\n$ \\par\n$ \\par\n$ \\par\n}\n$",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $ \\par\n$B \\par\n$C \\par\n$D \\par\n}\n$",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $A \\par\n$ \\par\n$C \\par\n$D \\par\n}\n$",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $A \\par\n$B \\par\n$ \\par\n$D \\par\n}\n$",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $A \\par\n$B \\par\n$C \\par\n$ \\par\n}\n$",
+    "4": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $A \\par\n$B \\par\n$C \\par\n$D \\par\n}\n$"
+   },
+   "strip_skip3_bytes_sha256": "eaf5f4eb2153c234ff19bd88c2980c611996d81cfdcdbf0b43391e85a09eee0c",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $A \\par\n$B \\par\n$C \\par\n$ \\par\n}\n$",
+   "text_length": 455
+  },
+  "04b-value-at-eof.frm": {
+   "bytes_sha256": "ff3140a1fd58cf3fdb170ac095b6219e1519e9400045b69657d9a3d45326ddcb",
+   "description": "\u0424\u0430\u0439\u043b \u0437\u0430\u043a\u0430\u043d\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044f \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435\u043c \u0431\u0435\u0437 \u043f\u0435\u0440\u0435\u0432\u043e\u0434\u0430 \u0441\u0442\u0440\u043e\u043a\u0438.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 4,
+   "encoding": "windows-1252",
+   "eol": "LF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "highlighted_skip3": [
+    3
+   ],
+   "line_count": 6,
+   "occurrences": [
+    {
+     "column": 7,
+     "index": 0,
+     "line": 2,
+     "offset": 420,
+     "skipped_by_default": true,
+     "value": "A"
+    },
+    {
+     "column": 1,
+     "index": 1,
+     "line": 3,
+     "offset": 428,
+     "skipped_by_default": true,
+     "value": "B"
+    },
+    {
+     "column": 1,
+     "index": 2,
+     "line": 4,
+     "offset": 436,
+     "skipped_by_default": true,
+     "value": "C"
+    },
+    {
+     "column": 1,
+     "index": 3,
+     "line": 6,
+     "offset": 446,
+     "skipped_by_default": false,
+     "value": "tailvalue"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "A",
+    "B",
+    "C",
+    ""
+   ],
+   "size_bytes": 456,
+   "strip_all_bytes_sha256": "0c63bd24d4ec5e07cedf4576af11434e8a0695659c346ea3063aa0c425639bd1",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $ \\par\n$ \\par\n$ \\par\n}\n$",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $ \\par\n$B \\par\n$C \\par\n}\n$tailvalue",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $A \\par\n$ \\par\n$C \\par\n}\n$tailvalue",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $A \\par\n$B \\par\n$ \\par\n}\n$tailvalue",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $A \\par\n$B \\par\n$C \\par\n}\n$"
+   },
+   "strip_skip3_bytes_sha256": "b4354b8843e00c3219d80534736d625c080d855e9929551ed59f317ebdb50835",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $A \\par\n$B \\par\n$C \\par\n}\n$",
+   "text_length": 456
+  },
+  "05-double-dollar.frm": {
+   "bytes_sha256": "c1ccb969882c84deb6341e64cf1a236de12dd09d38e2f4318e79b5cf54758905",
+   "description": "$$ \u0438 $$$: \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u043e\u0431\u0440\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u043c $. \u0426\u0435\u043f\u043e\u0447\u043a\u0438 $a$b$c.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 8,
+   "encoding": "windows-1252",
+   "eol": "CRLF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "highlighted_skip3": [
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "line_count": 5,
+   "occurrences": [
+    {
+     "column": 7,
+     "index": 0,
+     "line": 2,
+     "offset": 421,
+     "skipped_by_default": true,
+     "value": ""
+    },
+    {
+     "column": 8,
+     "index": 1,
+     "line": 2,
+     "offset": 422,
+     "skipped_by_default": true,
+     "value": "X"
+    },
+    {
+     "column": 1,
+     "index": 2,
+     "line": 3,
+     "offset": 432,
+     "skipped_by_default": true,
+     "value": ""
+    },
+    {
+     "column": 2,
+     "index": 3,
+     "line": 3,
+     "offset": 433,
+     "skipped_by_default": false,
+     "value": ""
+    },
+    {
+     "column": 3,
+     "index": 4,
+     "line": 3,
+     "offset": 434,
+     "skipped_by_default": false,
+     "value": ""
+    },
+    {
+     "column": 1,
+     "index": 5,
+     "line": 4,
+     "offset": 445,
+     "skipped_by_default": false,
+     "value": "a"
+    },
+    {
+     "column": 3,
+     "index": 6,
+     "line": 4,
+     "offset": 447,
+     "skipped_by_default": false,
+     "value": "b"
+    },
+    {
+     "column": 5,
+     "index": 7,
+     "line": 4,
+     "offset": 449,
+     "skipped_by_default": false,
+     "value": "c"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "",
+    "X",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "size_bytes": 459,
+   "strip_all_bytes_sha256": "16b5ec26c8afb9b7130b8ece18f35bf016971a821cf1daae23ae734766780e34",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $$ Y\\par\r\n$$$ end\\par\r\n$$$ \\par\r\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $$X Y\\par\r\n$$$ end\\par\r\n$a$b$c \\par\r\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $$ Y\\par\r\n$$$ end\\par\r\n$a$b$c \\par\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $$X Y\\par\r\n$$$ end\\par\r\n$a$b$c \\par\r\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $$X Y\\par\r\n$$$ end\\par\r\n$a$b$c \\par\r\n}",
+    "4": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $$X Y\\par\r\n$$$ end\\par\r\n$a$b$c \\par\r\n}",
+    "5": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $$X Y\\par\r\n$$$ end\\par\r\n$$b$c \\par\r\n}",
+    "6": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $$X Y\\par\r\n$$$ end\\par\r\n$a$$c \\par\r\n}",
+    "7": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $$X Y\\par\r\n$$$ end\\par\r\n$a$b$ \\par\r\n}"
+   },
+   "strip_skip3_bytes_sha256": "9db57f6851076f028e776b167db2ebb08f4491afd3025d750c8cedff268b8ee6",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $$X Y\\par\r\n$$$ end\\par\r\n$$$ \\par\r\n}",
+   "text_length": 459
+  },
+  "06-terminators.frm": {
+   "bytes_sha256": "d02aac250fee67e766b44a05779a4b8083e7039bb5166e68482d2aeacfce30c4",
+   "description": "\u0417\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u0435\u043b\u0438 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f: \\par, }, ;, \u043f\u0440\u043e\u0431\u0435\u043b, LF, TAB, \u043e\u0431\u0440\u0430\u0442\u043d\u0430\u044f \u043a\u043e\u0441\u0430\u044f, \u0437\u0430\u043a\u0440\u044b\u0432\u0430\u044e\u0449\u0430\u044f \u0441\u043a\u043e\u0431\u043a\u0430.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 8,
+   "encoding": "windows-1252",
+   "eol": "LF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "highlighted_skip3": [
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "line_count": 4,
+   "occurrences": [
+    {
+     "column": 10,
+     "index": 0,
+     "line": 2,
+     "offset": 423,
+     "skipped_by_default": true,
+     "value": "AAA"
+    },
+    {
+     "column": 23,
+     "index": 1,
+     "line": 2,
+     "offset": 436,
+     "skipped_by_default": true,
+     "value": "BBB"
+    },
+    {
+     "column": 32,
+     "index": 2,
+     "line": 2,
+     "offset": 445,
+     "skipped_by_default": true,
+     "value": "CCC"
+    },
+    {
+     "column": 40,
+     "index": 3,
+     "line": 2,
+     "offset": 453,
+     "skipped_by_default": false,
+     "value": "DDD"
+    },
+    {
+     "column": 48,
+     "index": 4,
+     "line": 2,
+     "offset": 461,
+     "skipped_by_default": false,
+     "value": "EEE"
+    },
+    {
+     "column": 4,
+     "index": 5,
+     "line": 3,
+     "offset": 469,
+     "skipped_by_default": false,
+     "value": "FFF"
+    },
+    {
+     "column": 12,
+     "index": 6,
+     "line": 3,
+     "offset": 477,
+     "skipped_by_default": false,
+     "value": "GGG"
+    },
+    {
+     "column": 23,
+     "index": 7,
+     "line": 3,
+     "offset": 488,
+     "skipped_by_default": false,
+     "value": "HHH"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "AAA",
+    "BBB",
+    "CCC",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "size_bytes": 495,
+   "strip_all_bytes_sha256": "864b7c6a099cb4182723871f0a49bfe670bd8a96083049c372a6b5f162a68da7",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$\\par v2:{$} v3:$;v4:$ v5:$\nv6:$\tv7:$\\b0 v8:$}\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$ v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
+    "4": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
+    "5": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$\tv7:$GGG\\b0 v8:$HHH}\n}",
+    "6": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$\\b0 v8:$HHH}\n}",
+    "7": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$}\n}"
+   },
+   "strip_skip3_bytes_sha256": "6fb5f0de0c7bd64660724589e24aaca07022382a2c1103e6304035edfd1fd6bc",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$ v5:$\nv6:$\tv7:$\\b0 v8:$}\n}",
+   "text_length": 495
+  },
+  "07-empty-values.frm": {
+   "bytes_sha256": "7a8acdd2bcc4c59644a3fc1d150d2c4ffb1b3494848ac389c87e353ab7c1174d",
+   "description": "\u041f\u0443\u0441\u0442\u044b\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f \u043f\u0435\u0440\u0435\u0434 \u043f\u0440\u043e\u0431\u0435\u043b\u043e\u043c, \\par, {, ;, }, CR+LF, \\'xx.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 7,
+   "encoding": "windows-1252",
+   "eol": "mixed:CRLF+LF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+   ],
+   "highlighted_skip3": [
+    3,
+    4,
+    5,
+    6
+   ],
+   "line_count": 4,
+   "occurrences": [
+    {
+     "column": 10,
+     "index": 0,
+     "line": 2,
+     "offset": 423,
+     "skipped_by_default": true,
+     "value": ""
+    },
+    {
+     "column": 15,
+     "index": 1,
+     "line": 2,
+     "offset": 428,
+     "skipped_by_default": true,
+     "value": ""
+    },
+    {
+     "column": 24,
+     "index": 2,
+     "line": 2,
+     "offset": 437,
+     "skipped_by_default": true,
+     "value": ""
+    },
+    {
+     "column": 32,
+     "index": 3,
+     "line": 2,
+     "offset": 445,
+     "skipped_by_default": false,
+     "value": ""
+    },
+    {
+     "column": 38,
+     "index": 4,
+     "line": 2,
+     "offset": 451,
+     "skipped_by_default": false,
+     "value": ""
+    },
+    {
+     "column": 43,
+     "index": 5,
+     "line": 2,
+     "offset": 456,
+     "skipped_by_default": false,
+     "value": ""
+    },
+    {
+     "column": 4,
+     "index": 6,
+     "line": 3,
+     "offset": 462,
+     "skipped_by_default": false,
+     "value": ""
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "size_bytes": 469,
+   "strip_all_bytes_sha256": "7a8acdd2bcc4c59644a3fc1d150d2c4ffb1b3494848ac389c87e353ab7c1174d",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+    "4": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+    "5": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+    "6": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}"
+   },
+   "strip_skip3_bytes_sha256": "7a8acdd2bcc4c59644a3fc1d150d2c4ffb1b3494848ac389c87e353ab7c1174d",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+   "text_length": 469
+  },
+  "08-long-line.frm": {
+   "bytes_sha256": "c0011cdb2874fbf2dd11e0acd770b4cfec0901fa544378ef6c9a753ae2c94a40",
+   "description": "\u0421\u0442\u0440\u043e\u043a\u0430 >10 000 \u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432 \u0441 $ \u0432 \u043f\u043e\u0437\u0438\u0446\u0438\u044f\u0445 ~9990, ~10005 \u0438 ~20000, \u043f\u043b\u044e\u0441 4-\u0439 \u0432 \u043a\u043e\u043d\u0446\u0435.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 4,
+   "encoding": "windows-1252",
+   "eol": "CRLF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "highlighted_skip3": [
+    3
+   ],
+   "line_count": 3,
+   "occurrences": [
+    {
+     "column": 9991,
+     "index": 0,
+     "line": 2,
+     "offset": 10405,
+     "skipped_by_default": true,
+     "value": "near1"
+    },
+    {
+     "column": 10006,
+     "index": 1,
+     "line": 2,
+     "offset": 10420,
+     "skipped_by_default": true,
+     "value": "over10k"
+    },
+    {
+     "column": 20001,
+     "index": 2,
+     "line": 2,
+     "offset": 20415,
+     "skipped_by_default": true,
+     "value": "deep20k"
+    },
+    {
+     "column": 25001,
+     "index": 3,
+     "line": 2,
+     "offset": 25415,
+     "skipped_by_default": false,
+     "value": "fourth"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "near1",
+    "over10k",
+    "deep20k",
+    ""
+   ],
+   "size_bytes": 25430,
+   "strip_all_bytes_sha256": "97b42d42ab508bf7b4b8c4f282e85fcdc2af3e45be71a36a0e18c50735063dd1",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit$ lorem ip$ lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit a$ lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit a$ \\par\r\n}",
+   "strip_skip3_bytes_sha256": "d7331c7f54b59ac5d4ca270978112a29a27eb59f1a7c7b4566c919c94efe2dc6",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit$near1 lorem ip$over10k lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit a$deep20k lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit a$ \\par\r\n}",
+   "text_length": 25430
+  },
+  "09-crlf.frm": {
+   "bytes_sha256": "7dececd1c174a80e1d87e228e9229219522b10e33027f8a70056033e988d24da",
+   "description": "\u0427\u0438\u0441\u0442\u044b\u0439 CRLF, \u043f\u0443\u0441\u0442\u0430\u044f \u0441\u0442\u0440\u043e\u043a\u0430 \u0432 \u0441\u0435\u0440\u0435\u0434\u0438\u043d\u0435.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 4,
+   "encoding": "windows-1252",
+   "eol": "CRLF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "highlighted_skip3": [
+    3
+   ],
+   "line_count": 7,
+   "occurrences": [
+    {
+     "column": 16,
+     "index": 0,
+     "line": 2,
+     "offset": 430,
+     "skipped_by_default": true,
+     "value": "one"
+    },
+    {
+     "column": 10,
+     "index": 1,
+     "line": 3,
+     "offset": 450,
+     "skipped_by_default": true,
+     "value": "two"
+    },
+    {
+     "column": 11,
+     "index": 2,
+     "line": 5,
+     "offset": 473,
+     "skipped_by_default": true,
+     "value": "four"
+    },
+    {
+     "column": 1,
+     "index": 3,
+     "line": 6,
+     "offset": 484,
+     "skipped_by_default": false,
+     "value": "five"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "one",
+    "two",
+    "four",
+    ""
+   ],
+   "size_bytes": 492,
+   "strip_all_bytes_sha256": "f1165aeac4d80205ff83bab0b9f84150be87ce7d75c94fd5f57f139676f5f4f7",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $ \\par\r\nLine two $ \\par\r\n\r\nLine four $\\par\r\n$\r\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $ \\par\r\nLine two $two \\par\r\n\r\nLine four $four\\par\r\n$five\r\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $one \\par\r\nLine two $ \\par\r\n\r\nLine four $four\\par\r\n$five\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $one \\par\r\nLine two $two \\par\r\n\r\nLine four $\\par\r\n$five\r\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $one \\par\r\nLine two $two \\par\r\n\r\nLine four $four\\par\r\n$\r\n}"
+   },
+   "strip_skip3_bytes_sha256": "5f6ebdb8ab1caa5a8f9cb91bef042f795a6765b5f7b0256234c8b4ec36e17a53",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $one \\par\r\nLine two $two \\par\r\n\r\nLine four $four\\par\r\n$\r\n}",
+   "text_length": 492
+  },
+  "10-lf.frm": {
+   "bytes_sha256": "01ddb6644e3e1460453b3085f806f2827be612bd0f0a6bd683b66f3027858d0c",
+   "description": "\u0427\u0438\u0441\u0442\u044b\u0439 LF; \u0442\u043e \u0436\u0435 \u0441\u043e\u0434\u0435\u0440\u0436\u0438\u043c\u043e\u0435, \u0447\u0442\u043e \u0438 \u0432 09.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 4,
+   "encoding": "windows-1252",
+   "eol": "LF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "highlighted_skip3": [
+    3
+   ],
+   "line_count": 7,
+   "occurrences": [
+    {
+     "column": 16,
+     "index": 0,
+     "line": 2,
+     "offset": 429,
+     "skipped_by_default": true,
+     "value": "one"
+    },
+    {
+     "column": 10,
+     "index": 1,
+     "line": 3,
+     "offset": 448,
+     "skipped_by_default": true,
+     "value": "two"
+    },
+    {
+     "column": 11,
+     "index": 2,
+     "line": 5,
+     "offset": 469,
+     "skipped_by_default": true,
+     "value": "four"
+    },
+    {
+     "column": 1,
+     "index": 3,
+     "line": 6,
+     "offset": 479,
+     "skipped_by_default": false,
+     "value": "five"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "one",
+    "two",
+    "four",
+    ""
+   ],
+   "size_bytes": 486,
+   "strip_all_bytes_sha256": "4d72f1c863c28266bd8a273eaad8594e55e6ed6e0307b71c5cbd13646f1229fa",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $ \\par\nLine two $ \\par\n\nLine four $\\par\n$\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $ \\par\nLine two $two \\par\n\nLine four $four\\par\n$five\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $one \\par\nLine two $ \\par\n\nLine four $four\\par\n$five\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $one \\par\nLine two $two \\par\n\nLine four $\\par\n$five\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $one \\par\nLine two $two \\par\n\nLine four $four\\par\n$\n}"
+   },
+   "strip_skip3_bytes_sha256": "0aec088c4c282f5d8e3a3e3dfb1eda5167d8bf7ae306c4ab630916d126e3a9e5",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $one \\par\nLine two $two \\par\n\nLine four $four\\par\n$\n}",
+   "text_length": 486
+  },
+  "10b-cr-only.frm": {
+   "bytes_sha256": "1d7972fca44e68c4b423cc0ace79b1f3e44028194ce9c833d50a198a54d6bf4a",
+   "description": "\u0421\u0442\u0430\u0440\u044b\u0439 Mac: \u0442\u043e\u043b\u044c\u043a\u043e CR.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 4,
+   "encoding": "windows-1252",
+   "eol": "CR",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "highlighted_skip3": [
+    3
+   ],
+   "line_count": 7,
+   "occurrences": [
+    {
+     "column": 16,
+     "index": 0,
+     "line": 2,
+     "offset": 429,
+     "skipped_by_default": true,
+     "value": "one"
+    },
+    {
+     "column": 10,
+     "index": 1,
+     "line": 3,
+     "offset": 448,
+     "skipped_by_default": true,
+     "value": "two"
+    },
+    {
+     "column": 11,
+     "index": 2,
+     "line": 5,
+     "offset": 469,
+     "skipped_by_default": true,
+     "value": "four"
+    },
+    {
+     "column": 1,
+     "index": 3,
+     "line": 6,
+     "offset": 479,
+     "skipped_by_default": false,
+     "value": "five"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "one",
+    "two",
+    "four",
+    ""
+   ],
+   "size_bytes": 486,
+   "strip_all_bytes_sha256": "d35111708c80f751c9cb7d385fae0bffac9f82840f01ec42a05e982b9c27dcf3",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $ \\par\rLine two $ \\par\r\rLine four $\\par\r$\r}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $ \\par\rLine two $two \\par\r\rLine four $four\\par\r$five\r}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $one \\par\rLine two $ \\par\r\rLine four $four\\par\r$five\r}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $one \\par\rLine two $two \\par\r\rLine four $\\par\r$five\r}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $one \\par\rLine two $two \\par\r\rLine four $four\\par\r$\r}"
+   },
+   "strip_skip3_bytes_sha256": "0f531a5e714d9ee854564e0f5a7f983950d2f24f18629bc21cac621297da5f98",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $one \\par\rLine two $two \\par\r\rLine four $four\\par\r$\r}",
+   "text_length": 486
+  },
+  "11-cp1252-high-bytes.frm": {
+   "bytes_sha256": "abf214f69354b92fc9926cd8fad665ad7d539f43059829ce45ad5e71680f6421",
+   "description": "\u0411\u0430\u0439\u0442\u044b 0x80-0xFF cp1252: \u20ac(80) \u00fc(FC) \u00df(DF) \u201e(84) \u201c(93) \u201d(94); \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f \u0441 \u043d\u0435-ASCII.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 6,
+   "encoding": "windows-1252",
+   "eol": "CRLF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+   ],
+   "highlighted_skip3": [
+    3,
+    4,
+    5
+   ],
+   "line_count": 8,
+   "occurrences": [
+    {
+     "column": 14,
+     "index": 0,
+     "line": 2,
+     "offset": 428,
+     "skipped_by_default": true,
+     "value": "EUR\u20ac12"
+    },
+    {
+     "column": 9,
+     "index": 1,
+     "line": 3,
+     "offset": 450,
+     "skipped_by_default": true,
+     "value": "M\u00fcller"
+    },
+    {
+     "column": 9,
+     "index": 2,
+     "line": 4,
+     "offset": 471,
+     "skipped_by_default": true,
+     "value": "quote\u201c"
+    },
+    {
+     "column": 4,
+     "index": 3,
+     "line": 5,
+     "offset": 488,
+     "skipped_by_default": false,
+     "value": "x\u00fcb"
+    },
+    {
+     "column": 6,
+     "index": 4,
+     "line": 6,
+     "offset": 500,
+     "skipped_by_default": false,
+     "value": "\u00dfa\u00dfb"
+    },
+    {
+     "column": 6,
+     "index": 5,
+     "line": 7,
+     "offset": 517,
+     "skipped_by_default": false,
+     "value": "a"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "EUR\u20ac12",
+    "M\u00fcller",
+    "quote\u201c",
+    "",
+    "",
+    ""
+   ],
+   "size_bytes": 532,
+   "strip_all_bytes_sha256": "c6cd46ed19040a5d8c8e349cea4614b9be329997a4a2771a816af108ee2709a7",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $ \\par\r\nStra\u00dfe: $\\par\r\nZitat: \u201e$ \\par\r\n\u201e\u201c $;\r\nRaw: $ \\par\r\nEsc: $\\'e9b \\par\r\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $ \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $a\\'e9b \\par\r\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $a\\'e9b \\par\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$ \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $a\\'e9b \\par\r\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $a\\'e9b \\par\r\n}",
+    "4": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $ \\par\r\nEsc: $a\\'e9b \\par\r\n}",
+    "5": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $\\'e9b \\par\r\n}"
+   },
+   "strip_skip3_bytes_sha256": "dcf3e9391548409d06ac8374afbfd64966f09e8caa03419d4d25f82d1e710719",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $;\r\nRaw: $ \\par\r\nEsc: $\\'e9b \\par\r\n}",
+   "text_length": 532
+  },
+  "12-utf8-bom.frm": {
+   "bytes_sha256": "59dc35472f727dc216ca0e710c12d4716313d2e935eeb9fa6ec200eb3bd00c67",
+   "description": "UTF-8 \u0441 BOM (EF BB BF); BOM \u043d\u0435 \u0432\u0445\u043e\u0434\u0438\u0442 \u0432 \u0441\u043c\u0435\u0449\u0435\u043d\u0438\u044f.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 4,
+   "encoding": "utf-8-bom",
+   "eol": "CRLF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "highlighted_skip3": [
+    3
+   ],
+   "line_count": 5,
+   "occurrences": [
+    {
+     "column": 18,
+     "index": 0,
+     "line": 2,
+     "offset": 432,
+     "skipped_by_default": true,
+     "value": "\u00fcber"
+    },
+    {
+     "column": 24,
+     "index": 1,
+     "line": 2,
+     "offset": 438,
+     "skipped_by_default": true,
+     "value": "\u0436\u0443\u043a"
+    },
+    {
+     "column": 1,
+     "index": 2,
+     "line": 3,
+     "offset": 449,
+     "skipped_by_default": true,
+     "value": "\u20acuro"
+    },
+    {
+     "column": 1,
+     "index": 3,
+     "line": 4,
+     "offset": 461,
+     "skipped_by_default": false,
+     "value": "last"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "\u00fcber",
+    "\u0436\u0443\u043a",
+    "\u20acuro",
+    ""
+   ],
+   "size_bytes": 478,
+   "strip_all_bytes_sha256": "ea7f7085095c08f4a3fb196292998d2f7c9f41caa832a9f69fceae10edfbf798",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard UTF-8 BOM: $ $ \\par\r\n$ \\par\r\n$\r\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard UTF-8 BOM: $ $\u0436\u0443\u043a \\par\r\n$\u20acuro \\par\r\n$last\r\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard UTF-8 BOM: $\u00fcber $ \\par\r\n$\u20acuro \\par\r\n$last\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard UTF-8 BOM: $\u00fcber $\u0436\u0443\u043a \\par\r\n$ \\par\r\n$last\r\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard UTF-8 BOM: $\u00fcber $\u0436\u0443\u043a \\par\r\n$\u20acuro \\par\r\n$\r\n}"
+   },
+   "strip_skip3_bytes_sha256": "0d2ec6794f55d37a300c51a10d354053bb5bdc303035a7e73365bbc473da5539",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard UTF-8 BOM: $\u00fcber $\u0436\u0443\u043a \\par\r\n$\u20acuro \\par\r\n$\r\n}",
+   "text_length": 469
+  },
+  "12b-utf8-nobom.frm": {
+   "bytes_sha256": "7c38ca2a1a8887038000831cfe2bee8635cf24faae95aeb07fdc8ce065fdf3f7",
+   "description": "\u0412\u0430\u043b\u0438\u0434\u043d\u044b\u0439 UTF-8 \u0431\u0435\u0437 BOM \u043f\u0440\u0438 \\ansicpg1252 \u2014 \u0430\u0432\u0442\u043e\u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0435\u043d\u0438\u0435 \u0434\u043e\u043b\u0436\u043d\u043e \u0432\u044b\u0431\u0440\u0430\u0442\u044c UTF-8.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 4,
+   "encoding": "utf-8",
+   "eol": "LF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "highlighted_skip3": [
+    3
+   ],
+   "line_count": 5,
+   "occurrences": [
+    {
+     "column": 21,
+     "index": 0,
+     "line": 2,
+     "offset": 434,
+     "skipped_by_default": true,
+     "value": "\u00fcber"
+    },
+    {
+     "column": 27,
+     "index": 1,
+     "line": 2,
+     "offset": 440,
+     "skipped_by_default": true,
+     "value": "\u0436\u0443\u043a"
+    },
+    {
+     "column": 1,
+     "index": 2,
+     "line": 3,
+     "offset": 450,
+     "skipped_by_default": true,
+     "value": "\u20acuro"
+    },
+    {
+     "column": 1,
+     "index": 3,
+     "line": 4,
+     "offset": 461,
+     "skipped_by_default": false,
+     "value": "last"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "\u00fcber",
+    "\u0436\u0443\u043a",
+    "\u20acuro",
+    ""
+   ],
+   "size_bytes": 474,
+   "strip_all_bytes_sha256": "156afac66814c9db3875c0dcc74c55d23449697b5c026541ae3116fca896391c",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard UTF-8 no BOM: $ $ \\par\n$ \\par\n$\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard UTF-8 no BOM: $ $\u0436\u0443\u043a \\par\n$\u20acuro \\par\n$last\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard UTF-8 no BOM: $\u00fcber $ \\par\n$\u20acuro \\par\n$last\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard UTF-8 no BOM: $\u00fcber $\u0436\u0443\u043a \\par\n$ \\par\n$last\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard UTF-8 no BOM: $\u00fcber $\u0436\u0443\u043a \\par\n$\u20acuro \\par\n$\n}"
+   },
+   "strip_skip3_bytes_sha256": "e7b34689707f9805971bebd787f31fcde3409a3840358e303da84bf1b753d3b1",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard UTF-8 no BOM: $\u00fcber $\u0436\u0443\u043a \\par\n$\u20acuro \\par\n$\n}",
+   "text_length": 468
+  },
+  "13-cp1251-cyrillic.frm": {
+   "bytes_sha256": "f789a996ca45edcc603a6371801543c3f03fa30ca6c1a70e871bc6abcc92e619",
+   "description": "\\ansicpg1251, \u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0430 \u0432 \u0431\u0430\u0439\u0442\u0430\u0445 0xC0-0xFF; \u0432 4-\u043c \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0438 '\u044f\u0449\u0438\u043a'.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 4,
+   "encoding": "windows-1251",
+   "eol": "CRLF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "highlighted_skip3": [
+    3
+   ],
+   "line_count": 6,
+   "occurrences": [
+    {
+     "column": 12,
+     "index": 0,
+     "line": 2,
+     "offset": 426,
+     "skipped_by_default": true,
+     "value": "\u0418\u0432\u0430\u043d\u043e\u0432"
+    },
+    {
+     "column": 8,
+     "index": 1,
+     "line": 3,
+     "offset": 447,
+     "skipped_by_default": true,
+     "value": "\u041a\u0438\u0457\u0432"
+    },
+    {
+     "column": 9,
+     "index": 2,
+     "line": 4,
+     "offset": 463,
+     "skipped_by_default": true,
+     "value": "\u0433\u0440\u043d"
+    },
+    {
+     "column": 1,
+     "index": 3,
+     "line": 5,
+     "offset": 473,
+     "skipped_by_default": false,
+     "value": "\u044f\u0449\u0438\u043a"
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "\u0418\u0432\u0430\u043d\u043e\u0432",
+    "\u041a\u0438\u0457\u0432",
+    "\u0433\u0440\u043d",
+    ""
+   ],
+   "size_bytes": 490,
+   "strip_all_bytes_sha256": "e2b330ca1207864879f1925299544fb806aea419e3a5d869904d43ac1088dc18",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $ \\par\r\n\u0413\u043e\u0440\u043e\u0434: $;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\\par\r\n$ \u2116 5 \\par\r\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $ \\par\r\n\u0413\u043e\u0440\u043e\u0434: $\u041a\u0438\u0457\u0432;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\u0433\u0440\u043d\\par\r\n$\u044f\u0449\u0438\u043a \u2116 5 \\par\r\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $\u0418\u0432\u0430\u043d\u043e\u0432 \\par\r\n\u0413\u043e\u0440\u043e\u0434: $;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\u0433\u0440\u043d\\par\r\n$\u044f\u0449\u0438\u043a \u2116 5 \\par\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $\u0418\u0432\u0430\u043d\u043e\u0432 \\par\r\n\u0413\u043e\u0440\u043e\u0434: $\u041a\u0438\u0457\u0432;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\\par\r\n$\u044f\u0449\u0438\u043a \u2116 5 \\par\r\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $\u0418\u0432\u0430\u043d\u043e\u0432 \\par\r\n\u0413\u043e\u0440\u043e\u0434: $\u041a\u0438\u0457\u0432;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\u0433\u0440\u043d\\par\r\n$ \u2116 5 \\par\r\n}"
+   },
+   "strip_skip3_bytes_sha256": "579f7bdb0d51b88bf9695aae6ba3185a98df96ec85bfee125caaf34becaf4a1b",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $\u0418\u0432\u0430\u043d\u043e\u0432 \\par\r\n\u0413\u043e\u0440\u043e\u0434: $\u041a\u0438\u0457\u0432;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\u0433\u0440\u043d\\par\r\n$ \u2116 5 \\par\r\n}",
+   "text_length": 490
+  },
+  "14-value-chars.frm": {
+   "bytes_sha256": "6b599ca59ef39b6e4bdc59cb57c9758045a5716f06048a308a6a7f6a7cc54141",
+   "description": "\u0417\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0441 \u043f\u0443\u043d\u043a\u0442\u0443\u0430\u0446\u0438\u0435\u0439: \u0432\u0441\u0451, \u043a\u0440\u043e\u043c\u0435 \u043f\u0440\u043e\u0431\u0435\u043b\u044c\u043d\u044b\u0445 \u0438 \\ { } $ ; \u2014 \u0447\u0430\u0441\u0442\u044c \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f.",
+   "dimmed_skip3": [
+    0,
+    1,
+    2
+   ],
+   "dollar_count": 4,
+   "encoding": "windows-1252",
+   "eol": "LF",
+   "highlighted_all": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "highlighted_skip3": [
+    3
+   ],
+   "line_count": 6,
+   "occurrences": [
+    {
+     "column": 7,
+     "index": 0,
+     "line": 2,
+     "offset": 420,
+     "skipped_by_default": true,
+     "value": "a.b-c,d:e/f"
+    },
+    {
+     "column": 1,
+     "index": 1,
+     "line": 3,
+     "offset": 438,
+     "skipped_by_default": true,
+     "value": "1234567890"
+    },
+    {
+     "column": 1,
+     "index": 2,
+     "line": 4,
+     "offset": 455,
+     "skipped_by_default": true,
+     "value": "x_y(z)[w]<q>!?"
+    },
+    {
+     "column": 1,
+     "index": 3,
+     "line": 5,
+     "offset": 476,
+     "skipped_by_default": false,
+     "value": "#%&*+=@^~|`'\""
+    }
+   ],
+   "rescan_after_strip_all": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "rescan_after_strip_skip3": [
+    "a.b-c,d:e/f",
+    "1234567890",
+    "x_y(z)[w]<q>!?",
+    ""
+   ],
+   "size_bytes": 497,
+   "strip_all_bytes_sha256": "e0648d21114ba60b1bc5b5574e1d1bb0e035efb0b0c97127d61eb30adf57ceb2",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $ \\par\n$ \\par\n$ \\par\n$ \\par\n}",
+   "strip_single_text": {
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $ \\par\n$1234567890 \\par\n$x_y(z)[w]<q>!? \\par\n$#%&*+=@^~|`'\" \\par\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $a.b-c,d:e/f \\par\n$ \\par\n$x_y(z)[w]<q>!? \\par\n$#%&*+=@^~|`'\" \\par\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $a.b-c,d:e/f \\par\n$1234567890 \\par\n$ \\par\n$#%&*+=@^~|`'\" \\par\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $a.b-c,d:e/f \\par\n$1234567890 \\par\n$x_y(z)[w]<q>!? \\par\n$ \\par\n}"
+   },
+   "strip_skip3_bytes_sha256": "988a7a7bb099f000589d7705b1e011609177fe64a04b9360f8f4158cca6c2dd2",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard $a.b-c,d:e/f \\par\n$1234567890 \\par\n$x_y(z)[w]<q>!? \\par\n$ \\par\n}",
+   "text_length": 497
+  }
+ },
+ "line_column": "1-based; \u0440\u0430\u0437\u0434\u0435\u043b\u0438\u0442\u0435\u043b\u0438 CRLF | LF | CR",
+ "offset_unit": "Unicode-\u0441\u043a\u0430\u043b\u044f\u0440\u044b \u0434\u0435\u043a\u043e\u0434\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0433\u043e \u0442\u0435\u043a\u0441\u0442\u0430 (BMP-only, = UTF-16 \u0435\u0434\u0438\u043d\u0438\u0446\u044b); CRLF = 2 \u0441\u0438\u043c\u0432\u043e\u043b\u0430; BOM \u043d\u0435 \u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044f",
+ "rule": "\u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 = \u0441\u0438\u043c\u0432\u043e\u043b\u044b \u043f\u043e\u0441\u043b\u0435 '$' \u0434\u043e \u043f\u0440\u043e\u0431\u0435\u043b\u044c\u043d\u043e\u0433\u043e (\u043f\u0440\u043e\u0431\u0435\u043b, TAB, CR, LF), \u043e\u0434\u043d\u043e\u0433\u043e \u0438\u0437 \\ { } $ ; \u0438\u043b\u0438 \u043a\u043e\u043d\u0446\u0430 \u0444\u0430\u0439\u043b\u0430; \u043c\u043e\u0436\u0435\u0442 \u0431\u044b\u0442\u044c \u043f\u0443\u0441\u0442\u044b\u043c",
+ "skip_default_n": 3,
+ "strip_semantics": "\u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f \u0443 \u043f\u043e\u0434\u0441\u0432\u0435\u0447\u0435\u043d\u043d\u044b\u0445, '$' \u043e\u0441\u0442\u0430\u0432\u0438\u0442\u044c; \u0431\u0430\u0439\u0442\u044b \u043f\u0435\u0440\u0435\u0441\u043e\u0431\u0440\u0430\u043d\u044b \u0432 \u0442\u043e\u0439 \u0436\u0435 \u043a\u043e\u0434\u0438\u0440\u043e\u0432\u043a\u0435, \u0441 \u0442\u0435\u043c \u0436\u0435 EOL \u0438 BOM",
+ "strip_single_note": "strip_single_text[k] \u2014 \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442 \u00ab\u0423\u0431\u0440\u0430\u0442\u044c \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435\u00bb \u0443 \u043e\u0434\u043d\u043e\u0433\u043e \u0432\u0445\u043e\u0436\u0434\u0435\u043d\u0438\u044f k (\u0442\u043e\u043b\u044c\u043a\u043e \u0434\u043b\u044f \u0444\u0430\u0439\u043b\u043e\u0432 <3000 \u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432)"
+}
