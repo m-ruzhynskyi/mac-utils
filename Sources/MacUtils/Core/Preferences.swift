@@ -174,6 +174,21 @@ enum Pref {
     /// «Не засыпать»: последний выбранный срок (сама функция после запуска всегда выключена).
     static let keepAwakeDuration = "keepAwakeDuration"
 
+    /// Текстовый редактор: «Пропускать первые N» знаков `$` (одна настройка на все файлы), новые документы,
+    /// восстановление вкладок, черновики, вид и недавние файлы (пути, последний — первым).
+    static let editorSkipFirst = "editorSkipFirst"
+    static let editorSkipCount = "editorSkipCount"
+    static let editorNewEncoding = "editorNewEncoding"
+    static let editorNewLineEnding = "editorNewLineEnding"
+    static let editorRestoreSession = "editorRestoreSession"
+    static let editorAutosaveDrafts = "editorAutosaveDrafts"
+    static let editorWrap = "editorWrap"
+    static let editorZoom = "editorZoom"
+    static let editorDollarPanel = "editorDollarPanel"
+    static let editorRecent = "editorRecent"
+    /// Вкладка «Редактор» уже добавлена в панель 🔧 (один раз при обновлении).
+    static let panelTabsEditorAdded = "panelTabsEditorAdded"
+
     static func register() {
         UserDefaults.standard.register(defaults: [
             cutPaste: true,
@@ -261,6 +276,15 @@ enum Pref {
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,
+            editorSkipFirst: true,
+            editorSkipCount: 3,
+            editorNewEncoding: TextEncoding.utf8.rawValue,
+            editorNewLineEnding: LineEnding.lf.rawValue,
+            editorRestoreSession: true,
+            editorAutosaveDrafts: true,
+            editorWrap: false,
+            editorZoom: 1.0,
+            editorDollarPanel: true,
         ])
     }
 

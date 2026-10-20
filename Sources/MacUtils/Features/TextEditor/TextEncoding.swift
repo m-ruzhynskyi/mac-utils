@@ -390,6 +390,71 @@ enum LineEnding: String, CaseIterable, Codable {
     struct Counts: Equatable {
         var crlf = 0, lf = 0, cr = 0
         var isMixed: Bool { [crlf, lf, cr].filter { $0 > 0 }.count > 1 }
+
+        /// Вид, которого больше; при равенстве — CRLF, LF, CR. Переводов нет — `nil`.
+        var dominant: LineEnding? {
+            let best = max(crlf, lf, cr)
+            guard best > 0 else { return nil }
+            return crlf == best ? .crlf : (lf == best ? .lf : .cr)
+        }
+    }
+
+    /// UTF-16 текста кусками по 64 К (без копирования всего текста и без побуквенных вызовов).
+    static func forEachChunk(_ text: NSString, _ body: (UnsafeBufferPointer<UInt16>) -> Void) {
+        let length = text.length
+        if let pointer = CFStringGetCharactersPtr(text as CFString) {
+            body(UnsafeBufferPointer(start: pointer, count: length))
+            return
+        }
+        let size = 65_536
+        var buffer = [UInt16](repeating: 0, count: size)
+        var location = 0
+        while location < length {
+            let count = min(size, length - location)
+            buffer.withUnsafeMutableBufferPointer { chunk in
+                text.getCharacters(chunk.baseAddress!, range: NSRange(location: location, length: count))
+                body(UnsafeBufferPointer(rebasing: chunk[..<count]))
+            }
+            location += count
+        }
+    }
+
+    static func count(in text: NSString) -> Counts {
+        var counts = Counts()
+        var previousCR = false
+        forEachChunk(text) { units in
+            for unit in units {
+                if unit == 0x0A {
+                    if previousCR { counts.crlf += 1; counts.cr -= 1 } else { counts.lf += 1 }
+                } else if unit == 0x0D {
+                    counts.cr += 1
+                }
+                previousCR = unit == 0x0D
+            }
+        }
+        return counts
+    }
+
+    /// Все переводы строк — одного вида (по UTF-16, без перебора символов `String`).
+    static func convert(_ text: NSString, to ending: LineEnding) -> String {
+        var result: [UInt16] = []
+        result.reserveCapacity(text.length + text.length / 16)
+        let replacement = Array(ending.string.utf16)
+        var previousCR = false
+        forEachChunk(text) { units in
+            for unit in units {
+                if unit == 0x0A {
+                    if !previousCR { result.append(contentsOf: replacement) }
+                } else if unit == 0x0D {
+                    result.append(contentsOf: replacement)
+                } else {
+                    result.append(unit)
+                }
+                previousCR = unit == 0x0D
+            }
+        }
+        guard !result.isEmpty else { return "" }
+        return result.withUnsafeBufferPointer { NSString(characters: $0.baseAddress!, length: $0.count) } as String
     }
 
     static func count(in text: String) -> Counts {

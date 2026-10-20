@@ -6,7 +6,7 @@ import Foundation
 /// а `HotKeyCenter` подставляет то, что пользователь выбрал в настройках (`HotKeyRegistry.resolve`).
 enum HotKeyAction: String, CaseIterable, Identifiable {
     case settings, tools, screenshot, screenshotOCR, dropShelf, annotate, windowPin, fixText, meeting, focus, qr,
-         appVolume, layoutFix
+         appVolume, layoutFix, textEditor
 
     var id: String { rawValue }
 
@@ -25,6 +25,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .qr: return HotKeyID.qr
         case .appVolume: return HotKeyID.appVolume
         case .layoutFix: return HotKeyID.layoutFix
+        case .textEditor: return HotKeyID.textEditor
         }
     }
 
@@ -43,6 +44,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .qr: return "Мгновенный QR"
         case .appVolume: return "Громкость приложений"
         case .layoutFix: return "Исправить раскладку"
+        case .textEditor: return "Текстовый редактор"
         }
     }
 
@@ -60,6 +62,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .qr: return .qr
         case .appVolume: return .volume
         case .layoutFix: return .layout
+        case .textEditor: return .textEditor
         }
     }
 
@@ -79,6 +82,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .qr: return LayoutHotKey(keyCode: kVK_ANSI_Q, modifiers: controlKey | optionKey)
         case .appVolume: return .controlOptionV
         case .layoutFix: return .commandBracket
+        case .textEditor: return LayoutHotKey(keyCode: kVK_ANSI_E, modifiers: cmdKey | optionKey | controlKey)
         }
     }
 

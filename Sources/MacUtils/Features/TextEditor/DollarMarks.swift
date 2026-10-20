@@ -65,6 +65,20 @@ enum DollarMarks {
         marks.map(\.value).filter { $0.length > 0 }.sorted { $0.location > $1.location }
     }
 
+    /// Оттенок знака по самому значению (FNV-1a по UTF-16): одинаковые значения всегда одного цвета, в любом
+    /// файле и после перезапуска. Пустое значение — `nil`, нейтральный оттенок.
+    static func hue(of value: NSString, hues: Int = 6) -> Int? {
+        let length = value.length
+        guard length > 0 else { return nil }
+        var hash: UInt32 = 2_166_136_261
+        for i in 0..<length {
+            let unit = value.character(at: i)
+            hash = (hash ^ UInt32(unit & 0xFF)) &* 16_777_619
+            hash = (hash ^ UInt32(unit >> 8)) &* 16_777_619
+        }
+        return Int(hash % UInt32(hues))
+    }
+
     /// Текст без значений у `marks`; сами `$` остаются.
     static func removingValues(of marks: some Sequence<DollarMark>, in text: String) -> String {
         let result = NSMutableString(string: text)
@@ -81,8 +95,17 @@ struct LineIndex {
     init(_ text: NSString) {
         let length = text.length
         guard length > 0 else { return }
+        if let pointer = CFStringGetCharactersPtr(text as CFString) {
+            scan(UnsafeBufferPointer(start: pointer, count: length))
+            return
+        }
         var units = [UInt16](repeating: 0, count: length)
         units.withUnsafeMutableBufferPointer { text.getCharacters($0.baseAddress!, range: NSRange(location: 0, length: length)) }
+        units.withUnsafeBufferPointer { scan($0) }
+    }
+
+    private mutating func scan(_ units: UnsafeBufferPointer<UInt16>) {
+        let length = units.count
         var i = 0
         while i < length {
             let unit = units[i]
@@ -101,6 +124,59 @@ struct LineIndex {
     init(_ text: String) { self.init(text as NSString) }
 
     var lineCount: Int { starts.count }
+
+    /// После правки `text`: `editedRange` — новый диапазон в тексте, `delta` — на сколько изменилась длина.
+    /// Пересчитывается только окрестность правки (с символа перед ней — CRLF может склеиться или разойтись),
+    /// остальные начала строк сдвигаются.
+    mutating func update(_ text: NSString, editedRange: NSRange, delta: Int) {
+        let length = text.length
+        // Правка на большую часть текста (замена целиком, отмена её) — построить заново быстрее.
+        if editedRange.length > 65_536, editedRange.length * 4 > length {
+            self = LineIndex(text)
+            return
+        }
+        let from = max(0, editedRange.location - 1)
+        var to = min(editedRange.location + editedRange.length + 1, length)
+        // Граница — не сразу после CR: иначе следующий LF решает, где начнётся строка.
+        while to < length, to > 0, text.character(at: to - 1) == 0x0D { to += 1 }
+        // Окрестность правки одним куском (и ещё знак после неё — для CRLF на границе).
+        let windowEnd = min(to + 1, length)
+        var units = [UInt16](repeating: 0, count: windowEnd - from)
+        units.withUnsafeMutableBufferPointer { buffer in
+            if let base = buffer.baseAddress { text.getCharacters(base, range: NSRange(location: from, length: windowEnd - from)) }
+        }
+        var fresh: [Int] = []
+        var i = from
+        while i < to {
+            let unit = units[i - from]
+            if unit == 0x0D {
+                i += (i + 1 < length && units[i + 1 - from] == 0x0A) ? 2 : 1
+                fresh.append(i)
+            } else if unit == 0x0A {
+                i += 1
+                fresh.append(i)
+            } else {
+                i += 1
+            }
+        }
+        // Прежние начала в (from, to − delta] заменяются новыми, дальше — сдвиг на delta.
+        let low = firstIndex(after: from)
+        let high = firstIndex(after: to - delta)
+        starts.replaceSubrange(low..<high, with: fresh)
+        if delta != 0 {
+            for index in (low + fresh.count)..<starts.count { starts[index] += delta }
+        }
+    }
+
+    /// Первый индекс, где начало строки больше `offset`.
+    private func firstIndex(after offset: Int) -> Int {
+        var low = 0, high = starts.count
+        while low < high {
+            let mid = (low + high) / 2
+            if starts[mid] <= offset { low = mid + 1 } else { high = mid }
+        }
+        return low
+    }
 
     /// Номер строки (с 1) для смещения.
     func line(at offset: Int) -> Int {
