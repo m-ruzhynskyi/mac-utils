@@ -210,9 +210,11 @@ final class ScreenShare: NSObject, ObservableObject {
                 }
                 startHeartbeat(socket)
                 state = .live(code: code, viewers: 0)
-                ShareMarksOverlay.shared.attach(to: filter)
+                ShareMarksOverlay.shared.attach(to: videoFilter ?? filter, display: videoDisplayID)
                 listen(socket)
                 showHUD()
+                watchDisplays()
+                announceDisplays()
             }
         }
     }
@@ -441,6 +443,10 @@ final class ScreenShare: NSObject, ObservableObject {
                 let filter = await self.prepared(filter)
                 try? await stream.updateContentFilter(filter)
                 try? await stream.updateConfiguration(config)
+                // Экран или окно — зрители видят или теряют мониторы; метки — на новом экране.
+                ShareMarksOverlay.shared.attach(to: filter, display: self.videoDisplayID)
+                ShareRequestQueue.shared.screenChanged()
+                self.announceDisplays()
             }
         }
     }
@@ -480,6 +486,106 @@ final class ScreenShare: NSObject, ObservableObject {
         guard let display else { return filter }
         videoDisplayID = display.displayID
         return Self.displayFilter(display, content: content)
+    }
+
+    // MARK: - Мониторы: зрители переключают сами (SHARE-PROTOCOL §4.1)
+
+    /// Объявленные зрителям мониторы и их экраны (CGDirectDisplayID — только внутри процесса, зрителям не уходит).
+    private var hostDisplays: [(display: ShareDisplay, id: CGDirectDisplayID)] = []
+    private var displaysRevision = ShareDisplays.Revision()
+    private var switchingDisplay = false
+    private var lastDisplaySwitch: Date?
+    private var screensObserver: NSObjectProtocol?
+
+    /// Номер транслируемого монитора (nil — окно или программа).
+    private var currentDisplayNumber: Int? {
+        videoDisplayID.flatMap { id in hostDisplays.first { $0.id == id }?.display.n }
+    }
+
+    /// Мониторы — всем зрителям. Переключение выключено или показывается окно — пустой список: кнопки у зрителей нет.
+    func announceDisplays() {
+        guard isLive, let socket else { return }
+        hostDisplays = ShareDisplays.list(ShareDisplays.screens())
+        let list = hostDisplays.map(\.display)
+        let message = ShareDisplays.message(rev: displaysRevision.update(list), list: list, current: currentDisplayNumber,
+                                            allowed: UserDefaults.standard.bool(forKey: Pref.shareAllowMonitorSwitch))
+        socket.send(.string(message)) { _ in }
+    }
+
+    /// Подключили, отключили монитор, сменили масштаб или раскладку — список заново.
+    private func watchDisplays() {
+        guard screensObserver == nil else { return }
+        screensObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                                                 object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { ScreenShare.shared.announceDisplays() }
+        }
+    }
+
+    private func stopWatchingDisplays() {
+        if let screensObserver { NotificationCenter.default.removeObserver(screensObserver) }
+        screensObserver = nil
+        hostDisplays = []
+        switchingDisplay = false
+        lastDisplaySwitch = nil
+    }
+
+    /// Зритель просит другой монитор: вопроса нет, решает настройка (`ShareMonitorSwitch.decide`).
+    private func handleSwitch(_ request: ShareMonitorSwitch.Request) {
+        let state = ShareMonitorSwitch.HostState(allowed: UserDefaults.standard.bool(forKey: Pref.shareAllowMonitorSwitch),
+                                                 screen: currentDisplayNumber != nil, rev: displaysRevision.value,
+                                                 list: hostDisplays.map(\.display), current: currentDisplayNumber,
+                                                 switching: switchingDisplay, lastSwitchAt: lastDisplaySwitch)
+        let decision = ShareMonitorSwitch.decide(state, display: request.display, rev: request.rev, now: Date())
+        guard decision == .change, let target = hostDisplays.first(where: { $0.display.n == request.display }) else {
+            reply(to: request, decision.rawValue)
+            if decision == .off || decision == .stale { announceDisplays() }
+            return
+        }
+        switchingDisplay = true
+        Task {
+            let switched = await switchDisplay(to: target.id)
+            switchingDisplay = false
+            guard isLive else { return }
+            guard switched else { return reply(to: request, "failed") }
+            lastDisplaySwitch = Date()
+            reply(to: request, "ok")
+            announceDisplays()
+            // Уведомление — в окне меток на новом мониторе: в картинку не попадает, кнопок нет.
+            ShareMarksOverlay.shared.notice(name: request.name, monitor: request.display, displays: hostDisplays.map(\.display))
+        }
+    }
+
+    private func reply(to request: ShareMonitorSwitch.Request, _ result: String) {
+        guard !request.from.isEmpty,
+              let message = ShareMonitorSwitch.resultMessage(to: request.from, display: request.display, result: result) else { return }
+        socket?.send(.string(message)) { _ in }
+    }
+
+    /// Другой монитор в тот же поток, без переподключения (как «Сменить источник»): фильтр, размер, окно меток.
+    /// Кодер H.264 пересоздаётся сам по размеру кадра, и первым идёт ключевой.
+    private func switchDisplay(to id: CGDirectDisplayID) async -> Bool {
+        guard let stream,
+              let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
+              let display = content.displays.first(where: { $0.displayID == id }) else { return false }
+        let filter = Self.displayFilter(display, content: content)
+        do {
+            try await stream.updateContentFilter(filter)
+        } catch {
+            Log.capture.error("Трансляция: монитор не переключился, код \((error as NSError).code)")
+            return false
+        }
+        // Фильтр уже новый: размер не встал — картинка всё равно с нового монитора, только пока в старом размере.
+        do { try await stream.updateConfiguration(Self.videoConfiguration(for: filter)) }
+        catch { Log.capture.error("Трансляция: размер потока не сменился, код \((error as NSError).code)") }
+        guard self.stream === stream else { return false }
+        videoFilter = filter
+        streamSizeOverride = nil
+        videoDisplayID = id
+        // Метки относились к прежнему монитору; окно меток и панель запросов — на новый.
+        ShareMarksOverlay.shared.store.clear()
+        ShareMarksOverlay.shared.attach(to: filter, display: id)
+        ShareRequestQueue.shared.screenChanged()
+        return true
     }
 
     /// Появилось или пропало служебное окно — обновляем, что исключено из картинки.
@@ -561,6 +667,8 @@ final class ScreenShare: NSObject, ObservableObject {
                                 let viewer = json["from"] as? String ?? ""
                                 ShareGame.shared.receive(json, peer: viewer, name: json["name"] as? String ?? "",
                                                          transport: self.gameTransport(to: viewer))
+                            case "switch-request":
+                                if let request = ShareMonitorSwitch.parseRequest(json) { self.handleSwitch(request) }
                             case "viewers":
                                 let raw = json["list"] as? [[String: Any]] ?? []
                                 self.watchers = raw.compactMap { $0["name"] as? String }
@@ -575,6 +683,8 @@ final class ScreenShare: NSObject, ObservableObject {
                                 }
                                 // Смотрит старая версия (без H.264) — дополнительно шлём ей кадры JPEG.
                                 self.sender?.legacyFrames = raw.contains { ($0["h264"] as? Bool) != true }
+                                // Новый зритель (или тот же после переподключения) получает мониторы без хранения на relay.
+                                self.announceDisplays()
                             default:
                                 break
                             }
@@ -681,6 +791,7 @@ final class ScreenShare: NSObject, ObservableObject {
                     startHeartbeat(fresh)
                     sender?.resendLast()
                     reconnecting = false
+                    announceDisplays()
                     Log.capture.info("Трансляция: переподключено")
                     return
                 case .refused(let code, let message) where ShareErrorText.needsNewID(code):
@@ -713,6 +824,7 @@ final class ScreenShare: NSObject, ObservableObject {
         hostKeyed = false
         Picker.shared.reset()
         ShareMarksOverlay.shared.detach()
+        stopWatchingDisplays()
         teardownCapture()
         heartbeat?.invalidate()
         heartbeat = nil
@@ -1814,6 +1926,7 @@ struct ScreenSharePage: View {
     @AppStorage(Pref.shareServer) private var server = ""
     @AppStorage(Pref.shareAudio) private var shareAudio = true
     @AppStorage(Pref.shareAllowMarks) private var allowMarks = true
+    @AppStorage(Pref.shareAllowMonitorSwitch) private var allowMonitorSwitch = true
     @State private var code = ""
 
     private var myID: String {
@@ -1874,12 +1987,17 @@ struct ScreenSharePage: View {
         }
         if !compact && !demo { TrustedRows() }
 
-        GroupLabel("Метки зрителей")
+        GroupLabel("Что могут зрители")
         ListCard {
             ToggleRow("Разрешить зрителям ставить метки и рисовать",
                       subtitle: "Зритель кликает или рисует по картинке — у вас на экране появляется метка «сюда!» или линия, и через пару секунд исчезает. Управлять вашим Mac зритель не может.",
                       systemImage: "scope", isOn: $allowMarks)
+            ToggleRow("Зрители могут переключать мои мониторы",
+                      subtitle: "Зритель сам выбирает, какой из ваших мониторов смотреть, — без вопроса. Картинка сменится у всех зрителей, а у вас мелькнёт уведомление. Когда показываете окно или программу, мониторы зрителям не видны.",
+                      systemImage: "display.2", isOn: $allowMonitorSwitch)
         }
+        // В эфире — сразу: у зрителей кнопка пропадает или появляется.
+        .onChange(of: allowMonitorSwitch) { share.announceDisplays() }
 
         GroupLabel("Звук")
         ListCard {
