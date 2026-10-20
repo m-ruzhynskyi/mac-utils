@@ -91,6 +91,8 @@ function electron(world) {
     const win = windows.find((w) => w.hwnd === hwnd && !w.destroyed);
     helperCalls.push(args);
     if (!win) return setImmediate(() => done(new Error("no window"), ""));
+    // world.helperBroken: помощник старой версии или упал — place/protect не отвечают.
+    if (world.helperBroken) return setImmediate(() => done(new Error("exit 2"), ""));
     if (command === "place") {
       const [x, y, width, height] = rest.map(Number);
       const to = world.displays.find((d) => contains(d.phys, x, y));
@@ -406,6 +408,21 @@ test("защита не встала после setIgnoreMouseEvents — вто�
     assert.equal(host.overlay.affinity, 0x11);
     assert.equal(calls.at(-1), "ignore:true", `клики сквозь окно остаются: ${calls}`);
     assert.match(host.markLog()[0], / affinity=0x11 order=2$/);
+  } finally { host.stop(); }
+});
+
+test("помощник не ответил на place и protect: метки не застревают, в журнале — что не подтвердилось", async () => {
+  const a = layoutA(), b = layoutB();
+  const host = await start(world([a, b], [screenSource(a, 1)], { helperBroken: true }));
+  try {
+    await host.share("screen:1:0");
+    host.mark(...P);
+    await tick(80);
+    assert.equal(host.marksSent(), 1);
+    assert.equal(host.places().length, 2, "одна повторная попытка, не больше");
+    assert.match(host.markLog()[0], / phys=- .* affinity=- order=2$/);
+    const log = fs.readFileSync(path.join(host.fake.module.app.getPath("logs"), "overlay.log"), "utf8");
+    assert.match(log, / place-mismatch /);
   } finally { host.stop(); }
 });
 
