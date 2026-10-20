@@ -90,6 +90,13 @@ struct DollarPanelView: View {
                                 .padding(.horizontal, DS.Space.xs)
                             ForEach(parts.active) { entry in row(entry, skipped: false) }
                         }
+                        let service = model.service
+                        if !service.isEmpty {
+                            Spacer().frame(height: DS.Space.s)
+                            GroupLabel("В служебных полях · \(service.count)").padding(.horizontal, DS.Space.xs)
+                                .help("Знаки в \\info, {\\*\\…} и таблицах RTF: на странице их не видно, их не трогаем")
+                            ForEach(service, id: \.mark.dollar) { entry in row(entry, skipped: true) }
+                        }
                     }
                 }
                 .scrollIndicators(.automatic)
@@ -103,7 +110,15 @@ struct DollarPanelView: View {
         }
     }
 
-    /// Строки двух групп — с разными id: иначе ленивый список путает строку, перешедшую из группы в группу.
+    /// «стало 5 непарных скобок», «стало 2 непарные скобки», «стала 1 непарная скобка».
+    static func unbalancedPhrase(_ count: Int) -> String {
+        let tens = count % 100, ones = count % 10
+        if !(11...14).contains(tens), ones == 1 { return "стала \(count) непарная скобка" }
+        if !(11...14).contains(tens), (2...4).contains(ones) { return "стало \(count) непарные скобки" }
+        return "стало \(count) непарных скобок"
+    }
+
+    /// Строки групп — с разными id: иначе ленивый список путает строку, перешедшую из группы в группу.
     static func skippedID(_ dollar: Int) -> Int { -dollar - 1 }
 
     private func row(_ entry: DollarEntry, skipped: Bool) -> some View {
@@ -133,6 +148,20 @@ struct DollarPanelView: View {
                         .disabled(!tab.undo.canUndo)
                 }
                 Text("Знаки $ остались на местах").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                if let unbalanced = model.unbalancedAfterRemoval {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 12)).foregroundStyle(DS.Tone.warning.line)
+                            .accessibilityHidden(true)
+                        Text("Внимание: в файле \(Self.unbalancedPhrase(unbalanced)) — Word может не открыть файл")
+                            .font(DS.Font.rowSub).foregroundStyle(.dsText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Button("Отменить") { tab.undo.undo() }
+                            .buttonStyle(.graphite(.secondary, size: .compact))
+                            .disabled(!tab.undo.canUndo)
+                    }
+                    .padding(.top, 2)
+                }
             }
             .padding(10)
             .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.iconButton, style: .continuous))
@@ -177,10 +206,10 @@ private struct DollarRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             if entry.value.isEmpty {
-                Text("пусто").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                Text(entry.mark.isEmpty ? "пусто" : "пробелы").font(DS.Font.rowSub).foregroundStyle(.dsMute)
             }
             Spacer(minLength: 0)
-            if (selected || hovered) && !entry.value.isEmpty {
+            if (selected || hovered) && !entry.mark.isEmpty && !entry.isHidden {
                 Button(action: remove) {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 13)).foregroundStyle(.dsMute)
                 }

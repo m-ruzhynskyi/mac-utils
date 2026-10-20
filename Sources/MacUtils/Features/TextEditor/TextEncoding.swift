@@ -118,22 +118,26 @@ enum TextEncoding: String, CaseIterable, Codable {
     }
 
     /// Байты для сохранения; `nil` — в тексте есть символы, которых в этой кодировке нет (`unrepresentable`).
-    func encode(_ text: String) -> Data? {
+    /// `utf16BOM` — писать ли BOM в UTF-16 (новые и преобразованные файлы — с ним; открытый без BOM — без).
+    func encode(_ text: String, utf16BOM: Bool = true) -> Data? {
         switch self {
         case .utf8: return Data(text.utf8)
         case .utf8BOM: return Self.bomUTF8 + Data(text.utf8)
         case .utf16LE, .utf16BE:
             let units = Self.units(text)
-            var bytes = [UInt8](repeating: 0, count: 2 + units.count * 2)
+            let head = utf16BOM ? 2 : 0
+            var bytes = [UInt8](repeating: 0, count: head + units.count * 2)
             let little = self == .utf16LE
             bytes.withUnsafeMutableBufferPointer { target in
-                target[0] = little ? 0xFF : 0xFE
-                target[1] = little ? 0xFE : 0xFF
+                if utf16BOM {
+                    target[0] = little ? 0xFF : 0xFE
+                    target[1] = little ? 0xFE : 0xFF
+                }
                 units.withUnsafeBufferPointer { source in
                     for i in 0..<source.count {
                         let high = UInt8(source[i] >> 8), low = UInt8(source[i] & 0xFF)
-                        target[2 + 2 * i] = little ? low : high
-                        target[3 + 2 * i] = little ? high : low
+                        target[head + 2 * i] = little ? low : high
+                        target[head + 1 + 2 * i] = little ? high : low
                     }
                 }
             }

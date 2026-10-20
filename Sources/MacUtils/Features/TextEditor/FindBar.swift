@@ -23,9 +23,18 @@ final class EditorSearch: ObservableObject {
     /// Итог «Заменить все».
     @Published private(set) var note: String?
 
+    /// Регулярное выражение ищется в фоне: долгий перебор не держит главный поток (а с ним и перехваты клавиш
+    /// всего приложения). Пока ищет — «Ищу…», новый запрос или правка прерывают прежний поиск.
+    @Published private(set) var searching = false
+
     /// «В выделении»: где искать (выделение на момент включения опции).
     private var scope: NSRange?
     private var pending: DispatchWorkItem?
+    private var generation = 0
+    private var running: TextSearch.Cancellation?
+    /// ⌘G нажали, пока поиск ещё идёт, — перейти, когда найдётся.
+    private var nextAfterSearch: Bool?
+    private let queue = DispatchQueue(label: "macutils.editor.search", qos: .userInitiated)
 
     private var tab: EditorTab? { workspace?.current }
     var isActive: Bool { workspace?.findMode != nil }
@@ -62,6 +71,7 @@ final class EditorSearch: ObservableObject {
     }
 
     func clear() {
+        stopRunning()
         for tab in workspace?.tabs ?? [] where !tab.matches.isEmpty { tab.setMatches([], current: nil) }
         count = 0
         current = nil
@@ -76,9 +86,12 @@ final class EditorSearch: ObservableObject {
         return clipped.length > 0 ? clipped : nil
     }
 
-    /// Пересчитать совпадения в текущей вкладке; текущее — первое не раньше курсора.
+    /// Пересчитать совпадения в текущей вкладке; текущее — первое не раньше курсора. Обычный текст — сразу
+    /// (10 МБ — десятки миллисекунд), регулярное выражение — в фоне с отменой.
     func refresh() {
         pending?.cancel()
+        pending = nil
+        stopRunning()
         guard let tab, isActive else { return }
         note = nil
         wrapped = false
@@ -90,8 +103,37 @@ final class EditorSearch: ObservableObject {
             tab.setMatches([], current: nil)
             return
         }
-        do {
-            let result = try TextSearch.find(query, in: tab.text, options: options, scope: searchScope)
+        let query = self.query, options = self.options, scope = searchScope
+        guard options.regex else {
+            finish(Result { try TextSearch.find(query, in: tab.text, options: options, scope: scope) }, timedOut: false, tab: tab)
+            return
+        }
+        let generation = self.generation
+        let snapshot = UncheckedSendable(tab.text.copy() as! NSString)
+        let cancel = TextSearch.Cancellation()
+        running = cancel
+        searching = true
+        queue.async { [weak self] in
+            let outcome = Result { try TextSearch.find(query, in: snapshot.value, options: options, scope: scope, isCancelled: { cancel.isCancelled }) }
+            let timedOut = cancel.timedOut
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.generation == generation, let tab = self.tab else { return }
+                    self.searching = false
+                    self.running = nil
+                    self.finish(outcome, timedOut: timedOut, tab: tab)
+                    if let backwards = self.nextAfterSearch {
+                        self.nextAfterSearch = nil
+                        self.next(backwards: backwards)
+                    }
+                }
+            }
+        }
+    }
+
+    private func finish(_ outcome: Result<TextSearch.Result, Error>, timedOut: Bool, tab: EditorTab) {
+        switch outcome {
+        case .success(let result):
             error = nil
             count = result.ranges.count
             truncated = result.truncated
@@ -99,18 +141,31 @@ final class EditorSearch: ObservableObject {
             current = result.ranges.firstIndex { $0 == selection } ?? result.ranges.firstIndex { $0.location >= selection.location }
                 ?? (result.ranges.isEmpty ? nil : 0)
             tab.setMatches(result.ranges, current: current)
-        } catch {
-            self.error = error.localizedDescription
+        case .failure(let failure):
+            error = timedOut ? "Выражение ищет слишком долго" : failure.localizedDescription
             count = 0
             current = nil
             tab.setMatches([], current: nil)
         }
     }
 
+    /// Прервать фоновый поиск или замену (новый запрос, правка, другая вкладка, закрытие панели).
+    private func stopRunning() {
+        generation += 1
+        running?.cancel()
+        running = nil
+        searching = false
+        nextAfterSearch = nil
+    }
+
     /// ⌘G / ⇧⌘G: следующее или предыдущее совпадение, по кругу.
     func next(backwards: Bool = false) {
         guard let tab else { return }
-        if pending != nil || tab.matches.isEmpty { refresh() }
+        if pending != nil || (tab.matches.isEmpty && !searching) { refresh() }
+        if searching {
+            nextAfterSearch = backwards
+            return
+        }
         guard let found = TextSearch.next(in: tab.matches, after: tab.textView.selectedRange(), backwards: backwards) else {
             NSSound.beep()
             return
@@ -134,11 +189,46 @@ final class EditorSearch: ObservableObject {
         next()
     }
 
-    /// «Заменить все» одним шагом отмены.
+    /// «Заменить все» одним шагом отмены. С регулярным выражением замены считаются в фоне и применяются, только если
+    /// текст за это время не меняли.
     func replaceAll() {
         guard let tab, !query.isEmpty else { return }
-        do {
-            let plan = try TextSearch.replacements(query, template: replacement, in: tab.text, options: options, scope: searchScope)
+        let query = self.query, template = replacement, options = self.options, scope = searchScope
+        guard options.regex else {
+            apply(Result { try TextSearch.replacements(query, template: template, in: tab.text, options: options, scope: scope) },
+                  timedOut: false, to: tab)
+            return
+        }
+        stopRunning()
+        let generation = self.generation, version = tab.textVersion
+        let snapshot = UncheckedSendable(tab.text.copy() as! NSString)
+        let cancel = TextSearch.Cancellation()
+        running = cancel
+        searching = true
+        queue.async { [weak self] in
+            let outcome = Result {
+                try TextSearch.replacements(query, template: template, in: snapshot.value, options: options, scope: scope,
+                                            isCancelled: { cancel.isCancelled })
+            }
+            let timedOut = cancel.timedOut
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.generation == generation else { return }
+                    self.searching = false
+                    self.running = nil
+                    guard tab.textVersion == version else {
+                        self.note = "Текст изменился — замените ещё раз"
+                        return
+                    }
+                    self.apply(outcome, timedOut: timedOut, to: tab)
+                }
+            }
+        }
+    }
+
+    private func apply(_ outcome: Result<(ranges: [NSRange], strings: [String]), Error>, timedOut: Bool, to tab: EditorTab) {
+        switch outcome {
+        case .success(let plan):
             guard !plan.ranges.isEmpty else {
                 note = "Совпадений нет"
                 return
@@ -146,14 +236,15 @@ final class EditorSearch: ObservableObject {
             tab.textView.replace(plan.ranges, with: plan.strings, actionName: "Заменить все")
             refresh()
             note = "Заменено: \(plan.ranges.count)"
-        } catch {
-            self.error = error.localizedDescription
+        case .failure(let failure):
+            error = timedOut ? "Выражение ищет слишком долго" : failure.localizedDescription
         }
     }
 
     /// «1 из 4», «20 000+», «Нет совпадений».
     var counter: String {
         if query.isEmpty { return "" }
+        if searching { return "Ищу…" }
         if count == 0 { return "Нет совпадений" }
         if truncated { return "\(Self.number(TextSearch.limit))+" }
         let position = current.map { "\($0 + 1) из " } ?? ""
@@ -205,6 +296,9 @@ struct FindBar: View {
                     Button("Заменить все") { search.replaceAll() }
                         .buttonStyle(.graphite(.primary, size: .compact))
                         .disabled(search.query.isEmpty || search.error != nil)
+                    Button("В папке…") { EditorWindowController.shared.showFolderSearch() }
+                        .buttonStyle(.graphite(.ghost, size: .compact))
+                        .help("Найти и заменить во всех файлах папки (⇧⌘F)")
                 }
             }
         }

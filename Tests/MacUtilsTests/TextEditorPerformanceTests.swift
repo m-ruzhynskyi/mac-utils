@@ -5,6 +5,18 @@ import XCTest
 /// Замеры редактора на файле 10 МБ (как `Tests/Fixtures/TextEditor/generate-big.sh`; файл создаётся во временной папке).
 /// Числа печатаются в лог; тест падает, если порог превышен больше чем в полтора раза (запас под CI и отладочную сборку).
 final class TextEditorPerformanceTests: XCTestCase {
+    private var defaults: EditorDefaultsSnapshot!
+
+    override func setUp() {
+        super.setUp()
+        defaults = EditorDefaultsSnapshot()
+    }
+
+    override func tearDown() {
+        defaults.restore()
+        super.tearDown()
+    }
+
     /// Тот же файл, что делает `generate-big.sh`: длинные строки по 8 знаков `$vNNNNN`, cp1252/ASCII, CRLF.
     /// `paragraphs` — строк `\pard …`; всего строк в тексте на 3 больше (заголовок, `}` и пустая после последнего CRLF).
     static func bigFile(target: Int = 10_485_760) -> (data: Data, dollars: Int, paragraphs: Int) {
@@ -128,12 +140,33 @@ final class TextEditorPerformanceTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.4))
         while tab.dollars.entries.count != big.dollars, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
 
+        // «Вид → Невидимые символы» на таком файле и ввод с ними (замечание тестировщика к 2.5: было ~3 с и 60 мс).
+        let invisiblesOn = Self.measure {
+            tab.showsInvisibles = true
+            tab.container.displayIfNeeded()
+        }
+        var withInvisibles: [Double] = []
+        for i in 0..<20 {
+            withInvisibles.append(Self.measure {
+                tab.textView.insertText("y", replacementRange: NSRange(location: middle + 200 + i, length: 0))
+                tab.container.displayIfNeeded()
+            })
+        }
+        withInvisibles.sort()
+        tab.showsInvisibles = false
+        print(String(format: "[editor-perf] %@ «Невидимые символы»: включение %.0f мс, ввод с ними %.1f мс (медиана из 20)",
+                     Self.build, invisiblesOn, withInvisibles[10]))
+        XCTAssertLessThan(invisiblesOn, Self.limit(1_000))
+        XCTAssertLessThan(withInvisibles[10], Self.limit(50))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        while tab.dollars.entries.count != big.dollars, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+
         // «Убрать значения» у 4 181 подсвеченного и одна отмена.
         var removed = 0
         let remove = Self.measure { removed = tab.removeHighlightedValues() }
         XCTAssertEqual(removed, big.dollars - 3, "все, кроме трёх пропущенных")
         let undo = Self.measure { tab.undo.undo() }
-        XCTAssertEqual(tab.storage.length, big.data.count + 100)
+        XCTAssertEqual(tab.storage.length, big.data.count + 120)
 
         print(String(format: "[editor-perf] %@ 10 МБ в редакторе: открытие до первого экрана %.0f мс, ввод символа в строку 20 000 символов %.1f мс без переноса (медиана из 50, макс. %.1f) и %.1f мс с переносом, перекраска экрана после паузы %.1f мс, «Убрать значения» (%d) %.0f мс, отмена %.0f мс",
                      Self.build, open, typing, samples.last ?? 0, typingWrapped, repaint, removed, remove, undo))

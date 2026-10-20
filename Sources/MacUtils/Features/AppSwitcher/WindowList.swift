@@ -38,18 +38,58 @@ enum WindowList {
         let name: String
         let icon: NSImage
         let isHidden: Bool
+        /// Только у самого Mac Utils: его окна из `NSApp.windows` (к своему процессу AX не ходим — из фона это падение AppKit).
+        var ownWindows: [OwnWindow]?
     }
 
+    /// Своё окно для переключателя — снимок с главного потока.
+    struct OwnWindow: Equatable {
+        let number: CGWindowID
+        let title: String
+        let isMinimized: Bool
+        let isVisible: Bool
+    }
+
+    static var ownPID: pid_t { ProcessInfo.processInfo.processIdentifier }
+
+    /// Mac Utils в своём переключателе — пока у него есть значок в Dock (открыт редактор или трансляция, либо
+    /// включено «Показывать в Dock»); с `.accessory` его в списке нет.
     @MainActor
-    static func snapshotApps() -> UncheckedSendable<[pid_t: AppInfo]> {
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        let apps = NSWorkspace.shared.runningApplications
+    static func snapshotApps(includeSelf: Bool = NSApp.activationPolicy() == .regular) -> UncheckedSendable<[pid_t: AppInfo]> {
+        let ownPID = ownPID
+        var apps = Dictionary(NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != ownPID }
             .map { app in
                 (app.processIdentifier, AppInfo(app: app, name: app.localizedName ?? app.bundleIdentifier ?? "?",
                                                  icon: app.icon ?? NSWorkspace.shared.icon(for: .application), isHidden: app.isHidden))
-            }
-        return UncheckedSendable(Dictionary(apps, uniquingKeysWith: { first, _ in first }))
+            }, uniquingKeysWith: { first, _ in first })
+        if includeSelf {
+            let app = NSRunningApplication.current
+            apps[ownPID] = AppInfo(app: app, name: app.localizedName ?? "Mac Utils", icon: NSApp.applicationIconImage ?? icon(of: app),
+                                   isHidden: NSApp.isHidden, ownWindows: ownWindows(NSApp.windows))
+        }
+        return UncheckedSendable(apps)
+    }
+
+    /// Свои обычные окна: редактор, просмотр трансляции, настройки. Панели (в том числе сам переключатель), оверлеи,
+    /// окна без заголовка и не на обычном уровне — нет. `canBecomeMain` у не показанного (свёрнутого) окна всегда false —
+    /// проверяем его только у показанного.
+    @MainActor
+    static func isSwitchable(_ window: NSWindow) -> Bool {
+        !(window is NSPanel) && (!window.isVisible || window.canBecomeMain) && window.styleMask.contains(.titled)
+            && !window.title.isEmpty && window.level == .normal && !window.ignoresMouseEvents
+    }
+
+    @MainActor
+    static func ownWindows(_ windows: [NSWindow]) -> [OwnWindow] {
+        windows.filter { isSwitchable($0) && ($0.isVisible || $0.isMiniaturized) && $0.windowNumber > 0 }.map {
+            OwnWindow(number: CGWindowID($0.windowNumber), title: $0.title, isMinimized: $0.isMiniaturized, isVisible: $0.isVisible)
+        }
+    }
+
+    /// Свои окна, которых нет среди видимых по CG (свёрнутые или все — если Mac Utils скрыт), в порядке `NSApp.windows`.
+    static func ownBackground(_ windows: [OwnWindow], appHidden: Bool, used: Set<CGWindowID>) -> [OwnWindow] {
+        windows.filter { ($0.isMinimized || appHidden) && !used.contains($0.number) }
     }
 
     /// Ключи видимых окон текущего рабочего стола (`w<номер>`): быстрый запрос CG без Accessibility.
@@ -93,6 +133,14 @@ enum WindowList {
                   let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
                   bounds.width >= minSize.width, bounds.height >= minSize.height else { continue }
 
+            // Свои окна — только из снимка `NSApp.windows`, без AX.
+            if let own = infos[pid]?.ownWindows {
+                guard let window = own.first(where: { $0.number == number }) else { continue }
+                used.insert(number)
+                items.append(SwitcherItem(id: "w\(number)", app: app, appName: infos[pid]?.name ?? name(of: app), title: window.title,
+                                          icon: infos[pid]?.icon ?? icon(of: app), windowID: number, axWindow: nil, isMinimized: false))
+                continue
+            }
             let cgTitle = info[kCGWindowName as String] as? String ?? ""
             var ax: AXWindowInfo?
             if let windows = axWindows(pid) {
@@ -115,6 +163,21 @@ enum WindowList {
                 < (order[$1.processIdentifier] ?? Int.max, $1.processIdentifier)
         }
         for app in rest {
+            if let own = infos[app.processIdentifier]?.ownWindows {
+                let info = infos[app.processIdentifier]
+                for window in ownBackground(own, appHidden: info?.isHidden ?? false, used: used) {
+                    used.insert(window.number)
+                    items.append(SwitcherItem(id: "w\(window.number)", app: app, appName: info?.name ?? name(of: app), title: window.title,
+                                              icon: info?.icon ?? icon(of: app), windowID: window.number, axWindow: nil,
+                                              isMinimized: window.isMinimized))
+                }
+                // Скрытый Mac Utils, окна которого AppKit не отдал: одна карточка самого приложения — выбор показывает его.
+                if info?.isHidden == true, !items.contains(where: { $0.pid == app.processIdentifier }) {
+                    items.append(SwitcherItem(id: "app\(app.processIdentifier)", app: app, appName: info?.name ?? name(of: app),
+                                              title: "", icon: info?.icon ?? icon(of: app), windowID: nil, axWindow: nil, isMinimized: false))
+                }
+                continue
+            }
             guard let windows = axWindows(app.processIdentifier) else { continue }
             for (index, window) in windows.enumerated() where window.isStandard {
                 guard window.isMinimized || (infos[app.processIdentifier]?.isHidden ?? false) else { continue }
@@ -135,7 +198,7 @@ enum WindowList {
         app.localizedName ?? app.bundleIdentifier ?? "?"
     }
 
-    private static func icon(of app: NSRunningApplication) -> NSImage {
+    static func icon(of app: NSRunningApplication) -> NSImage {
         app.icon ?? NSWorkspace.shared.icon(for: .application)
     }
 }
@@ -217,6 +280,7 @@ enum AXWindowID {
 @MainActor
 enum WindowActivation {
     static func activate(_ item: SwitcherItem) {
+        if item.pid == WindowList.ownPID { return activateOwn(item) }
         let app = item.app
         if app.isHidden { app.unhide() }
 
@@ -236,6 +300,15 @@ enum WindowActivation {
             app.activate(options: [])
             AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
         }
+    }
+
+    /// Своё окно — средствами AppKit (AX к своему процессу не ходим): свёрнутое разворачивается.
+    private static func activateOwn(_ item: SwitcherItem) {
+        if NSApp.isHidden { NSApp.unhide(nil) }
+        NSApp.activate(ignoringOtherApps: true)
+        guard let number = item.windowID, let window = NSApp.window(withWindowNumber: Int(number)) else { return }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
     }
 
     /// Если AX-окно не сохранилось — ищем его по номеру, затем по заголовку.

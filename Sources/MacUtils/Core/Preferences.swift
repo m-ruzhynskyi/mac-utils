@@ -185,6 +185,14 @@ enum Pref {
     static let editorWrap = "editorWrap"
     static let editorZoom = "editorZoom"
     static let editorDollarPanel = "editorDollarPanel"
+    /// Вид: невидимые символы и подсветка парных скобок.
+    static let editorInvisibles = "editorInvisibles"
+    static let editorBrackets = "editorBrackets"
+    /// Ширина табуляции в пробелах (табы ↔ пробелы, отступ таба на экране).
+    static let editorTabWidth = "editorTabWidth"
+    /// Поиск в папке: последняя папка и маска имён.
+    static let editorFolderSearchPath = "editorFolderSearchPath"
+    static let editorFolderSearchMask = "editorFolderSearchMask"
     static let editorRecent = "editorRecent"
     /// Вкладка «Редактор» уже добавлена в панель 🔧 (один раз при обновлении).
     static let panelTabsEditorAdded = "panelTabsEditorAdded"
@@ -305,6 +313,9 @@ enum Pref {
             editorWrap: false,
             editorZoom: 1.0,
             editorDollarPanel: true,
+            editorInvisibles: false,
+            editorBrackets: true,
+            editorTabWidth: 4,
             playerRememberPosition: true,
             playerSeekStep: 5,
             playerKeepAwake: true,
