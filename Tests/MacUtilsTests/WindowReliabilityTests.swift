@@ -291,6 +291,72 @@ final class WindowReliabilityTests: XCTestCase {
         XCTAssertNil(WindowDragRules.ownerUnder(CGPoint(x: 900, y: 900), windows: windows, ownPID: me, ownWindows: []))
     }
 
+    // MARK: - Окно курсора (1.6.10: «down отклонено: не чужое обычное окно» на каждое нажатие)
+
+    /// Раскладка пользователя: основной 1710×1107 с полосой меню 38 pt, второй монитор справа на 1710,357. Курсор на
+    /// macOS 27 — окно WindowServer уровня курсора, левый верхний угол ровно в точке нажатия.
+    private func userWindows(cursorAt point: CGPoint) -> [SW] {
+        [SW(number: 90, pid: 50, layer: WindowDragRules.passThroughLayer, bounds: CGRect(origin: point, size: CGSize(width: 32, height: 32))),
+         SW(number: 91, pid: 50, layer: 24, bounds: CGRect(x: 0, y: 0, width: 1710, height: 38)),
+         SW(number: 92, pid: 50, layer: 24, bounds: CGRect(x: 1710, y: 357, width: 1135, height: 30)),
+         SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 38, width: 1710, height: 1069)),
+         SW(number: 3, pid: 300, layer: 0, bounds: CGRect(x: 1710, y: 387, width: 1135, height: 700))]
+    }
+
+    func testCursorWindowDoesNotHideWindowUnderPress() {
+        for (point, owner) in [(CGPoint(x: 500, y: 60), pid_t(200)), (CGPoint(x: 1800, y: 400), pid_t(300))] {
+            let windows = userWindows(cursorAt: point)
+            XCTAssertEqual(WindowDragRules.ownerUnder(point, windows: windows, ownPID: me, ownWindows: []), owner,
+                           "окно курсора в точке нажатия клик не забирает")
+        }
+    }
+
+    func testMenuBarStillRejectedWithCursorWindowOnTop() {
+        let point = CGPoint(x: 500, y: 10)
+        XCTAssertNil(WindowDragRules.ownerUnder(point, windows: userWindows(cursorAt: point), ownPID: me, ownWindows: []))
+    }
+
+    func testRejectionNoteHasOnlyNumbers() {
+        let point = CGPoint(x: 500, y: 60)
+        XCTAssertEqual(WindowDragRules.underNote(point, windows: userWindows(cursorAt: point), ownPID: me, ownWindows: []),
+                       "первое own=0 inOwn=0 layer=\(WindowDragRules.passThroughLayer) alpha=1.00 32x32 окон=2")
+        XCTAssertEqual(WindowDragRules.underNote(CGPoint(x: 5000, y: 5000), windows: [], ownPID: me, ownWindows: []), "первое=- окон=0")
+        let own = [SW(number: 1, pid: me, layer: 0, bounds: CGRect(x: 0, y: 0, width: 400, height: 300))]
+        XCTAssertEqual(WindowDragRules.underNote(CGPoint(x: 10, y: 10), windows: own, ownPID: me, ownWindows: [1]),
+                       "первое own=1 inOwn=1 layer=0 alpha=1.00 400x300 окон=1")
+    }
+
+    // MARK: - Запасной путь: system-wide AX — только если над точкой нет нашего окна
+
+    func testSystemWideAllowedOverForeignOverlay() {
+        let windows = [SW(number: 4, pid: 300, layer: 25, bounds: CGRect(x: 0, y: 0, width: 1710, height: 1107)),
+                       SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 38, width: 1710, height: 1069))]
+        XCTAssertTrue(WindowDragRules.systemWideAllowed(at: CGPoint(x: 500, y: 60), windows: windows, ownPID: me))
+        XCTAssertTrue(WindowDragRules.systemWideAllowed(at: CGPoint(x: 5000, y: 60), windows: windows, ownPID: me), "мимо всех окон")
+    }
+
+    func testSystemWideForbiddenWhenOwnWindowIsOnTop() {
+        let windows = [SW(number: 9, pid: me, layer: 1000, bounds: CGRect(x: 0, y: 0, width: 1710, height: 1107)),
+                       SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 38, width: 1710, height: 1069))]
+        XCTAssertFalse(WindowDragRules.systemWideAllowed(at: CGPoint(x: 500, y: 60), windows: windows, ownPID: me),
+                       "наш оверлей сверху, даже сквозь клики: AX-запрос мог бы уйти в свой процесс")
+        let below = [windows[1], windows[0]]
+        XCTAssertTrue(WindowDragRules.systemWideAllowed(at: CGPoint(x: 500, y: 60), windows: below, ownPID: me),
+                      "наше окно под чужим обычным — запрос попадёт в чужое")
+    }
+
+    // MARK: - Точка нажатия
+
+    func testEventPointFallsBackToCursor() {
+        let screens = [CGRect(x: 0, y: 0, width: 1710, height: 1107), CGRect(x: 1710, y: 357, width: 1135, height: 789)]
+        let mouse = CGPoint(x: 500, y: 60)
+        XCTAssertEqual(WindowDragRules.eventPoint(CGPoint(x: 1800, y: 400), mouse: mouse, screens: screens), CGPoint(x: 1800, y: 400))
+        XCTAssertEqual(WindowDragRules.eventPoint(CGPoint(x: 1709, y: 1106), mouse: mouse, screens: screens), CGPoint(x: 1709, y: 1106))
+        XCTAssertEqual(WindowDragRules.eventPoint(nil, mouse: mouse, screens: screens), mouse, "у события нет точки")
+        XCTAssertEqual(WindowDragRules.eventPoint(CGPoint(x: 1800, y: 100), mouse: mouse, screens: screens), mouse,
+                       "точка вне всех экранов (над вторым монитором) — не та")
+    }
+
     func testScreenWindowParsesWindowServerInfo() {
         let info: [String: Any] = [kCGWindowNumber as String: 42, kCGWindowOwnerPID as String: 7, kCGWindowLayer as String: 0,
                                    kCGWindowAlpha as String: 1.0,

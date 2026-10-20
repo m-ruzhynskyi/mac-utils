@@ -8,6 +8,7 @@ enum Permissions {
     static var accessibility: Bool { AXIsProcessTrusted() }
 
     static func requestAccessibility() {
+        PermissionsModel.shared.awaitGrant()
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
     }
@@ -29,7 +30,10 @@ enum Permissions {
     static var microphone: Level { microphoneLevel(AVCaptureDevice.authorizationStatus(for: .audio)) }
 
     static func requestMicrophone() {
-        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        PermissionsModel.shared.awaitGrant()
+        AVCaptureDevice.requestAccess(for: .audio) { _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { PermissionsModel.shared.refresh() } }
+        }
     }
 
     /// «Полный доступ к диску»: пробуем прочитать защищённые TCC места.
@@ -65,6 +69,7 @@ enum Permissions {
     }
 
     static func openFullDiskAccess() {
+        PermissionsModel.shared.awaitGrant()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
             NSWorkspace.shared.open(url)
         }
@@ -81,6 +86,7 @@ enum Permissions {
     }
 
     static func requestScreenRecording() {
+        PermissionsModel.shared.awaitGrant()
         _ = CGRequestScreenCaptureAccess()
     }
 
@@ -92,6 +98,7 @@ enum Permissions {
     }
 
     static func open(_ pane: Pane) {
+        PermissionsModel.shared.awaitGrant()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane.rawValue)") {
             NSWorkspace.shared.open(url)
         }

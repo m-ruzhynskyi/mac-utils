@@ -401,6 +401,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
         let timer = Timer(timeInterval: 5, repeats: true) { _ in
             MainActor.assumeIsolated { MeetingRecorder.shared.checkAudioFlow() }
         }
+        timer.tolerance = 1
         RunLoop.main.add(timer, forMode: .common)
         watchdog = timer
     }

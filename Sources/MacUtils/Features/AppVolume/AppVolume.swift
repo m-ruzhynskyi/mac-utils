@@ -18,7 +18,10 @@ final class AppVolume: ObservableObject {
 
     private var taps: [String: VolumeTapping] = [:]
     private var listenersInstalled = false
+    /// Раз в секунду — только пока список приложений на экране (что играет, меняется без событий) или пока у живых
+    /// перехватов ещё не доказано разрешение на запись звука. Состав процессов и выход звука — слушатели Core Audio.
     private var refreshTimer: Timer?
+    private(set) var viewers = ViewerCount()
     private var watch = PermissionWatch()
     private let hud = VolumeHUDController()
 
@@ -52,13 +55,34 @@ final class AppVolume: ObservableObject {
             AppVolume.shared.toggleHUD()
         }
         installListeners()
-        if refreshTimer == nil {
-            let timer = Timer(timeInterval: 1, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
-            RunLoop.main.add(timer, forMode: .common)
-            refreshTimer = timer
-        }
         isRunning = true
         refresh()
+    }
+
+    var isPolling: Bool { refreshTimer != nil }
+
+    /// Список приложений со звуком появился на экране или ушёл с него (`onScreen`).
+    func viewerChanged(_ shown: Bool) {
+        viewers.update(shown)
+        if shown { refresh() } else { updatePolling() }
+    }
+
+    /// Нужен ли опрос раз в секунду: функция включена и список на экране или перехваты ждут проверки разрешения.
+    static func pollNeeded(running: Bool, onScreen: Bool, tapping: Bool, proven: Bool) -> Bool {
+        running && (onScreen || (tapping && !proven))
+    }
+
+    private func updatePolling() {
+        let needed = Self.pollNeeded(running: isRunning, onScreen: viewers.any, tapping: !taps.isEmpty, proven: watch.proven)
+        if needed, refreshTimer == nil {
+            let timer = Timer(timeInterval: 1, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
+            timer.tolerance = 0.2
+            RunLoop.main.add(timer, forMode: .common)
+            refreshTimer = timer
+        } else if !needed, let refreshTimer {
+            refreshTimer.invalidate()
+            self.refreshTimer = nil
+        }
     }
 
     // MARK: - Громкость
@@ -75,6 +99,7 @@ final class AppVolume: ObservableObject {
         store.set(entry, for: bundleID)
         UserDefaults.standard.set(store.data, forKey: Pref.appVolumes)
         apply(bundleID)
+        updatePolling()
     }
 
     func reset(_ bundleID: String) {
@@ -133,11 +158,14 @@ final class AppVolume: ObservableObject {
         for bundleID in taps.keys where !list.contains(where: { $0.bundleID == bundleID }) {
             taps.removeValue(forKey: bundleID)?.stop()
         }
+        updatePolling()
     }
 
     @objc private func tick() {
-        refresh()
+        // Список обновляем, только пока его видно: что играет, меняется без событий Core Audio о составе процессов.
+        if viewers.any { refresh() }
         checkLevels()
+        updatePolling()
     }
 
     /// Уровни перехвата: если приложение играет, а на входе тишина — нет разрешения.
@@ -150,7 +178,10 @@ final class AppVolume: ObservableObject {
         for (bundleID, tap) in taps {
             guard let tap = tap as? AppVolumeTap else { continue }
             let levels = tap.takeLevels()
-            if apps.first(where: { $0.bundleID == bundleID })?.isPlaying == true { anyPlaying = true }
+            // Играет ли приложение — у самих процессов перехвата: список `apps` без зрителей не обновляется.
+            if tap.processObjects.contains(where: { CoreAudioHelper.read($0, kAudioProcessPropertyIsRunningOutput, default: UInt32(0)) != 0 }) {
+                anyPlaying = true
+            }
             if levels.input > 0.0001 { anySound = true }
             if levels.input > 0 {
                 Log.audio.debug("Уровень \(bundleID, privacy: .public): вход \(levels.input) → выход \(levels.output)")
@@ -160,6 +191,7 @@ final class AppVolume: ObservableObject {
             // Ни один перехват за сессию не получил звука, а оригинал уже заглушён: fail-open, возвращаем приложениям их звук.
             permissionSuspect = true
             stopAll()
+            updatePolling()
             Log.audio.error("Громкость: нет звука на входе перехвата, похоже нет разрешения; перехваты сняты")
             Toast.show("Громкость приложений выключена: нет разрешения на запись звука",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
@@ -202,6 +234,11 @@ struct AppVolumeList: View {
     var compact = false
 
     var body: some View {
+        // Пока список на экране (настройки, панель, ⌃⌥V), он обновляется раз в секунду; ушёл — опрос стоп.
+        list.onScreen { AppVolume.shared.viewerChanged($0) }
+    }
+
+    @ViewBuilder private var list: some View {
         if model.apps.isEmpty {
             Text("Сейчас никакое приложение не воспроизводит звук.")
                 .foregroundStyle(.secondary)

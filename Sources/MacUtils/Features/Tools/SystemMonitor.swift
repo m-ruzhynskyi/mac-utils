@@ -48,7 +48,7 @@ final class SystemMonitorModel: ObservableObject {
     private var lastSample = Date()
     private var users = 0
 
-    /// Вкладки включают выборку, пока они на экране.
+    /// Вкладки включают выборку, пока они на экране (`onScreen`: и закрытие окна тоже выключает).
     func start() {
         guard !isDemo else { return }
         users += 1
@@ -60,6 +60,7 @@ final class SystemMonitorModel: ObservableObject {
         let timer = Timer(timeInterval: 1, repeats: true) { _ in
             MainActor.assumeIsolated { SystemMonitorModel.shared.sample() }
         }
+        timer.tolerance = 0.1
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
@@ -133,8 +134,7 @@ struct SystemMonitorView: View {
             }
         }
         .environment(\.compactCards, compact)
-        .onAppear { model.start() }
-        .onDisappear { model.stop() }
+        .onScreen { $0 ? model.start() : model.stop() }
     }
 
     private var diskCard: some View {
