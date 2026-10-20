@@ -7,10 +7,13 @@ const path = require("path");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const place = require("./overlay-place");
+const monitorsList = require("./displays");
 
 const RELAY = "https://mac-utils-relay.mako-62d.workers.dev/";
 let window = null;
 let chosen = null; // { source, audio }
+let nextSource = null; // монитор, выбранный зрителем (switchTo): его отдаст следующий getDisplayMedia страницы
+let pendingNotice = null; // уведомление «‹имя› переключает на монитор N» — ждёт окна меток, как метки
 let overlay = null; // прозрачное окно поверх экрана ведущего: метки и рисунки зрителей
 let tracker = null; // следит, где транслируемое окно, — метки ложатся точно на него
 let audioHelper = null; // звук программ без выбранных (mu-audio.exe capture …)
@@ -220,11 +223,15 @@ function sendRegion() {
 }
 
 function flushMarks() {
-  if (!overlayReady || !target || !pendingMarks.length) return;
-  if (sourceHidden) { pendingMarks.length = 0; return; }
+  if (!overlayReady || !target || (!pendingMarks.length && !pendingNotice)) return;
+  if (sourceHidden) { pendingMarks.length = 0; pendingNotice = null; return; }
   if (!overlayShown) showOverlay();
   if (!placedOn || !shielded) return;
   for (const mark of pendingMarks.splice(0)) overlay.webContents.send("mark", mark);
+  // Уведомление — только если исключение из захвата подтверждено помощником: иначе зрители увидели бы его в картинке
+  // (без помощника и на старой Windows 10 о переключении говорит строка «В эфире» на странице).
+  if (pendingNotice && affinity === EXCLUDE_FROM_CAPTURE) overlay.webContents.send("notice", pendingNotice);
+  pendingNotice = null;
 }
 
 // rect — физические пиксели; монитор — тот, где большая часть области (у экрана — он сам).
@@ -295,7 +302,7 @@ function hideOverlay() {
   if (overlay && !overlay.isDestroyed()) overlay.close();
   overlay = null; overlayReady = false; overlayShown = false; target = null; monitor = null; trackedRect = null;
   placedOn = null; placing = null; placed = null;
-  pendingMarks.length = 0;
+  pendingMarks.length = 0; pendingNotice = null;
 }
 
 function cleanNames(list) {
@@ -344,6 +351,8 @@ app.whenReady().then(() => {
   // getDisplayMedia на странице получает то, что пользователь выбрал в нашем окне выбора.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     if (!chosen) return callback({});
+    // Зритель переключил монитор: тот же эфир, другой экран; окно меток (prepareOverlay) — на него.
+    if (nextSource) { chosen.source = nextSource; nextSource = null; }
     // Звук без выбранных программ идёт через помощник (mu-audio.exe), а не через общий loopback.
     // Звук отдаём, только если страница его просила, — иначе Chromium отменяет захват.
     // С помощником звук всегда идёт через него — так список «не передавать» можно менять прямо в эфире.
@@ -356,6 +365,8 @@ app.whenReady().then(() => {
   // Всё в физических пикселях: у окна рамка от помощника та же, у экрана — заново его физическая рамка.
   for (const event of ["display-added", "display-removed", "display-metrics-changed"]) {
     screen.on(event, () => {
+      // Странице — список мониторов для зрителей заново.
+      if (window && !window.isDestroyed()) window.webContents.send("displays-changed");
       if (!overlay || overlay.isDestroyed()) return;
       // Масштаб монитора сменился — Windows меняет и размер окна меток (WM_DPICHANGED): ставим его заново.
       placedOn = null; placing = null;
@@ -429,7 +440,40 @@ app.whenReady().then(() => {
     const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
     const source = sources.find((s) => s.id === id);
     chosen = source ? { source, audio: !!audio, muted: cleanNames(muted) } : null;
+    nextSource = null;
     return !!source;
+  });
+
+  // Мониторы для зрителей (SHARE-PROTOCOL §4.1): номер, основной, физические пиксели, масштаб, место в DIP — без имён
+  // и ID устройств. current — номер транслируемого монитора, 0 — транслируется окно (переключать нельзя).
+  ipcMain.handle("displays", () => {
+    const all = screen.getAllDisplays();
+    const list = monitorsList.list(all, screen.getPrimaryDisplay(), physOf);
+    const current = /^screen:/.test(chosen?.source?.id || "") ? monitorsList.numberOf(sharedDisplay(), all) : 0;
+    return { list, current };
+  });
+
+  // Зритель выбрал монитор n: источник запоминается, страница берёт его новым getDisplayMedia. 0 — отменить выбор.
+  ipcMain.handle("switchTo", async (event, n) => {
+    nextSource = null;
+    if (!Number.isInteger(n) || n < 1 || !/^screen:/.test(chosen?.source?.id || "")) return false;
+    const sources = await desktopCapturer.getSources({ types: ["screen"] });
+    const source = monitorsList.sourceFor(n, sources, screen.getAllDisplays());
+    if (!source || !chosen) return false;
+    nextSource = source;
+    // Chromium пускает getDisplayMedia только по действию пользователя, а переключение приходит от зрителя по сети:
+    // пустой скрипт «с жестом» даёт странице активацию на несколько секунд — её новый getDisplayMedia проходит.
+    try { await event?.sender?.executeJavaScript("void 0", true); } catch (_) {}
+    return true;
+  });
+
+  // Уведомление ведущему о переключении — в окне меток нового монитора (оно исключено из захвата), 4 с.
+  ipcMain.on("notice", (_event, data) => {
+    const notice = monitorsList.notice(data);
+    if (!notice || !chosen) return;
+    if (!overlay || overlay.isDestroyed()) prepareOverlay();
+    pendingNotice = notice;
+    flushMarks();
   });
 
   createWindow();

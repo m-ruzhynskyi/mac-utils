@@ -46,7 +46,7 @@ function electron(world) {
       this.webContents = Object.assign(new EventEmitter(), {
         send(channel, data) {
           if (!self.loaded) return;
-          self.sent.push([channel, JSON.parse(JSON.stringify(data))]);
+          self.sent.push([channel, data === undefined ? undefined : JSON.parse(JSON.stringify(data))]);
           if (channel === "region") self.region = data;
           if (channel === "mark" && world.report !== false) self.reportMark(data);
         },
@@ -542,5 +542,108 @@ test("без помощника: окно меток в DIP на монитор,
     host.mark(0.8, 0.6);
     await tick(80);
     near(host.landed(), expected(b.phys, 0.8, 0.6), "без помощника");
+  } finally { host.stop(); }
+});
+
+// ---- Зритель переключает мониторы ведущего (SHARE-PROTOCOL §4.1): displays / switchTo / notice ----
+const katya = () => { const a = layoutA(), b = layoutB(), c = layoutC(); return { a, b, c, sources: [screenSource(a, 1), screenSource(b, 2), screenSource(c, 3)] }; };
+// Страница после switchTo делает новый getDisplayMedia: обработчик приложения отдаёт выбранный монитор.
+async function switchTo(host, n) {
+  const ok = await host.fake.handles.get("switchTo")({}, n);
+  if (ok) { host.fake.displayMedia({ audioRequested: false }, () => {}); await tick(); }
+  return ok;
+}
+
+test("мониторы для зрителей (Катя): номера слева направо, физические пиксели, без ID устройств; окно — current 0", async () => {
+  const k = katya();
+  const host = await start(world([k.b, k.c, k.a], [...k.sources, windowSource]));
+  try {
+    await host.share("screen:2:0");
+    const info = await host.fake.handles.get("displays")();
+    assert.equal(info.current, 2);
+    assert.deepEqual(info.list.map((d) => [d.n, d.w, d.h, d.scale, d.primary]), [[1, 1920, 1080, 1, false], [2, 3840, 2160, 1.75, true], [3, 1920, 1080, 1, false]]);
+    assert.doesNotMatch(JSON.stringify(info), /"id"|display_id/);
+    await host.share(windowSource.id);
+    assert.equal((await host.fake.handles.get("displays")()).current, 0);
+    assert.equal(await host.fake.handles.get("switchTo")({}, 1), false, "окно на монитор не переключается");
+  } finally { host.stop(); }
+});
+
+test("Катя: зритель переключает A → B → C — окно меток на новом мониторе в физических пикселях, метка на месте", async () => {
+  const k = katya();
+  const host = await start(world([k.a, k.b, k.c], k.sources, { createScale: 1.75 }));
+  try {
+    await host.share("screen:1:0");
+    for (const [n, d] of [[2, k.b], [3, k.c], [1, k.a], [3, k.c]]) {
+      assert.equal(await switchTo(host, n), true);
+      host.mark(...P);
+      await tick(80);
+      assert.deepEqual(host.overlay.phys, d.phys, `окно меток на мониторе ${n}`);
+      near(host.landed(), expected(d.phys, ...P), `монитор ${n}`);
+      assert.equal((await host.fake.handles.get("displays")()).current, n);
+    }
+  } finally { host.stop(); }
+});
+
+test("выбор монитора без getDisplayMedia (страница не смогла) отменяется switchTo(0): следующий захват — прежний экран", async () => {
+  const k = katya();
+  const host = await start(world([k.a, k.b, k.c], k.sources));
+  try {
+    await host.share("screen:2:0");
+    assert.equal(await host.fake.handles.get("switchTo")({}, 3), true);
+    assert.equal(await host.fake.handles.get("switchTo")({}, 0), false);
+    host.fake.displayMedia({ audioRequested: false }, () => {});
+    await tick();
+    host.mark(0.5, 0.5);
+    await tick(80);
+    near(host.landed(), expected(k.b.phys, 0.5, 0.5), "прежний монитор B");
+  } finally { host.stop(); }
+});
+
+test("уведомление о переключении: в окне меток после защиты от захвата, без помощника и на старой Windows — нет", async () => {
+  const k = katya();
+  for (const [extra, shown] of [[{}, true], [{ helper: false }, false], [{ oldWindows: true }, false]]) {
+    const host = await start(world([k.a, k.b, k.c], k.sources, extra));
+    try {
+      await host.share("screen:2:0");
+      await switchTo(host, 3);
+      const list = (await host.fake.handles.get("displays")()).list;
+      host.fake.ipc.get("notice")({}, { name: "Максим", n: 3, list });
+      await tick(80);
+      const notices = host.overlay.sent.filter(([c]) => c === "notice");
+      assert.equal(notices.length, shown ? 1 : 0, JSON.stringify(extra));
+      if (shown) {
+        assert.equal(notices[0][1].name, "Максим");
+        assert.equal(notices[0][1].n, 3);
+        assert.deepEqual(host.overlay.phys, k.c.phys, "уведомление на новом мониторе");
+        assert.equal(host.overlay.affinity, 0x11, "окно меток исключено из захвата");
+      }
+    } finally { host.stop(); }
+  }
+});
+
+test("мониторы изменились (подключили, масштаб) — странице приходит displays-changed", async () => {
+  const k = katya();
+  const host = await start(world([k.a, k.b, k.c], k.sources));
+  try {
+    const page = host.fake.windows[0];
+    page.loaded = true;
+    host.fake.module.screen.emit("display-added");
+    host.fake.module.screen.emit("display-metrics-changed");
+    assert.equal(page.sent.filter(([c]) => c === "displays-changed").length, 2);
+  } finally { host.stop(); }
+});
+
+test("switchTo даёт странице активацию (скрипт «с жестом»): иначе Chromium не пустит её getDisplayMedia", async () => {
+  const k = katya();
+  const host = await start(world([k.a, k.b, k.c], k.sources));
+  try {
+    await host.share("screen:2:0");
+    const calls = [];
+    const sender = { executeJavaScript: async (code, gesture) => { calls.push([code, gesture]); } };
+    assert.equal(await host.fake.handles.get("switchTo")({ sender }, 3), true);
+    assert.deepEqual(calls, [["void 0", true]]);
+    assert.equal(await host.fake.handles.get("switchTo")({ sender }, 9), false);
+    assert.equal(calls.length, 1, "нет такого монитора — без активации");
   } finally { host.stop(); }
 });

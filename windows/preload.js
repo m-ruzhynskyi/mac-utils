@@ -19,4 +19,10 @@ contextBridge.exposeInMainWorld("mu", {
   // Метки зрителей — на экран ведущего; трансляция закончилась — убрать окно меток.
   mark: (mark) => ipcRenderer.send("mark", mark),
   stopped: () => { ipcRenderer.removeAllListeners("audio"); ipcRenderer.send("stopped"); },
+  // Зрители переключают мониторы ведущего: список (без имён и ID устройств), его изменения, выбор монитора по номеру
+  // и уведомление ведущему в окне меток.
+  displays: () => ipcRenderer.invoke("displays"),
+  onDisplays: (callback) => { ipcRenderer.removeAllListeners("displays-changed"); ipcRenderer.on("displays-changed", () => callback()); },
+  switchTo: (n) => ipcRenderer.invoke("switchTo", n),
+  notice: (data) => ipcRenderer.send("notice", data),
 });

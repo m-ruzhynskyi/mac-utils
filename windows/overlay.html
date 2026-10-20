@@ -1,7 +1,23 @@
 <!doctype html>
 <html><head><meta charset="utf-8">
-<style>html,body{margin:0;background:transparent;overflow:hidden}canvas{position:fixed;inset:0;width:100vw;height:100vh}</style>
-</head><body><canvas id="c"></canvas>
+<style>html,body{margin:0;background:transparent;overflow:hidden}canvas{position:fixed;inset:0;width:100vw;height:100vh}
+  /* Уведомление «‹имя› переключает на монитор N» (как на Mac): правый верхний угол области, 4 с, без кнопок. */
+  :root { --panel: #171A1F; --field: #1F2329; --line: #2A2F37; --text: #EDEFF2; --mute: #9AA3AF; --acc: #C8F05A; --acc-ink: #10140A; }
+  @media (prefers-color-scheme: light) { :root { --panel: #FFFFFF; --field: #EEF0EA; --line: #D9DDD3; --text: #14171A; --mute: #59626E; } }
+  #notice { position: fixed; display: none; align-items: center; gap: 12px; padding: 10px 14px 10px 10px; border-radius: 16px; background: var(--panel);
+            border: 1px solid var(--line); box-shadow: 0 6px 16px rgba(0,0,0,.25); color: var(--text); font: 600 14px/1.3 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+            opacity: 0; transform: translateY(-6px); transition: opacity .2s, transform .2s; }
+  #notice.on { opacity: 1; transform: none; }
+  #notice .ava { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--field); font-weight: 800; font-size: 13px; }
+  #notice small { display: block; color: var(--mute); font-weight: 500; font-size: 12px; margin-top: 1px; }
+  #notice .map { position: relative; flex: none; }
+  #notice .map i { position: absolute; display: grid; place-items: center; border-radius: 5px; background: var(--field); border: 1px solid var(--line);
+                   font: 800 10px/1 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; font-style: normal; box-sizing: border-box; }
+  #notice .map i.cur { background: var(--acc); border-color: transparent; color: var(--acc-ink); }
+  #notice .map i.main::before { content: ""; position: absolute; top: 2px; left: 50%; transform: translateX(-50%); width: 45%; height: 2px; border-radius: 1px; background: currentColor; opacity: .5; }
+  @media (prefers-reduced-motion: reduce) { #notice { transition: none; } }
+</style>
+</head><body><canvas id="c"></canvas><div id="notice" aria-live="polite"></div>
 <script src="overlay-place.js"></script>
 <script>
 // Метки и рисунки зрителей поверх экрана ведущего (Windows). Логика рисования — как на странице трансляции.
@@ -21,6 +37,40 @@ window.overlay.onMark((m) => {
     const now = area();
     window.overlay.report({ mark: first, point: overlayPlace.markPoint(first, now), area: now, region, innerWidth, innerHeight, dpr: devicePixelRatio });
   }
+});
+// Уведомление о переключении монитора: текст — только textContent (имя зрителя приходит от relay).
+let noticeTimer = null;
+window.overlay.onNotice?.((n) => {
+  const box = document.getElementById("notice");
+  box.textContent = "";
+  const ava = document.createElement("span"); ava.className = "ava"; ava.textContent = n.name.slice(0, 1).toUpperCase();
+  const text = document.createElement("div"); text.textContent = `${n.name} переключает на монитор ${n.n}`;
+  const sub = document.createElement("small"); sub.textContent = "Зрители видят этот экран"; text.appendChild(sub);
+  box.append(ava, text);
+  if (n.list.length) {
+    // Мини-схема мониторов ведущего высотой 22 px, текущий — лайм.
+    const xs = n.list.map((d) => d.at[0]), ys = n.list.map((d) => d.at[1]);
+    const minX = Math.min(...xs), minY = Math.min(...ys);
+    const maxX = Math.max(...n.list.map((d) => d.at[0] + d.at[2])), maxY = Math.max(...n.list.map((d) => d.at[1] + d.at[3]));
+    const k = 22 / Math.max(maxY - minY, 1), map = document.createElement("span");
+    map.className = "map"; map.style.width = `${(maxX - minX) * k - 3}px`; map.style.height = `${(maxY - minY) * k - 3}px`;
+    for (const d of n.list) {
+      const tile = document.createElement("i");
+      Object.assign(tile.style, { left: `${(d.at[0] - minX) * k}px`, top: `${(d.at[1] - minY) * k}px`,
+                                  width: `${Math.max(4, d.at[2] * k - 3)}px`, height: `${Math.max(4, d.at[3] * k - 3)}px` });
+      tile.className = [d.primary ? "main" : "", d.n === n.n ? "cur" : ""].join(" ").trim();
+      tile.textContent = d.n;
+      map.appendChild(tile);
+    }
+    box.appendChild(map);
+  }
+  // Правый верхний угол транслируемой области (у экрана — всего окна меток).
+  const a = area();
+  box.style.display = "flex";
+  box.style.left = ""; box.style.right = `${Math.max(8, innerWidth - (a.x + a.w) + 16)}px`; box.style.top = `${Math.max(8, a.y + 16)}px`;
+  requestAnimationFrame(() => box.classList.add("on"));
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { box.classList.remove("on"); noticeTimer = setTimeout(() => { box.style.display = "none"; }, 250); }, 4000);
 });
 function render() {
   const dpr = devicePixelRatio || 1, w = innerWidth, h = innerHeight;

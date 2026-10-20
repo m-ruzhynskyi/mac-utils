@@ -1,7 +1,7 @@
 {
   "name": "mac-utils-share",
   "productName": "Mac Utils Share",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Трансляция экрана Mac Utils для Windows",
   "author": "Maksym Ruzhynskyi",
   "license": "SEE LICENSE IN ../LICENSE",
@@ -27,6 +27,7 @@
       "overlay.html",
       "overlay-preload.js",
       "overlay-place.js",
+      "displays.js",
       "offline.html",
       "package.json",
       "assets/icon.png"
