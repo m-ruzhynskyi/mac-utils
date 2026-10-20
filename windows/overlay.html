@@ -5,25 +5,27 @@
 <script src="overlay-place.js"></script>
 <script>
 // Метки и рисунки зрителей поверх экрана ведущего (Windows). Логика рисования — как на странице трансляции.
-// Точка зрителя — доля транслируемой области; где эта область в окне меток, присылает приложение (region).
+// Окно меток стоит ровно на мониторе транслируемой области; где в нём область, приложение присылает долями окна
+// (region: fx, fy, fw, fh). Здесь доли умножаются на размер окна в каждом кадре — от devicePixelRatio это не зависит.
 const COLORS = { red: "#ff453a", yellow: "#ffd60a", green: "#30d158", blue: "#0a84ff", white: "#ffffff" };
 const marks = [];
-let area = null;
+let region = null;
 const canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
-window.overlay.onRegion((r) => { area = r; });
+const area = () => overlayPlace.areaIn(region || { fx: 0, fy: 0, fw: 1, fh: 1 }, innerWidth, innerHeight);
+window.overlay.onRegion((r) => { region = r; });
 window.overlay.onMark((m) => {
   m.born = performance.now(); marks.push(m); if (marks.length === 1) requestAnimationFrame(render);
-  // Для журнала: где эта метка ляжет на холсте и где само окно меток, как его видит страница (DIP, масштаб).
+  // Для журнала: где эта метка ляжет на холсте и какой страница видит своё окно (только числа).
   const first = m.type === "ping" ? [m.x, m.y] : m.points?.[0];
   if (first && window.overlay.report) {
-    const point = overlayPlace.markPoint(first, area || { x: 0, y: 0, w: innerWidth, h: innerHeight });
-    window.overlay.report({ mark: first, point, area, screenX, screenY, innerWidth, innerHeight, dpr: devicePixelRatio });
+    const now = area();
+    window.overlay.report({ mark: first, point: overlayPlace.markPoint(first, now), area: now, region, innerWidth, innerHeight, dpr: devicePixelRatio });
   }
 });
 function render() {
   const dpr = devicePixelRatio || 1, w = innerWidth, h = innerHeight;
   canvas.width = w * dpr; canvas.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
-  const now = performance.now(), map = (p) => overlayPlace.markPoint(p, area || { x: 0, y: 0, w, h });
+  const now = performance.now(), frame = area(), map = (p) => overlayPlace.markPoint(p, frame);
   for (let i = marks.length - 1; i >= 0; i--) {
     const m = marks[i], age = (now - m.born) / 1000, life = m.type === "ping" ? 1.6 : 5;
     if (age > life) { marks.splice(i, 1); continue; }

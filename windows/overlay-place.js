@@ -1,5 +1,6 @@
 // Где рисовать метки зрителей поверх экрана ведущего (чистые функции; main.js и overlay.html, тесты — tests/).
-// Прямоугольники — в DIP Electron, как у screen.getAllDisplays(): { x, y, width, height }.
+// Прямоугольники — в ФИЗИЧЕСКИХ пикселях Windows: { x, y, width, height }. DIP Electron здесь не участвуют: на мониторах
+// с разным масштабом окно меток живёт с DPI не своего монитора, и DIP-арифметика уводит метки (журнал 1.1.17).
 // Точка зрителя — доля кадра трансляции от левого верхнего угла (0…1), кадр — ровно транслируемая область.
 (function (exports) {
   // Транслируемый монитор: по display_id источника, иначе по номеру в названии («Screen 2»), иначе основной.
@@ -16,11 +17,27 @@
     return primary;
   }
 
-  // Окно меток накрывает весь монитор транслируемой области, а метки ставятся в неё саму. Так положение меток не
-  // зависит от того, куда Windows на самом деле поставила окно меток (смена масштаба, монитор с другим DPI):
-  // region — транслируемая область относительно фактического содержимого окна меток (CSS-пиксели = DIP).
-  function region(target, content) {
-    return { x: target.x - content.x, y: target.y - content.y, w: target.width, h: target.height };
+  const overlap = (a, b) => Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) *
+    Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+
+  // Монитор (физическая рамка), на котором большая часть области; область вне всех мониторов — ближайший по центру.
+  function monitorOf(rect, monitors) {
+    const center = (r) => [r.x + r.width / 2, r.y + r.height / 2];
+    const [cx, cy] = center(rect);
+    const distance = (m) => { const [mx, my] = center(m); return (mx - cx) ** 2 + (my - cy) ** 2; };
+    return [...monitors].sort((a, b) => overlap(b, rect) - overlap(a, rect) || distance(a) - distance(b))[0] || null;
+  }
+
+  // Окно меток стоит ровно на мониторе области, поэтому область передаётся странице долями монитора (= долями окна
+  // меток): страница умножает их на свои innerWidth/innerHeight, и результат не зависит от её devicePixelRatio.
+  function fractions(target, monitor) {
+    return { fx: (target.x - monitor.x) / monitor.width, fy: (target.y - monitor.y) / monitor.height,
+             fw: target.width / monitor.width, fh: target.height / monitor.height };
+  }
+
+  // Доли → область на холсте страницы меток (CSS-пиксели её окна).
+  function areaIn(fr, width, height) {
+    return { x: fr.fx * width, y: fr.fy * height, w: fr.fw * width, h: fr.fh * height };
   }
 
   // Точка зрителя → точка на холсте окна меток.
@@ -37,7 +54,9 @@
   const same = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 
   exports.sharedDisplay = sharedDisplay;
-  exports.region = region;
+  exports.monitorOf = monitorOf;
+  exports.fractions = fractions;
+  exports.areaIn = areaIn;
   exports.markPoint = markPoint;
   exports.same = same;
   exports.share = share;

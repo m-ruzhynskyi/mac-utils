@@ -1,6 +1,7 @@
 // Метки зрителей у ведущего на Windows: куда на экране (в физических пикселях) попадает точка, которую зритель
 // поставил на кадре. main.js грузится целиком с подменённым Electron: мониторы с масштабом Windows (DIP и физические
-// пиксели), помощник track, окно меток. Ожидание: точка (доля кадра) попадает в ту же долю транслируемой области.
+// пиксели), помощник (track, place, protect), окно меток с его настоящей физической рамкой и DPI. Ожидание: точка
+// (доля кадра) попадает в ту же долю транслируемой области — при любом devicePixelRatio страницы меток.
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const Module = require("node:module");
@@ -13,9 +14,9 @@ const MAIN = process.env.MAIN_JS || path.join(__dirname, "..", "main.js");
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Монитор: DIP-границы (как у Electron), масштаб и физическая рамка.
-const monitor = (id, phys, scale, dipOrigin, primary = false) => ({
+const monitor = (id, phys, scale, dipOrigin, primary = false, dipSize = null) => ({
   id, scaleFactor: scale, primary, phys,
-  bounds: { x: dipOrigin[0], y: dipOrigin[1], width: Math.round(phys.width / scale), height: Math.round(phys.height / scale) },
+  bounds: { x: dipOrigin[0], y: dipOrigin[1], width: dipSize ? dipSize[0] : Math.round(phys.width / scale), height: dipSize ? dipSize[1] : Math.round(phys.height / scale) },
 });
 const toPhys = (d, x, y) => [d.phys.x + (x - d.bounds.x) * d.scaleFactor, d.phys.y + (y - d.bounds.y) * d.scaleFactor];
 const contains = (r, x, y) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
@@ -26,66 +27,90 @@ function electron(world) {
   const ipc = new Map(), handles = new Map(), screenEvents = new EventEmitter();
   let displayMedia = null;
   const windows = [];
+  let nextHwnd = 0x10000;
   class BrowserWindow extends EventEmitter {
     constructor(opts) {
       super();
       this.opts = opts;
       this.bounds = { x: opts.x ?? 0, y: opts.y ?? 0, width: opts.width ?? 800, height: opts.height ?? 600 };
+      // Windows: скрытое окно, созданное на мониторе с другим масштабом, живёт с DPI основного (world.createScale) —
+      // физически оно больше монитора (журнал ведущей: 3363x1890 вместо 1920x1080).
+      const at = world.displays.find((d) => contains(d.bounds, this.bounds.x, this.bounds.y)) || world.displays[0];
+      this.scale = world.createScale ?? at.scaleFactor;
+      const [px, py] = toPhys(at, this.bounds.x, this.bounds.y);
+      this.phys = { x: Math.round(px), y: Math.round(py), width: Math.round(this.bounds.width * this.scale), height: Math.round(this.bounds.height * this.scale) };
+      this.hwnd = String(nextHwnd++);
+      this.affinity = 0; this.ignoring = false;
       this.sent = []; this.calls = []; this.visible = opts.show !== false; this.destroyed = false;
       const self = this;
       this.webContents = Object.assign(new EventEmitter(), {
         send(channel, data) {
           if (!self.loaded) return;
           self.sent.push([channel, JSON.parse(JSON.stringify(data))]);
-          if (channel === "region") self.area = data;
+          if (channel === "region") self.region = data;
           if (channel === "mark" && world.report !== false) self.reportMark(data);
         },
         setWindowOpenHandler() {},
       });
       windows.push(this);
     }
-    // Windows: окно, переезжающее на монитор с другим масштабом, при первом setBounds получает размер,
-    // пересчитанный по масштабу прежнего монитора (поэтому main.js ставит границы дважды).
-    setBounds(b) {
-      const from = world.displays.find((d) => overlap(d.bounds, this.bounds) > 0) || world.displays[0];
-      const to = world.displays.find((d) => contains(d.bounds, b.x, b.y)) || from;
-      const k = world.dpiQuirk && from.scaleFactor !== to.scaleFactor ? from.scaleFactor / to.scaleFactor : 1;
-      const next = { x: b.x, y: b.y, width: Math.round(b.width * k), height: Math.round(b.height * k) };
-      const moved = next.x !== this.bounds.x || next.y !== this.bounds.y, resized = next.width !== this.bounds.width || next.height !== this.bounds.height;
-      this.bounds = next;
-      if (moved) this.emit("move");
-      if (resized) this.emit("resize");
-    }
-    // Как overlay.html: точка на холсте и где окно меток на экране по мнению страницы (world.pageOffset — окно стоит
-    // не там, где его границы по мнению приложения).
+    // Страница меток: её окно — физическая рамка / DPR (как innerWidth у Chromium), область — доли окна (overlay.html).
+    get page() { return { w: Math.round(this.phys.width / this.scale), h: Math.round(this.phys.height / this.scale), dpr: this.scale }; }
     reportMark(mark) {
-      const area = this.area || { x: 0, y: 0, w: this.bounds.width, h: this.bounds.height };
+      const page = this.page, place = require("../overlay-place");
+      const area = place.areaIn(this.region || { fx: 0, fy: 0, fw: 1, fh: 1 }, page.w, page.h);
       const first = mark.type === "ping" ? [mark.x, mark.y] : mark.points[0];
-      const d = world.displays.find((m) => contains(m.bounds, this.bounds.x, this.bounds.y)) || world.displays[0];
-      const [ox, oy] = world.pageOffset || [0, 0];
-      ipc.get("overlay-report")?.({ sender: this.webContents }, { mark: first, point: [area.x + first[0] * area.w, area.y + first[1] * area.h], area,
-        screenX: this.bounds.x + ox, screenY: this.bounds.y + oy, innerWidth: this.bounds.width, innerHeight: this.bounds.height, dpr: d.scaleFactor });
+      ipc.get("overlay-report")?.({ sender: this.webContents }, { mark: first, point: place.markPoint(first, area), area, region: this.region,
+        innerWidth: page.w, innerHeight: page.h, dpr: page.dpr });
     }
-    getBounds() { return { ...this.bounds }; }
-    getContentBounds() { return { ...this.bounds }; }
+    setBounds(b) { this.calls.push("setBounds"); this.bounds = { ...b }; const d = world.displays.find((m) => contains(m.bounds, b.x, b.y)) || world.displays[0];
+      const [x, y] = toPhys(d, b.x, b.y); this.scale = d.scaleFactor;
+      this.phys = { x: Math.round(x), y: Math.round(y), width: Math.round(b.width * d.scaleFactor), height: Math.round(b.height * d.scaleFactor) }; }
+    getNativeWindowHandle() { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(this.hwnd)); return b; }
+    // Electron считает DIP окна по его DPI, а не по монитору (журнал: overlay=-1098,… вместо -1920,…).
+    getBounds() { return { x: Math.round(this.phys.x / this.scale), y: Math.round(this.phys.y / this.scale), width: this.page.w, height: this.page.h }; }
+    getContentBounds() { return this.getBounds(); }
     loadFile() { setImmediate(() => { this.loaded = true; this.webContents.emit("did-finish-load"); }); }
     loadURL() { return Promise.resolve(); }
-    showInactive() { this.visible = true; if (world.protectionLostOnShow) this.protectedNow = false; this.calls.push("show"); }
-    setContentProtection(on) { this.protectedNow = on; this.calls.push(`protect:${on}`); }
-    isContentProtected() { return !!this.protectedNow; }
+    showInactive() { this.visible = true; if (world.protectionLostOnShow) this.affinity = 0; this.calls.push("show"); }
+    // world.layeredBlocks: защита, заданная после setIgnoreMouseEvents(true), не встаёт (проверка второго порядка).
+    setContentProtection(on) { this.calls.push(`protect:${on}`); if (!(world.layeredBlocks && this.ignoring)) this.affinity = on ? 0x11 : 0; }
+    setIgnoreMouseEvents(on) { this.ignoring = on; this.calls.push(`ignore:${on}`); }
     show() { this.visible = true; }
     hide() { this.visible = false; }
     close() { this.destroyed = true; }
     isDestroyed() { return this.destroyed; }
     isMinimized() { return false; }
-    setAlwaysOnTop() {} setIgnoreMouseEvents() {} flashFrame() {} focus() {} restore() {}
+    setAlwaysOnTop() {} flashFrame() {} focus() {} restore() {}
   }
+  // Помощник: place — SetWindowPos в физических пикселях; переезд на монитор с другим DPI в первый раз даёт размер по
+  // новому DPI (WM_DPICHANGED), второй раз встаёт как просили. protect — что стоит на окне (своё SetWindowDisplayAffinity
+  // для чужого окна Windows отклоняет: err=5).
+  function helper(args, done) {
+    const [command, hwnd, ...rest] = args;
+    const win = windows.find((w) => w.hwnd === hwnd && !w.destroyed);
+    helperCalls.push(args);
+    if (!win) return setImmediate(() => done(new Error("no window"), ""));
+    if (command === "place") {
+      const [x, y, width, height] = rest.map(Number);
+      const to = world.displays.find((d) => contains(d.phys, x, y));
+      const k = to && to.scaleFactor !== win.scale ? to.scaleFactor / win.scale : 1;
+      win.phys = { x, y, width: Math.round(width * k), height: Math.round(height * k) };
+      if (to) win.scale = to.scaleFactor;
+      return setImmediate(() => done(null, `${win.phys.x} ${win.phys.y} ${win.phys.width} ${win.phys.height} ${Math.round(96 * win.scale)}\n`));
+    }
+    if (command === "protect") return setImmediate(() => done(null, `affinity=0x${win.affinity.toString(16)} err=5 exstyle=0x80088\n`));
+    setImmediate(() => done(new Error("unknown"), ""));
+  }
+  const helperCalls = [];
   const screen = Object.assign(screenEvents, {
     getAllDisplays: () => world.displays,
     getPrimaryDisplay: () => world.displays.find((d) => d.primary),
     getDisplayMatching: (r) => [...world.displays].sort((a, b) => overlap(b.bounds, r) - overlap(a.bounds, r))[0],
     dipToScreenRect: (_w, r) => {
       const d = [...world.displays].sort((a, b) => overlap(b.bounds, r) - overlap(a.bounds, r))[0];
+      // Границы монитора целиком — его физическая рамка (журнал ведущей: capture совпал с монитором).
+      if (r.x === d.bounds.x && r.y === d.bounds.y && r.width === d.bounds.width && r.height === d.bounds.height) return { ...d.phys };
       const [x, y] = toPhys(d, r.x, r.y);
       return { x: Math.round(x), y: Math.round(y), width: Math.round(r.width * d.scaleFactor), height: Math.round(r.height * d.scaleFactor) };
     },
@@ -101,7 +126,7 @@ function electron(world) {
     },
   });
   return {
-    windows, ipc, handles, get displayMedia() { return displayMedia; },
+    windows, ipc, handles, helper, helperCalls, get displayMedia() { return displayMedia; },
     module: {
       app: { requestSingleInstanceLock: () => true, quit() {}, whenReady: () => Promise.resolve(), on() {}, isPackaged: false,
              getVersion: () => "1.1.0", getPath: () => world.logs },
@@ -121,7 +146,7 @@ async function start(world) {
   const childProcess = { ...require("node:child_process"), spawn: () => {
     const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), kill() {} });
     trackers.push(child); return child;
-  } };
+  }, execFile: (_file, args, _opts, done) => fake.helper(args, done) };
   const realFs = require("node:fs");
   const fakeFs = { ...realFs, existsSync: (p) => (String(p).endsWith("mu-audio.exe") ? world.helper !== false : realFs.existsSync(p)) };
   const load = Module._load, intervals = [], realInterval = global.setInterval;
@@ -155,18 +180,19 @@ async function start(world) {
       const file = path.join(world.logs, "overlay.log");
       return fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter((l) => / mark /.test(l)) : [];
     },
-    // Куда легла последняя метка: точка на холсте окна меток (как в overlay.html) → физические пиксели экрана.
+    // Куда легла последняя метка: точка на холсте страницы меток (как в overlay.html) → физические пиксели экрана
+    // по настоящей рамке окна меток и его DPR.
     landed() {
       const o = this.overlay;
       const mark = o.sent.filter(([c]) => c === "mark").at(-1)?.[1];
       if (!mark) return null;
-      const region = o.sent.filter(([c]) => c === "region").at(-1)?.[1];
-      const content = o.getContentBounds();
-      const area = region || { x: 0, y: 0, w: content.width, h: content.height };   // прежний overlay.html: на всё окно
-      const dip = [content.x + area.x + mark.x * area.w, content.y + area.y + mark.y * area.h];
-      const d = world.displays.find((m) => contains(m.bounds, dip[0], dip[1])) || world.displays[0];
-      return toPhys(d, dip[0], dip[1]).map(Math.round);
+      const region = o.sent.filter(([c]) => c === "region").at(-1)?.[1] || { fx: 0, fy: 0, fw: 1, fh: 1 };
+      const page = o.page, place = require("../overlay-place");
+      const [cx, cy] = place.markPoint([mark.x, mark.y], place.areaIn(region, page.w, page.h));
+      return [Math.round(o.phys.x + cx * page.dpr), Math.round(o.phys.y + cy * page.dpr)];
     },
+    marksSent() { return this.overlay.sent.filter(([c]) => c === "mark").length; },
+    places() { return fake.helperCalls.filter(([c]) => c === "place").map((a) => a.slice(2).map(Number)); },
   };
   return host;
 }
@@ -199,7 +225,7 @@ test("один монитор 125 %, весь экран: метка, прише
 
 test("второй монитор слева (100 % при основном 150 %): метки на нём, а не на основном", async () => {
   const a = laptop(), b = external();
-  const host = await start(world([a, b], [screenSource(a, 1), screenSource(b, 2)], { dpiQuirk: true }));
+  const host = await start(world([a, b], [screenSource(a, 1), screenSource(b, 2)]));
   try {
     await host.share("screen:2:0");
     await tick(80);
@@ -225,7 +251,7 @@ test("окно: метка до первой строки помощника ж�
 
 test("окно на мониторе с другим масштабом: метка на окне", async () => {
   const a = laptop(), b = external();
-  const host = await start(world([a, b], [windowSource], { dpiQuirk: true }));
+  const host = await start(world([a, b], [windowSource]));
   try {
     await host.share(windowSource.id);
     const rect = { x: -1700, y: 400, width: 1000, height: 700 };
@@ -255,50 +281,106 @@ test("смена масштаба Windows во время трансляции �
   } finally { host.stop(); }
 });
 
-// Снимок зрителя Mac (1.1.16): нажал в (0,797; 0,216), кольцо в видео — в (0,336; 0,705). Окно меток стоит не там, где
-// его границы по мнению приложения (смещение задано так, чтобы получилась эта пара). Журнал с первой же метки
-// показывает: q — где метка на самом деле в долях захвата, qApp — где её ждёт приложение.
 const pairOf = (line, key) => new RegExp(` ${key}=([-0-9.]+);([-0-9.]+)`).exec(line).slice(1).map(Number);
 
-test("разбор: пара точек со снимка (0,797; 0,216) → (0,336; 0,705) видна в журнале с первой метки", async () => {
-  const rect = { x: 380, y: 120, width: 1500, height: 900 };
-  const d = monitor(7, { x: 0, y: 0, width: 2560, height: 1440 }, 1.5, [0, 0], true);
-  // Сдвиг страницы меток (DIP), при котором точка 0,797;0,216 окна ложится в 0,336;0,705.
-  const offset = [((0.336 - 0.797) * rect.width) / 1.5, ((0.705 - 0.216) * rect.height) / 1.5];
-  const host = await start(world([d], [windowSource], { pageOffset: offset }));
+// Раскладка ведущей из журнала: A 1920x1080 @1 слева, B 2195x1235 DIP @1,75 основной, C 1920x1080 @1 справа.
+const layoutA = () => monitor(11, { x: -1920, y: 435, width: 1920, height: 1080 }, 1, [-1920, 248]);
+const layoutB = () => monitor(12, { x: 0, y: 0, width: 3840, height: 2160 }, 1.75, [0, 0], true, [2195, 1235]);
+const layoutC = () => monitor(13, { x: 3840, y: 452, width: 1920, height: 1080 }, 1, [2195, 258]);
+const P = [0.3972, 0.4159];
+
+for (const createScale of [1, 1.25, 1.75]) {
+  test(`раскладка ведущей, экран A: p=(0,3972; 0,4159) — в той же доле окна меток (страница @${createScale})`, async () => {
+    const a = layoutA(), b = layoutB(), c = layoutC();
+    const host = await start(world([a, b, c], [screenSource(a, 1), screenSource(b, 2), screenSource(c, 3)], { createScale }));
+    try {
+      await host.share("screen:1:0");
+      host.mark(...P);
+      await tick(80);
+      const o = host.overlay;
+      assert.deepEqual(o.phys, a.phys, "окно меток ровно на физической рамке монитора A");
+      assert.deepEqual(o.sent.filter(([c]) => c === "region").at(-1)[1], { fx: 0, fy: 0, fw: 1, fh: 1 });
+      const got = host.landed();
+      near(got, expected(a.phys, ...P), "экран A");
+      const share = [(got[0] - o.phys.x) / o.phys.width, (got[1] - o.phys.y) / o.phys.height];
+      assert.ok(Math.abs(share[0] - P[0]) < 0.002 && Math.abs(share[1] - P[1]) < 0.002, `доля окна меток ${share}`);
+      assert.ok(o.opts.enableLargerThanScreen, "окно больше рабочей области не обрезается");
+      const [line] = host.markLog();
+      assert.deepEqual(pairOf(line, "p"), P);
+      const q = pairOf(line, "q");
+      assert.ok(Math.abs(q[0] - P[0]) < 0.002 && Math.abs(q[1] - P[1]) < 0.002, `q=${q}`);
+      assert.match(line, / capture=-1920,435,1920x1080 monitor=-1920,435,1920x1080 phys=-1920,435,1920x1080@96 fr=0;0;1;1 /);
+      assert.match(line, / affinity=0x11 order=1$/);
+      assert.doesNotMatch(line, /protected=/);
+      assert.doesNotMatch(line, /\d{3,} \d{3,}/, "в строке только поля «ключ=числа»");
+    } finally { host.stop(); }
+  });
+}
+
+test("раскладка ведущей, окно на B @1,75: метка в доле окна", async () => {
+  const a = layoutA(), b = layoutB(), c = layoutC();
+  const host = await start(world([a, b, c], [windowSource]));
   try {
     await host.share(windowSource.id);
+    const rect = { x: 812, y: 301, width: 2207, height: 1333 };
     host.track(rect);
-    await tick(80);
-    host.mark(0.797, 0.216);
     await tick(20);
-    const [line] = host.markLog();
-    assert.ok(line, "строка mark в overlay.log");
-    assert.deepEqual(pairOf(line, "p"), [0.797, 0.216]);
-    const q = pairOf(line, "q"), qApp = pairOf(line, "qApp");
-    assert.ok(Math.abs(q[0] - 0.336) < 0.003 && Math.abs(q[1] - 0.705) < 0.003, `q=${q}`);
-    assert.ok(Math.abs(qApp[0] - 0.797) < 0.003 && Math.abs(qApp[1] - 0.216) < 0.003, `qApp=${qApp}`);
-    assert.match(line, / capture=380,120,1500x900 /);
-    assert.doesNotMatch(line, /\d{3,} \d{3,}/, "в строке только поля «ключ=числа»");
+    host.mark(...P);
+    await tick(80);
+    assert.deepEqual(host.overlay.phys, b.phys);
+    near(host.landed(), expected(rect, ...P), "окно на B");
+    const f = host.overlay.sent.filter(([c]) => c === "region").at(-1)[1];
+    assert.ok(Math.abs(f.fx - 812 / 3840) < 1e-9 && Math.abs(f.fh - 1333 / 2160) < 1e-9, JSON.stringify(f));
   } finally { host.stop(); }
 });
 
-test("разбор: когда всё на месте, q совпадает с точкой зрителя", async () => {
-  const a = laptop(), b = external();
-  const host = await start(world([a, b], [screenSource(a, 1), screenSource(b, 2)]));
+test("раскладка ведущей: окно перешло с B на C — окно меток переставлено на C, метка на окне", async () => {
+  const a = layoutA(), b = layoutB(), c = layoutC();
+  const host = await start(world([a, b, c], [windowSource]));
   try {
-    await host.share("screen:2:0");
+    await host.share(windowSource.id);
+    host.track({ x: 812, y: 301, width: 2207, height: 1333 });
+    host.mark(0.5, 0.5);
     await tick(80);
-    host.mark(0.797, 0.216);
-    await tick(20);
-    const [line] = host.markLog();
-    const q = pairOf(line, "q");
-    assert.ok(Math.abs(q[0] - 0.797) < 0.003 && Math.abs(q[1] - 0.216) < 0.003, `q=${q}`);
-    assert.match(line, / capture=-1920,200,1920x1080 /);
+    const moved = { x: 4100, y: 600, width: 1200, height: 700 };
+    host.track(moved);
+    await tick(80);
+    host.mark(...P);
+    await tick(80);
+    assert.deepEqual(host.overlay.phys, c.phys, "окно меток на физической рамке C");
+    assert.deepEqual(host.places().at(-1), [c.phys.x, c.phys.y, c.phys.width, c.phys.height]);
+    near(host.landed(), expected(moved, ...P), "окно на C");
   } finally { host.stop(); }
 });
 
-test("исключение из захвата ставится после показа окна меток (иначе метки видны в видео)", async () => {
+test("переезд окна меток на монитор с другим DPI: ответ помощника сверяется, вторая попытка встаёт", async () => {
+  const a = layoutA(), b = layoutB(), c = layoutC();
+  const host = await start(world([a, b, c], [screenSource(a, 1)], { createScale: 1.75 }));
+  try {
+    await host.share("screen:1:0");
+    host.mark(...P);
+    await tick(80);
+    const want = [a.phys.x, a.phys.y, a.phys.width, a.phys.height];
+    assert.deepEqual(host.places(), [want, want], "первый раз — размер по новому DPI, второй — как просили");
+    assert.deepEqual(host.overlay.phys, a.phys);
+  } finally { host.stop(); }
+});
+
+test("одна метка от страницы — одна метка в окне меток и одна строка журнала (без дублей)", async () => {
+  const a = layoutA(), b = layoutB();
+  const host = await start(world([a, b], [screenSource(a, 1)]));
+  try {
+    await host.share("screen:1:0");
+    host.mark(...P);
+    await tick(80);
+    host.mark(0.1, 0.2);
+    await tick(80);
+    assert.equal(host.marksSent(), 2);
+    assert.equal(host.markLog().length, 2);
+  } finally { host.stop(); }
+});
+
+test("исключение из захвата ставится после показа и setIgnoreMouseEvents; фактическое значение — в журнале", async () => {
   const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1.25, [0, 0], true);
   const host = await start(world([d], [screenSource(d, 1)], { protectionLostOnShow: true }));
   try {
@@ -307,7 +389,33 @@ test("исключение из захвата ставится после по�
     await tick(80);
     const calls = host.overlay.calls;
     assert.ok(calls.lastIndexOf("protect:true") > calls.indexOf("show"), `порядок: ${calls}`);
-    assert.ok(host.overlay.isContentProtected());
-    assert.match(host.markLog()[0], / protected=true$/);
+    assert.ok(calls.lastIndexOf("protect:true") > calls.lastIndexOf("ignore:true"), `порядок: ${calls}`);
+    assert.equal(host.overlay.affinity, 0x11);
+    assert.match(host.markLog()[0], / affinity=0x11 order=1$/);
+  } finally { host.stop(); }
+});
+
+test("защита не встала после setIgnoreMouseEvents — второй порядок: защита до него", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1.25, [0, 0], true);
+  const host = await start(world([d], [screenSource(d, 1)], { layeredBlocks: true }));
+  try {
+    await host.share("screen:1:0");
+    host.mark(0.5, 0.5);
+    await tick(80);
+    const calls = host.overlay.calls;
+    assert.equal(host.overlay.affinity, 0x11);
+    assert.equal(calls.at(-1), "ignore:true", `клики сквозь окно остаются: ${calls}`);
+    assert.match(host.markLog()[0], / affinity=0x11 order=2$/);
+  } finally { host.stop(); }
+});
+
+test("без помощника: окно меток в DIP на монитор, метка в своей точке", async () => {
+  const a = laptop(), b = external();
+  const host = await start(world([a, b], [screenSource(a, 1), screenSource(b, 2)], { helper: false }));
+  try {
+    await host.share("screen:2:0");
+    host.mark(0.8, 0.6);
+    await tick(80);
+    near(host.landed(), expected(b.phys, 0.8, 0.6), "без помощника");
   } finally { host.stop(); }
 });

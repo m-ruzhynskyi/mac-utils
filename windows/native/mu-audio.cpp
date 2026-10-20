@@ -3,6 +3,8 @@
 //   capture [имя.exe …]  → в stdout PCM 16 бит, моно, 24 кГц: звук всех программ, кроме перечисленных
 //                          (как «Не передавать звук программ» на Mac; глушатся и их дочерние процессы).
 //   track <hwnd>         → строки «x y w h» (физические пиксели), когда окно двигается; «hidden» — свёрнуто.
+//   place <hwnd> x y w h → окно меток — на этот физический прямоугольник поверх всех; «x y w h dpi» — где оно оказалось.
+//   protect <hwnd>       → исключить окно из захвата; «affinity=0x… err=… exstyle=0x…» — что на нём стоит на самом деле.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -283,11 +285,44 @@ static int track(HWND window) {
   return 0;
 }
 
+// ---- Окно меток: физические пиксели и исключение из захвата ----
+
+#ifndef WDA_EXCLUDEFROMCAPTURE
+#define WDA_EXCLUDEFROMCAPTURE 0x00000011
+#endif
+
+// Electron ставит окна в DIP, а окно, созданное на мониторе с другим масштабом, живёт с DPI основного монитора: его DIP
+// не совпадают с монитором. Здесь — сразу физические пиксели (помощник Per-Monitor V2); что вышло, проверяет приложение.
+static int place(HWND window, int x, int y, int w, int h) {
+  if (!IsWindow(window)) return 1;
+  SetWindowPos(window, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE);
+  RECT rect = {};
+  GetWindowRect(window, &rect);
+  printf("%ld %ld %ld %ld %u\n", rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, GetDpiForWindow(window));
+  return 0;
+}
+
+// SetWindowDisplayAffinity принимает только окна своего процесса (документация Microsoft), поэтому исключение ставит
+// само приложение (setContentProtection), а здесь — попытка (err покажет отказ) и проверка: GetWindowDisplayAffinity
+// читает окно любого процесса.
+static int protect(HWND window) {
+  if (!IsWindow(window)) return 1;
+  DWORD error = 0;
+  if (!SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE)) error = GetLastError();
+  DWORD affinity = 0;
+  if (!GetWindowDisplayAffinity(window, &affinity)) affinity = 0;
+  printf("affinity=0x%lx err=%lu exstyle=0x%lx\n", affinity, error, (unsigned long)GetWindowLongPtrW(window, GWL_EXSTYLE));
+  return 0;
+}
+
 int wmain(int argc, wchar_t** argv) {
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
   if (argc < 2) return 2;
   std::wstring command = argv[1];
   if (command == L"track" && argc > 2) return track((HWND)(INT_PTR)_wcstoi64(argv[2], nullptr, 10));
+  if (command == L"place" && argc > 6)
+    return place((HWND)(INT_PTR)_wcstoi64(argv[2], nullptr, 10), _wtoi(argv[3]), _wtoi(argv[4]), _wtoi(argv[5]), _wtoi(argv[6]));
+  if (command == L"protect" && argc > 2) return protect((HWND)(INT_PTR)_wcstoi64(argv[2], nullptr, 10));
   if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) return 1;
   if (command == L"list") return list();
   if (command == L"capture") return capture(std::vector<std::wstring>(argv + 2, argv + argc));

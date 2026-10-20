@@ -21,100 +21,164 @@ const hasHelper = () => fs.existsSync(HELPER);
 
 // Окно для меток: поверх того, что транслируется (экран или окно), сквозь него кликается.
 // В саму трансляцию оно не попадает — иначе зритель видел бы свою метку дважды (свою и в видео).
-// Окно меток накрывает монитор транслируемой области (`target`), а метки ставятся в саму область (overlay-place.js):
-// так они не зависят от того, куда Windows на самом деле поставила окно меток. Готовится в начале трансляции, а не
-// по первой метке: иначе первые метки терялись (страница меток ещё грузилась) или ложились на весь основной экран,
-// пока помощник не сообщил, где окно.
+// Окно меток ставит помощник (place) ровно на ФИЗИЧЕСКИЙ прямоугольник монитора транслируемой области, а странице меток
+// область передаётся долями этого монитора (overlay-place.js). Без DIP-арифметики: окно, созданное на мониторе с другим
+// масштабом, живёт с DPI основного монитора, и его DIP-границы уводят метки в сторону (журнал 1.1.17: метки левее окна).
+// Готовится в начале трансляции, а не по первой метке: иначе первые метки терялись (страница меток ещё грузилась).
 let overlayReady = false; // страница меток загружена
-let target = null; // транслируемая область, DIP; null — ещё не известна (окно: ждём помощника)
+let target = null; // транслируемая область, физические пиксели; null — ещё не известна (окно: ждём помощника)
+let monitor = null; // физическая рамка монитора этой области: на неё ставится окно меток
+let placedOn = null; // монитор, на который окно меток поставлено (ответ помощника получен); null — метки ждут
+let placing = null; // монитор, на который окно меток ставится сейчас (ждём помощника)
+let placed = null; // где окно меток по словам помощника: { x, y, width, height, dpi }
+let affinity = null; // исключение из захвата на окне меток по словам помощника (0x11 — исключено)
+let protectOrder = 1; // 1 — защита после setIgnoreMouseEvents, 2 — до него (если первый порядок не встал)
+let shielded = false; // защита после показа проверена помощником: до этого метки ждут, чтобы не попасть в видео
 let trackedRect = null; // последняя рамка окна от помощника, физические пиксели
 let overlayShown = false;
 let sourceHidden = false; // транслируемое окно свёрнуто или скрыто: меток не показываем
 const pendingMarks = [];
+const EXCLUDE_FROM_CAPTURE = 0x11;
 
 const sharedDisplay = () => place.sharedDisplay(chosen?.source, screen.getAllDisplays(), screen.getPrimaryDisplay());
+const physOf = (display) => screen.dipToScreenRect(null, display.bounds);
+const monitors = () => screen.getAllDisplays().map(physOf);
+
+// HWND окна меток для помощника (Buffer: 8 байт на x64).
+function hwndOf(win) {
+  const handle = win.getNativeWindowHandle();
+  return String(handle.length >= 8 ? handle.readBigUInt64LE(0) : handle.readUInt32LE(0));
+}
+
+function runHelper(args, done) {
+  execFile(HELPER, args.map(String), { windowsHide: true, timeout: 3000 }, (error, stdout) => done(error ? "" : String(stdout || "")));
+}
+
+const rect = (r) => (r ? `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)}x${Math.round(r.height)}` : "-");
+const hex = (n) => (n == null ? "-" : `0x${n.toString(16)}`);
+const fr = (f) => (f ? [f.fx, f.fy, f.fw, f.fh].map((v) => +v.toFixed(4)).join(";") : "-");
 
 // Числа для разбора, если метки лягут не туда: мониторы, область, окно меток. Без содержимого экрана и имён окон.
 function logPlacement(event) {
   try {
     const file = path.join(app.getPath("logs"), "overlay.log");
     if (fs.existsSync(file) && fs.statSync(file).size > 256 * 1024) fs.rmSync(file);
-    const rect = (r) => (r ? `${r.x},${r.y},${r.width}x${r.height}` : "-");
     const displays = screen.getAllDisplays().map((d) => `${d.id}:${rect(d.bounds)}@${d.scaleFactor}`).join(" ");
     const kind = /^window:/.test(chosen?.source?.id || "") ? "window" : "screen";
-    const bounds = overlay && !overlay.isDestroyed() ? overlay.getContentBounds() : null;
     fs.appendFileSync(file, `${new Date().toISOString()} ${event} ${kind} displays=[${displays}] source=${chosen?.source?.display_id || "-"} ` +
-      `target=${rect(target)} tracked=${rect(trackedRect)} overlay=${rect(bounds)}\n`);
+      `target=${rect(target)} monitor=${rect(monitor)} phys=${placed ? `${rect(placed)}@${placed.dpi}` : "-"} affinity=${hex(affinity)} order=${protectOrder}\n`);
   } catch (_) {}
 }
 
-// Разбор метки (первые 10 за трансляцию): точка зрителя, где её нарисовала страница меток (её screenX/Y, масштаб,
-// точка на холсте), в физических пикселях — и в долях захваченной области. Доля `q` должна совпасть с точкой
-// зрителя `p`; совпала, а у зрителя метка не там — захватывается не та область, что мы отслеживаем (сравнить
-// `thumb` — пропорции захвата по Chromium — с `capture`); не совпала — видно, какая из рамок ушла.
+// Разбор метки (первые 10 за трансляцию): точка зрителя `p`, область долями окна меток `fr`, где окно меток по словам
+// помощника (`phys`, физические пиксели и DPI) и где страница нарисовала метку, — в долях захваченной области `q`.
+// `q` должна совпасть с `p`; совпала, а у зрителя метка не там — захватывается не та область, что мы отслеживаем.
 let marksLogged = 0;
 function logMark(report) {
   if (marksLogged >= 10 || !overlay || overlay.isDestroyed() || !report) return;
   marksLogged++;
   try {
-    const rect = (r) => (r ? `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)}x${Math.round(r.height)}` : "-");
     const pair = (a) => (a ? a.map((v) => (typeof v === "number" ? +v.toFixed(4) : v)).join(";") : "-");
-    const content = overlay.getContentBounds();
-    const toPhysRect = (r) => (screen.dipToScreenRect ? screen.dipToScreenRect(overlay, r) : r);
-    const overlayPhys = toPhysRect(content);
-    const display = sharedDisplay();
-    const capture = display ? (screen.dipToScreenRect ? screen.dipToScreenRect(null, display.bounds) : display.bounds) : trackedRect;
     const [cx, cy] = report.point || [0, 0];
-    // Как точку видит страница меток (её положение на экране) и как её видит приложение (границы окна меток).
-    const byPage = screen.dipToScreenPoint ? screen.dipToScreenPoint({ x: report.screenX + cx, y: report.screenY + cy }) : null;
-    const byApp = { x: overlayPhys.x + cx * (report.dpr || 1), y: overlayPhys.y + cy * (report.dpr || 1) };
-    const thumb = chosen?.source?.thumbnail?.getSize?.();
-    const protectedNow = typeof overlay.isContentProtected === "function" ? overlay.isContentProtected() : "-";
-    const line = `${new Date().toISOString()} mark ${display ? "screen" : "window"} p=${pair(report.mark)} ` +
-      `q=${capture && byPage ? pair(place.share(byPage, capture)) : "-"} qApp=${capture ? pair(place.share(byApp, capture)) : "-"} ` +
-      `capture=${rect(capture)} thumb=${thumb ? `${thumb.width}x${thumb.height}` : "-"} target=${rect(target)} ` +
-      `overlay=${rect(content)} overlayPhys=${rect(overlayPhys)} page=${report.screenX},${report.screenY},${report.innerWidth}x${report.innerHeight}@${report.dpr} ` +
-      `area=${report.area ? `${Math.round(report.area.x)},${Math.round(report.area.y)},${Math.round(report.area.w)}x${Math.round(report.area.h)}` : "-"} ` +
-      `point=${pair(report.point)} source=${chosen?.source?.id?.split(":")[0] || "-"}:${chosen?.source?.id?.split(":")[1] || "-"} display_id=${chosen?.source?.display_id || "-"} protected=${protectedNow}`;
+    // Точка холста → физические пиксели: доля окна меток × его физический размер (DPR страницы не нужен).
+    const drawn = placed && report.innerWidth && report.innerHeight
+      ? { x: placed.x + (cx / report.innerWidth) * placed.width, y: placed.y + (cy / report.innerHeight) * placed.height } : null;
+    const area = report.area;
+    const line = `${new Date().toISOString()} mark ${sharedDisplay() ? "screen" : "window"} p=${pair(report.mark)} ` +
+      `q=${drawn && target ? pair(place.share(drawn, target)) : "-"} capture=${rect(target)} monitor=${rect(monitor)} ` +
+      `phys=${placed ? `${rect(placed)}@${placed.dpi}` : "-"} fr=${fr(report.region)} ` +
+      `page=${report.innerWidth}x${report.innerHeight}@${report.dpr} ` +
+      `area=${area ? `${Math.round(area.x)},${Math.round(area.y)},${Math.round(area.w)}x${Math.round(area.h)}` : "-"} ` +
+      `point=${pair(report.point)} overlay=${rect(overlay.getContentBounds())} affinity=${hex(affinity)} order=${protectOrder}`;
     fs.appendFileSync(path.join(app.getPath("logs"), "overlay.log"), line + "\n");
   } catch (_) {}
 }
 
-// Окно на мониторе с другим масштабом Windows ставит не туда и не того размера — задаём границы ещё раз.
-function placeOverlay(bounds) {
-  if (!overlay || overlay.isDestroyed()) return;
-  overlay.setBounds(bounds);
-  setTimeout(() => { if (overlay && !overlay.isDestroyed()) overlay.setBounds(bounds); }, 50);
+// Окно меток — на физический прямоугольник монитора. Переезд на монитор с другим DPI Windows сопровождает WM_DPICHANGED,
+// и окно получает размер по новому DPI, — поэтому ответ помощника сверяется и при расхождении ставим ещё раз.
+function placeOverlay() {
+  if (!overlay || overlay.isDestroyed() || !monitor) return;
+  const mine = overlay, want = monitor;
+  placedOn = null; placing = want;
+  if (!hasHelper()) {
+    // Без помощника — по-старому, в DIP Electron (дважды: первый раз Windows считает размер по прежнему монитору).
+    const bounds = screen.getDisplayMatching(screen.screenToDipRect(null, want)).bounds;
+    mine.setBounds(bounds);
+    setTimeout(() => { if (!mine.isDestroyed()) mine.setBounds(bounds); }, 50);
+    placedOn = want; placing = null; flushMarks();
+    return;
+  }
+  const attempt = (n) => runHelper(["place", hwndOf(mine), want.x, want.y, want.width, want.height], (out) => {
+    if (mine !== overlay || mine.isDestroyed() || placing !== want) return; // окно закрыто или ставится уже на другой монитор
+    const [x, y, width, height, dpi] = out.trim().split(/\s+/).map(Number);
+    placed = width && height ? { x, y, width, height, dpi } : null;
+    if (!place.same(placed, want) && n < 2) return attempt(n + 1);
+    placedOn = want; placing = null;
+    logPlacement(place.same(placed, want) ? "placed" : "place-mismatch");
+    flushMarks();
+  });
+  attempt(1);
 }
 
-// Область изменилась (или окно меток сдвинулось): окно меток — на её монитор, странице меток — где область.
+// Исключение из захвата ставит само приложение: SetWindowDisplayAffinity принимает только окна своего процесса.
+// Помощник читает, что встало (GetWindowDisplayAffinity читает окно любого процесса). Не 0x11 — второй порядок:
+// защита до setIgnoreMouseEvents (тот переписывает расширенный стиль окна), затем снова сквозные клики.
+function protectOverlay() {
+  const mine = overlay;
+  mine.setIgnoreMouseEvents(true);
+  mine.setContentProtection(true);
+  shielded = !hasHelper();
+  if (shielded) return;
+  const check = (order) => runHelper(["protect", hwndOf(mine)], (out) => {
+    if (mine !== overlay || mine.isDestroyed()) return;
+    const match = /affinity=0x([0-9a-f]+)/i.exec(out);
+    affinity = match ? parseInt(match[1], 16) : null;
+    protectOrder = order;
+    if (affinity !== EXCLUDE_FROM_CAPTURE && order === 1) {
+      mine.setIgnoreMouseEvents(false);
+      mine.setContentProtection(true);
+      mine.setIgnoreMouseEvents(true);
+      return check(2);
+    }
+    logPlacement("protect");
+    shielded = true;
+    flushMarks();
+  });
+  check(1);
+}
+
+// Показ окна меток: показать, поставить на монитор (помощник), исключить из захвата. Метки ждут обоих ответов помощника.
+function showOverlay() {
+  overlay.showInactive(); overlayShown = true;
+  placeOverlay();
+  protectOverlay();
+}
+
+// Область изменилась: странице меток — где она долями окна; монитор другой — окно меток на него.
 function layout() {
   if (!overlay || overlay.isDestroyed() || !target) return;
-  const display = screen.getDisplayMatching(target);
-  if (!place.same(overlay.getBounds(), display.bounds)) placeOverlay(display.bounds);
+  if (overlayShown && !place.same(placedOn, monitor) && !place.same(placing, monitor)) placeOverlay();
   sendRegion();
 }
 
 function sendRegion() {
   if (!overlay || overlay.isDestroyed() || !overlayReady || !target) return;
-  overlay.webContents.send("region", place.region(target, overlay.getContentBounds()));
+  overlay.webContents.send("region", place.fractions(target, monitor));
   flushMarks();
 }
 
 function flushMarks() {
   if (!overlayReady || !target || !pendingMarks.length) return;
   if (sourceHidden) { pendingMarks.length = 0; return; }
-  if (!overlayShown) {
-    overlay.showInactive(); overlayShown = true;
-    // Исключение из захвата ставим после показа: заданное скрытому окну (show: false) Windows может не применить,
-    // и тогда метки видны в самом видео (1.1.16).
-    overlay.setContentProtection(true);
-  }
+  if (!overlayShown) showOverlay();
+  if (!placedOn || !shielded) return;
   for (const mark of pendingMarks.splice(0)) overlay.webContents.send("mark", mark);
 }
 
+// rect — физические пиксели; монитор — тот, где большая часть области (у экрана — он сам).
 function setTarget(rect, event) {
   target = rect;
+  monitor = place.monitorOf(rect, monitors());
   logPlacement(event);
   layout();
 }
@@ -123,22 +187,22 @@ function setTarget(rect, event) {
 function prepareOverlay() {
   // Окно от прошлой трансляции (отказ после выбора источника, перезагрузка страницы) — с его областью и помощником.
   hideOverlay();
-  overlayReady = false; overlayShown = false; sourceHidden = false; target = null; trackedRect = null; marksLogged = 0;
+  overlayReady = false; overlayShown = false; sourceHidden = false; target = null; monitor = null; trackedRect = null; marksLogged = 0;
+  placedOn = null; placing = null; placed = null; affinity = null; protectOrder = 1; shielded = false;
   const display = sharedDisplay() || screen.getPrimaryDisplay();
   overlay = new BrowserWindow({
     ...display.bounds,
     show: false, transparent: true, frame: false, resizable: false, movable: false, focusable: false,
     skipTaskbar: true, hasShadow: false, alwaysOnTop: true,
+    // Больше рабочей области: иначе окно на весь монитор обрезается по панели задач (1235 → 1196).
+    enableLargerThanScreen: true,
     webPreferences: { contextIsolation: true, preload: path.join(__dirname, "overlay-preload.js") },
   });
   overlay.setAlwaysOnTop(true, "screen-saver");
   overlay.setIgnoreMouseEvents(true);
-  overlay.setContentProtection(true);
-  overlay.on("move", sendRegion);
-  overlay.on("resize", sendRegion);
   overlay.webContents.once("did-finish-load", () => { overlayReady = true; sendRegion(); });
   overlay.loadFile(path.join(__dirname, "overlay.html"));
-  if (sharedDisplay()) setTarget(sharedDisplay().bounds, "screen");
+  if (sharedDisplay()) setTarget(physOf(sharedDisplay()), "screen");
   else trackWindow();
 }
 
@@ -148,7 +212,7 @@ function trackWindow() {
   if (!match || tracker) return;
   if (!hasHelper()) {
     // Без помощника рамку окна не узнать: метки на весь монитор — лучше, чем ничего, но в журнале видно почему.
-    setTarget(screen.getPrimaryDisplay().bounds, "no-helper");
+    setTarget(physOf(screen.getPrimaryDisplay()), "no-helper");
     return;
   }
   const mine = tracker = spawn(HELPER, ["track", match[1]], { windowsHide: true });
@@ -164,7 +228,7 @@ function trackWindow() {
       if (!width || !height) continue;
       trackedRect = { x, y, width, height };
       sourceHidden = false;
-      setTarget(screen.screenToDipRect(null, trackedRect), "window");
+      setTarget(trackedRect, "window");
       flushMarks();
     }
   });
@@ -174,7 +238,8 @@ function trackWindow() {
 function hideOverlay() {
   if (tracker) { tracker.kill(); tracker = null; }
   if (overlay && !overlay.isDestroyed()) overlay.close();
-  overlay = null; overlayReady = false; overlayShown = false; target = null; trackedRect = null;
+  overlay = null; overlayReady = false; overlayShown = false; target = null; monitor = null; trackedRect = null;
+  placedOn = null; placing = null; placed = null;
   pendingMarks.length = 0;
 }
 
@@ -233,12 +298,14 @@ app.whenReady().then(() => {
   });
 
   // Мониторы подключили, отключили или поменяли масштаб — метки снова на нужном экране.
-  // У окна физическая рамка та же, а DIP после смены масштаба — другие: пересчитываем из последней рамки помощника.
+  // Всё в физических пикселях: у окна рамка от помощника та же, у экрана — заново его физическая рамка.
   for (const event of ["display-added", "display-removed", "display-metrics-changed"]) {
     screen.on(event, () => {
       if (!overlay || overlay.isDestroyed()) return;
-      if (sharedDisplay()) setTarget(sharedDisplay().bounds, event);
-      else if (trackedRect) setTarget(screen.screenToDipRect(null, trackedRect), event);
+      // Масштаб монитора сменился — Windows меняет и размер окна меток (WM_DPICHANGED): ставим его заново.
+      placedOn = null; placing = null;
+      if (sharedDisplay()) setTarget(physOf(sharedDisplay()), event);
+      else if (trackedRect) setTarget(trackedRect, event);
     });
   }
 
