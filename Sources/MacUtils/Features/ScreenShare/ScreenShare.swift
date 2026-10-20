@@ -1300,6 +1300,7 @@ final class ShareViewer: ObservableObject {
         frame = nil
         jpegFrames = 0
         video.reset()
+        resetMonitors()
         state = .connecting
         showWindow()
         generation += 1
@@ -1524,6 +1525,12 @@ final class ShareViewer: ObservableObject {
                             ShareHistory.shared.visited(viewer.code, name: json?["name"] as? String ?? "")
                             if let key = viewer.hostKey { ShareHistory.shared.pinHost(id: viewer.code, key: key) }
                             viewer.receive(socket)
+                        } else if type == "displays" {
+                            viewer.received(displays: json ?? [:])
+                            viewer.receive(socket)
+                        } else if type == "switch-result" {
+                            viewer.received(switchResult: json ?? [:])
+                            viewer.receive(socket)
                         } else if type == "declined" {
                             viewer.state = .ended("Вам не разрешили подключиться")
                             viewer.disconnect()
@@ -1576,6 +1583,77 @@ final class ShareViewer: ObservableObject {
         }
     }
 
+    // MARK: Мониторы ведущего (SHARE-PROTOCOL §4.1)
+
+    /// Мониторы ведущего и запрос в пути; пусто — ведущий их не объявил (старая версия, выключено, показывает окно).
+    @Published private(set) var monitors = ShareMonitorPicker()
+    /// Плашка сверху окна: идёт переключение или короткое сообщение (3–4 с).
+    @Published private(set) var monitorNotice: MonitorNotice?
+    enum MonitorNotice: Equatable { case switching(Int), info(String) }
+    private var monitorNoticeTask: Task<Void, Never>?
+    private var monitorWaitTask: Task<Void, Never>?
+    private var keyMonitor: Any?
+
+    private var hostLabel: String { hostName.isEmpty ? ShareCode.display(code) : hostName }
+
+    /// Клик по плитке или клавиша 1…9: переключить монитор ведущего (сразу, без вопроса — если ведущий разрешил).
+    func requestDisplay(_ n: Int) {
+        guard state == .watching, let socket, let message = monitors.request(n, now: Date()) else { return }
+        socket.send(.string(message)) { _ in }
+        showMonitorNotice(.switching(n), seconds: nil)
+        monitorWaitTask?.cancel()
+        monitorWaitTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(ShareMonitorSwitch.wait * 1_000_000_000))
+            guard let self, !Task.isCancelled, self.monitors.expired(now: Date()) else { return }
+            self.showMonitorNotice(.info("Монитор не переключился — попробуйте ещё раз"), seconds: 4)
+        }
+    }
+
+    fileprivate func received(displays json: [String: Any]) {
+        guard let parsed = ShareDisplays.parse(json) else { return }
+        let change = monitors.apply(parsed)
+        if change.done { monitorWaitTask?.cancel() }
+        if change.switched, let current = monitors.current {
+            // Доли меток относились к прежнему монитору.
+            marks.clear()
+            showMonitorNotice(.info("\(hostLabel) показывает монитор \(current)"), seconds: 3)
+        } else if change.done, case .switching = monitorNotice {
+            showMonitorNotice(nil, seconds: nil)
+        }
+        if change.gone { showMonitorNotice(.info("\(hostLabel): переключение мониторов выключено"), seconds: 4) }
+    }
+
+    fileprivate func received(switchResult json: [String: Any]) {
+        guard let display = ShareDisplays.integer(json["display"]), let result = json["result"] as? String else { return }
+        let notice = monitors.result(display: display, result: result)
+        if monitors.pending == nil { monitorWaitTask?.cancel() }
+        switch notice {
+        case .off: showMonitorNotice(.info("\(hostLabel): переключение мониторов выключено"), seconds: 4)
+        case .busy: showMonitorNotice(.info("Только что переключили — попробуйте через пару секунд"), seconds: 4)
+        case .failed: showMonitorNotice(.info("Не получилось переключить монитор"), seconds: 4)
+        case nil:
+            if monitors.pending == nil, case .switching = monitorNotice { showMonitorNotice(nil, seconds: nil) }
+        }
+    }
+
+    private func showMonitorNotice(_ notice: MonitorNotice?, seconds: TimeInterval?) {
+        monitorNoticeTask?.cancel()
+        monitorNotice = notice
+        guard let seconds else { return }
+        monitorNoticeTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard let self, !Task.isCancelled, self.monitorNotice == notice else { return }
+            self.monitorNotice = nil
+        }
+    }
+
+    private func resetMonitors() {
+        monitorWaitTask?.cancel()
+        monitorNoticeTask?.cancel()
+        monitors = ShareMonitorPicker()
+        monitorNotice = nil
+    }
+
     /// Пользователь прервал переподключение.
     func endManually() { state = .ended("Отключено") }
 
@@ -1604,6 +1682,7 @@ final class ShareViewer: ObservableObject {
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil
         player.stop()
+        resetMonitors()
     }
 
     /// Остановить просмотр при выходе: подключение закрывается, состояние уходит из «идёт» (окно остаётся до закрытия).
@@ -1625,6 +1704,19 @@ final class ShareViewer: ObservableObject {
             window.setContentSize(NSSize(width: 960, height: 600))
             window.isReleasedWhenClosed = false
             window.center()
+            // Клавиши 1…9 в окне просмотра — монитор ведущего с этим номером.
+            self.keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                let number = event.windowNumber, key = event.charactersIgnoringModifiers ?? ""
+                let plain = event.modifierFlags.intersection([.command, .option, .control]).isEmpty && !event.isARepeat
+                let handled = MainActor.assumeIsolated { () -> Bool in
+                    let viewer = ShareViewer.shared
+                    guard plain, number == viewer.window?.windowNumber, viewer.state == .watching,
+                          let n = viewer.monitors.monitor(forKey: key) else { return false }
+                    viewer.requestDisplay(n)
+                    return true
+                }
+                return handled ? nil : event
+            }
             NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
                 MainActor.assumeIsolated {
                     ShareViewer.shared.disconnect()
@@ -1656,11 +1748,15 @@ private struct ShareViewerView: View {
             let rect = imageRect(in: proxy.size)
             ZStack {
                 Color.black
-                H264View(player: video)
-                    .opacity(video.size == nil ? 0 : 1)
-                if video.size == nil, let frame = viewer.frame {
-                    Image(nsImage: frame).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                Group {
+                    H264View(player: video)
+                        .opacity(video.size == nil ? 0 : 1)
+                    if video.size == nil, let frame = viewer.frame {
+                        Image(nsImage: frame).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                    }
                 }
+                // Идёт переключение монитора — картинка притушена до нового кадра.
+                .opacity(viewer.monitors.pending == nil ? 1 : 0.55)
                 ShareMarksLayer(store: viewer.marks, rect: rect)
                 // Свой рисунок, пока ведёте мышью.
                 if stroke.count > 1 {
@@ -1672,6 +1768,7 @@ private struct ShareViewerView: View {
             .contentShape(Rectangle())
             .gesture(drawGesture(rect: rect))
             .overlay(alignment: .topTrailing) { badge }
+            .overlay(alignment: .top) { monitorNotice.padding(.top, 54) }
             .overlay(alignment: .bottom) { toolbar.padding(14) }
         }
         .frame(minWidth: 480, minHeight: 300)
@@ -1731,6 +1828,27 @@ private struct ShareViewerView: View {
         }
     }
 
+    /// Плашка о мониторах ведущего: идёт переключение, показывается другой монитор, переключение выключено.
+    @ViewBuilder private var monitorNotice: some View {
+        if viewer.state == .watching, let notice = viewer.monitorNotice {
+            Group {
+                switch notice {
+                case .switching(let n):
+                    ViewerStatusCard(.notice("Переключаю на монитор \(n)…"))
+                case .info(let text):
+                    HStack(spacing: DS.Space.s) {
+                        Image(systemName: "display.2").foregroundStyle(.dsMute).accessibilityHidden(true)
+                        Text(text).font(DS.Font.bodyStrong).foregroundStyle(.dsText)
+                    }
+                    .floating(.pill)
+                }
+            }
+            .shadow(color: .black.opacity(0.3), radius: 14, y: 6)
+            .allowsHitTesting(false)
+            .accessibilityAddTraits(.updatesFrequently)
+        }
+    }
+
     /// Метка в углу: идёт трансляция и качество картинки.
     @ViewBuilder private var badge: some View {
         if viewer.state == .watching, frameSize != nil || viewer.frame != nil {
@@ -1742,7 +1860,8 @@ private struct ShareViewerView: View {
     /// Метка (клик), рисование (вести мышью), цвет.
     @ViewBuilder private var toolbar: some View {
         if viewer.state == .watching {
-            ShareViewerToolbar(tool: $viewer.tool, color: $viewer.color) { viewer.playGame() }
+            ShareViewerToolbar(tool: $viewer.tool, color: $viewer.color, monitors: viewer.monitors,
+                               requestDisplay: { viewer.requestDisplay($0) }) { viewer.playGame() }
         }
     }
 }
@@ -1835,7 +1954,19 @@ struct ShareViewerBadge: View {
 struct ShareViewerToolbar: View {
     @Binding var tool: ShareViewer.Tool
     @Binding var color: String
+    /// Мониторы ведущего: раздел есть, только если ведущий их объявил.
+    let monitors: ShareMonitorPicker
+    let requestDisplay: (Int) -> Void
     let playGame: () -> Void
+
+    init(tool: Binding<ShareViewer.Tool>, color: Binding<String>, monitors: ShareMonitorPicker = ShareMonitorPicker(),
+         requestDisplay: @escaping (Int) -> Void = { _ in }, playGame: @escaping () -> Void) {
+        _tool = tool
+        _color = color
+        self.monitors = monitors
+        self.requestDisplay = requestDisplay
+        self.playGame = playGame
+    }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -1859,6 +1990,10 @@ struct ShareViewerToolbar: View {
             separator
             ViewerToolButton(symbol: "number", title: "Сыграть", selected: false, action: playGame)
                 .help("Крестики-нолики с ведущим")
+            if !monitors.list.isEmpty {
+                separator
+                MonitorSwitcher(picker: monitors, request: requestDisplay)
+            }
         }
         .padding(8)
         .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous))

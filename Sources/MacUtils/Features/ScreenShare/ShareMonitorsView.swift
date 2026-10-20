@@ -175,3 +175,44 @@ struct HostSwitchNotice: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+/// Раздел «Монитор» в панели зрителя: схема-кнопки, подсказка над плиткой под курсором.
+struct MonitorSwitcher: View {
+    let picker: ShareMonitorPicker
+    let request: (Int) -> Void
+    @State private var hover: Int?
+
+    var body: some View {
+        MonitorMap(displays: picker.list, current: picker.current, pending: picker.pending, hover: hover, height: 40,
+                   onTap: request, onHover: { hover = $0 })
+            .padding(.horizontal, 4)
+            .overlay(alignment: .topTrailing) {
+                if let hover, let display = picker.list.first(where: { $0.n == hover }) {
+                    MonitorTip(display: display).offset(x: 8, y: -52).allowsHitTesting(false)
+                }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Монитор ведущего")
+    }
+}
+
+/// Подсказка над плиткой: «Монитор 3 · 1920×1080 · 100 %» и клавиша.
+struct MonitorTip: View {
+    let display: ShareDisplay
+
+    var body: some View {
+        HStack(spacing: DS.Space.s) {
+            Text(display.title).font(DS.Font.caption).foregroundStyle(.dsText)
+            Text("\(display.n)").font(DS.Font.keycapCompact).foregroundStyle(.dsText)
+                .frame(minWidth: 20, minHeight: 20)
+                .background(Color.dsField, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+        }
+        .padding(.vertical, 6).padding(.horizontal, 10)
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+        .fixedSize()
+        .accessibilityHidden(true)
+    }
+}
