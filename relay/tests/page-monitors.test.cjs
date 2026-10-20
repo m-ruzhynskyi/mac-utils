@@ -10,7 +10,7 @@ const html = fs.readFileSync(`${__dirname}/../src/index.html`, 'utf8');
 const block = html.slice(html.indexOf('// <monitor-switch>'), html.indexOf('// </monitor-switch>'));
 assert.ok(block.length > 1000, 'метки <monitor-switch> на месте');
 const page = vm.createContext({});
-vm.runInContext(`${block}\nObject.assign(this, { switchDecision, displaysRevision, displaysMessage, swapVideoTrack, displayLabel, displaysLayout, monitorViewer, monitorKey, SWITCH_WAIT_MS });`, page);
+vm.runInContext(`${block}\nObject.assign(this, { switchDecision, displaysRevision, displaysMessage, swapVideoTrack, displayLabel, displaysLayout, monitorViewer, monitorKey, SWITCH_WAIT_MS, allowSwitchFrom, switchResult, shouldReannounce });`, page);
 const fixture = JSON.parse(fs.readFileSync(`${__dirname}/fixtures/displays.json`, 'utf8'));
 const KATE = fixture.valid[0].expected;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -142,4 +142,25 @@ test('схема: пропорции раскладки Кати, основно
   assert.ok(layout.width > 0 && layout.height > 0);
   assert.equal(page.displayLabel(KATE.list[1], 2), 'Монитор 2, основной, 3840 на 2160, 175 %, показывается сейчас');
   assert.equal(page.displayLabel(KATE.list[0], 2), 'Монитор 1, 1920 на 1080, 100 %');
+});
+
+test('разрешение ведущего по умолчанию выключено: только явное «да» из хранилища', () => {
+  assert.equal(page.allowSwitchFrom(undefined), false);
+  assert.equal(page.allowSwitchFrom(null), false);
+  assert.equal(page.allowSwitchFrom(false), false);
+  assert.equal(page.allowSwitchFrom('true'), false);
+  assert.equal(page.allowSwitchFrom(true), true);
+  assert.doesNotMatch(html, /id="allowSwitch" checked/, 'галочка в выборе не отмечена заранее');
+});
+
+test('итог переключения: выключили настройку во время переключения — off, не ok', () => {
+  assert.equal(page.switchResult(true, true), 'ok');
+  assert.equal(page.switchResult(true, false), 'off');
+  assert.equal(page.switchResult(false, true), 'failed');
+});
+
+test('свежий список на off/stale — не чаще раза в секунду', () => {
+  assert.equal(page.shouldReannounce(-Infinity, 0), true);
+  assert.equal(page.shouldReannounce(10_000, 10_999), false);
+  assert.equal(page.shouldReannounce(10_000, 11_000), true);
 });

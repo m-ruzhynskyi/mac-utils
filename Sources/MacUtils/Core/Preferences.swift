@@ -112,6 +112,7 @@ enum Pref {
     /// Зрители могут ставить метки и рисовать поверх экрана ведущего.
     static let shareAllowMarks = "shareAllowMarks"
     /// Зрители сами переключают, какой монитор ведущего транслируется (без вопроса; ведущему — уведомление).
+    /// По умолчанию выключено (приватность): ведущий включает один раз в настройках трансляции.
     static let shareAllowMonitorSwitch = "shareAllowMonitorSwitch"
     /// Свой постоянный 10-значный ID и история подключений (JSON).
     static let shareID = "shareID"
@@ -230,7 +231,8 @@ enum Pref {
             focusStrength: 0.6,
             shareAudio: true,
             shareAllowMarks: true,
-            shareAllowMonitorSwitch: true,
+            // Выключено, пока ведущий сам не включит: без этого зритель не видит другие его мониторы.
+            shareAllowMonitorSwitch: false,
             shareServer: "https://mac-utils-relay.mako-62d.workers.dev",
             cheatSheetSticky: false,
             dropShelf: true,

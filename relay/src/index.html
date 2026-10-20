@@ -303,8 +303,8 @@
   <b>Что показывать?</b>
   <div class="grid" id="sources"></div>
   <label class="muted"><input type="checkbox" id="withAudio" checked style="width:auto"> Передавать звук системы</label>
-  <label class="muted" id="allowSwitchBox" style="display:none"><input type="checkbox" id="allowSwitch" checked style="width:auto"> Зрители могут переключать мои мониторы<span class="new" id="allowSwitchNew">НОВОЕ</span></label>
-  <p class="muted" id="allowSwitchHint" style="display:none">Зритель сам выбирает монитор, вы увидите уведомление. Только когда показываете экран целиком.</p>
+  <label class="muted" id="allowSwitchBox" style="display:none"><input type="checkbox" id="allowSwitch" style="width:auto"> Зрители могут переключать мои мониторы<span class="new" id="allowSwitchNew">НОВОЕ</span></label>
+  <p class="muted" id="allowSwitchHint" style="display:none">По умолчанию выключено. Включите — и зритель сам выберет монитор, вы увидите уведомление. Только когда показываете экран целиком; выбор запоминается.</p>
   <div id="muteBox" class="muted" style="display:none; margin-top:6px">Не передавать звук программ (например, созвона):
     <div id="muteApps"></div></div>
   <div style="text-align:right; margin-top:10px"><button id="pickerCancel">Отмена</button></div>
@@ -672,6 +672,19 @@ function switchDecision(state, request, now) {
   if (state.switching || now - state.lastSwitchAt < SWITCH_GAP_MS) return "busy";
   return "switch";
 }
+
+// Разрешение ведущего из хранилища: только явное «да» (по умолчанию выключено — без включения зритель других
+// мониторов не видит).
+const allowSwitchFrom = (stored) => stored === true;
+
+// Чем закончилось разрешённое переключение: не вышло — failed; вышло, но настройку за это время выключили — off.
+function switchResult(switched, allowed) {
+  if (!switched) return "failed";
+  return allowed ? "ok" : "off";
+}
+
+// Свежий список на off/stale — не чаще раза в секунду: поток устаревших запросов не рассылает его всем.
+const shouldReannounce = (lastAt, now) => now - lastAt >= 1000;
 
 // Ревизия списка: растёт, только когда меняется сам список (состав, размеры, масштаб, раскладка), а не текущий монитор.
 function displaysRevision(memo, list) {
@@ -1627,11 +1640,11 @@ function startCapture(stream, code) {
 
 // ---- Ведущий: зрители переключают мои мониторы (приложение для Windows: mu.displays, mu.switchTo) ----
 // В обычном браузере источник выбирает только окно браузера, программно не переключить — мониторы не объявляются.
-// Разрешение — настройка ведущего (`mu-allow-switch`, по умолчанию да), вопроса при переключении нет.
-const hostMonitors = { memo: { key: "", rev: 0 }, rev: 0, list: [], current: 0, switching: false, lastSwitchAt: -Infinity, note: "" };
+// Разрешение — настройка ведущего (`mu-allow-switch`, по умолчанию нет), вопроса при переключении нет.
+const hostMonitors = { memo: { key: "", rev: 0 }, rev: 0, list: [], current: 0, switching: false, lastSwitchAt: -Infinity, announcedAt: -Infinity, note: "" };
 let announceChain = Promise.resolve(), liveViewers = [];
 const canSwitchMonitors = () => !!(window.mu && typeof window.mu.displays === "function" && typeof window.mu.switchTo === "function");
-const allowSwitch = () => store.get("mu-allow-switch", true) !== false;
+const allowSwitch = () => allowSwitchFrom(store.get("mu-allow-switch", false));
 
 // Список мониторов — всем зрителям: по очереди, каждый раз заново у приложения (последний всегда свежий).
 function announceDisplays() {
@@ -1645,6 +1658,7 @@ function announceDisplays() {
     renderSwitchButton();
     if (!capture || !hostSocket || hostSocket.readyState !== 1) return;
     hostSocket.send(JSON.stringify(displaysMessage(hostMonitors.rev, list, hostMonitors.current, allowSwitch())));
+    hostMonitors.announcedAt = Date.now();
   }).catch(() => {});
   return announceChain;
 }
@@ -1688,7 +1702,7 @@ async function onSwitchRequest(msg) {
   const decision = switchDecision(state, { display, rev: msg.rev }, Date.now());
   if (decision !== "switch") {
     reply(decision);
-    if (decision === "off" || decision === "stale") announceDisplays();
+    if ((decision === "off" || decision === "stale") && shouldReannounce(hostMonitors.announcedAt, Date.now())) announceDisplays();
     return;
   }
   hostMonitors.switching = true;
@@ -1697,7 +1711,8 @@ async function onSwitchRequest(msg) {
   hostMonitors.switching = false;
   if (!ok) return reply("failed");
   hostMonitors.lastSwitchAt = Date.now();
-  reply("ok");
+  // Настройку могли выключить, пока шло переключение: зрителю — off, вслед пустой список.
+  reply(switchResult(ok, canSwitchMonitors() && allowSwitch()));
   await announceDisplays();
   // Уведомление — в окне меток на новом мониторе (в картинку не попадает); без него — строка «В эфире».
   const name = String(msg.name || "Зритель").slice(0, 60);
@@ -1766,7 +1781,7 @@ async function reconnectHost(code) {
 
 function stopHost(message) {
   audience = []; $("gameButton").style.display = "none";
-  liveViewers = []; Object.assign(hostMonitors, { list: [], current: 0, switching: false, lastSwitchAt: -Infinity, note: "" });
+  liveViewers = []; Object.assign(hostMonitors, { list: [], current: 0, switching: false, lastSwitchAt: -Infinity, announcedAt: -Infinity, note: "" });
   $("switchButton").style.display = "none";
   $("muteButton").style.display = "none"; $("mutePanel").style.display = "none";
   if (game.peer !== "host") gamePeerGone();

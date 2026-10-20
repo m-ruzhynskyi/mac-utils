@@ -159,6 +159,25 @@ enum ShareMonitorSwitch {
         return .change
     }
 
+    /// Чем закончилось разрешённое переключение: не вышло — failed; вышло, но настройку за это время выключили — off
+    /// (вслед уйдёт пустой список); иначе ok.
+    static func result(switched: Bool, allowed: Bool) -> String {
+        guard switched else { return "failed" }
+        return allowed ? "ok" : "off"
+    }
+
+    /// Свежий список на устаревший или запрещённый запрос — не чаще раза в секунду.
+    static let reannounceInterval: TimeInterval = 1
+    static func shouldReannounce(last: Date?, now: Date) -> Bool {
+        last.map { now.timeIntervalSince($0) >= reannounceInterval } ?? true
+    }
+
+    /// Окно (метки, уведомление) исключено из захвата, только если оно есть среди окон, которые фильтр исключает.
+    static func windowExcluded(_ number: Int?, from windows: [Int]) -> Bool {
+        guard let number else { return false }
+        return windows.contains(number)
+    }
+
     struct Request: Equatable {
         let display: Int
         let rev: Int

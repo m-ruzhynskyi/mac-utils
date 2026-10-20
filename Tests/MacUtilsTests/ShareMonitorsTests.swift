@@ -89,6 +89,45 @@ final class ShareMonitorsTests: XCTestCase {
         XCTAssertEqual(ShareMonitorSwitch.decide(state, display: 1, rev: 7, now: at.addingTimeInterval(2)), .change)
     }
 
+    func testSwitchResultTurnsOffWhenSettingWasDisabledMeanwhile() {
+        XCTAssertEqual(ShareMonitorSwitch.result(switched: true, allowed: true), "ok")
+        XCTAssertEqual(ShareMonitorSwitch.result(switched: true, allowed: false), "off", "выключили во время переключения")
+        XCTAssertEqual(ShareMonitorSwitch.result(switched: false, allowed: true), "failed")
+        XCTAssertEqual(ShareMonitorSwitch.result(switched: false, allowed: false), "failed")
+    }
+
+    func testStaleAndOffReannounceAtMostOncePerSecond() {
+        let at = Date()
+        XCTAssertTrue(ShareMonitorSwitch.shouldReannounce(last: nil, now: at))
+        XCTAssertFalse(ShareMonitorSwitch.shouldReannounce(last: at, now: at.addingTimeInterval(0.5)))
+        XCTAssertTrue(ShareMonitorSwitch.shouldReannounce(last: at, now: at.addingTimeInterval(1)))
+    }
+
+    func testNoticeOnlyWhenMarksWindowIsExcludedFromCapture() {
+        XCTAssertTrue(ShareMonitorSwitch.windowExcluded(42, from: [7, 42]))
+        XCTAssertFalse(ShareMonitorSwitch.windowExcluded(42, from: [7]), "окна нет в списке — исключение не встанет")
+        XCTAssertFalse(ShareMonitorSwitch.windowExcluded(nil, from: [7, 42]), "окна меток ещё нет")
+    }
+
+    /// Приватность: без явного включения ведущим зрители другие мониторы не видят.
+    func testMonitorSwitchIsOffByDefault() {
+        Pref.register()
+        let registered = UserDefaults.standard.volatileDomain(forName: UserDefaults.registrationDomain)
+        XCTAssertEqual(registered[Pref.shareAllowMonitorSwitch] as? Bool, false)
+    }
+
+    /// Закрыли окно просмотра — клавиши 1…9 больше не перехватываются ни в каком окне Mac Utils.
+    @MainActor func testViewerKeysAreRemovedWhenWindowCloses() {
+        let viewer = ShareViewer.shared
+        viewer.installMonitorKeys()
+        XCTAssertTrue(viewer.monitorKeysInstalled)
+        viewer.installMonitorKeys()
+        viewer.windowClosed()
+        XCTAssertFalse(viewer.monitorKeysInstalled)
+        XCTAssertFalse(viewer.isWindowOpen)
+        XCTAssertEqual(viewer.state, .idle)
+    }
+
     // MARK: - Зритель
 
     private func parsed(current: Int?, rev: Int = 7, list: [ShareDisplay]? = nil) -> ShareDisplays.Parsed {

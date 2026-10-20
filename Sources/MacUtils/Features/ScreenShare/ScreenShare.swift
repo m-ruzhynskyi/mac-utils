@@ -439,10 +439,13 @@ final class ScreenShare: NSObject, ObservableObject {
             self.videoFilter = filter
             self.streamSizeOverride = nil
             ShareMarksOverlay.shared.attach(to: filter)
+            // Пока источник меняется, запросы зрителей получают busy: иначе их переключение могло лечь поверх выбора ведущего.
+            self.switchingDisplay = true
             Task {
                 let filter = await self.prepared(filter)
                 try? await stream.updateContentFilter(filter)
                 try? await stream.updateConfiguration(config)
+                self.switchingDisplay = false
                 // Экран или окно — зрители видят или теряют мониторы; метки — на новом экране.
                 ShareMarksOverlay.shared.attach(to: filter, display: self.videoDisplayID)
                 ShareRequestQueue.shared.screenChanged()
@@ -495,6 +498,7 @@ final class ScreenShare: NSObject, ObservableObject {
     private var displaysRevision = ShareDisplays.Revision()
     private var switchingDisplay = false
     private var lastDisplaySwitch: Date?
+    private var lastDisplaysAnnounce: Date?
     private var screensObserver: NSObjectProtocol?
 
     /// Номер транслируемого монитора (nil — окно или программа).
@@ -510,6 +514,7 @@ final class ScreenShare: NSObject, ObservableObject {
         let message = ShareDisplays.message(rev: displaysRevision.update(list), list: list, current: currentDisplayNumber,
                                             allowed: UserDefaults.standard.bool(forKey: Pref.shareAllowMonitorSwitch))
         socket.send(.string(message)) { _ in }
+        lastDisplaysAnnounce = Date()
     }
 
     /// Подключили, отключили монитор, сменили масштаб или раскладку — список заново.
@@ -527,6 +532,7 @@ final class ScreenShare: NSObject, ObservableObject {
         hostDisplays = []
         switchingDisplay = false
         lastDisplaySwitch = nil
+        lastDisplaysAnnounce = nil
     }
 
     /// Зритель просит другой монитор: вопроса нет, решает настройка (`ShareMonitorSwitch.decide`).
@@ -538,20 +544,26 @@ final class ScreenShare: NSObject, ObservableObject {
         let decision = ShareMonitorSwitch.decide(state, display: request.display, rev: request.rev, now: Date())
         guard decision == .change, let target = hostDisplays.first(where: { $0.display.n == request.display }) else {
             reply(to: request, decision.rawValue)
-            if decision == .off || decision == .stale { announceDisplays() }
+            // Свежий список — не чаще раза в секунду: поток устаревших запросов не опрашивает мониторы и не рассылает его всем.
+            if decision == .off || decision == .stale,
+               ShareMonitorSwitch.shouldReannounce(last: lastDisplaysAnnounce, now: Date()) { announceDisplays() }
             return
         }
         switchingDisplay = true
         Task {
-            let switched = await switchDisplay(to: target.id)
+            let noticeHidden = await switchDisplay(to: target.id)
             switchingDisplay = false
             guard isLive else { return }
-            guard switched else { return reply(to: request, "failed") }
-            lastDisplaySwitch = Date()
-            reply(to: request, "ok")
+            let allowed = UserDefaults.standard.bool(forKey: Pref.shareAllowMonitorSwitch)
+            let result = ShareMonitorSwitch.result(switched: noticeHidden != nil, allowed: allowed)
+            if noticeHidden != nil { lastDisplaySwitch = Date() }
+            reply(to: request, result)
+            guard let noticeHidden else { return }
             announceDisplays()
-            // Уведомление — в окне меток на новом мониторе: в картинку не попадает, кнопок нет.
-            ShareMarksOverlay.shared.notice(name: request.name, monitor: request.display, displays: hostDisplays.map(\.display))
+            // Уведомление — в окне меток на новом мониторе, только если оно точно исключено из захвата.
+            if noticeHidden {
+                ShareMarksOverlay.shared.notice(name: request.name, monitor: request.display, displays: hostDisplays.map(\.display))
+            }
         }
     }
 
@@ -562,22 +574,25 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Другой монитор в тот же поток, без переподключения (как «Сменить источник»): фильтр, размер, окно меток.
-    /// Кодер H.264 пересоздаётся сам по размеру кадра, и первым идёт ключевой.
-    private func switchDisplay(to id: CGDirectDisplayID) async -> Bool {
+    /// Кодер H.264 пересоздаётся сам по размеру кадра, и первым идёт ключевой. nil — не переключилось; иначе — попало ли
+    /// окно меток (а с ним уведомление) в исключения нового фильтра.
+    private func switchDisplay(to id: CGDirectDisplayID) async -> Bool? {
         guard let stream,
               let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
-              let display = content.displays.first(where: { $0.displayID == id }) else { return false }
+              let display = content.displays.first(where: { $0.displayID == id }) else { return nil }
         let filter = Self.displayFilter(display, content: content)
+        let noticeHidden = ShareMonitorSwitch.windowExcluded(ShareMarksOverlay.shared.windowNumber,
+                                                            from: content.windows.map { Int($0.windowID) })
         do {
             try await stream.updateContentFilter(filter)
         } catch {
             Log.capture.error("Трансляция: монитор не переключился, код \((error as NSError).code)")
-            return false
+            return nil
         }
         // Фильтр уже новый: размер не встал — картинка всё равно с нового монитора, только пока в старом размере.
         do { try await stream.updateConfiguration(Self.videoConfiguration(for: filter)) }
         catch { Log.capture.error("Трансляция: размер потока не сменился, код \((error as NSError).code)") }
-        guard self.stream === stream else { return false }
+        guard self.stream === stream else { return nil }
         videoFilter = filter
         streamSizeOverride = nil
         videoDisplayID = id
@@ -585,7 +600,7 @@ final class ScreenShare: NSObject, ObservableObject {
         ShareMarksOverlay.shared.store.clear()
         ShareMarksOverlay.shared.attach(to: filter, display: id)
         ShareRequestQueue.shared.screenChanged()
-        return true
+        return noticeHidden
     }
 
     /// Появилось или пропало служебное окно — обновляем, что исключено из картинки.
@@ -1694,6 +1709,39 @@ final class ShareViewer: ObservableObject {
     /// Окно просмотра открыто — Mac Utils виден в Dock и в ⌘Tab.
     private(set) var isWindowOpen = false
 
+    /// Окно просмотра закрыли: просмотр закончен, клавиши 1…9 больше не перехватываются (закрыто — не работает).
+    func windowClosed() {
+        disconnect()
+        state = .idle
+        isWindowOpen = false
+        removeMonitorKeys()
+    }
+
+    /// Клавиши 1…9 в окне просмотра — монитор ведущего с этим номером. Только пока окно открыто.
+    func installMonitorKeys() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let number = event.windowNumber, key = event.charactersIgnoringModifiers ?? ""
+            let plain = event.modifierFlags.intersection([.command, .option, .control]).isEmpty && !event.isARepeat
+            let handled = MainActor.assumeIsolated { () -> Bool in
+                let viewer = ShareViewer.shared
+                guard plain, number == viewer.window?.windowNumber, viewer.state == .watching,
+                      let n = viewer.monitors.monitor(forKey: key) else { return false }
+                viewer.requestDisplay(n)
+                return true
+            }
+            return handled ? nil : event
+        }
+    }
+
+    private func removeMonitorKeys() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+    }
+
+    /// Перехват клавиш 1…9 стоит (для проверки «закрыто — не работает»).
+    var monitorKeysInstalled: Bool { keyMonitor != nil }
+
     func showWindow() {
         isWindowOpen = true
         AppDelegate.syncDock()
@@ -1704,30 +1752,16 @@ final class ShareViewer: ObservableObject {
             window.setContentSize(NSSize(width: 960, height: 600))
             window.isReleasedWhenClosed = false
             window.center()
-            // Клавиши 1…9 в окне просмотра — монитор ведущего с этим номером.
-            self.keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                let number = event.windowNumber, key = event.charactersIgnoringModifiers ?? ""
-                let plain = event.modifierFlags.intersection([.command, .option, .control]).isEmpty && !event.isARepeat
-                let handled = MainActor.assumeIsolated { () -> Bool in
-                    let viewer = ShareViewer.shared
-                    guard plain, number == viewer.window?.windowNumber, viewer.state == .watching,
-                          let n = viewer.monitors.monitor(forKey: key) else { return false }
-                    viewer.requestDisplay(n)
-                    return true
-                }
-                return handled ? nil : event
-            }
             NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
                 MainActor.assumeIsolated {
-                    ShareViewer.shared.disconnect()
-                    ShareViewer.shared.state = .idle
-                    ShareViewer.shared.isWindowOpen = false
+                    ShareViewer.shared.windowClosed()
                     AppDelegate.syncDock()
                 }
             }
             self.window = window
             return window
         }()
+        installMonitorKeys()
         let label = ShareHistory.shared.label(for: code)
         window.title = code.isEmpty ? "Трансляция экрана" : "Трансляция · \(label ?? ShareCode.display(code))"
         NSApp.activate()
@@ -2061,7 +2095,7 @@ struct ScreenSharePage: View {
     @AppStorage(Pref.shareServer) private var server = ""
     @AppStorage(Pref.shareAudio) private var shareAudio = true
     @AppStorage(Pref.shareAllowMarks) private var allowMarks = true
-    @AppStorage(Pref.shareAllowMonitorSwitch) private var allowMonitorSwitch = true
+    @AppStorage(Pref.shareAllowMonitorSwitch) private var allowMonitorSwitch = false
     @State private var code = ""
 
     private var myID: String {
@@ -2128,7 +2162,7 @@ struct ScreenSharePage: View {
                       subtitle: "Зритель кликает или рисует по картинке — у вас на экране появляется метка «сюда!» или линия, и через пару секунд исчезает. Управлять вашим Mac зритель не может.",
                       systemImage: "scope", isOn: $allowMarks)
             ToggleRow("Зрители могут переключать мои мониторы",
-                      subtitle: "Зритель сам выбирает, какой из ваших мониторов смотреть, — без вопроса. Картинка сменится у всех зрителей, а у вас мелькнёт уведомление. Когда показываете окно или программу, мониторы зрителям не видны.",
+                      subtitle: "По умолчанию выключено. Включите — и зритель сам выберет, какой из ваших мониторов смотреть, без вопроса. Картинка сменится у всех зрителей, а у вас мелькнёт уведомление. Когда показываете окно или программу, мониторы зрителям не видны.",
                       systemImage: "display.2", isOn: $allowMonitorSwitch)
         }
         // В эфире — сразу: у зрителей кнопка пропадает или появляется.
