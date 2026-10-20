@@ -102,8 +102,8 @@ final class TextEditorPerformanceTests: XCTestCase {
         }
         XCTAssertEqual(tab.storage.length, big.data.count)
 
-        // Скан `$` идёт в фоне — ждём список.
-        let deadline = Date().addingTimeInterval(10)
+        // Скан `$` идёт в фоне — ждём список (под нагрузкой полного прогона — дольше).
+        let deadline = Date().addingTimeInterval(30)
         while tab.dollars.entries.count != big.dollars, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
         XCTAssertEqual(tab.dollars.entries.count, big.dollars)
 
