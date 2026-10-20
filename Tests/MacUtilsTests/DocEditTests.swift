@@ -54,8 +54,11 @@ final class DocEditTests: XCTestCase {
                            "видимый текст после правки", file: file, line: line)
             // Курсор — сразу после набранного.
             let caret = newMap.firstUnit(atOrAfter: result.caretSource)
-            let addedBreaks = now.utf16.filter { $0 == 0x0C }.count - expectedText.utf16.filter { $0 == 0x0C }.count
-            XCTAssertEqual(caret - max(0, addedBreaks), min(newMap.count, max(0, result.insertionUnit - removedBefore) + typed.count), "курсор", file: file, line: line)
+            // Место курсора без учёта разрывов «\f» (они могут появиться при ↩ в абзаце с `\pagebb`).
+            let expectedCaret = min(expected.count, max(0, result.insertionUnit - removedBefore) + typed.count)
+            let nowUnits = Array((now as NSString).utf16Units())
+            XCTAssertEqual(nowUnits.prefix(caret).filter { $0 != 0x0C }.count, expected.prefix(expectedCaret).filter { $0 != 0x0C }.count,
+                           "курсор", file: file, line: line)
             // Отмена (обратная правка) — байт в байт.
             let restored = NSMutableString(string: source)
             for (range, text) in undo.reversed() { restored.replaceCharacters(in: range, with: text) }
