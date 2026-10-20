@@ -113,9 +113,11 @@ final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
 
     func pictureInPictureController(_ controller: AVPictureInPictureController,
                                     restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completion: @escaping (Bool) -> Void) {
-        // Возврат из PiP — к окну плеера.
+        // Возврат из PiP — к окну плеера, если оно ещё открыто.
         DispatchQueue.main.async {
-            MainActor.assumeIsolated { self.controller?.present() }
+            MainActor.assumeIsolated {
+                if let controller = self.controller, !controller.isClosed { controller.present() }
+            }
             completion(true)
         }
     }

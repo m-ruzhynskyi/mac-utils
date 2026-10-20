@@ -93,7 +93,7 @@ struct VideoPlayerPage: View {
                     }
                 }
             }
-            Footnote("Интро, пересказ и титры находятся по главам файла (MP4, MOV, M4V). MKV, WebM и AVI плеер откроет в следующей версии.")
+            Footnote("Интро, пересказ и титры находятся по главам файла (MP4, MOV, M4V). MKV, WebM и AVI macOS не открывает — для них нужна другая программа.")
         }
         .onAppear { hiddenFolders = PlayerPrefs.skipHiddenFolders.count }
     }

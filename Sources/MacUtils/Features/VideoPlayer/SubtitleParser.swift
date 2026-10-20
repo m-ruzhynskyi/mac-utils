@@ -73,31 +73,45 @@ struct SubtitleTrack: Equatable {
     private(set) var cues: [SubtitleCue]
     /// Размер «холста» ASS для `\pos`.
     var playResolution = CGSize(width: 384, height: 288)
-    private let longest: Double
+    /// Обычные реплики (по началу) и самая длинная из них: поиск отступает назад только на неё.
+    private let short: [SubtitleCue]
+    private let longestShort: Double
+    /// Долгие реплики (ASS-надпись на весь фильм): их мало, проверяются перебором — иначе каждая из них
+    /// заставляла бы отступать на всю свою длину.
+    private let long: [SubtitleCue]
+
+    /// Реплика дольше этого — «долгая».
+    static let longCue: Double = 30
 
     init(format: Format, cues: [SubtitleCue], playResolution: CGSize? = nil) {
         self.format = format
         self.cues = cues.filter { $0.end > $0.start && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .sorted { $0.start < $1.start }
         if let playResolution { self.playResolution = playResolution }
-        longest = self.cues.map { $0.end - $0.start }.max() ?? 0
+        short = self.cues.filter { $0.end - $0.start <= Self.longCue }
+        long = self.cues.filter { $0.end - $0.start > Self.longCue }
+        longestShort = short.map { $0.end - $0.start }.max() ?? 0
     }
 
-    /// Реплики на экране в момент `time`: бинарный поиск последней начавшейся и шаг назад на длину самой длинной.
+    /// Реплики на экране в момент `time`: бинарный поиск последней начавшейся и шаг назад на длину самой длинной
+    /// обычной реплики; долгие — перебором. По началу, как в файле.
     func cues(at time: Double) -> [SubtitleCue] {
         guard !cues.isEmpty else { return [] }
-        var low = 0, high = cues.count
+        var low = 0, high = short.count
         while low < high {
             let middle = (low + high) / 2
-            if cues[middle].start <= time { low = middle + 1 } else { high = middle }
+            if short[middle].start <= time { low = middle + 1 } else { high = middle }
         }
         var result: [SubtitleCue] = []
         var index = low - 1
-        while index >= 0, cues[index].start >= time - longest {
-            if cues[index].end > time { result.append(cues[index]) }
+        while index >= 0, short[index].start >= time - longestShort {
+            if short[index].end > time { result.append(short[index]) }
             index -= 1
         }
-        return result.reversed()
+        result.reverse()
+        let lasting = long.filter { $0.start <= time && time < $0.end }
+        guard !lasting.isEmpty else { return result }
+        return (lasting + result).sorted { $0.start < $1.start }
     }
 }
 
@@ -152,7 +166,7 @@ enum SubtitleParser {
 
     /// «00:01:02,500 --> 00:01:04,000» (часы можно опустить, точка вместо запятой тоже встречается).
     private static let timing = try! NSRegularExpression(
-        pattern: #"^\s*((?:\d+:)?\d{1,2}:\d{1,2}[,.]\d{1,3})\s*-->\s*((?:\d+:)?\d{1,2}:\d{1,2}[,.]\d{1,3})"#)
+        pattern: #"^\s*((?:\d{1,5}:)?\d{1,2}:\d{1,2}[,.]\d{1,3})\s*-->\s*((?:\d{1,5}:)?\d{1,2}:\d{1,2}[,.]\d{1,3})"#)
 
     static func timingLine(_ line: String) -> (start: Double, end: Double)? {
         let range = NSRange(line.startIndex..., in: line)
@@ -162,23 +176,28 @@ enum SubtitleParser {
         return (start, end)
     }
 
+    /// Время дальше этого (≈ 115 суток) — мусор, а не реплика.
+    static let maxSeconds: Double = 10_000_000
+
     /// «1:02:03,5» → 3723,5. Дробная часть — по числу цифр (`,5` — полсекунды, `,500` — тоже).
+    /// Часы — до 5 цифр, минуты и секунды — до 2, дробь — до 3: длинная строка цифр в файле не переполнит счёт.
     static func seconds(_ text: String) -> Double? {
         let parts = text.split(whereSeparator: { $0 == ":" || $0 == "," || $0 == "." }).map(String.init)
-        guard parts.count >= 3, parts.count <= 4 else { return nil }
-        let numbers = parts.compactMap { Int($0) }
-        guard numbers.count == parts.count else { return nil }
-        let fraction = Double(numbers.last!) / pow(10, Double(parts.last!.count))
-        let whole = numbers.dropLast()
-        let total = whole.reduce(0) { $0 * 60 + $1 }
-        return Double(total) + fraction
+        guard parts.count >= 3, parts.count <= 4,
+              parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { return nil }
+        let whole = parts.dropLast()
+        guard parts.last!.count <= 3, whole.first!.count <= 5, whole.dropFirst().allSatisfy({ $0.count <= 2 }) else { return nil }
+        let fraction = Double(Int(parts.last!)!) / pow(10, Double(parts.last!.count))
+        let total = whole.reduce(0.0) { $0 * 60 + Double(Int($1)!) } + fraction
+        return total <= maxSeconds ? total : nil
     }
 
     static func parseSRT(_ text: String) -> SubtitleTrack {
         let lines = text.components(separatedBy: "\n")
         var cues: [SubtitleCue] = []
         var index = 0
-        while index < lines.count {
+        // Сменили файл или закрыли окно — разбор, начатый для него, прекращается.
+        while index < lines.count, !Task.isCancelled {
             guard let time = timingLine(lines[index]) else { index += 1; continue }
             var body: [String] = []
             var next = index + 1
@@ -212,10 +231,16 @@ enum SubtitleParser {
             cue.runs.append(run)
             buffer = ""
         }
+        // Без пары дальше по тексту — остаток уже не ищем: иначе мусор из сотен «<» разбирается квадратично.
+        var angleOpen = true, braceOpen = true
         var index = text.startIndex
         while index < text.endIndex {
             let character = text[index]
-            if character == "<", let close = text[index...].firstIndex(of: ">") {
+            let close = character == "<" && angleOpen ? text[index...].firstIndex(of: ">")
+                : character == "{" && braceOpen ? text[index...].firstIndex(of: "}") : nil
+            if close == nil, character == "<" { angleOpen = false }
+            if close == nil, character == "{" { braceOpen = false }
+            if character == "<", let close {
                 flush()
                 let tag = text[text.index(after: index)..<close].trimmingCharacters(in: .whitespaces).lowercased()
                 let closing = tag.hasPrefix("/")
@@ -235,7 +260,7 @@ enum SubtitleParser {
                 default: break
                 }
                 index = text.index(after: close)
-            } else if character == "{", let close = text[index...].firstIndex(of: "}") {
+            } else if character == "{", let close {
                 flush()
                 let block = String(text[text.index(after: index)..<close])
                 if block.hasPrefix("\\") { applyOverrides(block, to: &state, cue: &cue, style: nil) }
@@ -283,7 +308,7 @@ enum SubtitleParser {
     static func parseVTT(_ text: String) -> SubtitleTrack {
         let blocks = text.components(separatedBy: "\n\n")
         var cues: [SubtitleCue] = []
-        for block in blocks {
+        for block in blocks where !Task.isCancelled {
             let lines = block.components(separatedBy: "\n").filter { !$0.isEmpty }
             guard let timingIndex = lines.firstIndex(where: { $0.contains("-->") }),
                   let time = vttTiming(lines[timingIndex]) else { continue }
@@ -326,7 +351,7 @@ enum SubtitleParser {
         var legacyAlignment = false
         var cues: [SubtitleCue] = []
 
-        for raw in text.components(separatedBy: "\n") {
+        for raw in text.components(separatedBy: "\n") where !Task.isCancelled {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("[") && line.hasSuffix("]") {
                 section = line.lowercased()

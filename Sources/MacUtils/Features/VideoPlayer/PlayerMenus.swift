@@ -324,7 +324,7 @@ struct PlaylistPanel: View {
                 Text(item.url.lastPathComponent).font(DS.Font.manrope(12.5, current ? .heavy : .semibold, relativeTo: .callout))
                     .foregroundStyle(unsupported ? Color.dsMute : Color.dsText).lineLimit(1).truncationMode(.middle)
                 if unsupported {
-                    Text("\(PlayerMedia.formatName(item.url)) — в следующей версии").font(DS.Font.manrope(10.5, .semibold, relativeTo: .caption2))
+                    Text("\(PlayerMedia.formatName(item.url)) — не открывается в macOS").font(DS.Font.manrope(10.5, .semibold, relativeTo: .caption2))
                         .foregroundStyle(DS.Tone.warning.text).lineLimit(1)
                 } else if current, model.duration > 0 {
                     CurrentProgress(clock: model.clock, duration: model.duration)

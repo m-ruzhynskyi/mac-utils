@@ -130,11 +130,10 @@ struct MeetingsPage: View {
         }
     }
 
-    /// Готовые дорожки встречи («Собеседники.m4a», «Микрофон.m4a»), без незаконченных кусков.
+    /// Готовые дорожки встречи («Собеседники.m4a», «Я.m4a»): две проверки файлов вместо чтения папки при каждой перерисовке.
     static func audioFiles(_ meeting: MeetingRecorder.Meeting) -> [URL] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: meeting.folder.path)) ?? []
-        return names.filter { $0.hasSuffix(".m4a") && !$0.contains(".part-") && !$0.contains(".merging") }.sorted()
-            .map { meeting.folder.appendingPathComponent($0) }
+        [MeetingFiles.systemTrack, MeetingFiles.micTrack].map { meeting.folder.appendingPathComponent("\($0).m4a") }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     private func meetingRow(_ meeting: MeetingRecorder.Meeting) -> some View {

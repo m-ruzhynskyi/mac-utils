@@ -96,10 +96,10 @@ final class PlayerFeatureTests: XCTestCase {
         XCTAssertEqual(file.encoding, .windows1251)
         model.subtitles.select(.external(file.id))
         XCTAssertEqual(model.subtitles.cues(at: 1).first?.text, "Привет, это первая реплика")
-        model.subtitles.reencode(.koi8R)
+        await model.subtitles.reencode(.koi8R).value
         XCTAssertEqual(model.subtitles.selectedExternal?.encoding, .koi8R)
         XCTAssertNotEqual(model.subtitles.cues(at: 1).first?.text, "Привет, это первая реплика", "ручная кодировка перечитывает байты")
-        model.subtitles.reencode(.windows1251)
+        await model.subtitles.reencode(.windows1251).value
         XCTAssertEqual(model.subtitles.cues(at: 1).first?.text, "Привет, это первая реплика")
     }
 
@@ -109,13 +109,13 @@ final class PlayerFeatureTests: XCTestCase {
         model.open([try await demo("plain.mp4")])
         try await waitUntil("ready") { model.phase == .ready }
         let ass = try DemoSubtitles.write(DemoSubtitles.ass, .utf8BOM, to: folder.appendingPathComponent("другое имя.ass"))
-        model.subtitles.addExternal(ass)
+        await model.subtitles.addExternal(ass).value
         XCTAssertEqual(model.subtitles.selectedExternal?.url, ass, "добавленный файл сразу включён")
         XCTAssertFalse(model.subtitles.selectedExternal?.nearby ?? true)
         XCTAssertEqual(model.playlist.count, 1, "субтитры — не в плейлист")
         let broken = folder.appendingPathComponent("пусто.srt")
         try Data("мусор".utf8).write(to: broken)
-        model.subtitles.addExternal(broken)
+        await model.subtitles.addExternal(broken).value
         XCTAssertNotNil(model.subtitles.lastError, "понятная ошибка, а не падение")
         XCTAssertEqual(model.subtitles.selectedExternal?.url, ass, "прежний выбор остался")
     }

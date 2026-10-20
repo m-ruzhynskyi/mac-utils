@@ -67,6 +67,8 @@ final class SubtitleController: ObservableObject {
     }
 
     func reset() {
+        pending.values.forEach { $0.cancel() }
+        pending = [:]
         embedded = []
         external = []
         selection = .off
@@ -89,8 +91,8 @@ final class SubtitleController: ObservableObject {
             let folder = url.deletingLastPathComponent()
             let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
             for candidate in SubtitleFinder.candidates(for: url, names: names).prefix(8) {
-                let loaded = await Task.detached(priority: .userInitiated) { try? SubtitleParser.load(candidate.url) }.value
-                guard let loaded else { continue }
+                guard !Task.isCancelled else { return }
+                guard let loaded = try? await Self.parseFile(candidate.url) else { continue }
                 nearby.append(External(url: candidate.url, language: candidate.language, track: loaded.track,
                                        encoding: loaded.encoding, nearby: true))
             }
@@ -115,7 +117,16 @@ final class SubtitleController: ObservableObject {
         return .off
     }
 
+    /// Разбор файла вне главного потока. Отмена задачи (смена файла, закрытие окна) прерывает разбор.
+    nonisolated static func parseFile(_ url: URL, encoding: TextEncoding? = nil) async throws
+        -> (track: SubtitleTrack, encoding: TextEncoding) {
+        let loaded = try SubtitleParser.load(url, encoding: encoding)
+        try Task.checkCancellation()
+        return loaded
+    }
+
     /// Текст дорожки tx3g / WebVTT целиком (дорожка субтитров — килобайты). Другие форматы не показываем.
+    /// Читается вне главного потока; отмена задачи останавливает чтение.
     nonisolated static func read(_ track: AVAssetTrack, asset: AVAsset) async -> Embedded? {
         guard let format = try? await track.load(.formatDescriptions).first else { return nil }
         let subtype = format.mediaSubType.rawValue
@@ -124,31 +135,35 @@ final class SubtitleController: ObservableObject {
         let code = try? await track.load(.languageCode)
         let language = (tag ?? nil) ?? (code ?? nil)
         let id = track.trackID
-        let cues: [SubtitleCue]? = await Task.detached(priority: .userInitiated) {
-            guard let reader = try? AVAssetReader(asset: asset) else { return nil }
-            let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
-            guard reader.canAdd(output) else { return nil }
-            reader.add(output)
-            guard reader.startReading() else { return nil }
-            var cues: [SubtitleCue] = []
-            while let sample = output.copyNextSampleBuffer() {
-                let start = CMSampleBufferGetPresentationTimeStamp(sample).seconds
-                let duration = CMSampleBufferGetDuration(sample).seconds
-                guard start.isFinite, let block = CMSampleBufferGetDataBuffer(sample) else { continue }
-                var data = Data(count: CMBlockBufferGetDataLength(block))
-                data.withUnsafeMutableBytes { raw in
-                    _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: raw.count, destination: raw.baseAddress!)
-                }
-                let text = subtype == kCMTextFormatType_3GText ? tx3gText(data) : webVTTText(data)
-                guard !text.isEmpty else { continue }
-                var cue = SubtitleParser.markup(text)
-                cue.start = start
-                cue.end = duration.isFinite && duration > 0 ? start + duration : start + 3
-                cues.append(cue)
+        guard let reader = try? AVAssetReader(asset: asset) else { return nil }
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        guard reader.canAdd(output) else { return nil }
+        reader.add(output)
+        guard reader.startReading() else { return nil }
+        var cues: [SubtitleCue] = []
+        while let sample = output.copyNextSampleBuffer() {
+            if Task.isCancelled {
+                reader.cancelReading()
+                return nil
             }
-            return cues
-        }.value
-        guard let cues else { return nil }
+            let start = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+            let duration = CMSampleBufferGetDuration(sample).seconds
+            guard start.isFinite, let block = CMSampleBufferGetDataBuffer(sample) else { continue }
+            let length = CMBlockBufferGetDataLength(block)
+            // Пустой образец (промежуток между репликами) — читать нечего.
+            guard length > 0 else { continue }
+            var data = Data(count: length)
+            data.withUnsafeMutableBytes { raw in
+                guard let base = raw.baseAddress else { return }
+                _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: raw.count, destination: base)
+            }
+            let text = subtype == kCMTextFormatType_3GText ? tx3gText(data) : webVTTText(data)
+            guard !text.isEmpty else { continue }
+            var cue = SubtitleParser.markup(text)
+            cue.start = start
+            cue.end = duration.isFinite && duration > 0 ? start + duration : start + 3
+            cues.append(cue)
+        }
         let codec = subtype == kCMTextFormatType_3GText ? "mov_text" : "WebVTT"
         let track = SubtitleTrack(format: subtype == kCMTextFormatType_3GText ? .srt : .vtt, cues: cues)
         return Embedded(id: id, title: languageName(language) ?? "Дорожка \(id)", language: language, codec: codec, track: track)
@@ -193,33 +208,61 @@ final class SubtitleController: ObservableObject {
     }
 
     /// «Добавить файл…» или перетаскивание `.srt` на окно — к текущему видео, сразу включается.
-    func addExternal(_ url: URL) {
+    /// Файл разбирается вне главного потока; сменили видео или закрыли окно — результат не нужен.
+    @discardableResult
+    func addExternal(_ url: URL) -> Task<Void, Never> {
         if let existing = external.first(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
-            return select(.external(existing.id))
+            select(.external(existing.id))
+            return Task {}
         }
-        do {
-            let loaded = try SubtitleParser.load(url)
-            let base = model?.currentURL?.deletingPathExtension().lastPathComponent.lowercased() ?? ""
-            let stem = url.deletingPathExtension().lastPathComponent
-            let language = stem.lowercased().hasPrefix(base + ".") && !base.isEmpty ? String(stem.dropFirst(base.count + 1)) : nil
-            let item = External(url: url, language: language, track: loaded.track, encoding: loaded.encoding, nearby: false)
-            external.append(item)
-            select(.external(item.id))
-        } catch {
-            lastError = "«\(url.lastPathComponent)»: \(error.localizedDescription)"
+        let video = model?.currentURL
+        return run { [weak self] in
+            let result: Result<(track: SubtitleTrack, encoding: TextEncoding), Error>
+            do { result = .success(try await Self.parseFile(url)) } catch { result = .failure(error) }
+            guard let self, !Task.isCancelled, self.model?.currentURL == video else { return }
+            switch result {
+            case .success(let loaded):
+                let base = video?.deletingPathExtension().lastPathComponent.lowercased() ?? ""
+                let stem = url.deletingPathExtension().lastPathComponent
+                let language = stem.lowercased().hasPrefix(base + ".") && !base.isEmpty ? String(stem.dropFirst(base.count + 1)) : nil
+                let item = External(url: url, language: language, track: loaded.track, encoding: loaded.encoding, nearby: false)
+                self.external.append(item)
+                self.select(.external(item.id))
+            case .failure(let error):
+                self.lastError = "«\(url.lastPathComponent)»: \(error.localizedDescription)"
+            }
         }
     }
 
-    /// Ручной выбор кодировки внешнего файла: те же байты перечитываются.
-    func reencode(_ encoding: TextEncoding) {
-        guard let current = selectedExternal, let index = external.firstIndex(where: { $0.id == current.id }) else { return }
-        do {
-            let loaded = try SubtitleParser.load(current.url, encoding: encoding)
-            external[index].track = loaded.track
-            external[index].encoding = loaded.encoding
-        } catch {
-            lastError = error.localizedDescription
+    /// Ручной выбор кодировки внешнего файла: те же байты перечитываются (вне главного потока).
+    @discardableResult
+    func reencode(_ encoding: TextEncoding) -> Task<Void, Never> {
+        guard let current = selectedExternal else { return Task {} }
+        return run { [weak self] in
+            let result: Result<(track: SubtitleTrack, encoding: TextEncoding), Error>
+            do { result = .success(try await Self.parseFile(current.url, encoding: encoding)) } catch { result = .failure(error) }
+            guard let self, !Task.isCancelled, let index = self.external.firstIndex(where: { $0.id == current.id }) else { return }
+            switch result {
+            case .success(let loaded):
+                self.external[index].track = loaded.track
+                self.external[index].encoding = loaded.encoding
+            case .failure(let error):
+                self.lastError = error.localizedDescription
+            }
         }
+    }
+
+    /// Разборы, начатые по просьбе пользователя: отменяются при смене файла и закрытии окна, по завершении убираются.
+    private var pending: [UUID: Task<Void, Never>] = [:]
+
+    private func run(_ body: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let id = UUID()
+        let task = Task { [weak self] in
+            await body()
+            self?.pending[id] = nil
+        }
+        pending[id] = task
+        return task
     }
 
     func shiftDelay(_ step: Double) {

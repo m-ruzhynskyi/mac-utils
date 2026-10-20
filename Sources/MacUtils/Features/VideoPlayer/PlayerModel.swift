@@ -101,7 +101,8 @@ final class PlayerModel: ObservableObject {
     var onPlayingChange: ((Bool) -> Void)?
     /// Файл доиграл сам; `true` — модель уже перешла к следующему.
     var onFinish: ((Bool) -> Void)?
-    var onSeek: (() -> Void)?
+    /// Перемотка или смена скорости: «Сейчас играет» пересчитывает позицию и скорость.
+    var onTimingChange: (() -> Void)?
 
     /// Сколько наблюдателей сейчас стоит (для `IdleCPUTests`).
     var activeObserverCount: Int { (timeObserver == nil ? 0 : 1) + observations.count + (endObserver == nil ? 0 : 1) }
@@ -237,14 +238,23 @@ final class PlayerModel: ObservableObject {
 
     private func observe(_ item: AVPlayerItem) {
         observations = [
+            // Сигнал уже поставленного в очередь прежнего элемента не должен менять состояние нового файла.
             item.observe(\.status, options: [.new]) { [weak self] item, _ in
                 let status = item.status
                 let error = item.error
-                Task { @MainActor in self?.statusChanged(status, error: error) }
+                let source = UncheckedSendable(item)
+                Task { @MainActor in
+                    guard let self, source.value === self.player.currentItem else { return }
+                    self.statusChanged(status, error: error)
+                }
             },
             item.observe(\.loadedTimeRanges, options: [.new]) { [weak self] item, _ in
                 let end = item.loadedTimeRanges.map { $0.timeRangeValue.end.seconds }.max() ?? 0
-                Task { @MainActor in self?.clock.buffered = end.isFinite ? end : 0 }
+                let source = UncheckedSendable(item)
+                Task { @MainActor in
+                    guard let self, source.value === self.player.currentItem else { return }
+                    self.clock.buffered = end.isFinite ? end : 0
+                }
             },
             player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
                 let playing = player.timeControlStatus != .paused
@@ -398,6 +408,7 @@ final class PlayerModel: ObservableObject {
     }
 
     private func applyRate() {
+        defer { onTimingChange?() }
         player.defaultRate = effectiveRate
         if player.rate != 0 { player.rate = effectiveRate }
     }
@@ -413,7 +424,7 @@ final class PlayerModel: ObservableObject {
         clock.time = target
         skip.noteSeek()
         player.seek(to: time, toleranceBefore: before, toleranceAfter: after) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onSeek?() }
+            MainActor.assumeIsolated { self?.onTimingChange?() }
         }
     }
 

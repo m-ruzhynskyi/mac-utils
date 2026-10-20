@@ -202,11 +202,13 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         }
         model.onItemChange = { [weak self] in self?.itemChanged() }
         model.onPlayingChange = { [weak self] playing in self?.playingChanged(playing) }
-        model.onSeek = { PlayerSystem.shared.update() }
+        model.onTimingChange = { PlayerSystem.shared.update() }
         Self.windows.append(self)
     }
 
     func present() {
+        // Закрытое окно не возвращаем (его виды уже отпущены) — показываем другое или новое.
+        guard !closing else { return Self.show() }
         let wasVisible = window.isVisible
         if !wasVisible, !Self.anyOpen { FocusReturn.remember() }
         Self.syncDock(true)
@@ -270,9 +272,14 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         window.centerTrafficLights()
     }
 
+    /// Окно закрыто насовсем: контроллер больше не показывается (возврат из PiP его не оживит).
+    var isClosed: Bool { closing }
+
     func windowWillClose(_ notification: Notification) {
         guard !closing else { return }
         closing = true
+        // PiP не переживает окно: иначе в нём остался бы пустой плеер, а возврат из PiP открыл бы закрытое окно.
+        window.videoView?.stopPictureInPicture()
         endHold()
         chromeWork?.cancel()
         ui.reset()
@@ -283,6 +290,9 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         Self.windows.removeAll { $0 === self }
         PlayerSystem.shared.update()
         if Self.windows.isEmpty { PlayerMediaInfoCache.shared.clear() }
+        // Виды держат контроллер (`PlayerRootView.controller`), а окно — виды: без этого закрытое окно
+        // с моделью, AVPlayer и слоем жили бы до выхода из программы.
+        window.contentView = nil
         DispatchQueue.main.async {
             Self.syncDock(Self.anyOpen)
             if !Self.anyOpen, !SettingsWindowController.shared.isVisible { FocusReturn.restore() }
@@ -482,11 +492,11 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     // MARK: - Перетаскивание
 
     /// Файлы на окно: видео — в плейлист после текущего, субтитры — к текущему видео.
+    /// Сначала видео (его открытие сбрасывает субтитры прежнего файла), потом субтитры — к нему.
     func dropped(_ urls: [URL]) {
-        let subtitles = urls.filter(PlayerMedia.isSubtitle)
-        for url in subtitles { model.subtitles.addExternal(url) }
         let media = PlayerMedia.expand(urls.filter { !PlayerMedia.isSubtitle($0) })
         if !media.isEmpty { model.open(media) }
+        for url in urls.filter(PlayerMedia.isSubtitle) { model.subtitles.addExternal(url) }
     }
 
     /// «Открыть в другой программе…» на экране неподдерживаемого формата.

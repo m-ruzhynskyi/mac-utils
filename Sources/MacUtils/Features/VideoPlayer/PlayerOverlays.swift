@@ -356,7 +356,7 @@ struct EmptyPlayerView: View {
                 VStack(spacing: DS.Space.s) {
                     Image(systemName: "play.rectangle.on.rectangle").font(.system(size: 30, weight: .regular)).foregroundStyle(.dsAccText)
                     Text("Перетащите видео или откройте файл").font(DS.Font.headline).foregroundStyle(.dsText)
-                    Text("MP4, MOV, M4V и аудио — сразу; MKV, WebM и AVI — в следующей версии")
+                    Text("MP4, MOV, M4V и аудио; MKV, WebM и AVI macOS не открывает")
                         .font(DS.Font.rowSub).foregroundStyle(.dsMute).multilineTextAlignment(.center)
                     Button("Открыть… ⌘O") { PlayerWindowController.openPanel() }
                         .buttonStyle(.graphite(.primary, size: .compact))
@@ -429,7 +429,7 @@ struct UnsupportedCard: View {
                 ToastTile(symbol: "film.stack", tone: .warning)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(format) не открывается встроенным плеером macOS").font(DS.Font.headline).foregroundStyle(.dsText)
-                    Text("Сразу играют MP4, MOV и M4V. Поддержка MKV, WebM и AVI появится в следующей версии Mac Utils. Пока файл можно открыть в другой программе.")
+                    Text("Встроенный плеер macOS играет MP4, MOV и M4V, а MKV, WebM и AVI — нет. Файл можно открыть в другой программе.")
                         .font(DS.Font.body).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -489,6 +489,8 @@ final class PlayerMediaInfoCache: ObservableObject {
     @Published private var thumbnails: [URL: NSImage] = [:]
     @Published private var durations: [URL: Double] = [:]
     private var requested: Set<URL> = []
+    /// Растёт при `clear()`: запросы, начатые до очистки, свои результаты уже не записывают.
+    private var generation = 0
 
     func thumbnail(of url: URL) -> NSImage? { thumbnails[url] }
     func duration(of url: URL) -> Double? { durations[url] }
@@ -497,16 +499,18 @@ final class PlayerMediaInfoCache: ObservableObject {
         guard !requested.contains(url), !PlayerMedia.isUnsupported(url), FileManager.default.fileExists(atPath: url.path) else { return }
         if requested.count >= Self.limit { clear() }
         requested.insert(url)
+        let generation = generation
         Task {
             let asset = AVURLAsset(url: url)
             let duration = (try? await asset.load(.duration))?.seconds
+            guard generation == self.generation else { return }
             if let duration, duration.isFinite { durations[url] = duration }
-            guard (try? await asset.loadTracks(withMediaType: .video))?.isEmpty == false else { return }
+            guard (try? await asset.loadTracks(withMediaType: .video))?.isEmpty == false, generation == self.generation else { return }
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
             generator.maximumSize = CGSize(width: 320, height: 320)
             let at = CMTime(seconds: min(10, (duration ?? 0) * 0.1), preferredTimescale: 600)
-            if let image = try? await generator.image(at: at).image {
+            if let image = try? await generator.image(at: at).image, generation == self.generation {
                 thumbnails[url] = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
             }
         }
@@ -514,6 +518,7 @@ final class PlayerMediaInfoCache: ObservableObject {
 
     /// Последнее окно плеера закрыли — память не держим.
     func clear() {
+        generation += 1
         thumbnails = [:]
         durations = [:]
         requested = []

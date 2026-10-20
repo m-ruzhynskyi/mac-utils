@@ -268,23 +268,27 @@ enum NeroChapters {
     }
 
     /// Атомы подряд: (тип, полезная нагрузка). 64-битный размер и «до конца» поддерживаются.
+    /// Размеры из файла сравниваются с остатком данных вычитанием: `offset + size` на мусорном размере переполнился бы.
+    /// Разбирает и полезную нагрузку образцов WebVTT, которую AVFoundation не проверяет, — поэтому без доверия к данным.
     static func boxes(in data: Data) -> [(type: String, payload: Data)] {
         var result: [(String, Data)] = []
         var offset = data.startIndex
-        while offset + 8 <= data.endIndex {
-            var size = Int(data[offset..<offset + 4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) })
+        while data.endIndex - offset >= 8 {
+            let remaining = data.endIndex - offset
+            var size = UInt64(data[offset..<offset + 4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) })
             let type = String(decoding: data[offset + 4..<offset + 8], as: UTF8.self)
             var header = 8
             if size == 1 {
-                guard offset + 16 <= data.endIndex else { break }
-                size = Int(clamping: data[offset + 8..<offset + 16].reduce(UInt64(0)) { $0 << 8 | UInt64($1) })
+                guard remaining >= 16 else { break }
+                size = data[offset + 8..<offset + 16].reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
                 header = 16
             } else if size == 0 {
-                size = data.endIndex - offset
+                size = UInt64(remaining)
             }
-            guard size >= header, offset + size <= data.endIndex else { break }
-            result.append((type, data[offset + header..<offset + size]))
-            offset += size
+            guard size >= UInt64(header), size <= UInt64(remaining) else { break }
+            let length = Int(size)
+            result.append((type, data[offset + header..<offset + length]))
+            offset += length
         }
         return result.map { (type: $0.0, payload: $0.1) }
     }
@@ -295,7 +299,7 @@ enum NeroChapters {
         defer { try? handle.close() }
         var offset: UInt64 = 0
         let end = (try? handle.seekToEnd()) ?? 0
-        while offset + 8 <= end {
+        while end - offset >= 8 {
             try? handle.seek(toOffset: offset)
             guard let header = try? handle.read(upToCount: 16), header.count >= 8 else { break }
             var size = UInt64(header.prefix(4).reduce(UInt32(0)) { $0 << 8 | UInt32($1) })
@@ -307,7 +311,8 @@ enum NeroChapters {
             } else if size == 0 {
                 size = end - offset
             }
-            guard size >= headerSize else { break }
+            // Остаток файла — вычитанием: мусорный 64-битный размер не переполнит `offset + size`.
+            guard size >= headerSize, size <= end - offset else { break }
             if type == "moov" {
                 guard size - headerSize <= UInt64(maxMoovBytes) else { return [] }
                 try? handle.seek(toOffset: offset + headerSize)
