@@ -59,6 +59,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     @Published var mode = EditorViewMode.code
     /// Показ документом — создаётся при первом переходе в «Документ».
     var documentController: DocumentController?
+    /// С последнего сохранения правили из «Документа» — запись только после проверок без потерь.
+    var editedInDocument = false
     var matchesBrackets = true { didSet { refreshBrackets() } }
     /// Где сейчас подсвечены скобки (временный атрибут фона).
     private var bracketRanges: [NSRange] = []

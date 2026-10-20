@@ -52,6 +52,9 @@ extension EditorTab {
         mode = .document
     }
 
+    /// Правка сделана из «Документа» — перед записью нужна проверка без потерь (`DocSaveGuard`).
+    func noteDocumentEdit() { editedInDocument = true }
+
     /// «Показать в коде»: в «Код» и выделить кусок исходника.
     func showInCode(_ range: NSRange) {
         setMode(.code)

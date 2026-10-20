@@ -6,6 +6,12 @@ enum EditorViewMode: String, Codable, CaseIterable {
     case code, document
 }
 
+/// Точечная правка исходника: кусок `range` (в координатах исходника до правки) заменяется на `text`.
+struct DocEdit: Equatable {
+    var range: NSRange
+    var text: String
+}
+
 /// Что показывает панель форматирования про выделение (смешанное — `nil`).
 struct DocSelectionInfo: Equatable {
     var fontName: String?
@@ -297,8 +303,39 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         return string
     }
 
-    /// Двойной клик по полю страницы — правка колонтитула (D-4а); пока — нет.
-    func doubleClick(_ event: NSEvent, on page: DocPageView) -> Bool { false }
+    /// Двойной клик по полю страницы — правка колонтитула (D-4а): `true` — обработан.
+    var onPageDoubleClick: ((NSEvent, DocPageView) -> Bool)?
+
+    func doubleClick(_ event: NSEvent, on page: DocPageView) -> Bool { onPageDoubleClick?(event, page) ?? false }
+
+    // MARK: - Правка исходника
+
+    /// Все правки из «Документа» идут сюда: одним шагом отмены (общей с «Кодом»), только указанные куски исходника,
+    /// затем показ обновляется сразу. `select` — показанное выделение после правки (по новой карте).
+    @discardableResult
+    func apply(_ edits: [DocEdit], actionName: String, select: ((DocRendering) -> NSRange)? = nil) -> Bool {
+        guard let tab, !edits.isEmpty else { return false }
+        let sorted = edits.sorted { $0.range.location < $1.range.location }
+        for (a, b) in zip(sorted, sorted.dropFirst()) where NSMaxRange(a.range) > b.range.location {
+            assertionFailure("Правки «Документа» не должны пересекаться")
+            return false
+        }
+        guard sorted.allSatisfy({ NSMaxRange($0.range) <= tab.storage.length }) else { return false }
+        guard tab.textView.replace(sorted.map(\.range), with: sorted.map(\.text), actionName: actionName) else { return false }
+        tab.noteDocumentEdit()
+        refresh(select: select)
+        return true
+    }
+
+    /// Показанное выделение (у всех страниц оно общее).
+    var selectedUnits: NSRange { textViews.first?.selectedRange() ?? NSRange(location: 0, length: 0) }
+
+    /// Абзацы модели, которых касается выделение (у курсора — его абзац).
+    func paragraphs(in units: NSRange) -> [Int] {
+        guard let first = rendering.paragraph(atUnit: units.location) else { return [] }
+        let last = rendering.paragraph(atUnit: max(units.location, NSMaxRange(units) - 1)) ?? first
+        return Array(first...max(first, last))
+    }
 
     // MARK: - Знаки $
 
