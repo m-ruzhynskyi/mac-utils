@@ -558,6 +558,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
             return (tab?.dollars.removableCount ?? 0) > 0
         case #selector(editorFindNext(_:)), #selector(editorFindPrevious(_:)):
             return tab != nil && !workspace.search.query.isEmpty
+        case #selector(editorNextBookmark(_:)), #selector(editorPreviousBookmark(_:)), #selector(editorClearBookmarks(_:)):
+            return !(tab?.bookmarks.isEmpty ?? true)
         case #selector(editorZoomOut(_:)):
             return tab != nil && workspace.zoom > EditorStyle.zoomRange.lowerBound
         case #selector(editorZoomIn(_:)):
@@ -608,6 +610,25 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
     @objc func editorTrimTrailing(_ sender: Any?) { tab?.apply(LineCommands.trimTrailingWhitespace, name: "Удалить хвостовые пробелы") }
     @objc func editorUppercase(_ sender: Any?) { tab?.apply({ LineCommands.changeCase($0, $1, .upper) }, name: "ВЕРХНИЙ РЕГИСТР") }
     @objc func editorLowercase(_ sender: Any?) { tab?.apply({ LineCommands.changeCase($0, $1, .lower) }, name: "нижний регистр") }
+    @objc func editorSortAscending(_ sender: Any?) { tab?.apply({ LineCommands.sort($0, $1, .ascending) }, name: "Сортировать") }
+    @objc func editorSortDescending(_ sender: Any?) { tab?.apply({ LineCommands.sort($0, $1, .descending) }, name: "Сортировать") }
+    @objc func editorSortCaseInsensitive(_ sender: Any?) { tab?.apply({ LineCommands.sort($0, $1, .caseInsensitive) }, name: "Сортировать") }
+    @objc func editorRemoveDuplicates(_ sender: Any?) {
+        tab?.apply({ LineCommands.removeDuplicates($0, $1, caseSensitive: true) }, name: "Удалить повторы")
+    }
+    @objc func editorRemoveDuplicatesCaseInsensitive(_ sender: Any?) {
+        tab?.apply({ LineCommands.removeDuplicates($0, $1, caseSensitive: false) }, name: "Удалить повторы")
+    }
+    @objc func editorTabsToSpaces(_ sender: Any?) {
+        tab?.apply({ LineCommands.tabsToSpaces($0, $1, width: EditorPrefs.tabWidth) }, name: "Табы → пробелы")
+    }
+    @objc func editorSpacesToTabs(_ sender: Any?) {
+        tab?.apply({ LineCommands.spacesToTabs($0, $1, width: EditorPrefs.tabWidth) }, name: "Пробелы → табы")
+    }
+    @objc func editorToggleBookmark(_ sender: Any?) { tab?.toggleBookmark() }
+    @objc func editorNextBookmark(_ sender: Any?) { tab?.goToBookmark(backwards: false) }
+    @objc func editorPreviousBookmark(_ sender: Any?) { tab?.goToBookmark(backwards: true) }
+    @objc func editorClearBookmarks(_ sender: Any?) { tab?.clearBookmarks() }
     @objc func editorSentenceCase(_ sender: Any?) { tab?.apply({ LineCommands.changeCase($0, $1, .sentence) }, name: "Как в предложении") }
 }
 

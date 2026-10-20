@@ -11,6 +11,7 @@ struct TextEditorPage: View {
     @AppStorage(Pref.editorNewLineEnding) private var newLineEnding = LineEnding.lf.rawValue
     @AppStorage(Pref.editorRestoreSession) private var restore = true
     @AppStorage(Pref.editorAutosaveDrafts) private var drafts = true
+    @AppStorage(Pref.editorTabWidth) private var tabWidth = 4
 
     static let extensions = ["frm", "rtf", "txt", "log", "json", "xml", "csv"]
 
@@ -56,6 +57,10 @@ struct TextEditorPage: View {
                     .labelsHidden()
                     .graphitePicker()
                     .fixedSize()
+                }
+                Row("Ширина табуляции", subtitle: "Сколько пробелов в табе — на экране и в «Табы ↔ пробелы»", systemImage: "arrow.right.to.line") {
+                    GraphiteStepper(value: Binding(get: { min(max(tabWidth, 1), 8) }, set: { tabWidth = min(max($0, 1), 8) }),
+                                    range: 1...8, label: "Ширина табуляции")
                 }
                 Row("Перевод строки новых документов", systemImage: "return") {
                     Segmented(selection: $newLineEnding, options: LineEnding.allCases.map { ($0.rawValue, $0.title) })

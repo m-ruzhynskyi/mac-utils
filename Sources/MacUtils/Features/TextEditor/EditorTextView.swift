@@ -188,13 +188,113 @@ final class EditorTextView: NSTextView {
 
     // MARK: - Ввод
 
+    private var isInsertingBreak = false
+
     override func insertNewline(_ sender: Any?) {
+        isInsertingBreak = true
+        defer { isInsertingBreak = false }
         insertText(lineBreak, replacementRange: selectedRange())
     }
 
     override func insertNewlineIgnoringFieldEditor(_ sender: Any?) { insertNewline(sender) }
 
+    // MARK: - Несколько выделений и курсоров
+
+    /// Дополнительные курсоры (кроме выделения `NSTextView`, которое пустым бывает только одно). Появляются после ввода
+    /// в прямоугольное выделение (⌥ + перетаскивание) и по ⌘-клику / ⌃⇧↑↓.
+    private(set) var extraCarets: [Int] = []
+    /// Курсоров и выделений всего (для строки состояния).
+    var cursorCount: Int { selectedRanges.count + extraCarets.count }
+    var onCursorsChange: (() -> Void)?
+    private var keepingCarets = false
+
+    /// Все места правки: выделения и дополнительные курсоры, по возрастанию, без пересечений.
+    var editTargets: [NSRange] {
+        let ranges = selectedRanges.map(\.rangeValue) + extraCarets.map { NSRange(location: $0, length: 0) }
+        var result: [NSRange] = []
+        for range in ranges.sorted(by: { ($0.location, $0.length) < ($1.location, $1.length) }) {
+            if let last = result.last {
+                // Тот же курсор дважды или курсор в начале выделения — одно место.
+                if range.length == 0, range.location == last.location { continue }
+                if range.location < NSMaxRange(last) {
+                    result[result.count - 1] = NSUnionRange(last, range)
+                    continue
+                }
+            }
+            result.append(range)
+        }
+        return result
+    }
+
+    var hasMultipleTargets: Bool { editTargets.count > 1 }
+
+    /// Поставить курсоры: первый — выделение `NSTextView`, остальные — дополнительные.
+    func setCarets(_ positions: [Int]) {
+        let length = textStorage?.length ?? 0
+        let sorted = Array(Set(positions.map { min(max($0, 0), length) })).sorted()
+        guard let first = sorted.first else { return }
+        keepingCarets = true
+        setSelectedRange(NSRange(location: first, length: 0))
+        keepingCarets = false
+        extraCarets = Array(sorted.dropFirst())
+        needsDisplay = true
+        onCursorsChange?()
+    }
+
+    func clearExtraCarets() {
+        guard !extraCarets.isEmpty || selectedRanges.count > 1 else { return }
+        extraCarets = []
+        keepingCarets = true
+        setSelectedRange(NSRange(location: selectedRange().location, length: 0))
+        keepingCarets = false
+        needsDisplay = true
+        onCursorsChange?()
+    }
+
+    /// Каждой цели — своя строка замены; один шаг отмены, затем курсор за каждой вставкой.
+    private func editAll(_ make: (NSRange) -> (range: NSRange, string: String)?) {
+        let edits = editTargets.compactMap(make).filter { $0.range.length > 0 || !$0.string.isEmpty }
+        guard !edits.isEmpty else { return NSSound.beep() }
+        guard replace(edits.map(\.range), with: edits.map(\.string), actionName: "Ввод") else { return }
+        var shift = 0
+        var carets: [Int] = []
+        for edit in edits {
+            let inserted = (edit.string as NSString).length
+            carets.append(edit.range.location + shift + inserted)
+            shift += inserted - edit.range.length
+        }
+        setCarets(carets)
+    }
+
+    private func insertEverywhere(_ typed: String) {
+        editAll { ($0, typed) }
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        guard hasMultipleTargets, let text = textStorage?.mutableString else { return super.deleteBackward(sender) }
+        // Пустой курсор удаляет символ перед собой, но не перевод строки (столбец не склеивает строки).
+        editAll { range in
+            if range.length > 0 { return (range, "") }
+            guard range.location > 0, !LineCommands.isBreak(text.character(at: range.location - 1)) else { return nil }
+            return (text.rangeOfComposedCharacterSequence(at: range.location - 1), "")
+        }
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        guard hasMultipleTargets, let text = textStorage?.mutableString else { return super.deleteForward(sender) }
+        editAll { range in
+            if range.length > 0 { return (range, "") }
+            guard range.location < text.length, !LineCommands.isBreak(text.character(at: range.location)) else { return nil }
+            return (text.rangeOfComposedCharacterSequence(at: range.location), "")
+        }
+    }
+
     override func insertText(_ string: Any, replacementRange: NSRange) {
+        if hasMultipleTargets, !hasMarkedText(), replacementRange.location == NSNotFound || isInsertingBreak,
+           let typed = (string as? String) ?? (string as? NSAttributedString)?.string {
+            insertEverywhere(typed)
+            return
+        }
         // Замена: один набранный символ вместо следующего, но не вместо перевода строки и не при вводе через IME.
         if overwrite, !hasMarkedText(), replacementRange.location == NSNotFound, selectedRange().length == 0,
            let typed = (string as? String) ?? (string as? NSAttributedString)?.string, !typed.contains(where: \.isNewline) {
@@ -229,8 +329,26 @@ final class EditorTextView: NSTextView {
         super.keyDown(with: event)
     }
 
-    /// Esc не открывает список автодополнения слов (в исходнике он только мешает).
-    override func cancelOperation(_ sender: Any?) { onEscape?() }
+    /// Esc: несколько курсоров — снова один; иначе закрыть панель поиска. Список автодополнения слов не открывается.
+    override func cancelOperation(_ sender: Any?) {
+        if hasMultipleTargets { return clearExtraCarets() }
+        onEscape?()
+    }
+
+    /// Дополнительные курсоры рисуем сами: `NSTextView` рисует только один.
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard !extraCarets.isEmpty, let layout = layoutManager, let container = textContainer else { return }
+        insertionPointColor.setFill()
+        let length = textStorage?.length ?? 0
+        for caret in extraCarets where caret <= length {
+            let glyph = layout.glyphIndexForCharacter(at: min(caret, max(0, length - 1)))
+            var rect = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: caret < length ? 1 : 0), in: container)
+            if caret >= length, length > 0 { rect.origin.x = rect.maxX }
+            let line = NSRect(x: rect.minX + textContainerOrigin.x, y: rect.minY + textContainerOrigin.y, width: 1.5, height: max(rect.height, 14))
+            if line.intersects(dirtyRect) { line.fill() }
+        }
+    }
 
     /// В режиме замены — курсор-блок шириной в символ.
     override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
@@ -287,7 +405,13 @@ final class EditorTextView: NSTextView {
     }
 
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        // Любой другой переход (клик, стрелки, поиск) — снова один курсор.
+        if !keepingCarets, !extraCarets.isEmpty {
+            extraCarets = []
+            needsDisplay = true
+        }
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        if !keepingCarets { onCursorsChange?() }
         guard highlightsCurrentLine else { return }
         if let old = drawnLineRect { setNeedsDisplay(old) }
         if let new = currentLineRect(), new != drawnLineRect { setNeedsDisplay(new) }
@@ -420,7 +544,16 @@ final class LineNumberGutter: NSView {
         let inText = NSPoint(x: 0, y: point.y + (text.enclosingScrollView?.contentView.bounds.minY ?? 0) - text.textContainerOrigin.y)
         let glyph = layout.glyphIndex(for: inText, in: container)
         let char = layout.characterIndexForGlyph(at: glyph)
-        let line = tab.lines.line(at: char)
+        var line = tab.lines.line(at: char)
+        // Под последней строкой (пустая строка после перевода) — она же.
+        if char == tab.storage.length, layout.extraLineFragmentRect.height > 0, inText.y >= layout.extraLineFragmentRect.minY {
+            line = tab.lines.lineCount
+        }
+        // Левая полоса колонки — закладка, остальное — выделить строку.
+        if point.x < 14 {
+            tab.toggleBookmark(line: line)
+            return
+        }
         let start = tab.lines.starts[line - 1]
         let end = line < tab.lines.lineCount ? tab.lines.starts[line] : tab.storage.length
         text.window?.makeFirstResponder(text)

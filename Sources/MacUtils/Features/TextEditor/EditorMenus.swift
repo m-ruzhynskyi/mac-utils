@@ -25,6 +25,8 @@ enum EditorMenus {
         return item
     }
 
+    private static func key(_ function: Int) -> String { String(Character(UnicodeScalar(UInt16(function))!)) }
+
     static func file() -> NSMenuItem {
         let recent = NSMenuItem(title: "Открыть недавние", action: nil, keyEquivalent: "")
         let recentMenu = NSMenu(title: "Открыть недавние")
@@ -54,6 +56,17 @@ enum EditorMenus {
             item("Как в предложении", #selector(C.editorSentenceCase(_:))),
         ]))
         menu.addItem(item("Удалить хвостовые пробелы", #selector(C.editorTrimTrailing(_:))))
+        menu.addItem(submenu("Строки", [
+            item("Сортировать А → Я", #selector(C.editorSortAscending(_:))),
+            item("Сортировать Я → А", #selector(C.editorSortDescending(_:))),
+            item("Сортировать без учёта регистра", #selector(C.editorSortCaseInsensitive(_:))),
+            .separator(),
+            item("Удалить повторы", #selector(C.editorRemoveDuplicates(_:))),
+            item("Удалить повторы без учёта регистра", #selector(C.editorRemoveDuplicatesCaseInsensitive(_:))),
+            .separator(),
+            item("Табы → пробелы", #selector(C.editorTabsToSpaces(_:))),
+            item("Пробелы → табы", #selector(C.editorSpacesToTabs(_:))),
+        ]))
         menu.addItem(.separator())
         menu.addItem(item("Убрать значения $", #selector(C.editorRemoveValues(_:))))
     }
@@ -77,6 +90,14 @@ enum EditorMenus {
                 item("Найти ранее", #selector(C.editorFindPrevious(_:)), "g", [.command, .shift]),
                 .separator(),
                 item("Перейти к строке…", #selector(C.editorGoToLine(_:)), "l"),
+                .separator(),
+                submenu("Закладки", [
+                    item("Поставить или снять", #selector(C.editorToggleBookmark(_:)), Self.key(NSF2FunctionKey)),
+                    item("Следующая", #selector(C.editorNextBookmark(_:)), Self.key(NSF2FunctionKey), []),
+                    item("Предыдущая", #selector(C.editorPreviousBookmark(_:)), Self.key(NSF2FunctionKey), .shift),
+                    .separator(),
+                    item("Удалить все закладки", #selector(C.editorClearBookmarks(_:))),
+                ]),
             ]),
             submenu("Вид", [
                 item("Перенос строк", #selector(C.editorToggleWrap(_:))),

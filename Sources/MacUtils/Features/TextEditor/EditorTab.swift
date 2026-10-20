@@ -8,6 +8,8 @@ struct EditorCaret: Equatable {
     /// Выделено символов (UTF-16, как длина) и строк (0 — выделение в одной строке).
     var selected = 0
     var selectedLines = 0
+    /// Курсоров и выделений (больше одного — прямоугольное выделение или несколько курсоров).
+    var cursors = 1
 }
 
 /// Вкладка редактора: документ, текст (TextKit 1), своя история отмены, панель `$` и подсветка.
@@ -90,6 +92,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         textView.delegate = self
         storage.delegate = self
         textView.onOverwriteChange = { [weak self] in self?.overwrite = $0 }
+        textView.onCursorsChange = { [weak self] in self?.refreshCaret() }
         dollars.onUpdate = { [weak self] in self?.rehighlight() }
         load(text ?? document.decodedText, resetUndo: true)
         if let text, !(text as NSString).isEqual(to: document.decodedText) {
@@ -168,7 +171,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         style.maximumLineHeight = EditorStyle.lineHeight * zoom
         style.lineBreakMode = .byCharWrapping
         style.tabStops = []
-        style.defaultTabInterval = ("    " as NSString).size(withAttributes: [.font: EditorStyle.font(zoom: zoom)]).width
+        style.defaultTabInterval = (String(repeating: " ", count: EditorPrefs.tabWidth) as NSString)
+            .size(withAttributes: [.font: EditorStyle.font(zoom: zoom)]).width
         return [.font: EditorStyle.font(zoom: zoom), .foregroundColor: EditorStyle.text, .paragraphStyle: style]
     }
 
@@ -246,7 +250,10 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         guard editedMask.contains(.editedCharacters) else { return }
         MainActor.assumeIsolated {
             guard !bulkLoading else { return }
+            let editLine = lines.line(at: editedRange.location)
+            let oldLineCount = lines.lineCount
             lines.update(textStorage.mutableString, editedRange: editedRange, delta: delta)
+            bookmarks = Self.shiftBookmarks(bookmarks, editLine: editLine, lineDelta: lines.lineCount - oldLineCount)
             // Временные атрибуты подсветки сдвигаются вместе с текстом — запоминаем, где они теперь.
             let oldEnd = editedRange.location + editedRange.length - delta
             highlighted = highlighted.map { range in
@@ -282,6 +289,40 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         ruler.needsDisplay = true
     }
 
+    // MARK: - Закладки
+
+    /// Закладки ниже правки сдвигаются вместе со строками; закладки удалённых строк встают на строку правки.
+    nonisolated static func shiftBookmarks(_ marks: Set<Int>, editLine: Int, lineDelta: Int) -> Set<Int> {
+        guard lineDelta != 0 else { return marks }
+        return Set(marks.map { line in
+            guard line > editLine else { return line }
+            return max(editLine, line + lineDelta)
+        })
+    }
+
+    /// ⌘F2: закладка на строке курсора — поставить или снять.
+    func toggleBookmark(line: Int? = nil) {
+        let line = line ?? caret.line
+        if bookmarks.contains(line) { bookmarks.remove(line) } else { bookmarks.insert(line) }
+        ruler.needsDisplay = true
+        onEdit?()
+    }
+
+    /// F2 / ⇧F2: к следующей или предыдущей закладке, по кругу.
+    func goToBookmark(backwards: Bool) {
+        let sorted = bookmarks.filter { $0 <= lines.lineCount }.sorted()
+        guard !sorted.isEmpty else { return NSSound.beep() }
+        let current = caret.line
+        let target = backwards ? (sorted.last { $0 < current } ?? sorted.last!) : (sorted.first { $0 > current } ?? sorted.first!)
+        goTo(line: target)
+    }
+
+    func clearBookmarks() {
+        bookmarks.removeAll()
+        ruler.needsDisplay = true
+        onEdit?()
+    }
+
     /// Парная скобка у курсора — фоном у обеих; без пары — красным. Только при пустом выделении.
     func refreshBrackets() {
         guard let layout = textView.layoutManager else { return }
@@ -311,7 +352,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     private func refreshCaret() {
         let selection = textView.selectedRange()
         let position = lines.position(at: min(selection.location, storage.length))
-        var next = EditorCaret(line: position.line, column: position.column, selected: selection.length, selectedLines: 0)
+        var next = EditorCaret(line: position.line, column: position.column, selected: selection.length, selectedLines: 0,
+                               cursors: textView.cursorCount)
         if selection.length > 0 {
             let endLine = lines.line(at: max(selection.location, NSMaxRange(selection) - 1))
             next.selectedLines = endLine > position.line ? endLine - position.line + 1 : 0

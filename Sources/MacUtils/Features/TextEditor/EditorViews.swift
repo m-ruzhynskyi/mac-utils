@@ -348,6 +348,7 @@ struct EditorStatusBar: View {
 
     private var selectionText: String {
         let caret = tab.caret
+        if caret.cursors > 1 { return "Курсоров \(caret.cursors)" }
         guard caret.selected > 0 else { return "Выделено 0" }
         if caret.selectedLines > 1 { return "Выделено \(EditorSearch.number(caret.selected)) · \(caret.selectedLines) стр." }
         return "Выделено \(EditorSearch.number(caret.selected))"
