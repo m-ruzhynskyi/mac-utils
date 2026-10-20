@@ -182,6 +182,15 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         }
     }
 
+    /// Открыть файл вкладкой сразу в нужном режиме (для «Команд», ссылок): «Документ» — только у RTF.
+    func open(_ url: URL, mode: EditorViewMode) {
+        open([url])
+        guard let tab = workspace.tab(for: url) else { return }
+        workspace.selectedID = tab.id
+        if mode == .document, !tab.canShowDocument { return }
+        tab.setMode(mode)
+    }
+
     /// Что можно открыть: только обычный файл (не папка, устройство, канал); большой — после вопроса.
     enum OpenCheck: Equatable {
         case ok

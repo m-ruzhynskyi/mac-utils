@@ -6,7 +6,7 @@ import XCTest
 /// пропускается. В журнал — только числа (правила — `.audit/real-frm-rules.md`).
 @MainActor
 final class DocRealFilesTests: XCTestCase {
-    static func copies() throws -> [URL] {
+    nonisolated static func copies() throws -> [URL] {
         guard let path = ProcessInfo.processInfo.environment["MU_REAL_FRM_DIR"], !path.isEmpty else {
             throw XCTSkip("Задайте MU_REAL_FRM_DIR=<папка с копиями .frm>")
         }
