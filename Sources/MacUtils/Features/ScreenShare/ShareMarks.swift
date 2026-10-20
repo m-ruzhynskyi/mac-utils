@@ -85,6 +85,31 @@ final class ShareMarkStore: ObservableObject {
     }
 }
 
+/// Геометрия меток, общая для всех сторон трансляции: точка — доля кадра (0…1) от его левого верхнего угла, кадр —
+/// ровно транслируемая область. Зритель Mac, страница relay и окно меток Windows считают одинаково
+/// (страница — `imageRect`/`framePoint`, Windows — overlay-place.js).
+enum ShareMarkGeometry {
+    /// Где кадр внутри вида: вписан с сохранением пропорций и по центру (как `resizeAspect` у слоя видео).
+    static func imageRect(frame: CGSize?, in size: CGSize) -> CGRect {
+        guard let frame, frame.width > 0, frame.height > 0 else { return CGRect(origin: .zero, size: size) }
+        let scale = min(size.width / frame.width, size.height / frame.height)
+        let fitted = CGSize(width: frame.width * scale, height: frame.height * scale)
+        return CGRect(x: (size.width - fitted.width) / 2, y: (size.height - fitted.height) / 2,
+                      width: fitted.width, height: fitted.height)
+    }
+
+    /// Точка вида (y вниз, как у SwiftUI) → доля кадра; вне кадра — nil.
+    static func normalized(_ point: CGPoint, in rect: CGRect) -> CGPoint? {
+        guard rect.width > 0, rect.height > 0, rect.contains(point) else { return nil }
+        return CGPoint(x: (point.x - rect.minX) / rect.width, y: (point.y - rect.minY) / rect.height)
+    }
+
+    /// Доля кадра → точка вида.
+    static func point(_ unit: CGPoint, in rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.minX + unit.x * rect.width, y: rect.minY + unit.y * rect.height)
+    }
+}
+
 /// Рисует метки в прямоугольнике кадра (rect — где кадр внутри вида).
 struct ShareMarksLayer: View {
     @ObservedObject var store: ShareMarkStore
@@ -95,7 +120,7 @@ struct ShareMarksLayer: View {
             Canvas { canvas, _ in
                 for mark in store.marks {
                     let age = context.date.timeIntervalSince(mark.born)
-                    let point = { (p: CGPoint) in CGPoint(x: rect.minX + p.x * rect.width, y: rect.minY + p.y * rect.height) }
+                    let point = { (p: CGPoint) in ShareMarkGeometry.point(p, in: rect) }
                     switch mark.kind {
                     case .ping:
                         let center = point(mark.points[0])
@@ -175,7 +200,11 @@ final class ShareMarksOverlay {
     private func updateFrame() {
         guard let frame = targetFrame() else { return }
         let panel = self.panel ?? makePanel()
-        if panel.frame != frame { panel.setFrame(frame, display: true) }
+        if panel.frame != frame {
+            // Транслируемое окно изменило размер — поток под новый размер, иначе кадр и панель меток разойдутся.
+            if panel.frame.size != frame.size, panel.frame.width > 0 { ScreenShare.shared.sharedWindowResized(to: frame.size) }
+            panel.setFrame(frame, display: true)
+        }
     }
 
     private func makePanel() -> NSPanel {

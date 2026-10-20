@@ -99,6 +99,14 @@ enum ShareVideo {
         return (max(2, Int(pixelWidth * scale) / 2 * 2), max(2, Int(pixelHeight * scale) / 2 * 2))
     }
 
+    /// Окно изменило размер (точки, `scale` — пикселей на точку): новый размер потока, если он заметно другой.
+    /// Разница в 2 пикселя — округление, поток не трогаем.
+    static func resizedStreamSize(current: (width: Int, height: Int), window: CGSize, scale: CGFloat) -> (width: Int, height: Int)? {
+        guard window.width >= 1, window.height >= 1 else { return nil }
+        let size = streamSize(pixelWidth: window.width * scale, pixelHeight: window.height * scale)
+        return abs(size.width - current.width) > 2 || abs(size.height - current.height) > 2 ? size : nil
+    }
+
     /// `DataRateLimits` (пары «байт, секунд»): в среднем не больше 1,5× скорости за секунду (без всплесков,
     /// которые забивают сеть), и ни один кадр не больше `maxFrameBytes` (короткое окно 0,1 с).
     static func dataRateLimits(bitrate: Int) -> [Double] {

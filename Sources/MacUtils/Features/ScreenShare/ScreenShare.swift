@@ -394,17 +394,47 @@ final class ScreenShare: NSObject, ObservableObject {
         config.height = size.height
     }
 
+    /// Настройка видеопотока: размер по фильтру, 60 кадров/с (при перегрузке FrameSender снижает до 30), формат,
+    /// который кодек берёт без пересчёта.
+    private static func videoConfiguration(for filter: SCContentFilter) -> SCStreamConfiguration {
+        let config = SCStreamConfiguration()
+        configure(config, for: filter)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(ShareVideo.frameRate))
+        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        config.showsCursor = true
+        config.queueDepth = 5
+        return config
+    }
+
+    /// Фильтр текущего видеопотока: размер транслируемого окна берётся из него при старте.
+    private var videoFilter: SCContentFilter?
+
+    /// Транслируемое окно изменило размер (рамку следит панель меток): поток — под новый размер. Иначе кадр остаётся
+    /// прежнего размера, окно в нём обрезано или с полями, и точки зрителей у ведущего ложатся не туда.
+    func sharedWindowResized(to points: CGSize) {
+        guard let stream, let filter = videoFilter, filter.style == .window else { return }
+        let scale = CGFloat(filter.pointPixelScale)
+        let current = streamSizeOverride
+            ?? ShareVideo.streamSize(pixelWidth: filter.contentRect.width * scale, pixelHeight: filter.contentRect.height * scale)
+        guard let size = ShareVideo.resizedStreamSize(current: current, window: points, scale: scale) else { return }
+        let config = Self.videoConfiguration(for: filter)
+        config.width = size.width
+        config.height = size.height
+        streamSizeOverride = size
+        Task { try? await stream.updateConfiguration(config) }
+    }
+
+    /// Размер потока после изменения окна (nil — ещё по фильтру).
+    private var streamSizeOverride: (width: Int, height: Int)?
+
     /// Сменить, что показываем, не прерывая трансляцию.
     func changeSource() {
         guard isLive, let stream else { return }
         Picker.shared.choose(for: stream) { filter in
             guard let filter else { return }
-            let config = SCStreamConfiguration()
-            Self.configure(config, for: filter)
-            config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(ShareVideo.frameRate))
-            config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-            config.showsCursor = true
-            config.queueDepth = 5
+            let config = Self.videoConfiguration(for: filter)
+            self.videoFilter = filter
+            self.streamSizeOverride = nil
             ShareMarksOverlay.shared.attach(to: filter)
             Task {
                 let filter = await self.prepared(filter)
@@ -463,13 +493,10 @@ final class ScreenShare: NSObject, ObservableObject {
 
     private func beginCapture(filter: SCContentFilter) async throws {
         let filter = await prepared(filter)
-        let config = SCStreamConfiguration()
-        Self.configure(config, for: filter)
         // H.264 (аппаратно): 60 кадров в секунду (при перегрузке FrameSender снижает до 30) и формат, который кодек берёт без пересчёта.
-        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(ShareVideo.frameRate))
-        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        config.showsCursor = true
-        config.queueDepth = 5
+        let config = Self.videoConfiguration(for: filter)
+        videoFilter = filter
+        streamSizeOverride = nil
         guard let socket else { throw CocoaError(.featureUnsupported) }
         let sender = FrameSender(socket: socket)
         let stream = SCStream(filter: filter, configuration: config, delegate: sender)
@@ -700,6 +727,8 @@ final class ScreenShare: NSObject, ObservableObject {
         let audioStream = self.audioStream
         self.stream = nil
         self.audioStream = nil
+        videoFilter = nil
+        streamSizeOverride = nil
         audioRefresh?.invalidate()
         audioRefresh = nil
         sender = nil
@@ -1520,7 +1549,7 @@ private struct ShareViewerView: View {
                 ShareMarksLayer(store: viewer.marks, rect: rect)
                 // Свой рисунок, пока ведёте мышью.
                 if stroke.count > 1 {
-                    Path { $0.addLines(stroke.map { CGPoint(x: rect.minX + $0.x * rect.width, y: rect.minY + $0.y * rect.height) }) }
+                    Path { $0.addLines(stroke.map { ShareMarkGeometry.point($0, in: rect) }) }
                         .stroke(ShareMark.color(named: viewer.color), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
                 }
                 status
@@ -1534,18 +1563,9 @@ private struct ShareViewerView: View {
     }
 
     /// Где картинка внутри окна (вписана с сохранением пропорций).
-    private func imageRect(in size: CGSize) -> CGRect {
-        guard let frame = frameSize, frame.width > 0, frame.height > 0 else { return CGRect(origin: .zero, size: size) }
-        let scale = min(size.width / frame.width, size.height / frame.height)
-        let fitted = CGSize(width: frame.width * scale, height: frame.height * scale)
-        return CGRect(x: (size.width - fitted.width) / 2, y: (size.height - fitted.height) / 2,
-                      width: fitted.width, height: fitted.height)
-    }
+    private func imageRect(in size: CGSize) -> CGRect { ShareMarkGeometry.imageRect(frame: frameSize, in: size) }
 
-    private func normalized(_ point: CGPoint, in rect: CGRect) -> CGPoint? {
-        guard rect.width > 0, rect.height > 0, rect.contains(point) else { return nil }
-        return CGPoint(x: (point.x - rect.minX) / rect.width, y: (point.y - rect.minY) / rect.height)
-    }
+    private func normalized(_ point: CGPoint, in rect: CGRect) -> CGPoint? { ShareMarkGeometry.normalized(point, in: rect) }
 
     private func drawGesture(rect: CGRect) -> some Gesture {
         DragGesture(minimumDistance: 0)

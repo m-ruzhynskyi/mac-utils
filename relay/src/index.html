@@ -1226,9 +1226,11 @@ function startCapture(stream, code) {
     // До 1920 по длинной стороне (как на Mac); уровень кодека 5.0 (4D4032) — 4.0 не принимает 1920×1200 и выше.
     const scale = Math.min(1, 1920 / Math.max(sourceWidth, sourceHeight));
     // Кадр захвата уже нужного размера — в кодер напрямую, без копий через холст (иначе 60 кадров/с не успеваем).
-    // Кодер не принял такие кадры (ошибка или тишина) — дальше через холст (`ladder.direct`).
+    // Кодер не принял такие кадры (ошибка или тишина) — дальше через холст (`ladder.direct`). Крупнее 1920 — только через
+    // холст: масштаб в кодере на Windows (Media Foundation) не проверить, а обрезанный вместо уменьшенного кадр выглядит
+    // правдоподобно, но точки зрителей тогда ложатся у ведущего не туда.
     const direct = canEncode && typeof VideoFrame !== "undefined" && source instanceof VideoFrame && ladder.direct !== false &&
-      (scale === 1 ? sourceWidth % 2 === 0 && sourceHeight % 2 === 0 : true);
+      scale === 1 && sourceWidth % 2 === 0 && sourceHeight % 2 === 0;
     const width = Math.round(sourceWidth * scale / 2) * 2, height = Math.round(sourceHeight * scale / 2) * 2;
     if (!direct) { canvas.width = width; canvas.height = height; ctx.drawImage(source, 0, 0, width, height); }
     if (canEncode) {
