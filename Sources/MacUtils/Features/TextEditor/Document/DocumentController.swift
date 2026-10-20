@@ -43,6 +43,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
     private var renderedVersion = -1
     private var refreshScheduled = false
     private var headerCache: [String: NSAttributedString] = [:]
+    private var headerSignature = 0
     private var highlighted = false
     private var observers: [NSObjectProtocol] = []
 
@@ -100,7 +101,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
     }
 
     /// Текст вкладки — RTF, который можно показать документом.
-    static func canShow(_ text: NSString) -> Bool {
+    nonisolated static func canShow(_ text: NSString) -> Bool {
         var index = 0
         while index < min(text.length, 64), [0x20, 0x09, 0x0A, 0x0D, 0xFEFF].contains(text.character(at: index)) { index += 1 }
         return text.length - index >= 5 && text.substring(with: NSRange(location: index, length: 5)) == "{\\rtf"
@@ -138,13 +139,30 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         let string = patch.string
         model = fresh
         rendering = next
-        headerCache = [:]
+        // Колонтитулы перерисовываются, только если изменились их группы (иначе — по кэшу).
+        var hasher = Hasher()
+        let source = tab.text
+        for section in fresh.sections {
+            hasher.combine(section.props)
+            for (kind, header) in section.headers.sorted(by: { $0.key.rawValue < $1.key.rawValue }) where NSMaxRange(header.group) <= source.length {
+                hasher.combine(kind)
+                hasher.combine(source.substring(with: header.group))
+            }
+        }
+        let headers = hasher.finalize()
+        let headersChanged = force || headers != headerSignature
+        headerSignature = headers
+        if headersChanged { headerCache = [:] }
         storage.beginEditing()
         storage.replaceCharacters(in: replaced, with: string)
         storage.endEditing()
         if pagesView.pages.isEmpty { addPage(section: 0) }
-        updatePageSections()
-        updateHeaders()
+        // Разделы страниц и номера — по завершении раскладки (`finishPagination`): спрашивать раскладку всех страниц
+        // на каждое нажатие — это разложить весь документ заново.
+        if force || headersChanged {
+            updatePageSections()
+            updateHeaders()
+        }
         let target = select?(next) ?? {
             let start = next.map.unit(forSource: sourceStart)
             let end = max(start, next.map.unit(forSource: sourceEnd))
@@ -155,7 +173,8 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
             view.setSelectedRange(NSRange(location: location, length: min(target.length, storage.length - location)))
         }
         wordCount = Self.words(fresh.body)
-        highlightDollars()
+        // Подсветка `$` двигается вместе с текстом; свежий список знаков придёт после пересчёта (`dollars.onUpdate`).
+        if force { highlightDollars() }
         updateStatus()
     }
 
@@ -183,7 +202,8 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         let props = section < model.sections.count ? model.sections[section].props : (model.sections.first?.props ?? RTFSectionProps())
         let page = DocPageView(props: props, section: section)
         page.textView.delegate = self
-        page.textView.isEditable = false
+        page.textView.controller = self
+        page.textView.isEditable = true
         page.textView.isSelectable = true
         page.textView.onDoubleClickOutside = { [weak self, weak page] event in
             guard let self, let page else { return false }
@@ -454,6 +474,95 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         let y = page.frame.minY + page.bodyRect.minY + line.minY - 12
         scrollView.contentView.scroll(to: NSPoint(x: scrollView.contentView.bounds.minX, y: max(0, y)))
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    // MARK: - Ввод
+
+    /// Набор, удаление, вставка, перетаскивание: показ напрямую не меняется — правка уходит в исходник, показ
+    /// перерисовывается из него.
+    nonisolated func textView(_ textView: NSTextView, shouldChangeTextInRanges ranges: [NSValue], replacementStrings: [String]?) -> Bool {
+        MainActor.assumeIsolated {
+            if composing { return true }
+            guard ranges.count == 1, let replacement = replacementStrings?.first else {
+                NSSound.beep()
+                return false
+            }
+            perform(replacing: ranges[0].rangeValue, with: replacement)
+            return false
+        }
+    }
+
+    /// Заменить показанные единицы текстом (пустой — удаление). `false` — правка невозможна (подсказка).
+    @discardableResult
+    func perform(replacing units: NSRange, with text: String) -> Bool {
+        guard let tab else { return false }
+        let result = DocTextEditor.replace(units, with: text, model: model, map: rendering.map, source: tab.text)
+        if let refusal = result.refusal {
+            show(notice: refusal)
+            NSSound.beep()
+            return false
+        }
+        guard !result.edits.isEmpty else {
+            if units.length > 0 || !text.isEmpty { NSSound.beep() }
+            return false
+        }
+        let caret = result.caretSource
+        return apply(result.edits, actionName: text.isEmpty ? "Удаление" : "Ввод") { rendering in
+            NSRange(location: rendering.map.firstUnit(atOrAfter: caret), length: 0)
+        }
+    }
+
+    /// Курсор не встаёт внутрь номера страницы (поле неделимо) — переносится за поле.
+    nonisolated func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,
+                              toCharacterRange new: NSRange) -> NSRange {
+        MainActor.assumeIsolated {
+            guard new.length == 0, new.location > 0, new.location < rendering.map.count,
+                  rendering.map.kind(at: new.location - 1) == .field, rendering.map.kind(at: new.location) == .field,
+                  rendering.map.range(at: new.location - 1) == rendering.map.range(at: new.location) else { return new }
+            var end = new.location
+            while end < rendering.map.count, rendering.map.kind(at: end) == .field, rendering.map.range(at: end) == rendering.map.range(at: new.location) {
+                end += 1
+            }
+            return NSRange(location: end, length: 0)
+        }
+    }
+
+    // MARK: Метод ввода
+
+    private(set) var composing = false
+    private var compositionRange = NSRange(location: 0, length: 0)
+
+    func beginComposition(replacing range: NSRange) {
+        composing = true
+        compositionRange = range
+    }
+
+    /// Набранное подтверждено: на экране — временный текст, в исходник — правка по карте до набора.
+    func commitComposition(_ text: String) {
+        composing = false
+        // На экране осталось набранное методом ввода — показ целиком заново из исходника (с правкой или без).
+        perform(replacing: compositionRange, with: text)
+        refresh(force: true)
+    }
+
+    func cancelComposition() {
+        guard composing else { return }
+        composing = false
+        refresh(force: true)
+    }
+
+    // MARK: Подсказки
+
+    /// Короткая подсказка над документом (отказ правки, вставка без форматирования); гаснет сама.
+    @Published private(set) var notice: String?
+    private var noticeWork: DispatchWorkItem?
+
+    func show(notice text: String) {
+        notice = text
+        noticeWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.notice = nil } }
+        noticeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
     }
 
     nonisolated func textViewDidChangeSelection(_ notification: Notification) {

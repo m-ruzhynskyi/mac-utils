@@ -300,6 +300,11 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
     }
 
     private func write(_ tab: EditorTab, to url: URL, lossy: Bool = false, done: ((Bool) -> Void)?) {
+        // Правили в «Документе» — сначала проверки без потерь; не прошли — файл не пишется (лист `d10`).
+        if tab.editedInDocument, !lossy {
+            let report = DocSaveGuard.check(document: tab.document, text: tab.text, journal: tab.journal)
+            guard report.passed else { return presentSaveGuard(report, for: tab, done: done) }
+        }
         let text = tab.text.copy() as! NSString as String
         do {
             let data = try tab.document.data(for: text, lossy: lossy)
@@ -540,6 +545,60 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         workspace.findMode = nil
         workspace.search.clear()
         if let tab = workspace.current { tab.textView.window?.makeFirstResponder(tab.textView) }
+    }
+
+    // MARK: - Защита при записи
+
+    /// Показ листа (подменяется в тестах): `d10` с выбором «Сохранить как копию…», «Показать в коде», «Отмена».
+    lazy var saveGuardPrompt: (DocSaveGuard.Report, EditorTab, @escaping (Bool) -> Void) -> Void = { [weak self] report, tab, done in
+        guard let self, let window = self.window else { return done(false) }
+        let sheet = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 320), styleMask: [.titled], backing: .buffered, defer: true)
+        func finish() {
+            window.endSheet(sheet)
+        }
+        let view = DocSaveGuardSheet(report: report) { [weak self] in
+            finish()
+            self?.saveCopy(report, of: tab) { _ in done(false) }
+        } showInCode: {
+            finish()
+            if let range = report.problemRange { tab.showInCode(range) } else { tab.setMode(.code) }
+            done(false)
+        } cancel: {
+            finish()
+            done(false)
+        }
+        let host = NSHostingView(rootView: view)
+        host.frame.size = host.fittingSize
+        sheet.contentView = host
+        sheet.setContentSize(host.fittingSize)
+        window.beginSheet(sheet)
+    }
+
+    private func presentSaveGuard(_ report: DocSaveGuard.Report, for tab: EditorTab, done: ((Bool) -> Void)?) {
+        saveGuardPrompt(report, tab) { done?($0) }
+    }
+
+    /// «Сохранить как копию…»: те же байты с правками — в другой файл; оригинал и вкладка не меняются.
+    func saveCopy(_ report: DocSaveGuard.Report, of tab: EditorTab, done: @escaping (Bool) -> Void) {
+        guard let data = report.data, let window else { return done(false) }
+        let panel = NSSavePanel()
+        let base = tab.document.url?.deletingPathExtension().lastPathComponent ?? tab.untitledName
+        let ext = tab.document.url?.pathExtension ?? "rtf"
+        panel.nameFieldStringValue = "\(base) копия.\(ext.isEmpty ? "rtf" : ext)"
+        if let folder = tab.document.url?.deletingLastPathComponent() { panel.directoryURL = folder }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            MainActor.assumeIsolated {
+                guard response == .OK, let url = panel.url else { return done(false) }
+                do {
+                    try Self.writeFile(data, to: url)
+                    tab.documentController?.show(notice: "Копия сохранена: \(url.lastPathComponent). Оригинал не тронут.")
+                    done(true)
+                } catch {
+                    self?.showError("Не удалось сохранить копию «\(url.lastPathComponent)»", error)
+                    done(false)
+                }
+            }
+        }
     }
 
     // MARK: - Открыть в Word

@@ -110,6 +110,8 @@ private final class RTFParser {
     private var currentSection = 0
     /// Первый код основного текста раздела (`\pard`, `\trowd`, текст…) — сюда вставляются новые колонтитулы.
     private var sectionContentStart: [Int: Int] = [:]
+    /// Начало текста текущего раздела уже отмечено (проверка на каждый символ — без словаря).
+    private var contentNoted = false
     private var lastHeaderEnd: [Int: Int] = [:]
     private var row = RTFRow()
     private var cellInProgress = RTFCellDef()
@@ -292,10 +294,10 @@ private final class RTFParser {
             top.ignorable = true
             return
         case 0x5C, 0x7B, 0x7D:
-            text([next], range: symbol)
-        case 0x7E: text([0x00A0], range: symbol)       // \~
-        case 0x5F: text([0x2011], range: symbol)       // \_
-        case 0x2D: text([0x00AD], range: symbol)       // \- мягкий перенос
+            text(next, range: symbol)
+        case 0x7E: text(0x00A0, range: symbol)       // \~
+        case 0x5F: text(0x2011, range: symbol)       // \_
+        case 0x2D: text(0x00AD, range: symbol)       // \- мягкий перенос
         case 0x0D, 0x0A:                               // \ + перевод строки = \par
             if next == 0x0D, i < count, u[i] == 0x0A { i += 1 }
             paragraphEnd(.paragraph, range: NSRange(location: start, length: i - start))
@@ -658,7 +660,7 @@ private final class RTFParser {
             let unit = UInt16(truncatingIfNeeded: number < 0 ? number + 65_536 : number)
             let end = replacementsEnd(from: i, count: top.uc)
             i = end
-            text([unit], range: NSRange(location: range.location, length: end - range.location))
+            text(unit, range: NSRange(location: range.location, length: end - range.location))
         case .bin:
             if let number, number > 0 { i = min(count, i + number) }
         case .tab: special(.tab, unit: 0x09, range: range)
@@ -672,20 +674,20 @@ private final class RTFParser {
             finishRow(range)
         case .nestrow:
             break
-        case .emdash: text([0x2014], range: range)
-        case .endash: text([0x2013], range: range)
-        case .lquote: text([0x2018], range: range)
-        case .rquote: text([0x2019], range: range)
-        case .ldblquote: text([0x201C], range: range)
-        case .rdblquote: text([0x201D], range: range)
-        case .bullet: text([0x2022], range: range)
-        case .emspace: text([0x2003], range: range)
-        case .enspace: text([0x2002], range: range)
-        case .qmspace: text([0x2005], range: range)
-        case .zwj: text([0x200D], range: range)
-        case .zwnj: text([0x200C], range: range)
+        case .emdash: text(0x2014, range: range)
+        case .endash: text(0x2013, range: range)
+        case .lquote: text(0x2018, range: range)
+        case .rquote: text(0x2019, range: range)
+        case .ldblquote: text(0x201C, range: range)
+        case .rdblquote: text(0x201D, range: range)
+        case .bullet: text(0x2022, range: range)
+        case .emspace: text(0x2003, range: range)
+        case .enspace: text(0x2002, range: range)
+        case .qmspace: text(0x2005, range: range)
+        case .zwj: text(0x200D, range: range)
+        case .zwnj: text(0x200C, range: range)
         case .chpgn:
-            emit([0x23], range: range, kind: .field(.page), field: nil)
+            emit(0x23, nil, range: range, kind: .field(.page), field: nil)
         // Таблица.
         case .trowd:
             noteContent(range.location)
@@ -772,10 +774,10 @@ private final class RTFParser {
         if (0xD800...0xDBFF).contains(unit), i < count, (0xDC00...0xDFFF).contains(u[i]) {
             let low = u[i]
             i += 1
-            text([unit, low], range: NSRange(location: start, length: 2))
+            text(unit, low, range: NSRange(location: start, length: 2))
             return
         }
-        text([unit], range: NSRange(location: start, length: 1))
+        text(unit, range: NSRange(location: start, length: 1))
     }
 
     /// `\'hh`: байт в кодировке шрифта или документа.
@@ -783,7 +785,7 @@ private final class RTFParser {
         switch top.destination {
         case .fontTable, .fontEntry: fontName.append(decode(byte))
         case .shapeName, .shapeValue, .fieldInstruction: collect(decode(byte))
-        case .text: text([decode(byte)], range: range)
+        case .text: text(decode(byte), range: range)
         default: break
         }
     }
@@ -810,12 +812,18 @@ private final class RTFParser {
         }
     }
 
-    /// Видимый текст (или символ) в текущей истории.
-    private func text(_ units: [UInt16], range: NSRange) {
+    /// Видимый символ (одна единица UTF-16 или пара суррогатов) в текущей истории. Без массивов — это на каждый символ.
+    private func text(_ unit: UInt16, _ low: UInt16? = nil, range: NSRange) {
         switch top.destination {
         case .text: break
-        case .fontTable, .fontEntry: fontName.append(contentsOf: units); return
-        case .shapeName, .shapeValue, .fieldInstruction: units.forEach(collect); return
+        case .fontTable, .fontEntry:
+            fontName.append(unit)
+            if let low { fontName.append(low) }
+            return
+        case .shapeName, .shapeValue, .fieldInstruction:
+            collect(unit)
+            if let low { collect(low) }
+            return
         default: return
         }
         var kind = RTFRun.Kind.text
@@ -823,30 +831,34 @@ private final class RTFParser {
         if top.fieldResult, let field = top.field, field < model.fields.count, model.fields[field].kind.isComputed {
             kind = .field(model.fields[field].kind)
         }
-        emit(units, range: range, kind: kind, field: top.fieldResult ? top.field : nil)
+        emit(unit, low, range: range, kind: kind, field: top.fieldResult ? top.field : nil)
     }
 
     private func special(_ kind: RTFRun.Kind, unit: UInt16, range: NSRange) {
         guard top.destination == .text else { return }
         // Табуляция в номере списка (`{\listtext ·\tab}`) — часть номера, а не текста абзаца.
-        emit([unit], range: range, kind: top.listText ? .listText : kind, field: top.fieldResult ? top.field : nil)
+        emit(unit, nil, range: range, kind: top.listText ? .listText : kind, field: top.fieldResult ? top.field : nil)
     }
 
-    private func emit(_ units: [UInt16], range: NSRange, kind: RTFRun.Kind, field: Int?) {
+    private func emit(_ unit: UInt16, _ low: UInt16?, range: NSRange, kind: RTFRun.Kind, field: Int?) {
         noteContent(range.location)
         let story = top.story
         let key = RunKey(version: top.charVersion, group: top.id, kind: Self.kindTag(kind), uc: top.uc, field: field)
         if stories[story].lastKey == key, !stories[story].current.runs.isEmpty {
             let last = stories[story].current.runs.count - 1
-            stories[story].units[last].append(contentsOf: units)
-            // Пара суррогатов — обе единицы с одним диапазоном.
-            stories[story].current.runs[last].map.append(contentsOf: repeatElement(range, count: units.count))
+            stories[story].units[last].append(unit)
+            stories[story].current.runs[last].map.append(range)
+            if let low {
+                // Пара суррогатов — обе единицы с одним диапазоном.
+                stories[story].units[last].append(low)
+                stories[story].current.runs[last].map.append(range)
+            }
             return
         }
-        var run = RTFRun(kind: kind, text: "", props: top.char, map: Array(repeating: range, count: units.count), group: top.id, uc: top.uc)
+        var run = RTFRun(kind: kind, text: "", props: top.char, map: low == nil ? [range] : [range, range], group: top.id, uc: top.uc)
         run.field = field
         stories[story].current.runs.append(run)
-        stories[story].units.append(units)
+        stories[story].units.append(low.map { [unit, $0] } ?? [unit])
         stories[story].lastKey = key
     }
 
@@ -901,6 +913,8 @@ private final class RTFParser {
             paragraph.runs[run].text = String(utf16CodeUnits: units, count: units.count)
         }
         paragraph.props = props
+        paragraph.endProps = top.char
+        paragraph.endUC = top.uc
         paragraph.end = end
         paragraph.endRange = range
         let open = Set(stack.map(\.id))
@@ -990,11 +1004,13 @@ private final class RTFParser {
         section.firstParagraph = stories[0].paragraphs.count
         model.sections.append(section)
         currentSection += 1
+        contentNoted = false
     }
 
     /// Первый код основного текста раздела — новые колонтитулы встают перед ним.
     private func noteContent(_ location: Int) {
-        guard top.story == 0, top.destination == .text, sectionContentStart[currentSection] == nil else { return }
+        guard !contentNoted, top.story == 0, top.destination == .text else { return }
+        contentNoted = true
         sectionContentStart[currentSection] = location
         if currentSection == 0, model.documentPropsInsertion == 0 { model.documentPropsInsertion = location }
     }

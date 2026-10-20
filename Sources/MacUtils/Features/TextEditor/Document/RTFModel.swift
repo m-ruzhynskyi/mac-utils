@@ -340,6 +340,10 @@ enum RTFParagraphEnd: Hashable {
 struct RTFParagraph {
     var runs: [RTFRun] = []
     var props = RTFParaProps()
+    /// Свойства символа на конце абзаца (у знака ¶): их получает набранное в пустом абзаце.
+    var endProps = RTFCharProps()
+    /// `\ucN` на конце абзаца.
+    var endUC = 1
     var end = RTFParagraphEnd.storyEnd
     /// Код конца абзаца в исходнике (`\par ` с разделителем); у `.storyEnd` — пустой диапазон в конце истории.
     var endRange = NSRange(location: 0, length: 0)

@@ -38,6 +38,28 @@ struct DocumentHost: NSViewRepresentable {
     }
 }
 
+/// Подсказка над страницами: почему правка не сделана («Изменить это можно в режиме «Код»») и т. п.
+struct DocNoticeView: View {
+    @ObservedObject var document: DocumentController
+
+    var body: some View {
+        if let notice = document.notice {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "info.circle.fill").foregroundStyle(Color.dsMute).accessibilityHidden(true)
+                Text(notice).font(DS.Font.bodyStrong).foregroundStyle(.dsText).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, DS.Space.m)
+            .padding(.vertical, DS.Space.s)
+            .background(Color.dsPanel, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.dsLine, lineWidth: 1))
+            .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
+            .padding(.bottom, DS.Space.l)
+            .transition(.opacity)
+            .accessibilityAddTraits(.updatesFrequently)
+        }
+    }
+}
+
 /// Сегменты «Код | Документ» в заголовке окна (`d01`, `d02`), ⌘⇧D. Есть только у RTF.
 struct ViewModeSwitch: View {
     @ObservedObject var tab: EditorTab

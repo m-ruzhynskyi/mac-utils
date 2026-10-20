@@ -24,6 +24,7 @@ struct EditorRootView: View {
                             if tab.mode == .document, let document = tab.documentController {
                                 DocFormatBar(tab: tab, document: document)
                                 DocumentHost(controller: document).clipped()
+                                    .overlay(alignment: .bottom) { DocNoticeView(document: document) }
                             } else {
                                 // Текст — строго в своей области: AppKit-вид поверх SwiftUI не должен заходить на строку состояния.
                                 EditorTextHost(tab: tab).clipped()

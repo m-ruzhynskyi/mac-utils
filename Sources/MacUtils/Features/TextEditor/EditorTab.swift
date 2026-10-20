@@ -61,6 +61,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     var documentController: DocumentController?
     /// С последнего сохранения правили из «Документа» — запись только после проверок без потерь.
     var editedInDocument = false
+    /// Нетронутые куски текста с открытия или сохранения (сверка байтов «вне правок» перед записью).
+    private(set) var journal = DocSourceJournal(length: 0)
     var matchesBrackets = true { didSet { refreshBrackets() } }
     /// Где сейчас подсвечены скобки (временный атрибут фона).
     private var bracketRanges: [NSRange] = []
@@ -175,6 +177,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         refreshCounts()
         refreshLineEnding()
         textView.setSelectedRange(NSRange(location: 0, length: 0))
+        journal = DocSourceJournal(length: storage.length)
+        editedInDocument = false
         dollars.removedCount = nil
         dollars.textChanged({ [weak self] in self?.text ?? "" }, immediately: true)
         ruler.updateThickness()
@@ -249,6 +253,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     func markSaved() {
         changeCount = 0
         pendingChange = false
+        journal = DocSourceJournal(length: storage.length)
+        editedInDocument = false
         updateDirty()
     }
 
@@ -268,6 +274,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         MainActor.assumeIsolated {
             sourceRevision += 1
             guard !bulkLoading else { return }
+            journal.record(edited: editedRange, delta: delta)
             documentController?.sourceDidChange()
             dollars.invalidate()
             let editLine = lines.line(at: editedRange.location)

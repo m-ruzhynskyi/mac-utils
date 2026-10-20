@@ -70,12 +70,46 @@ final class DocLayoutManager: NSLayoutManager {
 /// Текст одной страницы: все страницы делят одно хранилище и один `DocLayoutManager`, у каждой — свой контейнер.
 final class DocTextView: NSTextView {
     weak var page: DocPageView?
+    weak var controller: DocumentController?
     /// Двойной клик по полю страницы (колонтитул) — передаётся странице.
     var onDoubleClickOutside: ((NSEvent) -> Bool)?
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2, let handler = onDoubleClickOutside, handler(event) { return }
         super.mouseDown(with: event)
+    }
+
+    // MARK: Ввод через метод ввода (японский, китайский…): набираемое — только на экране, в исходник — по подтверждению.
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        if !hasMarkedText() {
+            controller?.beginComposition(replacing: replacementRange.location == NSNotFound ? self.selectedRange() : replacementRange)
+        }
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+    }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        if hasMarkedText(), let controller {
+            let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+            super.unmarkText()
+            controller.commitComposition(text)
+            return
+        }
+        super.insertText(string, replacementRange: replacementRange)
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        controller?.cancelComposition()
+    }
+
+    // Вставка — обычным текстом (форматированная — этап D-4).
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { [.string] }
+
+    override func paste(_ sender: Any?) {
+        let rich = NSPasteboard.general.availableType(from: [.rtf, .rtfd, .html]) != nil
+        pasteAsPlainText(sender)
+        if rich { controller?.show(notice: "Вставлено без части форматирования") }
     }
 
     // В документе нет «умных» замен: набранное должно попадать в исходник как есть.
