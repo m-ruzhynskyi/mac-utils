@@ -318,6 +318,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let policy: NSApplication.ActivationPolicy = visible ? .regular : .accessory
         guard NSApp.activationPolicy() != policy else { return }
         NSApp.setActivationPolicy(policy)
+        // Со значком в Dock Mac Utils есть в своём переключателе, без значка — нет. Системный ⌘Tab эта смена не трогает.
+        AppSwitcher.shared.activationPolicyChanged()
         // Окно настроек не должно пропадать при смене режима.
         if policy == .accessory, SettingsWindowController.shared.isVisible {
             DispatchQueue.main.async { SettingsWindowController.shared.show() }
