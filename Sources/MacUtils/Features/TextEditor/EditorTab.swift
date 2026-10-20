@@ -46,6 +46,17 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     /// Ручной выбор языка сохраняется для вкладки.
     var zoom: CGFloat = 1 { didSet { applyZoom() } }
 
+    var showsInvisibles: Bool {
+        get { (textView.layoutManager as? EditorLayoutManager)?.showsInvisibles ?? false }
+        set { (textView.layoutManager as? EditorLayoutManager)?.showsInvisibles = newValue }
+    }
+    var matchesBrackets = true { didSet { refreshBrackets() } }
+    /// Где сейчас подсвечены скобки (временный атрибут фона).
+    private var bracketRanges: [NSRange] = []
+
+    /// Растёт с каждой правкой текста: фоновый результат (поиск, замена) применяется, только если текст тот же.
+    private(set) var textVersion = 0
+
     /// Счётчик правок от сохранения: +1 за каждый шаг отмены, −1 за отмену.
     private var changeCount = 0
     private var pendingChange = false
@@ -138,6 +149,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         if resetUndo { undo.removeAllActions() }
         textView.typingAttributes = baseAttributes
         lines = LineIndex(text)
+        textVersion += 1
         changeCount = 0
         pendingChange = false
         updateDirty()
@@ -247,6 +259,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     }
 
     func textDidChange(_ notification: Notification) {
+        textVersion += 1
         pendingChange = true
         updateDirty()
         refreshCounts()
@@ -265,7 +278,28 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
 
     func textViewDidChangeSelection(_ notification: Notification) {
         refreshCaret()
+        refreshBrackets()
         ruler.needsDisplay = true
+    }
+
+    /// Парная скобка у курсора — фоном у обеих; без пары — красным. Только при пустом выделении.
+    func refreshBrackets() {
+        guard let layout = textView.layoutManager else { return }
+        let full = NSRange(location: 0, length: storage.length)
+        for range in bracketRanges where NSMaxRange(range) <= full.length {
+            layout.removeTemporaryAttribute(.backgroundColor, forCharacterRange: range)
+        }
+        bracketRanges = []
+        let selection = textView.selectedRange()
+        guard matchesBrackets, selection.length == 0, let match = BracketMatcher.match(in: text, caret: selection.location) else { return }
+        switch match {
+        case .pair(let a, let b):
+            bracketRanges = [NSRange(location: a, length: 1), NSRange(location: b, length: 1)]
+            for range in bracketRanges { layout.addTemporaryAttribute(.backgroundColor, value: EditorStyle.bracketFill, forCharacterRange: range) }
+        case .unmatched(let a):
+            bracketRanges = [NSRange(location: a, length: 1)]
+            layout.addTemporaryAttribute(.backgroundColor, value: EditorStyle.bracketUnmatched, forCharacterRange: bracketRanges[0])
+        }
     }
 
     private func refreshCounts() {
@@ -331,8 +365,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         guard !ranges.isEmpty else { return 0 }
         // Список отстал от текста — ничего не трогаем, список пересчитывается сразу.
         let string = text
-        guard ranges.allSatisfy({ NSMaxRange($0) <= string.length && $0.location > 0 && string.character(at: $0.location - 1) == 0x24 })
-        else {
+        guard ranges.allSatisfy({ DollarMarks.isValue($0, in: string) }) else {
             dollars.scanNow(string)
             NSSound.beep()
             return 0
@@ -473,6 +506,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
                                hue: DollarMarks.hue(of: string.substring(with: shifted.value) as NSString, hues: EditorStyle.hueCount))
         }
         highlight(window, in: string, layout: layout, entries: local, firstIndex: before)
+        refreshBrackets()
     }
 
     func applyHighlights() {
@@ -491,6 +525,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
             for key in keys { layout.removeTemporaryAttribute(key, forCharacterRange: range) }
             highlight(range, in: string, layout: layout)
         }
+        bracketRanges = []
+        refreshBrackets()
     }
 
     /// `entries` и `firstIndex` — знаки `$` для окна и номер первого из них по порядку (по умолчанию — из списка панели).

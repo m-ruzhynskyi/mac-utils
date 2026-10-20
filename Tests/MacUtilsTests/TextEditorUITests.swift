@@ -8,9 +8,11 @@ import XCTest
 @MainActor
 final class TextEditorUITests: XCTestCase {
     private var windows: [NSWindow] = []
+    private var defaults: EditorDefaultsSnapshot!
 
     override func setUp() {
         super.setUp()
+        defaults = EditorDefaultsSnapshot()
         _ = NSApplication.shared
         DSFonts.registerAll()
         UserDefaults.standard.set(true, forKey: Pref.editorSkipFirst)
@@ -20,7 +22,14 @@ final class TextEditorUITests: XCTestCase {
     override func tearDown() {
         for window in windows { window.contentView = nil; window.close() }
         windows = []
+        defaults.restore()
         super.tearDown()
+    }
+
+    /// Регулярное выражение ищется в фоне — ждём результата.
+    private func waitSearch(_ search: EditorSearch) {
+        let deadline = Date().addingTimeInterval(5)
+        while search.searching, Date() < deadline { settle(0.02) }
     }
 
     /// Демо-форма счёта (как на макетах): первые три `$` — служебные в `\info`.
@@ -198,14 +207,17 @@ final class TextEditorUITests: XCTestCase {
         search.options = SearchOptions(regex: true)
         search.query = "("
         search.refresh()
+        waitSearch(search)
         XCTAssertNotNil(search.error, "ошибка выражения — в поле, без падения")
         // Замена по группам — один шаг отмены.
         let original = tab.text as String
         search.query = #"\$(\w+)"#
         search.replacement = "<$1>"
         search.refresh()
+        waitSearch(search)
         settle(0.05)
         search.replaceAll()
+        waitSearch(search)
         XCTAssertFalse((tab.text as String).contains("$"))
         XCTAssertTrue((tab.text as String).contains("<one>"))
         XCTAssertEqual(search.note, "Заменено: 4")
@@ -364,6 +376,7 @@ final class TextEditorUITests: XCTestCase {
             workspace.dollarPanelVisible = false
             settle()
             workspace.search.refresh()
+            waitSearch(workspace.search)
             settle()
             try write(window, to: folder.appendingPathComponent("editor-c-find-\(suffix).png"))
             workspace.findMode = nil

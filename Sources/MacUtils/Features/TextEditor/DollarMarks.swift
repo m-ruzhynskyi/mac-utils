@@ -79,6 +79,14 @@ enum DollarMarks {
         return Int(hash % UInt32(hues))
     }
 
+    /// Диапазон всё ещё ровно значение знака: перед ним `$`, внутри нет завершителей, сразу после — завершитель или конец.
+    /// Нужно, когда список отстал от текста (пересчёт через 250 мс после правки).
+    static func isValue(_ range: NSRange, in text: NSString) -> Bool {
+        guard range.location > 0, NSMaxRange(range) <= text.length, text.character(at: range.location - 1) == 0x24 else { return false }
+        for i in range.location..<NSMaxRange(range) where isTerminator(text.character(at: i)) { return false }
+        return NSMaxRange(range) == text.length || isTerminator(text.character(at: NSMaxRange(range)))
+    }
+
     /// Текст без значений у `marks`; сами `$` остаются.
     static func removingValues(of marks: some Sequence<DollarMark>, in text: String) -> String {
         let result = NSMutableString(string: text)

@@ -33,6 +33,11 @@ enum EditorStyle {
     static let keyword = DS.color(dark: 0xB79BFF, light: 0x7A4FE0)
     static let comment = DS.color(dark: 0x6B7480, light: 0x8A929C)
     static let currentLine = DS.color(dark: 0x1C2026, light: 0xF3F5EF)
+    /// Невидимые символы (·, →, ¶, ¤) — бледнее текста, но различимы в обеих темах.
+    static let invisible = DS.color(dark: 0x4A525E, light: 0xB4BAC2)
+    /// Парная скобка у курсора и скобка без пары.
+    static let bracketFill = NSColor(name: nil) { DS.rgb(0xC8F05A, alpha: DS.isDark($0) ? 0.3 : 0.45) }
+    static let bracketUnmatched = NSColor(name: nil) { DS.rgb(DS.isDark($0) ? 0xFF7A6B : 0xD03A2B, alpha: 0.35) }
     static let gutter = DS.color(dark: 0x14171B, light: 0xF8F9F6)
 
     /// Шесть оттенков знаков `$` (тёмная / светлая тема; кандидаты в `DS.Palette.mark1…6`) и нейтральный — для пустых значений.
@@ -90,7 +95,7 @@ final class EditorTextView: NSTextView {
 
     static func make() -> (scroll: NSScrollView, text: EditorTextView) {
         let storage = NSTextStorage()
-        let layout = NSLayoutManager()
+        let layout = EditorLayoutManager()
         layout.allowsNonContiguousLayout = true
         // Без фоновой раскладки: на 10 МБ она раскладывает весь текст, и потом каждая большая правка его заново инвалидирует.
         layout.backgroundLayoutEnabled = false

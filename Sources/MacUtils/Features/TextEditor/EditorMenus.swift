@@ -80,6 +80,8 @@ enum EditorMenus {
             ]),
             submenu("Вид", [
                 item("Перенос строк", #selector(C.editorToggleWrap(_:))),
+                item("Невидимые символы", #selector(C.editorToggleInvisibles(_:)), "i", [.command, .option]),
+                item("Парные скобки", #selector(C.editorToggleBrackets(_:))),
                 .separator(),
                 item("Крупнее", #selector(C.editorZoomIn(_:)), "="),
                 item("Мельче", #selector(C.editorZoomOut(_:)), "-"),

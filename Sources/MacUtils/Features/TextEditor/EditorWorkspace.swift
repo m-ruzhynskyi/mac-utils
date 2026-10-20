@@ -20,6 +20,18 @@ final class EditorWorkspace: ObservableObject {
             for tab in tabs { tab.textView.setWraps(wraps) }
         }
     }
+    @Published var showsInvisibles = UserDefaults.standard.bool(forKey: Pref.editorInvisibles) {
+        didSet {
+            UserDefaults.standard.set(showsInvisibles, forKey: Pref.editorInvisibles)
+            for tab in tabs { tab.showsInvisibles = showsInvisibles }
+        }
+    }
+    @Published var matchesBrackets = UserDefaults.standard.object(forKey: Pref.editorBrackets) as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(matchesBrackets, forKey: Pref.editorBrackets)
+            for tab in tabs { tab.matchesBrackets = matchesBrackets }
+        }
+    }
     @Published var zoom = EditorPrefs.zoom {
         didSet {
             EditorPrefs.zoom = zoom
@@ -49,6 +61,8 @@ final class EditorWorkspace: ObservableObject {
     func add(_ tab: EditorTab, select: Bool = true, at index: Int? = nil) {
         tab.zoom = zoom
         tab.textView.setWraps(wraps)
+        tab.showsInvisibles = showsInvisibles
+        tab.matchesBrackets = matchesBrackets
         if let index { tabs.insert(tab, at: min(index, tabs.count)) } else { tabs.append(tab) }
         tabObservers[tab.id] = tab.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         tab.onEdit = { [weak self] in self?.onChange?() }

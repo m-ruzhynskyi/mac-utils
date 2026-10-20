@@ -21,10 +21,13 @@ enum TextSearch {
 
     enum Failure: LocalizedError, Equatable {
         case badPattern(String)
+        /// Поиск прерван: запрос или текст сменились, либо выражение ищет слишком долго.
+        case cancelled
 
         var errorDescription: String? {
             switch self {
             case .badPattern(let reason): return reason
+            case .cancelled: return "Поиск прерван"
             }
         }
     }
@@ -44,8 +47,10 @@ enum TextSearch {
 
     /// Все совпадения в `scope` по порядку (не больше `limit`, если он задан). Пустые совпадения (`^`, `\b`)
     /// тоже считаются, поиск после них идёт дальше, а не по кругу.
+    /// `isCancelled` — проверяется и между совпадениями, и во время долгого перебора внутри одного (regex
+    /// с катастрофическим откатом вроде `(a+)+$`): поиск в фоне можно прервать.
     static func find(_ query: String, in text: NSString, options: SearchOptions, scope: NSRange? = nil,
-                     limit: Int? = TextSearch.limit) throws -> Result {
+                     limit: Int? = TextSearch.limit, isCancelled: (() -> Bool)? = nil) throws -> Result {
         let scope = scope ?? NSRange(location: 0, length: text.length)
         guard !query.isEmpty, scope.length > 0 || options.regex else { return Result(ranges: [], truncated: false) }
         // Обычный текст без «слова целиком» — быстрый поиск `NSString` (10 МБ — десятки миллисекунд).
@@ -68,7 +73,14 @@ enum TextSearch {
         var truncated = false
         // Изменяемый текст редактора при переходе в `String` копируется — один раз, а не на каждое совпадение.
         let string = text as String
-        regex.enumerateMatches(in: string, options: [.withTransparentBounds], range: scope) { match, _, stop in
+        var cancelled = false
+        let flags: NSRegularExpression.MatchingOptions = isCancelled == nil ? [.withTransparentBounds] : [.withTransparentBounds, .reportProgress]
+        regex.enumerateMatches(in: string, options: flags, range: scope) { match, _, stop in
+            if let isCancelled, isCancelled() {
+                cancelled = true
+                stop.pointee = true
+                return
+            }
             guard let match else { return }
             if let limit, ranges.count == limit {
                 truncated = true
@@ -77,12 +89,13 @@ enum TextSearch {
             }
             ranges.append(match.range)
         }
+        if cancelled { throw Failure.cancelled }
         return Result(ranges: ranges, truncated: truncated)
     }
 
     /// Строки замены для совпадений: в режиме regex `$1`, `$2` — группы, иначе текст как есть.
     static func replacements(_ query: String, template: String, in text: NSString, options: SearchOptions,
-                             scope: NSRange? = nil) throws -> (ranges: [NSRange], strings: [String]) {
+                             scope: NSRange? = nil, isCancelled: (() -> Bool)? = nil) throws -> (ranges: [NSRange], strings: [String]) {
         guard options.regex else {
             let ranges = try find(query, in: text, options: options, scope: scope, limit: nil).ranges
             return (ranges, Array(repeating: template, count: ranges.count))
@@ -90,9 +103,39 @@ enum TextSearch {
         let regex = try expression(query, options: options)
         let scope = scope ?? NSRange(location: 0, length: text.length)
         let string = text as String
-        let matches = regex.matches(in: string, options: [.withTransparentBounds], range: scope)
-        return (matches.map(\.range),
-                matches.map { regex.replacementString(for: $0, in: string, offset: 0, template: template) })
+        var ranges: [NSRange] = [], strings: [String] = []
+        var cancelled = false
+        let flags: NSRegularExpression.MatchingOptions = isCancelled == nil ? [.withTransparentBounds] : [.withTransparentBounds, .reportProgress]
+        regex.enumerateMatches(in: string, options: flags, range: scope) { match, _, stop in
+            if let isCancelled, isCancelled() {
+                cancelled = true
+                stop.pointee = true
+                return
+            }
+            guard let match else { return }
+            ranges.append(match.range)
+            strings.append(regex.replacementString(for: match, in: string, offset: 0, template: template))
+        }
+        if cancelled { throw Failure.cancelled }
+        return (ranges, strings)
+    }
+
+    /// Флаг отмены для фонового поиска (и предел по времени).
+    final class Cancellation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var flag = false
+        private let deadline: TimeInterval
+
+        init(timeout: TimeInterval = 15) { deadline = ProcessInfo.processInfo.systemUptime + timeout }
+
+        func cancel() { lock.lock(); flag = true; lock.unlock() }
+
+        var isCancelled: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return flag || ProcessInfo.processInfo.systemUptime > deadline
+        }
+
+        var timedOut: Bool { ProcessInfo.processInfo.systemUptime > deadline }
     }
 
     /// Замена одного совпадения `range` (оно должно совпадать с запросом целиком).

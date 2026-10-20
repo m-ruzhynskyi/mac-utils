@@ -104,6 +104,9 @@ struct EditorDocument {
     private(set) var decodedEncoding: TextEncoding
     /// Байты не подошли кодировке («Открыть заново в UTF-8» у cp1252): показаны знаком �.
     private(set) var lossyDecode = false
+    /// UTF-16: писать BOM. Файл, открытый в UTF-16 без BOM («Открыть заново в…»), и сохраняется без него;
+    /// новый и «Преобразовать в UTF-16» — с BOM.
+    var utf16BOM = true
     /// Кодировка при сохранении («Преобразовать в…» меняет только её).
     var encoding: TextEncoding
     /// Откуда взялась кодировка — показывает меню «Кодировка».
@@ -172,6 +175,11 @@ struct EditorDocument {
         decodedEncoding = newEncoding
         encoding = newEncoding
         reason = .manual
+        switch newEncoding {
+        case .utf16LE: utf16BOM = original.starts(with: TextEncoding.bomUTF16LE)
+        case .utf16BE: utf16BOM = original.starts(with: TextEncoding.bomUTF16BE)
+        default: utf16BOM = true
+        }
     }
 
     enum SaveError: LocalizedError, Equatable {
@@ -190,7 +198,7 @@ struct EditorDocument {
     func data(for text: String, lossy: Bool = false) throws -> Data {
         // Сравнение побуквенное (`NSString`): у `String` «é» и «e + ◌́» равны, а байты у них разные.
         if encoding == decodedEncoding, (text as NSString).isEqual(to: decodedText) { return original }
-        if let data = encoding.encode(text) { return data }
+        if let data = encoding.encode(text, utf16BOM: utf16BOM) { return data }
         guard lossy else { throw SaveError.unrepresentable(encoding.unrepresentable(in: text)) }
         return encoding.lossyEncode(text)
     }

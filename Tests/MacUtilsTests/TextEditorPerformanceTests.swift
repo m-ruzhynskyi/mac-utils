@@ -5,6 +5,18 @@ import XCTest
 /// Замеры редактора на файле 10 МБ (как `Tests/Fixtures/TextEditor/generate-big.sh`; файл создаётся во временной папке).
 /// Числа печатаются в лог; тест падает, если порог превышен больше чем в полтора раза (запас под CI и отладочную сборку).
 final class TextEditorPerformanceTests: XCTestCase {
+    private var defaults: EditorDefaultsSnapshot!
+
+    override func setUp() {
+        super.setUp()
+        defaults = EditorDefaultsSnapshot()
+    }
+
+    override func tearDown() {
+        defaults.restore()
+        super.tearDown()
+    }
+
     /// Тот же файл, что делает `generate-big.sh`: длинные строки по 8 знаков `$vNNNNN`, cp1252/ASCII, CRLF.
     /// `paragraphs` — строк `\pard …`; всего строк в тексте на 3 больше (заголовок, `}` и пустая после последнего CRLF).
     static func bigFile(target: Int = 10_485_760) -> (data: Data, dollars: Int, paragraphs: Int) {

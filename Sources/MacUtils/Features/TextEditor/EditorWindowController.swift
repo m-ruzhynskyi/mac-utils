@@ -418,6 +418,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         let apply = { [weak self] in
             tab.document.encoding = encoding
             tab.document.reason = .manual
+            tab.document.utf16BOM = true
             tab.updateDirty()
             self?.workspaceChanged()
         }
@@ -541,6 +542,12 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         case #selector(editorLanguage(_:)):
             item.state = tab?.document.language == EditorLanguage.allCases[item.tag] ? .on : .off
             return tab != nil
+        case #selector(editorToggleInvisibles(_:)):
+            item.state = workspace.showsInvisibles ? .on : .off
+            return tab != nil
+        case #selector(editorToggleBrackets(_:)):
+            item.state = workspace.matchesBrackets ? .on : .off
+            return tab != nil
         case #selector(editorToggleWrap(_:)):
             item.state = workspace.wraps ? .on : .off
             return tab != nil
@@ -579,6 +586,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
     @objc func editorGoToLine(_ sender: Any?) { workspace.overlay = .goToLine }
 
     @objc func editorToggleWrap(_ sender: Any?) { workspace.wraps.toggle() }
+    @objc func editorToggleInvisibles(_ sender: Any?) { workspace.showsInvisibles.toggle() }
+    @objc func editorToggleBrackets(_ sender: Any?) { workspace.matchesBrackets.toggle() }
     @objc func editorZoomIn(_ sender: Any?) { workspace.zoom = min(EditorStyle.zoomRange.upperBound, (workspace.zoom * 10 + 1).rounded() / 10) }
     @objc func editorZoomOut(_ sender: Any?) { workspace.zoom = max(EditorStyle.zoomRange.lowerBound, (workspace.zoom * 10 - 1).rounded() / 10) }
     @objc func editorZoomReset(_ sender: Any?) { workspace.zoom = 1 }
