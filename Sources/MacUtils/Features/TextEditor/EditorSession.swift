@@ -229,10 +229,12 @@ enum EditorRecent {
 
     static func clear() { UserDefaults.standard.removeObject(forKey: Pref.editorRecent) }
 
-    /// «~/Documents/Формы» вместо полного пути.
-    static func folderTitle(_ url: URL) -> String {
-        let folder = url.deletingLastPathComponent().path
+    /// «~/Documents/Формы» вместо полного пути (папка файла).
+    static func folderTitle(_ url: URL) -> String { folderTitle(ofFolder: url.deletingLastPathComponent()) }
+
+    static func folderTitle(ofFolder folder: URL) -> String {
+        let path = folder.path
         let home = NSHomeDirectory()
-        return folder.hasPrefix(home) ? "~" + folder.dropFirst(home.count) : folder
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 }

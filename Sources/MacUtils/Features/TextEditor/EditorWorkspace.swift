@@ -39,6 +39,10 @@ final class EditorWorkspace: ObservableObject {
         }
     }
     let search = EditorSearch()
+    let folderSearch = FolderSearchModel()
+    @Published var folderSearchVisible = false {
+        didSet { if !folderSearchVisible { folderSearch.stop() } }
+    }
 
     enum Overlay: Equatable {
         case encoding, goToLine

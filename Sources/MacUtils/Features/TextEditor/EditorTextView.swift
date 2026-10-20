@@ -266,6 +266,57 @@ final class EditorTextView: NSTextView {
         setCarets(carets)
     }
 
+    /// ⌘-клик: курсор в точке клика добавляется к остальным (клик по уже стоящему курсору его убирает).
+    override func mouseDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags == .command, event.clickCount == 1 else { return super.mouseDown(with: event) }
+        let index = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+        var positions = editTargets.map { $0.length == 0 ? $0.location : NSMaxRange($0) }
+        if positions.count > 1, let existing = positions.firstIndex(of: index) {
+            positions.remove(at: existing)
+        } else {
+            positions.append(index)
+        }
+        window?.makeFirstResponder(self)
+        setCarets(positions)
+    }
+
+    /// ⌃⇧↑ / ⌃⇧↓: ещё курсор строкой выше (над самым верхним) или ниже (под самым нижним), в том же столбце.
+    func addCaret(lineOffset: Int) {
+        guard let text = textStorage?.mutableString else { return }
+        let positions = editTargets.map { $0.length == 0 ? $0.location : NSMaxRange($0) }
+        guard let from = lineOffset < 0 ? positions.min() : positions.max() else { return }
+        let line = LineCommands.lineBlock(text, NSRange(location: from, length: 0))
+        let column = from - line.location
+        let target: NSRange
+        if lineOffset < 0 {
+            guard line.location > 0 else { return NSSound.beep() }
+            target = LineCommands.lineBlock(text, NSRange(location: line.location - 1, length: 0))
+        } else {
+            guard NSMaxRange(line) < text.length || (NSMaxRange(line) == text.length && line.length > 0
+                  && LineCommands.isBreak(text.character(at: NSMaxRange(line) - 1))) else { return NSSound.beep() }
+            target = LineCommands.lineBlock(text, NSRange(location: NSMaxRange(line), length: 0))
+        }
+        var body = target.length
+        while body > 0, LineCommands.isBreak(text.character(at: target.location + body - 1)) { body -= 1 }
+        setCarets(positions + [target.location + min(column, body)])
+        scrollRangeToVisible(NSRange(location: target.location + min(column, body), length: 0))
+    }
+
+    /// ← → при нескольких курсорах двигают все (↑ ↓ и остальное — снова один курсор).
+    override func moveLeft(_ sender: Any?) { moveCarets(by: -1) { super.moveLeft(sender) } }
+    override func moveRight(_ sender: Any?) { moveCarets(by: 1) { super.moveRight(sender) } }
+
+    private func moveCarets(by step: Int, single: () -> Void) {
+        guard !extraCarets.isEmpty, let text = textStorage?.mutableString else { return single() }
+        let positions = editTargets.map { range -> Int in
+            if range.length > 0 { return step < 0 ? range.location : NSMaxRange(range) }
+            if step < 0 { return range.location > 0 ? text.rangeOfComposedCharacterSequence(at: range.location - 1).location : 0 }
+            return range.location < text.length ? NSMaxRange(text.rangeOfComposedCharacterSequence(at: range.location)) : text.length
+        }
+        setCarets(positions)
+    }
+
     private func insertEverywhere(_ typed: String) {
         editAll { ($0, typed) }
     }

@@ -190,6 +190,9 @@ enum Pref {
     static let editorBrackets = "editorBrackets"
     /// Ширина табуляции в пробелах (табы ↔ пробелы, отступ таба на экране).
     static let editorTabWidth = "editorTabWidth"
+    /// Поиск в папке: последняя папка и маска имён.
+    static let editorFolderSearchPath = "editorFolderSearchPath"
+    static let editorFolderSearchMask = "editorFolderSearchMask"
     static let editorRecent = "editorRecent"
     /// Вкладка «Редактор» уже добавлена в панель 🔧 (один раз при обновлении).
     static let panelTabsEditorAdded = "panelTabsEditorAdded"

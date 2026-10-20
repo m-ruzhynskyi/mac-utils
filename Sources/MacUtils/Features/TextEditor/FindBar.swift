@@ -296,6 +296,9 @@ struct FindBar: View {
                     Button("Заменить все") { search.replaceAll() }
                         .buttonStyle(.graphite(.primary, size: .compact))
                         .disabled(search.query.isEmpty || search.error != nil)
+                    Button("В папке…") { EditorWindowController.shared.showFolderSearch() }
+                        .buttonStyle(.graphite(.ghost, size: .compact))
+                        .help("Найти и заменить во всех файлах папки (⇧⌘F)")
                 }
             }
         }

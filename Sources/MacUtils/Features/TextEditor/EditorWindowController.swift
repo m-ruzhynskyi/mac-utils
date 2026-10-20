@@ -333,7 +333,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
 
     /// Запись целиком: новый файл — атомарно; существующий — через замену (права, метки Finder и дата создания
     /// остаются, при сбое на диске остаётся прежний файл).
-    static func writeFile(_ data: Data, to link: URL) throws {
+    nonisolated static func writeFile(_ data: Data, to link: URL) throws {
         // Пишем в настоящий файл: `replaceItemAt` по символической ссылке заменил бы саму ссылку обычным файлом.
         let url = link.resolvingSymlinksInPath()
         let manager = FileManager.default
@@ -487,6 +487,49 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         NotificationCenter.default.post(name: .editorFocusFind, object: nil)
     }
 
+    // MARK: - Поиск в папке
+
+    /// ⇧⌘F: панель «Поиск в папке» внизу окна; запрос и опции — из панели поиска, папка — последняя или папка файла.
+    func showFolderSearch() {
+        let model = workspace.folderSearch
+        if model.query.isEmpty { model.query = workspace.search.query }
+        if model.folder == nil { model.folder = workspace.current?.document.url?.deletingLastPathComponent() }
+        model.options = workspace.search.options
+        model.dirtyOpenFiles = { [weak self] in
+            Set((self?.workspace.tabs ?? []).filter(\.isDirty).compactMap { $0.document.url?.standardizedFileURL.resolvingSymlinksInPath().path })
+        }
+        model.reloadOpenFiles = { [weak self] urls in
+            guard let self else { return }
+            for url in urls { if let tab = self.workspace.tab(for: url), !tab.isDirty { self.reloadFromDisk(tab) } }
+        }
+        workspace.folderSearchVisible = true
+    }
+
+    /// Открыть найденное: вкладка файла и выделение совпадения.
+    func openFolderMatch(_ url: URL, range: NSRange) {
+        open([url])
+        guard let tab = workspace.tab(for: url) else { return }
+        workspace.selectedID = tab.id
+        DispatchQueue.main.async { tab.reveal(range) }
+    }
+
+    /// «Заменить в папке…» — файлы на диске перезаписываются, отменить нельзя: сначала вопрос.
+    func confirmFolderReplace() {
+        let model = workspace.folderSearch
+        guard let summary = model.summary, !summary.files.isEmpty, let window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Заменить \(summary.matchCount) \(plural(summary.matchCount, "совпадение", "совпадения", "совпадений")) "
+            + "в \(summary.files.count) \(plural(summary.files.count, "файле", "файлах", "файлах"))?"
+        alert.informativeText = "Файлы перезапишутся на диске в своих кодировках — ⌘Z это не отменит. "
+            + "Открытые вкладки с несохранёнными правками не тронутся."
+        alert.addButton(withTitle: "Заменить")
+        alert.addButton(withTitle: "Отмена")
+        alert.beginSheetModal(for: window) { response in
+            MainActor.assumeIsolated { if response == .alertFirstButtonReturn { model.replaceAll() } }
+        }
+    }
+
     func hideFind() {
         workspace.findMode = nil
         workspace.search.clear()
@@ -586,6 +629,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         workspace.search.next(backwards: true)
     }
     @objc func editorGoToLine(_ sender: Any?) { workspace.overlay = .goToLine }
+    @objc func editorFindInFolder(_ sender: Any?) { showFolderSearch() }
 
     @objc func editorToggleWrap(_ sender: Any?) { workspace.wraps.toggle() }
     @objc func editorToggleInvisibles(_ sender: Any?) { workspace.showsInvisibles.toggle() }
@@ -625,6 +669,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
     @objc func editorSpacesToTabs(_ sender: Any?) {
         tab?.apply({ LineCommands.spacesToTabs($0, $1, width: EditorPrefs.tabWidth) }, name: "Пробелы → табы")
     }
+    @objc func editorAddCaretAbove(_ sender: Any?) { tab?.textView.addCaret(lineOffset: -1) }
+    @objc func editorAddCaretBelow(_ sender: Any?) { tab?.textView.addCaret(lineOffset: 1) }
     @objc func editorToggleBookmark(_ sender: Any?) { tab?.toggleBookmark() }
     @objc func editorNextBookmark(_ sender: Any?) { tab?.goToBookmark(backwards: false) }
     @objc func editorPreviousBookmark(_ sender: Any?) { tab?.goToBookmark(backwards: true) }

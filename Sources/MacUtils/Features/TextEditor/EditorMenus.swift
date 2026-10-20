@@ -56,6 +56,10 @@ enum EditorMenus {
             item("Как в предложении", #selector(C.editorSentenceCase(_:))),
         ]))
         menu.addItem(item("Удалить хвостовые пробелы", #selector(C.editorTrimTrailing(_:))))
+        menu.addItem(item("Добавить курсор выше", #selector(C.editorAddCaretAbove(_:)), String(Character(UnicodeScalar(NSUpArrowFunctionKey)!)),
+                          [.control, .shift]))
+        menu.addItem(item("Добавить курсор ниже", #selector(C.editorAddCaretBelow(_:)), String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)),
+                          [.control, .shift]))
         menu.addItem(submenu("Строки", [
             item("Сортировать А → Я", #selector(C.editorSortAscending(_:))),
             item("Сортировать Я → А", #selector(C.editorSortDescending(_:))),
@@ -88,6 +92,7 @@ enum EditorMenus {
                 item("Найти и заменить…", #selector(C.editorReplace(_:)), "f", [.command, .option]),
                 item("Найти далее", #selector(C.editorFindNext(_:)), "g"),
                 item("Найти ранее", #selector(C.editorFindPrevious(_:)), "g", [.command, .shift]),
+                item("Найти в папке…", #selector(C.editorFindInFolder(_:)), "f", [.command, .shift]),
                 .separator(),
                 item("Перейти к строке…", #selector(C.editorGoToLine(_:)), "l"),
                 .separator(),

@@ -23,6 +23,15 @@ struct EditorRootView: View {
                         DollarPanelView(tab: tab).frame(width: Self.panelWidth)
                     }
                 }
+                if workspace.folderSearchVisible {
+                    FolderSearchPanel(model: workspace.folderSearch) { url, range in
+                        EditorWindowController.shared.openFolderMatch(url, range: range)
+                    } close: {
+                        workspace.folderSearchVisible = false
+                    } confirmReplace: {
+                        EditorWindowController.shared.confirmFolderReplace()
+                    }
+                }
                 EditorStatusBar(workspace: workspace, tab: tab)
             } else {
                 EmptyState("Нет открытых документов", systemImage: "doc.plaintext",
