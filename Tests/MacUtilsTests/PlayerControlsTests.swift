@@ -175,14 +175,13 @@ final class PlayerEntryPointTests: XCTestCase {
         XCTAssertFalse(utis.contains { $0.contains("matroska") || $0.contains("webm") || $0 == "public.avi" }, "MKV/WebM/AVI — во второй версии")
     }
 
-    /// Номер MINOR согласуется при слиянии: запись есть, но без номера и пока не в списке выпусков.
-    func testWhatsNewEntryWithoutVersionNumber() {
-        XCTAssertEqual(Changelog.videoPlayer.version, "Видеоплеер")
-        XCTAssertFalse(Changelog.videoPlayer.items.isEmpty)
-        XCTAssertFalse(Changelog.releases.contains { $0.version == Changelog.videoPlayer.version })
+    /// Видеоплеер выходит в 1.9 (вместе с режимом «Документ»): пункты — в записи «1.9», без номеров версий в тексте.
+    func testWhatsNewEntry() {
+        let release = Changelog.releases.first { $0.version == "1.9" }
+        XCTAssertTrue(release?.items.contains { $0.hasPrefix("Видеоплеер") } ?? false)
         let numbered = try! NSRegularExpression(pattern: #"\b\d+\.\d+(\.\d+)?\b"#)
-        for item in Changelog.videoPlayer.items {
-            XCTAssertNil(numbered.firstMatch(in: item, range: NSRange(item.startIndex..., in: item)), "без номеров версий: \(item)")
+        for item in release?.items ?? [] where item.contains("плеер") || item.contains("Пропустить") {
+            XCTAssertNil(numbered.firstMatch(in: item, range: NSRange(item.startIndex..., in: item)), item)
         }
     }
 
