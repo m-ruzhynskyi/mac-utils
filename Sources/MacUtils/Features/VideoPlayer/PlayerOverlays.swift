@@ -318,7 +318,7 @@ private struct NextEpisodeCard: View {
                     }
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Следующая серия через \(seconds)").font(DS.Font.headline).foregroundStyle(.dsText).lineLimit(1).fixedSize()
-                    Text(next.url.lastPathComponent).font(DS.Font.rowSub).foregroundStyle(.dsMute).lineLimit(1).truncationMode(.middle)
+                    EpisodeTitle(name: next.url.lastPathComponent, font: DS.Font.rowSub, color: .dsMute)
                     Text(detail).font(DS.Font.mono(11, relativeTo: .caption)).foregroundStyle(.dsMute)
                 }
                 .frame(maxWidth: 220, alignment: .leading)

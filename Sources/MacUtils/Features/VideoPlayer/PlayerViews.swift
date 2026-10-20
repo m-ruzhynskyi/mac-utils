@@ -59,8 +59,7 @@ struct PlayerTitleBar: View {
                 Text("Видеоплеер").font(DS.Font.manrope(14, .heavy, relativeTo: .headline)).foregroundStyle(.dsText)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(model.info.title).font(DS.Font.manrope(13.5, .heavy, relativeTo: .headline)).foregroundStyle(.dsText)
-                        .lineLimit(1).truncationMode(.middle)
+                    EpisodeTitle(name: model.info.title, font: DS.Font.manrope(13.5, .heavy, relativeTo: .headline))
                     if let subtitle {
                         Text(subtitle).font(DS.Font.manrope(11, .regular, relativeTo: .caption)).foregroundStyle(.dsMute).lineLimit(1)
                     }
@@ -600,5 +599,36 @@ private struct SpeedChip: View {
         .buttonStyle(.plain)
         .help("Скорость ([ и ])")
         .accessibilityLabel("Скорость \(PlaybackRate.title(rate))")
+    }
+}
+
+/// Имя файла в одну строку: номер серии («s01e03») не сокращается никогда, сокращается то, что перед ним;
+/// короткий хвост после номера («_demo.mp4») тоже виден. Без номера — сокращение посередине.
+struct EpisodeTitle: View {
+    let name: String
+    let font: Font
+    var color: Color = .dsText
+
+    var body: some View {
+        if let parts = EpisodeName.split(name) {
+            HStack(spacing: 0) {
+                if !parts.before.isEmpty {
+                    // Начало названия хотя бы «Оче…»: по нему видно, какой это сериал.
+                    Text(parts.before).lineLimit(1).truncationMode(.tail).frame(minWidth: 40, alignment: .leading).layoutPriority(0)
+                }
+                Text(parts.marker).lineLimit(1).fixedSize().layoutPriority(3)
+                if parts.after.count <= 16 {
+                    Text(parts.after).lineLimit(1).fixedSize().layoutPriority(2)
+                } else {
+                    Text(parts.after).lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                }
+            }
+            .font(font)
+            .foregroundStyle(color)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(name)
+        } else {
+            Text(name).font(font).foregroundStyle(color).lineLimit(1).truncationMode(.middle)
+        }
     }
 }

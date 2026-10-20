@@ -46,15 +46,7 @@ final class PlayerModelTests: XCTestCase {
 
     /// Номер кадра, который сейчас показан.
     private func shownFrame(_ model: PlayerModel) async throws -> Int? {
-        let output = try XCTUnwrap(model.videoOutput)
-        let time = model.player.currentTime()
-        for _ in 0..<50 {
-            if let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
-                return DemoVideo.frameNumber(in: buffer)
-            }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-        return nil
+        await DemoVideo.shownFrame(try XCTUnwrap(model.videoOutput), player: model.player)
     }
 
     func testOpensDemoAndDescribesIt() async throws {

@@ -192,3 +192,21 @@ final class PlayerEntryPointTests: XCTestCase {
         XCTAssertEqual(SettingsSection.allCases.last, .videoPlayer, "новый раздел — в конце: на порядке держатся сохранённые вкладки")
     }
 }
+
+/// Тестер 2, дефект 1: номер серии в плейлисте и заголовке не сокращается.
+final class EpisodeNameTests: XCTestCase {
+    func testMarkers() {
+        let table: [(String, String?)] = [
+            ("harbor_s01e03_demo.mp4", "s01e03"), ("Harbor.S01E03.1080p.WEB.mp4", "S01E03"), ("Harbor S01 E03.mp4", "S01 E03"),
+            ("Harbor 1x03 Пилот.mp4", "1x03"), ("Гавань — Серия 12.mp4", "Серия 12"), ("Гавань, 3 серия.mp4", "3 серия"),
+            ("Show Episode 5.mov", "Episode 5"), ("show_ep05.m4v", "ep05"), ("Anime - E07.mp4", "E07"),
+            ("lecture_demo_part1.mp4", nil), ("2026-10-20 запись экрана.mp4", nil), ("1920x1080 demo.mp4", nil), ("Sample.mp4", nil),
+        ]
+        for (name, marker) in table {
+            XCTAssertEqual(EpisodeName.split(name)?.marker, marker, name)
+        }
+        let parts = EpisodeName.split("Очень длинное название сериала про гавань s01e03_demo.mp4")
+        XCTAssertEqual(parts?.before, "Очень длинное название сериала про гавань ")
+        XCTAssertEqual(parts?.after, "_demo.mp4")
+    }
+}

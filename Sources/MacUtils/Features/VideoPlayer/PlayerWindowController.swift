@@ -364,12 +364,14 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     func handleKey(_ event: NSEvent) -> Bool {
         let keyCode = Int(event.keyCode)
         let modifiers = event.modifierFlags.intersection(PlayerShortcuts.relevantModifiers)
-        guard let action = PlayerShortcuts.action(keyCode: keyCode, modifiers: modifiers) else { return false }
         let now = event.timestamp
-        if event.type == .keyUp {
-            if action == .seekForward { handleHold(hold.keyUp(at: now)) }
-            return action == .seekForward
+        // Отпускание → — по коду клавиши, без модификаторов: отпустили → с зажатым ⇧ — удержание всё равно кончается.
+        if event.type == .keyUp, keyCode == kVK_RightArrow, hold.pressedAt != nil {
+            handleHold(hold.keyUp(at: now))
+            return true
         }
+        guard let action = PlayerShortcuts.action(keyCode: keyCode, modifiers: modifiers) else { return false }
+        if event.type == .keyUp { return false }
         if action == .seekForward {
             handleHold(hold.keyDown(at: now, isRepeat: event.isARepeat))
             if !event.isARepeat, hold.pressedAt != nil {

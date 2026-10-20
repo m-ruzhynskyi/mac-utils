@@ -144,6 +144,27 @@ final class PlayerUISnapshots: XCTestCase {
         try render("p15-next-episode", in: directory) { root(player) }
     }
 
+    /// Длинные имена серий: номер серии виден, сокращается начало (дефект 1 Тестера 2).
+    func testLongEpisodeNames() async throws {
+        let directory = try directory()
+        let folder = try XCTUnwrap(folder)
+        var urls: [URL] = []
+        for index in 1...3 {
+            var options = DemoVideo.Options()
+            options.duration = 2
+            options.width = 160
+            options.height = 90
+            urls.append(try await DemoVideo.make(options, in: folder,
+                                                 name: "Очень длинное название сериала про ночную гавань.S01E0\(index).1080p.WEB-DL.mp4"))
+        }
+        let player = PlayerWindowController(model: PlayerModel(silent: true, positions: PositionStore(file: nil)))
+        player.model.open(urls)
+        try await waitUntil { player.model.phase == .ready }
+        player.model.pause()
+        player.ui.playlistVisible = true
+        try render("p03b-long-names", in: directory) { root(player) }
+    }
+
     func testUnsupportedAndSettings() async throws {
         let directory = try directory()
         let fake = try XCTUnwrap(folder).appendingPathComponent("trailer_demo.mkv")

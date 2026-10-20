@@ -64,11 +64,7 @@ final class PlayerWindowTests: XCTestCase {
         XCTAssertTrue(key(controller, kVK_ANSI_Period))
         try await waitUntil("кадр 241") { model.frameNumber == 241 }
         let output = try XCTUnwrap(model.videoOutput)
-        var shown: Int?
-        for _ in 0..<50 where shown == nil {
-            shown = output.copyPixelBuffer(forItemTime: model.player.currentTime(), itemTimeForDisplay: nil).flatMap(DemoVideo.frameNumber(in:))
-            if shown == nil { try await Task.sleep(nanoseconds: 20_000_000) }
-        }
+        let shown = await DemoVideo.shownFrame(output, player: model.player)
         XCTAssertEqual(shown, 241, "`.` — следующий кадр по номеру на нём")
         XCTAssertTrue(key(controller, kVK_ANSI_Comma))
         try await waitUntil("кадр 240") { model.frameNumber == 240 }
@@ -97,6 +93,18 @@ final class PlayerWindowTests: XCTestCase {
         XCTAssertEqual(model.rate, 1)
         try await waitUntil("снова пауза") { !model.isPlaying }
         XCTAssertNil(controller.ui.hud)
+    }
+
+    /// Тестер 2, дефект 3: отпустили → с зажатым ⇧ — 2× не залипает.
+    func testHoldEndsWhenReleasedWithShift() async throws {
+        let controller = try await makeController()
+        let model = controller.model
+        XCTAssertTrue(key(controller, kVK_RightArrow))
+        try await waitUntil("2×") { model.boostRate == 2 }
+        XCTAssertTrue(key(controller, kVK_RightArrow, .keyUp, flags: .shift))
+        XCTAssertNil(model.boostRate)
+        XCTAssertEqual(model.rate, 1)
+        try await waitUntil("снова пауза") { !model.isPlaying }
     }
 
     func testSeekAndRateKeys() async throws {

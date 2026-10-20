@@ -37,12 +37,15 @@ enum PlayerSnapshot {
         }
     }
 
-    /// Показанный кадр: из `AVPlayerItemVideoOutput`; если его нет — точный кадр из файла на том же времени.
+    /// Показанный кадр: из `AVPlayerItemVideoOutput`, если буфер именно этого времени уже готов (сразу после шага
+    /// под нагрузкой там может быть ещё прежний кадр); иначе — точный кадр из файла на том же времени.
     static func frame(of model: PlayerModel) async -> CGImage? {
         guard let item = model.player.currentItem else { return nil }
         let time = item.currentTime()
+        var display = CMTime.invalid
         if let output = model.videoOutput,
-           let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil),
+           let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: &display),
+           display.isValid, abs(display.seconds - time.seconds) < 0.001,
            let image = render(buffer, transform: model.info.transform) {
             return image
         }

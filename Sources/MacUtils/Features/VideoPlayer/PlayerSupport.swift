@@ -199,3 +199,31 @@ enum CodecDescription {
         return text + " к/с"
     }
 }
+
+/// Номер серии в имени файла: «s01e03», «S01E03», «1x03», «Серия 12», «Episode 5», «ep05», «3 серия».
+/// Плейлист и заголовок сокращают имя так, чтобы номер оставался виден: иначе серии неразличимы.
+enum EpisodeName {
+    struct Parts: Equatable {
+        let before: String
+        let marker: String
+        let after: String
+    }
+
+    private static let patterns: [NSRegularExpression] = [
+        #"(?<![\p{L}\d])s\d{1,2}[ ._-]?e\d{1,4}(?!\d)"#,
+        #"(?<![\p{L}\d])\d{1,2}x\d{2,3}(?!\d)"#,
+        #"(?<!\p{L})(?:серия|эпизод|episode|ep)[ ._-]*\d{1,4}(?!\d)"#,
+        #"(?<![\p{L}\d])\d{1,4}[ ._-]*(?:серия|эпизод)(?!\p{L})"#,
+        #"(?<![\p{L}\d])e\d{2,4}(?!\d)"#,
+    ].map { try! NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+
+    /// Имя, разрезанное вокруг номера серии; nil — номера нет.
+    static func split(_ name: String) -> Parts? {
+        let range = NSRange(name.startIndex..., in: name)
+        for pattern in patterns {
+            guard let match = pattern.firstMatch(in: name, range: range), let found = Range(match.range, in: name) else { continue }
+            return Parts(before: String(name[..<found.lowerBound]), marker: String(name[found]), after: String(name[found.upperBound...]))
+        }
+        return nil
+    }
+}

@@ -247,6 +247,24 @@ enum DemoVideo {
         return value
     }
 
+    /// Номер кадра, который `output` показывает на текущем времени `player`. Ждёт, пока буфер с этим временем
+    /// показа декодируется (под нагрузкой раньше приходит прежний кадр), — до `timeout` секунд.
+    @MainActor
+    static func shownFrame(_ output: AVPlayerItemVideoOutput, player: AVPlayer, timeout: Double = 10) async -> Int? {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last: Int?
+        while Date() < deadline {
+            let time = player.currentTime()
+            var display = CMTime.invalid
+            if let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: &display) {
+                last = frameNumber(in: buffer)
+                if display.isValid, abs(display.seconds - time.seconds) < 0.01 { return last }
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return last
+    }
+
     /// То же для картинки (снимок кадра).
     static func frameNumber(in image: CGImage) -> Int? {
         var buffer: CVPixelBuffer?

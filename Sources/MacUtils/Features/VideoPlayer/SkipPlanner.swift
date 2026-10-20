@@ -71,25 +71,52 @@ enum ChapterClassifier {
         (.preview, ["preview", "next episode", "анонс", "следующая серия", "予告"]),
     ]
 
+    /// После этих фраз может идти название («Previously on Harbor»). После остальных — только номер
+    /// («OP 1», «Ending 2»): «Intro to Swift», «Op. 27 No. 2» и «Ed Sheeran» — обычные главы.
+    private static let phrasesWithTail: Set<String> = ["previously on"]
+
     /// Слова в нижнем регистре: ё → е, апострофы удаляются («Ed's» → «eds»), прочая пунктуация и цифры — пробел.
     static func words(_ title: String) -> [String] {
-        var text = title.lowercased().replacingOccurrences(of: "ё", with: "е")
-        for apostrophe in ["'", "’", "ʼ", "`", "‘"] { text = text.replacingOccurrences(of: apostrophe, with: "") }
-        let cleaned = String(text.unicodeScalars.map { scalar -> Character in
-            CharacterSet.letters.contains(scalar) ? Character(scalar) : " "
-        })
-        return cleaned.split(separator: " ").map(String.init)
+        tokens(title).filter { !$0.allSatisfy(\.isNumber) }
     }
 
-    /// Вид по названию (без учёта места).
+    /// Слова и числа по отдельности: «OP1» → [«op», «1»], «Op. 27 No. 2» → [«op», «27», «no», «2»].
+    static func tokens(_ title: String) -> [String] {
+        var text = title.lowercased().replacingOccurrences(of: "ё", with: "е")
+        for apostrophe in ["'", "’", "ʼ", "`", "‘"] { text = text.replacingOccurrences(of: apostrophe, with: "") }
+        var tokens: [String] = []
+        var current = ""
+        var currentIsNumber = false
+        for character in text {
+            let letter = character.unicodeScalars.allSatisfy { CharacterSet.letters.contains($0) }
+            let digit = character.isASCII && character.isNumber
+            if (letter || digit), current.isEmpty || currentIsNumber == digit {
+                current.append(character)
+                currentIsNumber = digit
+            } else {
+                if !current.isEmpty { tokens.append(current) }
+                current = letter || digit ? String(character) : ""
+                currentIsNumber = digit
+            }
+        }
+        if !current.isEmpty { tokens.append(current) }
+        return tokens
+    }
+
+    /// Вид по названию (без учёта места): название — это фраза из словаря, после неё — разве что номер.
     static func kind(title: String) -> Kind? {
-        let words = words(title)
-        guard !words.isEmpty, words.count <= 3 else { return nil }
+        let tokens = tokens(title)
+        guard !tokens.isEmpty else { return nil }
         var best: (kind: Kind, length: Int)?
         for (kind, phrases) in dictionary {
             for phrase in phrases {
                 let parts = phrase.split(separator: " ").map(String.init)
-                if words.starts(with: parts), parts.count > (best?.length ?? 0) { best = (kind, parts.count) }
+                guard tokens.starts(with: parts), parts.count > (best?.length ?? 0) else { continue }
+                let tail = tokens.dropFirst(parts.count)
+                let fits = phrasesWithTail.contains(phrase)
+                    ? tail.filter { !$0.allSatisfy(\.isNumber) }.count + parts.count <= 3
+                    : tail.count <= 1 && tail.allSatisfy { $0.allSatisfy(\.isNumber) }
+                if fits { best = (kind, parts.count) }
             }
         }
         return best?.kind

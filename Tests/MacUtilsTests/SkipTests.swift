@@ -11,11 +11,13 @@ final class ChapterClassifierTests: XCTestCase {
         XCTAssertEqual(ChapterClassifier.words("OP1"), ["op"], "цифры — пробел")
         XCTAssertEqual(ChapterClassifier.words("Ещё: ЗАСТАВКА!"), ["еще", "заставка"], "ё → е, регистр")
         XCTAssertEqual(ChapterClassifier.words("Opening-Theme"), ["opening", "theme"])
+        XCTAssertEqual(ChapterClassifier.tokens("Op. 27 No. 2"), ["op", "27", "no", "2"], "номера сохраняются")
+        XCTAssertEqual(ChapterClassifier.tokens("OP1"), ["op", "1"])
     }
 
     func testDictionaryByTitle() {
         let table: [(String, ChapterClassifier.Kind?)] = [
-            ("Intro", .intro), ("OP", .intro), ("OP2", .intro), ("Opening Credits", .intro), ("Opening theme song", .intro),
+            ("Intro", .intro), ("OP", .intro), ("OP2", .intro), ("Opening Credits", .intro), ("Opening Theme", .intro), ("OP 1", .intro), ("Opening", .intro),
             ("Заставка", .intro), ("Вступление", .intro), ("Опенинг", .intro), ("Начальные титры", .intro), ("オープニング", .intro),
             ("Recap", .recap), ("Previously on Harbor", .recap), ("Ранее в сериале", .recap), ("В предыдущих сериях", .recap),
             ("Пересказ", .recap),
@@ -25,6 +27,9 @@ final class ChapterClassifierTests: XCTestCase {
             // Ловушки.
             ("Ed's Story", nil), ("The Ending", nil), ("Prologue", nil), ("Пролог", nil), ("Концовка", nil),
             ("Opening Theme Full Version", nil), ("Chapter 1", nil), ("", nil), ("Introduction to physics", nil),
+            // Тестер 2, дефект 2: op / ed / intro — только всё название или с номером.
+            ("Intro to Swift", nil), ("Op. 27 No. 2", nil), ("Ed Sheeran", nil), ("Opening theme song", nil),
+            ("Ending 2", .credits), ("ED 3", .credits), ("Intro.", .intro), ("— Intro —", .intro), ("Credits roll", nil),
         ]
         for (title, kind) in table {
             XCTAssertEqual(ChapterClassifier.kind(title: title), kind, title)
