@@ -25,7 +25,6 @@ struct DollarPanelView: View {
                     .accessibilityLabel("Подсвечено \(parts.active.count) из \(model.entries.count)")
             }
             skipCard
-            ruleCard
             list(parts)
             footer(parts)
         }
@@ -111,21 +110,16 @@ struct DollarPanelView: View {
         }
     }
 
+    /// «стало 5 непарных скобок», «стало 2 непарные скобки», «стала 1 непарная скобка».
+    static func unbalancedPhrase(_ count: Int) -> String {
+        let tens = count % 100, ones = count % 10
+        if !(11...14).contains(tens), ones == 1 { return "стала \(count) непарная скобка" }
+        if !(11...14).contains(tens), (2...4).contains(ones) { return "стало \(count) непарные скобки" }
+        return "стало \(count) непарных скобок"
+    }
+
     /// Строки групп — с разными id: иначе ленивый список путает строку, перешедшую из группы в группу.
     static func skippedID(_ dollar: Int) -> Int { -dollar - 1 }
-
-    /// «Значения: по видимому тексту RTF / как в исходнике» (по умолчанию RTF для .frm и .rtf).
-    private var ruleCard: some View {
-        HStack(spacing: DS.Space.s) {
-            Text("Значения").font(DS.Font.rowSub).foregroundStyle(.dsMute)
-            Spacer(minLength: 0)
-            Segmented(selection: Binding(get: { tab.dollarRule }, set: { tab.dollarRule = $0 }),
-                      options: [(DollarRule.rtf, "Текст RTF"), (DollarRule.source, "Исходник")])
-                .help("Текст RTF — значение из видимого текста, даже если Word разбил его кодами форматирования. "
-                      + "Исходник — символы как есть до конца строки")
-        }
-        .padding(.horizontal, DS.Space.xs)
-    }
 
     private func row(_ entry: DollarEntry, skipped: Bool) -> some View {
         DollarRow(entry: entry, skipped: skipped, selected: model.selected == entry.mark.dollar) {
@@ -154,6 +148,20 @@ struct DollarPanelView: View {
                         .disabled(!tab.undo.canUndo)
                 }
                 Text("Знаки $ остались на местах").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                if let unbalanced = model.unbalancedAfterRemoval {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 12)).foregroundStyle(DS.Tone.warning.line)
+                            .accessibilityHidden(true)
+                        Text("Внимание: в файле \(Self.unbalancedPhrase(unbalanced)) — Word может не открыть файл")
+                            .font(DS.Font.rowSub).foregroundStyle(.dsText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Button("Отменить") { tab.undo.undo() }
+                            .buttonStyle(.graphite(.secondary, size: .compact))
+                            .disabled(!tab.undo.canUndo)
+                    }
+                    .padding(.top, 2)
+                }
             }
             .padding(10)
             .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.iconButton, style: .continuous))

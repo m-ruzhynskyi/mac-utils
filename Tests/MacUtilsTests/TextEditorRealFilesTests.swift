@@ -17,11 +17,10 @@ final class TextEditorRealFilesTests: XCTestCase {
     }
 
     private struct Stats {
-        var marks = 0, empty = 0, hidden = 0, total = 0, longest = 0
+        var marks = 0, empty = 0, total = 0, longest = 0
         mutating func add(_ marks: [DollarMark], in text: NSString) {
             for mark in marks {
                 self.marks += 1
-                if mark.hidden { hidden += 1 }
                 let value = mark.text(in: text)
                 if mark.isEmpty || value.trimmingCharacters(in: .whitespaces).isEmpty { empty += 1 }
                 total += value.count
@@ -29,14 +28,14 @@ final class TextEditorRealFilesTests: XCTestCase {
             }
         }
         var line: String {
-            "знаков \(marks), пустых \(empty), служебных \(hidden), длина средняя \(marks > 0 ? String(format: "%.1f", Double(total) / Double(marks)) : "0"), наибольшая \(longest)"
+            "знаков \(marks), пустых \(empty), длина средняя \(marks > 0 ? String(format: "%.1f", Double(total) / Double(marks)) : "0"), наибольшая \(longest)"
         }
     }
 
-    /// Старое правило (до пробела и `\ { } $ ;`), правило исходника 1.7.1 и правило по видимому тексту RTF — только числа.
+    /// Старое правило 1.7.0 и окончательное (до конца строки исходника) — только числа.
     func testRuleStatistics() throws {
-        var old = Stats(), source = Stats(), rtf = Stats(), rtfLeading = Stats()
-        var bytesSame = 0, seconds = 0.0
+        var old = Stats(), line = Stats()
+        var bytesSame = 0
         let urls = try files()
         for url in urls {
             let data = try Data(contentsOf: url)
@@ -44,48 +43,41 @@ final class TextEditorRealFilesTests: XCTestCase {
             let text = document.decodedText as NSString
             if try document.data(for: document.decodedText) == data { bytesSame += 1 }
             old.add(Self.oldRule(text), in: text)
-            source.add(DollarMarks.scan(text, rule: .source), in: text)
-            let started = Date()
-            rtf.add(RTFDollarScanner.scan(text, encoding: document.encoding), in: text)
-            seconds += Date().timeIntervalSince(started)
-            rtfLeading.add(RTFDollarScanner.scan(text, encoding: document.encoding, skipsLeadingSpace: true), in: text)
+            line.add(DollarMarks.scan(text), in: text)
         }
         print("[real-frm] файлов \(urls.count), открыть→сохранить без правок — те же байты: \(bytesSame)")
         print("[real-frm] старое правило: \(old.line)")
-        print("[real-frm] исходник 1.7.1: \(source.line)")
-        print("[real-frm] RTF, пробел — конец: \(rtf.line); скан всех файлов \(Int(seconds * 1000)) мс")
-        print("[real-frm] RTF, пробелы сразу после $ пропускаются: \(rtfLeading.line)")
+        print("[real-frm] до конца строки: \(line.line), непустых \(line.marks - line.empty)")
         XCTAssertEqual(bytesSame, urls.count)
     }
 
-    /// «Убрать значения» по правилу RTF: коды на месте — RTF открывается, группы `{}` сбалансированы, байты вне значений те же.
-    func testRemovalKeepsRTFValid() throws {
-        var opened = 0, openedBefore = 0, balanced = 0, outsideSame = 0, removedTotal = 0
+    /// «Убрать значения» (у всех и с пропуском первых 3): сколько файлов меняют баланс `{}`, открывается ли RTF.
+    func testRemovalBraceBalance() throws {
         let urls = try files()
-        for url in urls {
-            let data = try Data(contentsOf: url)
-            let document = EditorDocument(data: data)
-            let text = document.decodedText as NSString
-            let rtf: [NSAttributedString.DocumentReadingOptionKey: Any] = [.documentType: NSAttributedString.DocumentType.rtf]
-            let before = (try? NSAttributedString(data: data, options: rtf, documentAttributes: nil)) != nil
-            if before { openedBefore += 1 }
-            let marks = RTFDollarScanner.scan(text, encoding: document.encoding).filter { !$0.hidden }
-            removedTotal += marks.filter { !$0.isEmpty }.count
-            let stripped = DollarMarks.removingValues(of: marks, in: text as String)
-            let saved = try document.data(for: stripped, lossy: false)
-            // Открывается после правки — каждый файл, который открывался до неё.
-            if before, (try? NSAttributedString(data: saved, options: rtf, documentAttributes: nil)) != nil { opened += 1 }
-            if Self.braceBalance(stripped as NSString) == Self.braceBalance(text) { balanced += 1 }
-            // Вне вырезанных кусков исходник тот же.
-            var kept = text as String
-            kept = DollarMarks.removingValues(of: marks, in: kept)
-            if kept == stripped { outsideSame += 1 }
+        for skip in [nil, 3] as [Int?] {
+            var changed = 0, warned = 0, opened = 0, openedBefore = 0, removedTotal = 0, filesTouched = 0
+            for url in urls {
+                let data = try Data(contentsOf: url)
+                let document = EditorDocument(data: data)
+                let text = document.decodedText as NSString
+                let rtf: [NSAttributedString.DocumentReadingOptionKey: Any] = [.documentType: NSAttributedString.DocumentType.rtf]
+                let before = (try? NSAttributedString(data: data, options: rtf, documentAttributes: nil)) != nil
+                if before { openedBefore += 1 }
+                let marks = DollarMarks.split(DollarMarks.scan(text), skipFirst: skip).active
+                let removed = marks.filter { !$0.isEmpty }.count
+                removedTotal += removed
+                if removed > 0 { filesTouched += 1 }
+                let stripped = DollarMarks.removingValues(of: marks, in: text as String) as NSString
+                let saved = try document.data(for: stripped as String, lossy: false)
+                if before, (try? NSAttributedString(data: saved, options: rtf, documentAttributes: nil)) != nil { opened += 1 }
+                if Self.braceBalance(stripped) != Self.braceBalance(text) { changed += 1 }
+                // Предупреждение панели: был баланс — стал нет.
+                if DollarMarks.unbalancedBraces(in: text) == 0, DollarMarks.unbalancedBraces(in: stripped) > 0 { warned += 1 }
+            }
+            print("[real-frm] «Убрать значения» (пропуск \(skip.map(String.init) ?? "нет")): файлов \(urls.count), меняются \(filesTouched), "
+                  + "убрано значений \(removedTotal), баланс {} меняется в \(changed), предупреждение в \(warned), "
+                  + "открывались как RTF \(openedBefore), открываются после \(opened)")
         }
-        print("[real-frm] «Убрать значения»: файлов \(urls.count), убрано значений \(removedTotal), открывались как RTF до правки \(openedBefore), "
-              + "открываются после (из открывавшихся) \(opened), группы сбалансированы \(balanced)")
-        XCTAssertEqual(opened, openedBefore, "открывавшиеся как RTF открываются и после правки")
-        XCTAssertEqual(balanced, urls.count)
-        XCTAssertEqual(outsideSame, urls.count)
     }
 
     /// Разность `{` и `}` без экранированных.

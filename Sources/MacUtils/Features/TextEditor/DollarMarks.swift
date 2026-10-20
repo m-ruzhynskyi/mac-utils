@@ -31,34 +31,18 @@ struct DollarMark: Equatable {
     func text(in source: NSString) -> String { visible ?? source.substring(with: value) }
 }
 
-/// Как считать значение знака: по видимому тексту RTF (для .frm и .rtf) или по символам исходника.
+/// Как считать значение знака. Панель «$» — всегда `.source`; `.rtf` (по видимому тексту) — внутренний, для будущего
+/// режима «Документ», в интерфейсе его нет.
 enum DollarRule: String, Codable, CaseIterable {
     case rtf, source
-
-    var title: String {
-        switch self {
-        case .rtf: return "По видимому тексту RTF"
-        case .source: return "Как в исходнике"
-        }
-    }
 }
 
 /// Правило «$ и его значение» для панели «Знаки $» текстового редактора.
 enum DollarMarks {
-    /// В исходнике значение — все символы после `$` до пробельного символа (пробел, табуляция, перевод строки, NBSP…),
-    /// следующего `$` или конца текста. `\ { } ;` и прочие видимые символы входят в значение.
+    /// Значение — все символы исходника после `$` до конца строки (CR/LF в значение не входит), следующего `$` или
+    /// конца текста. Пробелы, `\ { } ; '`, коды RTF — всё входит, RTF не разбирается.
     static func isTerminator(_ unit: UInt16) -> Bool {
-        unit == 0x24 || isWhitespace(unit)
-    }
-
-    static func isWhitespace(_ unit: UInt16) -> Bool {
-        switch unit {
-        case 0x20, 0x09, 0x0A, 0x0B, 0x0C, 0x0D: return true
-        case 0..<0x80: return false
-        default:
-            // Половинки суррогатной пары пробелом не бывают; остальное — по свойству Юникода (NBSP, U+2028…).
-            return Unicode.Scalar(unit)?.properties.isWhitespace ?? false
-        }
+        unit == 0x24 || unit == 0x0A || unit == 0x0D
     }
 
     static func scan(_ text: NSString, rule: DollarRule, encoding: TextEncoding = .windows1252) -> [DollarMark] {
@@ -117,6 +101,25 @@ enum DollarMarks {
             hash = (hash ^ UInt32(unit >> 8)) &* 16_777_619
         }
         return Int(hash % UInt32(hues))
+    }
+
+    /// Непарных `{` и `}` во всём тексте (`\{`, `\}` и `\\` — не скобки). 0 — баланс есть.
+    static func unbalancedBraces(in text: NSString) -> Int {
+        let length = text.length
+        guard length > 0 else { return 0 }
+        var units = [UInt16](repeating: 0, count: length)
+        units.withUnsafeMutableBufferPointer { text.getCharacters($0.baseAddress!, range: NSRange(location: 0, length: length)) }
+        var depth = 0, unmatched = 0, i = 0
+        while i < length {
+            switch units[i] {
+            case 0x5C: i += 1                     // экранированный знак за `\` пропускаем
+            case 0x7B: depth += 1
+            case 0x7D: if depth > 0 { depth -= 1 } else { unmatched += 1 }
+            default: break
+            }
+            i += 1
+        }
+        return unmatched + depth
     }
 
     /// Текст без значений у `marks`; сами `$` остаются.

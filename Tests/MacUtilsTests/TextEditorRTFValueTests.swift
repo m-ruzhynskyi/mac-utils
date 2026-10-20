@@ -2,8 +2,9 @@ import AppKit
 import XCTest
 @testable import MacUtils
 
-/// Значение `$` по видимому тексту RTF (1.7.1, окончательное правило): через коды, группы и переводы строк исходника;
-/// конец — видимый пробельный символ, `\par \line \pard \sect \page \tab \cell \row`, следующий `$` или конец.
+/// Внутренний разбор `$` по видимому тексту RTF — для будущего режима «Документ»; панель «$» его не использует
+/// (правило панели — до конца строки исходника, TextEditorValueRuleTests). Через коды, группы и переводы строк
+/// исходника; конец — видимый пробельный символ, `\par \line \pard \sect \page \tab \cell \row`, следующий `$` или конец.
 final class TextEditorRTFValueTests: XCTestCase {
     private func values(_ rtf: String) -> [String] {
         RTFDollarScanner.scan(rtf as NSString).map { $0.visible ?? "" }
@@ -83,7 +84,8 @@ final class TextEditorRTFValueTests: XCTestCase {
         let rtf = #"{\rtf1\ansi\ansicpg1252{\info{\title $T}}\pard $one\par $tw}{\insrsid9 o}\par $thr\'e9e\par}"#
         let data = try XCTUnwrap(TextEncoding.windows1252.encode(rtf))
         let tab = EditorTab(document: EditorDocument(data: data, url: URL(fileURLWithPath: "/tmp/demo.frm")))
-        XCTAssertEqual(tab.dollarRule, .rtf, ".frm — по видимому тексту RTF")
+        XCTAssertEqual(tab.dollarRule, .source, "панель — одно правило для всех файлов")
+        tab.dollarRule = .rtf
         let deadline = Date().addingTimeInterval(3)
         while tab.dollars.entries.count != 4, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
         XCTAssertEqual(tab.dollars.service.map(\.value), ["T"])
@@ -95,7 +97,7 @@ final class TextEditorRTFValueTests: XCTestCase {
         tab.undo.undo()
         XCTAssertEqual(tab.text as String, rtf, "одна отмена")
         XCTAssertEqual(try tab.document.data(for: tab.text as String), data)
-        // Переключатель: как в исходнике — до пробела.
+        // Снова правило панели — до конца строки (в списке без хвостовых пробелов).
         tab.dollarRule = .source
         XCTAssertEqual(tab.dollars.entries.map(\.value).first, "T}}\\pard")
     }

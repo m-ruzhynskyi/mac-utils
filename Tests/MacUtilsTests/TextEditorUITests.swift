@@ -106,8 +106,7 @@ final class TextEditorUITests: XCTestCase {
             let workspace = EditorWorkspace()
             let tab = EditorTab(document: EditorDocument(data: data, url: folder.appendingPathComponent(name)))
             // expected.json описывает правило исходника; правило по видимому тексту RTF — TextEditorRTFValueTests.
-            tab.dollarRule = .source
-            workspace.add(tab)
+                workspace.add(tab)
             _ = host(workspace)
             waitForScan(tab, count: info["dollar_count"] as! Int)
             let original = tab.text as String
@@ -140,12 +139,12 @@ final class TextEditorUITests: XCTestCase {
         let (workspace, tab) = tab(Self.demo)
         _ = host(workspace)
         waitForScan(tab, count: 22)
-        // По тексту RTF `$` в \info — служебные, пропущенные «первые N» — из текста страницы.
-        XCTAssertEqual(tab.dollars.service.count, 3)
-        let skipped = try XCTUnwrap(tab.dollars.split.skipped.first { !$0.value.isEmpty })
+        // Значение — до конца строки или следующего `$`: у первого пропущенного это `FORM_TITLE}{\author `.
+        let skipped = try XCTUnwrap(tab.dollars.split.skipped.first)
+        XCTAssertEqual(skipped.value, #"FORM_TITLE}{\author"#)
         XCTAssertEqual(tab.removeValues([skipped]), 1)
-        XCTAssertFalse((tab.text as String).contains("$" + skipped.value), "значение убрано")
-        XCTAssertTrue((tab.text as String).contains(#"{\title $FORM_TITLE}"#), "служебные не тронуты")
+        XCTAssertTrue((tab.text as String).contains(#"{\info{\title $$AUTHOR}"#))
+        XCTAssertNil(tab.dollars.unbalancedAfterRemoval, "убраны `}` и `{` — баланс тот же")
         tab.undo.undo()
         XCTAssertEqual(tab.text as String, Self.demo)
     }
@@ -158,7 +157,7 @@ final class TextEditorUITests: XCTestCase {
         workspace.add(tab)
         _ = host(workspace)
         waitForScan(tab, count: 4)
-        let deep = try XCTUnwrap(tab.dollars.entries.first { $0.value == "deep20k" })
+        let deep = try XCTUnwrap(tab.dollars.entries.first { $0.value.hasPrefix("deep20k") })
         XCTAssertEqual(tab.scrollView.contentView.bounds.minX, 0)
         tab.dollars.selected = deep.id
         tab.reveal(deep.mark.whole)

@@ -8,36 +8,29 @@ final class DollarMarksTests: XCTestCase {
         return DollarMarks.scan(text).map { string.substring(with: $0.value) }
     }
 
-    /// Правило «как в исходнике»: значение до пробельного символа, следующего `$` или конца; `\ { } ;` входят
-    /// (по тексту RTF — в TextEditorRTFValueTests).
-    func testValueEndsAtWhitespaceDollarOrEnd() {
-        XCTAssertEqual(values("a $name b"), ["name"])
-        XCTAssertEqual(values("$a\\par"), ["a\\par"])
-        XCTAssertEqual(values("{$x}"), ["x}"])
-        XCTAssertEqual(values("$x{y"), ["x{y"])
-        XCTAssertEqual(values("$x;y"), ["x;y"])
-        XCTAssertEqual(values("$x\ty"), ["x"])
-        XCTAssertEqual(values("$x\r\ny"), ["x"])
+    /// Значение — всё после `$` до конца строки исходника, следующего `$` или конца текста; RTF не разбирается.
+    func testValueRunsToEndOfLine() {
+        XCTAssertEqual(values("a $name b"), ["name b"], "пробелы входят")
+        XCTAssertEqual(values("$a\\par }{\\rtlch x;y'1"), ["a\\par }{\\rtlch x;y'1"], "коды, скобки, ; и ' входят")
+        XCTAssertEqual(values("$x\ty"), ["x\ty"], "табуляция входит")
+        XCTAssertEqual(values("$x\r\ny"), ["x"], "CRLF не входит")
         XCTAssertEqual(values("$x\ny"), ["x"])
-        XCTAssertEqual(values("$x\u{00A0}y"), ["x"], "неразрывный пробел — тоже пробельный")
-        XCTAssertEqual(values("$x\u{2028}y"), ["x"])
-        XCTAssertEqual(values("end $last"), ["last"], "до конца текста")
-        XCTAssertEqual(values("$ctrl,word.1-2"), ["ctrl,word.1-2"], "прочая пунктуация входит в значение")
+        XCTAssertEqual(values("$x\ry"), ["x"])
+        XCTAssertEqual(values("$a b $c d\n"), ["a b ", "c d"], "два $ на одной строке")
+        XCTAssertEqual(values("end $last value"), ["last value"], "до конца текста без перевода строки")
     }
 
     func testEmptyValues() {
         XCTAssertEqual(values("$"), [""])
-        XCTAssertEqual(values("$ x"), [""])
-        XCTAssertEqual(values("$\tx"), [""])
         XCTAssertEqual(values("$\r\nx"), [""])
-        XCTAssertEqual(values("$\u{00A0}x"), [""])
+        XCTAssertEqual(values("$\nx"), [""])
         XCTAssertEqual(values("$$x"), ["", "x"], "второй `$` — свой знак со своим значением")
         XCTAssertEqual(values("$a$b$"), ["a", "b", ""])
     }
 
     func testNonASCIIValuesAndUTF16Offsets() {
-        XCTAssertEqual(values("$Привет мир"), ["Привет"])
-        let text = "é $a😀b c"
+        XCTAssertEqual(values("$Привет мир\n"), ["Привет мир"])
+        let text = "é $a😀b\nc"
         let marks = DollarMarks.scan(text)
         XCTAssertEqual(marks, [DollarMark(dollar: 2, value: NSRange(location: 3, length: 4))], "😀 — два знака UTF-16")
         XCTAssertEqual((text as NSString).substring(with: marks[0].whole), "$a😀b")
@@ -46,10 +39,10 @@ final class DollarMarksTests: XCTestCase {
     }
 
     func testSkipFirstN() {
-        let marks = DollarMarks.scan("$a $b $c $d $e")
+        let marks = DollarMarks.scan("$a$b$c$d$e")
         let on = DollarMarks.split(marks, skipFirst: 3)
-        XCTAssertEqual(on.skipped.map(\.dollar), [0, 3, 6])
-        XCTAssertEqual(on.active.map(\.dollar), [9, 12])
+        XCTAssertEqual(on.skipped.map(\.dollar), [0, 2, 4])
+        XCTAssertEqual(on.active.map(\.dollar), [6, 8])
         let off = DollarMarks.split(marks, skipFirst: nil)
         XCTAssertTrue(off.skipped.isEmpty)
         XCTAssertEqual(off.active.count, 5)
@@ -59,13 +52,14 @@ final class DollarMarksTests: XCTestCase {
     }
 
     func testRemoveValuesKeepsDollarsAndSkipped() {
-        let text = "{\\rtf1 $keep1 $keep2 \\par $x1 $$y2;\r\n$z $ }"
+        let text = "{\\rtf1 $keep1\r\n$keep 2\\par\r\n$x1 $$y2;\r\n$z\n$}"
         let marks = DollarMarks.scan(text)
+        XCTAssertEqual(marks.count, 7)
         let active = DollarMarks.split(marks, skipFirst: 2).active
-        XCTAssertEqual(DollarMarks.removingValues(of: active, in: text), "{\\rtf1 $keep1 $keep2 \\par $ $$\r\n$ $ }")
-        XCTAssertEqual(DollarMarks.removingValues(of: marks, in: text), "{\\rtf1 $ $ \\par $ $$\r\n$ $ }")
+        XCTAssertEqual(DollarMarks.removingValues(of: active, in: text), "{\\rtf1 $keep1\r\n$keep 2\\par\r\n$$$\r\n$\n$")
+        XCTAssertEqual(DollarMarks.removingValues(of: marks, in: text), "{\\rtf1 $\r\n$\r\n$$$\r\n$\n$")
         // Одного выбранного.
-        XCTAssertEqual(DollarMarks.removingValues(of: [marks[4]], in: text), "{\\rtf1 $keep1 $keep2 \\par $x1 $$\r\n$z $ }")
+        XCTAssertEqual(DollarMarks.removingValues(of: [marks[4]], in: text), "{\\rtf1 $keep1\r\n$keep 2\\par\r\n$x1 $$\r\n$z\n$}")
         // Диапазоны идут с конца и без пустых — так их можно удалить одной правкой (один шаг отмены).
         let ranges = DollarMarks.valueRanges(active)
         XCTAssertEqual(ranges.map(\.location), ranges.map(\.location).sorted(by: >))

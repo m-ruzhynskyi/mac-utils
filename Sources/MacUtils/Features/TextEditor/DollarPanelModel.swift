@@ -47,7 +47,11 @@ final class DollarPanelModel: ObservableObject {
     /// Выбранное в списке вхождение (смещение `$`).
     @Published var selected: Int?
     /// «Убрано: N · Отменить ⌘Z» — до следующей правки.
-    @Published var removedCount: Int?
+    @Published var removedCount: Int? {
+        didSet { if removedCount == nil { unbalancedAfterRemoval = nil } }
+    }
+    /// После «Убрать значения» в файле, где был баланс `{}`, стало столько непарных скобок (предупреждение в плашке).
+    @Published var unbalancedAfterRemoval: Int?
     /// Скан ещё идёт (первый раз после открытия).
     @Published private(set) var scanning = false
 

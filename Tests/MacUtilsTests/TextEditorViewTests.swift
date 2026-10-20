@@ -159,30 +159,30 @@ final class TextEditorViewTests: XCTestCase {
     /// Перед удалением устаревшие строки списка сверяются со свежим списком: то же место `$` и те же куски значения.
     func testStaleEntriesAreMatchedWithFreshScan() {
         let model = DollarPanelModel()
-        model.apply(DollarPanelModel.scan("a $AB c $D"), generation: model.currentGeneration)
+        model.apply(DollarPanelModel.scan("a $AB\n$D"), generation: model.currentGeneration)
         let old = model.entries
         XCTAssertEqual(model.current(old)?.map(\.value), ["AB", "D"])
-        model.apply(DollarPanelModel.scan("a $AC c $D"), generation: model.currentGeneration)
+        model.apply(DollarPanelModel.scan("a $AC\n$D"), generation: model.currentGeneration)
         XCTAssertNil(model.current(old), "значение стало другим — не трогать")
         XCTAssertEqual(model.current([old[1]])?.map(\.value), ["D"])
-        model.apply(DollarPanelModel.scan("a $A c $D"), generation: model.currentGeneration)
+        model.apply(DollarPanelModel.scan("a $A\n$D"), generation: model.currentGeneration)
         XCTAssertNil(model.current([old[1]]), "`$D` сдвинулся — тоже не трогать")
     }
 
     /// Одиночное «Убрать значение» по устаревшей строке списка (текст сдвинулся, а `$` оказался на том же месте)
     /// не удаляет чужие символы: проверка значения и пересчёт.
     func testSingleRemovalWithStaleEntryDoesNothing() throws {
-        let tab = EditorTab(document: EditorDocument(data: Data("x $AB c".utf8)))
-        XCTAssertEqual(tab.dollarRule, .source, "не RTF — правило исходника")
+        let tab = EditorTab(document: EditorDocument(data: Data("x $AB\nc".utf8)))
+        XCTAssertEqual(tab.dollarRule, .source)
         hosted(tab)
         let deadline = Date().addingTimeInterval(3)
         while tab.dollars.entries.count != 1, Date() < deadline { settle(0.02) }
         let stale = try XCTUnwrap(tab.dollars.entries.first)
         // Сдвиг: `$` на прежнем месте, но значение теперь короче.
-        tab.storage.replaceCharacters(in: NSRange(location: 3, length: 2), with: "Z c")
-        XCTAssertEqual(tab.text as String, "x $Z c c")
+        tab.storage.replaceCharacters(in: NSRange(location: 3, length: 2), with: "Z\nc")
+        XCTAssertEqual(tab.text as String, "x $Z\nc\nc")
         XCTAssertEqual(tab.removeValues([stale]), 0)
-        XCTAssertEqual(tab.text as String, "x $Z c c", "чужие символы не удалены")
+        XCTAssertEqual(tab.text as String, "x $Z\nc\nc", "чужие символы не удалены")
         XCTAssertTrue(tab.dollars.isCurrent, "список пересчитан сразу")
         XCTAssertEqual(tab.dollars.entries.first?.value, "Z")
     }

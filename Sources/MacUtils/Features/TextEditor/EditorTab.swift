@@ -297,12 +297,10 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
 
     // MARK: - Правило значений `$`
 
-    /// .frm и .rtf (и всё, что начинается с `{\rtf`) — по видимому тексту RTF; прочие файлы — по исходнику.
-    static func defaultRule(for document: EditorDocument) -> DollarRule {
-        document.language == .rtf ? .rtf : .source
-    }
+    /// Одно правило для всех файлов: значение — до конца строки исходника (решение пользователя).
+    static func defaultRule(for document: EditorDocument) -> DollarRule { .source }
 
-    /// Переключатель в панели «$»: значения по видимому тексту RTF или как в исходнике.
+    /// Правило значений; в интерфейсе не меняется (`.rtf` — для будущего режима «Документ»).
     var dollarRule: DollarRule {
         get { dollars.rule }
         set {
@@ -436,10 +434,14 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         }
         let ranges = DollarMarks.valueRanges(fresh.map(\.mark))
         guard !ranges.isEmpty else { return 0 }
+        let removed = fresh.filter { !$0.mark.isEmpty }.count
+        // Не запрещаем, но предупреждаем: был баланс `{}`, а после удаления его нет — Word может не открыть файл.
+        let wasBalanced = DollarMarks.unbalancedBraces(in: text) == 0
         textView.replace(ranges, with: Array(repeating: "", count: ranges.count),
                          actionName: fresh.count == 1 ? "Убрать значение" : "Убрать значения")
-        let removed = fresh.filter { !$0.mark.isEmpty }.count
+        let after = wasBalanced ? DollarMarks.unbalancedBraces(in: text) : 0
         dollars.removedCount = removed
+        dollars.unbalancedAfterRemoval = after > 0 ? after : nil
         return removed
     }
 
