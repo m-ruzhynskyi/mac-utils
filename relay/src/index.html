@@ -130,6 +130,38 @@
   #tools .color { width: 26px; height: 26px; border-radius: 50%; cursor: pointer; flex: none; margin: 0 2px; border: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
   #tools .color.on { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--text); }
 
+  /* Мониторы ведущего: схема раскладки (доли `at`), текущий — лайм. Не помещается в строку — уходит на вторую. */
+  #tools .mon { display: none; align-items: center; gap: 8px; padding: 0 4px; }
+  #tools.monitors .mon, #tools.monitors .monSep { display: inline-flex; }
+  #tools .monSep { display: none; }
+  #tools.wrapped .monSep { display: none; }
+  #tools.wrapped .mon { flex-basis: 100%; justify-content: center; border-top: 1px solid var(--line); margin-top: 6px; padding-top: 8px; }
+  #tools .mon .lbl2 { font-size: 13px; font-weight: 700; color: var(--mute); white-space: nowrap; }
+  #tools .map { position: relative; flex: none; }
+  #tools .map button { position: absolute; height: auto; min-width: 0; padding: 0; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+                       background: var(--field); border: 1px solid var(--line); color: var(--text); font: 800 14px/1 var(--font); }
+  #tools .map button:hover:not(:disabled) { background: var(--off); }
+  #tools .map button.cur, #tools .map button.cur:hover:not(:disabled) { background: var(--acc); border-color: transparent; color: var(--acc-ink); cursor: default; }
+  #tools .map button.wait { border: 2px dashed var(--acc-line); }
+  #tools .map button.main::before { content: ""; position: absolute; top: 3px; left: 50%; transform: translateX(-50%); width: 45%; min-width: 10px; height: 2.5px; border-radius: 2px;
+                                       background: color-mix(in srgb, var(--mute) 60%, transparent); }
+  #tools .map button.cur.main::before { background: color-mix(in srgb, var(--acc-ink) 55%, transparent); }
+  #tools .map button small { font: 500 9px/1.2 var(--mono); opacity: .75; }
+  #tools .map button.wait small { width: 10px; height: 10px; margin-top: 2px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--acc-text) 25%, transparent);
+                                  border-top-color: var(--acc-text); font-size: 0; opacity: 1; animation: spin .8s linear infinite; }
+  #tools .map button[data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 12px); right: -8px; padding: 6px 10px; border-radius: 10px; white-space: nowrap;
+                                              background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--text); font: 600 12px/1.3 var(--font); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #stage.switching #video, #stage.switching #screen { opacity: .55; transition: opacity .2s; }
+  #monitorNote { position: absolute; z-index: 1; max-width: min(520px, calc(100% - 32px)); padding: 16px 20px 16px 58px; border-radius: 16px; background: var(--side);
+                 border: 1px solid var(--line); box-shadow: var(--shadow); font-weight: 600; display: none; }
+  #monitorNote::before { content: "i"; position: absolute; left: 18px; top: 16px; width: 26px; height: 26px; border-radius: 9px; display: grid; place-items: center;
+                         background: var(--acc); color: var(--acc-ink); font: 800 14px/1 var(--mono); }
+  #monitorNote .muted { display: block; margin-top: 4px; font-weight: 500; }
+  #switchButton.on { border-color: var(--acc-line); color: var(--acc-text); }
+  .new { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 99px; background: var(--acc); color: var(--acc-ink); font: 800 11px/18px var(--font); letter-spacing: .08em; vertical-align: 1px; }
+  #allowSwitchHint { margin: -10px 0 0 28px; }
+
   /* Плавающие панели: игра, звук */
   #game, #mutePanel { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 20px; padding: 16px; }
   #game { position: fixed; right: 20px; bottom: 20px; z-index: 12; display: none; width: min(290px, calc(100vw - 32px)); }
@@ -240,7 +272,7 @@
   <button id="leave" style="display:none" title="Перестать смотреть эту трансляцию">Отключиться</button>
   <button id="historyButton" aria-label="История"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6.2M4 4v4h4M12 8v4l3 2"/></svg><span>История</span></button>
   <button id="share" class="primary">Транслировать свой экран</button>
-  <span id="live"><span class="dot"></span><span id="liveText"></span><button id="muteButton" style="display:none" title="Звук каких программ не передавать — можно менять прямо в эфире">🔇 Звук</button><button id="gameButton" style="display:none" title="Крестики-нолики со зрителем">＃ Сыграть</button><button class="danger" id="stop">Стоп</button></span>
+  <span id="live"><span class="dot"></span><span id="liveText"></span><button id="muteButton" style="display:none" title="Звук каких программ не передавать — можно менять прямо в эфире">🔇 Звук</button><button id="switchButton" style="display:none" aria-pressed="true"></button><button id="gameButton" style="display:none" title="Крестики-нолики со зрителем">＃ Сыграть</button><button class="danger" id="stop">Стоп</button></span>
 </header>
 <div id="stage">
   <img id="screen" alt="">
@@ -258,7 +290,10 @@
     <span class="color" data-color="white" style="background:#fff" title="Белый"></span>
     <span class="sep"></span>
     <button id="gameInvite" title="Крестики-нолики с ведущим" aria-label="Сыграть"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4L7 20M17 4l-2 16M4 9h16M3 15h16"/></svg><span class="tl">Сыграть</span></button>
+    <span class="sep monSep"></span>
+    <div class="mon" id="monitors" role="group" aria-label="Монитор ведущего"><span class="lbl2" id="monitorsLabel">Монитор</span><div class="map" id="monitorMap"></div></div>
   </div>
+  <div id="monitorNote" role="status"></div>
   <div id="status">Введите ID собеседника и нажмите «Смотреть» — или транслируйте свой экран.<br>
   <span class="muted">Свой ID сообщите тому, кто будет смотреть вас. Каждого зрителя вы сначала разрешаете.</span></div>
 </div>
@@ -268,6 +303,8 @@
   <b>Что показывать?</b>
   <div class="grid" id="sources"></div>
   <label class="muted"><input type="checkbox" id="withAudio" checked style="width:auto"> Передавать звук системы</label>
+  <label class="muted" id="allowSwitchBox" style="display:none"><input type="checkbox" id="allowSwitch" checked style="width:auto"> Зрители могут переключать мои мониторы<span class="new" id="allowSwitchNew">НОВОЕ</span></label>
+  <p class="muted" id="allowSwitchHint" style="display:none">Зритель сам выбирает монитор, вы увидите уведомление. Только когда показываете экран целиком.</p>
   <div id="muteBox" class="muted" style="display:none; margin-top:6px">Не передавать звук программ (например, созвона):
     <div id="muteApps"></div></div>
   <div style="text-align:right; margin-top:10px"><button id="pickerCancel">Отмена</button></div>
@@ -621,6 +658,212 @@ document.querySelectorAll("#tools .color").forEach((b) => b.onclick = () => {
   document.querySelectorAll("#tools .color").forEach((x) => x.classList.toggle("on", x === b));
 });
 
+// ---- Мониторы ведущего: зритель переключает сам (SHARE-PROTOCOL §4.1) ----
+// Логика без DOM — между метками (relay/tests/page-monitors.test.cjs берёт код между ними).
+// <monitor-switch>
+const MAX_DISPLAYS = 8, SWITCH_GAP_MS = 2000, SWITCH_WAIT_MS = 8000;
+
+// Правило ведущего (одно на Mac и странице): что ответить на switch-request.
+// state: { allowed, screen, rev, list, current, switching, lastSwitchAt }; "switch" — переключить, остальное — ответ как есть.
+function switchDecision(state, request, now) {
+  if (!state.allowed || !state.screen || !state.list.length) return "off";
+  if (request.rev !== state.rev || !state.list.some((d) => d.n === request.display)) return "stale";
+  if (request.display === state.current) return "ok";
+  if (state.switching || now - state.lastSwitchAt < SWITCH_GAP_MS) return "busy";
+  return "switch";
+}
+
+// Ревизия списка: растёт, только когда меняется сам список (состав, размеры, масштаб, раскладка), а не текущий монитор.
+function displaysRevision(memo, list) {
+  const key = JSON.stringify(list);
+  if (key !== memo.key) { memo.key = key; memo.rev = (memo.rev + 1) % 2147483648; }
+  return memo.rev;
+}
+
+// Сообщение displays; переключать нельзя (настройка, окно, нет списка) — пустой список без current.
+function displaysMessage(rev, list, current, allowed) {
+  const shown = allowed && list.some((d) => d.n === current) ? list.slice(0, MAX_DISPLAYS) : [];
+  return shown.length ? { type: "displays", v: 1, rev, current, list: shown } : { type: "displays", v: 1, rev, list: [] };
+}
+
+// Новая дорожка видео вместо старой. Старая не должна остановить эфир (onended), звук первого захвата остаётся,
+// звук второго (если вдруг пришёл) не нужен. Чтение кадров старой дорожки останавливается до её остановки.
+function swapVideoTrack(stream, next, stopReading) {
+  const track = next.getVideoTracks()[0];
+  if (!track) return null;
+  for (const extra of next.getAudioTracks()) extra.stop();
+  const old = stream.getVideoTracks();
+  for (const t of old) t.onended = null;
+  stopReading();
+  for (const t of old) { stream.removeTrack(t); t.stop(); }
+  stream.addTrack(track);
+  return track;
+}
+
+const percent = (scale) => `${Math.round(scale * 100)} %`;
+const displayTip = (d) => `Монитор ${d.n} · ${d.w}×${d.h} · ${percent(d.scale)}`;
+// Для чтения с экрана: «Монитор 2, основной, 3840 на 2160, 175 %, показывается сейчас».
+function displayLabel(d, current) {
+  return [`Монитор ${d.n}`, d.primary ? "основной" : null, `${d.w} на ${d.h}`, percent(d.scale), d.n === current ? "показывается сейчас" : null]
+    .filter(Boolean).join(", ");
+}
+
+// Схема: плитки в пропорциях `at` высотой `height`, зазор между соседями `gap`.
+function displaysLayout(list, height, gap = 3) {
+  if (!list.length) return { width: 0, height: 0, tiles: [] };
+  const minX = Math.min(...list.map((d) => d.at[0])), minY = Math.min(...list.map((d) => d.at[1]));
+  const maxX = Math.max(...list.map((d) => d.at[0] + d.at[2])), maxY = Math.max(...list.map((d) => d.at[1] + d.at[3]));
+  const k = height / Math.max(maxY - minY, 1);
+  return {
+    width: (maxX - minX) * k - gap, height: (maxY - minY) * k - gap,
+    tiles: list.map((d) => ({ n: d.n, x: (d.at[0] - minX) * k, y: (d.at[1] - minY) * k, w: Math.max(4, d.at[2] * k - gap), h: Math.max(4, d.at[3] * k - gap) })),
+  };
+}
+
+// Зритель: список и текущий монитор ведущего, запрос в пути.
+function monitorViewer() {
+  return {
+    list: [], current: 0, rev: 0, pending: 0, pendingAt: 0, known: false,
+    // displays от ведущего → что изменилось: switched — показывается другой монитор (метки — заново);
+    // gone — список пропал (переключать больше нельзя); done — запрос в пути завершён.
+    apply(msg) {
+      if (!msg || msg.v !== 1 || !Number.isInteger(msg.rev) || !Array.isArray(msg.list)) return null;
+      const list = msg.list.filter((d) => d && Number.isInteger(d.n) && Array.isArray(d.at) && d.at.length === 4).slice(0, MAX_DISPLAYS);
+      const current = list.some((d) => d.n === msg.current) ? msg.current : 0;
+      const had = this.list.length > 0, before = this.current, first = !this.known;
+      this.known = true; this.rev = msg.rev;
+      this.list = current ? list : []; this.current = current;
+      const switched = !first && had && current !== 0 && current !== before;
+      let done = false;
+      if (this.pending && (current === this.pending || !this.list.some((d) => d.n === this.pending))) { this.pending = 0; done = true; }
+      return { switched, gone: had && !this.list.length, done };
+    },
+    // Клик или клавиша: сообщение для relay или null (нет такого, уже показывается, запрос уже в пути).
+    request(n, now) {
+      if (this.pending || n === this.current || !this.list.some((d) => d.n === n)) return null;
+      this.pending = n; this.pendingAt = now;
+      return { type: "switch-request", display: n, rev: this.rev };
+    },
+    // switch-result → что сказать зрителю: null — ничего (ok ждёт displays, stale — свежий список уже в пути).
+    result(msg) {
+      if (!msg || !this.pending || msg.display !== this.pending) return null;
+      if (msg.result === "ok") { if (this.current === this.pending) this.pending = 0; return null; }
+      this.pending = 0;
+      return ["off", "busy", "failed"].includes(msg.result) ? msg.result : null;
+    },
+    // Ответа нет SWITCH_WAIT_MS — запрос снимается.
+    expired(now) {
+      if (!this.pending || now - this.pendingAt < SWITCH_WAIT_MS) return false;
+      this.pending = 0;
+      return true;
+    },
+    reset() { Object.assign(this, { list: [], current: 0, rev: 0, pending: 0, pendingAt: 0, known: false }); },
+  };
+}
+
+// Клавиши 1…9 у зрителя: номер монитора или 0 (не цифра, модификаторы, фокус в поле ввода).
+function monitorKey(event) {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return 0;
+  const tag = (event.target && event.target.tagName) || "";
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (event.target && event.target.isContentEditable)) return 0;
+  return /^[1-9]$/.test(event.key) ? Number(event.key) : 0;
+}
+// </monitor-switch>
+
+// Зритель: раздел «Монитор» в панели, плашки и клавиши.
+const viewerMonitors = monitorViewer();
+let monitorNoteTimer = null, monitorWaitTimer = null;
+function monitorNote(html, ms) {
+  clearTimeout(monitorNoteTimer);
+  $("monitorNote").innerHTML = html;
+  $("monitorNote").style.display = html ? "block" : "none";
+  if (html && ms) monitorNoteTimer = setTimeout(() => monitorNote(""), ms);
+}
+const hostLabel = () => esc(hostName || display(watchingId || ""));
+function renderMonitors() {
+  const v = viewerMonitors, map = $("monitorMap");
+  $("tools").classList.toggle("monitors", v.list.length > 0);
+  $("stage").classList.toggle("switching", !!v.pending);
+  map.innerHTML = "";
+  if (!v.list.length) return layoutTools();
+  const layout = displaysLayout(v.list, 40);
+  map.style.width = `${layout.width}px`; map.style.height = `${layout.height}px`;
+  for (const tile of layout.tiles) {
+    const d = v.list.find((x) => x.n === tile.n), button = document.createElement("button");
+    Object.assign(button.style, { left: `${tile.x}px`, top: `${tile.y}px`, width: `${tile.w}px`, height: `${tile.h}px` });
+    button.className = [d.primary ? "main" : "", d.n === v.current ? "cur" : "", d.n === v.pending ? "wait" : ""].filter(Boolean).join(" ");
+    button.setAttribute("aria-label", displayLabel(d, v.current));
+    if (d.n === v.current) button.setAttribute("aria-current", "true");
+    button.dataset.tip = `${displayTip(d)} · клавиша ${d.n}`;
+    button.innerHTML = `${d.n}${tile.h >= 30 ? `<small>${percent(d.scale).replace(" ", "")}</small>` : ""}`;
+    button.onclick = () => requestMonitor(d.n);
+    map.appendChild(button);
+  }
+  layoutTools();
+}
+// Раздел мониторов не помещается в строку панели — на свою строку, с подписью «Монитор · <ведущий>» в узком окне.
+function layoutTools() {
+  const tools = $("tools"), section = $("monitors");
+  tools.classList.remove("wrapped");
+  $("monitorsLabel").textContent = "Монитор";
+  if (!tools.classList.contains("monitors") || tools.style.display === "none") return;
+  const first = tools.querySelector("button");
+  if (first && section.offsetTop > first.offsetTop + first.offsetHeight / 2) {
+    tools.classList.add("wrapped");
+    if (innerWidth <= 520) $("monitorsLabel").textContent = `Монитор · ${hostName || display(watchingId || "")}`;
+  }
+}
+// Ширина рабочей области меняется (окно, боковая панель), шрифты догрузились — проверяем заново.
+if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => layoutTools()).observe($("stage"));
+else addEventListener("resize", layoutTools);
+document.fonts?.ready.then(layoutTools);
+function requestMonitor(n) {
+  if (!watching || !viewSocket || viewSocket.readyState !== 1) return;
+  const message = viewerMonitors.request(n, Date.now());
+  if (!message) return;
+  viewSocket.send(JSON.stringify(message));
+  monitorNote(`Переключаю на монитор ${n}…<span class="muted">Картинка сменится у всех зрителей сразу.</span>`);
+  clearTimeout(monitorWaitTimer);
+  monitorWaitTimer = setTimeout(() => {
+    if (!viewerMonitors.expired(Date.now())) return;
+    monitorNote("Монитор не переключился<span class=\"muted\">Попробуйте ещё раз.</span>", 4000);
+    renderMonitors();
+  }, SWITCH_WAIT_MS);
+  renderMonitors();
+}
+function onViewerDisplays(m) {
+  const change = viewerMonitors.apply(m);
+  if (!change) return;
+  if (change.done) clearTimeout(monitorWaitTimer);
+  if (change.switched) {
+    // Доли меток относились к прежнему монитору.
+    marks.length = 0; drawing = null; requestAnimationFrame(renderMarks);
+    monitorNote(`${hostLabel()} показывает монитор ${viewerMonitors.current}`, 3000);
+  } else if (change.done) monitorNote("");
+  if (change.gone) monitorNote(`${hostLabel()}: переключение мониторов выключено`, 4000);
+  renderMonitors();
+}
+const SWITCH_TEXTS = {
+  off: () => `${hostLabel()}: переключение мониторов выключено`,
+  busy: () => "Только что переключили<span class=\"muted\">Попробуйте через пару секунд.</span>",
+  failed: () => "Не получилось переключить монитор",
+};
+function onSwitchResult(m) {
+  const what = viewerMonitors.result(m);
+  if (!viewerMonitors.pending) clearTimeout(monitorWaitTimer);
+  if (what) monitorNote(SWITCH_TEXTS[what](), 4000);
+  else if (!viewerMonitors.pending && m.result === "stale") monitorNote("");
+  renderMonitors();
+}
+function resetMonitors() {
+  viewerMonitors.reset(); clearTimeout(monitorWaitTimer); monitorNote(""); renderMonitors();
+}
+document.addEventListener("keydown", (event) => {
+  if (!watching || !viewerMonitors.list.length) return;
+  const n = monitorKey(event);
+  if (n && viewerMonitors.list.some((d) => d.n === n)) { event.preventDefault(); requestMonitor(n); }
+});
+
 // ---- Смотреть ----
 async function watch() {
   // Ключ страницы загружается за миллисекунды; без него подключение просто идёт как раньше.
@@ -647,12 +890,14 @@ async function watch() {
       }
       else if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
       else if (m.type === "game") gameReceive(m, "host", hostName || display(id), viewGameSend);
-      else if (m.type === "accepted") { hostName = m.name || ""; visited(id, m.name, viewHostKey); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; }
+      else if (m.type === "accepted") { hostName = m.name || ""; visited(id, m.name, viewHostKey); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; renderMonitors(); }
       else if (m.type === "declined") { status("Вам не разрешили подключиться"); stopWatch(true); }
       else if (m.type === "ended") { status("Трансляция завершена"); stopWatch(true); }
       else if (m.type === "reconnecting") status("Ведущий переподключается…");
       else if (m.type === "resumed") status("");
       else if (m.type === "ping" || m.type === "stroke") addMark(m);
+      else if (m.type === "displays") onViewerDisplays(m);
+      else if (m.type === "switch-result") onSwitchResult(m);
       return;
     }
     const bytes = new Uint8Array(event.data);
@@ -704,12 +949,17 @@ function paintFrame() {
   canvas.getContext("2d").drawImage(frame, 0, 0); frame.close();
   if (canvas.style.display !== "block") { canvas.style.display = "block"; $("screen").style.display = "none"; status(""); }
 }
+let decoderSps = "";
 function playH264(bytes) {
   const key = bytes[0] === 1, data = bytes.subarray(1);
+  const sps = key ? nalUnits(data).find((u) => (u[0] & 0x1f) === 7) : null;
+  // Другие SPS (ведущий переключил монитор, другой размер) — новый декодер с этого ключевого кадра: надёжнее, чем
+  // рассчитывать на смену разрешения внутри одного VideoDecoder.
+  if (sps && decoder && decoder.state !== "closed" && sps.join() !== decoderSps) { try { decoder.close(); } catch (_) {} decoder = null; waitKey = false; }
   if (!decoder || decoder.state === "closed") {
     if (!key || typeof VideoDecoder === "undefined") return;
-    const sps = nalUnits(data).find((u) => (u[0] & 0x1f) === 7);
     if (!sps) return;
+    decoderSps = sps.join();
     const hex = (n) => n.toString(16).padStart(2, "0");
     const canvas = $("video"), ctx = canvas.getContext("2d");
     decoder = new VideoDecoder({
@@ -739,6 +989,7 @@ function stopWatch(keepStatus) {
   $("video").style.display = "none"; $("screen").style.display = "";
   if (viewSocket) { viewSocket.onclose = null; viewSocket.close(1000); viewSocket = null; }
   watching = false; $("tools").style.display = "none";
+  resetMonitors();
   if (!keepStatus) { $("screen").removeAttribute("src"); }
 }
 
@@ -929,6 +1180,14 @@ function pickSource() {
       grid.appendChild(item);
     }
     $("pickerCancel").onclick = () => { $("picker").style.display = "none"; resolve(false); };
+    // Переключать мониторы зрителям — только если приложение умеет (новые версии клиента для Windows).
+    const switchable = canSwitchMonitors();
+    $("allowSwitchBox").style.display = switchable ? "" : "none";
+    $("allowSwitchHint").style.display = switchable ? "" : "none";
+    $("allowSwitch").checked = allowSwitch();
+    // «Новое» — пока ведущий не видел галочку в выборе хотя бы раз.
+    $("allowSwitchNew").style.display = switchable && !store.get("mu-allow-switch-seen", false) ? "" : "none";
+    if (switchable) store.set("mu-allow-switch-seen", true);
     $("picker").style.display = "flex";
     showMuteApps();
   });
@@ -954,6 +1213,7 @@ async function share() {
   if (!ok && !pageKey && pageKeySupported() && (await hostCheckReason()) === "id-claimed" && (await retryPageKey())) ok = await openHost(myId);
   if (!ok) { stream.getTracks().forEach((t) => t.stop()); return explainHostFailure(); }
   startCapture(stream, myId);
+  announceDisplays();
 }
 
 // Почему relay не пустил ведущего: WebSocket причины не отдаёт, поэтому спрашиваем лёгким GET (без подключения).
@@ -1286,30 +1546,34 @@ function startCapture(stream, code) {
   };
   // Кадры берём по мере прихода от захвата (до 60/с), а не по таймеру; нет MediaStreamTrackProcessor — таймер, как раньше.
   const timer = { cancel() {} };
-  const videoTrack = stream.getVideoTracks()[0];
-  if (canEncode && typeof MediaStreamTrackProcessor !== "undefined") {
-    let running = true, lastFrameAt = 0;
-    const reader = new MediaStreamTrackProcessor({ track: videoTrack }).readable.getReader();
-    // Статичный экран: захват может не присылать кадров, а новому зрителю нужен ключевой — берём кадр из <video>.
-    const keepAlive = setInterval(() => {
-      if (forceKey && performance.now() - lastFrameAt > 500) tick(video, video.videoWidth, video.videoHeight);
-    }, 500);
-    timer.cancel = () => { running = false; clearInterval(keepAlive); reader.cancel().catch(() => {}); };
-    (async () => {
-      try {
-        while (running) {
-          const { value: frame, done } = await reader.read();
-          if (done) break;
-          lastFrameAt = performance.now();
-          // Исключение в одном кадре не должно останавливать чтение: иначе остаются только кадры keep-alive раз в 0,5 с.
-          try { tick(frame, frame.displayWidth, frame.displayHeight); } catch (_) {} finally { frame.close(); }
-        }
-      } catch (_) {}
-    })();
-  } else {
-    const interval = setInterval(() => tick(video, video.videoWidth, video.videoHeight), canEncode ? 17 : 125);
-    timer.cancel = () => clearInterval(interval);
-  }
+  // Чтение кадров дорожки; при смене монитора (capture.replaceVideo) старое чтение останавливается, начинается новое.
+  const readFrames = (videoTrack) => {
+    if (canEncode && typeof MediaStreamTrackProcessor !== "undefined") {
+      let running = true, lastFrameAt = 0;
+      const reader = new MediaStreamTrackProcessor({ track: videoTrack }).readable.getReader();
+      // Статичный экран: захват может не присылать кадров, а новому зрителю нужен ключевой — берём кадр из <video>.
+      const keepAlive = setInterval(() => {
+        if (forceKey && performance.now() - lastFrameAt > 500) tick(video, video.videoWidth, video.videoHeight);
+      }, 500);
+      timer.cancel = () => { running = false; clearInterval(keepAlive); reader.cancel().catch(() => {}); };
+      (async () => {
+        try {
+          while (running) {
+            const { value: frame, done } = await reader.read();
+            if (done) break;
+            if (!running) { frame.close(); break; }
+            lastFrameAt = performance.now();
+            // Исключение в одном кадре не должно останавливать чтение: иначе остаются только кадры keep-alive раз в 0,5 с.
+            try { tick(frame, frame.displayWidth, frame.displayHeight); } catch (_) {} finally { frame.close(); }
+          }
+        } catch (_) {}
+      })();
+    } else {
+      const interval = setInterval(() => tick(video, video.videoWidth, video.videoHeight), canEncode ? 17 : 125);
+      timer.cancel = () => clearInterval(interval);
+    }
+  };
+  readFrames(stream.getVideoTracks()[0]);
   let audioContext = null;
   $("muteButton").style.display = useHelperAudio && window.mu.setMuted ? "" : "none";
   if (useHelperAudio) {
@@ -1346,7 +1610,105 @@ function startCapture(stream, code) {
     processor.connect(audioContext.destination);
   }
   stream.getVideoTracks()[0].onended = () => stopHost("Трансляция остановлена");
-  capture = { stream, timer, audioContext };
+  // Другой монитор (зритель переключил): новая дорожка видео в тот же эфир — без переподключения, звук остаётся.
+  // Кодер пересоздаётся сам по размеру кадра, первым идёт ключевой.
+  const replaceVideo = (next) => {
+    const track = swapVideoTrack(stream, next, () => timer.cancel());
+    if (!track) return false;
+    track.onended = () => stopHost("Трансляция остановлена");
+    video.srcObject = new MediaStream([track]);
+    video.play();
+    forceKey = true;
+    readFrames(track);
+    return true;
+  };
+  capture = { stream, timer, audioContext, replaceVideo };
+}
+
+// ---- Ведущий: зрители переключают мои мониторы (приложение для Windows: mu.displays, mu.switchTo) ----
+// В обычном браузере источник выбирает только окно браузера, программно не переключить — мониторы не объявляются.
+// Разрешение — настройка ведущего (`mu-allow-switch`, по умолчанию да), вопроса при переключении нет.
+const hostMonitors = { memo: { key: "", rev: 0 }, rev: 0, list: [], current: 0, switching: false, lastSwitchAt: -Infinity, note: "" };
+let announceChain = Promise.resolve(), liveViewers = [];
+const canSwitchMonitors = () => !!(window.mu && typeof window.mu.displays === "function" && typeof window.mu.switchTo === "function");
+const allowSwitch = () => store.get("mu-allow-switch", true) !== false;
+
+// Список мониторов — всем зрителям: по очереди, каждый раз заново у приложения (последний всегда свежий).
+function announceDisplays() {
+  announceChain = announceChain.then(async () => {
+    if (!capture || !hostSocket || hostSocket.readyState !== 1) return;
+    let info = null;
+    if (canSwitchMonitors()) { try { info = await window.mu.displays(); } catch (_) {} }
+    const list = Array.isArray(info?.list) ? info.list : [];
+    hostMonitors.list = list; hostMonitors.current = Number.isInteger(info?.current) ? info.current : 0;
+    hostMonitors.rev = displaysRevision(hostMonitors.memo, list);
+    renderSwitchButton();
+    if (!capture || !hostSocket || hostSocket.readyState !== 1) return;
+    hostSocket.send(JSON.stringify(displaysMessage(hostMonitors.rev, list, hostMonitors.current, allowSwitch())));
+  }).catch(() => {});
+  return announceChain;
+}
+
+function renderSwitchButton() {
+  const button = $("switchButton"), allowed = allowSwitch();
+  button.style.display = capture && canSwitchMonitors() && hostMonitors.current > 0 ? "" : "none";
+  button.textContent = allowed ? "🖥 Мониторы: можно" : "🖥 Мониторы: нельзя";
+  button.classList.toggle("on", allowed);
+  button.setAttribute("aria-pressed", String(allowed));
+  button.title = allowed ? "Зрители сами выбирают ваш монитор. Нажмите, чтобы запретить — кнопка у них пропадёт."
+                         : "Зрители не могут переключать ваши мониторы. Нажмите, чтобы разрешить.";
+}
+function setAllowSwitch(allowed) {
+  store.set("mu-allow-switch", allowed);
+  $("allowSwitch").checked = allowed;
+  renderSwitchButton();
+  announceDisplays();
+}
+$("switchButton").onclick = () => setAllowSwitch(!allowSwitch());
+$("allowSwitch").onchange = () => setAllowSwitch($("allowSwitch").checked);
+if (window.mu && typeof window.mu.onDisplays === "function") window.mu.onDisplays(() => announceDisplays());
+
+// Новый монитор в тот же эфир: приложение выбирает источник, страница берёт его новым getDisplayMedia (только видео).
+async function switchCapture(n) {
+  if (!capture?.replaceVideo || !(await window.mu.switchTo(n))) return false;
+  let stream = null;
+  try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 60, max: 60 } }, audio: false }); } catch (_) {}
+  if (stream && capture && capture.replaceVideo(stream)) return true;
+  stream?.getTracks().forEach((t) => t.stop());
+  try { await window.mu.switchTo(0); } catch (_) {}   // выбор не состоялся — приложение забывает его
+  return false;
+}
+
+async function onSwitchRequest(msg) {
+  const from = typeof msg.from === "string" ? msg.from : "", display = msg.display;
+  const reply = (result) => {
+    if (from && hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify({ type: "switch-result", to: from, display, result }));
+  };
+  const state = { ...hostMonitors, allowed: canSwitchMonitors() && allowSwitch() && !!capture, screen: hostMonitors.current > 0 };
+  const decision = switchDecision(state, { display, rev: msg.rev }, Date.now());
+  if (decision !== "switch") {
+    reply(decision);
+    if (decision === "off" || decision === "stale") announceDisplays();
+    return;
+  }
+  hostMonitors.switching = true;
+  let ok = false;
+  try { ok = await switchCapture(display); } catch (_) {}
+  hostMonitors.switching = false;
+  if (!ok) return reply("failed");
+  hostMonitors.lastSwitchAt = Date.now();
+  reply("ok");
+  await announceDisplays();
+  // Уведомление — в окне меток на новом мониторе (в картинку не попадает); без него — строка «В эфире».
+  const name = String(msg.name || "Зритель").slice(0, 60);
+  hostMonitors.note = `монитор ${display}, выбор: ${name}`;
+  renderLiveText();
+  if (typeof window.mu?.notice === "function") window.mu.notice({ name, n: display, list: hostMonitors.list });
+}
+
+function renderLiveText() {
+  const people = liveViewers.length ? `смотрят: ${liveViewers.map((v) => v.name).join(", ")}` : "никто не смотрит";
+  $("liveText").textContent = `В эфире · ${people}${hostMonitors.note ? ` · ${hostMonitors.note}` : ""}`;
 }
 
 function onHostMessage(ws, event) {
@@ -1356,14 +1718,17 @@ function onHostMessage(ws, event) {
   if (msg.type === "error") { hostError = msg; return; }
   if (msg.type === "authed") {
     hostAuth = { keyed: msg.mode !== "off", fp: typeof msg.fp === "string" ? msg.fp : null };
-    if (capture) $("liveText").textContent = "В эфире · никто не смотрит";
+    if (capture) renderLiveText();
     $("live").title = hostAuth.fp ? `Ключ устройства: ${hostAuth.fp}` : "";
+    // До `authed` relay команды хоста с ключом отбрасывает: список мониторов — заново.
+    announceDisplays();
     return;
   }
   // Метка или рисунок зрителя — на экран ведущего (в приложении для Windows — поверх всего).
   if ((msg.type === "ping" || msg.type === "stroke") && window.mu && window.mu.mark) window.mu.mark(msg);
   if (msg.type === "request") onRequest(msg);
   if (msg.type === "game") gameReceive(msg, msg.from, msg.name, hostGameSend(msg.from));
+  if (msg.type === "switch-request") onSwitchRequest(msg);
   if (msg.type === "viewers") {
     audience = (msg.list || []).filter((v) => v.id);
     $("gameButton").style.display = audience.length ? "" : "none";
@@ -1373,8 +1738,11 @@ function onHostMessage(ws, event) {
   if (msg.type === "viewers") forceKey = true; // новый зритель — сразу ключевой кадр
   if (msg.type === "cancelled") { const i = requests.findIndex((r) => typeof msg.rid === "string" ? r.rid === msg.rid : r.viewer === msg.viewer); if (i >= 0) { requests.splice(i, 1); showRequest(); } }
   if (msg.type === "viewers") {
-    $("liveText").textContent = msg.count ? `В эфире · смотрят: ${(msg.list || []).map((v) => v.name).join(", ")}` : "В эфире · никто не смотрит";
+    liveViewers = msg.count ? (msg.list || []) : [];
+    renderLiveText();
     $("liveText").title = (msg.list || []).map((v) => v.fp ? `${v.name}: ключ ${v.fp}` : v.name).join("\n");
+    // Новый зритель (или тот же после переподключения) получает список мониторов без хранения на relay.
+    announceDisplays();
   }
 }
 
@@ -1389,6 +1757,7 @@ async function reconnectHost(code) {
     if (await openHost(code)) {
       hostSocket.onclose = (event) => hostClosed(code, event);
       $("liveText").textContent = "В эфире";
+      announceDisplays();
       return;
     }
   }
@@ -1397,6 +1766,8 @@ async function reconnectHost(code) {
 
 function stopHost(message) {
   audience = []; $("gameButton").style.display = "none";
+  liveViewers = []; Object.assign(hostMonitors, { list: [], current: 0, switching: false, lastSwitchAt: -Infinity, note: "" });
+  $("switchButton").style.display = "none";
   $("muteButton").style.display = "none"; $("mutePanel").style.display = "none";
   if (game.peer !== "host") gamePeerGone();
   if (capture) {
