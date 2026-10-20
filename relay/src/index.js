@@ -5,6 +5,7 @@
 // {"type":"accept"|"decline","viewer":"…","name":"<имя ведущего>"}. Кадры и звук идут только пущенным зрителям.
 // Двоичные сообщения: первый байт — тип (1 — кадр JPEG, 2 — звук PCM 16 бит, 24 кГц, моно).
 // Текст от пущенных зрителей (метки {"type":"ping"|"stroke"}) — ведущему и остальным зрителям.
+// Мониторы ведущего: {"type":"displays"} — пущенным зрителям, {"type":"switch-request"} — ведущему, ответ — одному зрителю.
 // /status?ids=a,b,c — кто из них сейчас в эфире (для отметок в истории); POST /status — то же с подписью.
 // /version — коммит, принимаемые протоколы и режим проверки ключей.
 // Протокол mu-share-2: устройство доказывает владение ключом Ed25519 или P-256 (challenge/response, см. auth.js),
@@ -95,6 +96,51 @@ function sanitizeGame(command) {
   }
   if (typeof command.busy === "boolean") game.busy = command.busy;
   return game;
+}
+
+// Мониторы ведущего (SHARE-PROTOCOL §4.1): список без имён и ID устройств — номер, основной, пиксели, масштаб, место
+// на схеме. Пересобирается из проверенных полей; любое негодное поле — сообщение отбрасывается целиком.
+const MAX_DISPLAYS = 8;
+const MAX_REV = 2 ** 31 - 1;
+const SWITCH_RESULTS = new Set(["ok", "off", "stale", "busy", "failed"]);
+const displayNumber = (value) => Number.isInteger(value) && value >= 1 && value <= MAX_DISPLAYS;
+const revision = (value) => Number.isInteger(value) && value >= 0 && value <= MAX_REV;
+const pixels = (value) => Number.isInteger(value) && value >= 1 && value <= 32768;
+const coordinate = (value) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1e6;
+
+function sanitizeDisplays(command) {
+  if (!command || typeof command !== "object" || command.v !== 1 || !revision(command.rev)) return null;
+  if (!Array.isArray(command.list) || command.list.length > MAX_DISPLAYS) return null;
+  const list = [];
+  for (const item of command.list) {
+    if (!item || typeof item !== "object" || !displayNumber(item.n) || typeof item.primary !== "boolean") return null;
+    if (!pixels(item.w) || !pixels(item.h)) return null;
+    if (typeof item.scale !== "number" || !(item.scale >= 0.5 && item.scale <= 4)) return null;
+    const at = item.at;
+    if (!Array.isArray(at) || at.length !== 4 || !at.every(coordinate) || !(at[2] > 0) || !(at[3] > 0)) return null;
+    if (list.some((other) => other.n === item.n)) return null;
+    list.push({ n: item.n, primary: item.primary, w: item.w, h: item.h, scale: Math.round(item.scale * 100) / 100, at: [at[0], at[1], at[2], at[3]] });
+  }
+  const displays = { type: "displays", v: 1, rev: command.rev };
+  if (list.length) {
+    if (!list.some((item) => item.n === command.current)) return null;
+    displays.current = command.current;
+  }
+  displays.list = list;
+  return displays;
+}
+
+// Запрос зрителя «покажи монитор N»: номер и ревизия списка, по которому он выбирал.
+function sanitizeSwitchRequest(command) {
+  if (!command || typeof command !== "object" || !displayNumber(command.display) || !revision(command.rev)) return null;
+  return { type: "switch-request", display: command.display, rev: command.rev };
+}
+
+// Ответ ведущего одному зрителю (`to` relay убирает).
+function sanitizeSwitchResult(command) {
+  if (!command || typeof command !== "object" || typeof command.to !== "string" || command.to === "") return null;
+  if (!displayNumber(command.display) || !SWITCH_RESULTS.has(command.result)) return null;
+  return { type: "switch-result", display: command.display, result: command.result };
 }
 
 // Token bucket на сокет зрителя: RATE сообщений/с, всплеск BURST.
@@ -818,6 +864,13 @@ export class Room {
       }
       return;
     }
+    // Переключить монитор ведущего — только ведущему, как игра: ID и имя зрителя ставит relay.
+    if (command.type === "switch-request") {
+      const fields = sanitizeSwitchRequest(command);
+      if (!fields) return;
+      this.toHost({ ...fields, from: info.id || "", name: info.name || "", ...(info.auth === "key" ? { fp: info.fp } : {}) });
+      return;
+    }
     // Дальше — только метки; служебные типы (viewers, request, ended…) зритель слать не может.
     const mark = sanitizeMark(command);
     if (!mark) return;
@@ -845,6 +898,27 @@ export class Room {
       for (const viewer of this.approvedViewers()) {
         const info = viewer.deserializeAttachment() || {};
         if (info.id && info.id === to) { try { viewer.send(game); } catch (_) {} }
+      }
+      return;
+    }
+    // Мониторы ведущего — всем пущенным зрителям; ожидающие и не прошедшие проверку их не видят.
+    if (command.type === "displays") {
+      const displays = sanitizeDisplays(command);
+      if (!displays) return;
+      const message = JSON.stringify(displays);
+      for (const viewer of this.approvedViewers()) {
+        try { viewer.send(message); } catch (_) {}
+      }
+      return;
+    }
+    // Ответ на switch-request — только тому зрителю (все его подключения).
+    if (command.type === "switch-result") {
+      const result = sanitizeSwitchResult(command);
+      if (!result) return;
+      const message = JSON.stringify(result);
+      for (const viewer of this.approvedViewers()) {
+        const info = viewer.deserializeAttachment() || {};
+        if (info.id && info.id === command.to) { try { viewer.send(message); } catch (_) {} }
       }
       return;
     }

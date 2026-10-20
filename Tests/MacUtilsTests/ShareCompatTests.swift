@@ -62,6 +62,83 @@ final class ShareCompatTests: XCTestCase {
         XCTAssertEqual(stroke.points, [CGPoint(x: 0.1, y: 0.2), CGPoint(x: 0.9, y: 0.8)])
     }
 
+    // MARK: - Мониторы ведущего (displays.json, SHARE-PROTOCOL §4.1)
+
+    private func displaysFixture() throws -> [String: Any] {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: Self.fixtures.appendingPathComponent("displays.json"))) as? [String: Any])
+    }
+
+    private func object(_ text: String) throws -> NSDictionary {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? NSDictionary)
+    }
+
+    /// Mac понимает каждый годный список так, как его передаёт relay; Mac-ведущий шлёт список Кати ровно как в фикстуре.
+    func testDisplaysFormatMatchesRelayAndPage() throws {
+        let fixture = try displaysFixture()
+        for sample in try XCTUnwrap(fixture["valid"] as? [[String: Any]]) {
+            let about = sample["about"] as? String ?? ""
+            let expected = try XCTUnwrap(sample["expected"] as? [String: Any])
+            let parsed = try XCTUnwrap(ShareDisplays.parse(try object(try XCTUnwrap(sample["message"] as? String)) as! [String: Any]), about)
+            XCTAssertEqual(parsed.rev, expected["rev"] as? Int, about)
+            XCTAssertEqual(parsed.current, expected["current"] as? Int, about)
+            let list = try XCTUnwrap(expected["list"] as? [[String: Any]])
+            XCTAssertEqual(parsed.list.map(\.n), list.compactMap { $0["n"] as? Int }, about)
+            // Mac-ведущий: тот же список из своих полей — тот же JSON, что relay передаёт зрителям.
+            let again = ShareDisplays.message(rev: parsed.rev, list: parsed.list, current: parsed.current, allowed: true)
+            XCTAssertEqual(try object(again), expected as NSDictionary, about)
+        }
+        // Выключено — пустой список без current, как у страницы.
+        let kate = try XCTUnwrap(ShareDisplays.parse(try object(try XCTUnwrap((fixture["valid"] as? [[String: Any]])?.first?["message"] as? String)) as! [String: Any]))
+        XCTAssertEqual(try object(ShareDisplays.message(rev: 8, list: kate.list, current: 2, allowed: false)),
+                       ["type": "displays", "v": 1, "rev": 8, "list": [Any]()] as NSDictionary)
+    }
+
+    /// Нумерация Mac совпадает с фикстурой (её же проверяют relay и Windows): слева направо, затем сверху вниз.
+    func testDisplayNumberingMatchesFixture() throws {
+        for layout in try XCTUnwrap(try displaysFixture()["numbering"] as? [[String: Any]]) {
+            let about = layout["about"] as? String ?? ""
+            let raw = try XCTUnwrap(layout["screens"] as? [[String: Any]])
+            let primary = try XCTUnwrap(raw.first { $0["primary"] as? Bool == true })
+            let primaryHeight = try XCTUnwrap((primary["at"] as? [Double])?[3])
+            var keys: [CGDirectDisplayID: String] = [:]
+            let screens = try raw.enumerated().map { index, item -> ShareDisplays.Screen in
+                let at = try XCTUnwrap(item["at"] as? [Double])
+                keys[CGDirectDisplayID(index + 1)] = item["key"] as? String
+                // Из «y вниз от верха основного» — в рамку Cocoa (y вверх от низа основного).
+                return ShareDisplays.Screen(id: CGDirectDisplayID(index + 1),
+                                            frame: CGRect(x: at[0], y: primaryHeight - at[1] - at[3], width: at[2], height: at[3]),
+                                            pixels: CGSize(width: at[2], height: at[3]), scale: 1, primary: item["primary"] as? Bool == true)
+            }
+            let list = ShareDisplays.list(screens)
+            XCTAssertEqual(list.map { keys[$0.id] ?? "" }, layout["expected"] as? [String], about)
+            XCTAssertEqual(list.map(\.display.n), Array(1...list.count), about)
+            for (display, id) in list {
+                let item = raw[Int(id) - 1]
+                XCTAssertEqual([display.at.minX, display.at.minY, display.at.width, display.at.height], item["at"] as? [Double], about)
+            }
+        }
+    }
+
+    /// switch-request Mac — ровно как в фикстуре; switch-result Mac — те поля, что relay проверяет и передаёт.
+    func testSwitchMessagesMatchFixture() throws {
+        let fixture = try displaysFixture()
+        let request = try XCTUnwrap((fixture["requests"] as? [String: Any])?["valid"] as? [[String: Any]]).first
+        XCTAssertEqual(ShareMonitorSwitch.requestMessage(display: 3, rev: 7), request?["message"] as? String)
+        for sample in try XCTUnwrap((fixture["results"] as? [String: Any])?["valid"] as? [[String: Any]]) {
+            let message = try object(try XCTUnwrap(sample["message"] as? String))
+            guard message["text"] == nil else { continue }
+            let mac = try XCTUnwrap(ShareMonitorSwitch.resultMessage(to: try XCTUnwrap(message["to"] as? String),
+                                                                     display: try XCTUnwrap(message["display"] as? Int),
+                                                                     result: try XCTUnwrap(message["result"] as? String)))
+            XCTAssertEqual(try object(mac), message)
+        }
+        // Запрос, как его пересобрал relay: ID и имя — от relay.
+        let parsed = ShareMonitorSwitch.parseRequest(["type": "switch-request", "display": 3, "rev": 7, "from": "1111111111", "name": "Катя"])
+        XCTAssertEqual(parsed, ShareMonitorSwitch.Request(display: 3, rev: 7, from: "1111111111", name: "Катя"))
+        XCTAssertNil(ShareMonitorSwitch.parseRequest(["type": "switch-request", "display": "3", "rev": 7]))
+        XCTAssertNil(ShareMonitorSwitch.parseRequest(["type": "switch-request", "display": true, "rev": 7]))
+    }
+
     /// Точка зрителя Mac — доля кадра от левого верхнего угла, картинка вписана с полями (как `resizeAspect`):
     /// поля не входят в кадр, точка в поле — не метка. Так же считают страница и окно меток Windows.
     func testViewerPointIsAShareOfTheFrameNotOfTheWindow() throws {

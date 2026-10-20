@@ -1038,3 +1038,90 @@ test('GET /status: только 10-значные ID, не больше 20, ли
   assert.equal((await f.worker.fetch(new Request('https://relay.example/status?ids=4000000000', { headers: V1 }), { ...w.env, AUTH_MODE: 'required' })).status, 426);
   assert.equal((await f.worker.fetch(new Request('https://relay.example/status?ids=4000000000'), w.env)).status, 403);
 });
+
+// ---- Мониторы ведущего (SHARE-PROTOCOL §4.1) ----
+const DISPLAYS = JSON.parse(fs.readFileSync(`${__dirname}/fixtures/displays.json`, 'utf8'));
+const KATE = DISPLAYS.valid[0];
+const keyedHost = (f) => f.socket('host', { auth: 'key', pub: 'host-pub', fp: 'aaaa-bbbb-cccc-dddd', lastSeen: 1_000_000 });
+
+for (const [kind, make] of [['legacy (mu-share-1)', hostLive], ['с ключом', keyedHost]]) {
+  test(`displays от хоста ${kind} доходит только пущенным зрителям, без лишних полей`, () => {
+    const f = fixture(), host = make(f);
+    const a = f.socket('viewer', { id: '1111111111', approved: true });
+    const b = f.socket('viewer', { id: '2222222222', approved: true, auth: 'key', fp: 'ffff' });
+    const waiting = f.socket('viewer', { id: '3333333333', approved: false, auth: 'key' });
+    const unauth = f.socket('viewer', { id: '4444444444', approved: false, auth: 'pending' });
+    f.room.webSocketMessage(host, KATE.message.replace('"rev":7', '"rev":7,"name":"Kate PC"'));
+    assert.deepEqual(a.messages.at(-1), KATE.expected);
+    assert.deepEqual(b.messages.at(-1), KATE.expected);
+    assert.equal(waiting.messages.length, 0);
+    assert.equal(unauth.messages.length, 0);
+    assert.equal(host.messages.length, 0);
+  });
+}
+test('displays от хоста, не прошедшего проверку ключа, и негодный список не доходят никому', () => {
+  const f = fixture();
+  const pending = f.socket('host', { auth: 'pending', nonce: 'n', connectedAt: 1_000_000, lastSeen: 1_000_000 });
+  const host = hostLive(f);
+  const viewer = f.socket('viewer', { id: '1111111111', approved: true });
+  f.room.webSocketMessage(pending, KATE.message);
+  for (const sample of DISPLAYS.invalid) f.room.webSocketMessage(host, sample.message);
+  assert.equal(viewer.messages.length, 0);
+});
+test('switch-request от пущенного зрителя приходит хосту с ID, именем и отпечатком от relay', () => {
+  const f = fixture(), host = keyedHost(f);
+  const kate = f.socket('viewer', { id: '1111111111', name: 'Катя', approved: true, auth: 'key', fp: '1234-5678-9abc-def0' });
+  const other = f.socket('viewer', { id: '2222222222', name: 'Bob', approved: true });
+  f.room.webSocketMessage(kate, JSON.stringify({ type: 'switch-request', display: 3, rev: 7, from: '2222222222', name: 'Apple Support', fp: 'x' }));
+  assert.deepEqual(host.messages.at(-1), { type: 'switch-request', display: 3, rev: 7, from: '1111111111', name: 'Катя', fp: '1234-5678-9abc-def0' });
+  assert.equal(other.messages.length, 0);
+  assert.equal(kate.messages.length, 0);
+  f.room.webSocketMessage(other, JSON.stringify({ type: 'switch-request', display: 1, rev: 7 }));
+  assert.deepEqual(host.messages.at(-1), { type: 'switch-request', display: 1, rev: 7, from: '2222222222', name: 'Bob' });
+});
+test('switch-request от ожидающего и негодный switch-request хосту не приходят', () => {
+  const f = fixture(), host = hostLive(f);
+  const waiting = f.socket('viewer', { id: '1111111111', approved: false });
+  const unauth = f.socket('viewer', { id: '2222222222', approved: false, auth: 'pending' });
+  const viewer = f.socket('viewer', { id: '3333333333', approved: true });
+  f.room.webSocketMessage(waiting, '{"type":"switch-request","display":2,"rev":1}');
+  f.room.webSocketMessage(unauth, '{"type":"switch-request","display":2,"rev":1}');
+  for (const message of DISPLAYS.requests.invalid) f.room.webSocketMessage(viewer, message);
+  assert.equal(host.messages.length, 0);
+});
+test('switch-result получает только зритель `to` (все его подключения), без `to` и лишних полей', () => {
+  const f = fixture(), host = hostLive(f);
+  const kate = f.socket('viewer', { id: '1111111111', approved: true });
+  const kateTwin = f.socket('viewer', { id: '1111111111', approved: true });
+  const bob = f.socket('viewer', { id: '2222222222', approved: true });
+  const waiting = f.socket('viewer', { id: '1111111111', approved: false });
+  const anonymous = f.socket('viewer', { id: '', approved: true });
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'switch-result', to: '1111111111', display: 3, result: 'busy', text: '<b>x</b>' }));
+  assert.deepEqual(kate.messages.at(-1), { type: 'switch-result', display: 3, result: 'busy' });
+  assert.deepEqual(kateTwin.messages.at(-1), { type: 'switch-result', display: 3, result: 'busy' });
+  assert.equal(bob.messages.length + waiting.messages.length + anonymous.messages.length, 0);
+  f.room.webSocketMessage(host, JSON.stringify({ type: 'switch-result', to: '', display: 3, result: 'ok' }));
+  for (const message of DISPLAYS.results.invalid) f.room.webSocketMessage(host, message);
+  assert.equal(anonymous.messages.length, 0);
+  assert.equal(kate.messages.length, 1);
+});
+for (const type of ['displays', 'switch-result']) {
+  test(`зритель не может прислать ${type} ни хосту, ни другим зрителям`, () => {
+    const f = fixture(), host = hostLive(f);
+    const evil = f.socket('viewer', { id: '1111111111', approved: true });
+    const other = f.socket('viewer', { id: '2222222222', approved: true });
+    const message = type === 'displays' ? KATE.message : '{"type":"switch-result","to":"2222222222","display":1,"result":"off"}';
+    f.room.webSocketMessage(evil, message);
+    assert.equal(host.messages.length, 0);
+    assert.equal(other.messages.length, 0);
+  });
+}
+test('switch-request тратит токены зрителя: больше всплеска (40) сразу не проходит', () => {
+  const f = fixture(), host = hostLive(f);
+  const viewer = f.socket('viewer', { id: '1111111111', approved: true });
+  for (let i = 0; i < 60; i++) f.room.webSocketMessage(viewer, '{"type":"switch-request","display":2,"rev":1}');
+  assert.equal(host.messages.filter((m) => m.type === 'switch-request').length, 40);
+  f.advance(1000);
+  for (let i = 0; i < 60; i++) f.room.webSocketMessage(viewer, '{"type":"switch-request","display":2,"rev":1}');
+  assert.equal(host.messages.filter((m) => m.type === 'switch-request').length, 60);
+});

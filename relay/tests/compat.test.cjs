@@ -5,6 +5,7 @@
 //   Chromium 130 (Electron 33, как клиент для Windows) с аппаратным кодером и с программным OpenH264 (тот же, что у
 //   ведущего Windows без аппаратного H.264). Ключевой кадр, потом два обычных; картинка — демо 320×180.
 // - marks.json: метки зрителя в формате Mac и страницы.
+// - displays.json: мониторы ведущего, запросы и ответы переключения (SHARE-PROTOCOL §4.1).
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -16,7 +17,8 @@ const page = vm.createContext({});
 vm.runInContext(html.slice(html.indexOf('// <host-video>'), html.indexOf('// </host-video>')), page);
 const relaySource = fs.readFileSync(`${__dirname}/../src/index.js`, 'utf8');
 const relay = vm.createContext({});
-vm.runInContext(relaySource.slice(relaySource.indexOf('const MARK_COLORS'), relaySource.indexOf('const GAME_ACTIONS')) + '\nthis.sanitizeMark = sanitizeMark;', relay);
+vm.runInContext(relaySource.slice(relaySource.indexOf('const MARK_COLORS'), relaySource.indexOf('// Token bucket')) +
+  '\nObject.assign(this, { sanitizeMark, sanitizeDisplays, sanitizeSwitchRequest, sanitizeSwitchResult });', relay);
 
 function packets(name) {
   const data = fs.readFileSync(`${dir}/${name}`);
@@ -58,4 +60,33 @@ test('метки: формат Mac и страницы relay принимает 
       assert.deepEqual(JSON.parse(JSON.stringify(clean)), marks.expected[side][kind], `${side} ${kind}`);
     }
   }
+});
+
+const displays = JSON.parse(fs.readFileSync(`${dir}/displays.json`, 'utf8'));
+const plain = (value) => JSON.parse(JSON.stringify(value));
+
+test('мониторы ведущего: годные списки relay передаёт без имён и ID, в том же виде', () => {
+  for (const sample of displays.valid) {
+    assert.deepEqual(plain(relay.sanitizeDisplays(JSON.parse(sample.message))), sample.expected, sample.about);
+  }
+});
+
+test('мониторы ведущего: негодный список relay отбрасывает целиком', () => {
+  for (const sample of displays.invalid) {
+    assert.equal(relay.sanitizeDisplays(JSON.parse(sample.message)), null, sample.about);
+  }
+});
+
+test('мониторы ведущего: нумерация фикстуры — слева направо, затем сверху вниз', () => {
+  for (const layout of displays.numbering) {
+    const order = [...layout.screens].sort((a, b) => a.at[0] - b.at[0] || a.at[1] - b.at[1]).map((s) => s.key);
+    assert.deepEqual(order, layout.expected, layout.about);
+  }
+});
+
+test('switch-request и switch-result: relay оставляет только проверенные поля', () => {
+  for (const sample of displays.requests.valid) assert.deepEqual(plain(relay.sanitizeSwitchRequest(JSON.parse(sample.message))), sample.expected);
+  for (const message of displays.requests.invalid) assert.equal(relay.sanitizeSwitchRequest(JSON.parse(message)), null, message);
+  for (const sample of displays.results.valid) assert.deepEqual(plain(relay.sanitizeSwitchResult(JSON.parse(sample.message))), sample.expected);
+  for (const message of displays.results.invalid) assert.equal(relay.sanitizeSwitchResult(JSON.parse(message)), null, message);
 });
