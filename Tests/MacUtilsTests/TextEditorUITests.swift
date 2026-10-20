@@ -105,6 +105,8 @@ final class TextEditorUITests: XCTestCase {
             let data = try Data(contentsOf: folder.appendingPathComponent(name))
             let workspace = EditorWorkspace()
             let tab = EditorTab(document: EditorDocument(data: data, url: folder.appendingPathComponent(name)))
+            // expected.json описывает правило исходника; правило по видимому тексту RTF — TextEditorRTFValueTests.
+            tab.dollarRule = .source
             workspace.add(tab)
             _ = host(workspace)
             waitForScan(tab, count: info["dollar_count"] as! Int)
@@ -138,9 +140,12 @@ final class TextEditorUITests: XCTestCase {
         let (workspace, tab) = tab(Self.demo)
         _ = host(workspace)
         waitForScan(tab, count: 22)
-        let skipped = try XCTUnwrap(tab.dollars.split.skipped.first)
+        // По тексту RTF `$` в \info — служебные, пропущенные «первые N» — из текста страницы.
+        XCTAssertEqual(tab.dollars.service.count, 3)
+        let skipped = try XCTUnwrap(tab.dollars.split.skipped.first { !$0.value.isEmpty })
         XCTAssertEqual(tab.removeValues([skipped]), 1)
-        XCTAssertTrue((tab.text as String).contains(#"{\title $}"#))
+        XCTAssertFalse((tab.text as String).contains("$" + skipped.value), "значение убрано")
+        XCTAssertTrue((tab.text as String).contains(#"{\title $FORM_TITLE}"#), "служебные не тронуты")
         tab.undo.undo()
         XCTAssertEqual(tab.text as String, Self.demo)
     }

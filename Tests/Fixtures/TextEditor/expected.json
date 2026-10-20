@@ -33,7 +33,7 @@
      "line": 3,
      "offset": 446,
      "skipped_by_default": true,
-     "value": "CITY"
+     "value": "CITY\\par"
     },
     {
      "column": 6,
@@ -41,7 +41,7 @@
      "line": 4,
      "offset": 462,
      "skipped_by_default": true,
-     "value": "ZIP91000"
+     "value": "ZIP91000\\par"
     }
    ],
    "rescan_after_strip_all": [
@@ -51,16 +51,16 @@
    ],
    "rescan_after_strip_skip3": [
     "FIRST",
-    "CITY",
-    "ZIP91000"
+    "CITY\\par",
+    "ZIP91000\\par"
    ],
    "size_bytes": 478,
-   "strip_all_bytes_sha256": "8501efa699cedf861e65badbe5c548ccd9404cf9c5c3243f24fc10883f8c43ff",
-   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $ \\par\r\nCity: $\\par\r\nZip: $\\par\r\n}",
+   "strip_all_bytes_sha256": "cc9b041b9ab948d3adebca5679b342bed9b0f43fbc77dc54cc0adab820e65864",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $ \\par\r\nCity: $\r\nZip: $\r\n}",
    "strip_single_text": {
     "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $ \\par\r\nCity: $CITY\\par\r\nZip: $ZIP91000\\par\r\n}",
-    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $FIRST \\par\r\nCity: $\\par\r\nZip: $ZIP91000\\par\r\n}",
-    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $FIRST \\par\r\nCity: $CITY\\par\r\nZip: $\\par\r\n}"
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $FIRST \\par\r\nCity: $\r\nZip: $ZIP91000\\par\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $FIRST \\par\r\nCity: $CITY\\par\r\nZip: $\r\n}"
    },
    "strip_skip3_bytes_sha256": "4827705a1918775929b6fb3a1b176c510c65c58323207284d2446f69b32033ac",
    "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Name: $FIRST \\par\r\nCity: $CITY\\par\r\nZip: $ZIP91000\\par\r\n}",
@@ -102,7 +102,7 @@
      "line": 3,
      "offset": 431,
      "skipped_by_default": true,
-     "value": "B2"
+     "value": "B2\\par"
     },
     {
      "column": 1,
@@ -110,7 +110,7 @@
      "line": 4,
      "offset": 440,
      "skipped_by_default": true,
-     "value": "C3"
+     "value": "C3;"
     },
     {
      "column": 1,
@@ -118,7 +118,7 @@
      "line": 5,
      "offset": 446,
      "skipped_by_default": false,
-     "value": "D4"
+     "value": "D4{}\\par"
     }
    ],
    "rescan_after_strip_all": [
@@ -129,21 +129,21 @@
    ],
    "rescan_after_strip_skip3": [
     "A1",
-    "B2",
-    "C3",
+    "B2\\par",
+    "C3;",
     ""
    ],
    "size_bytes": 458,
-   "strip_all_bytes_sha256": "3cbae6145fc7b2d6dc86e3bae6c3de9b81736ee41e1b275858340b39c372501c",
-   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $ \\par\r\n$\\par\r\n$;\r\n${}\\par\r\n}",
+   "strip_all_bytes_sha256": "fef87c9137613a43d2db8434cc2ead7376e55fdda48cc5d4e530663c0bdddd55",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $ \\par\r\n$\r\n$\r\n$\r\n}",
    "strip_single_text": {
     "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $ \\par\r\n$B2\\par\r\n$C3;\r\n$D4{}\\par\r\n}",
-    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$\\par\r\n$C3;\r\n$D4{}\\par\r\n}",
-    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$B2\\par\r\n$;\r\n$D4{}\\par\r\n}",
-    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$B2\\par\r\n$C3;\r\n${}\\par\r\n}"
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$\r\n$C3;\r\n$D4{}\\par\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$B2\\par\r\n$\r\n$D4{}\\par\r\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$B2\\par\r\n$C3;\r\n$\r\n}"
    },
-   "strip_skip3_bytes_sha256": "146953a68df24e62ecfa100dcb44c60cba817bba1154539f1e5c57f65fc2b9e7",
-   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$B2\\par\r\n$C3;\r\n${}\\par\r\n}",
+   "strip_skip3_bytes_sha256": "f0d14595a9e8fcaf3f530aa684097f8d35c378f31feea6aaf026e77f5852efa6",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard $A1 \\par\r\n$B2\\par\r\n$C3;\r\n$\r\n}",
    "text_length": 458
   },
   "03-zero-dollars.frm": {
@@ -508,7 +508,7 @@
      "line": 2,
      "offset": 423,
      "skipped_by_default": true,
-     "value": "AAA"
+     "value": "AAA\\par"
     },
     {
      "column": 23,
@@ -516,7 +516,7 @@
      "line": 2,
      "offset": 436,
      "skipped_by_default": true,
-     "value": "BBB"
+     "value": "BBB}"
     },
     {
      "column": 32,
@@ -524,7 +524,7 @@
      "line": 2,
      "offset": 445,
      "skipped_by_default": true,
-     "value": "CCC"
+     "value": "CCC;v4:"
     },
     {
      "column": 40,
@@ -556,7 +556,7 @@
      "line": 3,
      "offset": 477,
      "skipped_by_default": false,
-     "value": "GGG"
+     "value": "GGG\\b0"
     },
     {
      "column": 23,
@@ -564,7 +564,7 @@
      "line": 3,
      "offset": 488,
      "skipped_by_default": false,
-     "value": "HHH"
+     "value": "HHH}"
     }
    ],
    "rescan_after_strip_all": [
@@ -578,9 +578,9 @@
     ""
    ],
    "rescan_after_strip_skip3": [
-    "AAA",
-    "BBB",
-    "CCC",
+    "AAA\\par",
+    "BBB}",
+    "CCC;v4:",
     "",
     "",
     "",
@@ -588,20 +588,20 @@
     ""
    ],
    "size_bytes": 495,
-   "strip_all_bytes_sha256": "864b7c6a099cb4182723871f0a49bfe670bd8a96083049c372a6b5f162a68da7",
-   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$\\par v2:{$} v3:$;v4:$ v5:$\nv6:$\tv7:$\\b0 v8:$}\n}",
+   "strip_all_bytes_sha256": "f38b816708068ece52b31d989943aaf35c511ebfccf0a2d42eb075ede74d2b70",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$ v2:{$ v3:$$ v5:$\nv6:$\tv7:$ v8:$\n}",
    "strip_single_text": {
-    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
-    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
-    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
+    "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$ v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$ v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
     "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$ v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
     "4": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$\nv6:$FFF\tv7:$GGG\\b0 v8:$HHH}\n}",
     "5": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$\tv7:$GGG\\b0 v8:$HHH}\n}",
-    "6": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$\\b0 v8:$HHH}\n}",
-    "7": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$}\n}"
+    "6": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$ v8:$HHH}\n}",
+    "7": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$DDD v5:$EEE\nv6:$FFF\tv7:$GGG\\b0 v8:$\n}"
    },
-   "strip_skip3_bytes_sha256": "6fb5f0de0c7bd64660724589e24aaca07022382a2c1103e6304035edfd1fd6bc",
-   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$ v5:$\nv6:$\tv7:$\\b0 v8:$}\n}",
+   "strip_skip3_bytes_sha256": "cbb279a1dd498ffbbe4a01cc269224200cec9bba1daa4b72c8d556031a4afb34",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard v1:$AAA\\par v2:{$BBB} v3:$CCC;v4:$ v5:$\nv6:$\tv7:$ v8:$\n}",
    "text_length": 495
   },
   "07-empty-values.frm": {
@@ -646,7 +646,7 @@
      "line": 2,
      "offset": 428,
      "skipped_by_default": true,
-     "value": ""
+     "value": "\\par"
     },
     {
      "column": 24,
@@ -654,7 +654,7 @@
      "line": 2,
      "offset": 437,
      "skipped_by_default": true,
-     "value": ""
+     "value": "{x}"
     },
     {
      "column": 32,
@@ -662,7 +662,7 @@
      "line": 2,
      "offset": 445,
      "skipped_by_default": false,
-     "value": ""
+     "value": ";"
     },
     {
      "column": 38,
@@ -670,7 +670,7 @@
      "line": 2,
      "offset": 451,
      "skipped_by_default": false,
-     "value": ""
+     "value": "}e6:"
     },
     {
      "column": 43,
@@ -686,7 +686,7 @@
      "line": 3,
      "offset": 462,
      "skipped_by_default": false,
-     "value": ""
+     "value": "\\'e9"
     }
    ],
    "rescan_after_strip_all": [
@@ -700,27 +700,27 @@
    ],
    "rescan_after_strip_skip3": [
     "",
-    "",
-    "",
+    "\\par",
+    "{x}",
     "",
     "",
     "",
     ""
    ],
    "size_bytes": 469,
-   "strip_all_bytes_sha256": "7a8acdd2bcc4c59644a3fc1d150d2c4ffb1b3494848ac389c87e353ab7c1174d",
-   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+   "strip_all_bytes_sha256": "310e8596891079d838846fb98a0b9b80003469d34833380ecebb109de6d0ca61",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$ e3:$ e4:$ e5:$$\r\ne7:$\n}",
    "strip_single_text": {
     "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
-    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
-    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
-    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
-    "4": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$ e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:$ e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$ e5:$}e6:$\r\ne7:$\\'e9\n}",
+    "4": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$$\r\ne7:$\\'e9\n}",
     "5": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
-    "6": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}"
+    "6": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\n}"
    },
-   "strip_skip3_bytes_sha256": "7a8acdd2bcc4c59644a3fc1d150d2c4ffb1b3494848ac389c87e353ab7c1174d",
-   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$; e5:$}e6:$\r\ne7:$\\'e9\n}",
+   "strip_skip3_bytes_sha256": "e2b8c40f009aec34dcff5f0553832ababc5f6131416e8f51a6927f1fd4586d76",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard e1:$ e2:$\\par e3:${x} e4:$ e5:$$\r\ne7:$\n}",
    "text_length": 469
   },
   "08-long-line.frm": {
@@ -841,7 +841,7 @@
      "line": 5,
      "offset": 473,
      "skipped_by_default": true,
-     "value": "four"
+     "value": "four\\par"
     },
     {
      "column": 1,
@@ -861,16 +861,16 @@
    "rescan_after_strip_skip3": [
     "one",
     "two",
-    "four",
+    "four\\par",
     ""
    ],
    "size_bytes": 492,
-   "strip_all_bytes_sha256": "f1165aeac4d80205ff83bab0b9f84150be87ce7d75c94fd5f57f139676f5f4f7",
-   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $ \\par\r\nLine two $ \\par\r\n\r\nLine four $\\par\r\n$\r\n}",
+   "strip_all_bytes_sha256": "369d29da780b28d399ac94a9fd93f9058f78b3f5b8a2fdc0e01448028ca2a258",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $ \\par\r\nLine two $ \\par\r\n\r\nLine four $\r\n$\r\n}",
    "strip_single_text": {
     "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $ \\par\r\nLine two $two \\par\r\n\r\nLine four $four\\par\r\n$five\r\n}",
     "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $one \\par\r\nLine two $ \\par\r\n\r\nLine four $four\\par\r\n$five\r\n}",
-    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $one \\par\r\nLine two $two \\par\r\n\r\nLine four $\\par\r\n$five\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $one \\par\r\nLine two $two \\par\r\n\r\nLine four $\r\n$five\r\n}",
     "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Line one $one \\par\r\nLine two $two \\par\r\n\r\nLine four $four\\par\r\n$\r\n}"
    },
    "strip_skip3_bytes_sha256": "5f6ebdb8ab1caa5a8f9cb91bef042f795a6765b5f7b0256234c8b4ec36e17a53",
@@ -921,7 +921,7 @@
      "line": 5,
      "offset": 469,
      "skipped_by_default": true,
-     "value": "four"
+     "value": "four\\par"
     },
     {
      "column": 1,
@@ -941,16 +941,16 @@
    "rescan_after_strip_skip3": [
     "one",
     "two",
-    "four",
+    "four\\par",
     ""
    ],
    "size_bytes": 486,
-   "strip_all_bytes_sha256": "4d72f1c863c28266bd8a273eaad8594e55e6ed6e0307b71c5cbd13646f1229fa",
-   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $ \\par\nLine two $ \\par\n\nLine four $\\par\n$\n}",
+   "strip_all_bytes_sha256": "dc4d5aad1cfa1def1f154344724c2da013014f279b53c1db2f00127013e2d53e",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $ \\par\nLine two $ \\par\n\nLine four $\n$\n}",
    "strip_single_text": {
     "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $ \\par\nLine two $two \\par\n\nLine four $four\\par\n$five\n}",
     "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $one \\par\nLine two $ \\par\n\nLine four $four\\par\n$five\n}",
-    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $one \\par\nLine two $two \\par\n\nLine four $\\par\n$five\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $one \\par\nLine two $two \\par\n\nLine four $\n$five\n}",
     "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\n\\pard Line one $one \\par\nLine two $two \\par\n\nLine four $four\\par\n$\n}"
    },
    "strip_skip3_bytes_sha256": "0aec088c4c282f5d8e3a3e3dfb1eda5167d8bf7ae306c4ab630916d126e3a9e5",
@@ -1001,7 +1001,7 @@
      "line": 5,
      "offset": 469,
      "skipped_by_default": true,
-     "value": "four"
+     "value": "four\\par"
     },
     {
      "column": 1,
@@ -1021,16 +1021,16 @@
    "rescan_after_strip_skip3": [
     "one",
     "two",
-    "four",
+    "four\\par",
     ""
    ],
    "size_bytes": 486,
-   "strip_all_bytes_sha256": "d35111708c80f751c9cb7d385fae0bffac9f82840f01ec42a05e982b9c27dcf3",
-   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $ \\par\rLine two $ \\par\r\rLine four $\\par\r$\r}",
+   "strip_all_bytes_sha256": "4a59d18142f72dfb8fe96b550c718f45e2612c17c61fdae0aee2062dcc7a0007",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $ \\par\rLine two $ \\par\r\rLine four $\r$\r}",
    "strip_single_text": {
     "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $ \\par\rLine two $two \\par\r\rLine four $four\\par\r$five\r}",
     "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $one \\par\rLine two $ \\par\r\rLine four $four\\par\r$five\r}",
-    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $one \\par\rLine two $two \\par\r\rLine four $\\par\r$five\r}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $one \\par\rLine two $two \\par\r\rLine four $\r$five\r}",
     "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\\pard Line one $one \\par\rLine two $two \\par\r\rLine four $four\\par\r$\r}"
    },
    "strip_skip3_bytes_sha256": "0f531a5e714d9ee854564e0f5a7f983950d2f24f18629bc21cac621297da5f98",
@@ -1077,7 +1077,7 @@
      "line": 3,
      "offset": 450,
      "skipped_by_default": true,
-     "value": "M\u00fcller"
+     "value": "M\u00fcller\\par"
     },
     {
      "column": 9,
@@ -1093,7 +1093,7 @@
      "line": 5,
      "offset": 488,
      "skipped_by_default": false,
-     "value": "x\u00fcb"
+     "value": "x\u00fcb;"
     },
     {
      "column": 6,
@@ -1109,7 +1109,7 @@
      "line": 7,
      "offset": 517,
      "skipped_by_default": false,
-     "value": "a"
+     "value": "a\\'e9b"
     }
    ],
    "rescan_after_strip_all": [
@@ -1122,25 +1122,25 @@
    ],
    "rescan_after_strip_skip3": [
     "EUR\u20ac12",
-    "M\u00fcller",
+    "M\u00fcller\\par",
     "quote\u201c",
     "",
     "",
     ""
    ],
    "size_bytes": 532,
-   "strip_all_bytes_sha256": "c6cd46ed19040a5d8c8e349cea4614b9be329997a4a2771a816af108ee2709a7",
-   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $ \\par\r\nStra\u00dfe: $\\par\r\nZitat: \u201e$ \\par\r\n\u201e\u201c $;\r\nRaw: $ \\par\r\nEsc: $\\'e9b \\par\r\n}",
+   "strip_all_bytes_sha256": "75237c291677f125edbcbee637288ff7eb9f2606a5ccdb19e6688f0fb7f5eca8",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $ \\par\r\nStra\u00dfe: $\r\nZitat: \u201e$ \\par\r\n\u201e\u201c $\r\nRaw: $ \\par\r\nEsc: $ \\par\r\n}",
    "strip_single_text": {
     "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $ \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $a\\'e9b \\par\r\n}",
-    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $a\\'e9b \\par\r\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $a\\'e9b \\par\r\n}",
     "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$ \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $a\\'e9b \\par\r\n}",
-    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $a\\'e9b \\par\r\n}",
+    "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $a\\'e9b \\par\r\n}",
     "4": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $ \\par\r\nEsc: $a\\'e9b \\par\r\n}",
-    "5": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $\\'e9b \\par\r\n}"
+    "5": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $x\u00fcb;\r\nRaw: $\u00dfa\u00dfb \\par\r\nEsc: $ \\par\r\n}"
    },
-   "strip_skip3_bytes_sha256": "dcf3e9391548409d06ac8374afbfd64966f09e8caa03419d4d25f82d1e710719",
-   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $;\r\nRaw: $ \\par\r\nEsc: $\\'e9b \\par\r\n}",
+   "strip_skip3_bytes_sha256": "7b0c5d849e91b6b02018b2da3d501745973c165e0503c516c8609172833ac083",
+   "strip_skip3_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1252\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard Preis: $EUR\u20ac12 \\par\r\nStra\u00dfe: $M\u00fcller\\par\r\nZitat: \u201e$quote\u201c \\par\r\n\u201e\u201c $\r\nRaw: $ \\par\r\nEsc: $ \\par\r\n}",
    "text_length": 532
   },
   "12-utf8-bom.frm": {
@@ -1339,7 +1339,7 @@
      "line": 3,
      "offset": 447,
      "skipped_by_default": true,
-     "value": "\u041a\u0438\u0457\u0432"
+     "value": "\u041a\u0438\u0457\u0432;"
     },
     {
      "column": 9,
@@ -1347,7 +1347,7 @@
      "line": 4,
      "offset": 463,
      "skipped_by_default": true,
-     "value": "\u0433\u0440\u043d"
+     "value": "\u0433\u0440\u043d\\par"
     },
     {
      "column": 1,
@@ -1366,17 +1366,17 @@
    ],
    "rescan_after_strip_skip3": [
     "\u0418\u0432\u0430\u043d\u043e\u0432",
-    "\u041a\u0438\u0457\u0432",
-    "\u0433\u0440\u043d",
+    "\u041a\u0438\u0457\u0432;",
+    "\u0433\u0440\u043d\\par",
     ""
    ],
    "size_bytes": 490,
-   "strip_all_bytes_sha256": "e2b330ca1207864879f1925299544fb806aea419e3a5d869904d43ac1088dc18",
-   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $ \\par\r\n\u0413\u043e\u0440\u043e\u0434: $;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\\par\r\n$ \u2116 5 \\par\r\n}",
+   "strip_all_bytes_sha256": "a3fd3815da048e540c48c68530db22ac64768f6216fb86e0ddcc983e8e79baef",
+   "strip_all_text": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $ \\par\r\n\u0413\u043e\u0440\u043e\u0434: $\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\r\n$ \u2116 5 \\par\r\n}",
    "strip_single_text": {
     "0": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $ \\par\r\n\u0413\u043e\u0440\u043e\u0434: $\u041a\u0438\u0457\u0432;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\u0433\u0440\u043d\\par\r\n$\u044f\u0449\u0438\u043a \u2116 5 \\par\r\n}",
-    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $\u0418\u0432\u0430\u043d\u043e\u0432 \\par\r\n\u0413\u043e\u0440\u043e\u0434: $;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\u0433\u0440\u043d\\par\r\n$\u044f\u0449\u0438\u043a \u2116 5 \\par\r\n}",
-    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $\u0418\u0432\u0430\u043d\u043e\u0432 \\par\r\n\u0413\u043e\u0440\u043e\u0434: $\u041a\u0438\u0457\u0432;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\\par\r\n$\u044f\u0449\u0438\u043a \u2116 5 \\par\r\n}",
+    "1": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $\u0418\u0432\u0430\u043d\u043e\u0432 \\par\r\n\u0413\u043e\u0440\u043e\u0434: $\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\u0433\u0440\u043d\\par\r\n$\u044f\u0449\u0438\u043a \u2116 5 \\par\r\n}",
+    "2": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $\u0418\u0432\u0430\u043d\u043e\u0432 \\par\r\n\u0413\u043e\u0440\u043e\u0434: $\u041a\u0438\u0457\u0432;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\r\n$\u044f\u0449\u0438\u043a \u2116 5 \\par\r\n}",
     "3": "{\\rtf1\\adeflang1025\\ansi\\ansicpg1251\\uc1\\adeff0\\deff0\\stshfdbch0\\stshfloch0\\stshfhich0\\stshfbi0\\deflang1033\\deflangfe1033{\\fonttbl{\\f0\\froman\\fcharset0\\fprq2 Times New Roman;}{\\f1\\fswiss\\fcharset0\\fprq2 Arial;}{\\f2\\fmodern\\fcharset0\\fprq1 Courier New;}}{\\colortbl;\\red0\\green0\\blue0;\\red255\\green0\\blue0;}{\\info{\\title Demo form}{\\author Demo Author}}\\paperw11906\\paperh16838\\margl1134\\margr1134\\viewkind1\\f1\\fs20\r\n\\pard \u0424\u0418\u041e: $\u0418\u0432\u0430\u043d\u043e\u0432 \\par\r\n\u0413\u043e\u0440\u043e\u0434: $\u041a\u0438\u0457\u0432;\r\n\u0412\u0430\u043b\u044e\u0442\u0430: $\u0433\u0440\u043d\\par\r\n$ \u2116 5 \\par\r\n}"
    },
    "strip_skip3_bytes_sha256": "579f7bdb0d51b88bf9695aae6ba3185a98df96ec85bfee125caaf34becaf4a1b",

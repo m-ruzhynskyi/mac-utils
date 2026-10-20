@@ -16,7 +16,8 @@ struct EditorRootView: View {
                     VStack(spacing: 0) {
                         if workspace.findMode != nil { FindBar(workspace: workspace, search: workspace.search) }
                         EditorBanners(tab: tab)
-                        EditorTextHost(tab: tab)
+                        // Текст — строго в своей области: AppKit-вид поверх SwiftUI не должен заходить на строку состояния.
+                        EditorTextHost(tab: tab).clipped()
                     }
                     if workspace.dollarPanelVisible {
                         Rectangle().fill(Color.dsLine).frame(width: 1).accessibilityHidden(true)
@@ -350,9 +351,12 @@ struct EditorStatusBar: View {
                 .accessibilityLabel(tab.overwrite ? "Режим замены" : "Режим вставки")
         }
         .padding(.horizontal, DS.Space.s)
+        .frame(maxWidth: .infinity)
         .frame(height: 30)
-        .background(Color.dsSide)
+        // На всю ширину окна до самых нижних углов: без отступов «безопасной зоны» у скруглённых углов окна.
+        .background(Color.dsSide.ignoresSafeArea())
         .overlay(alignment: .top) { Rectangle().fill(Color.dsLine).frame(height: 1) }
+        .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
     }
 
     private var selectionText: String {

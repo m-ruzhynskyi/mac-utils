@@ -94,6 +94,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         textView.onOverwriteChange = { [weak self] in self?.overwrite = $0 }
         textView.onCursorsChange = { [weak self] in self?.refreshCaret() }
         dollars.onUpdate = { [weak self] in self?.rehighlight() }
+        dollars.rule = Self.defaultRule(for: document)
+        dollars.encoding = document.encoding
         load(text ?? document.decodedText, resetUndo: true)
         if let text, !(text as NSString).isEqual(to: document.decodedText) {
             // Восстановленный черновик отличается от файла — вкладка изменена.
@@ -250,6 +252,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         guard editedMask.contains(.editedCharacters) else { return }
         MainActor.assumeIsolated {
             guard !bulkLoading else { return }
+            dollars.invalidate()
             let editLine = lines.line(at: editedRange.location)
             // Вставка в самом начале строки (Enter перед текстом) сдвигает и саму эту строку.
             let atLineStart = lines.starts[editLine - 1] == editedRange.location
@@ -290,6 +293,24 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         refreshCaret()
         refreshBrackets()
         ruler.needsDisplay = true
+    }
+
+    // MARK: - Правило значений `$`
+
+    /// .frm и .rtf (и всё, что начинается с `{\rtf`) — по видимому тексту RTF; прочие файлы — по исходнику.
+    static func defaultRule(for document: EditorDocument) -> DollarRule {
+        document.language == .rtf ? .rtf : .source
+    }
+
+    /// Переключатель в панели «$»: значения по видимому тексту RTF или как в исходнике.
+    var dollarRule: DollarRule {
+        get { dollars.rule }
+        set {
+            guard newValue != dollars.rule else { return }
+            dollars.rule = newValue
+            dollars.objectWillChange.send()
+            dollars.scanNow(text)
+        }
     }
 
     // MARK: - Закладки
@@ -406,19 +427,20 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     /// «Убрать значения» у подсвеченных (или у одного): `$` остаются, один шаг отмены.
     @discardableResult
     func removeValues(_ entries: [DollarEntry]) -> Int {
-        let ranges = DollarMarks.valueRanges(entries.map(\.mark))
-        guard !ranges.isEmpty else { return 0 }
-        // Список отстал от текста — ничего не трогаем, список пересчитывается сразу.
-        let string = text
-        guard ranges.allSatisfy({ DollarMarks.isValue($0, in: string) }) else {
-            dollars.scanNow(string)
+        // Список отстал от текста (пересчёт через 250 мс после правки) — пересчитываем сразу и убираем только то,
+        // что совпало с новым списком; не совпало — ничего не трогаем.
+        if !dollars.isCurrent { dollars.scanNow(text) }
+        guard let fresh = dollars.current(entries.filter { !$0.isHidden }) else {
             NSSound.beep()
             return 0
         }
+        let ranges = DollarMarks.valueRanges(fresh.map(\.mark))
+        guard !ranges.isEmpty else { return 0 }
         textView.replace(ranges, with: Array(repeating: "", count: ranges.count),
-                         actionName: ranges.count == 1 ? "Убрать значение" : "Убрать значения")
-        dollars.removedCount = ranges.count
-        return ranges.count
+                         actionName: fresh.count == 1 ? "Убрать значение" : "Убрать значения")
+        let removed = fresh.filter { !$0.mark.isEmpty }.count
+        dollars.removedCount = removed
+        return removed
     }
 
     /// Выделить и показать диапазон.
@@ -540,12 +562,21 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         let end = min(lineEnd, NSMaxRange(edit) + 2_000)
         guard end > start else { return }
         let window = NSRange(location: start, length: end - start)
+        // RTF: значение тянется через коды и строки — по куску его не пересчитать. Подсветка знаков сдвинулась вместе
+        // с текстом; здесь только синтаксис, весь экран — после пересчёта списка (через 250 мс).
+        if dollars.rule == .rtf {
+            for (tokenRange, token) in SyntaxHighlighter.tokens(document.language, in: string, range: window) {
+                layout.addTemporaryAttribute(.foregroundColor, value: Self.color(token), forCharacterRange: tokenRange)
+            }
+            refreshBrackets()
+            return
+        }
         for key in [NSAttributedString.Key.foregroundColor, .backgroundColor, .underlineStyle, .underlineColor] {
             layout.removeTemporaryAttribute(key, forCharacterRange: window)
         }
         // Знаки в окне — свежим сканом; номер по порядку — по списку до окна (он до правки и не сдвинулся).
         let before = dollars.count(before: start)
-        let local = DollarMarks.scan(string.substring(with: window) as NSString).map { mark in
+        let local = DollarMarks.scan(string.substring(with: window) as NSString, rule: .source).map { mark in
             let shifted = DollarMark(dollar: mark.dollar + start, value: NSRange(location: mark.value.location + start, length: mark.value.length))
             return DollarEntry(mark: shifted, line: 0, value: string.substring(with: shifted.value),
                                hue: DollarMarks.hue(of: string.substring(with: shifted.value) as NSString, hues: EditorStyle.hueCount))
@@ -592,26 +623,36 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         let slice = local.map { ArraySlice($0) } ?? dollars.entries(in: range)
         for index in slice.indices {
             let entry = slice[index]
-            let order = local == nil ? index : firstIndex + index
             let mark = entry.mark
-            guard NSMaxRange(mark.whole) <= string.length, string.character(at: mark.dollar) == 0x24 else { continue }
+            guard mark.dollar < string.length, string.character(at: mark.dollar) == 0x24,
+                  mark.parts.allSatisfy({ NSMaxRange($0) <= string.length }) else { continue }
+            // Подсвечиваются `$` и куски значения; коды RTF между кусками не красим.
+            let pieces = [NSRange(location: mark.dollar, length: 1)] + mark.parts
+            // Служебные знаки (`\info`, `{\*\…}`) — бледно, без подчёркивания; пропущенные первые N — бледно с точками.
+            if mark.hidden {
+                for piece in pieces { layout.addTemporaryAttribute(.foregroundColor, value: EditorStyle.faint, forCharacterRange: piece) }
+                continue
+            }
+            let order = local == nil ? (entry.order ?? 0) : firstIndex + index
             if order < skip {
-                layout.addTemporaryAttributes([
-                    .foregroundColor: EditorStyle.faint,
-                    .underlineStyle: NSUnderlineStyle([.single, .patternDot]).rawValue,
-                    .underlineColor: EditorStyle.faint,
-                ], forCharacterRange: mark.whole)
+                for piece in pieces {
+                    layout.addTemporaryAttributes([
+                        .foregroundColor: EditorStyle.faint,
+                        .underlineStyle: NSUnderlineStyle([.single, .patternDot]).rawValue,
+                        .underlineColor: EditorStyle.faint,
+                    ], forCharacterRange: piece)
+                }
                 continue
             }
             let selected = dollars.selected == mark.dollar
             let fill = EditorStyle.hueFill(entry.hue, selected: selected)
             layout.addTemporaryAttributes([.foregroundColor: EditorStyle.hue(entry.hue), .backgroundColor: fill],
-                                          forCharacterRange: NSRange(location: mark.dollar, length: 1))
-            if mark.value.length > 0 {
+                                          forCharacterRange: pieces[0])
+            for part in mark.parts {
                 layout.addTemporaryAttributes([
                     .foregroundColor: EditorStyle.text, .backgroundColor: fill,
                     .underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: EditorStyle.hue(entry.hue),
-                ], forCharacterRange: mark.value)
+                ], forCharacterRange: part)
             }
         }
 

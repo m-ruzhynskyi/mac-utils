@@ -25,6 +25,7 @@ struct DollarPanelView: View {
                     .accessibilityLabel("Подсвечено \(parts.active.count) из \(model.entries.count)")
             }
             skipCard
+            ruleCard
             list(parts)
             footer(parts)
         }
@@ -90,6 +91,13 @@ struct DollarPanelView: View {
                                 .padding(.horizontal, DS.Space.xs)
                             ForEach(parts.active) { entry in row(entry, skipped: false) }
                         }
+                        let service = model.service
+                        if !service.isEmpty {
+                            Spacer().frame(height: DS.Space.s)
+                            GroupLabel("В служебных полях · \(service.count)").padding(.horizontal, DS.Space.xs)
+                                .help("Знаки в \\info, {\\*\\…} и таблицах RTF: на странице их не видно, их не трогаем")
+                            ForEach(service, id: \.mark.dollar) { entry in row(entry, skipped: true) }
+                        }
                     }
                 }
                 .scrollIndicators(.automatic)
@@ -103,8 +111,21 @@ struct DollarPanelView: View {
         }
     }
 
-    /// Строки двух групп — с разными id: иначе ленивый список путает строку, перешедшую из группы в группу.
+    /// Строки групп — с разными id: иначе ленивый список путает строку, перешедшую из группы в группу.
     static func skippedID(_ dollar: Int) -> Int { -dollar - 1 }
+
+    /// «Значения: по видимому тексту RTF / как в исходнике» (по умолчанию RTF для .frm и .rtf).
+    private var ruleCard: some View {
+        HStack(spacing: DS.Space.s) {
+            Text("Значения").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+            Spacer(minLength: 0)
+            Segmented(selection: Binding(get: { tab.dollarRule }, set: { tab.dollarRule = $0 }),
+                      options: [(DollarRule.rtf, "Текст RTF"), (DollarRule.source, "Исходник")])
+                .help("Текст RTF — значение из видимого текста, даже если Word разбил его кодами форматирования. "
+                      + "Исходник — символы как есть до конца строки")
+        }
+        .padding(.horizontal, DS.Space.xs)
+    }
 
     private func row(_ entry: DollarEntry, skipped: Bool) -> some View {
         DollarRow(entry: entry, skipped: skipped, selected: model.selected == entry.mark.dollar) {
@@ -177,10 +198,10 @@ private struct DollarRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             if entry.value.isEmpty {
-                Text("пусто").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                Text(entry.mark.isEmpty ? "пусто" : "пробелы").font(DS.Font.rowSub).foregroundStyle(.dsMute)
             }
             Spacer(minLength: 0)
-            if (selected || hovered) && !entry.value.isEmpty {
+            if (selected || hovered) && !entry.mark.isEmpty && !entry.isHidden {
                 Button(action: remove) {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 13)).foregroundStyle(.dsMute)
                 }

@@ -80,6 +80,12 @@ final class TextEditorViewTests: XCTestCase {
         XCTAssertEqual(BracketMatcher.match(in: "x { y" as NSString, caret: 2), .unmatched(2))
         XCTAssertNil(BracketMatcher.match(in: "abc" as NSString, caret: 1))
         XCTAssertNil(BracketMatcher.match(in: "" as NSString, caret: 0))
+        // Пара дальше предела поиска — неизвестно, не «без пары».
+        let far = ("{" + String(repeating: "a", count: BracketMatcher.limit + 10) + "}") as NSString
+        XCTAssertNil(BracketMatcher.match(in: far, caret: 0), "за пределом — не красным")
+        XCTAssertNil(BracketMatcher.match(in: far, caret: far.length), "и назад тоже")
+        let open = ("{" + String(repeating: "a", count: 100)) as NSString
+        XCTAssertEqual(BracketMatcher.match(in: open, caret: 0), .unmatched(0), "весь текст в пределе — без пары")
     }
 
     func testBracketHighlightFollowsCaret() throws {
@@ -150,19 +156,24 @@ final class TextEditorViewTests: XCTestCase {
         XCTAssertEqual(TextEncoding.utf16BE.encode("A", utf16BOM: true), Data([0xFE, 0xFF, 0x00, 0x41]))
     }
 
-    func testValueCheckBeforeRemoval() {
-        let text = "a $AB c $D" as NSString
-        XCTAssertTrue(DollarMarks.isValue(NSRange(location: 3, length: 2), in: text))
-        XCTAssertTrue(DollarMarks.isValue(NSRange(location: 9, length: 1), in: text), "до конца текста")
-        XCTAssertFalse(DollarMarks.isValue(NSRange(location: 3, length: 1), in: text), "после диапазона значение продолжается")
-        XCTAssertFalse(DollarMarks.isValue(NSRange(location: 3, length: 4), in: text), "внутри завершитель")
-        XCTAssertFalse(DollarMarks.isValue(NSRange(location: 4, length: 1), in: text), "перед диапазоном не `$`")
+    /// Перед удалением устаревшие строки списка сверяются со свежим списком: то же место `$` и те же куски значения.
+    func testStaleEntriesAreMatchedWithFreshScan() {
+        let model = DollarPanelModel()
+        model.apply(DollarPanelModel.scan("a $AB c $D"), generation: model.currentGeneration)
+        let old = model.entries
+        XCTAssertEqual(model.current(old)?.map(\.value), ["AB", "D"])
+        model.apply(DollarPanelModel.scan("a $AC c $D"), generation: model.currentGeneration)
+        XCTAssertNil(model.current(old), "значение стало другим — не трогать")
+        XCTAssertEqual(model.current([old[1]])?.map(\.value), ["D"])
+        model.apply(DollarPanelModel.scan("a $A c $D"), generation: model.currentGeneration)
+        XCTAssertNil(model.current([old[1]]), "`$D` сдвинулся — тоже не трогать")
     }
 
     /// Одиночное «Убрать значение» по устаревшей строке списка (текст сдвинулся, а `$` оказался на том же месте)
     /// не удаляет чужие символы: проверка значения и пересчёт.
     func testSingleRemovalWithStaleEntryDoesNothing() throws {
         let tab = EditorTab(document: EditorDocument(data: Data("x $AB c".utf8)))
+        XCTAssertEqual(tab.dollarRule, .source, "не RTF — правило исходника")
         hosted(tab)
         let deadline = Date().addingTimeInterval(3)
         while tab.dollars.entries.count != 1, Date() < deadline { settle(0.02) }

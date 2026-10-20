@@ -17,7 +17,9 @@ import re
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKIP_N = 3
 WS = " \t\r\n"
-STOP = WS + "\\{}$;"
+# Правило 1.7.1 (окончательное): значение — до пробельного символа (пробел, TAB, CR, LF) или следующего $;
+# \ { } ; и прочие видимые символы входят.
+STOP = WS + "$"
 
 
 def header(cp="1252"):
@@ -271,7 +273,7 @@ def main():
         f.write("\n")
 
     # самопроверка вторым алгоритмом (regex) по сырым байтам с диска
-    rx = re.compile(r"\$([^ \t\r\n\\{}$;]*)")
+    rx = re.compile(r"\$([^ \t\r\n$]*)")
     for name, e in files.items():
         data = open(os.path.join(HERE, name), "rb").read()
         assert sha(data) == e["bytes_sha256"], name

@@ -4,25 +4,65 @@ import Foundation
 struct DollarMark: Equatable {
     /// Где стоит `$`.
     let dollar: Int
-    /// Значение: начинается сразу после `$`; длина 0 — значение пустое.
+    /// Охват значения: от символа сразу после `$` до конца последнего символа значения; длина 0 — значение пустое.
     let value: NSRange
+    /// Куски исходника, из которых состоит значение. В исходнике — один кусок (`value`); в RTF — только видимые символы
+    /// (обычные символы, `\'hh`, `\uN` с заменителем…), а коды и группы между ними в значение не входят.
+    let parts: [NSRange]
+    /// Видимое значение (RTF: `\'e9` → é, `\u1071?` → я); `nil` — это сам текст `value`.
+    let visible: String?
+    /// Знак внутри служебной группы RTF (`\info`, `{\*\…}`, таблицы шрифтов…): на странице его не видно, не трогаем.
+    let hidden: Bool
+
+    init(dollar: Int, value: NSRange, parts: [NSRange]? = nil, visible: String? = nil, hidden: Bool = false) {
+        self.dollar = dollar
+        self.value = value
+        self.parts = parts ?? (value.length > 0 ? [value] : [])
+        self.visible = visible
+        self.hidden = hidden
+    }
 
     /// `$` вместе со значением.
     var whole: NSRange { NSRange(location: dollar, length: value.length + 1) }
+
+    var isEmpty: Bool { parts.isEmpty }
+
+    /// Значение как его видит читатель документа.
+    func text(in source: NSString) -> String { visible ?? source.substring(with: value) }
+}
+
+/// Как считать значение знака: по видимому тексту RTF (для .frm и .rtf) или по символам исходника.
+enum DollarRule: String, Codable, CaseIterable {
+    case rtf, source
+
+    var title: String {
+        switch self {
+        case .rtf: return "По видимому тексту RTF"
+        case .source: return "Как в исходнике"
+        }
+    }
 }
 
 /// Правило «$ и его значение» для панели «Знаки $» текстового редактора.
 enum DollarMarks {
-    /// Значение — символы сразу после `$` до первого пробельного символа, одного из `\ { } $ ;` или конца текста.
+    /// В исходнике значение — все символы после `$` до пробельного символа (пробел, табуляция, перевод строки, NBSP…),
+    /// следующего `$` или конца текста. `\ { } ;` и прочие видимые символы входят в значение.
     static func isTerminator(_ unit: UInt16) -> Bool {
+        unit == 0x24 || isWhitespace(unit)
+    }
+
+    static func isWhitespace(_ unit: UInt16) -> Bool {
         switch unit {
-        case 0x5C, 0x7B, 0x7D, 0x24, 0x3B: return true // \ { } $ ;
         case 0x20, 0x09, 0x0A, 0x0B, 0x0C, 0x0D: return true
         case 0..<0x80: return false
         default:
             // Половинки суррогатной пары пробелом не бывают; остальное — по свойству Юникода (NBSP, U+2028…).
             return Unicode.Scalar(unit)?.properties.isWhitespace ?? false
         }
+    }
+
+    static func scan(_ text: NSString, rule: DollarRule, encoding: TextEncoding = .windows1252) -> [DollarMark] {
+        rule == .rtf ? RTFDollarScanner.scan(text, encoding: encoding) : scan(text)
     }
 
     /// Все `$` по порядку со значениями.
@@ -60,9 +100,9 @@ enum DollarMarks {
         return (marks[..<skip], marks[skip...])
     }
 
-    /// Диапазоны значений к удалению, с конца к началу (удаление не сдвигает следующие). Пустые значения пропускаются.
+    /// Куски значений к удалению, с конца к началу (удаление не сдвигает следующие). Коды RTF между кусками остаются.
     static func valueRanges(_ marks: some Sequence<DollarMark>) -> [NSRange] {
-        marks.map(\.value).filter { $0.length > 0 }.sorted { $0.location > $1.location }
+        marks.flatMap(\.parts).filter { $0.length > 0 }.sorted { $0.location > $1.location }
     }
 
     /// Оттенок знака по самому значению (FNV-1a по UTF-16): одинаковые значения всегда одного цвета, в любом
@@ -77,14 +117,6 @@ enum DollarMarks {
             hash = (hash ^ UInt32(unit >> 8)) &* 16_777_619
         }
         return Int(hash % UInt32(hues))
-    }
-
-    /// Диапазон всё ещё ровно значение знака: перед ним `$`, внутри нет завершителей, сразу после — завершитель или конец.
-    /// Нужно, когда список отстал от текста (пересчёт через 250 мс после правки).
-    static func isValue(_ range: NSRange, in text: NSString) -> Bool {
-        guard range.location > 0, NSMaxRange(range) <= text.length, text.character(at: range.location - 1) == 0x24 else { return false }
-        for i in range.location..<NSMaxRange(range) where isTerminator(text.character(at: i)) { return false }
-        return NSMaxRange(range) == text.length || isTerminator(text.character(at: NSMaxRange(range)))
     }
 
     /// Текст без значений у `marks`; сами `$` остаются.

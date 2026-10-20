@@ -149,31 +149,46 @@ enum BracketMatcher {
         for index in [caret - 1, caret] where index >= 0 && index < text.length {
             let unit = text.character(at: index)
             guard pairs[unit] != nil || closing[unit] != nil, !isEscaped(text, index) else { continue }
-            if let partner = partner(of: index, in: text) { return .pair(index, partner) }
-            return .unmatched(index)
+            switch search(from: index, in: text) {
+            case .found(let partner): return .pair(index, partner)
+            case .none: return .unmatched(index)
+            // Пара может быть дальше предела — красным не красим, неизвестно.
+            case .beyondLimit: return nil
+            }
         }
         return nil
     }
 
     static func partner(of index: Int, in text: NSString) -> Int? {
+        if case .found(let partner) = search(from: index, in: text) { return partner }
+        return nil
+    }
+
+    private enum Search { case found(Int), none, beyondLimit }
+
+    private static func search(from index: Int, in text: NSString) -> Search {
         let unit = text.character(at: index)
         if let close = pairs[unit] {
             var depth = 0, i = index
-            while i < min(text.length, index + limit) {
+            let end = min(text.length, index + limit)
+            while i < end {
                 let c = text.character(at: i)
                 if (c == unit || c == close), !isEscaped(text, i) { depth += c == unit ? 1 : -1 }
-                if depth == 0 { return i }
+                if depth == 0 { return .found(i) }
                 i += 1
             }
+            return end < text.length ? .beyondLimit : .none
         } else if let open = closing[unit] {
             var depth = 0, i = index
-            while i >= max(0, index - limit) {
+            let start = max(0, index - limit)
+            while i >= start {
                 let c = text.character(at: i)
                 if (c == unit || c == open), !isEscaped(text, i) { depth += c == unit ? 1 : -1 }
-                if depth == 0 { return i }
+                if depth == 0 { return .found(i) }
                 i -= 1
             }
+            return start > 0 ? .beyondLimit : .none
         }
-        return nil
+        return .none
     }
 }
