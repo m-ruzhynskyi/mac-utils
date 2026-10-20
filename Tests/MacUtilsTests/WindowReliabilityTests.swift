@@ -52,8 +52,72 @@ final class WindowReliabilityTests: XCTestCase {
         let frame = CGRect(x: 100, y: 200, width: 800, height: 600)
         XCTAssertTrue(WindowDragRules.isTitleBarPoint(CGPoint(x: 300, y: 210), in: frame))
         XCTAssertTrue(WindowDragRules.isTitleBarPoint(CGPoint(x: 300, y: 239), in: frame))
-        XCTAssertFalse(WindowDragRules.isTitleBarPoint(CGPoint(x: 300, y: 240), in: frame))
+        XCTAssertTrue(WindowDragRules.isTitleBarPoint(CGPoint(x: 300, y: 295), in: frame))
+        XCTAssertFalse(WindowDragRules.isTitleBarPoint(CGPoint(x: 300, y: 296), in: frame))
         XCTAssertFalse(WindowDragRules.isTitleBarPoint(CGPoint(x: 300, y: 500), in: frame))
+    }
+
+    /// Высокие панели macOS 27 (замер стенда): нажатие в нижней части панели — тоже заголовок. В 1.6.8 (40 pt) нет.
+    func testTallToolbarsOfMacOS27CountAsTitleBar() {
+        let frame = CGRect(x: 0, y: 100, width: 900, height: 700)
+        for bar: CGFloat in [32, 40, 52, 66, 83, 88] {
+            XCTAssertTrue(WindowDragRules.isTitleBarPoint(CGPoint(x: 450, y: 100 + bar - 6), in: frame), "панель \(bar) pt")
+        }
+    }
+
+    func testMoveSourceFallsBackToWindowServer() {
+        let start = CGRect(x: 100, y: 100, width: 500, height: 400)
+        let moved = CGRect(x: 180, y: 140, width: 500, height: 400)
+        XCTAssertEqual(WindowDragRules.moveSource(start: start, now: moved, startBounds: start, nowBounds: moved), .ax)
+        XCTAssertEqual(WindowDragRules.moveSource(start: start, now: start, startBounds: start, nowBounds: moved), .windowServer,
+                       "программа ещё не знает нового места, WindowServer окно уже двигает")
+        XCTAssertNil(WindowDragRules.moveSource(start: start, now: start, startBounds: start, nowBounds: start))
+        XCTAssertNil(WindowDragRules.moveSource(start: start, now: nil, startBounds: nil, nowBounds: nil))
+        XCTAssertNil(WindowDragRules.moveSource(start: start, now: CGRect(x: 90, y: 100, width: 510, height: 400),
+                                                startBounds: start, nowBounds: CGRect(x: 90, y: 100, width: 510, height: 400)),
+                     "тянут за левый край — меняют размер")
+    }
+
+    /// Курсор, прижатый к верхнему краю основного экрана: в Cocoa y == maxY — экран находится, зона «весь экран».
+    func testCursorPinnedToTopEdgeFindsScreen() {
+        let primary = NSRect(x: 0, y: 0, width: 1710, height: 1112)
+        let second = NSRect(x: 1710, y: -34, width: 1135, height: 789)
+        XCTAssertEqual(WindowDragRules.screenIndex(containing: NSPoint(x: 800, y: primary.maxY), frames: [primary, second]), 0)
+        XCTAssertEqual(WindowTiler.zone(for: NSPoint(x: 800, y: primary.maxY), in: primary, screens: [primary, second]), .maximize)
+        XCTAssertEqual(WindowTiler.zone(for: NSPoint(x: 0, y: primary.maxY), in: primary, screens: [primary, second]), .topLeft)
+        XCTAssertEqual(WindowDragRules.screenIndex(containing: NSPoint(x: 2000, y: 400), frames: [primary, second]), 1)
+        XCTAssertEqual(WindowDragRules.screenIndex(containing: NSPoint(x: 2844, y: 755), frames: [primary, second]), 1, "правый верх второго")
+        XCTAssertNil(WindowDragRules.screenIndex(containing: NSPoint(x: 2000, y: 900), frames: [primary, second]))
+    }
+
+    /// Два монитора (раскладка стенда): общий край — не край прилипания, свободные края второго монитора — края.
+    func testSharedEdgeBetweenMonitorsIsNotASnapEdge() {
+        let primary = NSRect(x: 0, y: 0, width: 1710, height: 1112)
+        let second = NSRect(x: 1710, y: -34, width: 1135, height: 789)
+        let screens = [primary, second]
+        XCTAssertNil(WindowTiler.zone(for: NSPoint(x: 1709, y: 500), in: primary, screens: screens), "курсор уходит на второй монитор")
+        XCTAssertNil(WindowTiler.zone(for: NSPoint(x: 1710, y: 400), in: second, screens: screens))
+        XCTAssertEqual(WindowTiler.zone(for: NSPoint(x: 1709, y: 1000), in: primary, screens: screens), .right,
+                       "выше второго монитора правый край основного свободен")
+        XCTAssertEqual(WindowTiler.zone(for: NSPoint(x: 2844, y: 400), in: second, screens: screens), .right)
+        XCTAssertEqual(WindowTiler.zone(for: NSPoint(x: 2844, y: 754), in: second, screens: screens), .topRight)
+        XCTAssertEqual(WindowTiler.zone(for: NSPoint(x: 2000, y: 755), in: second, screens: screens), .maximize)
+        XCTAssertEqual(WindowTiler.zone(for: NSPoint(x: 1710, y: -30), in: second, screens: screens), .bottomLeft,
+                       "ниже основного левый край второго свободен")
+        XCTAssertEqual(WindowTiler.zone(for: NSPoint(x: 0, y: 500), in: primary, screens: screens), .left)
+        // Монитор сверху: верх основного — общий край.
+        let above = NSRect(x: 200, y: 1112, width: 1920, height: 1080)
+        XCTAssertNil(WindowTiler.zone(for: NSPoint(x: 800, y: 1111), in: primary, screens: [primary, above]))
+        XCTAssertEqual(WindowTiler.zone(for: NSPoint(x: 40, y: 1111), in: primary, screens: [primary, above]), .topLeft,
+                       "левее верхнего монитора верх свободен")
+        let s = WindowDragRules.sharedEdges(of: primary, at: NSPoint(x: 1709, y: 500), screens: screens)
+        XCTAssertTrue(s.right)
+        XCTAssertFalse(s.left || s.top || s.bottom)
+    }
+
+    func testCocoaAndAXPointsRoundTrip() {
+        let p = CGPoint(x: 123, y: 45)
+        XCTAssertEqual(WindowTiler.axPoint(fromCocoa: WindowTiler.cocoaPoint(fromAX: p)), p)
     }
 
     func testMoveDragNeedsMovedOriginAndSameSize() {
