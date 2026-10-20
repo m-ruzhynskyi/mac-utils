@@ -363,6 +363,7 @@ struct SettingsSectionPage: View {
             case .tasks: TaskManagerView(model: .shared, compact: compact).navigationTitle("Диспетчер задач")
             case .cleanup: DiskCleanupView(model: .shared, compact: compact).navigationTitle("Очистка диска")
             case .shots: ScreenshotLibraryView(library: .shared, compact: compact).navigationTitle("Мои снимки")
+            case .textEditor: TextEditorPage()
         }
     }
 }

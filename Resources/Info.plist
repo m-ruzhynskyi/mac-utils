@@ -17,7 +17,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.6.0</string>
+    <string>1.7.0</string>
     <key>CFBundleVersion</key>
     <string>0</string>
     <key>LSMinimumSystemVersion</key>
@@ -33,6 +33,60 @@
             <array>
                 <string>macutils</string>
             </array>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Текст</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mruzhynskyi.macutils.frm</string>
+                <string>public.plain-text</string>
+                <string>public.rtf</string>
+                <string>public.json</string>
+                <string>public.xml</string>
+                <string>public.comma-separated-values-text</string>
+                <string>public.log</string>
+                <string>com.apple.log</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Форма RTF (.frm)</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>frm</string>
+            </array>
+        </dict>
+    </array>
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mruzhynskyi.macutils.frm</string>
+            <key>UTTypeDescription</key>
+            <string>Форма RTF (.frm)</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.plain-text</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>frm</string>
+                </array>
+            </dict>
         </dict>
     </array>
     <key>LSUIElement</key>

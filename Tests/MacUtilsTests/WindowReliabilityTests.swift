@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import XCTest
 @testable import MacUtils
@@ -63,19 +64,6 @@ final class WindowReliabilityTests: XCTestCase {
         for bar: CGFloat in [32, 40, 52, 66, 83, 88] {
             XCTAssertTrue(WindowDragRules.isTitleBarPoint(CGPoint(x: 450, y: 100 + bar - 6), in: frame), "панель \(bar) pt")
         }
-    }
-
-    func testMoveSourceFallsBackToWindowServer() {
-        let start = CGRect(x: 100, y: 100, width: 500, height: 400)
-        let moved = CGRect(x: 180, y: 140, width: 500, height: 400)
-        XCTAssertEqual(WindowDragRules.moveSource(start: start, now: moved, startBounds: start, nowBounds: moved), .ax)
-        XCTAssertEqual(WindowDragRules.moveSource(start: start, now: start, startBounds: start, nowBounds: moved), .windowServer,
-                       "программа ещё не знает нового места, WindowServer окно уже двигает")
-        XCTAssertNil(WindowDragRules.moveSource(start: start, now: start, startBounds: start, nowBounds: start))
-        XCTAssertNil(WindowDragRules.moveSource(start: start, now: nil, startBounds: nil, nowBounds: nil))
-        XCTAssertNil(WindowDragRules.moveSource(start: start, now: CGRect(x: 90, y: 100, width: 510, height: 400),
-                                                startBounds: start, nowBounds: CGRect(x: 90, y: 100, width: 510, height: 400)),
-                     "тянут за левый край — меняют размер")
     }
 
     /// Курсор, прижатый к верхнему краю основного экрана: в Cocoa y == maxY — экран находится, зона «весь экран».
@@ -326,23 +314,96 @@ final class WindowReliabilityTests: XCTestCase {
                        "первое own=1 inOwn=1 layer=0 alpha=1.00 400x300 окон=1")
     }
 
-    // MARK: - Запасной путь: system-wide AX — только если над точкой нет нашего окна
+    // MARK: - Нажатие только по WindowServer (1.6.12: «down нет ответа AX» на большинство нажатий)
 
-    func testSystemWideAllowedOverForeignOverlay() {
-        let windows = [SW(number: 4, pid: 300, layer: 25, bounds: CGRect(x: 0, y: 0, width: 1710, height: 1107)),
-                       SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 38, width: 1710, height: 1069))]
-        XCTAssertTrue(WindowDragRules.systemWideAllowed(at: CGPoint(x: 500, y: 60), windows: windows, ownPID: me))
-        XCTAssertTrue(WindowDragRules.systemWideAllowed(at: CGPoint(x: 5000, y: 60), windows: windows, ownPID: me), "мимо всех окон")
+    /// Журнал 15:15: второй монитор слева (отрицательные x), первым под точкой — окно курсора 28×40, наш тёплый экран
+    /// поверх всего. AX не спрашиваем — окно берётся из списка WindowServer.
+    func testPressOnSecondMonitorLeftWithCursorWindow() {
+        let point = CGPoint(x: -506, y: 1074)
+        let windows = [SW(number: 90, pid: 50, layer: WindowDragRules.passThroughLayer, bounds: CGRect(origin: point, size: CGSize(width: 28, height: 40))),
+                       SW(number: 9, pid: me, layer: 1000, bounds: CGRect(x: -1366, y: 1050, width: 1366, height: 1024)),
+                       SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: -1300, y: 1060, width: 1000, height: 900))]
+        XCTAssertEqual(WindowDragRules.press(at: point, windows: windows, ownPID: me, ownWindows: []), .accepted(windows[2], height: 14))
     }
 
-    func testSystemWideForbiddenWhenOwnWindowIsOnTop() {
-        let windows = [SW(number: 9, pid: me, layer: 1000, bounds: CGRect(x: 0, y: 0, width: 1710, height: 1107)),
+    /// Окно курсора не на уровне курсора, но крошечное, — тоже пропускается; картинка перетаскивания — тоже.
+    func testTinyAndDraggingWindowsPassClicks() {
+        let point = CGPoint(x: 500, y: 60)
+        let windows = [SW(number: 91, pid: 50, layer: 0, bounds: CGRect(origin: point, size: CGSize(width: 28, height: 40))),
+                       SW(number: 92, pid: 60, layer: WindowDragRules.draggingLayer, bounds: CGRect(x: 400, y: 0, width: 300, height: 200)),
                        SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 38, width: 1710, height: 1069))]
-        XCTAssertFalse(WindowDragRules.systemWideAllowed(at: CGPoint(x: 500, y: 60), windows: windows, ownPID: me),
-                       "наш оверлей сверху, даже сквозь клики: AX-запрос мог бы уйти в свой процесс")
-        let below = [windows[1], windows[0]]
-        XCTAssertTrue(WindowDragRules.systemWideAllowed(at: CGPoint(x: 500, y: 60), windows: below, ownPID: me),
-                      "наше окно под чужим обычным — запрос попадёт в чужое")
+        XCTAssertEqual(WindowDragRules.press(at: point, windows: windows, ownPID: me, ownWindows: []), .accepted(windows[2], height: 22))
+        let small = [SW(number: 3, pid: 300, layer: 0, bounds: CGRect(x: 480, y: 50, width: 100, height: 80))] + windows
+        XCTAssertEqual(WindowDragRules.ownerUnder(point, windows: small, ownPID: me, ownWindows: []), 300, "окно 100×80 — настоящее")
+    }
+
+    /// Журнал: «ниже заголовка y=1029» — по рамке WindowServer, без AX.
+    func testPressBelowTitleBarByWindowServerBounds() {
+        let windows = [SW(number: 2, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 38, width: 1641, height: 1074))]
+        XCTAssertEqual(WindowDragRules.press(at: CGPoint(x: 300, y: 1067), windows: windows, ownPID: me, ownWindows: []),
+                       .rejected("ниже заголовка y=1029 полоса=96"))
+        XCTAssertEqual(WindowDragRules.press(at: CGPoint(x: 300, y: 82), windows: windows, ownPID: me, ownWindows: []),
+                       .accepted(windows[0], height: 44))
+        guard case .rejected(let reason) = WindowDragRules.press(at: CGPoint(x: 10, y: 10), windows: [], ownPID: me, ownWindows: [])
+        else { return XCTFail() }
+        XCTAssertEqual(reason, "не чужое обычное окно первое=- окон=0")
+    }
+
+    /// Медленный AX при отпускании (программа отвечает секунду) не задерживает следующее нажатие, а устаревшие раскладки
+    /// в очереди не выполняются.
+    @MainActor
+    func testSlowAXDoesNotBlockNextPress() throws {
+        _ = NSApplication.shared
+        let tiler = WindowTiler.shared
+        let saved = (tiler.windowList, tiler.windowBounds, tiler.placeWindow)
+        defer {
+            tiler.windowList = saved.0
+            tiler.windowBounds = saved.1
+            tiler.placeWindow = saved.2
+            tiler.handleMouse(.up, at: .zero)
+        }
+        let screen = try XCTUnwrap(NSScreen.screens.first).frame
+        let start = CGRect(x: 300, y: 200, width: 600, height: 400)
+        let window = SW(number: 2, pid: 200, layer: 0, bounds: start)
+        tiler.windowList = { [window] }
+        tiler.windowBounds = { _ in start.offsetBy(dx: 40, dy: 0) }
+        let calls = Counter()
+        tiler.placeWindow = { _, _ in
+            calls.add()
+            Thread.sleep(forTimeInterval: 1)
+            return "заглушка"
+        }
+        func drag() throws {
+            tiler.handleMouse(.down, at: CGPoint(x: 400, y: 220))
+            try wait { tiler.dragWindow != nil }
+            // Верх основного экрана посередине (у левого края может стоять второй монитор).
+            let edge = CGPoint(x: screen.midX, y: 0)
+            let deadline = Date().addingTimeInterval(2)
+            while tiler.dragTarget == nil, Date() < deadline {
+                tiler.handleMouse(.dragged, at: edge)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.06))
+            }
+            XCTAssertEqual(tiler.dragTarget, .maximize)
+            tiler.handleMouse(.up, at: edge)
+        }
+        try drag()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.25))   // первая раскладка уже в AX и «висит» секунду
+        try drag()
+        try drag()                                                 // вторая устарела, пока ждала в очереди
+        let pressed = Date()
+        tiler.handleMouse(.down, at: CGPoint(x: 400, y: 220))
+        try wait { tiler.dragWindow != nil }
+        XCTAssertLessThan(Date().timeIntervalSince(pressed), 0.5, "нажатие принято, пока AX занят")
+        RunLoop.main.run(until: Date().addingTimeInterval(2.5))
+        XCTAssertEqual(calls.value, 2, "первая и последняя раскладки; средняя пропущена")
+    }
+
+    private func wait(timeout: TimeInterval = 1, _ condition: () -> Bool) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            guard Date() < deadline else { return XCTFail("не дождались") }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
     }
 
     // MARK: - Точка нажатия
@@ -364,4 +425,11 @@ final class WindowReliabilityTests: XCTestCase {
         XCTAssertEqual(SW(info), SW(number: 42, pid: 7, layer: 0, alpha: 1, bounds: CGRect(x: 1, y: 2, width: 3, height: 4)))
         XCTAssertNil(SW([:]))
     }
+}
+
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+    func add() { lock.lock(); count += 1; lock.unlock() }
 }

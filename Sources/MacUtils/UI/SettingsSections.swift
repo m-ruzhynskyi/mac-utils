@@ -6,7 +6,7 @@ import SwiftUI
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general, hotKeys, exclusions, panel, music, share, focus, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
-         uninstaller, monitor, tasks, cleanup, shots
+         uninstaller, monitor, tasks, cleanup, shots, textEditor
 
     var id: String { rawValue }
 
@@ -18,6 +18,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .tasks: return "Задачи"
         case .cleanup: return "Очистка"
         case .shots: return "Снимки"
+        case .textEditor: return "Редактор"
         case .cutPaste: return "Вырезать"
         case .smoothScroll: return "Прокрутка"
         case .switcher: return "Переключатель"
@@ -74,6 +75,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .tasks: return "Диспетчер задач"
         case .cleanup: return "Очистка диска"
         case .shots: return "Мои снимки"
+        case .textEditor: return "Текстовый редактор"
         }
     }
 
@@ -107,6 +109,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .tasks: return "list.bullet.rectangle"
         case .cleanup: return "externaldrive.badge.minus"
         case .shots: return "photo.on.rectangle.angled"
+        case .textEditor: return "doc.plaintext"
         }
     }
 }
@@ -145,6 +148,7 @@ extension SettingsSection {
         case .tasks: return "диспетчер задач процессы завершить"
         case .cleanup: return "очистка диска кэш корзина загрузки место"
         case .shots: return "мои снимки история поиск умная папка копии снимков"
+        case .textEditor: return "текстовый редактор блокнот notepad frm rtf txt log json xml csv кодировка вкладки знаки $ доллар открыть с помощью"
         }
     }
 
@@ -180,7 +184,7 @@ enum SettingsGroup: String, CaseIterable, Identifiable {
         case .general: return [.general, .hotKeys, .exclusions, .panel]
         case .capture: return [.screenshot, .shots, .annotate, .qr, .meetings]
         case .windowsInput: return [.switcher, .windows, .volume, .layout, .smoothScroll, .cutPaste, .textInput]
-        case .filesSystem: return [.shelf, .downloads, .cheatSheet, .uninstaller, .cleanup, .monitor, .tasks]
+        case .filesSystem: return [.shelf, .downloads, .textEditor, .cheatSheet, .uninstaller, .cleanup, .monitor, .tasks]
         case .more: return [.wellbeing, .focus, .music, .share, .ai]
         }
     }
@@ -214,6 +218,7 @@ extension SettingsSection {
         case .annotate: return "Стрелки, рамки, маркер и перо прямо поверх экрана — во время созвона, демонстрации или записи экрана (рисунки попадают в запись)."
         case .meetings: return "Записывает звук созвона (собеседников и ваш микрофон отдельно), расшифровывает прямо на Mac (Whisper или распознавание Apple), а локальная модель (Ollama) делает отчёт: итог, решения, задачи."
         case .ai: return "Всё работает на локальной модели через Ollama — тексты, снимки и файлы не уходят в интернет."
+        case .textEditor: return "Вкладки, кодировки и знаки $ для .frm и других текстов"
         case .music, .share, .switcher, .wellbeing, .uninstaller, .monitor, .tasks, .cleanup, .shots: return ""
         }
     }
