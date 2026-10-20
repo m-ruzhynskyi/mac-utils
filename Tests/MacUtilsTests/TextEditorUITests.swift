@@ -136,6 +136,47 @@ final class TextEditorUITests: XCTestCase {
         XCTAssertEqual(tab.text as String, Self.demo)
     }
 
+    /// 08-long-line: клик по `deep20k` прокручивает к нему по горизонтали; пустой файл — «Знаков $ нет».
+    func testRevealInLongLineAndEmptyPanel() throws {
+        let url = TextEditorAcceptanceTests.folder.appendingPathComponent("08-long-line.frm")
+        let workspace = EditorWorkspace()
+        let tab = EditorTab(document: try EditorDocument.open(url))
+        workspace.add(tab)
+        _ = host(workspace)
+        waitForScan(tab, count: 4)
+        let deep = try XCTUnwrap(tab.dollars.entries.first { $0.value == "deep20k" })
+        XCTAssertEqual(tab.scrollView.contentView.bounds.minX, 0)
+        tab.dollars.selected = deep.id
+        tab.reveal(deep.mark.whole)
+        settle(0.2)
+        XCTAssertEqual(tab.textView.selectedRange(), deep.mark.whole)
+        XCTAssertGreaterThan(tab.scrollView.contentView.bounds.minX, 1_000, "прокрутка вбок к 20-тысячному символу")
+
+        let empty = EditorTab(document: try EditorDocument.open(TextEditorAcceptanceTests.folder.appendingPathComponent("03-zero-dollars.frm")))
+        workspace.add(empty)
+        settle(0.3)
+        XCTAssertTrue(empty.dollars.entries.isEmpty)
+        XCTAssertFalse(empty.dollars.scanning)
+        XCTAssertEqual(empty.dollars.removableCount, 0)
+    }
+
+    /// Панель с 4 184 знаками (файл 10 МБ): список ленивый — показ и смена выбора не тормозят.
+    func testPanelWithThousandsOfMarks() {
+        let big = TextEditorPerformanceTests.bigFile()
+        let workspace = EditorWorkspace()
+        let tab = EditorTab(document: EditorDocument(data: big.data, url: URL(fileURLWithPath: "/tmp/big.frm")))
+        workspace.add(tab)
+        let window = host(workspace, size: NSSize(width: 1000, height: 700))
+        waitForScan(tab, count: big.dollars)
+        let select = TextEditorPerformanceTests.measure {
+            tab.dollars.selected = tab.dollars.entries[big.dollars / 2].id
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.contentView?.displayIfNeeded()
+        }
+        print(String(format: "[editor-perf] %@ панель с %d знаками: смена выбора и перерисовка %.0f мс", TextEditorPerformanceTests.build, big.dollars, select))
+        XCTAssertLessThan(select, TextEditorPerformanceTests.limit(300))
+    }
+
     // MARK: - Строка состояния, перевод строки, режим замены
 
     func testCaretLineEndingAndOverwrite() {
