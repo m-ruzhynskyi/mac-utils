@@ -189,6 +189,26 @@ enum Pref {
     /// Вкладка «Редактор» уже добавлена в панель 🔧 (один раз при обновлении).
     static let panelTabsEditorAdded = "panelTabsEditorAdded"
 
+    /// Видеоплеер: просмотр, субтитры, пропуск, «Мои снимки», последние выбранные языки и недавние файлы.
+    static let playerRememberPosition = "playerRememberPosition"
+    static let playerSeekStep = "playerSeekStep"
+    static let playerKeepAwake = "playerKeepAwake"
+    static let playerKeepPitch = "playerKeepPitch"
+    static let playerVolume = "playerVolume"
+    static let playerSubtitlesNearby = "playerSubtitlesNearby"
+    static let playerSubtitleSize = "playerSubtitleSize"
+    static let playerSubtitleBackground = "playerSubtitleBackground"
+    static let playerSubtitleLanguage = "playerSubtitleLanguage"
+    static let playerAudioLanguage = "playerAudioLanguage"
+    static let playerSkipAuto = "playerSkipAuto"
+    static let playerNextEpisode = "playerNextEpisode"
+    /// Папки, где кнопку «Пропустить…» просили не показывать.
+    static let playerSkipHiddenFolders = "playerSkipHiddenFolders"
+    /// Двойной клик по видео в «Моих снимках»: true — плеер Mac Utils, false — программа по умолчанию.
+    static let playerOpensShots = "playerOpensShots"
+    static let playerRecent = "playerRecent"
+    static let playerFinished = "playerFinished"
+
     static func register() {
         UserDefaults.standard.register(defaults: [
             cutPaste: true,
@@ -285,6 +305,17 @@ enum Pref {
             editorWrap: false,
             editorZoom: 1.0,
             editorDollarPanel: true,
+            playerRememberPosition: true,
+            playerSeekStep: 5,
+            playerKeepAwake: true,
+            playerKeepPitch: true,
+            playerVolume: 1.0,
+            playerSubtitlesNearby: true,
+            playerSubtitleSize: 1,
+            playerSubtitleBackground: false,
+            playerSkipAuto: false,
+            playerNextEpisode: true,
+            playerOpensShots: true,
         ])
     }
 
