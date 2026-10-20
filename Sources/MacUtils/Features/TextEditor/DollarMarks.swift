@@ -4,25 +4,49 @@ import Foundation
 struct DollarMark: Equatable {
     /// Где стоит `$`.
     let dollar: Int
-    /// Значение: начинается сразу после `$`; длина 0 — значение пустое.
+    /// Охват значения: от символа сразу после `$` до конца последнего символа значения; длина 0 — значение пустое.
     let value: NSRange
+    /// Куски исходника, из которых состоит значение. В исходнике — один кусок (`value`); в RTF — только видимые символы
+    /// (обычные символы, `\'hh`, `\uN` с заменителем…), а коды и группы между ними в значение не входят.
+    let parts: [NSRange]
+    /// Видимое значение (RTF: `\'e9` → é, `\u1071?` → я); `nil` — это сам текст `value`.
+    let visible: String?
+    /// Знак внутри служебной группы RTF (`\info`, `{\*\…}`, таблицы шрифтов…): на странице его не видно, не трогаем.
+    let hidden: Bool
+
+    init(dollar: Int, value: NSRange, parts: [NSRange]? = nil, visible: String? = nil, hidden: Bool = false) {
+        self.dollar = dollar
+        self.value = value
+        self.parts = parts ?? (value.length > 0 ? [value] : [])
+        self.visible = visible
+        self.hidden = hidden
+    }
 
     /// `$` вместе со значением.
     var whole: NSRange { NSRange(location: dollar, length: value.length + 1) }
+
+    var isEmpty: Bool { parts.isEmpty }
+
+    /// Значение как его видит читатель документа.
+    func text(in source: NSString) -> String { visible ?? source.substring(with: value) }
+}
+
+/// Как считать значение знака. Панель «$» — всегда `.source`; `.rtf` (по видимому тексту) — внутренний, для будущего
+/// режима «Документ», в интерфейсе его нет.
+enum DollarRule: String, Codable, CaseIterable {
+    case rtf, source
 }
 
 /// Правило «$ и его значение» для панели «Знаки $» текстового редактора.
 enum DollarMarks {
-    /// Значение — символы сразу после `$` до первого пробельного символа, одного из `\ { } $ ;` или конца текста.
+    /// Значение — все символы исходника после `$` до конца строки (CR/LF в значение не входит), следующего `$` или
+    /// конца текста. Пробелы, `\ { } ; '`, коды RTF — всё входит, RTF не разбирается.
     static func isTerminator(_ unit: UInt16) -> Bool {
-        switch unit {
-        case 0x5C, 0x7B, 0x7D, 0x24, 0x3B: return true // \ { } $ ;
-        case 0x20, 0x09, 0x0A, 0x0B, 0x0C, 0x0D: return true
-        case 0..<0x80: return false
-        default:
-            // Половинки суррогатной пары пробелом не бывают; остальное — по свойству Юникода (NBSP, U+2028…).
-            return Unicode.Scalar(unit)?.properties.isWhitespace ?? false
-        }
+        unit == 0x24 || unit == 0x0A || unit == 0x0D
+    }
+
+    static func scan(_ text: NSString, rule: DollarRule, encoding: TextEncoding = .windows1252) -> [DollarMark] {
+        rule == .rtf ? RTFDollarScanner.scan(text, encoding: encoding) : scan(text)
     }
 
     /// Все `$` по порядку со значениями.
@@ -60,9 +84,9 @@ enum DollarMarks {
         return (marks[..<skip], marks[skip...])
     }
 
-    /// Диапазоны значений к удалению, с конца к началу (удаление не сдвигает следующие). Пустые значения пропускаются.
+    /// Куски значений к удалению, с конца к началу (удаление не сдвигает следующие). Коды RTF между кусками остаются.
     static func valueRanges(_ marks: some Sequence<DollarMark>) -> [NSRange] {
-        marks.map(\.value).filter { $0.length > 0 }.sorted { $0.location > $1.location }
+        marks.flatMap(\.parts).filter { $0.length > 0 }.sorted { $0.location > $1.location }
     }
 
     /// Оттенок знака по самому значению (FNV-1a по UTF-16): одинаковые значения всегда одного цвета, в любом
@@ -77,6 +101,25 @@ enum DollarMarks {
             hash = (hash ^ UInt32(unit >> 8)) &* 16_777_619
         }
         return Int(hash % UInt32(hues))
+    }
+
+    /// Непарных `{` и `}` во всём тексте (`\{`, `\}` и `\\` — не скобки). 0 — баланс есть.
+    static func unbalancedBraces(in text: NSString) -> Int {
+        let length = text.length
+        guard length > 0 else { return 0 }
+        var units = [UInt16](repeating: 0, count: length)
+        units.withUnsafeMutableBufferPointer { text.getCharacters($0.baseAddress!, range: NSRange(location: 0, length: length)) }
+        var depth = 0, unmatched = 0, i = 0
+        while i < length {
+            switch units[i] {
+            case 0x5C: i += 1                     // экранированный знак за `\` пропускаем
+            case 0x7B: depth += 1
+            case 0x7D: if depth > 0 { depth -= 1 } else { unmatched += 1 }
+            default: break
+            }
+            i += 1
+        }
+        return unmatched + depth
     }
 
     /// Текст без значений у `marks`; сами `$` остаются.

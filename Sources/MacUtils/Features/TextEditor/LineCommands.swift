@@ -114,6 +114,96 @@ enum LineCommands {
                                            length: max(0, selection.length - removedInside)))
     }
 
+    // MARK: - Сортировка, дубли, табы
+
+    /// Строки, к которым применяется команда: выделенные (если выделение есть) или весь текст.
+    /// Возвращает тела строк и их переводы строк по порядку (у последней может не быть).
+    static func lines(_ text: NSString, _ selection: NSRange) -> (range: NSRange, bodies: [String], breaks: [String]) {
+        let range = selection.length > 0 ? lineBlock(text, selection) : NSRange(location: 0, length: text.length)
+        var bodies: [String] = [], breaks: [String] = []
+        var index = range.location
+        let end = NSMaxRange(range)
+        while index < end {
+            var stop = index
+            while stop < end, !isBreak(text.character(at: stop)) { stop += 1 }
+            let eol = min(breakLength(text, at: stop), end - stop)
+            bodies.append(text.substring(with: NSRange(location: index, length: stop - index)))
+            breaks.append(text.substring(with: NSRange(location: stop, length: eol)))
+            index = stop + max(eol, stop == end ? 1 : 0)
+        }
+        return (range, bodies, breaks)
+    }
+
+    /// Собрать строки обратно: переводы строк остаются на своих местах (последняя строка — как была, без перевода).
+    private static func joined(_ bodies: [String], _ breaks: [String]) -> String {
+        zip(bodies, breaks).map { $0 + $1 }.joined()
+    }
+
+    private static func edit(_ text: NSString, _ selection: NSRange, _ transform: ([String]) -> [String]) -> LineEdit? {
+        let parts = lines(text, selection)
+        guard parts.bodies.count > 1 else { return nil }
+        var bodies = transform(parts.bodies)
+        var breaks = parts.breaks
+        // Строк стало меньше (удалены дубли) — лишние переводы строк уходят с конца, последний остаётся как был.
+        if bodies.count < breaks.count {
+            let last = breaks.last ?? ""
+            breaks = Array(breaks.prefix(bodies.count))
+            if !breaks.isEmpty { breaks[breaks.count - 1] = last }
+        }
+        bodies = Array(bodies.prefix(breaks.count))
+        let result = joined(bodies, breaks)
+        guard result != text.substring(with: parts.range) else { return nil }
+        return LineEdit(ranges: [parts.range], strings: [result],
+                        selection: selection.length > 0 ? NSRange(location: parts.range.location, length: (result as NSString).length)
+                                                        : NSRange(location: min(selection.location, parts.range.location + (result as NSString).length), length: 0))
+    }
+
+    enum SortOrder { case ascending, descending, caseInsensitive }
+
+    /// Сортировка строк (стабильная: равные остаются в прежнем порядке). А→Я и Я→А — с учётом регистра.
+    static func sort(_ text: NSString, _ selection: NSRange, _ order: SortOrder) -> LineEdit? {
+        edit(text, selection) { bodies in
+            let indexed = Array(bodies.enumerated())
+            let sorted = indexed.sorted { a, b in
+                let result: ComparisonResult
+                switch order {
+                case .ascending, .descending: result = a.element.compare(b.element, options: [], range: nil, locale: Locale.current)
+                case .caseInsensitive: result = a.element.compare(b.element, options: [.caseInsensitive], range: nil, locale: Locale.current)
+                }
+                if result == .orderedSame { return a.offset < b.offset }
+                return order == .descending ? result == .orderedDescending : result == .orderedAscending
+            }
+            return sorted.map(\.element)
+        }
+    }
+
+    /// Удалить повторяющиеся строки: остаётся первая. Без учёта регистра `beta` и `Beta` — одна строка.
+    static func removeDuplicates(_ text: NSString, _ selection: NSRange, caseSensitive: Bool) -> LineEdit? {
+        edit(text, selection) { bodies in
+            var seen = Set<String>()
+            return bodies.filter { seen.insert(caseSensitive ? $0 : $0.lowercased()).inserted }
+        }
+    }
+
+    /// Табы → N пробелов и обратно (каждые N пробелов подряд → таб): обратимо. Выделенные строки или весь текст.
+    static func tabsToSpaces(_ text: NSString, _ selection: NSRange, width: Int) -> LineEdit? {
+        replaceInLines(text, selection) { $0.replacingOccurrences(of: "\t", with: String(repeating: " ", count: max(1, width))) }
+    }
+
+    static func spacesToTabs(_ text: NSString, _ selection: NSRange, width: Int) -> LineEdit? {
+        replaceInLines(text, selection) { $0.replacingOccurrences(of: String(repeating: " ", count: max(1, width)), with: "\t") }
+    }
+
+    private static func replaceInLines(_ text: NSString, _ selection: NSRange, _ transform: (String) -> String) -> LineEdit? {
+        let parts = lines(text, selection)
+        let result = joined(parts.bodies.map(transform), parts.breaks)
+        guard result != text.substring(with: parts.range) else { return nil }
+        let length = (result as NSString).length
+        return LineEdit(ranges: [parts.range], strings: [result],
+                        selection: selection.length > 0 ? NSRange(location: parts.range.location, length: length)
+                                                        : NSRange(location: min(selection.location, parts.range.location + length), length: 0))
+    }
+
     enum Case { case upper, lower, sentence }
 
     /// Регистр выделения (без выделения — слова под курсором).

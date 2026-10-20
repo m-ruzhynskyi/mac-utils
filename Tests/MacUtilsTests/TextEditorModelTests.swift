@@ -271,9 +271,11 @@ final class LineCommandsTests: XCTestCase {
 final class EditorSessionTests: XCTestCase {
     private var folder: URL!
     private var saved: URL!
+    private var defaults: EditorDefaultsSnapshot!
 
     override func setUp() {
         super.setUp()
+        defaults = EditorDefaultsSnapshot()
         saved = EditorSession.folder
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("editor-session-\(UUID().uuidString)", isDirectory: true)
         EditorSession.folder = folder
@@ -284,6 +286,7 @@ final class EditorSessionTests: XCTestCase {
     override func tearDown() {
         try? FileManager.default.removeItem(at: folder)
         EditorSession.folder = saved
+        defaults.restore()
         super.tearDown()
     }
 
@@ -435,5 +438,26 @@ final class EditorWorkspaceTests: XCTestCase {
         workspace.remove(first)
         XCTAssertEqual(workspace.newDocument().title, "Без имени 1")
         XCTAssertEqual(second.textView.lineBreak, EditorPrefs.newLineEnding.string)
+    }
+}
+
+/// Тесты меняют общие настройки редактора в домене xctest — после теста возвращаем как было, иначе соседние тесты
+/// (и параллельный прогон тестировщика) видят чужие значения.
+struct EditorDefaultsSnapshot {
+    static let keys = [Pref.editorSkipFirst, Pref.editorSkipCount, Pref.editorRestoreSession, Pref.editorAutosaveDrafts,
+                       Pref.editorInvisibles, Pref.editorBrackets, Pref.editorWrap, Pref.editorZoom, Pref.editorDollarPanel,
+                       Pref.editorRecent, Pref.editorTabWidth]
+    private let values: [String: Any]
+
+    init() {
+        var values: [String: Any] = [:]
+        for key in Self.keys { values[key] = UserDefaults.standard.object(forKey: key) }
+        self.values = values
+    }
+
+    func restore() {
+        for key in Self.keys {
+            if let value = values[key] { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+        }
     }
 }

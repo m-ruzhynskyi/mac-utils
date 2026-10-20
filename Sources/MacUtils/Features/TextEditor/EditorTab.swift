@@ -8,6 +8,8 @@ struct EditorCaret: Equatable {
     /// Выделено символов (UTF-16, как длина) и строк (0 — выделение в одной строке).
     var selected = 0
     var selectedLines = 0
+    /// Курсоров и выделений (больше одного — прямоугольное выделение или несколько курсоров).
+    var cursors = 1
 }
 
 /// Вкладка редактора: документ, текст (TextKit 1), своя история отмены, панель `$` и подсветка.
@@ -46,6 +48,17 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     /// Ручной выбор языка сохраняется для вкладки.
     var zoom: CGFloat = 1 { didSet { applyZoom() } }
 
+    var showsInvisibles: Bool {
+        get { (textView.layoutManager as? EditorLayoutManager)?.showsInvisibles ?? false }
+        set { (textView.layoutManager as? EditorLayoutManager)?.showsInvisibles = newValue }
+    }
+    var matchesBrackets = true { didSet { refreshBrackets() } }
+    /// Где сейчас подсвечены скобки (временный атрибут фона).
+    private var bracketRanges: [NSRange] = []
+
+    /// Растёт с каждой правкой текста: фоновый результат (поиск, замена) применяется, только если текст тот же.
+    private(set) var textVersion = 0
+
     /// Счётчик правок от сохранения: +1 за каждый шаг отмены, −1 за отмену.
     private var changeCount = 0
     private var pendingChange = false
@@ -79,7 +92,10 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         textView.delegate = self
         storage.delegate = self
         textView.onOverwriteChange = { [weak self] in self?.overwrite = $0 }
+        textView.onCursorsChange = { [weak self] in self?.refreshCaret() }
         dollars.onUpdate = { [weak self] in self?.rehighlight() }
+        dollars.rule = Self.defaultRule(for: document)
+        dollars.encoding = document.encoding
         load(text ?? document.decodedText, resetUndo: true)
         if let text, !(text as NSString).isEqual(to: document.decodedText) {
             // Восстановленный черновик отличается от файла — вкладка изменена.
@@ -138,6 +154,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         if resetUndo { undo.removeAllActions() }
         textView.typingAttributes = baseAttributes
         lines = LineIndex(text)
+        textVersion += 1
         changeCount = 0
         pendingChange = false
         updateDirty()
@@ -156,7 +173,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         style.maximumLineHeight = EditorStyle.lineHeight * zoom
         style.lineBreakMode = .byCharWrapping
         style.tabStops = []
-        style.defaultTabInterval = ("    " as NSString).size(withAttributes: [.font: EditorStyle.font(zoom: zoom)]).width
+        style.defaultTabInterval = (String(repeating: " ", count: EditorPrefs.tabWidth) as NSString)
+            .size(withAttributes: [.font: EditorStyle.font(zoom: zoom)]).width
         return [.font: EditorStyle.font(zoom: zoom), .foregroundColor: EditorStyle.text, .paragraphStyle: style]
     }
 
@@ -234,7 +252,14 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         guard editedMask.contains(.editedCharacters) else { return }
         MainActor.assumeIsolated {
             guard !bulkLoading else { return }
+            dollars.invalidate()
+            let editLine = lines.line(at: editedRange.location)
+            // Вставка в самом начале строки (Enter перед текстом) сдвигает и саму эту строку.
+            let atLineStart = lines.starts[editLine - 1] == editedRange.location
+            let oldLineCount = lines.lineCount
             lines.update(textStorage.mutableString, editedRange: editedRange, delta: delta)
+            let lineDelta = lines.lineCount - oldLineCount
+            bookmarks = Self.shiftBookmarks(bookmarks, editLine: atLineStart && lineDelta > 0 ? editLine - 1 : editLine, lineDelta: lineDelta)
             // Временные атрибуты подсветки сдвигаются вместе с текстом — запоминаем, где они теперь.
             let oldEnd = editedRange.location + editedRange.length - delta
             highlighted = highlighted.map { range in
@@ -247,6 +272,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     }
 
     func textDidChange(_ notification: Notification) {
+        textVersion += 1
         pendingChange = true
         updateDirty()
         refreshCounts()
@@ -265,7 +291,78 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
 
     func textViewDidChangeSelection(_ notification: Notification) {
         refreshCaret()
+        refreshBrackets()
         ruler.needsDisplay = true
+    }
+
+    // MARK: - Правило значений `$`
+
+    /// Одно правило для всех файлов: значение — до конца строки исходника (решение пользователя).
+    static func defaultRule(for document: EditorDocument) -> DollarRule { .source }
+
+    /// Правило значений; в интерфейсе не меняется (`.rtf` — для будущего режима «Документ»).
+    var dollarRule: DollarRule {
+        get { dollars.rule }
+        set {
+            guard newValue != dollars.rule else { return }
+            dollars.rule = newValue
+            dollars.objectWillChange.send()
+            dollars.scanNow(text)
+        }
+    }
+
+    // MARK: - Закладки
+
+    /// Закладки ниже правки сдвигаются вместе со строками; закладки удалённых строк встают на строку правки.
+    nonisolated static func shiftBookmarks(_ marks: Set<Int>, editLine: Int, lineDelta: Int) -> Set<Int> {
+        guard lineDelta != 0 else { return marks }
+        return Set(marks.map { line in
+            guard line > editLine else { return line }
+            return max(editLine, line + lineDelta)
+        })
+    }
+
+    /// ⌘F2: закладка на строке курсора — поставить или снять.
+    func toggleBookmark(line: Int? = nil) {
+        let line = line ?? caret.line
+        if bookmarks.contains(line) { bookmarks.remove(line) } else { bookmarks.insert(line) }
+        ruler.needsDisplay = true
+        onEdit?()
+    }
+
+    /// F2 / ⇧F2: к следующей или предыдущей закладке, по кругу.
+    func goToBookmark(backwards: Bool) {
+        let sorted = bookmarks.filter { $0 <= lines.lineCount }.sorted()
+        guard !sorted.isEmpty else { return NSSound.beep() }
+        let current = caret.line
+        let target = backwards ? (sorted.last { $0 < current } ?? sorted.last!) : (sorted.first { $0 > current } ?? sorted.first!)
+        goTo(line: target)
+    }
+
+    func clearBookmarks() {
+        bookmarks.removeAll()
+        ruler.needsDisplay = true
+        onEdit?()
+    }
+
+    /// Парная скобка у курсора — фоном у обеих; без пары — красным. Только при пустом выделении.
+    func refreshBrackets() {
+        guard let layout = textView.layoutManager else { return }
+        let full = NSRange(location: 0, length: storage.length)
+        for range in bracketRanges where NSMaxRange(range) <= full.length {
+            layout.removeTemporaryAttribute(.backgroundColor, forCharacterRange: range)
+        }
+        bracketRanges = []
+        let selection = textView.selectedRange()
+        guard matchesBrackets, selection.length == 0, let match = BracketMatcher.match(in: text, caret: selection.location) else { return }
+        switch match {
+        case .pair(let a, let b):
+            bracketRanges = [NSRange(location: a, length: 1), NSRange(location: b, length: 1)]
+            for range in bracketRanges { layout.addTemporaryAttribute(.backgroundColor, value: EditorStyle.bracketFill, forCharacterRange: range) }
+        case .unmatched(let a):
+            bracketRanges = [NSRange(location: a, length: 1)]
+            layout.addTemporaryAttribute(.backgroundColor, value: EditorStyle.bracketUnmatched, forCharacterRange: bracketRanges[0])
+        }
     }
 
     private func refreshCounts() {
@@ -277,7 +374,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     private func refreshCaret() {
         let selection = textView.selectedRange()
         let position = lines.position(at: min(selection.location, storage.length))
-        var next = EditorCaret(line: position.line, column: position.column, selected: selection.length, selectedLines: 0)
+        var next = EditorCaret(line: position.line, column: position.column, selected: selection.length, selectedLines: 0,
+                               cursors: textView.cursorCount)
         if selection.length > 0 {
             let endLine = lines.line(at: max(selection.location, NSMaxRange(selection) - 1))
             next.selectedLines = endLine > position.line ? endLine - position.line + 1 : 0
@@ -327,20 +425,24 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     /// «Убрать значения» у подсвеченных (или у одного): `$` остаются, один шаг отмены.
     @discardableResult
     func removeValues(_ entries: [DollarEntry]) -> Int {
-        let ranges = DollarMarks.valueRanges(entries.map(\.mark))
-        guard !ranges.isEmpty else { return 0 }
-        // Список отстал от текста — ничего не трогаем, список пересчитывается сразу.
-        let string = text
-        guard ranges.allSatisfy({ NSMaxRange($0) <= string.length && $0.location > 0 && string.character(at: $0.location - 1) == 0x24 })
-        else {
-            dollars.scanNow(string)
+        // Список отстал от текста (пересчёт через 250 мс после правки) — пересчитываем сразу и убираем только то,
+        // что совпало с новым списком; не совпало — ничего не трогаем.
+        if !dollars.isCurrent { dollars.scanNow(text) }
+        guard let fresh = dollars.current(entries.filter { !$0.isHidden }) else {
             NSSound.beep()
             return 0
         }
+        let ranges = DollarMarks.valueRanges(fresh.map(\.mark))
+        guard !ranges.isEmpty else { return 0 }
+        let removed = fresh.filter { !$0.mark.isEmpty }.count
+        // Не запрещаем, но предупреждаем: был баланс `{}`, а после удаления его нет — Word может не открыть файл.
+        let wasBalanced = DollarMarks.unbalancedBraces(in: text) == 0
         textView.replace(ranges, with: Array(repeating: "", count: ranges.count),
-                         actionName: ranges.count == 1 ? "Убрать значение" : "Убрать значения")
-        dollars.removedCount = ranges.count
-        return ranges.count
+                         actionName: fresh.count == 1 ? "Убрать значение" : "Убрать значения")
+        let after = wasBalanced ? DollarMarks.unbalancedBraces(in: text) : 0
+        dollars.removedCount = removed
+        dollars.unbalancedAfterRemoval = after > 0 ? after : nil
+        return removed
     }
 
     /// Выделить и показать диапазон.
@@ -462,17 +564,27 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         let end = min(lineEnd, NSMaxRange(edit) + 2_000)
         guard end > start else { return }
         let window = NSRange(location: start, length: end - start)
+        // RTF: значение тянется через коды и строки — по куску его не пересчитать. Подсветка знаков сдвинулась вместе
+        // с текстом; здесь только синтаксис, весь экран — после пересчёта списка (через 250 мс).
+        if dollars.rule == .rtf {
+            for (tokenRange, token) in SyntaxHighlighter.tokens(document.language, in: string, range: window) {
+                layout.addTemporaryAttribute(.foregroundColor, value: Self.color(token), forCharacterRange: tokenRange)
+            }
+            refreshBrackets()
+            return
+        }
         for key in [NSAttributedString.Key.foregroundColor, .backgroundColor, .underlineStyle, .underlineColor] {
             layout.removeTemporaryAttribute(key, forCharacterRange: window)
         }
         // Знаки в окне — свежим сканом; номер по порядку — по списку до окна (он до правки и не сдвинулся).
         let before = dollars.count(before: start)
-        let local = DollarMarks.scan(string.substring(with: window) as NSString).map { mark in
+        let local = DollarMarks.scan(string.substring(with: window) as NSString, rule: .source).map { mark in
             let shifted = DollarMark(dollar: mark.dollar + start, value: NSRange(location: mark.value.location + start, length: mark.value.length))
             return DollarEntry(mark: shifted, line: 0, value: string.substring(with: shifted.value),
                                hue: DollarMarks.hue(of: string.substring(with: shifted.value) as NSString, hues: EditorStyle.hueCount))
         }
         highlight(window, in: string, layout: layout, entries: local, firstIndex: before)
+        refreshBrackets()
     }
 
     func applyHighlights() {
@@ -491,6 +603,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
             for key in keys { layout.removeTemporaryAttribute(key, forCharacterRange: range) }
             highlight(range, in: string, layout: layout)
         }
+        bracketRanges = []
+        refreshBrackets()
     }
 
     /// `entries` и `firstIndex` — знаки `$` для окна и номер первого из них по порядку (по умолчанию — из списка панели).
@@ -511,26 +625,36 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         let slice = local.map { ArraySlice($0) } ?? dollars.entries(in: range)
         for index in slice.indices {
             let entry = slice[index]
-            let order = local == nil ? index : firstIndex + index
             let mark = entry.mark
-            guard NSMaxRange(mark.whole) <= string.length, string.character(at: mark.dollar) == 0x24 else { continue }
+            guard mark.dollar < string.length, string.character(at: mark.dollar) == 0x24,
+                  mark.parts.allSatisfy({ NSMaxRange($0) <= string.length }) else { continue }
+            // Подсвечиваются `$` и куски значения; коды RTF между кусками не красим.
+            let pieces = [NSRange(location: mark.dollar, length: 1)] + mark.parts
+            // Служебные знаки (`\info`, `{\*\…}`) — бледно, без подчёркивания; пропущенные первые N — бледно с точками.
+            if mark.hidden {
+                for piece in pieces { layout.addTemporaryAttribute(.foregroundColor, value: EditorStyle.faint, forCharacterRange: piece) }
+                continue
+            }
+            let order = local == nil ? (entry.order ?? 0) : firstIndex + index
             if order < skip {
-                layout.addTemporaryAttributes([
-                    .foregroundColor: EditorStyle.faint,
-                    .underlineStyle: NSUnderlineStyle([.single, .patternDot]).rawValue,
-                    .underlineColor: EditorStyle.faint,
-                ], forCharacterRange: mark.whole)
+                for piece in pieces {
+                    layout.addTemporaryAttributes([
+                        .foregroundColor: EditorStyle.faint,
+                        .underlineStyle: NSUnderlineStyle([.single, .patternDot]).rawValue,
+                        .underlineColor: EditorStyle.faint,
+                    ], forCharacterRange: piece)
+                }
                 continue
             }
             let selected = dollars.selected == mark.dollar
             let fill = EditorStyle.hueFill(entry.hue, selected: selected)
             layout.addTemporaryAttributes([.foregroundColor: EditorStyle.hue(entry.hue), .backgroundColor: fill],
-                                          forCharacterRange: NSRange(location: mark.dollar, length: 1))
-            if mark.value.length > 0 {
+                                          forCharacterRange: pieces[0])
+            for part in mark.parts {
                 layout.addTemporaryAttributes([
                     .foregroundColor: EditorStyle.text, .backgroundColor: fill,
                     .underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: EditorStyle.hue(entry.hue),
-                ], forCharacterRange: mark.value)
+                ], forCharacterRange: part)
             }
         }
 
