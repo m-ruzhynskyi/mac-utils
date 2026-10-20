@@ -27,9 +27,12 @@ final class ShareMonitorsTests: XCTestCase {
     }
 
     func testListKeepsEightAndClampsValues() {
-        let many = (0..<10).map { i in
-            ShareDisplays.Screen(id: CGDirectDisplayID(i + 1), frame: CGRect(x: CGFloat(i) * 100, y: 0, width: 100, height: 100),
-                                 pixels: CGSize(width: 40000, height: 0), scale: 9, primary: i == 0)
+        var many: [ShareDisplays.Screen] = []
+        for i in 0..<10 {
+            let x = CGFloat(i) * 100
+            let frame = CGRect(x: x, y: 0, width: 100, height: 100)
+            let pixels = CGSize(width: 40000, height: 0)
+            many.append(ShareDisplays.Screen(id: CGDirectDisplayID(i + 1), frame: frame, pixels: pixels, scale: 9, primary: i == 0))
         }
         let list = ShareDisplays.list(many)
         XCTAssertEqual(list.count, ShareDisplays.maxCount)
