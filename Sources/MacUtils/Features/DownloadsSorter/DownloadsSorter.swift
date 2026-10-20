@@ -253,6 +253,7 @@ final class DownloadsSorter: ObservableObject {
         let timer = Timer(timeInterval: 600, repeats: true) { _ in
             MainActor.assumeIsolated { _ = DownloadsSorter.shared.run() }
         }
+        timer.tolerance = 60
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
         isRunning = source != nil

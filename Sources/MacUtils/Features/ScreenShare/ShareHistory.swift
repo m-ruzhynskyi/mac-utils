@@ -182,6 +182,7 @@ final class ShareHistory: ObservableObject {
         let timer = Timer(timeInterval: 10, repeats: true) { _ in
             MainActor.assumeIsolated { ShareHistory.shared.refreshLive() }
         }
+        timer.tolerance = 2
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
@@ -337,8 +338,7 @@ struct ShareHistoryList: View {
                 }
             }
         }
-        .onAppear { history.startPolling() }
-        .onDisappear { history.stopPolling() }
+        .onScreen { $0 ? history.startPolling() : history.stopPolling() }
         .alert("Подпись для \(renaming.map { ShareCode.display($0.id) } ?? "")", isPresented: Binding(
             get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Например, Саша — работа", text: $newLabel)

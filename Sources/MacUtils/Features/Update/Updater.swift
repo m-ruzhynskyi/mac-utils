@@ -89,6 +89,7 @@ final class Updater: NSObject, ObservableObject {
         }
         let timer = Timer(timeInterval: 6 * 3600, target: self, selector: #selector(scheduledCheck),
                           userInfo: nil, repeats: true)
+        timer.tolerance = 600
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
         Task { @MainActor in

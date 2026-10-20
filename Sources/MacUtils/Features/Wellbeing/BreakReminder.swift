@@ -90,6 +90,7 @@ final class BreakReminder: ObservableObject {
             let timer = Timer(timeInterval: Self.step, repeats: true) { _ in
                 MainActor.assumeIsolated { BreakReminder.shared.tick() }
             }
+            timer.tolerance = 3
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
         } else if !enabled {
