@@ -50,14 +50,23 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
 
     var showsInvisibles: Bool {
         get { (textView.layoutManager as? EditorLayoutManager)?.showsInvisibles ?? false }
-        set { (textView.layoutManager as? EditorLayoutManager)?.showsInvisibles = newValue }
+        set {
+            (textView.layoutManager as? EditorLayoutManager)?.showsInvisibles = newValue
+            documentController?.showsInvisibles = newValue
+        }
     }
+    /// Режим «Код» или «Документ» (только у RTF).
+    @Published var mode = EditorViewMode.code
+    /// Показ документом — создаётся при первом переходе в «Документ».
+    var documentController: DocumentController?
     var matchesBrackets = true { didSet { refreshBrackets() } }
     /// Где сейчас подсвечены скобки (временный атрибут фона).
     private var bracketRanges: [NSRange] = []
 
     /// Растёт с каждой правкой текста: фоновый результат (поиск, замена) применяется, только если текст тот же.
     private(set) var textVersion = 0
+    /// Растёт с каждым изменением хранилища, в том числе отменой и повтором (по ним документ перерисовывается).
+    private(set) var sourceRevision = 0
 
     /// Счётчик правок от сохранения: +1 за каждый шаг отмены, −1 за отмену.
     private var changeCount = 0
@@ -93,7 +102,10 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         storage.delegate = self
         textView.onOverwriteChange = { [weak self] in self?.overwrite = $0 }
         textView.onCursorsChange = { [weak self] in self?.refreshCaret() }
-        dollars.onUpdate = { [weak self] in self?.rehighlight() }
+        dollars.onUpdate = { [weak self] in
+            self?.rehighlight()
+            self?.documentController?.highlightDollars()
+        }
         dollars.rule = Self.defaultRule(for: document)
         dollars.encoding = document.encoding
         load(text ?? document.decodedText, resetUndo: true)
@@ -165,6 +177,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         dollars.textChanged({ [weak self] in self?.text ?? "" }, immediately: true)
         ruler.updateThickness()
         rehighlight()
+        documentController?.sourceDidChange()
     }
 
     private var baseAttributes: [NSAttributedString.Key: Any] {
@@ -251,7 +264,9 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
                                  range editedRange: NSRange, changeInLength delta: Int) {
         guard editedMask.contains(.editedCharacters) else { return }
         MainActor.assumeIsolated {
+            sourceRevision += 1
             guard !bulkLoading else { return }
+            documentController?.sourceDidChange()
             dollars.invalidate()
             let editLine = lines.line(at: editedRange.location)
             // Вставка в самом начале строки (Enter перед текстом) сдвигает и саму эту строку.
@@ -283,6 +298,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         ruler.updateThickness()
         ruler.needsDisplay = true
         highlightEdit()
+        documentController?.sourceDidChange()
         onEdit?()
     }
 

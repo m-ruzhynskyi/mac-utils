@@ -194,6 +194,8 @@ enum Pref {
     static let editorFolderSearchPath = "editorFolderSearchPath"
     static let editorFolderSearchMask = "editorFolderSearchMask"
     static let editorRecent = "editorRecent"
+    /// Режим «Код» / «Документ» по расширению (последний выбор).
+    static let editorViewModes = "editorViewModes"
     /// Вкладка «Редактор» уже добавлена в панель 🔧 (один раз при обновлении).
     static let panelTabsEditorAdded = "panelTabsEditorAdded"
 

@@ -168,7 +168,10 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
                 let replaceEmpty = workspace.tabs.count == 1 && workspace.tabs[0].document.url == nil
                     && !workspace.tabs[0].isDirty && workspace.tabs[0].length == 0
                 let blank = replaceEmpty ? workspace.tabs[0] : nil
-                workspace.add(EditorTab(document: document, zoom: workspace.zoom))
+                let tab = EditorTab(document: document, zoom: workspace.zoom)
+                // .frm и .rtf — сразу «Документом» (или как выбирали для этого типа в последний раз).
+                tab.restoreMode(nil)
+                workspace.add(tab)
                 if let blank { workspace.remove(blank) }
                 EditorRecent.add(url)
             } catch {
@@ -481,6 +484,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
 
     func showFind(replace: Bool) {
         guard let tab = workspace.current else { return }
+        // Поиск и замена работают по исходнику — в «Код» (место переносится).
+        if tab.mode == .document { tab.setMode(.code) }
         if workspace.findMode == nil { workspace.search.prepare(from: tab) }
         workspace.findMode = replace || workspace.findMode == true
         workspace.search.refresh()
@@ -535,6 +540,41 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         workspace.findMode = nil
         workspace.search.clear()
         if let tab = workspace.current { tab.textView.window?.makeFirstResponder(tab.textView) }
+    }
+
+    // MARK: - Открыть в Word
+
+    static let wordBundleID = "com.microsoft.Word"
+
+    /// Заглушка «Открыть в Word»: Word открывает файл с диска — несохранённые правки сначала сохранить или оставить.
+    func openInWord(_ tab: EditorTab?) {
+        guard let tab, let url = tab.document.url else { return NSSound.beep() }
+        guard let word = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.wordBundleID) else {
+            let alert = NSAlert()
+            alert.messageText = "Microsoft Word не найден"
+            alert.informativeText = "Этот элемент можно посмотреть в Word, но Word на этом Mac не установлен. «Показать в коде» откроет его исходник."
+            if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+            return
+        }
+        let open = {
+            NSWorkspace.shared.open([url], withApplicationAt: word, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+        }
+        guard tab.isDirty, let window else { return open() }
+        let alert = NSAlert()
+        alert.messageText = "Открыть в Word версию с диска?"
+        alert.informativeText = "Word прочитает файл с диска — несохранённых правок в нём ещё нет."
+        alert.addButton(withTitle: "Сохранить и открыть")
+        alert.addButton(withTitle: "Открыть с диска")
+        alert.addButton(withTitle: "Отмена")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            MainActor.assumeIsolated {
+                switch response {
+                case .alertFirstButtonReturn: self?.save(tab) { saved in if saved { open() } }
+                case .alertSecondButtonReturn: open()
+                default: break
+                }
+            }
+        }
     }
 
     // MARK: - Ошибки
@@ -595,6 +635,13 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         case #selector(editorToggleWrap(_:)):
             item.state = workspace.wraps ? .on : .off
             return tab != nil
+        case #selector(editorToggleDocument(_:)):
+            item.state = tab?.mode == .document ? .on : .off
+            if let reason = tab?.documentUnavailableReason { item.toolTip = reason }
+            return tab?.canShowDocument ?? false
+        case #selector(editorShowCode(_:)):
+            item.state = tab?.mode == .code ? .on : .off
+            return tab?.isRTF ?? false
         case #selector(editorToggleDollarPanel(_:)):
             item.state = workspace.dollarPanelVisible ? .on : .off
             return tab != nil
@@ -605,8 +652,10 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         case #selector(editorNextBookmark(_:)), #selector(editorPreviousBookmark(_:)), #selector(editorClearBookmarks(_:)):
             return !(tab?.bookmarks.isEmpty ?? true)
         case #selector(editorZoomOut(_:)):
+            if let document = documentInFront { return document.zoom > DocumentController.zoomRange.lowerBound }
             return tab != nil && workspace.zoom > EditorStyle.zoomRange.lowerBound
         case #selector(editorZoomIn(_:)):
+            if let document = documentInFront { return document.zoom < DocumentController.zoomRange.upperBound }
             return tab != nil && workspace.zoom < EditorStyle.zoomRange.upperBound
         default:
             return tab != nil
@@ -633,11 +682,29 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
     @objc func editorFindInFolder(_ sender: Any?) { showFolderSearch() }
 
     @objc func editorToggleWrap(_ sender: Any?) { workspace.wraps.toggle() }
+    @objc func editorToggleDocument(_ sender: Any?) { if let tab { tab.setMode(tab.mode == .document ? .code : .document) } }
+    @objc func editorShowCode(_ sender: Any?) { tab?.setMode(.code) }
     @objc func editorToggleInvisibles(_ sender: Any?) { workspace.showsInvisibles.toggle() }
     @objc func editorToggleBrackets(_ sender: Any?) { workspace.matchesBrackets.toggle() }
-    @objc func editorZoomIn(_ sender: Any?) { workspace.zoom = min(EditorStyle.zoomRange.upperBound, (workspace.zoom * 10 + 1).rounded() / 10) }
-    @objc func editorZoomOut(_ sender: Any?) { workspace.zoom = max(EditorStyle.zoomRange.lowerBound, (workspace.zoom * 10 - 1).rounded() / 10) }
-    @objc func editorZoomReset(_ sender: Any?) { workspace.zoom = 1 }
+    @objc func editorZoomIn(_ sender: Any?) {
+        if let document = documentInFront { return document.step(zoom: 1) }
+        workspace.zoom = min(EditorStyle.zoomRange.upperBound, (workspace.zoom * 10 + 1).rounded() / 10)
+    }
+    @objc func editorZoomOut(_ sender: Any?) {
+        if let document = documentInFront { return document.step(zoom: -1) }
+        workspace.zoom = max(EditorStyle.zoomRange.lowerBound, (workspace.zoom * 10 - 1).rounded() / 10)
+    }
+    @objc func editorZoomReset(_ sender: Any?) {
+        if let document = documentInFront {
+            document.fit = .none
+            document.zoom = 1
+            return
+        }
+        workspace.zoom = 1
+    }
+
+    /// Вкладка в «Документе»: ⌘+ / ⌘− / ⌘0 меняют масштаб страниц.
+    private var documentInFront: DocumentController? { tab?.mode == .document ? tab?.documentController : nil }
     @objc func editorToggleDollarPanel(_ sender: Any?) { workspace.dollarPanelVisible.toggle() }
     @objc func editorRemoveValues(_ sender: Any?) {
         tab?.removeHighlightedValues()
