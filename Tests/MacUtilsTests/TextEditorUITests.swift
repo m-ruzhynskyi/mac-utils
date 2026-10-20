@@ -8,9 +8,11 @@ import XCTest
 @MainActor
 final class TextEditorUITests: XCTestCase {
     private var windows: [NSWindow] = []
+    private var defaults: EditorDefaultsSnapshot!
 
     override func setUp() {
         super.setUp()
+        defaults = EditorDefaultsSnapshot()
         _ = NSApplication.shared
         DSFonts.registerAll()
         UserDefaults.standard.set(true, forKey: Pref.editorSkipFirst)
@@ -20,7 +22,14 @@ final class TextEditorUITests: XCTestCase {
     override func tearDown() {
         for window in windows { window.contentView = nil; window.close() }
         windows = []
+        defaults.restore()
         super.tearDown()
+    }
+
+    /// Регулярное выражение ищется в фоне — ждём результата.
+    private func waitSearch(_ search: EditorSearch) {
+        let deadline = Date().addingTimeInterval(5)
+        while search.searching, Date() < deadline { settle(0.02) }
     }
 
     /// Демо-форма счёта (как на макетах): первые три `$` — служебные в `\info`.
@@ -96,7 +105,8 @@ final class TextEditorUITests: XCTestCase {
             let data = try Data(contentsOf: folder.appendingPathComponent(name))
             let workspace = EditorWorkspace()
             let tab = EditorTab(document: EditorDocument(data: data, url: folder.appendingPathComponent(name)))
-            workspace.add(tab)
+            // expected.json описывает правило исходника; правило по видимому тексту RTF — TextEditorRTFValueTests.
+                workspace.add(tab)
             _ = host(workspace)
             waitForScan(tab, count: info["dollar_count"] as! Int)
             let original = tab.text as String
@@ -129,9 +139,12 @@ final class TextEditorUITests: XCTestCase {
         let (workspace, tab) = tab(Self.demo)
         _ = host(workspace)
         waitForScan(tab, count: 22)
+        // Значение — до конца строки или следующего `$`: у первого пропущенного это `FORM_TITLE}{\author `.
         let skipped = try XCTUnwrap(tab.dollars.split.skipped.first)
+        XCTAssertEqual(skipped.value, #"FORM_TITLE}{\author"#)
         XCTAssertEqual(tab.removeValues([skipped]), 1)
-        XCTAssertTrue((tab.text as String).contains(#"{\title $}"#))
+        XCTAssertTrue((tab.text as String).contains(#"{\info{\title $$AUTHOR}"#))
+        XCTAssertNil(tab.dollars.unbalancedAfterRemoval, "убраны `}` и `{` — баланс тот же")
         tab.undo.undo()
         XCTAssertEqual(tab.text as String, Self.demo)
     }
@@ -144,7 +157,7 @@ final class TextEditorUITests: XCTestCase {
         workspace.add(tab)
         _ = host(workspace)
         waitForScan(tab, count: 4)
-        let deep = try XCTUnwrap(tab.dollars.entries.first { $0.value == "deep20k" })
+        let deep = try XCTUnwrap(tab.dollars.entries.first { $0.value.hasPrefix("deep20k") })
         XCTAssertEqual(tab.scrollView.contentView.bounds.minX, 0)
         tab.dollars.selected = deep.id
         tab.reveal(deep.mark.whole)
@@ -198,14 +211,17 @@ final class TextEditorUITests: XCTestCase {
         search.options = SearchOptions(regex: true)
         search.query = "("
         search.refresh()
+        waitSearch(search)
         XCTAssertNotNil(search.error, "ошибка выражения — в поле, без падения")
         // Замена по группам — один шаг отмены.
         let original = tab.text as String
         search.query = #"\$(\w+)"#
         search.replacement = "<$1>"
         search.refresh()
+        waitSearch(search)
         settle(0.05)
         search.replaceAll()
+        waitSearch(search)
         XCTAssertFalse((tab.text as String).contains("$"))
         XCTAssertTrue((tab.text as String).contains("<one>"))
         XCTAssertEqual(search.note, "Заменено: 4")
@@ -364,6 +380,7 @@ final class TextEditorUITests: XCTestCase {
             workspace.dollarPanelVisible = false
             settle()
             workspace.search.refresh()
+            waitSearch(workspace.search)
             settle()
             try write(window, to: folder.appendingPathComponent("editor-c-find-\(suffix).png"))
             workspace.findMode = nil

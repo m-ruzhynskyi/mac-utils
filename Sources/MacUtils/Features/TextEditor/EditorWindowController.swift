@@ -333,7 +333,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
 
     /// Запись целиком: новый файл — атомарно; существующий — через замену (права, метки Finder и дата создания
     /// остаются, при сбое на диске остаётся прежний файл).
-    static func writeFile(_ data: Data, to link: URL) throws {
+    nonisolated static func writeFile(_ data: Data, to link: URL) throws {
         // Пишем в настоящий файл: `replaceItemAt` по символической ссылке заменил бы саму ссылку обычным файлом.
         let url = link.resolvingSymlinksInPath()
         let manager = FileManager.default
@@ -418,6 +418,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         let apply = { [weak self] in
             tab.document.encoding = encoding
             tab.document.reason = .manual
+            tab.document.utf16BOM = true
             tab.updateDirty()
             self?.workspaceChanged()
         }
@@ -486,6 +487,50 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         NotificationCenter.default.post(name: .editorFocusFind, object: nil)
     }
 
+    // MARK: - Поиск в папке
+
+    /// ⇧⌘F: панель «Поиск в папке» внизу окна; запрос и опции — из панели поиска, папка — последняя или папка файла.
+    func showFolderSearch() {
+        let model = workspace.folderSearch
+        if model.query.isEmpty { model.query = workspace.search.query }
+        if model.folder == nil { model.folder = workspace.current?.document.url?.deletingLastPathComponent() }
+        // Опции панели поиска — только для нового списка: найденный список остаётся со своими.
+        if model.summary == nil { model.options = workspace.search.options }
+        model.dirtyOpenFiles = { [weak self] in
+            Set((self?.workspace.tabs ?? []).filter(\.isDirty).compactMap { $0.document.url?.standardizedFileURL.resolvingSymlinksInPath().path })
+        }
+        model.reloadOpenFiles = { [weak self] urls in
+            guard let self else { return }
+            for url in urls { if let tab = self.workspace.tab(for: url), !tab.isDirty { self.reloadFromDisk(tab) } }
+        }
+        workspace.folderSearchVisible = true
+    }
+
+    /// Открыть найденное: вкладка файла и выделение совпадения.
+    func openFolderMatch(_ url: URL, range: NSRange) {
+        open([url])
+        guard let tab = workspace.tab(for: url) else { return }
+        workspace.selectedID = tab.id
+        DispatchQueue.main.async { tab.reveal(range) }
+    }
+
+    /// «Заменить в папке…» — файлы на диске перезаписываются, отменить нельзя: сначала вопрос.
+    func confirmFolderReplace() {
+        let model = workspace.folderSearch
+        guard model.canReplace, let summary = model.summary, let window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Заменить \(summary.matchCount) \(plural(summary.matchCount, "совпадение", "совпадения", "совпадений")) "
+            + "в \(summary.files.count) \(plural(summary.files.count, "файле", "файлах", "файлах"))?"
+        alert.informativeText = "Заменяется «\(model.query)» → «\(model.replacement)». Файлы перезапишутся на диске в своих кодировках — "
+            + "⌘Z это не отменит. Не тронутся открытые вкладки с несохранёнными правками и файлы, изменённые после поиска."
+        alert.addButton(withTitle: "Заменить")
+        alert.addButton(withTitle: "Отмена")
+        alert.beginSheetModal(for: window) { response in
+            MainActor.assumeIsolated { if response == .alertFirstButtonReturn { model.replaceAll() } }
+        }
+    }
+
     func hideFind() {
         workspace.findMode = nil
         workspace.search.clear()
@@ -541,6 +586,12 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         case #selector(editorLanguage(_:)):
             item.state = tab?.document.language == EditorLanguage.allCases[item.tag] ? .on : .off
             return tab != nil
+        case #selector(editorToggleInvisibles(_:)):
+            item.state = workspace.showsInvisibles ? .on : .off
+            return tab != nil
+        case #selector(editorToggleBrackets(_:)):
+            item.state = workspace.matchesBrackets ? .on : .off
+            return tab != nil
         case #selector(editorToggleWrap(_:)):
             item.state = workspace.wraps ? .on : .off
             return tab != nil
@@ -551,6 +602,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
             return (tab?.dollars.removableCount ?? 0) > 0
         case #selector(editorFindNext(_:)), #selector(editorFindPrevious(_:)):
             return tab != nil && !workspace.search.query.isEmpty
+        case #selector(editorNextBookmark(_:)), #selector(editorPreviousBookmark(_:)), #selector(editorClearBookmarks(_:)):
+            return !(tab?.bookmarks.isEmpty ?? true)
         case #selector(editorZoomOut(_:)):
             return tab != nil && workspace.zoom > EditorStyle.zoomRange.lowerBound
         case #selector(editorZoomIn(_:)):
@@ -577,8 +630,11 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         workspace.search.next(backwards: true)
     }
     @objc func editorGoToLine(_ sender: Any?) { workspace.overlay = .goToLine }
+    @objc func editorFindInFolder(_ sender: Any?) { showFolderSearch() }
 
     @objc func editorToggleWrap(_ sender: Any?) { workspace.wraps.toggle() }
+    @objc func editorToggleInvisibles(_ sender: Any?) { workspace.showsInvisibles.toggle() }
+    @objc func editorToggleBrackets(_ sender: Any?) { workspace.matchesBrackets.toggle() }
     @objc func editorZoomIn(_ sender: Any?) { workspace.zoom = min(EditorStyle.zoomRange.upperBound, (workspace.zoom * 10 + 1).rounded() / 10) }
     @objc func editorZoomOut(_ sender: Any?) { workspace.zoom = max(EditorStyle.zoomRange.lowerBound, (workspace.zoom * 10 - 1).rounded() / 10) }
     @objc func editorZoomReset(_ sender: Any?) { workspace.zoom = 1 }
@@ -599,6 +655,27 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
     @objc func editorTrimTrailing(_ sender: Any?) { tab?.apply(LineCommands.trimTrailingWhitespace, name: "Удалить хвостовые пробелы") }
     @objc func editorUppercase(_ sender: Any?) { tab?.apply({ LineCommands.changeCase($0, $1, .upper) }, name: "ВЕРХНИЙ РЕГИСТР") }
     @objc func editorLowercase(_ sender: Any?) { tab?.apply({ LineCommands.changeCase($0, $1, .lower) }, name: "нижний регистр") }
+    @objc func editorSortAscending(_ sender: Any?) { tab?.apply({ LineCommands.sort($0, $1, .ascending) }, name: "Сортировать") }
+    @objc func editorSortDescending(_ sender: Any?) { tab?.apply({ LineCommands.sort($0, $1, .descending) }, name: "Сортировать") }
+    @objc func editorSortCaseInsensitive(_ sender: Any?) { tab?.apply({ LineCommands.sort($0, $1, .caseInsensitive) }, name: "Сортировать") }
+    @objc func editorRemoveDuplicates(_ sender: Any?) {
+        tab?.apply({ LineCommands.removeDuplicates($0, $1, caseSensitive: true) }, name: "Удалить повторы")
+    }
+    @objc func editorRemoveDuplicatesCaseInsensitive(_ sender: Any?) {
+        tab?.apply({ LineCommands.removeDuplicates($0, $1, caseSensitive: false) }, name: "Удалить повторы")
+    }
+    @objc func editorTabsToSpaces(_ sender: Any?) {
+        tab?.apply({ LineCommands.tabsToSpaces($0, $1, width: EditorPrefs.tabWidth) }, name: "Табы → пробелы")
+    }
+    @objc func editorSpacesToTabs(_ sender: Any?) {
+        tab?.apply({ LineCommands.spacesToTabs($0, $1, width: EditorPrefs.tabWidth) }, name: "Пробелы → табы")
+    }
+    @objc func editorAddCaretAbove(_ sender: Any?) { tab?.textView.addCaret(lineOffset: -1) }
+    @objc func editorAddCaretBelow(_ sender: Any?) { tab?.textView.addCaret(lineOffset: 1) }
+    @objc func editorToggleBookmark(_ sender: Any?) { tab?.toggleBookmark() }
+    @objc func editorNextBookmark(_ sender: Any?) { tab?.goToBookmark(backwards: false) }
+    @objc func editorPreviousBookmark(_ sender: Any?) { tab?.goToBookmark(backwards: true) }
+    @objc func editorClearBookmarks(_ sender: Any?) { tab?.clearBookmarks() }
     @objc func editorSentenceCase(_ sender: Any?) { tab?.apply({ LineCommands.changeCase($0, $1, .sentence) }, name: "Как в предложении") }
 }
 

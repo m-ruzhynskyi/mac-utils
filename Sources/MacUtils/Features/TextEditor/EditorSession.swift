@@ -81,7 +81,11 @@ enum EditorSession {
                               scroll: [Double(tab.scrollView.contentView.bounds.minX), Double(tab.scrollView.contentView.bounds.minY)],
                               bookmarks: tab.bookmarks.sorted(), fileStamp: tab.document.fileStamp, draftID: nil)
             if tab.isDirty || untitled {
-                guard keepDrafts else { continue }
+                guard keepDrafts else {
+                    // Без черновиков правки не хранятся, но файл вкладки откроется снова (как чистые).
+                    if !untitled, EditorPrefs.restoreSession { entries.append(entry) }
+                    continue
+                }
                 let draft = tab.draftID ?? UUID()
                 tab.draftID = draft
                 let version = versions[tab.id, default: 0]
@@ -225,10 +229,12 @@ enum EditorRecent {
 
     static func clear() { UserDefaults.standard.removeObject(forKey: Pref.editorRecent) }
 
-    /// «~/Documents/Формы» вместо полного пути.
-    static func folderTitle(_ url: URL) -> String {
-        let folder = url.deletingLastPathComponent().path
+    /// «~/Documents/Формы» вместо полного пути (папка файла).
+    static func folderTitle(_ url: URL) -> String { folderTitle(ofFolder: url.deletingLastPathComponent()) }
+
+    static func folderTitle(ofFolder folder: URL) -> String {
+        let path = folder.path
         let home = NSHomeDirectory()
-        return folder.hasPrefix(home) ? "~" + folder.dropFirst(home.count) : folder
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 }

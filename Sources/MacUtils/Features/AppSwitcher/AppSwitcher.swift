@@ -133,6 +133,11 @@ final class AppSwitcher: NSObject, ObservableObject {
         refreshItems()
     }
 
+    /// Mac Utils получил или потерял значок в Dock: в кэше появляются или пропадают его окна.
+    func activationPolicyChanged() {
+        refreshItems()
+    }
+
     @objc private func appTerminated(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         recent.removeAll { $0 == app.processIdentifier }
@@ -245,7 +250,9 @@ final class AppSwitcher: NSObject, ObservableObject {
         let draft = WindowList.collect(recent: recent, apps: WindowList.snapshotApps(), axBudget: 0)
         let merged = SwitcherMerge.merge(draft: draft, cached: cache, seen: seenKeys, id: \.id,
                                          isBackground: { $0.isMinimized || $0.isHidden })
-        let list = merged.isEmpty ? (cache.isEmpty ? draft : cache) : merged
+        // Значок из Dock ушёл (`.accessory`) — своих окон из кэша в списке быть не должно.
+        let list = Self.withoutOwnIfAccessory(merged.isEmpty ? (cache.isEmpty ? draft : cache) : merged,
+                                              policy: NSApp.activationPolicy())
         guard !list.isEmpty else {
             refreshItems()
             return false
@@ -332,6 +339,8 @@ final class AppSwitcher: NSObject, ObservableObject {
 
     private func quitSelected() {
         guard items.indices.contains(selected) else { return }
+        // Q на своей карточке завершил бы сам Mac Utils вместе с переключателем.
+        guard items[selected].pid != WindowList.ownPID else { return NSSound.beep() }
         let pid = items[selected].pid
         items[selected].app.terminate()
         removeItems(of: pid)
@@ -353,6 +362,10 @@ final class AppSwitcher: NSObject, ObservableObject {
         }
         selected = min(selected, items.count - 1)
         panel.show()
+    }
+
+    static func withoutOwnIfAccessory(_ items: [SwitcherItem], policy: NSApplication.ActivationPolicy) -> [SwitcherItem] {
+        policy == .regular ? items : items.filter { $0.pid != WindowList.ownPID }
     }
 
     // MARK: - Системный ⌘Tab
