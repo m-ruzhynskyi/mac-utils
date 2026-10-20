@@ -254,7 +254,7 @@ final class EditorTextView: NSTextView {
     /// Каждой цели — своя строка замены; один шаг отмены, затем курсор за каждой вставкой.
     private func editAll(_ make: (NSRange) -> (range: NSRange, string: String)?) {
         let edits = editTargets.compactMap(make).filter { $0.range.length > 0 || !$0.string.isEmpty }
-        guard !edits.isEmpty else { return NSSound.beep() }
+        guard !edits.isEmpty else { return Feedback.beep() }
         guard replace(edits.map(\.range), with: edits.map(\.string), actionName: "Ввод") else { return }
         var shift = 0
         var carets: [Int] = []
@@ -290,11 +290,11 @@ final class EditorTextView: NSTextView {
         let column = from - line.location
         let target: NSRange
         if lineOffset < 0 {
-            guard line.location > 0 else { return NSSound.beep() }
+            guard line.location > 0 else { return Feedback.beep() }
             target = LineCommands.lineBlock(text, NSRange(location: line.location - 1, length: 0))
         } else {
             guard NSMaxRange(line) < text.length || (NSMaxRange(line) == text.length && line.length > 0
-                  && LineCommands.isBreak(text.character(at: NSMaxRange(line) - 1))) else { return NSSound.beep() }
+                  && LineCommands.isBreak(text.character(at: NSMaxRange(line) - 1))) else { return Feedback.beep() }
             target = LineCommands.lineBlock(text, NSRange(location: NSMaxRange(line), length: 0))
         }
         var body = target.length

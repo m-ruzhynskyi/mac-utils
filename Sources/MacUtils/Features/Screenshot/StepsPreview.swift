@@ -197,8 +197,8 @@ final class StepsPreviewWindowController: NSObject, NSWindowDelegate {
         model.reload()
         let window = self.window ?? makeWindow()
         self.window = window
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        ScreenOutput.activateApp()
+        window.makeKeyAndOrderFrontOnScreen()
     }
 
     func dismiss() {

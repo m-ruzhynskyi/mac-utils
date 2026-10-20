@@ -378,7 +378,7 @@ final class ScrollCapture: NSObject, ObservableObject {
 
     private func showPanels() {
         let border = Self.makeBorderPanel(around: rect)
-        border.orderFrontRegardless()
+        border.orderFrontRegardlessOnScreen()
         borderPanel = border
 
         let host = FirstMouseHostingView(rootView: ScrollCaptureHUD(capture: self))
@@ -398,7 +398,7 @@ final class ScrollCapture: NSObject, ObservableObject {
         if origin.y + size.height > visible.maxY { origin.y = rect.minY + 12 }
         origin.x = min(max(visible.minX + 8, origin.x), visible.maxX - size.width - 8)
         hud.setFrameOrigin(origin)
-        hud.orderFrontRegardless()
+        hud.orderFrontRegardlessOnScreen()
         hudPanel = hud
     }
 }

@@ -178,7 +178,7 @@ final class StepsSession: ObservableObject {
         guard env.showsWindows else { return }
         if hudPanel == nil { makeHUD() }
         placeHUD()
-        hudPanel?.orderFrontRegardless()
+        hudPanel?.orderFrontRegardlessOnScreen()
     }
 
     private func makeHUD() {

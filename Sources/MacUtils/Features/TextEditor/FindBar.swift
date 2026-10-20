@@ -167,7 +167,7 @@ final class EditorSearch: ObservableObject {
             return
         }
         guard let found = TextSearch.next(in: tab.matches, after: tab.textView.selectedRange(), backwards: backwards) else {
-            NSSound.beep()
+            Feedback.beep()
             return
         }
         current = found.index
@@ -407,7 +407,7 @@ struct GoToLinePanel: View {
     private func go() {
         guard let location = TextSearch.parseLocation(input), location.line >= 1 else {
             invalid = true
-            NSSound.beep()
+            Feedback.beep()
             return
         }
         onGo(location.line, location.column)

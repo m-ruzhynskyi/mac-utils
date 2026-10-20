@@ -146,7 +146,7 @@ private final class EditorMenuActions: NSObject, NSMenuDelegate, NSMenuItemValid
         guard FileManager.default.fileExists(atPath: url.path) else {
             // Файла больше нет — убираем из списка.
             EditorRecent.remove(url)
-            NSSound.beep()
+            Feedback.beep()
             return
         }
         EditorWindowController.shared.open([url])

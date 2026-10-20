@@ -455,7 +455,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
         panel.allowedContentTypes = [.audio, .movie]
         panel.prompt = "Расшифровать"
         panel.message = "Выберите запись встречи — аудио или видео"
-        NSApp.activate(ignoringOtherApps: true)
+        ScreenOutput.activateApp(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let source = panel.url else { return }
         lastError = nil
         let activity = beginActivity("Готовлю звук…")
@@ -657,7 +657,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = host
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
         hud = panel
     }
 }

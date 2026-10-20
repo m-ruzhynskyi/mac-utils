@@ -305,10 +305,10 @@ enum WindowActivation {
     /// Своё окно — средствами AppKit (AX к своему процессу не ходим): свёрнутое разворачивается.
     private static func activateOwn(_ item: SwitcherItem) {
         if NSApp.isHidden { NSApp.unhide(nil) }
-        NSApp.activate(ignoringOtherApps: true)
+        ScreenOutput.activateApp(ignoringOtherApps: true)
         guard let number = item.windowID, let window = NSApp.window(withWindowNumber: Int(number)) else { return }
         if window.isMiniaturized { window.deminiaturize(nil) }
-        window.makeKeyAndOrderFront(nil)
+        window.makeKeyAndOrderFrontOnScreen()
     }
 
     /// Если AX-окно не сохранилось — ищем его по номеру, затем по заголовку.

@@ -110,8 +110,8 @@ final class AppStatusItem: NSObject {
     func showTools() -> Bool {
         guard let button = item?.button else { return false }
         let popover = self.popover ?? makePopover()
-        if !popover.isShown {
-            NSApp.activate()
+        if !popover.isShown, ScreenOutput.mayShow("Панель в строке меню") {
+            ScreenOutput.activateApp()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }

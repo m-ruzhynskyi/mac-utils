@@ -212,8 +212,8 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         let wasVisible = window.isVisible
         if !wasVisible, !Self.anyOpen { FocusReturn.remember() }
         Self.syncDock(true)
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        ScreenOutput.activateApp()
+        window.makeKeyAndOrderFrontOnScreen("Окно плеера")
         window.centerTrafficLights()
         window.focusVideo()
         Self.windows.removeAll { $0 === self }

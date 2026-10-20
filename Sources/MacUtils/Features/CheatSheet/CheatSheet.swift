@@ -189,7 +189,7 @@ final class CheatSheet: ObservableObject {
     private func presentPanel() {
         let panel = self.panel ?? makePanel()
         resizePanel()
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
     }
 
     private func resizePanel() {
