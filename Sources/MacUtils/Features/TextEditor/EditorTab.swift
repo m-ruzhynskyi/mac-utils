@@ -345,8 +345,9 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
 
     /// Выделить и показать диапазон.
     func reveal(_ range: NSRange, select: Bool = true) {
-        let safe = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
-        let target = safe.length == 0 && range.length > 0 ? NSRange(location: min(range.location, storage.length), length: 0) : safe
+        // Не `NSIntersectionRange`: для пустого диапазона в конце текста он даёт {0, 0} — курсор прыгал в начало.
+        let location = min(max(range.location, 0), storage.length)
+        let target = NSRange(location: location, length: min(max(range.length, 0), storage.length - location))
         if select { textView.setSelectedRange(target) }
         textView.scrollRangeToVisible(target)
         textView.showFindIndicator(for: target)

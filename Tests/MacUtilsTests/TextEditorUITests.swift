@@ -177,6 +177,76 @@ final class TextEditorUITests: XCTestCase {
         XCTAssertLessThan(select, TextEditorPerformanceTests.limit(300))
     }
 
+    // MARK: - Поиск и замена (09-crlf)
+
+    func testFindReplaceInEditor() throws {
+        let url = TextEditorAcceptanceTests.folder.appendingPathComponent("09-crlf.frm")
+        let workspace = EditorWorkspace()
+        let tab = EditorTab(document: try EditorDocument.open(url))
+        workspace.add(tab)
+        _ = host(workspace)
+        let search = workspace.search
+        workspace.findMode = true
+        search.query = "two"
+        search.refresh()
+        XCTAssertEqual(search.counter, "1 из 2", "«Line two» и «$two» (в CHECKLIST 7.1 указано одно)")
+        search.query = "Line"
+        search.options.wholeWord = true
+        search.options.caseSensitive = true
+        search.refresh()
+        XCTAssertEqual(search.count, 3)
+        search.options = SearchOptions(regex: true)
+        search.query = "("
+        search.refresh()
+        XCTAssertNotNil(search.error, "ошибка выражения — в поле, без падения")
+        // Замена по группам — один шаг отмены.
+        let original = tab.text as String
+        search.query = #"\$(\w+)"#
+        search.replacement = "<$1>"
+        search.refresh()
+        settle(0.05)
+        search.replaceAll()
+        XCTAssertFalse((tab.text as String).contains("$"))
+        XCTAssertTrue((tab.text as String).contains("<one>"))
+        XCTAssertEqual(search.note, "Заменено: 4")
+        settle(0.05)
+        tab.undo.undo()
+        XCTAssertEqual(tab.text as String, original)
+        // «В выделении»: строки 2–3.
+        let lines = LineIndex(tab.text)
+        tab.textView.setSelectedRange(NSRange(location: lines.starts[1], length: lines.starts[3] - lines.starts[1]))
+        search.options = SearchOptions(inSelection: true)
+        search.query = "$"
+        search.refresh()
+        XCTAssertEqual(search.count, 2)
+        // «Далее» по кругу и пустой запрос.
+        search.options = SearchOptions()
+        tab.textView.setSelectedRange(NSRange(location: tab.storage.length, length: 0))
+        search.next()
+        XCTAssertTrue(search.wrapped)
+        search.query = ""
+        search.refresh()
+        XCTAssertTrue(tab.matches.isEmpty)
+        XCTAssertEqual(search.counter, "")
+        // Перейти к строке: вне диапазона — к последней.
+        tab.goTo(line: 4)
+        XCTAssertEqual(tab.caret.line, 4)
+        tab.goTo(line: 999, column: 999)
+        XCTAssertEqual(tab.caret.line, tab.lineCount)
+        tab.goTo(line: 0)
+        XCTAssertEqual(tab.caret.line, 1)
+    }
+
+    func testFindDollarInTenMegabytes() throws {
+        let big = TextEditorPerformanceTests.bigFile()
+        let text = try XCTUnwrap(TextEncoding.windows1252.decode(big.data)) as NSString
+        var result = TextSearch.Result(ranges: [], truncated: false)
+        let time = TextEditorPerformanceTests.measure { result = (try? TextSearch.find("$", in: text, options: SearchOptions())) ?? result }
+        XCTAssertEqual(result.ranges.count, big.dollars)
+        print(String(format: "[editor-perf] %@ поиск $ в 10 МБ: %.0f мс (%d)", TextEditorPerformanceTests.build, time, result.ranges.count))
+        XCTAssertLessThan(time, TextEditorPerformanceTests.limit(300))
+    }
+
     // MARK: - Строка состояния, перевод строки, режим замены
 
     func testCaretLineEndingAndOverwrite() {
