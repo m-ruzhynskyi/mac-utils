@@ -41,6 +41,8 @@ final class FormatRulerView: NSView {
 
     func attach(_ controller: DocumentController, formatter: DocFormatter) {
         self.formatter = formatter
+        setAccessibilityRole(.ruler)
+        setAccessibilityLabel("Линейка: поля, отступы и табуляции абзаца")
         guard self.controller !== controller else { return }
         self.controller = controller
         observers.forEach(NotificationCenter.default.removeObserver)
