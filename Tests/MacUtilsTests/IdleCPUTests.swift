@@ -113,6 +113,28 @@ final class IdleCPUTests: XCTestCase {
         XCTAssertEqual(AppDelegate.trustCheckInterval(trusted: true), 5)
     }
 
+    // MARK: - Видеоплеер
+
+    /// Закрыто — значит не работает: без окна плеера нет ни наблюдателей AVPlayer, ни утверждения питания,
+    /// ни обработчиков медиаклавиш.
+    func testVideoPlayerIdleWithoutWindow() {
+        XCTAssertTrue(PlayerWindowController.windows.isEmpty, "окна плеера сами не создаются")
+        XCTAssertEqual(PlayerSystem.plan(openWindows: 0, playing: false, keepAwake: true),
+                       .init(preventDisplaySleep: false, remoteCommands: false))
+        XCTAssertEqual(PlayerSystem.plan(openWindows: 1, playing: false, keepAwake: true),
+                       .init(preventDisplaySleep: false, remoteCommands: true), "пауза — экран может гаснуть")
+        XCTAssertEqual(PlayerSystem.plan(openWindows: 1, playing: true, keepAwake: true),
+                       .init(preventDisplaySleep: true, remoteCommands: true))
+        XCTAssertEqual(PlayerSystem.plan(openWindows: 1, playing: true, keepAwake: false),
+                       .init(preventDisplaySleep: false, remoteCommands: true), "настройка выключена — утверждения нет")
+        PlayerSystem.shared.update()
+        XCTAssertFalse(PlayerSystem.shared.holdsAssertion)
+        XCTAssertFalse(PlayerSystem.shared.handlesRemoteCommands)
+        XCTAssertFalse(PlayerSystem.shared.publishesNowPlaying)
+        let model = PlayerModel(silent: true, positions: PositionStore(file: nil))
+        XCTAssertEqual(model.activeObserverCount, 0, "модель без файла ни на что не подписана")
+    }
+
     func testSwitcherCacheTimerIsOnlyAFallback() {
         XCTAssertGreaterThanOrEqual(AppSwitcher.cacheRefreshInterval, 60)
     }

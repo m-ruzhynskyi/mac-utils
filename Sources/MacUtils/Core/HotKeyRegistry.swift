@@ -6,7 +6,7 @@ import Foundation
 /// а `HotKeyCenter` подставляет то, что пользователь выбрал в настройках (`HotKeyRegistry.resolve`).
 enum HotKeyAction: String, CaseIterable, Identifiable {
     case settings, tools, screenshot, screenshotOCR, dropShelf, annotate, windowPin, fixText, meeting, focus, qr,
-         appVolume, layoutFix, textEditor
+         appVolume, layoutFix, textEditor, videoPlayer
 
     var id: String { rawValue }
 
@@ -26,6 +26,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .appVolume: return HotKeyID.appVolume
         case .layoutFix: return HotKeyID.layoutFix
         case .textEditor: return HotKeyID.textEditor
+        case .videoPlayer: return HotKeyID.videoPlayer
         }
     }
 
@@ -45,6 +46,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .appVolume: return "Громкость приложений"
         case .layoutFix: return "Исправить раскладку"
         case .textEditor: return "Текстовый редактор"
+        case .videoPlayer: return "Видеоплеер"
         }
     }
 
@@ -63,6 +65,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .appVolume: return .volume
         case .layoutFix: return .layout
         case .textEditor: return .textEditor
+        case .videoPlayer: return .videoPlayer
         }
     }
 
@@ -83,6 +86,8 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .appVolume: return .controlOptionV
         case .layoutFix: return .commandBracket
         case .textEditor: return LayoutHotKey(keyCode: kVK_ANSI_E, modifiers: cmdKey | optionKey | controlKey)
+        // ⌃⌥⌘P свободна: ⌃⌥P — «Окно поверх всех», это другое сочетание.
+        case .videoPlayer: return LayoutHotKey(keyCode: kVK_ANSI_P, modifiers: cmdKey | optionKey | controlKey)
         }
     }
 

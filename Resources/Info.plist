@@ -58,6 +58,35 @@
         </dict>
         <dict>
             <key>CFBundleTypeName</key>
+            <string>Видео</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.mpeg-4</string>
+                <string>com.apple.quicktime-movie</string>
+                <string>com.apple.m4v-video</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Звук</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.mp3</string>
+                <string>com.apple.m4a-audio</string>
+                <string>com.microsoft.waveform-audio</string>
+                <string>public.aac-audio</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
             <string>Форма RTF (.frm)</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
