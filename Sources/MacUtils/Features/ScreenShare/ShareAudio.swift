@@ -78,6 +78,21 @@ enum ShareAudioExclusion {
     }
 }
 
+/// Формат, по которому строится конвертер перехвата: фактический формат входного потока агрегата (после drift
+/// compensation он может отличаться от формата самого перехвата), без него — формат перехвата.
+enum ShareTapFormat {
+    static func chosen(tap: AudioStreamBasicDescription, stream: AudioStreamBasicDescription?) -> AudioStreamBasicDescription {
+        if let stream, stream.mSampleRate > 0, stream.mChannelsPerFrame > 0 { return stream }
+        return tap
+    }
+
+    /// Частота сменилась (AirPods + звонок → HFP 16/24 кГц, «Настройка Audio-MIDI») — конвертер устарел, пересобрать.
+    static func needsRebuild(converterRate: Double, tap: AudioStreamBasicDescription, stream: AudioStreamBasicDescription?) -> Bool {
+        let rate = chosen(tap: tap, stream: stream).mSampleRate
+        return rate > 0 && abs(rate - converterRate) > 0.5
+    }
+}
+
 /// Повтор перехвата после явной ошибки Core Audio: при постоянной ошибке не создавать и не разрушать перехват
 /// и агрегат на каждой пересборке, а пробовать раз на новую обстановку — сменился выход или набор программ.
 struct ShareTapRetry: Equatable {
@@ -161,6 +176,11 @@ final class ShareAudioTap: @unchecked Sendable {
     private let queue = DispatchQueue(label: "macutils.share.tap", qos: .userInteractive)
     private let onSamples: @Sendable ([Float]) -> Void
     private var converter: AVAudioConverter?
+    /// Частота, на которую построен конвертер (главный поток).
+    private(set) var converterRate: Double = 0
+    /// Частота перехвата или агрегата сменилась и конвертер устарел — пересобрать (зовётся в главном потоке).
+    var onFormatChange: (@MainActor () -> Void)?
+    private var listeners: [(AudioObjectID, AudioObjectPropertySelector, AudioObjectPropertyListenerBlock)] = []
     private let output = AVAudioFormat(standardFormatWithSampleRate: ShareProtocol.sampleRate, channels: 1)!
     /// Пик входа с прошлого чтения: пишется в `queue`, читается из главного потока (Float — без разрывов).
     private let peak = UnsafeMutablePointer<Float>.allocate(capacity: 1)
@@ -207,11 +227,6 @@ final class ShareAudioTap: @unchecked Sendable {
         outputDevice = CoreAudioHelper.defaultOutputDevice
         var status = AudioHardwareCreateProcessTap(description(excluded), &tapID)
         guard status == noErr else { throw AppVolumeTap.TapError.status("Перехват звука", status) }
-        var format = CoreAudioHelper.read(tapID, kAudioTapPropertyFormat, default: AudioStreamBasicDescription())
-        guard format.mSampleRate > 0, let input = AVAudioFormat(streamDescription: &format) else {
-            throw AppVolumeTap.TapError.status("Формат перехвата", -1)
-        }
-        converter = AVAudioConverter(from: input, to: output)
         layoutLogged = false
         // Агрегат — только из перехвата, без подустройства (так в примере Apple для перехватов): выходу трансляция ничего
         // не играет, а входы выхода — микрофон AirPods или гарнитуры — так не включаются вовсе (без режима звонка HFP,
@@ -226,6 +241,17 @@ final class ShareAudioTap: @unchecked Sendable {
         ]
         status = AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &aggregateID)
         guard status == noErr else { throw AppVolumeTap.TapError.status("Агрегатное устройство", status) }
+        // Конвертер — по фактическому формату входа агрегата; в журнал — обе частоты (только числа).
+        let tapFormat = Self.tapFormat(tapID)
+        var format = ShareTapFormat.chosen(tap: tapFormat, stream: Self.streamFormat(aggregateID))
+        guard format.mSampleRate > 0, let input = AVAudioFormat(streamDescription: &format) else {
+            throw AppVolumeTap.TapError.status("Формат перехвата", -1)
+        }
+        converter = AVAudioConverter(from: input, to: output)
+        converterRate = format.mSampleRate
+        Log.capture.info("Звук трансляции: частота перехвата \(tapFormat.mSampleRate, privacy: .public) Гц, вход агрегата \(format.mSampleRate, privacy: .public) Гц")
+        listen(tapID, kAudioTapPropertyFormat)
+        listen(aggregateID, kAudioDevicePropertyNominalSampleRate)
         status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) { [weak self] _, inputData, _, outputData, _ in
             for buffer in UnsafeMutableAudioBufferListPointer(outputData) {
                 if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
@@ -261,6 +287,11 @@ final class ShareAudioTap: @unchecked Sendable {
     }
 
     func stop() {
+        for (object, selector, block) in listeners {
+            var address = CoreAudioHelper.address(selector)
+            AudioObjectRemovePropertyListenerBlock(object, &address, .main, block)
+        }
+        listeners = []
         if aggregateID != kAudioObjectUnknown {
             if let procID {
                 AudioDeviceStop(aggregateID, procID)
@@ -274,6 +305,37 @@ final class ShareAudioTap: @unchecked Sendable {
             AudioHardwareDestroyProcessTap(tapID)
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
+    }
+
+    /// Частота перехвата или входа агрегата уже не та, на которую построен конвертер.
+    var formatChanged: Bool {
+        guard tapID != kAudioObjectUnknown, aggregateID != kAudioObjectUnknown else { return false }
+        return ShareTapFormat.needsRebuild(converterRate: converterRate, tap: Self.tapFormat(tapID), stream: Self.streamFormat(aggregateID))
+    }
+
+    private static func tapFormat(_ tap: AudioObjectID) -> AudioStreamBasicDescription {
+        CoreAudioHelper.read(tap, kAudioTapPropertyFormat, default: AudioStreamBasicDescription())
+    }
+
+    /// Фактический формат входного потока агрегата (поток перехвата); nil — потока ещё нет.
+    private static func streamFormat(_ aggregate: AudioObjectID) -> AudioStreamBasicDescription? {
+        guard let stream = CoreAudioHelper.readArray(aggregate, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput).last else {
+            return nil
+        }
+        let format = CoreAudioHelper.read(stream, kAudioStreamPropertyVirtualFormat, default: AudioStreamBasicDescription())
+        return format.mSampleRate > 0 ? format : nil
+    }
+
+    /// Смена формата — в главном потоке; пересобираем, только если частота действительно ушла от конвертера.
+    private func listen(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) {
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.formatChanged else { return }
+                self.onFormatChange?()
+            }
+        }
+        var address = CoreAudioHelper.address(selector)
+        if AudioObjectAddPropertyListenerBlock(object, &address, .main, block) == noErr { listeners.append((object, selector, block)) }
     }
 
     /// Вызывается в `queue`: вход перехвата → 24 кГц моно. Берётся только буфер перехвата, не весь вход агрегата.

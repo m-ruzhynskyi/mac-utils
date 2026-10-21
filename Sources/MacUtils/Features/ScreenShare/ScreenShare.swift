@@ -395,10 +395,11 @@ final class ScreenShare: NSObject, ObservableObject {
         }
         if #available(macOS 14.2, *), let tap = audioTap as? ShareAudioTap {
             // Выход сменился (отключили наушники): перехват собран при прежнем выходе — собираем заново.
-            if tap.outputDevice != CoreAudioHelper.defaultOutputDevice {
+            // …или у того же выхода сменилась частота (AirPods + звонок → HFP): конвертер устарел.
+            if tap.outputDevice != CoreAudioHelper.defaultOutputDevice || tap.formatChanged {
                 do {
                     try tap.restart()
-                    Log.capture.info("Звук трансляции: выход сменился, перехват пересобран")
+                    Log.capture.info("Звук трансляции: выход или частота сменились, перехват пересобран")
                 } catch {
                     Log.capture.error("Звук трансляции: перехват не пересобран — \(error.localizedDescription, privacy: .public); переходим на ScreenCaptureKit")
                     fallBackToStream()
@@ -451,6 +452,8 @@ final class ScreenShare: NSObject, ObservableObject {
         }
         tapRetry = ShareTapRetry()
         Log.capture.info("Звук трансляции: перехват, исключено \(ShareAudioExclusion.summary(excluded), privacy: .public)")
+        // Частота сменилась посреди трансляции — та же пересборка, что при смене выхода.
+        (audioTap as? ShareAudioTap)?.onFormatChange = { ScreenShare.shared.refreshAudioFilter() }
         audioPermission = PermissionWatch()
         startAudioCheck()
         return true
@@ -524,7 +527,7 @@ final class ScreenShare: NSObject, ObservableObject {
         // Подсказка ведущему, как в «Громкости приложений»: иначе зрители молча остаются без звука.
         guard !audioSilenceShown else { return }
         audioSilenceShown = true
-        Toast.show("Нет звука из перехвата — разрешите Mac Utils «Запись системного звука»",
+        Toast.show("Нет звука из перехвата — если зрители не слышат звук, проверьте разрешение «Запись системного звука» для Mac Utils",
                    symbol: "exclamationmark.triangle.fill", tint: .orange)
     }
 

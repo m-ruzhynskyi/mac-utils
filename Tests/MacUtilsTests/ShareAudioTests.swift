@@ -122,4 +122,27 @@ final class ShareAudioTests: XCTestCase {
         retry = ShareTapRetry()
         XCTAssertTrue(retry.shouldTry("out1-10"), "после успеха — заново")
     }
+
+    private func format(_ rate: Double, channels: UInt32 = 1) -> AudioStreamBasicDescription {
+        AudioStreamBasicDescription(mSampleRate: rate, mFormatID: kAudioFormatLinearPCM, mFormatFlags: kAudioFormatFlagsNativeFloatPacked,
+                                    mBytesPerPacket: 4 * channels, mFramesPerPacket: 1, mBytesPerFrame: 4 * channels,
+                                    mChannelsPerFrame: channels, mBitsPerChannel: 32, mReserved: 0)
+    }
+
+    /// Конвертер — по фактическому формату входа агрегата; нет его — по формату перехвата.
+    func testConverterFormatPrefersAggregateStream() {
+        XCTAssertEqual(ShareTapFormat.chosen(tap: format(48_000), stream: format(44_100)).mSampleRate, 44_100)
+        XCTAssertEqual(ShareTapFormat.chosen(tap: format(48_000), stream: nil).mSampleRate, 48_000)
+        XCTAssertEqual(ShareTapFormat.chosen(tap: format(48_000), stream: format(0)).mSampleRate, 48_000, "пустой формат потока")
+        XCTAssertEqual(ShareTapFormat.chosen(tap: format(48_000), stream: format(16_000, channels: 0)).mSampleRate, 48_000)
+    }
+
+    /// AirPods + звонок (HFP): частота 48 → 16/24 кГц — конвертер пересобирается; та же частота — нет.
+    func testRateChangeRebuildsConverter() {
+        XCTAssertFalse(ShareTapFormat.needsRebuild(converterRate: 48_000, tap: format(48_000), stream: format(48_000)))
+        XCTAssertTrue(ShareTapFormat.needsRebuild(converterRate: 48_000, tap: format(16_000), stream: format(16_000)), "HFP")
+        XCTAssertTrue(ShareTapFormat.needsRebuild(converterRate: 48_000, tap: format(48_000), stream: format(24_000)), "вход агрегата")
+        XCTAssertTrue(ShareTapFormat.needsRebuild(converterRate: 48_000, tap: format(44_100), stream: nil), "Audio-MIDI")
+        XCTAssertFalse(ShareTapFormat.needsRebuild(converterRate: 48_000, tap: format(0), stream: nil), "формат не прочитан — не трогаем")
+    }
 }
