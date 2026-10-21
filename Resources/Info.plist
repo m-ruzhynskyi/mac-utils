@@ -127,7 +127,7 @@
     <key>NSAppleEventsUsageDescription</key>
     <string>Mac Utils управляет Finder, чтобы узнать выделенные файлы и открытую папку при вырезании и вставке.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>Mac Utils меняет громкость отдельных приложений: перехватывает их звук и воспроизводит с нужным уровнем. Ничего не записывается.</string>
+    <string>Mac Utils меняет громкость отдельных приложений и передаёт звук системы в трансляцию без заглушённых программ (например, звонка). Ничего не записывается.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Mac Utils расшифровывает записи встреч прямо на этом Mac.</string>
     <key>NSMicrophoneUsageDescription</key>
