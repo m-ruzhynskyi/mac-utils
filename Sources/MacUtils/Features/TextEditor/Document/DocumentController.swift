@@ -327,7 +327,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         guard let kind = headerKind(for: page, header: header), let story = headers(of: page.section)[kind]?.story else { return nil }
         let key = "\(page.section)-\(kind.rawValue)-\(page.number)-\(total)-\(sectionTotal)"
         if let cached = headerCache[key] { return cached }
-        let rendering = renderer.renderMargins(story, model: model) { field in
+        let rendering = renderer.renderMargins(story, model: model, textWidth: DocPageView.bodyRect(page.props).width) { field in
             switch field {
             case .page: return "\(page.number)"
             case .numPages: return "\(total)"
