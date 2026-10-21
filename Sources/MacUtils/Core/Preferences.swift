@@ -119,6 +119,8 @@ enum Pref {
     static let shareHistory = "shareHistory"
     /// Программы, чей звук не идёт в трансляцию (bundle id).
     static let shareMutedApps = "shareMutedApps"
+    /// «Не передавать звонки»: программы звонков (`ShareAudioExclusion.callApps`) заглушены для трансляции.
+    static let shareMuteCalls = "shareMuteCalls"
     /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.
     static let cheatSheetSticky = "cheatSheetSticky"
 
@@ -261,6 +263,7 @@ enum Pref {
             focusStrength: 0.6,
             shareAudio: true,
             shareAllowMarks: true,
+            shareMuteCalls: false,
             // Выключено, пока ведущий сам не включит: без этого зритель не видит другие его мониторы.
             shareAllowMonitorSwitch: false,
             shareServer: "https://mac-utils-relay.mako-62d.workers.dev",

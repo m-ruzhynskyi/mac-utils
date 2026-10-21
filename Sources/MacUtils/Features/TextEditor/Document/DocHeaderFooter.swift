@@ -132,7 +132,7 @@ final class DocHeaderSession: NSObject, NSTextViewDelegate {
         }
         let total = controller.pageCount
         let sectionTotal = controller.pagesView.pages.filter { $0.section == page.section }.count
-        let (string, map) = controller.renderer.renderStory(header.story, model: controller.model) { field in
+        let rendering = controller.renderer.renderMargins(header.story, model: controller.model) { field in
             switch field {
             case .page: return "\(page.number)"
             case .numPages: return "\(total)"
@@ -140,6 +140,7 @@ final class DocHeaderSession: NSObject, NSTextViewDelegate {
             case .other: return nil
             }
         }
+        let (string, map) = (rendering.string, rendering.map)
         self.map = map
         storage.setAttributedString(string)
         layoutManager.showsInvisibles = controller.showsInvisibles
@@ -160,7 +161,8 @@ final class DocHeaderSession: NSObject, NSTextViewDelegate {
         container.size = NSSize(width: area.width, height: 10_000)
         layoutManager.ensureLayout(for: container)
         let height = max(16, ceil(layoutManager.usedRect(for: container).height))
-        let y = isHeader ? area.minY : max(area.minY, page.bounds.height - CGFloat(max(page.props.footerY, 0)) / 20 - height)
+        // Как на странице (`DocPageView`): верхний — от `\headery` вниз, нижний — низом на `\footery`, растёт вверх.
+        let y = isHeader ? area.minY : page.bounds.height - CGFloat(max(page.props.footerY, 0)) / 20 - height
         textView.frame = NSRect(x: area.minX, y: y, width: area.width, height: height)
         page.headerFrame = (textView.frame.insetBy(dx: -8, dy: -6), title)
     }

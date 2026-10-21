@@ -19,6 +19,8 @@ final class AppVolumeTap: VolumeTapping, @unchecked Sendable {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
+    /// Входы подустройства выключены для IOProc: пишется до `AudioDeviceStart`, читается в колбэке.
+    private let inputsOff = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
     private let queue = DispatchQueue(label: "macutils.volume", qos: .userInteractive)
     /// Множитель громкости: пишется из главного потока, читается в аудиопотоке.
     private let gainPointer = UnsafeMutablePointer<Float>.allocate(capacity: 1)
@@ -52,6 +54,7 @@ final class AppVolumeTap: VolumeTapping, @unchecked Sendable {
         self.processObjects = processObjects
         self.outputDevice = outputDevice
         gainPointer.initialize(to: gain)
+        inputsOff.initialize(to: false)
         levels.initialize(repeating: 0, count: 2)
         do {
             try start()
@@ -64,6 +67,7 @@ final class AppVolumeTap: VolumeTapping, @unchecked Sendable {
     deinit {
         stop()
         gainPointer.deallocate()
+        inputsOff.deallocate()
         levels.deallocate()
     }
 
@@ -97,10 +101,22 @@ final class AppVolumeTap: VolumeTapping, @unchecked Sendable {
 
         let gainPointer = self.gainPointer
         let levels = self.levels
+        // Входы выхода (микрофон гарнитуры/AirPods) — свойство самого устройства; буфер перехвата — после них.
+        let subdeviceInputs = AggregateStreams.inputStreamCount(outputDevice)
+        let inputsOff = self.inputsOff
+        inputsOff.pointee = false
         status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) { _, input, _, output, _ in
-            Self.render(input: input, output: output, gain: gainPointer.pointee, levels: levels)
+            let count = Int(input.pointee.mNumberBuffers)
+            let tapBuffer = AggregateStreams.tapBuffer(inputCount: count, subdeviceInputs: subdeviceInputs, subdeviceInputsOff: inputsOff.pointee)
+            Self.render(input: input, tapBuffer: tapBuffer, output: output, gain: gainPointer.pointee, levels: levels)
         }
-        guard status == noErr, procID != nil else { throw TapError.status("Обработчик звука", status) }
+        guard status == noErr, let procID else { throw TapError.status("Обработчик звука", status) }
+        // Входы подустройства IOProc не нужны: иначе у AirPods включается микрофон и звук становится «телефонным».
+        inputsOff.pointee = AggregateStreams.disableSubdeviceInputs(aggregate: aggregateID, procID: procID, subdeviceInputs: subdeviceInputs)
+            && subdeviceInputs > 0
+        if subdeviceInputs > 0, !inputsOff.pointee {
+            Log.audio.error("Громкость: входы устройства вывода не выключены — раскладка агрегата ещё не собрана")
+        }
         status = AudioDeviceStart(aggregateID, procID)
         guard status == noErr else { throw TapError.status("Запуск вывода", status) }
     }
@@ -121,21 +137,22 @@ final class AppVolumeTap: VolumeTapping, @unchecked Sendable {
         }
     }
 
-    /// Копирует звук перехвата в выход с множителем. Буферы — float32;
-    /// каналы сопоставляются по порядку, лишние каналы выхода — тишина.
-    private static func render(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>,
+    /// Копирует звук перехвата (буфер `tapBuffer` входа агрегата) в первый буфер выхода с множителем; float32,
+    /// остальные буферы выхода — тишина. Буферы до `tapBuffer` — вход подустройства (микрофон гарнитуры), их не трогаем.
+    private static func render(input: UnsafePointer<AudioBufferList>, tapBuffer: Int?, output: UnsafeMutablePointer<AudioBufferList>,
                                gain: Float, levels: UnsafeMutablePointer<Float>) {
         let inputs = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
+        let tap = tapBuffer.flatMap { $0 < inputs.count ? inputs[$0] : nil }
         let outputs = UnsafeMutableAudioBufferListPointer(output)
         for index in 0..<outputs.count {
             guard let outData = outputs[index].mData else { continue }
             let outCount = Int(outputs[index].mDataByteSize) / MemoryLayout<Float>.size
             let out = UnsafeMutableBufferPointer(start: outData.assumingMemoryBound(to: Float.self), count: outCount)
-            guard index < inputs.count, let inData = inputs[index].mData else {
+            guard index == 0, let tap, let inData = tap.mData else {
                 out.update(repeating: 0)
                 continue
             }
-            let inCount = Int(inputs[index].mDataByteSize) / MemoryLayout<Float>.size
+            let inCount = Int(tap.mDataByteSize) / MemoryLayout<Float>.size
             let source = UnsafeBufferPointer(start: inData.assumingMemoryBound(to: Float.self), count: inCount)
             VolumeMath.apply(gain: gain, to: out, from: source)
             if outCount > inCount {

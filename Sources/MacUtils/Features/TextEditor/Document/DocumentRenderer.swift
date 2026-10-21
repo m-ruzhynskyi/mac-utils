@@ -200,10 +200,30 @@ final class DocRenderer {
 
     /// Колонтитул (или другая история) целиком; `field` — текст вычисляемого поля (номер страницы).
     func renderStory(_ story: RTFStory, model: RTFDocumentModel, field: (RTFFieldKind) -> String?) -> (NSAttributedString, DocSourceMap) {
+        let rendered = renderMargins(story, model: model, field: field)
+        return (rendered.string, rendered.map)
+    }
+
+    /// Колонтитул: текст, карта и насколько он выходит в поля страницы. Абзацы колонтитулов Word часто с отрицательными
+    /// отступами (заходят в поле); показ сдвигает отступы на этот выступ, а рамку рисования расширяет на столько же.
+    struct StoryRendering {
+        var string: NSAttributedString
+        var map: DocSourceMap
+        /// Выступ влево и вправо за поля текста, в пунктах.
+        var outdentLeft: CGFloat
+        var outdentRight: CGFloat
+    }
+
+    func renderMargins(_ story: RTFStory, model: RTFDocumentModel, field: (RTFFieldKind) -> String?) -> StoryRendering {
+        let shiftLeft = max(0, -(story.paragraphs.map { min($0.props.left, $0.props.left + $0.props.firstLine) }.min() ?? 0))
+        let shiftRight = max(0, -(story.paragraphs.map(\.props.right).min() ?? 0))
         let places = cellPlaces(story)
         var map = DocSourceMap()
         let string = NSMutableAttributedString()
-        for (index, paragraph) in story.paragraphs.enumerated() {
+        for (index, original) in story.paragraphs.enumerated() {
+            var paragraph = original
+            paragraph.props.left += shiftLeft
+            paragraph.props.right += shiftRight
             var plan = self.plan(paragraph, index: index, model: model, place: paragraph.cell.flatMap { places[$0] }, sectionBreaks: false)
             // Вычисляемые поля — свой текст (номер страницы), весь — на кусок исходника поля.
             for (offset, piece) in plan.pieces.enumerated() where piece.kind == .field {
@@ -218,7 +238,7 @@ final class DocRenderer {
             }
             string.append(attributed(plan, paragraph: paragraph, model: model))
         }
-        return (string, map)
+        return StoryRendering(string: string, map: map, outdentLeft: CGFloat(shiftLeft) / 20, outdentRight: CGFloat(shiftRight) / 20)
     }
 
     // MARK: - План абзаца
