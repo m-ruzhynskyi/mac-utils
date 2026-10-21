@@ -207,6 +207,83 @@ final class DocEditUITests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: url, encoding: .ascii), source)
     }
 
+    // MARK: - Черновик из сессии (ревью, п. 1)
+
+    /// Вкладка с черновиком (файл на диске + правка в `{\info}`) — правка в «Документе» сохраняется с проверками.
+    private func openDraft(_ draft: String, file: String) throws -> (EditorTab, DocumentController, URL) {
+        let url = folder.appendingPathComponent("draft.frm")
+        try Data(file.utf8).write(to: url)
+        let workspace = EditorWorkspace()
+        let tab = EditorTab(document: try EditorDocument.open(url), text: draft)
+        tab.restoreMode(nil)
+        workspace.add(tab)
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 900, height: 700), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: EditorRootView(workspace: workspace))
+        window.orderBack(nil)
+        windows.append(window)
+        settle()
+        return (tab, try XCTUnwrap(tab.documentController), url)
+    }
+
+    func testDraftThenDocumentEditSaves() throws {
+        let file = DocDemo.expertReport
+        let draft = file.replacingOccurrences(of: #"{\info{\title Demo}}"#, with: #"{\info{\title Demo draft}}"#)
+        XCTAssertNotEqual(draft, file)
+        let (tab, document, url) = try openDraft(draft, file: file)
+        XCTAssertTrue(tab.isDirty)
+        let view = try page(document)
+        let city = (document.storage.string as NSString).range(of: "Демоград")
+        view.setSelectedRange(NSRange(location: NSMaxRange(city), length: 0))
+        view.insertText("ск", replacementRange: NSRange(location: NSNotFound, length: 0))
+        let report = DocSaveGuard.check(document: tab.document, text: tab.text, journal: tab.journal)
+        XCTAssertTrue(report.passed, report.problem)
+        var saved: Bool?
+        EditorWindowController.shared.save(tab) { saved = $0 }
+        XCTAssertEqual(saved, true)
+        XCTAssertTrue(guardShown.isEmpty)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .ascii),
+                       draft.replacingOccurrences(of: DocDemo.rtf("Демоград"), with: DocDemo.rtf("Демоградск")), "на диске — черновик с правкой")
+    }
+
+    /// Черновик, испорченный вне правок «Документа» (потеряна скобка), — запись отклоняется, файл цел.
+    func testBrokenDraftIsRefused() throws {
+        let file = DocDemo.expertReport
+        let draft = file.replacingOccurrences(of: #"{\info{\title Demo}}"#, with: #"{\info{\title Demo}"#)
+        let (tab, document, url) = try openDraft(draft, file: file)
+        let view = try page(document)
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        view.insertText("Z", replacementRange: NSRange(location: NSNotFound, length: 0))
+        var saved: Bool?
+        EditorWindowController.shared.save(tab) { saved = $0 }
+        XCTAssertEqual(saved, false)
+        XCTAssertEqual(guardShown.first?.braces, false)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .ascii), file, "файл на диске цел")
+    }
+
+    /// Признак «правили в Документе» переживает черновик в сессии: проверки при записи не теряются.
+    func testEditedInDocumentSurvivesSession() throws {
+        let saved = EditorSession.folder
+        EditorSession.folder = folder.appendingPathComponent("session", isDirectory: true)
+        defer { EditorSession.folder = saved }
+        UserDefaults.standard.set(true, forKey: Pref.editorAutosaveDrafts)
+        UserDefaults.standard.set(true, forKey: Pref.editorRestoreSession)
+        let (tab, document, _) = try open(Data(DocDemo.expertReport.utf8))
+        let view = try page(document)
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        view.insertText("Z", replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertTrue(tab.editedInDocument)
+        let workspace = EditorWorkspace()
+        workspace.add(tab)
+        EditorSession.save(workspace)
+        let state = try XCTUnwrap(EditorSession.load())
+        XCTAssertEqual(state.tabs.first?.editedInDocument, true)
+        let restored = try XCTUnwrap(EditorSession.makeTab(state.tabs[0], workspace: EditorWorkspace()))
+        XCTAssertTrue(restored.editedInDocument)
+        XCTAssertTrue(DocSaveGuard.check(document: restored.document, text: restored.text, journal: restored.journal).passed)
+    }
+
     func testJournalTracksCleanSegments() {
         var journal = DocSourceJournal(length: 100)
         journal.record(edited: NSRange(location: 10, length: 3), delta: 3)          // вставка 3 в 10

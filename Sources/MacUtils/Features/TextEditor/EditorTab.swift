@@ -117,6 +117,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
             // Восстановленный черновик отличается от файла — вкладка изменена.
             pendingChange = true
             updateDirty()
+            // Журнал — от файла на диске: правленая часть черновика (между общим началом и концом) — уже не «нетронутая».
+            journal = Self.journal(from: document.decodedText as NSString, to: text as NSString)
         }
         observeUndo()
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -206,6 +208,20 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         textView.typingAttributes = baseAttributes
         ruler.zoom = zoom
         ruler.needsDisplay = true
+    }
+
+    /// Журнал для текста `draft`, полученного из `original`: всё, кроме средней части между общим началом и общим концом,
+    /// — нетронутые куски исходника.
+    static func journal(from original: NSString, to draft: NSString) -> DocSourceJournal {
+        var journal = DocSourceJournal(length: original.length)
+        let shorter = min(original.length, draft.length)
+        var prefix = 0
+        while prefix < shorter, original.character(at: prefix) == draft.character(at: prefix) { prefix += 1 }
+        var suffix = 0
+        while suffix < shorter - prefix,
+              original.character(at: original.length - 1 - suffix) == draft.character(at: draft.length - 1 - suffix) { suffix += 1 }
+        journal.record(edited: NSRange(location: prefix, length: draft.length - prefix - suffix), delta: draft.length - original.length)
+        return journal
     }
 
     // MARK: - Состояние «изменено»

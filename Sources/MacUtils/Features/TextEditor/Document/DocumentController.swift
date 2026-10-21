@@ -249,6 +249,8 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         if pageCount != pagesView.pages.count { pageCount = pagesView.pages.count }
         updatePageSections()
         updateHeaders()
+        // Номера страниц в панели «$» — теперь известны.
+        tab?.dollars.objectWillChange.send()
     }
 
     /// Раздел каждой страницы — по её первому символу; размер страницы — из раздела.
@@ -408,9 +410,12 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
     }
 
     /// Номер страницы, на которой стоит место исходника (для строк панели «$»); `nil` — не видно на странице.
+    /// Раскладку не заставляет: для ещё не разложенного текста — `nil`, панель обновится по завершении раскладки
+    /// (иначе каждая перерисовка панели после правки раскладывала бы весь документ заново).
     func page(ofSource location: Int) -> Int? {
         let unit = rendering.map.unit(forSource: location)
-        guard unit < rendering.map.count, NSLocationInRange(location, rendering.map.range(at: unit)) else { return nil }
+        guard unit < rendering.map.count, NSLocationInRange(location, rendering.map.range(at: unit)),
+              unit < layoutManager.firstUnlaidCharacterIndex() else { return nil }
         let glyph = layoutManager.glyphIndexForCharacter(at: unit)
         guard let container = layoutManager.textContainer(forGlyphAt: glyph, effectiveRange: nil) else { return nil }
         return pagesView.pages.firstIndex { $0.container === container }.map { $0 + 1 }
