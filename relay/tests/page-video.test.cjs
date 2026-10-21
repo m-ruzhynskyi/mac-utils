@@ -21,12 +21,17 @@ assert.ok(block.length > 100 && capture.length > 1000 && monitors.length > 100, 
 const NAL = { sps: [0x67, 0x4d, 0x40, 0x32, 0xaa], pps: [0x68, 0xee, 0x3c, 0x80], idr: [0x65, 0x88, 0x84, 0x00], slice: [0x41, 0x9a, 0x02] };
 const annexB = (...units) => Uint8Array.from(units.flatMap((u) => [0, 0, 0, 1, ...u]));
 
-// behaviour: { hardware: bool (есть аппаратный кодер), any: bool (создаётся хоть какой-то), direct: 'ok' | 'throw' | 'silent',
-//              spsOnce: bool (SPS/PPS только в первом ключевом кадре кодера), syncError: bool (ошибка прямо из configure),
-//              latency: число кадров, которые кодер держит, пока не придут следующие }
+// behaviour: { hardware: bool (есть аппаратный кодер), any: bool (создаётся хоть какой-то), software: bool (есть программный),
+//              direct: 'ok' | 'throw' | 'silent', spsOnce: bool (SPS/PPS только в первом ключевом кадре кодера),
+//              syncError: bool (ошибка прямо из configure), latency: число кадров, которые кодер держит,
+//              outage: [от, до] мс — аппаратный кодер падает и не создаётся (сброс GPU-процесса, смена монитора, сон),
+//              outageAll: [от, до] мс — то же для любого кодера, crashEvery: мс — аппаратный падает посреди эфира так часто,
+//              probe: { hw, sw } — ответ VideoEncoder.isConfigSupported, stuckQueue: очередь кодера не уходит }
 function page(behaviour) {
   let clock = 0;
-  const sent = [], intervals = [], configs = [];
+  const sent = [], intervals = [], configs = [], logs = [];
+  const within = (range) => range && clock >= range[0] && clock < range[1];
+  let lastCrash = 0;
   let wake = null, stopped = 0;
   class VideoFrame {
     constructor(source, init = {}) {
@@ -39,14 +44,25 @@ function page(behaviour) {
   class VideoEncoder {
     constructor({ output, error }) { this.output = output; this.error = error; this.state = 'unconfigured'; this.encodeQueueSize = 0; this.keys = 0; }
     configure(config) {
-      configs.push(config); this.config = `${config.width}x${config.height}`;
-      const works = behaviour.any !== false && (config.hardwareAcceleration !== 'prefer-hardware' || behaviour.hardware !== false);
+      configs.push(config); this.config = `${config.width}x${config.height}`; this.acceleration = config.hardwareAcceleration;
+      const hardware = config.hardwareAcceleration === 'prefer-hardware';
+      const works = behaviour.any !== false && !within(behaviour.outageAll) &&
+        (hardware ? behaviour.hardware !== false && !within(behaviour.outage) : behaviour.software !== false);
       if (works) { this.state = 'configured'; return; }
       const fail = () => { this.state = 'closed'; this.error(new Error('Encoder creation error.')); };
       if (behaviour.syncError) fail(); else Promise.resolve().then(fail);
     }
     encode(frame, { keyFrame }) {
       if (this.state !== 'configured') throw new Error('InvalidStateError');
+      const hardware = this.acceleration === 'prefer-hardware';
+      const crash = within(behaviour.outageAll) || (hardware && (within(behaviour.outage) ||
+        (behaviour.crashEvery && clock - lastCrash >= behaviour.crashEvery && clock >= behaviour.crashEvery)));
+      if (crash) {
+        if (behaviour.crashEvery && hardware && !within(behaviour.outage)) lastCrash = clock;
+        this.state = 'closed'; Promise.resolve().then(() => this.error(new Error('Encoder failure')));
+        return;
+      }
+      if (behaviour.stuckQueue && (behaviour.fed?.length ?? 0) >= 10) { this.encodeQueueSize = 3; }
       const direct = frame.source instanceof VideoFrame;
       (behaviour.fed ??= []).push({ direct, width: frame.source?.width ?? frame.displayWidth, config: this.config });
       if (direct && behaviour.direct === 'throw') throw new Error('EncodingError');
@@ -63,10 +79,14 @@ function page(behaviour) {
     }
     close() { this.state = 'closed'; }
   }
+  if (behaviour.probe) {
+    VideoEncoder.isConfigSupported = async (config) =>
+      ({ supported: config.hardwareAcceleration === 'prefer-hardware' ? behaviour.probe.hw : behaviour.probe.sw });
+  }
   const element = () => ({ style: {}, textContent: '', title: '', insertAdjacentHTML() {} });
   const elements = {};
   const context = vm.createContext({
-    console, Math, Promise, Uint8Array, Infinity,
+    console: { ...console, info() {} }, Math, Promise, Uint8Array, Infinity, logs,
     performance: { now: () => clock },
     setInterval: (fn, ms) => { intervals.push({ fn, ms }); return intervals.length; }, clearInterval() {},
     document: { createElement: (tag) => tag === 'canvas'
@@ -80,7 +100,7 @@ function page(behaviour) {
     MediaStreamTrackProcessor: class { constructor() { this.readable = { getReader: () => ({
       read: () => new Promise((resolve) => { wake = resolve; }), cancel: async () => {} }) }; } },
   });
-  vm.runInContext(`var forceKey = true, watching = false, capture = null, useHelperAudio = false, window = {};
+  vm.runInContext(`var forceKey = true, watching = false, capture = null, useHelperAudio = false, window = { mu: { log: (l) => logs.push(l) } };
     var hostSocket = { readyState: 1, bufferedAmount: 0, onclose: null, send: (p) => sent.push(p) };
     ${block}\n${monitors}\n${capture}`, Object.assign(context, { sent }));
   const track = { onended: null, stop() { if (this.onended) this.onended(); } };
@@ -88,7 +108,7 @@ function page(behaviour) {
     removeTrack(t) { this.tracks = this.tracks.filter((x) => x !== t); }, addTrack(t) { this.tracks.push(t); } };
   context.startCapture(stream, '1234567890');
   return {
-    sent, configs, get stopped() { return stopped; },
+    sent, configs, logs, get stopped() { return stopped; },
     // Зритель переключил монитор: новая дорожка (кадры другого размера), старое чтение остановлено.
     replace(size) {
       const next = { onended: null, stop() {} };
@@ -147,8 +167,11 @@ for (const syncError of [false, true]) {
     assert.equal(v.jpeg, 0);
     const rate = (p.sent.length - before) / 4;
     assert.ok(rate >= 25 && rate <= 31, `кадров в секунду ${rate}`);
-    assert.ok(p.configs.some((c) => c.hardwareAcceleration === 'no-preference'));
-    assert.ok(p.configs.filter((c) => c.hardwareAcceleration === 'no-preference').every((c) => c.framerate === 30));
+    // Явно программный: `no-preference` на Windows снова берёт аппаратный Media Foundation.
+    const software = p.configs.filter((c) => c.hardwareAcceleration === 'prefer-software');
+    assert.ok(software.length > 0);
+    assert.ok(p.configs.every((c) => c.hardwareAcceleration !== 'no-preference'));
+    assert.ok(software.every((c) => c.framerate === 30 && c.width === 1280 && c.height === 720), 'программный — 1280×720, 30 кадров/с');
   });
 }
 
@@ -218,4 +241,95 @@ test('смена монитора (1920×1080 → 1280×720): тот же эфи
   assert.equal(first[1], 1, 'первый пакет после смены — ключевой');
   assert.ok(viewer(p.sent, before).canShow, 'зритель настраивает декодер по нему');
   assert.ok(viewer(p.sent, before).h264 > 50, 'кадры идут дальше');
+});
+
+// Окно, в котором пакеты [from, to) ушли: сколько H.264 и JPEG.
+const kinds = (sent, from, to = sent.length) => {
+  const part = sent.slice(from, to).map((p) => Uint8Array.from(p)[0]);
+  return { h264: part.filter((t) => t === 3).length, jpeg: part.filter((t) => t === 1).length };
+};
+
+test('аппаратный кодер падает посреди эфира (сброс GPU, 3 с): программный H.264, не JPEG; через 30 с снова аппаратный', async () => {
+  const p = page({ outage: [2000, 5000] });
+  await p.run(2);
+  const before = p.sent.length;
+  await p.run(4);
+  const during = kinds(p.sent, before);
+  assert.equal(during.jpeg, 0, 'ни одного кадра JPEG');
+  assert.ok(during.h264 > 60, `видео идёт во время сбоя: ${during.h264}`);
+  assert.ok(p.configs.some((c) => c.hardwareAcceleration === 'prefer-software'), 'перешли на программный');
+  await p.run(30);
+  assert.equal(p.configs.at(-1).hardwareAcceleration, 'prefer-hardware', 'вернулись на аппаратный');
+  const back = p.sent.length;
+  await p.run(2);
+  assert.ok(kinds(p.sent, back).h264 > 100, 'снова 60 кадров/с');
+  assert.ok(p.logs.some((l) => /^encoder mode reason=(fail|crash) mode=sw /.test(l)));
+  assert.ok(p.logs.some((l) => /^encoder mode reason=retry mode=hw /.test(l)));
+});
+
+test('аппаратный кодер падает каждые 10 с: третий сбой за минуту — программный, а не вечные перезапуски', async () => {
+  const p = page({ crashEvery: 10_000 });
+  await p.run(35);
+  assert.ok(p.logs.some((l) => /^encoder mode reason=crash mode=sw /.test(l)), p.logs.filter((l) => l.includes('mode')).join('\n'));
+  assert.equal(kinds(p.sent, 0).jpeg, 0);
+});
+
+test('ни один кодер временно не создаётся (6 с): JPEG только как мост, затем снова H.264 без перезапуска эфира', async () => {
+  const p = page({ outageAll: [2000, 8000] });
+  await p.run(2);
+  const before = p.sent.length;
+  await p.run(6);
+  assert.ok(kinds(p.sent, before).jpeg > 0, 'мост JPEG, пока кодеры не создаются');
+  await p.run(10);
+  const after = p.sent.length;
+  await p.run(3);
+  const v = kinds(p.sent, after);
+  assert.equal(v.jpeg, 0, 'после сбоя JPEG больше нет');
+  assert.ok(v.h264 > 60, `видео вернулось: ${v.h264}`);
+  await p.run(30);
+  assert.equal(p.configs.at(-1).hardwareAcceleration, 'prefer-hardware', 'и аппаратный вернулся');
+});
+
+test('H.264 нет вообще (isConfigSupported — нет для обоих): JPEG без повторных попыток кодера', async () => {
+  const p = page({ any: false, probe: { hw: false, sw: false } });
+  await p.run(1);
+  const configs = p.configs.length;
+  await p.run(70);
+  assert.equal(p.configs.length, configs, 'кодер больше не создаётся');
+  assert.ok(viewer(p.sent).jpeg > 400);
+  assert.ok(p.logs.some((l) => l.startsWith('encoder probe hw1920x1080=no(unsupported) hw1280x720=no(unsupported) hw3840x2160=no(unsupported) sw1280x720=no(unsupported)')));
+  assert.ok(p.logs.some((l) => /^encoder mode reason=nocodec mode=jpeg /.test(l)));
+});
+
+test('isConfigSupported: аппаратного нет — сразу программный, без JPEG', async () => {
+  const p = page({ hardware: false, probe: { hw: false, sw: true } });
+  await p.run(2);
+  assert.equal(viewer(p.sent).jpeg, 0);
+  assert.ok(p.configs.some((c) => c.hardwareAcceleration === 'prefer-software'));
+  assert.ok(p.logs.some((l) => /^encoder probe hw1920x1080=no\(unsupported\) .* sw1280x720=yes/.test(l)));
+  assert.ok(p.logs.some((l) => /^encoder mode reason=unsupported mode=sw /.test(l)));
+});
+
+test('кодер не успевает (очередь > 2): кадры пропускаются; встал больше чем на 3 с — пересоздаётся, а не молчит вечно', async () => {
+  const behaviour = { stuckQueue: true };
+  const p = page(behaviour);
+  await p.run(1);
+  const fed = behaviour.fed.length;
+  assert.ok(fed <= 12, `подано до полной очереди ${fed}`);
+  await p.run(2);
+  assert.equal(behaviour.fed.length, fed, 'пока очередь полна, кадры в кодер не подаются');
+  await p.run(61);
+  assert.ok(p.logs.some((l) => /^encoder error crash code=stalled /.test(l)), 'вставший кодер замечен');
+  const stats = p.logs.filter((l) => l.startsWith('encoder stats'));
+  assert.ok(stats.length >= 1 && /queueSkips=[1-9]\d*/.test(stats.at(-1)), stats.at(-1));
+});
+
+test('журнал кодера: смена режима, ошибки с кодом, раз в минуту stats — только числа и коды', async () => {
+  const p = page({ outage: [2000, 5000] });
+  await p.run(125);
+  const stats = p.logs.filter((l) => l.startsWith('encoder stats'));
+  assert.ok(stats.length >= 2, `stats ${stats.length}`);
+  assert.ok(p.logs.some((l) => /^encoder error (crash|fail) code=Error:Encoder_failure /.test(l)));
+  for (const line of p.logs) assert.match(line, /^encoder [a-z]+( [a-zA-Z0-9]+(=[A-Za-z0-9().:_,-]*)?)*$/, line);
+  assert.ok(stats.every((l) => /queued=\d+ encodeQueue=\d+ .* outFps=\d+$/.test(l)));
 });

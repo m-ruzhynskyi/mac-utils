@@ -1386,11 +1386,47 @@ $("decline").onclick = () => { const r = requests.shift(); if (r) answer(r.viewe
 
 // ---- Кодер ведущего: запасные пути (relay/tests/page-video.test.cjs берёт код между метками) ----
 // <host-video>
-// Режимы кодера H.264 по порядку: аппаратный; любой, в том числе программный (OpenH264 в Chromium). Когда не работает ни
-// один, кадры идут JPEG. Аппаратного кодера может не быть (на Windows: драйвер, удалённый рабочий стол, виртуальная машина,
-// упавший GPU-процесс). Тогда `prefer-hardware` при каждом создании кодера даёт ошибку, и без запасного пути зрители
-// ждали картинку вечно.
-const ENCODER_MODES = ["prefer-hardware", "no-preference"];
+// Режимы кодера по порядку: аппаратный H.264; программный H.264 (OpenH264 в Chromium и Electron) — явно `prefer-software`:
+// `no-preference` на Windows снова берёт аппаратный Media Foundation, и после его сбоя оставался только JPEG; JPEG — мост
+// на время повторной попытки и единственный путь, только если H.264 нет вообще. Аппаратного кодера может не быть или он
+// падает посреди эфира (драйвер, удалённый рабочий стол, виртуальная машина, сброс GPU-процесса, смена монитора, сон).
+const ENCODER_MODES = ["prefer-hardware", "prefer-software"];
+const ENCODER_NAMES = ["hw", "sw", "jpeg"];
+// Повторная попытка лучшего режима после временной ошибки: аппаратного — через 30 с, после каждой новой неудачи вдвое
+// дольше, до 5 мин; видео после JPEG — через 5 с, до 60 с. Режим продержался 2 мин — счёт заново.
+const ENCODER_RETRY = [{ base: 30_000, max: 300_000 }, { base: 5_000, max: 60_000 }];
+// Программному кодеру — не больше 1280 по длинной стороне и 30 кадров/с: 1920×1080 на 60 ему не по силам.
+const SOFTWARE_MAX_SIDE = 1280;
+const ENCODER_CODEC = "avc1.4D4032";
+// Журнал кодера — только числа и коды (режим, размер, очередь, ошибки), без содержимого экрана и данных пользователя:
+// консоль страницы и, в приложении для Windows, overlay.log (по нему видно, что было у ведущего).
+function encoderLog(line) {
+  try { console.info(`[share] encoder ${line}`); } catch (_) {}
+  try { window.mu?.log?.(`encoder ${line}`); } catch (_) {}
+}
+// Код ошибки кодера: имя и текст Chromium («Encoder creation error.») — только буквы, цифры и знаки, до 80 символов.
+function encoderErrorCode(error) {
+  if (typeof error === "string") return error;
+  const text = `${error?.name || "Error"}:${error?.message || ""}`;
+  return text.replace(/[^A-Za-z0-9 .,:_()-]/g, "").replace(/\s+/g, "_").slice(0, 80);
+}
+// Что умеет кодер этого компьютера (VideoEncoder.isConfigSupported): аппаратный H.264 на 1920×1080, 1280×720 и
+// 3840×2160 (4K — только для журнала, кодер получает не больше 1920) и программный на 1280×720. Итог — в журнал и в
+// `done(аппаратный, программный)`. Проверки нет — считаем, что есть (ошибку покажет сам кодер).
+function probeEncoders(done) {
+  if (typeof VideoEncoder === "undefined" || typeof VideoEncoder.isConfigSupported !== "function") return;
+  const config = (width, height, hardwareAcceleration) => ({ codec: ENCODER_CODEC, width, height, bitrate: 6_000_000, framerate: 30,
+                                                             latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration });
+  const checks = [[1920, 1080, "prefer-hardware"], [1280, 720, "prefer-hardware"], [3840, 2160, "prefer-hardware"], [1280, 720, "prefer-software"]];
+  Promise.all(checks.map(([w, h, acceleration]) => Promise.resolve()
+    .then(() => VideoEncoder.isConfigSupported(config(w, h, acceleration)))
+    .then((r) => ({ name: `${acceleration === "prefer-hardware" ? "hw" : "sw"}${w}x${h}`, ok: !!r?.supported, code: r?.supported ? "" : "unsupported" }),
+          (e) => ({ name: `${acceleration === "prefer-hardware" ? "hw" : "sw"}${w}x${h}`, ok: false, code: encoderErrorCode(e) }))))
+    .then((results) => {
+      encoderLog(`probe ${results.map((r) => `${r.name}=${r.ok ? "yes" : `no(${r.code})`}`).join(" ")}`);
+      done(results[0].ok || results[1].ok, results[3].ok);
+    });
+}
 function nalUnits(data) {
   const units = []; let start = -1;
   for (let i = 0; i + 3 <= data.length; i++) {
@@ -1416,19 +1452,54 @@ function withParameterSets(data, cache) {
   return out;
 }
 // Что работает у этого ведущего. `direct`: кадры захвата прямо в кодер, null — не проверено, true — кодер их отдал,
-// false — через холст. `mode`: индекс в ENCODER_MODES, ENCODER_MODES.length — JPEG.
-function encoderLadder() {
+// false — через холст. `mode`: индекс в ENCODER_MODES, ENCODER_MODES.length — JPEG. `reason` — почему сменился режим
+// (код для журнала): start, fail, crash, retry, unsupported, nocodec. Методы возвращают true, если режим сменился.
+function encoderLadder(now = 0) {
   return {
-    mode: 0, direct: null, failures: 0,
+    mode: 0, direct: null, failures: 0, crashes: [], since: now, reason: "start", noH264: false,
+    retryAt: [0, 0], backoff: [0, 0],
     get jpeg() { return this.mode >= ENCODER_MODES.length; },
     get acceleration() { return ENCODER_MODES[this.mode]; },
+    get name() { return ENCODER_NAMES[this.mode]; },
     output(fedDirect) { this.failures = 0; if (fedDirect && this.direct === null) this.direct = true; },
     // Кодер не отдал ни одного кадра (ошибка, исключение, тишина). Получал кадры захвата напрямую — сначала холст;
-    // иначе после двух неудач подряд — следующий режим.
-    failed(fedDirect) {
-      if (fedDirect && this.direct !== true) { this.direct = false; return; }
-      if (++this.failures < 2) return;
-      this.failures = 0; this.mode++;
+    // иначе после двух неудач подряд — режим ниже.
+    failed(fedDirect, now) {
+      if (fedDirect && this.direct !== true) { this.direct = false; return false; }
+      if (++this.failures < 2) return false;
+      return this.down(now, "fail");
+    },
+    // Кодер работал и упал посреди эфира — пересоздаётся в том же режиме; третий раз за минуту — режим ниже.
+    crashed(now) {
+      this.crashes = this.crashes.filter((at) => now - at < 60_000);
+      this.crashes.push(now);
+      return this.crashes.length >= 3 && this.down(now, "crash");
+    },
+    down(now, reason) {
+      const from = this.mode;
+      if (from >= ENCODER_MODES.length) return false;
+      const retry = ENCODER_RETRY[from];
+      if (now - this.since >= 120_000) this.backoff[from] = 0;
+      this.backoff[from] = this.backoff[from] ? Math.min(retry.max, this.backoff[from] * 2) : retry.base;
+      this.retryAt[from] = now + this.backoff[from];
+      return this.enter(from + 1, now, reason);
+    },
+    // Пора снова попробовать режим лучше текущего.
+    retry(now) {
+      if (this.noH264) return false;
+      for (let i = 0; i < this.mode; i++) if (now >= this.retryAt[i]) return this.enter(i, now, "retry");
+      return false;
+    },
+    // Итог VideoEncoder.isConfigSupported. Нет ни одного H.264 — JPEG без повторов; нет только аппаратного — сразу
+    // программный (аппаратный — повтором, как после ошибки: проверка бывает неточной).
+    supported(hardware, software, now) {
+      if (!hardware && !software) { this.noH264 = true; return this.mode !== ENCODER_MODES.length && this.enter(ENCODER_MODES.length, now, "nocodec"); }
+      if (!hardware && this.mode === 0) return this.down(now, "unsupported");
+      return false;
+    },
+    enter(mode, now, reason) {
+      this.mode = mode; this.failures = 0; this.crashes = []; this.since = now; this.reason = reason;
+      return true;
     },
   };
 }
@@ -1450,7 +1521,7 @@ function startCapture(stream, code) {
   // Видео H.264 через WebCodecs, как в Discord: аппаратный кодек, нет его — программный, не работает и он — кадры JPEG.
   // `session` — текущий кодер: сколько кадров отдал и получил, когда получил первый, были ли кадры захвата напрямую, SPS/PPS.
   let encoder = null, session = null, frameIndex = 0, encodedSize = "";
-  const ladder = encoderLadder();
+  const ladder = encoderLadder(performance.now());
   // Скорость под сеть: очередь в сокете растёт — снижаем, свободно — поднимаем.
   let bitrate = 6_000_000, encodedBitrate = 0, lastAdapt = 0, lastKey = 0;
   // 60 кадров/с; при перегрузке (очередь в сокете, кодер отстаёт, сглаженная скорость дольше 3 с ниже 5 Мбит/с) — 30,
@@ -1471,32 +1542,51 @@ function startCapture(stream, code) {
   };
   forceKey = true;
   let canEncode = typeof VideoEncoder !== "undefined";
+  // Для журнала (только числа и коды): ошибки кодера, пропуски кадров (очередь кодера, JPEG занят), размер источника.
+  const counts = { errors: 0, queueSkips: 0, jpegSkips: 0, outputs: 0, statsOutputs: 0 };
+  let sourceSize = "-", lastStatsAt = performance.now();
+  const logEncoder = (event) => encoderLog(`${event} mode=${ladder.name} src=${sourceSize} size=${encodedSize || "-"} ` +
+    `fps=${ladder.jpeg ? 8 : fps} bitrate=${Math.round(bitrate / 1000)}k queued=${Math.round(hostSocket?.bufferedAmount ?? 0)} ` +
+    `encodeQueue=${encoder?.encodeQueueSize ?? 0} errors=${counts.errors} queueSkips=${counts.queueSkips} jpegSkips=${counts.jpegSkips} ` +
+    `outFps=${Math.round((counts.outputs - counts.statsOutputs) / Math.max(1, (performance.now() - lastStatsAt) / 1000))}`);
+  // Режим сменился: прежний кодер закрыт, новый создаст следующий кадр. Программный — 30 кадров/с без возврата на 60.
+  const applyMode = () => {
+    try { encoder?.close(); } catch (_) {}
+    encoder = null; session = null; encodedSize = ""; forceKey = true;
+    canEncode = !ladder.jpeg && typeof VideoEncoder !== "undefined";
+    softwareCap = ladder.mode === 1;
+    if (softwareCap) fps = 30;
+    logEncoder(`mode reason=${ladder.reason}`);
+  };
+  if (!canEncode) { ladder.supported(false, false, performance.now()); applyMode(); }
+  else probeEncoders((hardware, software) => { if (ladder.supported(hardware, software, performance.now())) applyMode(); });
+  logEncoder(`start reason=${ladder.reason}`);
   // Звук не ждёт сеть: очередь в сокете больше, чем у видео перед пропуском кадров, и ещё ~5 с звука — пакет звука
   // выбрасывается. Иначе на медленной сети очередь звука росла без предела (до ~170 МБ в час), пока не кончится память.
   const audioRoom = () => hostSocket.bufferedAmount <= Math.max(400_000, bitrate / 8) + 256_000;
   // JPEG кодируется асинхронно и держит снимок холста (1920×1080 — 8 МБ). Пока прежний не готов, новый не начинаем:
   // на медленном компьютере очередь снимков росла на гигабайты за минуты.
   let jpegBusy = false;
-  const encoderConfig = (width, height) => ({ codec: "avc1.4D4032", width, height, bitrate: Math.round(bitrate), framerate: fps,
+  const encoderConfig = (width, height) => ({ codec: ENCODER_CODEC, width, height, bitrate: Math.round(bitrate), framerate: fps,
                                               latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: ladder.acceleration });
-  // Кодер не отдал ни одного кадра (ошибка, исключение, тишина) — следующий путь по `ladder`. Программный кодер — 30
-  // кадров/с без возврата на 60 (60 ему не по силам), JPEG — до 8 кадров/с.
-  const encoderFailed = (mine) => {
+  // Кодер упал (ошибка, исключение, тишина): следующий кадр создаёт новый. Не отдал ни одного кадра — неудача,
+  // работал и упал — сбой посреди эфира; повторяются — режим ниже по `ladder` (JPEG — до 8 кадров/с, мост до повтора).
+  const encoderFailed = (mine, error) => {
     if (!mine || mine !== session) return;
     try { encoder?.close(); } catch (_) {}
-    encoder = null; session = null; forceKey = true;
-    if (mine.outputs) return;
-    const before = ladder.mode;
-    ladder.failed(mine.direct);
-    if (ladder.mode === before) return;
-    encodedSize = "";
-    if (ladder.jpeg) canEncode = false;
-    else { fps = 30; softwareCap = true; }
+    encoder = null; session = null; forceKey = true; counts.errors++;
+    // Первые 20 сбоев за эфир — в журнал с кодом ошибки (имя и текст Chromium, без данных пользователя).
+    if (counts.errors <= 20) logEncoder(`error ${mine.outputs ? "crash" : "fail"} code=${encoderErrorCode(error)}`);
+    const now = performance.now();
+    if (mine.outputs ? ladder.crashed(now) : ladder.failed(mine.direct, now)) applyMode();
   };
   // Кадр из захвата (VideoFrame или <video>) → холст до 1920 по длинной стороне → кодер.
   const tick = (source, sourceWidth, sourceHeight) => {
     if (!hostSocket || hostSocket.readyState !== 1 || !sourceWidth) { forceKey = true; return; }
     const now = performance.now(), queued = hostSocket.bufferedAmount;
+    sourceSize = `${sourceWidth}x${sourceHeight}`;
+    if (ladder.retry(now)) applyMode();
+    if (now - lastStatsAt >= 60_000) { logEncoder("stats"); lastStatsAt = now; counts.statsOutputs = counts.outputs; }
     if (queued > 250_000 && now - lastAdapt > 500) { bitrate = Math.max(700_000, bitrate * 0.7); lastAdapt = now; }
     else if (queued < 60_000 && now - lastAdapt > 2000 && bitrate < 12_000_000) { bitrate = Math.min(12_000_000, bitrate * 1.15); lastAdapt = now; }
     // Больше ~1 с в очереди — пропускаем кадры, потом начинаем с ключевого.
@@ -1506,14 +1596,17 @@ function startCapture(stream, code) {
     if (smooth < 5_000_000) { lowSince ??= now; if (now - lowSince > 3000) trouble(now); } else lowSince = null;
     // Тишина: кадры поданы, а кодер не отдал ни одного. Не меньше 5 кадров — кодеру с задержкой в кадр на неподвижном
     // экране следующий кадр может прийти нескоро, это не поломка.
-    if (session && !session.outputs && session.fed >= 5 && now - session.fedAt > 1500) encoderFailed(session);
+    if (session && !session.outputs && session.fed >= 5 && now - session.fedAt > 1500) encoderFailed(session, "silent");
+    // Кодер работал и встал: очередь полна, кадров нет дольше 3 с — пересоздаём (иначе кадры пропускаются вечно и
+    // картинка у зрителей замирает).
+    if (session && session.outputs && encoder?.encodeQueueSize > 2 && now - session.outputAt > 3000) encoderFailed(session, "stalled");
     if (queued > Math.max(400_000, bitrate / 8)) { forceKey = true; trouble(now); return; }
     if (queued < Math.max(60_000, bitrate / 64)) calm(now);
     // Пониженный режим: каждый второй кадр (по времени, а не по счёту).
     if (fps === 30 && now - lastEncodedAt < 25) return;
     if (!canEncode && now - lastEncodedAt < 125) return;
     // До 1920 по длинной стороне (как на Mac); уровень кодека 5.0 (4D4032) — 4.0 не принимает 1920×1200 и выше.
-    const scale = Math.min(1, 1920 / Math.max(sourceWidth, sourceHeight));
+    const scale = Math.min(1, (ladder.mode === 1 ? SOFTWARE_MAX_SIDE : 1920) / Math.max(sourceWidth, sourceHeight));
     // Кадр захвата уже нужного размера — в кодер напрямую, без копий через холст (иначе 60 кадров/с не успеваем).
     // Кодер не принял такие кадры (ошибка или тишина) — дальше через холст (`ladder.direct`). Крупнее 1920 — только через
     // холст: масштаб в кодере на Windows (Media Foundation) не проверить, а обрезанный вместо уменьшенного кадр выглядит
@@ -1526,16 +1619,17 @@ function startCapture(stream, code) {
       const size = `${width}x${height}`;
       if (encoder && encoder.state === "configured" && size === encodedSize && (encodedBitrate === 0 || bitrate < encodedBitrate || (bitrate > encodedBitrate * 1.2 && now - lastConfigAt >= 2000))) {
         encodedBitrate = bitrate; lastConfigAt = now;
-        try { encoder.configure(encoderConfig(width, height)); } catch (_) { encoderFailed(session); return; }
+        try { encoder.configure(encoderConfig(width, height)); } catch (e) { encoderFailed(session, e); return; }
         forceKey = true;
       }
       if (!encoder || encoder.state === "closed" || size !== encodedSize) {
         try { encoder?.close(); } catch (_) {}
         encodedSize = size; forceKey = true; graceUntil = now + 2000; lastConfigAt = now;
         const mine = session = { outputs: 0, fed: 0, fedAt: 0, direct: false };
+        if (counts.errors <= 20) logEncoder("create");
         encoder = new VideoEncoder({
           output: (chunk) => {
-            mine.outputs++; ladder.output(mine.direct);
+            mine.outputs++; mine.outputAt = performance.now(); counts.outputs++; ladder.output(mine.direct);
             if (!hostSocket || hostSocket.readyState !== 1) return;
             const key = chunk.type === "key";
             let body = new Uint8Array(chunk.byteLength);
@@ -1545,13 +1639,14 @@ function startCapture(stream, code) {
             packet[0] = 3; packet[1] = key ? 1 : 0; packet.set(body, 2);
             hostSocket.send(packet);
           },
-          error: () => encoderFailed(mine),
+          error: (e) => encoderFailed(mine, e),
         });
         encodedBitrate = bitrate;
-        try { encoder.configure(encoderConfig(width, height)); } catch (_) { encoderFailed(mine); return; }
+        try { encoder.configure(encoderConfig(width, height)); } catch (e) { encoderFailed(mine, e); return; }
       }
       if (!encoder || !session) return;   // ошибка кодера пришла прямо из configure
-      if (encoder.encodeQueueSize > 2) { trouble(now, true); return; }
+      // Кодер не успевает — кадр пропускается, очередь не копится.
+      if (encoder.encodeQueueSize > 2) { counts.queueSkips++; trouble(now, true); return; }
       lastEncodedAt = now;
       // Метки всегда по performance.now(): и у прямых кадров, и у холста с keep-alive — одни часы.
       const stamp = { timestamp: Math.round(performance.now() * 1000) };
@@ -1560,11 +1655,11 @@ function startCapture(stream, code) {
       const keyFrame = forceKey || now - lastKey > 4000;
       session.fedAt ||= now; session.fed++; if (direct) session.direct = true;
       try { encoder.encode(frame, { keyFrame }); }
-      catch (_) { frame.close(); encoderFailed(session); return; }
+      catch (e) { frame.close(); encoderFailed(session, e); return; }
       frame.close(); if (keyFrame) lastKey = now; forceKey = false; frameIndex++;
       return;
     }
-    if (jpegBusy) return;
+    if (jpegBusy) { counts.jpegSkips++; return; }
     lastEncodedAt = now;
     jpegBusy = true;
     canvas.toBlob(async (blob) => {

@@ -62,7 +62,7 @@ function host(options) {
   const element = () => ({ style: {}, textContent: '', title: '', insertAdjacentHTML() {} });
   const elements = {};
   const context = vm.createContext({
-    console, Math, Promise, Uint8Array, DataView, ArrayBuffer, Infinity,
+    console: { ...console, info() {} }, Math, Promise, Uint8Array, DataView, ArrayBuffer, Infinity,
     performance: { now: () => clock },
     setInterval: () => 0, clearInterval() {},
     document: { createElement: (tag) => tag === 'canvas'
