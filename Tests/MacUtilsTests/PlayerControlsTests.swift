@@ -189,7 +189,14 @@ final class PlayerEntryPointTests: XCTestCase {
         XCTAssertFalse(PanelTabs.defaultValue.split(separator: ",").contains("videoPlayer"), "вкладка «Плеер» в панели по умолчанию выключена")
         XCTAssertTrue(PanelTabs.available.contains(.videoPlayer))
         XCTAssertEqual(SettingsSection.videoPlayer.group, .filesSystem)
-        XCTAssertEqual(SettingsSection.allCases.last, .videoPlayer, "новый раздел — в конце: на порядке держатся сохранённые вкладки")
+        // Новые разделы — в конце, по порядку появления (плеер, затем «Команды и ссылки»): прежние не сдвигаются.
+        let all = SettingsSection.allCases.map(\.rawValue)
+        let videoIndex = all.firstIndex(of: "videoPlayer")
+        XCTAssertNotNil(videoIndex)
+        XCTAssertEqual(videoIndex.map { all[..<$0].suffix(1) }, ["textEditor"], "плеер — сразу после прежних разделов")
+        XCTAssertEqual(all.suffix(2), ["videoPlayer", "shortcuts"])
+        // Сохранённые вкладки панели — по именам разделов, а не по номерам: порядок allCases их не сдвигает.
+        XCTAssertEqual(PanelTabs.sections("videoPlayer,textEditor"), [.videoPlayer, .textEditor])
     }
 }
 

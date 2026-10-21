@@ -164,7 +164,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
         center.unregister(id: HotKeyID.meeting)
         if UserDefaults.standard.bool(forKey: Pref.meetings) {
             center.register(id: HotKeyID.meeting, keyCode: kVK_ANSI_M, modifiers: controlKey | optionKey) {
-                MeetingRecorder.shared.toggle()
+                AppAction(hotKey: .meeting).run()
             }
             recoverUnfinishedOnce()
         }
