@@ -382,6 +382,17 @@ final class ScreenShare: NSObject, ObservableObject {
     /// пересобираем список исключённых.
     func refreshAudioFilter() {
         if #available(macOS 14.2, *), let tap = audioTap as? ShareAudioTap {
+            // Выход сменился (отключили наушники): агрегат на часах прежнего устройства замолкает — собираем заново.
+            if tap.outputDevice != CoreAudioHelper.defaultOutputDevice {
+                do {
+                    try tap.restart()
+                    Log.capture.info("Звук трансляции: выход сменился, перехват пересобран")
+                } catch {
+                    Log.capture.error("Звук трансляции: перехват не пересобран — \(error.localizedDescription, privacy: .public); переходим на ScreenCaptureKit")
+                    fallBackToStream()
+                    return
+                }
+            }
             let excluded = Self.tapExclusion()
             let objects = excluded.map(\.object).sorted()
             guard objects != tap.excluded else { return }
@@ -411,41 +422,56 @@ final class ScreenShare: NSObject, ObservableObject {
                 }
                 Log.capture.info("Звук трансляции: перехват, исключено \(ShareAudioExclusion.summary(excluded), privacy: .public)")
                 audioPermission = PermissionWatch()
-                startAudioCheck(sender: sender)
+                startAudioCheck()
             } catch {
                 Log.capture.error("Звук трансляции: перехват не запустился — \(error.localizedDescription, privacy: .public)")
             }
         }
-        if audioTap == nil { try await startAudioStream(sender: sender) }
+        if audioTap == nil { audioStream = try await makeAudioStream(sender: sender) }
         audioWatcher = ShareAudioWatcher { ScreenShare.shared.refreshAudioFilter() }
         // Свой процесс появляется в Core Audio только с началом перехвата — сразу и его в исключённые.
         refreshAudioFilter()
     }
 
-    private func startAudioStream(sender: FrameSender) async throws {
+    private func makeAudioStream(sender: FrameSender) async throws -> SCStream {
         let (filter, excluded) = try await Self.audioFilter()
         let audioStream = SCStream(filter: filter, configuration: Self.audioConfiguration(), delegate: sender)
         try audioStream.addStreamOutput(sender, type: .audio, sampleHandlerQueue: sender.audioQueue)
         try await audioStream.startCapture()
-        self.audioStream = audioStream
         Log.capture.info("Звук трансляции (SCK): исключено \(ShareAudioExclusion.summary(excluded), privacy: .public)")
+        return audioStream
+    }
+
+    /// Перехват не годится — звук через ScreenCaptureKit. Трансляцию могли остановить, пока поток запускался:
+    /// тогда сразу гасим его, а не оставляем захват звука после «Стоп».
+    private func fallBackToStream() {
+        if #available(macOS 14.2, *) { (audioTap as? ShareAudioTap)?.stop() }
+        audioTap = nil
+        audioCheck?.invalidate()
+        audioCheck = nil
+        guard let sender else { return }
+        Task {
+            guard let stream = try? await makeAudioStream(sender: sender) else { return }
+            guard self.sender === sender else {
+                try? await stream.stopCapture()
+                return
+            }
+            audioStream = stream
+        }
     }
 
     /// Нет разрешения на перехват — Core Audio молча отдаёт тишину. Пока звук ни разу не пришёл, а программы
     /// играют, проверяем раз в секунду; тишина 10 с — переходим на ScreenCaptureKit (fail-open, как в «Громкости»).
-    private func startAudioCheck(sender: FrameSender) {
+    private func startAudioCheck() {
         audioCheck?.invalidate()
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak sender] _ in
-            MainActor.assumeIsolated {
-                guard let sender else { return }
-                ScreenShare.shared.checkAudioPermission(sender: sender)
-            }
+        let timer = Timer(timeInterval: 1, repeats: true) { _ in
+            MainActor.assumeIsolated { ScreenShare.shared.checkAudioPermission() }
         }
         RunLoop.main.add(timer, forMode: .common)
         audioCheck = timer
     }
 
-    private func checkAudioPermission(sender: FrameSender) {
+    private func checkAudioPermission() {
         guard #available(macOS 14.2, *), let tap = audioTap as? ShareAudioTap else {
             audioCheck?.invalidate()
             audioCheck = nil
@@ -463,11 +489,7 @@ final class ScreenShare: NSObject, ObservableObject {
         }
         guard tripped else { return }
         Log.capture.error("Звук трансляции: перехват молчит — похоже, нет разрешения; переходим на ScreenCaptureKit")
-        audioCheck?.invalidate()
-        audioCheck = nil
-        tap.stop()
-        audioTap = nil
-        Task { try? await startAudioStream(sender: sender) }
+        fallBackToStream()
     }
 
     private static func configure(_ config: SCStreamConfiguration, for filter: SCContentFilter) {

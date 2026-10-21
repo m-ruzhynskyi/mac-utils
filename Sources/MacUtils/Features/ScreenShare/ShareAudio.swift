@@ -79,13 +79,14 @@ enum ShareAudioExclusion {
 }
 
 /// Когда пересобирать список исключённых: программа запустилась или закрылась, процесс открыл или закрыл звук
-/// (так начинается звонок — голос Discord появляется в отдельном процессе уже после старта трансляции).
+/// (так начинается звонок — голос Discord появляется в отдельном процессе уже после старта трансляции),
+/// сменился выход звука (перехват пересобирается на часах нового устройства).
 /// Без опроса: только события, и только пока идёт трансляция со звуком.
 @MainActor
 final class ShareAudioWatcher {
     private let workspace: NotificationCenter
     private var observers: [NSObjectProtocol] = []
-    private var listener: AudioObjectPropertyListenerBlock?
+    private var listeners: [(AudioObjectPropertySelector, AudioObjectPropertyListenerBlock)] = []
     private var scheduled = false
     private let onChange: @MainActor () -> Void
 
@@ -99,12 +100,14 @@ final class ShareAudioWatcher {
             })
         }
         guard coreAudio else { return }
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.schedule() }
-        }
-        var address = CoreAudioHelper.address(kAudioHardwarePropertyProcessObjectList)
-        if AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, listener) == noErr {
-            self.listener = listener
+        for selector in [kAudioHardwarePropertyProcessObjectList, kAudioHardwarePropertyDefaultOutputDevice] {
+            let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.schedule() }
+            }
+            var address = CoreAudioHelper.address(selector)
+            if AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, listener) == noErr {
+                listeners.append((selector, listener))
+            }
         }
     }
 
@@ -112,11 +115,11 @@ final class ShareAudioWatcher {
     func stop() {
         for observer in observers { workspace.removeObserver(observer) }
         observers = []
-        if let listener {
-            var address = CoreAudioHelper.address(kAudioHardwarePropertyProcessObjectList)
+        for (selector, listener) in listeners {
+            var address = CoreAudioHelper.address(selector)
             AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, listener)
-            self.listener = nil
         }
+        listeners = []
     }
 
     /// Пачка событий (запуск программы — сразу несколько процессов) — одна пересборка.
@@ -140,7 +143,7 @@ final class ShareAudioTap: @unchecked Sendable {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
-    private let uuid = UUID()
+    private var uuid = UUID()
     private let queue = DispatchQueue(label: "macutils.share.tap", qos: .userInteractive)
     private let onSamples: @Sendable ([Float]) -> Void
     private var converter: AVAudioConverter?
@@ -148,6 +151,8 @@ final class ShareAudioTap: @unchecked Sendable {
     /// Пик входа с прошлого чтения: пишется в `queue`, читается из главного потока (Float — без разрывов).
     private let peak = UnsafeMutablePointer<Float>.allocate(capacity: 1)
     private(set) var excluded: [AudioObjectID]
+    /// Выход, на часах которого собран агрегат.
+    private(set) var outputDevice = AudioObjectID(kAudioObjectUnknown)
 
     init(excluding objects: [AudioObjectID], onSamples: @escaping @Sendable ([Float]) -> Void) throws {
         excluded = objects
@@ -182,6 +187,8 @@ final class ShareAudioTap: @unchecked Sendable {
     }
 
     private func start() throws {
+        uuid = UUID()
+        outputDevice = CoreAudioHelper.defaultOutputDevice
         var status = AudioHardwareCreateProcessTap(description(excluded), &tapID)
         guard status == noErr else { throw AppVolumeTap.TapError.status("Перехват звука", status) }
         var format = CoreAudioHelper.read(tapID, kAudioTapPropertyFormat, default: AudioStreamBasicDescription())
@@ -190,7 +197,7 @@ final class ShareAudioTap: @unchecked Sendable {
         }
         converter = AVAudioConverter(from: input, to: output)
         // Часы агрегата — от текущего выхода; сам выход не трогаем (пишем тишину).
-        guard let outputUID = CoreAudioHelper.readString(CoreAudioHelper.defaultOutputDevice, kAudioDevicePropertyDeviceUID) else {
+        guard let outputUID = CoreAudioHelper.readString(outputDevice, kAudioDevicePropertyDeviceUID) else {
             throw AppVolumeTap.TapError.status("Устройство вывода", -1)
         }
         let aggregate: [String: Any] = [
@@ -214,6 +221,17 @@ final class ShareAudioTap: @unchecked Sendable {
         guard status == noErr, procID != nil else { throw AppVolumeTap.TapError.status("Обработчик звука", status) }
         status = AudioDeviceStart(aggregateID, procID)
         guard status == noErr else { throw AppVolumeTap.TapError.status("Запуск перехвата", status) }
+    }
+
+    /// Выход сменился — тот же перехват (с тем же списком исключённых) на часах нового устройства.
+    func restart() throws {
+        stop()
+        do {
+            try start()
+        } catch {
+            stop()
+            throw error
+        }
     }
 
     /// Новый список исключённых — на лету, тем же перехватом (без разрыва звука).
