@@ -21,13 +21,13 @@ final class DesignSystemTests: XCTestCase {
     func testGroupsMatchConcept() {
         XCTAssertEqual(SettingsGroup.allCases.map(\.title), ["Основное", "Захват", "Окна и ввод", "Файлы и система", "Ещё"])
         XCTAssertEqual(SettingsGroup.general.sections.map(\.title),
-                       ["Общие", "Горячие клавиши", "Исключённые программы", "Панель в строке меню"])
+                       ["Общие", "Горячие клавиши", "Команды и ссылки", "Исключённые программы", "Панель в строке меню"])
         XCTAssertEqual(SettingsGroup.capture.sections.map(\.title),
                        ["Снимки экрана", "Мои снимки", "Рисование на экране", "QR-коды", "Записи встреч"])
         XCTAssertEqual(SettingsGroup.windowsInput.sections.map(\.title),
                        ["Переключатель приложений", "Окна", "Громкость", "Раскладка", "Плавная прокрутка", "Вырезать и вставить", "Ввод текста"])
         XCTAssertEqual(SettingsGroup.filesSystem.sections.map(\.title),
-                       ["Полка", "Загрузки", "Текстовый редактор", "Шпаргалка", "Удаление программ", "Очистка диска", "Монитор системы", "Диспетчер задач"])
+                       ["Полка", "Загрузки", "Текстовый редактор", "Видеоплеер", "Шпаргалка", "Удаление программ", "Очистка диска", "Монитор системы", "Диспетчер задач"])
         XCTAssertEqual(SettingsGroup.more.sections.map(\.title),
                        ["Перерывы и тёплый экран", "Фокус", "Музыка", "Трансляция экрана", "ИИ (Ollama)"])
     }

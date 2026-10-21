@@ -6,6 +6,12 @@ import XCTest
 /// Чистая логика пакета 6: переключатель окон, перетаскивание к краю, «Поверх всех», «Фокус», служебные события tap.
 @MainActor
 final class WindowReliabilityTests: XCTestCase {
+    /// Перетаскивание и раскладка показывают подсказку прилипания — на экран пользователя она не выходит.
+    override func tearDown() {
+        XCTAssertEqual(ScreenGuard.windowsOnScreen(), [], "окна тестов на экране пользователя")
+        super.tearDown()
+    }
+
     // MARK: EventTap
 
     func testDisableEventsAreRecognised() {

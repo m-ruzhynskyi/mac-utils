@@ -118,14 +118,26 @@ struct DollarPanelView: View {
         return "стало \(count) непарных скобок"
     }
 
+    /// Где знак: номер строки исходника, а в «Документе» — страница («с.2»; не видно на странице — «—»).
+    private func place(_ entry: DollarEntry) -> String {
+        guard tab.mode == .document, let document = tab.documentController else { return "\(entry.line)" }
+        return document.page(ofSource: entry.mark.dollar).map { "с.\($0)" } ?? "—"
+    }
+
+    /// Значение в строке: в «Коде» — как в исходнике, в «Документе» — как видно на странице (`\'ca…` → «Катя»).
+    private func shown(_ entry: DollarEntry) -> String {
+        guard tab.mode == .document, let document = tab.documentController else { return entry.value }
+        return document.visibleValue(of: entry.mark) ?? entry.value
+    }
+
     /// Строки групп — с разными id: иначе ленивый список путает строку, перешедшую из группы в группу.
     static func skippedID(_ dollar: Int) -> Int { -dollar - 1 }
 
     private func row(_ entry: DollarEntry, skipped: Bool) -> some View {
-        DollarRow(entry: entry, skipped: skipped, selected: model.selected == entry.mark.dollar) {
+        DollarRow(entry: entry, skipped: skipped, selected: model.selected == entry.mark.dollar, place: place(entry), value: shown(entry)) {
             model.selected = entry.mark.dollar
             tab.dollars.onUpdate?()
-            tab.reveal(entry.mark.whole)
+            tab.revealDollar(entry)
         } remove: {
             tab.removeValues([entry])
         }
@@ -185,6 +197,8 @@ private struct DollarRow: View {
     let entry: DollarEntry
     let skipped: Bool
     let selected: Bool
+    let place: String
+    let value: String
     let select: () -> Void
     let remove: () -> Void
     @State private var hovered = false
@@ -193,7 +207,7 @@ private struct DollarRow: View {
         let hue = skipped ? nil : Color(nsColor: EditorStyle.hue(entry.hue))
         let faint = Color(nsColor: EditorStyle.faint)
         HStack(spacing: DS.Space.s) {
-            Text("\(entry.line)")
+            Text(place)
                 .font(DS.Font.mono(11, relativeTo: .caption))
                 .foregroundStyle(faint)
                 .frame(minWidth: 22, alignment: .trailing)
@@ -201,11 +215,11 @@ private struct DollarRow: View {
             RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .fill(hue ?? faint.opacity(0.5))
                 .frame(width: 4, height: 16)
-            (Text("$").foregroundStyle(hue ?? faint) + Text(entry.value).foregroundStyle(skipped ? faint : Color.dsText))
+            (Text("$").foregroundStyle(hue ?? faint) + Text(value).foregroundStyle(skipped ? faint : Color.dsText))
                 .font(DS.Font.mono(12.5, relativeTo: .body))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if entry.value.isEmpty {
+            if value.isEmpty {
                 Text(entry.mark.isEmpty ? "пусто" : "пробелы").font(DS.Font.rowSub).foregroundStyle(.dsMute)
             }
             Spacer(minLength: 0)
@@ -215,7 +229,7 @@ private struct DollarRow: View {
                 }
                 .buttonStyle(.plain)
                 .help("Убрать значение")
-                .accessibilityLabel("Убрать значение \(entry.value)")
+                .accessibilityLabel("Убрать значение \(value)")
             }
         }
         .padding(.horizontal, 6)
@@ -234,7 +248,7 @@ private struct DollarRow: View {
         .onKeyPress(.return) { select(); return .handled }
         .onKeyPress(.delete) { remove(); return .handled }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Строка \(entry.line), $\(entry.value.isEmpty ? " пусто" : entry.value)\(skipped ? ", пропущено" : "")")
+        .accessibilityLabel("\(place.hasPrefix("с.") ? "Страница " + place.dropFirst(2) : "Строка " + place), $\(value.isEmpty ? " пусто" : value)\(skipped ? ", пропущено" : "")")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "Убрать значение", remove)
     }

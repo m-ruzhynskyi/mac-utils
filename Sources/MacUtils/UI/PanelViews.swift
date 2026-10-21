@@ -15,7 +15,7 @@ struct PanelSectionView: View {
     /// (со своей прокруткой) — иначе вкладка была бы пустой (так было с «Исключениями» и «Клавишами»).
     static let quickPanels: Set<SettingsSection> = [
         .screenshot, .windows, .volume, .layout, .shelf, .cheatSheet, .downloads, .qr, .annotate, .wellbeing, .meetings, .ai,
-        .cutPaste, .smoothScroll, .switcher, .textEditor,
+        .cutPaste, .smoothScroll, .switcher, .textEditor, .videoPlayer,
     ]
 
     /// Раздел показывает свою страницу в компактном виде (со своей прокруткой).
@@ -55,6 +55,7 @@ struct PanelSectionView: View {
         case .smoothScroll: SmoothScrollPanel()
         case .switcher: SwitcherPanel()
         case .textEditor: EditorPanel()
+        case .videoPlayer: PlayerPanel()
         default: EmptyView()
         }
     }
@@ -562,6 +563,44 @@ private struct SwitcherPanel: View {
                 Segmented(selection: $modifier, options: [("option", "⌥Tab"), ("command", "⌘Tab")])
             }
             .disabled(!enabled)
+        }
+    }
+}
+
+private struct PlayerPanel: View {
+    @State private var recent = PlayerRecent.urls
+
+    var body: some View {
+        QuickGroup("Видеоплеер") {
+            QuickAction(title: "Открыть плеер", subtitle: "Плейлист, субтитры, пропуск интро", systemImage: "play.rectangle",
+                        tile: .accent, hotKey: .videoPlayer) {
+                fromPanel { PlayerWindowController.show() }
+            }
+            QuickAction(title: "Открыть видео…", subtitle: "MP4, MOV, M4V, MP3, M4A… или перетащите сюда", systemImage: "folder",
+                        keys: ["⌘", "O"]) {
+                fromPanel { PlayerWindowController.openPanel() }
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            AppStatusItem.shared.closeTools()
+            PlayerWindowController.openDropped(providers)
+            return true
+        }
+        Group {
+            if !recent.isEmpty {
+                QuickGroup("Продолжить просмотр") {
+                    ForEach(recent.prefix(6), id: \.self) { url in
+                        QuickAction(title: url.lastPathComponent, subtitle: EditorRecent.folderTitle(url),
+                                    systemImage: PlayerMedia.isVideo(url) ? "film" : "waveform") {
+                            fromPanel { PlayerWindowController.open([url]) }
+                        }
+                    }
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            let now = PlayerRecent.urls
+            if now != recent { recent = now }
         }
     }
 }

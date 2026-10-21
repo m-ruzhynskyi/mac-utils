@@ -551,16 +551,19 @@ final class SnapPreview {
     /// Номер показа: скрытие после вспышки не гасит показ, начатый позже.
     private var shown = 0
 
+    /// Подсказка показана (модель): под тестами панель на экран не выводится, а показ виден здесь.
+    private(set) var isVisible = false
+
     /// Номер окна подсказки у WindowServer (для стенда).
     var windowNumber: Int? { panel?.windowNumber }
-    var isVisible: Bool { panel?.isVisible == true }
     var frame: NSRect? { panel?.frame }
 
     func show(_ frame: NSRect) {
         shown += 1
+        isVisible = true
         let panel = self.panel ?? make()
         panel.setFrame(frame.insetBy(dx: 4, dy: 4), display: true)
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen("SnapPreview")
     }
 
     /// Короткая вспышка рамки после раскладки клавишами, без анимации окна.
@@ -577,6 +580,7 @@ final class SnapPreview {
 
     func hide() {
         shown += 1
+        isVisible = false
         panel?.orderOut(nil)
     }
 

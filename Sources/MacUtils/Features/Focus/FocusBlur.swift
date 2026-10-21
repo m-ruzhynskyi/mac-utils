@@ -34,7 +34,7 @@ final class FocusBlur: ObservableObject {
             return
         }
         center.register(id: HotKeyID.focus, keyCode: kVK_ANSI_F, modifiers: controlKey | optionKey) {
-            FocusBlur.shared.toggle()
+            AppAction(hotKey: .focus).run()
         }
         if isOn { applyStyle() }
     }
@@ -139,7 +139,7 @@ final class FocusBlur: ObservableObject {
         if overlays.count != NSScreen.screens.count { buildOverlays() }
         for overlay in overlays {
             // Сначала окно должно быть на экране, тогда его можно поставить под чужое окно.
-            if !overlay.isVisible { overlay.orderFrontRegardless() }
+            if !overlay.isVisible { overlay.orderFrontRegardlessOnScreen() }
             overlay.order(.below, relativeTo: below)
         }
         fade(in: true)

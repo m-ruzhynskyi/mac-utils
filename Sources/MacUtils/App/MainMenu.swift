@@ -53,7 +53,7 @@ enum MainMenu {
 @MainActor
 private final class MainMenuActions: NSObject {
     @objc func about() {
-        NSApp.activate()
+        ScreenOutput.activateApp()
         NSApp.orderFrontStandardAboutPanel(nil)
     }
 

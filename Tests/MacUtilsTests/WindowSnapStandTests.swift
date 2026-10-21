@@ -39,7 +39,7 @@ final class WindowSnapStandTests: XCTestCase {
 
         // Курсор ушёл от края — подсказки нет.
         try drag(to: CGPoint(x: area.midX, y: area.midY), "от края — без зоны") { tiler.dragTarget == nil && !tiler.preview.isVisible }
-        try wait("подсказка снята с экрана", timeout: 1) { !onscreen(tiler.preview.windowNumber) }
+        try wait("подсказка снята", timeout: 1) { !tiler.preview.isVisible }
 
         // Прижат к верхнему краю (в Cocoa y == maxY) — весь экран.
         try drag(to: CGPoint(x: area.midX, y: area.minY), "у верхнего края — весь экран") { tiler.dragTarget == .maximize }
@@ -178,23 +178,15 @@ final class WindowSnapStandTests: XCTestCase {
     }
 
     /// Подсказка на экране (по WindowServer) и там, где встанет окно (с отступом 4 pt).
+    /// Подсказка показана в нужной рамке. Проверяется модель и рамка панели, а не экран: под тестами панель на экран
+    /// пользователя не выводится (ScreenOutput), и у WindowServer её нет.
     private func assertPreview(at frame: CGRect, file: StaticString = #filePath, line: UInt = #line) throws {
         let preview = WindowTiler.shared.preview
-        let number = try XCTUnwrap(preview.windowNumber, file: file, line: line)
         let expected = frame.insetBy(dx: 4, dy: 4)
-        // WindowServer узнаёт о показе панели через цикл run loop.
-        var window: WindowDragRules.ScreenWindow?
-        let deadline = Date().addingTimeInterval(1)
-        repeat {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-            let info = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(number)) as? [[String: Any]] ?? []
-            window = info.first.flatMap(WindowDragRules.ScreenWindow.init)
-        } while (window.map { !close($0.bounds, expected) } ?? true) && Date() < deadline
-        let shown = try XCTUnwrap(window, "подсказки нет у WindowServer", file: file, line: line)
-        XCTAssertTrue(onscreen(number), "подсказка на экране", file: file, line: line)
-        XCTAssertGreaterThan(shown.alpha, 0, file: file, line: line)
-        XCTAssertTrue(close(shown.bounds, expected), "подсказка \(shown.bounds) вместо \(expected), панель \(String(describing: preview.frame))",
-                      file: file, line: line)
+        XCTAssertTrue(preview.isVisible, "подсказка показана", file: file, line: line)
+        let shown = try XCTUnwrap(preview.frame, "панели подсказки нет", file: file, line: line)
+        XCTAssertTrue(close(shown, expected), "подсказка \(shown) вместо \(expected)", file: file, line: line)
+        XCTAssertFalse(onscreen(preview.windowNumber), "подсказка не выводится на экран пользователя", file: file, line: line)
     }
 
     private func onscreen(_ number: Int?) -> Bool {

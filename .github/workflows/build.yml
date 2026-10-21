@@ -1,7 +1,8 @@
 name: CI
 
 # development и pull request'ы — сборка и тесты.
-# main (после слияния из development) — тесты, подписанная универсальная сборка и релиз.
+# main (после слияния из development) — тесты (или результат тех же тестов из PR при том же дереве),
+# подписанная универсальная сборка и релиз. Тесты делятся на 3 шарда: scripts/test-shard.sh.
 # Версия: MAJOR.MINOR из Resources/Info.plist, PATCH = наибольший тег линии + 1 (scripts/version.sh, docs/VERSIONING.md).
 # Тег vX.Y.Z создаёт только задача release.
 on:
@@ -14,36 +15,159 @@ on:
 permissions:
   contents: read
 
+# Новый push или новый коммит в PR отменяет устаревший прогон PR; push'и одной ветки идут по очереди
+# (выпуски не отменяются, а ожидающий push в main всё равно пропустил бы свой релиз — см. «Check tag»).
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  test:
+  # push в main = merge PR development → main. Если дерево этого коммита уже прошло все тесты
+  # в прогоне того же PR, тесты второй раз не гоняются. Любое сомнение — тесты как обычно.
+  tested-tree:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      tested: ${{ steps.find.outputs.tested }}
+    steps:
+      - name: Find PR run that tested this tree
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Шаг не падает: ошибка API = «не доказано», и тесты идут как обычно.
+          set +e
+          echo "tested=false" >> "$GITHUB_OUTPUT"
+          TREE=$(gh api "repos/$REPO/git/commits/$SHA" --jq .tree.sha)
+          PR=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+            --jq "[.[] | select(.merge_commit_sha == \"$SHA\" and .base.ref == \"main\" and .head.repo.full_name == \"$REPO\")][0] | \"\(.number) \(.head.sha)\"")
+          read -r PR_NUMBER HEAD_SHA <<< "$PR"
+          if [[ -z "$TREE" || -z "$HEAD_SHA" || "$HEAD_SHA" == "null" ]]; then
+            echo "::notice::Коммит $SHA не merge PR в main — тесты как обычно."; exit 0
+          fi
+          # Артефакт tested-tree-<дерево> кладёт задача test только после того, как прошли все шарды.
+          for RUN in $(gh api "repos/$REPO/actions/artifacts?name=tested-tree-$TREE&per_page=100" \
+              --jq ".artifacts[] | select(.expired == false and .workflow_run.head_sha == \"$HEAD_SHA\") | .workflow_run.id"); do
+            OK=$(gh api "repos/$REPO/actions/runs/$RUN" --jq "
+              .event == \"pull_request\" and .conclusion == \"success\" and .path == \".github/workflows/build.yml\"
+              and .head_sha == \"$HEAD_SHA\" and .head_repository.full_name == \"$REPO\"")
+            if [[ "$OK" == "true" ]]; then
+              echo "::notice::Дерево $TREE прошло тесты в прогоне $RUN (PR #$PR_NUMBER) — повторно не гоняю."
+              echo "tested=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          done
+          echo "::notice::Нет успешного прогона PR #$PR_NUMBER с деревом $TREE — тесты как обычно."
+
+  test-shard:
+    needs: tested-tree
+    # tested-tree пропущена (не push в main) или упала — outputs пустые, тесты идут.
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    name: test-shard ${{ matrix.shard }}
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    env:
+      SHARDS: 3
+      # Шард 0 ещё собирает приложение (≈ 2,5 мин) и гоняет тесты скриптов — тестов ему меньше.
+      SHARD_PRELOAD: 0=170
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: matrix.shard == 0
         with:
           node-version: 22
-      - name: Version script tests
-        run: ./scripts/test-version.sh
+      - name: Script tests
+        if: matrix.shard == 0
+        run: ./scripts/test-version.sh && python3 scripts/test-shard.py --self-test
       - name: Relay regression tests
+        if: matrix.shard == 0
         run: npm test --prefix relay
       - name: Build
-        run: swift build
+        run: swift build --build-tests
       - name: Test
-        run: swift test
+        env:
+          SHARD_REPORT: ${{ runner.temp }}/shard-${{ matrix.shard }}.txt
+        run: ./scripts/test-shard.sh "${{ matrix.shard }}" "$SHARDS"
       # Ad-hoc сборка без секретов: ловит поломки build.sh и подписи в pull request'ах.
       - name: Build app (ad-hoc)
+        if: matrix.shard == 0
         run: |
           env -u SIGN_IDENTITY ./build.sh
           codesign --verify --deep --strict "build/Mac Utils.app"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/shard-${{ matrix.shard }}.txt
+          retention-days: 3
+          overwrite: true
+
+  # Обязательная проверка «test» в правилах main: зелёная, только если все шарды прошли и вместе
+  # выполнили все тесты одного дерева, либо это дерево уже прошло тесты в PR (tested-tree).
+  test:
+    needs: [tested-tree, test-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Reused PR result
+        if: needs.tested-tree.outputs.tested == 'true' && needs.test-shard.result == 'skipped'
+        run: echo "Тесты этого дерева прошли в прогоне PR — см. задачу tested-tree."
+      - name: Shards
+        if: needs.tested-tree.outputs.tested != 'true' || needs.test-shard.result != 'skipped'
+        run: |
+          if [[ "${{ needs.test-shard.result }}" != "success" ]]; then
+            echo "::error::Шарды тестов: ${{ needs.test-shard.result }}"; exit 1
+          fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.test-shard.result == 'success'
+        with:
+          pattern: shard-*
+          path: shards
+          merge-multiple: true
+      - name: All tests ran once
+        id: sum
+        if: needs.test-shard.result == 'success'
+        run: |
+          cat shards/shard-*.txt
+          field() { sed -n "s/.*$1=\([^ ]*\).*/\1/p" shards/shard-*.txt; }
+          REPORTS=(shards/shard-*.txt)
+          [[ ${#REPORTS[@]} -eq 3 ]] || { echo "::error::Нет отчёта одного из шардов"; exit 1; }
+          [[ $(field listed | sort -u | wc -l) -eq 1 && $(field tree | sort -u | wc -l) -eq 1 ]] \
+            || { echo "::error::Шарды видели разные списки тестов или разные деревья"; exit 1; }
+          LISTED=$(field listed | head -1)
+          EXECUTED=$(field executed | awk '{s += $1} END {print s}')
+          [[ "$EXECUTED" == "$LISTED" ]] || { echo "::error::Выполнено $EXECUTED тестов из $LISTED"; exit 1; }
+          echo "Выполнено $EXECUTED из $LISTED тестов в 3 шардах." >> "$GITHUB_STEP_SUMMARY"
+          TREE=$(field tree | head -1)
+          echo "tree=$TREE" >> "$GITHUB_OUTPUT"
+          echo "$TREE" > tested-tree.txt
+      # Метка для push в main после merge: это дерево уже прошло все тесты (см. tested-tree).
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: github.event_name == 'pull_request' && github.base_ref == 'main' && steps.sum.outputs.tree != ''
+        with:
+          name: tested-tree-${{ steps.sum.outputs.tree }}
+          path: tested-tree.txt
+          retention-days: 14
+          overwrite: true
 
   release:
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # !cancelled() вместо неявного success(): иначе пропущенные шарды (тесты уже прошли в PR) пропустили бы и релиз.
+    if: ${{ !cancelled() && needs.test.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 30
     # Два push в main подряд не должны считать версию одновременно.
     concurrency:
       group: release

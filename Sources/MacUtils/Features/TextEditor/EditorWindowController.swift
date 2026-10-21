@@ -28,8 +28,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         let wasVisible = window.isVisible
         if !wasVisible { FocusReturn.remember() }
         AppDelegate.syncDock(editorOpen: true)
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        ScreenOutput.activateApp()
+        window.makeKeyAndOrderFrontOnScreen()
         window.centerTrafficLights()
         if !wasVisible { checkDisk() }
     }
@@ -168,7 +168,10 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
                 let replaceEmpty = workspace.tabs.count == 1 && workspace.tabs[0].document.url == nil
                     && !workspace.tabs[0].isDirty && workspace.tabs[0].length == 0
                 let blank = replaceEmpty ? workspace.tabs[0] : nil
-                workspace.add(EditorTab(document: document, zoom: workspace.zoom))
+                let tab = EditorTab(document: document, zoom: workspace.zoom)
+                // .frm и .rtf — сразу «Документом» (или как выбирали для этого типа в последний раз).
+                tab.restoreMode(nil)
+                workspace.add(tab)
                 if let blank { workspace.remove(blank) }
                 EditorRecent.add(url)
             } catch {
@@ -177,6 +180,15 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
                 showError("Не удалось открыть «\(url.lastPathComponent)»", error)
             }
         }
+    }
+
+    /// Открыть файл вкладкой сразу в нужном режиме (для «Команд», ссылок): «Документ» — только у RTF.
+    func open(_ url: URL, mode: EditorViewMode) {
+        open([url])
+        guard let tab = workspace.tab(for: url) else { return }
+        workspace.selectedID = tab.id
+        if mode == .document, !tab.canShowDocument { return }
+        tab.setMode(mode)
     }
 
     /// Что можно открыть: только обычный файл (не папка, устройство, канал); большой — после вопроса.
@@ -204,7 +216,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         alert.informativeText = "Размер — \(DS.Format.bytes(Int64(bytes))). Файл целиком читается в память, это может занять время."
         alert.addButton(withTitle: "Открыть")
         alert.addButton(withTitle: "Отмена")
-        NSApp.activate()
+        ScreenOutput.activateApp()
         return alert.runModal() == .alertFirstButtonReturn
     }
 
@@ -215,7 +227,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         alert.informativeText = "Ссылка просит открыть:\n\(url.path)"
         alert.addButton(withTitle: "Открыть")
         alert.addButton(withTitle: "Отмена")
-        NSApp.activate()
+        ScreenOutput.activateApp()
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         open([url])
     }
@@ -297,6 +309,11 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
     }
 
     private func write(_ tab: EditorTab, to url: URL, lossy: Bool = false, done: ((Bool) -> Void)?) {
+        // Правили в «Документе» — сначала проверки без потерь; не прошли — файл не пишется (лист `d10`).
+        if tab.editedInDocument, !lossy {
+            let report = DocSaveGuard.check(document: tab.document, text: tab.text, journal: tab.journal)
+            guard report.passed else { return presentSaveGuard(report, for: tab, done: done) }
+        }
         let text = tab.text.copy() as! NSString as String
         do {
             let data = try tab.document.data(for: text, lossy: lossy)
@@ -481,6 +498,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
 
     func showFind(replace: Bool) {
         guard let tab = workspace.current else { return }
+        // Поиск и замена работают по исходнику — в «Код» (место переносится).
+        if tab.mode == .document { tab.setMode(.code) }
         if workspace.findMode == nil { workspace.search.prepare(from: tab) }
         workspace.findMode = replace || workspace.findMode == true
         workspace.search.refresh()
@@ -537,6 +556,95 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         if let tab = workspace.current { tab.textView.window?.makeFirstResponder(tab.textView) }
     }
 
+    // MARK: - Защита при записи
+
+    /// Показ листа (подменяется в тестах): `d10` с выбором «Сохранить как копию…», «Показать в коде», «Отмена».
+    lazy var saveGuardPrompt: (DocSaveGuard.Report, EditorTab, @escaping (Bool) -> Void) -> Void = { [weak self] report, tab, done in
+        guard let self, let window = self.window else { return done(false) }
+        let sheet = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 320), styleMask: [.titled], backing: .buffered, defer: true)
+        func finish() {
+            window.endSheet(sheet)
+        }
+        let view = DocSaveGuardSheet(report: report) { [weak self] in
+            finish()
+            self?.saveCopy(report, of: tab) { _ in done(false) }
+        } showInCode: {
+            finish()
+            if let range = report.problemRange { tab.showInCode(range) } else { tab.setMode(.code) }
+            done(false)
+        } cancel: {
+            finish()
+            done(false)
+        }
+        let host = NSHostingView(rootView: view)
+        host.frame.size = host.fittingSize
+        sheet.contentView = host
+        sheet.setContentSize(host.fittingSize)
+        window.beginSheet(sheet)
+    }
+
+    private func presentSaveGuard(_ report: DocSaveGuard.Report, for tab: EditorTab, done: ((Bool) -> Void)?) {
+        saveGuardPrompt(report, tab) { done?($0) }
+    }
+
+    /// «Сохранить как копию…»: те же байты с правками — в другой файл; оригинал и вкладка не меняются.
+    func saveCopy(_ report: DocSaveGuard.Report, of tab: EditorTab, done: @escaping (Bool) -> Void) {
+        guard let data = report.data, let window else { return done(false) }
+        let panel = NSSavePanel()
+        let base = tab.document.url?.deletingPathExtension().lastPathComponent ?? tab.untitledName
+        let ext = tab.document.url?.pathExtension ?? "rtf"
+        panel.nameFieldStringValue = "\(base) копия.\(ext.isEmpty ? "rtf" : ext)"
+        if let folder = tab.document.url?.deletingLastPathComponent() { panel.directoryURL = folder }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            MainActor.assumeIsolated {
+                guard response == .OK, let url = panel.url else { return done(false) }
+                do {
+                    try Self.writeFile(data, to: url)
+                    tab.documentController?.show(notice: "Копия сохранена: \(url.lastPathComponent). Оригинал не тронут.")
+                    done(true)
+                } catch {
+                    self?.showError("Не удалось сохранить копию «\(url.lastPathComponent)»", error)
+                    done(false)
+                }
+            }
+        }
+    }
+
+    // MARK: - Открыть в Word
+
+    static let wordBundleID = "com.microsoft.Word"
+
+    /// Заглушка «Открыть в Word»: Word открывает файл с диска — несохранённые правки сначала сохранить или оставить.
+    func openInWord(_ tab: EditorTab?) {
+        guard let tab, let url = tab.document.url else { return Feedback.beep() }
+        guard let word = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.wordBundleID) else {
+            let alert = NSAlert()
+            alert.messageText = "Microsoft Word не найден"
+            alert.informativeText = "Этот элемент можно посмотреть в Word, но Word на этом Mac не установлен. «Показать в коде» откроет его исходник."
+            if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+            return
+        }
+        let open = {
+            NSWorkspace.shared.open([url], withApplicationAt: word, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+        }
+        guard tab.isDirty, let window else { return open() }
+        let alert = NSAlert()
+        alert.messageText = "Открыть в Word версию с диска?"
+        alert.informativeText = "Word прочитает файл с диска — несохранённых правок в нём ещё нет."
+        alert.addButton(withTitle: "Сохранить и открыть")
+        alert.addButton(withTitle: "Открыть с диска")
+        alert.addButton(withTitle: "Отмена")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            MainActor.assumeIsolated {
+                switch response {
+                case .alertFirstButtonReturn: self?.save(tab) { saved in if saved { open() } }
+                case .alertSecondButtonReturn: open()
+                default: break
+                }
+            }
+        }
+    }
+
     // MARK: - Ошибки
 
     func showError(_ title: String, _ error: Error) {
@@ -561,7 +669,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         alert.informativeText = "Выйти без сохранения? Правки пропадут. Чтобы не терять их, включите «Автосохранение черновиков» в настройках редактора."
         alert.addButton(withTitle: "Отмена")
         alert.addButton(withTitle: "Выйти без сохранения")
-        NSApp.activate()
+        ScreenOutput.activateApp()
         return alert.runModal() == .alertSecondButtonReturn
     }
 
@@ -595,6 +703,13 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         case #selector(editorToggleWrap(_:)):
             item.state = workspace.wraps ? .on : .off
             return tab != nil
+        case #selector(editorToggleDocument(_:)):
+            item.state = tab?.mode == .document ? .on : .off
+            if let reason = tab?.documentUnavailableReason { item.toolTip = reason }
+            return tab?.canShowDocument ?? false
+        case #selector(editorShowCode(_:)):
+            item.state = tab?.mode == .code ? .on : .off
+            return tab?.isRTF ?? false
         case #selector(editorToggleDollarPanel(_:)):
             item.state = workspace.dollarPanelVisible ? .on : .off
             return tab != nil
@@ -605,8 +720,10 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         case #selector(editorNextBookmark(_:)), #selector(editorPreviousBookmark(_:)), #selector(editorClearBookmarks(_:)):
             return !(tab?.bookmarks.isEmpty ?? true)
         case #selector(editorZoomOut(_:)):
+            if let document = documentInFront { return document.zoom > DocumentController.zoomRange.lowerBound }
             return tab != nil && workspace.zoom > EditorStyle.zoomRange.lowerBound
         case #selector(editorZoomIn(_:)):
+            if let document = documentInFront { return document.zoom < DocumentController.zoomRange.upperBound }
             return tab != nil && workspace.zoom < EditorStyle.zoomRange.upperBound
         default:
             return tab != nil
@@ -633,11 +750,29 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
     @objc func editorFindInFolder(_ sender: Any?) { showFolderSearch() }
 
     @objc func editorToggleWrap(_ sender: Any?) { workspace.wraps.toggle() }
+    @objc func editorToggleDocument(_ sender: Any?) { if let tab { tab.setMode(tab.mode == .document ? .code : .document) } }
+    @objc func editorShowCode(_ sender: Any?) { tab?.setMode(.code) }
     @objc func editorToggleInvisibles(_ sender: Any?) { workspace.showsInvisibles.toggle() }
     @objc func editorToggleBrackets(_ sender: Any?) { workspace.matchesBrackets.toggle() }
-    @objc func editorZoomIn(_ sender: Any?) { workspace.zoom = min(EditorStyle.zoomRange.upperBound, (workspace.zoom * 10 + 1).rounded() / 10) }
-    @objc func editorZoomOut(_ sender: Any?) { workspace.zoom = max(EditorStyle.zoomRange.lowerBound, (workspace.zoom * 10 - 1).rounded() / 10) }
-    @objc func editorZoomReset(_ sender: Any?) { workspace.zoom = 1 }
+    @objc func editorZoomIn(_ sender: Any?) {
+        if let document = documentInFront { return document.step(zoom: 1) }
+        workspace.zoom = min(EditorStyle.zoomRange.upperBound, (workspace.zoom * 10 + 1).rounded() / 10)
+    }
+    @objc func editorZoomOut(_ sender: Any?) {
+        if let document = documentInFront { return document.step(zoom: -1) }
+        workspace.zoom = max(EditorStyle.zoomRange.lowerBound, (workspace.zoom * 10 - 1).rounded() / 10)
+    }
+    @objc func editorZoomReset(_ sender: Any?) {
+        if let document = documentInFront {
+            document.fit = .none
+            document.zoom = 1
+            return
+        }
+        workspace.zoom = 1
+    }
+
+    /// Вкладка в «Документе»: ⌘+ / ⌘− / ⌘0 меняют масштаб страниц.
+    private var documentInFront: DocumentController? { tab?.mode == .document ? tab?.documentController : nil }
     @objc func editorToggleDollarPanel(_ sender: Any?) { workspace.dollarPanelVisible.toggle() }
     @objc func editorRemoveValues(_ sender: Any?) {
         tab?.removeHighlightedValues()

@@ -55,7 +55,8 @@ enum WindowList {
     /// Mac Utils в своём переключателе — пока у него есть значок в Dock (открыт редактор или трансляция, либо
     /// включено «Показывать в Dock»); с `.accessory` его в списке нет.
     @MainActor
-    static func snapshotApps(includeSelf: Bool = NSApp.activationPolicy() == .regular) -> UncheckedSendable<[pid_t: AppInfo]> {
+    static func snapshotApps(includeSelf: Bool? = nil) -> UncheckedSendable<[pid_t: AppInfo]> {
+        let includeSelf = includeSelf ?? (NSApp.activationPolicy() == .regular)
         let ownPID = ownPID
         var apps = Dictionary(NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != ownPID }
@@ -305,10 +306,10 @@ enum WindowActivation {
     /// Своё окно — средствами AppKit (AX к своему процессу не ходим): свёрнутое разворачивается.
     private static func activateOwn(_ item: SwitcherItem) {
         if NSApp.isHidden { NSApp.unhide(nil) }
-        NSApp.activate(ignoringOtherApps: true)
+        ScreenOutput.activateApp(ignoringOtherApps: true)
         guard let number = item.windowID, let window = NSApp.window(withWindowNumber: Int(number)) else { return }
         if window.isMiniaturized { window.deminiaturize(nil) }
-        window.makeKeyAndOrderFront(nil)
+        window.makeKeyAndOrderFrontOnScreen()
     }
 
     /// Если AX-окно не сохранилось — ищем его по номеру, затем по заголовку.

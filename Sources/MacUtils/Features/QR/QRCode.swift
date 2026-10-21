@@ -125,7 +125,7 @@ final class QRCodeService: ObservableObject {
             return
         }
         center.register(id: HotKeyID.qr, keyCode: kVK_ANSI_Q, modifiers: controlKey | optionKey) {
-            QRCodeService.shared.run()
+            AppAction(hotKey: .qr).run()
         }
     }
 
@@ -235,7 +235,7 @@ final class QRCodeService: ObservableObject {
             panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.midX - size.width / 2,
                                          y: screen.visibleFrame.midY - size.height / 2))
         }
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
         outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
             MainActor.assumeIsolated { QRCodeService.shared.hide() }
         }

@@ -19,7 +19,7 @@ final class WindowPin: ObservableObject {
             return
         }
         center.register(id: HotKeyID.windowPin, keyCode: kVK_ANSI_P, modifiers: controlKey | optionKey) {
-            WindowPin.shared.toggleFocused()
+            AppAction(hotKey: .windowPin).run()
         }
     }
 
@@ -154,7 +154,7 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
         if hidden {
             panel.orderOut(nil)
         } else {
-            panel.orderFrontRegardless()
+            panel.orderFrontRegardlessOnScreen()
         }
         // Копия скрыта — кадры никому не нужны: захват 30 к/с без дела только греет Mac.
         if hidden != isHiddenCopy {

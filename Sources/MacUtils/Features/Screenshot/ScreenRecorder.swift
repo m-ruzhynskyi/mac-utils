@@ -220,7 +220,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         alert.addButton(withTitle: "Удалить запись")
         alert.buttons[0].keyEquivalent = "\u{1b}"  // Esc = «Продолжить запись»
         alert.buttons[1].hasDestructiveAction = true
-        NSApp.activate()
+        ScreenOutput.activateApp()
         if alert.runModal() == .alertSecondButtonReturn { cancel() }
     }
 
@@ -306,10 +306,12 @@ final class ScreenRecorder: NSObject, ObservableObject {
                 pasteboard.clearContents()
                 pasteboard.writeObjects([destination as NSURL])
             }
+            // MP4 — сразу посмотреть в плеере Mac Utils; GIF — показать в Finder.
+            let action = format == .gif
+                ? Toast.Action(title: "Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([destination]) }
+                : Toast.Action(title: "Открыть в плеере") { PlayerWindowController.open([destination]) }
             Toast.show(copy ? "Запись сохранена и скопирована" : "Запись сохранена", symbol: "record.circle", tint: .red,
-                       action: Toast.Action(title: "Показать в Finder") {
-                           NSWorkspace.shared.activateFileViewerSelecting([destination])
-                       })
+                       action: action)
         } catch {
             Toast.show("Не удалось сохранить запись: \(error.localizedDescription)",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
@@ -372,7 +374,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         border.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         border.contentView = NSHostingView(rootView:
             RoundedRectangle(cornerRadius: 3).strokeBorder(Color.red, lineWidth: 2))
-        border.orderFrontRegardless()
+        border.orderFrontRegardlessOnScreen()
         borderPanel = border
 
         let host = FirstMouseHostingView(rootView: RecordingHUD(recorder: self))
@@ -391,7 +393,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         if origin.y + size.height > visible.maxY { origin.y = rect.minY + 12 }
         origin.x = min(max(visible.minX + 8, origin.x), visible.maxX - size.width - 8)
         hud.setFrameOrigin(origin)
-        hud.orderFrontRegardless()
+        hud.orderFrontRegardlessOnScreen()
         hudPanel = hud
     }
 }

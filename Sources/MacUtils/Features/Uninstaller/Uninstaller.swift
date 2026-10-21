@@ -124,7 +124,7 @@ final class UninstallerModel: ObservableObject {
             alert.informativeText = "Чтобы удалить его полностью, приложение нужно закрыть."
             alert.addButton(withTitle: "Закрыть и удалить")
             alert.addButton(withTitle: "Отмена")
-            NSApp.activate()
+            ScreenOutput.activateApp()
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             running.forEach { $0.terminate() }
             working = true
@@ -141,7 +141,7 @@ final class UninstallerModel: ObservableObject {
                     alert.addButton(withTitle: "Подождать")
                     alert.addButton(withTitle: "Отмена")
                     alert.addButton(withTitle: "Завершить принудительно")
-                    NSApp.activate()
+                    ScreenOutput.activateApp()
                     switch alert.runModal() {
                     case .alertFirstButtonReturn:
                         continue

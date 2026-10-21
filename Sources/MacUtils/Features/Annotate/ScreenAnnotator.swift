@@ -63,7 +63,7 @@ final class ScreenAnnotator: ObservableObject {
             return
         }
         center.register(id: HotKeyID.annotate, keyCode: kVK_ANSI_A, modifiers: controlKey | optionKey) {
-            ScreenAnnotator.shared.toggle()
+            AppAction(hotKey: .annotate).run()
         }
     }
 
@@ -96,7 +96,7 @@ final class ScreenAnnotator: ObservableObject {
         bar.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         bar.isMovableByWindowBackground = true
         bar.contentView = host
-        bar.orderFrontRegardless()
+        bar.orderFrontRegardlessOnScreen()
         toolbarPanel = bar
 
         screenObserver = NotificationCenter.default.addObserver(
@@ -159,10 +159,10 @@ final class ScreenAnnotator: ObservableObject {
         let key = preferred.flatMap { overlays[$0] } ?? overlays.values.first
         for overlay in overlays.values {
             if overlay.panel === key?.panel, !isClickThroughNow {
-                overlay.panel.makeKeyAndOrderFront(nil)
+                overlay.panel.makeKeyAndOrderFrontOnScreen()
                 overlay.panel.makeFirstResponder(overlay.canvas)
             } else {
-                overlay.panel.orderFrontRegardless()
+                overlay.panel.orderFrontRegardlessOnScreen()
             }
         }
         redrawAll()
@@ -197,7 +197,7 @@ final class ScreenAnnotator: ObservableObject {
         }
         // Вернулись к рисованию — клавиши (Esc, 1–4) снова должны попадать на холст.
         if !ignore, let overlay = overlays.values.first(where: { $0.panel.isKeyWindow }) ?? overlays.values.first {
-            overlay.panel.makeKeyAndOrderFront(nil)
+            overlay.panel.makeKeyAndOrderFrontOnScreen()
             overlay.panel.makeFirstResponder(overlay.canvas)
         }
     }

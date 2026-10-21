@@ -69,7 +69,7 @@ final class LayoutFix: ObservableObject {
             hotKey = nil
         } else if hotKey != key || !center.isRegistered(id: HotKeyID.layoutFix) {
             center.register(id: HotKeyID.layoutFix, keyCode: key.keyCode, modifiers: key.modifiers) {
-                LayoutFix.shared.fix()
+                AppAction(hotKey: .layoutFix).run()
             }
             hotKey = key
         }

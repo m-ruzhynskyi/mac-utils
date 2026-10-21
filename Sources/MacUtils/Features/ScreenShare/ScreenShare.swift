@@ -898,7 +898,7 @@ final class ScreenShare: NSObject, ObservableObject {
         alert.informativeText = "Трансляция остановится, ключ этого Mac и ID будут заменены. Старый ID перестанет работать: друзьям нужно сообщить новый."
         alert.addButton(withTitle: "Получить новый ID")
         alert.addButton(withTitle: "Отмена")
-        NSApp.activate()
+        ScreenOutput.activateApp()
         if alert.runModal() == .alertFirstButtonReturn { renewID() }
     }
 
@@ -925,7 +925,7 @@ final class ScreenShare: NSObject, ObservableObject {
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = host
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
         hud = panel
         refreshVideoFilter()
     }
@@ -1764,8 +1764,8 @@ final class ShareViewer: ObservableObject {
         installMonitorKeys()
         let label = ShareHistory.shared.label(for: code)
         window.title = code.isEmpty ? "Трансляция экрана" : "Трансляция · \(label ?? ShareCode.display(code))"
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        ScreenOutput.activateApp()
+        window.makeKeyAndOrderFrontOnScreen()
     }
 }
 

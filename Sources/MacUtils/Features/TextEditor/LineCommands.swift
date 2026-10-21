@@ -256,7 +256,7 @@ extension EditorTab {
     /// Применить команду правки одним шагом отмены.
     func apply(_ command: (NSString, NSRange, String) -> LineEdit?, name: String) {
         guard let edit = command(text, textView.selectedRange(), textView.lineBreak) else {
-            NSSound.beep()
+            Feedback.beep()
             return
         }
         guard textView.replace(edit.ranges, with: edit.strings, actionName: name) else { return }

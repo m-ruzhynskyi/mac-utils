@@ -52,7 +52,7 @@ final class AppVolume: ObservableObject {
         let key = LayoutHotKey.load(codeKey: Pref.appVolumeKeyCode, modifiersKey: Pref.appVolumeModifiers,
                                     default: .controlOptionV)
         center.register(id: HotKeyID.appVolume, keyCode: key.keyCode, modifiers: key.modifiers) {
-            AppVolume.shared.toggleHUD()
+            AppAction(hotKey: .appVolume).run()
         }
         installListeners()
         isRunning = true
@@ -302,7 +302,7 @@ final class VolumeHUDController {
     func show() {
         let panel = self.panel ?? make()
         relayout()
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
         outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             MainActor.assumeIsolated { self?.hide() }
         }

@@ -88,8 +88,8 @@ final class TextEditorUITests: XCTestCase {
     }
 
     /// Ждём фоновый скан `$` (debounce и очередь).
-    private func waitForScan(_ tab: EditorTab, count: Int, file: StaticString = #filePath, line: UInt = #line) {
-        let deadline = Date().addingTimeInterval(5)
+    private func waitForScan(_ tab: EditorTab, count: Int, timeout: TimeInterval = 5, file: StaticString = #filePath, line: UInt = #line) {
+        let deadline = Date().addingTimeInterval(timeout)
         while tab.dollars.entries.count != count, Date() < deadline { settle(0.05) }
         XCTAssertEqual(tab.dollars.entries.count, count, file: file, line: line)
     }
@@ -180,7 +180,9 @@ final class TextEditorUITests: XCTestCase {
         let tab = EditorTab(document: EditorDocument(data: big.data, url: URL(fileURLWithPath: "/tmp/big.frm")))
         workspace.add(tab)
         let window = host(workspace, size: NSSize(width: 1000, height: 700))
-        waitForScan(tab, count: big.dollars)
+        // Скан 10 МБ в фоне: под нагрузкой (полный прогон) — дольше; не дождались — проверка, а не падение процесса.
+        waitForScan(tab, count: big.dollars, timeout: 30)
+        guard tab.dollars.entries.count == big.dollars else { return }
         let select = TextEditorPerformanceTests.measure {
             tab.dollars.selected = tab.dollars.entries[big.dollars / 2].id
             window.contentView?.layoutSubtreeIfNeeded()

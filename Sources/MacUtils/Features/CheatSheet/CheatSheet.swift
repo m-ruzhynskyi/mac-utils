@@ -176,7 +176,9 @@ final class CheatSheet: ObservableObject {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     let sheet = CheatSheet.shared
-                    sheet.groups = menus + [Self.macUtilsGroup()]
+                    // Окно плеера впереди — его клавиши (их нет в меню: они без ⌘).
+                    let player = own && PlayerWindowController.isKey ? [PlayerShortcuts.cheatGroup] : []
+                    sheet.groups = player + menus + [Self.macUtilsGroup()]
                     sheet.loading = false
                     sheet.resizePanel()
                 }
@@ -187,7 +189,7 @@ final class CheatSheet: ObservableObject {
     private func presentPanel() {
         let panel = self.panel ?? makePanel()
         resizePanel()
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardlessOnScreen()
     }
 
     private func resizePanel() {

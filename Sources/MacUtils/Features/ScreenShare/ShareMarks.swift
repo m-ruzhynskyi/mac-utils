@@ -206,14 +206,14 @@ final class ShareMarksOverlay {
         // Под строкой меню и индикатором «Эфир».
         let top = screen.map { $0.frame.maxY - $0.visibleFrame.maxY } ?? 0
         notices.show(ShareHostNotice(name: name, monitor: monitor, displays: displays), top: top + 44)
-        panel?.orderFrontRegardless()
+        panel?.orderFrontRegardlessOnScreen("Уведомление о мониторе")
     }
 
     func show(_ mark: ShareMark) {
         guard UserDefaults.standard.bool(forKey: Pref.shareAllowMarks), panel != nil || filter != nil else { return }
         if panel == nil { updateFrame() }
         store.add(mark)
-        panel?.orderFrontRegardless()
+        panel?.orderFrontRegardlessOnScreen()
     }
 
     private func updateFrame() {

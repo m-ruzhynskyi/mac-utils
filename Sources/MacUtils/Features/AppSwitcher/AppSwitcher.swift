@@ -340,7 +340,7 @@ final class AppSwitcher: NSObject, ObservableObject {
     private func quitSelected() {
         guard items.indices.contains(selected) else { return }
         // Q на своей карточке завершил бы сам Mac Utils вместе с переключателем.
-        guard items[selected].pid != WindowList.ownPID else { return NSSound.beep() }
+        guard items[selected].pid != WindowList.ownPID else { return Feedback.beep() }
         let pid = items[selected].pid
         items[selected].app.terminate()
         removeItems(of: pid)

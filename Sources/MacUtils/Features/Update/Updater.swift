@@ -261,7 +261,7 @@ final class Updater: NSObject, ObservableObject {
             alert.informativeText = prompt.title + ". " + prompt.message
             alert.addButton(withTitle: "Обновить и перезапустить")
             alert.addButton(withTitle: "Не сейчас")
-            NSApp.activate(ignoringOtherApps: true)
+            ScreenOutput.activateApp(ignoringOtherApps: true)
             guard alert.runModal() == .alertFirstButtonReturn else {
                 state = .available(release.version)
                 return

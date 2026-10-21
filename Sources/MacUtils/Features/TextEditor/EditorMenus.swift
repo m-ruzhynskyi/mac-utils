@@ -105,6 +105,9 @@ enum EditorMenus {
                 ]),
             ]),
             submenu("Вид", [
+                item("Код", #selector(C.editorShowCode(_:))),
+                item("Документ", #selector(C.editorToggleDocument(_:)), "d", [.command, .shift]),
+                .separator(),
                 item("Перенос строк", #selector(C.editorToggleWrap(_:))),
                 item("Невидимые символы", #selector(C.editorToggleInvisibles(_:)), "i", [.command, .option]),
                 item("Парные скобки", #selector(C.editorToggleBrackets(_:))),
@@ -136,14 +139,17 @@ enum EditorMenus {
 @MainActor
 private final class EditorMenuActions: NSObject, NSMenuDelegate, NSMenuItemValidation {
     @objc func newDocument() { EditorWindowController.shared.newDocument() }
-    @objc func open() { EditorWindowController.shared.openPanel() }
+    /// «Файл → Открыть…» из окна плеера — видео в плеер (⌘O с клавиатуры плеер перехватывает раньше меню).
+    @objc func open() {
+        if PlayerWindowController.isKey { PlayerWindowController.openPanel() } else { EditorWindowController.shared.openPanel() }
+    }
 
     @objc func openRecent(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
         guard FileManager.default.fileExists(atPath: url.path) else {
             // Файла больше нет — убираем из списка.
             EditorRecent.remove(url)
-            NSSound.beep()
+            Feedback.beep()
             return
         }
         EditorWindowController.shared.open([url])
