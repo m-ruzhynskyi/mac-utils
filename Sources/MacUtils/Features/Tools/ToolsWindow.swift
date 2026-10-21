@@ -151,10 +151,10 @@ struct ToolsView: View {
 
     // MARK: Окно «Инструменты»
 
-    /// Вкладки окна: как в панели; инструменты (программы, монитор, задачи, снимки, очистка) — всегда,
-    /// даже если в панели их скрыли.
+    /// Вкладки окна: как в панели; инструменты (программы, монитор, задачи, снимки, очистка) и плеер — всегда,
+    /// даже если в панели их скрыли (вкладка «Плеер» в панели по умолчанию выключена).
     private var windowTabs: [SettingsSection] {
-        let tools = ToolsWindowController.Tab.allCases.compactMap { SettingsSection(rawValue: $0.rawValue) }
+        let tools = ToolsWindowController.Tab.allCases.compactMap { SettingsSection(rawValue: $0.rawValue) } + [.videoPlayer]
         return visibleTabs + tools.filter { !visibleTabs.contains($0) }
     }
 

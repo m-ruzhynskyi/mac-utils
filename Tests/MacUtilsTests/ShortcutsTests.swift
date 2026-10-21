@@ -52,6 +52,8 @@ final class ShortcutsTests: XCTestCase {
             ("macutils://meeting-start", .meeting(.start)), ("macutils://meeting-stop", .meeting(.stop)),
             ("macutils://share-start?screen", .shareStart(screen: true)), ("macutils://share-stop", .shareStop),
             ("macutils://viewer-monitor?3", .viewerMonitor(3)),
+            ("macutils://player", .player), ("macutils://player-open?path=/tmp/v.mp4", .playerOpen(path: "/tmp/v.mp4")),
+            ("macutils://player-pause", .playerTogglePlay), ("macutils://player-continue", .playerContinue),
             ("macutils://dollars-remove?path=/tmp/a.frm&skip=5", .dollarsRemove(path: "/tmp/a.frm", skipFirst: 5)),
             ("macutils://dollars-remove?path=/tmp/a.frm&skip=off", .dollarsRemove(path: "/tmp/a.frm", skipFirst: nil)),
             ("macutils://dollars-find?path=/tmp/a.frm", .dollarsFind(path: "/tmp/a.frm")),
@@ -101,6 +103,7 @@ final class ShortcutsTests: XCTestCase {
             (FixSelectedTextIntent(), .fixText), (LayoutFixIntent(), .layoutFix), (BreakIntent(), .breakNow),
             (ShelfIntent(), .shelf), (AppVolumeIntent(), .appVolume), (OpenDownloadsIntent(), .openDownloads),
             (SortDownloadsIntent(), .sortDownloads), (OpenEditorIntent(), .editor(path: nil)),
+            (OpenPlayerIntent(), .player), (PlayerTogglePlayIntent(), .playerTogglePlay), (ContinueWatchingIntent(), .playerContinue),
         ]
         for (intent, action) in cases {
             ran = []

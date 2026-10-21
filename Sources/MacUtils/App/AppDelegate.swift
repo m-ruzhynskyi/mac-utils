@@ -46,6 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) {
             AppAction(hotKey: .textEditor).run()
         }
+        HotKeyCenter.shared.register(
+            id: HotKeyID.videoPlayer,
+            keyCode: kVK_ANSI_P,
+            modifiers: cmdKey | optionKey | controlKey
+        ) {
+            AppAction(hotKey: .videoPlayer).run()
+        }
 
         // Чистая установка: «Что нового» не нужно (оно только после обновления). Делаем до `Updater.start()`.
         let launchDefaults = UserDefaults.standard
@@ -80,10 +87,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Ссылки `macutils://…` — те же действия, что горячие клавиши, панель и «Команды» (`AppAction`, список — страница
-    /// «Команды и ссылки»). Файлы («Открыть с помощью», перетаскивание на значок в Dock) открываются вкладками редактора.
+    /// «Команды и ссылки»). Файлы («Открыть с помощью», перетаскивание на значок в Dock): видео и звук — в плеер,
+    /// субтитры — к видео в открытом плеере, остальное — вкладками текстового редактора.
     func application(_ application: NSApplication, open urls: [URL]) {
         let files = urls.filter(\.isFileURL)
-        if !files.isEmpty { EditorWindowController.shared.open(files) }
+        let route = FileRoute.split(files, playerOpen: PlayerWindowController.anyOpen)
+        if !route.player.isEmpty { PlayerWindowController.open(route.player) }
+        if !route.editor.isEmpty { EditorWindowController.shared.open(route.editor) }
         for url in urls where url.scheme == "macutils" {
             if let action = AppAction(url: url) {
                 action.run()
@@ -113,7 +123,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ShareViewer.shared.showWindow()
             return false
         }
-        // Значок в Dock появился из-за редактора — к нему.
+        // Значок в Dock появился из-за плеера или редактора — к ним (последний активный).
+        if PlayerWindowController.anyOpen, !EditorWindowController.shared.isKey {
+            PlayerWindowController.show()
+            return false
+        }
         if EditorWindowController.shared.isOpen {
             EditorWindowController.shared.show()
             return false
@@ -220,6 +234,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Плеер: место запоминается и при выходе с открытым окном.
+        for controller in PlayerWindowController.windows { controller.model.savePosition() }
         WarmScreen.shared.shutdown()
         KeepAwake.shared.shutdown()
         AppSwitcher.shared.shutdown()
@@ -283,12 +299,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// В Dock — обычное приложение (клик по значку открывает настройки), иначе — фоновое.
     private func syncDock() { Self.syncDock() }
 
-    /// В Dock — если так выбрано в настройках, открыт просмотр трансляции (чтобы окно было легко найти) или окно
-    /// текстового редактора (у него строка меню «Файл / Правка / … / Кодировка»). `editorOpen` — пока окно открывается
-    /// или закрывается.
-    static func syncDock(editorOpen: Bool? = nil) {
+    /// В Dock — если так выбрано в настройках, открыт просмотр трансляции (чтобы окно было легко найти), окно
+    /// текстового редактора (у него строка меню «Файл / Правка / … / Кодировка») или окно плеера (полный экран,
+    /// PiP и ⌘Tab работают только у обычного приложения). `editorOpen`, `playerOpen` — пока окно открывается или закрывается.
+    static func syncDock(editorOpen: Bool? = nil, playerOpen: Bool? = nil) {
         let visible = UserDefaults.standard.bool(forKey: Pref.showInDock) || ShareViewer.shared.isWindowOpen
-            || (editorOpen ?? EditorWindowController.shared.isOpen)
+            || (editorOpen ?? EditorWindowController.shared.isOpen) || (playerOpen ?? PlayerWindowController.anyOpen)
         let policy: NSApplication.ActivationPolicy = visible ? .regular : .accessory
         guard NSApp.activationPolicy() != policy else { return }
         NSApp.setActivationPolicy(policy)
@@ -318,4 +334,17 @@ enum HotKeyID {
     static let meeting: UInt32 = 32
     static let focus: UInt32 = 33
     static let textEditor: UInt32 = 34
+    static let videoPlayer: UInt32 = 35
+}
+
+/// Куда открыть файлы из Finder и Dock: видео и звук — в плеер; субтитры — в плеер, если он открыт (к текущему видео),
+/// иначе в редактор как текст; остальное — в редактор.
+enum FileRoute {
+    static func split(_ urls: [URL], playerOpen: Bool) -> (player: [URL], editor: [URL]) {
+        var player: [URL] = [], editor: [URL] = []
+        for url in urls {
+            if PlayerMedia.isMedia(url) || (playerOpen && PlayerMedia.isSubtitle(url)) { player.append(url) } else { editor.append(url) }
+        }
+        return (player, editor)
+    }
 }

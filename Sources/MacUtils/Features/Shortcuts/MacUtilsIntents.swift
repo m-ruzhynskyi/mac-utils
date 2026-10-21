@@ -292,6 +292,31 @@ struct ConvertLineEndingsIntent: AppIntent {
     }
 }
 
+// MARK: - Видеоплеер
+
+struct OpenPlayerIntent: AppIntent {
+    static let title: LocalizedStringResource = "Открыть видеоплеер"
+    static let description = IntentDescription("Видеоплеер Mac Utils (⌃⌥⌘P); если указан файл или папка — открыть их (папку — плейлистом).")
+    @Parameter(title: "Видео или папка") var file: IntentFile?
+    static var parameterSummary: some ParameterSummary { Summary("Открыть в плеере \(\.$file)") }
+    @MainActor func perform() async throws -> some IntentResult {
+        if let file { AppAction.playerOpen(path: try path(of: file).path).run() } else { AppAction.player.run() }
+        return .result()
+    }
+}
+
+struct PlayerTogglePlayIntent: AppIntent {
+    static let title: LocalizedStringResource = "Пауза в плеере"
+    static let description = IntentDescription("Пауза или продолжить в активном окне видеоплеера.")
+    @MainActor func perform() async throws -> some IntentResult { run(.playerTogglePlay) }
+}
+
+struct ContinueWatchingIntent: AppIntent {
+    static let title: LocalizedStringResource = "Продолжить просмотр"
+    static let description = IntentDescription("Открыть последнее недосмотренное видео с того же места.")
+    @MainActor func perform() async throws -> some IntentResult { run(.playerContinue) }
+}
+
 // MARK: - Встречи, текст, здоровье, прочее
 
 struct MeetingIntent: AppIntent {

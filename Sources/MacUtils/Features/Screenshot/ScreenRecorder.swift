@@ -306,10 +306,12 @@ final class ScreenRecorder: NSObject, ObservableObject {
                 pasteboard.clearContents()
                 pasteboard.writeObjects([destination as NSURL])
             }
+            // MP4 — сразу посмотреть в плеере Mac Utils; GIF — показать в Finder.
+            let action = format == .gif
+                ? Toast.Action(title: "Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([destination]) }
+                : Toast.Action(title: "Открыть в плеере") { PlayerWindowController.open([destination]) }
             Toast.show(copy ? "Запись сохранена и скопирована" : "Запись сохранена", symbol: "record.circle", tint: .red,
-                       action: Toast.Action(title: "Показать в Finder") {
-                           NSWorkspace.shared.activateFileViewerSelecting([destination])
-                       })
+                       action: action)
         } catch {
             Toast.show("Не удалось сохранить запись: \(error.localizedDescription)",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)

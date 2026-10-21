@@ -6,7 +6,7 @@ import SwiftUI
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general, hotKeys, exclusions, panel, music, share, focus, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
-         uninstaller, monitor, tasks, cleanup, shots, textEditor, shortcuts
+         uninstaller, monitor, tasks, cleanup, shots, textEditor, videoPlayer, shortcuts
 
     var id: String { rawValue }
 
@@ -19,6 +19,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .cleanup: return "Очистка"
         case .shots: return "Снимки"
         case .textEditor: return "Редактор"
+        case .videoPlayer: return "Плеер"
         case .shortcuts: return "Команды"
         case .cutPaste: return "Вырезать"
         case .smoothScroll: return "Прокрутка"
@@ -77,6 +78,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .cleanup: return "Очистка диска"
         case .shots: return "Мои снимки"
         case .textEditor: return "Текстовый редактор"
+        case .videoPlayer: return "Видеоплеер"
         case .shortcuts: return "Команды и ссылки"
         }
     }
@@ -112,6 +114,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .cleanup: return "externaldrive.badge.minus"
         case .shots: return "photo.on.rectangle.angled"
         case .textEditor: return "doc.plaintext"
+        case .videoPlayer: return "play.rectangle"
         case .shortcuts: return "square.stack.3d.forward.dottedline"
         }
     }
@@ -152,6 +155,7 @@ extension SettingsSection {
         case .cleanup: return "очистка диска кэш корзина загрузки место"
         case .shots: return "мои снимки история поиск умная папка копии снимков"
         case .textEditor: return "текстовый редактор блокнот notepad frm rtf txt log json xml csv кодировка вкладки знаки $ доллар открыть с помощью"
+        case .videoPlayer: return "видеоплеер видео плеер фильм сериал mp4 mov m4v mp3 субтитры srt ass дорожка скорость плейлист пропустить интро титры следующая серия кадр картинка в картинке pip"
         case .shortcuts: return "команды shortcuts siri spotlight автоматизация ссылки url macutils:// открыть url действия"
         }
     }
@@ -188,7 +192,7 @@ enum SettingsGroup: String, CaseIterable, Identifiable {
         case .general: return [.general, .hotKeys, .shortcuts, .exclusions, .panel]
         case .capture: return [.screenshot, .shots, .annotate, .qr, .meetings]
         case .windowsInput: return [.switcher, .windows, .volume, .layout, .smoothScroll, .cutPaste, .textInput]
-        case .filesSystem: return [.shelf, .downloads, .textEditor, .cheatSheet, .uninstaller, .cleanup, .monitor, .tasks]
+        case .filesSystem: return [.shelf, .downloads, .textEditor, .videoPlayer, .cheatSheet, .uninstaller, .cleanup, .monitor, .tasks]
         case .more: return [.wellbeing, .focus, .music, .share, .ai]
         }
     }
@@ -224,6 +228,7 @@ extension SettingsSection {
         case .meetings: return "Записывает звук созвона (собеседников и ваш микрофон отдельно), расшифровывает прямо на Mac (Whisper или распознавание Apple), а локальная модель (Ollama) делает отчёт: итог, решения, задачи."
         case .ai: return "Всё работает на локальной модели через Ollama — тексты, снимки и файлы не уходят в интернет."
         case .textEditor: return "Вкладки, кодировки и знаки $ для .frm и других текстов"
+        case .videoPlayer: return "Плейлист, субтитры, дорожки и запоминание места"
         case .music, .share, .switcher, .wellbeing, .uninstaller, .monitor, .tasks, .cleanup, .shots: return ""
         }
     }

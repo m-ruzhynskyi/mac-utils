@@ -74,6 +74,7 @@ enum AppAction: Equatable {
     case shareStart(screen: Bool), shareStop, shareToggle(screen: Bool)
     case watch(code: String)
     case viewerMonitor(Int)
+    case player, playerOpen(path: String), playerTogglePlay, playerContinue
     case dollarsRemove(path: String, skipFirst: Int?)
     case dollarsFind(path: String)
     case convertEncoding(path: String, TextEncoding, from: TextEncoding?)
@@ -99,6 +100,7 @@ enum AppAction: Equatable {
         case .appVolume: self = .appVolume
         case .layoutFix: self = .layoutFix
         case .textEditor: self = .editor(path: nil)
+        case .videoPlayer: self = .player
         }
     }
 
@@ -155,6 +157,18 @@ enum AppAction: Equatable {
         case .shareToggle(let screen): ScreenShare.shared.isLive ? ScreenShare.shared.stop() : ScreenShare.shared.start(screen: screen)
         case .watch(let code): ShareViewer.shared.watch(code: code)
         case .viewerMonitor(let n): ShareViewer.shared.requestDisplay(n)
+        case .player: PlayerWindowController.show()
+        case .playerOpen(let path): PlayerWindowController.open([Self.fileURL(path)])
+        case .playerTogglePlay:
+            if let controller = PlayerWindowController.current { controller.model.togglePlay() } else { PlayerWindowController.show() }
+        case .playerContinue:
+            // «Продолжить просмотр»: последний недосмотренный файл, который ещё на месте; нет такого — пустое окно со списком.
+            let finished = PlayerRecent.finished
+            if let url = PlayerRecent.urls.first(where: { !finished.contains($0.path) && FileManager.default.fileExists(atPath: $0.path) }) {
+                PlayerWindowController.open([url])
+            } else {
+                PlayerWindowController.show()
+            }
         case .dollarsFind(let path):
             // Список знаков — в панели «Знаки $» редактора (ссылка сначала спрашивает, открывать ли файл).
             EditorWindowController.shared.openFromLink(Self.fileURL(path))
@@ -236,6 +250,12 @@ extension AppAction {
         case "keep-awake":
             guard let choice = query.isEmpty ? .toggle : KeepAwakeChoice(rawValue: query) else { return nil }
             self = .keepAwake(choice)
+        case "player": self = .player
+        case "player-open":
+            guard let path = value("path"), !path.isEmpty else { return nil }
+            self = .playerOpen(path: path)
+        case "player-pause": self = .playerTogglePlay
+        case "player-continue": self = .playerContinue
         case "downloads-sort": self = .sortDownloads
         case "downloads-open": self = .openDownloads
         case "share": self = .shareToggle(screen: query == "screen")
@@ -304,6 +324,10 @@ extension AppAction {
         AppActionInfo(group: "Текстовый редактор", title: "Знаки $ файла (в редакторе)", link: "macutils://dollars-find?path=~/Documents/a.frm", shortcut: "Найти значения $ в файле"),
         AppActionInfo(group: "Текстовый редактор", title: "Сменить кодировку файла", link: "macutils://encoding?path=~/Documents/a.txt&to=utf8", shortcut: "Сменить кодировку файла"),
         AppActionInfo(group: "Текстовый редактор", title: "Переводы строк файла", link: "macutils://line-endings?path=~/Documents/a.txt&to=lf", shortcut: "Переводы строк файла"),
+        AppActionInfo(group: "Видеоплеер", title: "Открыть плеер", link: "macutils://player", shortcut: "Открыть видеоплеер"),
+        AppActionInfo(group: "Видеоплеер", title: "Открыть видео или папку", link: "macutils://player-open?path=~/Movies/film.mp4", shortcut: "Открыть видеоплеер"),
+        AppActionInfo(group: "Видеоплеер", title: "Пауза или продолжить", link: "macutils://player-pause", shortcut: "Пауза в плеере"),
+        AppActionInfo(group: "Видеоплеер", title: "Продолжить просмотр", link: "macutils://player-continue", shortcut: "Продолжить просмотр"),
         AppActionInfo(group: "Встречи", title: "Запись встречи: начать или остановить", link: "macutils://meeting", shortcut: "Запись встречи"),
         AppActionInfo(group: "Встречи", title: "Начать запись встречи", link: "macutils://meeting-start", shortcut: "Запись встречи"),
         AppActionInfo(group: "Встречи", title: "Остановить запись встречи", link: "macutils://meeting-stop", shortcut: "Запись встречи"),
