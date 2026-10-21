@@ -10,4 +10,6 @@ enum Log {
     static let uninstall = Logger(subsystem: "com.mruzhynskyi.macutils", category: "uninstall")
     static let ai = Logger(subsystem: "com.mruzhynskyi.macutils", category: "ai")
     static let audio = Logger(subsystem: "com.mruzhynskyi.macutils", category: "audio")
+    /// Видеоплеер: только коды и числа, без путей и имён файлов.
+    static let player = Logger(subsystem: "com.mruzhynskyi.macutils", category: "player")
 }
