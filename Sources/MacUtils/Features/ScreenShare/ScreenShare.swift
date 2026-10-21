@@ -111,6 +111,10 @@ final class ScreenShare: NSObject, ObservableObject {
     private var audioPermission = PermissionWatch()
     /// Откат на ScreenCaptureKit уже показан в этой трансляции (Toast — один раз).
     private var audioFallbackShown = false
+    /// «Нет звука из перехвата» уже показано в этой трансляции.
+    private var audioSilenceShown = false
+    /// Повтор перехвата после ошибки — один раз на новую обстановку (выход, набор программ), а не на каждую пересборку.
+    private var tapRetry = ShareTapRetry()
     private var heartbeat: Timer?
     private var sender: FrameSender?
     private var hud: NSPanel?
@@ -383,13 +387,14 @@ final class ScreenShare: NSObject, ObservableObject {
     /// Список заглушённых изменился, программа запустилась или закрылась, процесс открыл звук (начался звонок) —
     /// пересобираем список исключённых.
     func refreshAudioFilter() {
-        // Откатились на SCK из-за ошибки перехвата — при каждой пересборке пробуем перехват снова.
-        if #available(macOS 14.2, *), audioTap == nil, let stream = audioStream, let sender, retryTap(sender: sender) {
+        // Откатились на SCK из-за ошибки перехвата — пробуем перехват снова, когда сменился выход или набор программ.
+        if #available(macOS 14.2, *), audioTap == nil, let stream = audioStream, let sender,
+           tapRetry.shouldTry(ShareTapRetry.situation()), retryTap(sender: sender) {
             audioStream = nil
             Task { try? await stream.stopCapture() }
         }
         if #available(macOS 14.2, *), let tap = audioTap as? ShareAudioTap {
-            // Выход сменился (отключили наушники): агрегат на часах прежнего устройства замолкает — собираем заново.
+            // Выход сменился (отключили наушники): перехват собран при прежнем выходе — собираем заново.
             if tap.outputDevice != CoreAudioHelper.defaultOutputDevice {
                 do {
                     try tap.restart()
@@ -422,6 +427,8 @@ final class ScreenShare: NSObject, ObservableObject {
     /// Звук трансляции: перехват Core Audio (исключает и помощников программ), без него — ScreenCaptureKit.
     private func startAudio(sender: FrameSender) async throws {
         audioFallbackShown = false
+        audioSilenceShown = false
+        tapRetry = ShareTapRetry()
         if #available(macOS 14.2, *), !retryTap(sender: sender) { showAudioFallback() }
         if audioTap == nil { audioStream = try await makeAudioStream(sender: sender) }
         audioWatcher = ShareAudioWatcher { ScreenShare.shared.refreshAudioFilter() }
@@ -439,8 +446,10 @@ final class ScreenShare: NSObject, ObservableObject {
             }
         } catch {
             Log.capture.error("Звук трансляции: перехват не запустился — \(error.localizedDescription, privacy: .public)")
+            tapRetry.failed(in: ShareTapRetry.situation())
             return false
         }
+        tapRetry = ShareTapRetry()
         Log.capture.info("Звук трансляции: перехват, исключено \(ShareAudioExclusion.summary(excluded), privacy: .public)")
         audioPermission = PermissionWatch()
         startAudioCheck()
@@ -510,9 +519,13 @@ final class ScreenShare: NSObject, ObservableObject {
         guard audioPermission.proven || tripped else { return }
         audioCheck?.invalidate()
         audioCheck = nil
-        if tripped {
-            Log.capture.error("Звук трансляции: перехват молчит 10 с, хотя программы держат вывод — возможно, нет разрешения на запись звука")
-        }
+        guard tripped else { return }
+        Log.capture.error("Звук трансляции: перехват молчит 10 с, хотя программы держат вывод — возможно, нет разрешения на запись звука")
+        // Подсказка ведущему, как в «Громкости приложений»: иначе зрители молча остаются без звука.
+        guard !audioSilenceShown else { return }
+        audioSilenceShown = true
+        Toast.show("Нет звука из перехвата — разрешите Mac Utils «Запись системного звука»",
+                   symbol: "exclamationmark.triangle.fill", tint: .orange)
     }
 
     private static func configure(_ config: SCStreamConfiguration, for filter: SCContentFilter) {

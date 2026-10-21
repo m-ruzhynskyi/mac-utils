@@ -43,24 +43,50 @@ enum CoreAudioHelper {
 }
 
 /// Где во входе агрегата (подустройство + перехват) звук перехвата. Входные потоки агрегата идут так: сначала потоки
-/// подустройств (у USB-гарнитуры или аудиоинтерфейса у выхода есть свой вход — микрофон), за ними — потоки перехватов.
-/// Буферы IOProc — по одному на поток, в том же порядке.
+/// подустройств (у USB-гарнитуры, AirPods или аудиоинтерфейса у выхода есть свой вход — микрофон), за ними — поток
+/// перехвата. Буферы IOProc — по одному на поток, в том же порядке.
+/// Состав агрегата HAL может собрать не сразу после создания, поэтому раскладка проверяется в каждом колбэке IOProc
+/// по числу его буферов; входы подустройства — свойство настоящего устройства, оно стабильно.
 enum AggregateStreams {
-    /// Индекс первого буфера перехвата; nil — раскладка не сходится, и тогда звук не берём совсем (иначе можно взять микрофон).
-    static func tapBufferIndex(aggregateInputs: Int, subdeviceInputs: [Int], tapStreams: Int) -> Int? {
-        let before = subdeviceInputs.reduce(0, +)
-        guard tapStreams > 0, subdeviceInputs.allSatisfy({ $0 >= 0 }), aggregateInputs == before + tapStreams else { return nil }
-        return before
+    /// Индекс буфера перехвата (последний: один поток после входов подустройства); nil — раскладка не сходится, и тогда
+    /// звук не берём совсем (иначе можно взять микрофон). `subdeviceInputsOff` — входы подустройства выключены для IOProc
+    /// (`inputStreamUsage`): если HAL их в списке буферов опускает, остаётся один буфер — перехват.
+    static func tapBuffer(inputCount: Int, subdeviceInputs: Int, subdeviceInputsOff: Bool = false) -> Int? {
+        guard subdeviceInputs >= 0, inputCount > 0 else { return nil }
+        if inputCount == subdeviceInputs + 1 { return inputCount - 1 }
+        if subdeviceInputsOff, inputCount == 1 { return 0 }
+        return nil
+    }
+
+    /// Какие входные потоки агрегата включить для IOProc: только перехват, входы подустройства — нет (у AirPods включённый
+    /// вход — это микрофон: Bluetooth уходит в режим звонка, звук становится «телефонным»). nil — раскладка не сошлась.
+    static func inputStreamUsage(aggregateInputs: Int, subdeviceInputs: Int) -> [Bool]? {
+        guard subdeviceInputs >= 0, aggregateInputs == subdeviceInputs + 1 else { return nil }
+        return (0..<aggregateInputs).map { $0 == aggregateInputs - 1 }
     }
 
     static func inputStreamCount(_ device: AudioObjectID) -> Int {
         CoreAudioHelper.readArray(device, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput).count
     }
 
-    /// По живому агрегату: перехват — один поток (моно или стерео-смесь).
-    static func tapBufferIndex(aggregate: AudioObjectID, subdevices: [AudioObjectID], tapStreams: Int = 1) -> Int? {
-        tapBufferIndex(aggregateInputs: inputStreamCount(aggregate), subdeviceInputs: subdevices.map(inputStreamCount),
-                       tapStreams: tapStreams)
+    /// Выключить для IOProc входы подустройства (`kAudioDevicePropertyIOProcStreamUsage`); до `AudioDeviceStart`.
+    /// false — не вышло (раскладка ещё не собрана или HAL отказал); тогда в колбэке всё равно берётся только перехват.
+    static func disableSubdeviceInputs(aggregate: AudioObjectID, procID: AudioDeviceIOProcID, subdeviceInputs: Int) -> Bool {
+        guard let usage = inputStreamUsage(aggregateInputs: inputStreamCount(aggregate), subdeviceInputs: subdeviceInputs) else { return false }
+        // Входов у подустройства нет — выключать нечего.
+        guard usage.count > 1 else { return true }
+        let flags = MemoryLayout<AudioHardwareIOProcStreamUsage>.offset(of: \.mStreamIsOn)!
+        let size = flags + usage.count * MemoryLayout<UInt32>.size
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: MemoryLayout<AudioHardwareIOProcStreamUsage>.alignment)
+        defer { raw.deallocate() }
+        raw.storeBytes(of: unsafeBitCast(procID, to: UnsafeMutableRawPointer.self), as: UnsafeMutableRawPointer.self)
+        raw.storeBytes(of: UInt32(usage.count), toByteOffset: MemoryLayout<AudioHardwareIOProcStreamUsage>.offset(of: \.mNumberStreams)!,
+                       as: UInt32.self)
+        for (index, on) in usage.enumerated() {
+            raw.storeBytes(of: on ? 1 : 0, toByteOffset: flags + index * MemoryLayout<UInt32>.size, as: UInt32.self)
+        }
+        var address = CoreAudioHelper.address(kAudioDevicePropertyIOProcStreamUsage, scope: kAudioObjectPropertyScopeInput)
+        return AudioObjectSetPropertyData(aggregate, &address, 0, nil, UInt32(size), raw) == noErr
     }
 }
 

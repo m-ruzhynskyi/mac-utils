@@ -83,20 +83,43 @@ final class ShareAudioTests: XCTestCase {
         XCTAssertEqual(calls, 2, "закрыто — не работает")
     }
 
-    /// Буфер перехвата — после входов подустройства: у USB-гарнитуры первым идёт микрофон, его брать нельзя.
-    func testTapBufferIndexSkipsSubdeviceInputs() {
-        XCTAssertEqual(AggregateStreams.tapBufferIndex(aggregateInputs: 1, subdeviceInputs: [0], tapStreams: 1), 0, "встроенные динамики")
-        XCTAssertEqual(AggregateStreams.tapBufferIndex(aggregateInputs: 2, subdeviceInputs: [1], tapStreams: 1), 1, "гарнитура: микрофон первым")
-        XCTAssertEqual(AggregateStreams.tapBufferIndex(aggregateInputs: 4, subdeviceInputs: [3], tapStreams: 1), 3, "аудиоинтерфейс")
-        XCTAssertEqual(AggregateStreams.tapBufferIndex(aggregateInputs: 3, subdeviceInputs: [1, 1], tapStreams: 1), 2)
+    /// Буфер перехвата — последний, после входов подустройства: у USB-гарнитуры и AirPods первым идёт микрофон.
+    func testTapBufferIsLastAfterSubdeviceInputs() {
+        XCTAssertEqual(AggregateStreams.tapBuffer(inputCount: 1, subdeviceInputs: 0), 0, "встроенные динамики / трансляция без подустройства")
+        XCTAssertEqual(AggregateStreams.tapBuffer(inputCount: 2, subdeviceInputs: 1), 1, "гарнитура: микрофон первым")
+        XCTAssertEqual(AggregateStreams.tapBuffer(inputCount: 4, subdeviceInputs: 3), 3, "аудиоинтерфейс")
+        // Входы подустройства выключены для IOProc, и HAL их в буферах опускает — остаётся один, перехват.
+        XCTAssertEqual(AggregateStreams.tapBuffer(inputCount: 1, subdeviceInputs: 1, subdeviceInputsOff: true), 0)
+        XCTAssertEqual(AggregateStreams.tapBuffer(inputCount: 2, subdeviceInputs: 1, subdeviceInputsOff: true), 1)
     }
 
-    /// Раскладка не сходится — индекса нет (звук не передаём), а не «первый попавшийся» буфер.
-    func testTapBufferIndexRefusesMismatchedLayout() {
-        XCTAssertNil(AggregateStreams.tapBufferIndex(aggregateInputs: 1, subdeviceInputs: [1], tapStreams: 1), "потока перехвата нет")
-        XCTAssertNil(AggregateStreams.tapBufferIndex(aggregateInputs: 0, subdeviceInputs: [0], tapStreams: 1))
-        XCTAssertNil(AggregateStreams.tapBufferIndex(aggregateInputs: 3, subdeviceInputs: [1], tapStreams: 1), "лишний поток")
-        XCTAssertNil(AggregateStreams.tapBufferIndex(aggregateInputs: 1, subdeviceInputs: [], tapStreams: 0))
-        XCTAssertNil(AggregateStreams.tapBufferIndex(aggregateInputs: 1, subdeviceInputs: [-1], tapStreams: 2))
+    /// Раскладка не сходится (состав агрегата ещё собирается) — буфера нет, звук не берём, а не «первый попавшийся».
+    func testTapBufferRefusesIncompleteLayout() {
+        XCTAssertNil(AggregateStreams.tapBuffer(inputCount: 1, subdeviceInputs: 1), "только микрофон — перехвата ещё нет")
+        XCTAssertNil(AggregateStreams.tapBuffer(inputCount: 0, subdeviceInputs: 0))
+        XCTAssertNil(AggregateStreams.tapBuffer(inputCount: 3, subdeviceInputs: 1), "лишний поток")
+        XCTAssertNil(AggregateStreams.tapBuffer(inputCount: 2, subdeviceInputs: 0), "у трансляции один буфер")
+        XCTAssertNil(AggregateStreams.tapBuffer(inputCount: 1, subdeviceInputs: -1))
+    }
+
+    /// Для IOProc включён только поток перехвата, входы подустройства (микрофон AirPods) — выключены.
+    func testInputStreamUsageKeepsOnlyTap() {
+        XCTAssertEqual(AggregateStreams.inputStreamUsage(aggregateInputs: 1, subdeviceInputs: 0), [true])
+        XCTAssertEqual(AggregateStreams.inputStreamUsage(aggregateInputs: 2, subdeviceInputs: 1), [false, true])
+        XCTAssertEqual(AggregateStreams.inputStreamUsage(aggregateInputs: 3, subdeviceInputs: 2), [false, false, true])
+        XCTAssertNil(AggregateStreams.inputStreamUsage(aggregateInputs: 1, subdeviceInputs: 1), "состав не собран — не трогаем")
+        XCTAssertNil(AggregateStreams.inputStreamUsage(aggregateInputs: 0, subdeviceInputs: 0))
+    }
+
+    /// После ошибки перехвата — одна попытка на новую обстановку, а не на каждую пересборку.
+    func testTapRetryOncePerSituation() {
+        var retry = ShareTapRetry()
+        XCTAssertTrue(retry.shouldTry("out1-10"))
+        retry.failed(in: "out1-10")
+        XCTAssertFalse(retry.shouldTry("out1-10"), "та же обстановка — не повторяем")
+        XCTAssertTrue(retry.shouldTry("out2-10"), "сменился выход")
+        XCTAssertTrue(retry.shouldTry("out1-11"), "запустилась программа")
+        retry = ShareTapRetry()
+        XCTAssertTrue(retry.shouldTry("out1-10"), "после успеха — заново")
     }
 }

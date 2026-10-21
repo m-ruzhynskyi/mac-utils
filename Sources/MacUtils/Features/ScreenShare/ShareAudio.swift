@@ -78,6 +78,20 @@ enum ShareAudioExclusion {
     }
 }
 
+/// Повтор перехвата после явной ошибки Core Audio: при постоянной ошибке не создавать и не разрушать перехват
+/// и агрегат на каждой пересборке, а пробовать раз на новую обстановку — сменился выход или набор программ.
+struct ShareTapRetry: Equatable {
+    private(set) var failedIn: String?
+
+    func shouldTry(_ situation: String) -> Bool { situation != failedIn }
+    mutating func failed(in situation: String) { failedIn = situation }
+
+    /// Обстановка: устройство вывода и запущенные программы.
+    @MainActor static func situation() -> String {
+        "\(CoreAudioHelper.defaultOutputDevice)-\(NSWorkspace.shared.runningApplications.count)"
+    }
+}
+
 /// Когда пересобирать список исключённых: программа запустилась или закрылась, процесс открыл или закрыл звук
 /// (так начинается звонок — голос Discord появляется в отдельном процессе уже после старта трансляции),
 /// сменился выход звука (перехват пересобирается на часах нового устройства).
@@ -151,10 +165,10 @@ final class ShareAudioTap: @unchecked Sendable {
     /// Пик входа с прошлого чтения: пишется в `queue`, читается из главного потока (Float — без разрывов).
     private let peak = UnsafeMutablePointer<Float>.allocate(capacity: 1)
     private(set) var excluded: [AudioObjectID]
-    /// Выход, на часах которого собран агрегат.
+    /// Выход при сборке перехвата: сменился — собираем заново.
     private(set) var outputDevice = AudioObjectID(kAudioObjectUnknown)
-    /// Буфер перехвата во входе агрегата (`AggregateStreams`); nil — не нашли, звук не передаём (но не микрофон).
-    private var tapBuffer: Int?
+    /// Раскладка входа не сошлась — уже записано в журнал (только в `queue`).
+    private var layoutLogged = false
 
     init(excluding objects: [AudioObjectID], onSamples: @escaping @Sendable ([Float]) -> Void) throws {
         excluded = objects
@@ -198,27 +212,20 @@ final class ShareAudioTap: @unchecked Sendable {
             throw AppVolumeTap.TapError.status("Формат перехвата", -1)
         }
         converter = AVAudioConverter(from: input, to: output)
-        // Часы агрегата — от текущего выхода; сам выход не трогаем (пишем тишину).
-        guard let outputUID = CoreAudioHelper.readString(outputDevice, kAudioDevicePropertyDeviceUID) else {
-            throw AppVolumeTap.TapError.status("Устройство вывода", -1)
-        }
+        layoutLogged = false
+        // Агрегат — только из перехвата, без подустройства (так в примере Apple для перехватов): выходу трансляция ничего
+        // не играет, а входы выхода — микрофон AirPods или гарнитуры — так не включаются вовсе (без режима звонка HFP,
+        // «телефонного» звука и индикатора микрофона).
         let aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "Mac Utils Share",
             kAudioAggregateDeviceUIDKey: "com.mruzhynskyi.macutils.share.\(UUID().uuidString)",
-            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outputUID]],
             kAudioAggregateDeviceTapListKey: [[kAudioSubTapDriftCompensationKey: true, kAudioSubTapUIDKey: uuid.uuidString]],
         ]
         status = AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &aggregateID)
         guard status == noErr else { throw AppVolumeTap.TapError.status("Агрегатное устройство", status) }
-        // Первым входом агрегата может быть микрофон выхода (USB-гарнитура): буфер перехвата — по его месту.
-        tapBuffer = AggregateStreams.tapBufferIndex(aggregate: aggregateID, subdevices: [outputDevice])
-        if tapBuffer == nil {
-            Log.capture.error("Звук трансляции: поток перехвата среди входов агрегата не найден — звук не передаётся")
-        }
         status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) { [weak self] _, inputData, _, outputData, _ in
             for buffer in UnsafeMutableAudioBufferListPointer(outputData) {
                 if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
@@ -272,7 +279,15 @@ final class ShareAudioTap: @unchecked Sendable {
     /// Вызывается в `queue`: вход перехвата → 24 кГц моно. Берётся только буфер перехвата, не весь вход агрегата.
     private func convert(_ inputData: UnsafePointer<AudioBufferList>, format: AVAudioFormat) {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
-        guard let tapBuffer, tapBuffer < list.count, list[tapBuffer].mDataByteSize > 0, let converter else { return }
+        // Подустройства нет — во входе один буфер, перехват. Иначе (состав ещё собирается) звук не берём.
+        guard let tapBuffer = AggregateStreams.tapBuffer(inputCount: list.count, subdeviceInputs: 0) else {
+            if !layoutLogged {
+                layoutLogged = true
+                Log.capture.error("Звук трансляции: во входе перехвата \(list.count) потоков вместо одного — звук не передаётся")
+            }
+            return
+        }
+        guard list[tapBuffer].mDataByteSize > 0, let converter else { return }
         var single = AudioBufferList(mNumberBuffers: 1, mBuffers: list[tapBuffer])
         let frames = AVAudioFrameCount(single.mBuffers.mDataByteSize / max(1, format.streamDescription.pointee.mBytesPerFrame))
         let capacity = AVAudioFrameCount(Double(frames) * output.sampleRate / format.sampleRate) + 16
