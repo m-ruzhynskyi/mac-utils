@@ -337,8 +337,21 @@ final class H264Player: ObservableObject, @unchecked Sendable {
     /// Что пришло с начала просмотра (для журнала, когда картинки нет): пакеты, ключевые, ключевые с SPS и PPS.
     struct Received: Equatable { var packets = 0, keys = 0, withParameterSets = 0 }
     private var counts = Received()
+    /// Пакеты, принятые к разбору и ещё не разобранные. Больше `limit` — новые отбрасываются до ключевого кадра:
+    /// декодер или показ отстали (окно свёрнуто, Mac занят), и очередь не должна расти, пока не кончится память.
+    private let pendingLock = NSLock()
+    private var pending = 0
+    private let limit: Int
+    /// Кадры пропущены (очередь, слой не готов): дальше — только с ключевого, иначе картинка рассыпается. Только на `queue`.
+    private var waitingForKey = false
+    /// Сколько пакетов отброшено (для журнала и стендов).
+    private(set) var dropped = 0
 
-    init() {
+    /// ≈ 1 с видео при 60 кадрах в секунду.
+    static let defaultLimit = 60
+
+    init(limit: Int = H264Player.defaultLimit) {
+        self.limit = limit
         layer.videoGravity = .resizeAspect
         layer.backgroundColor = NSColor.black.cgColor
     }
@@ -374,12 +387,39 @@ final class H264Player: ObservableObject, @unchecked Sendable {
         let current = source === socket
         sourceLock.unlock()
         guard current else { return }
-        queue.async { self.decodeAndShow(payload) }
+        pendingLock.lock()
+        let full = pending >= limit
+        if !full { pending += 1 }
+        pendingLock.unlock()
+        guard !full else {
+            queue.async { self.waitingForKey = true; self.dropped += 1 }
+            return
+        }
+        queue.async {
+            self.decodeAndShow(payload)
+            self.pendingLock.lock()
+            self.pending -= 1
+            self.pendingLock.unlock()
+        }
     }
 
     /// Вызывается на `queue`.
     private func decodeAndShow(_ payload: Data) {
         guard payload.count > 1 else { return }
+        let key = payload.first == 1
+        counts.packets += 1
+        if key { counts.keys += 1 }
+        // Слой не успевает (не показывается, декодер отстал): не копим кадры в нём, ждём ключевой.
+        if !layer.isReadyForMoreMediaData {
+            waitingForKey = true
+            dropped += 1
+            return
+        }
+        if waitingForKey {
+            guard key else { dropped += 1; return }
+            waitingForKey = false
+            layer.flush()
+        }
         let units = H264Packet.units(payload.dropFirst())
         var frame: [Data] = []
         var sets = 0
@@ -390,10 +430,8 @@ final class H264Player: ObservableObject, @unchecked Sendable {
             default: frame.append(unit)
             }
         }
-        counts.packets += 1
-        if payload.first == 1 { counts.keys += 1 }
         if sets == 3 { counts.withParameterSets += 1 }
-        if let sps, let pps, format == nil || payload.first == 1 { makeFormat(sps: sps, pps: pps) }
+        if let sps, let pps, format == nil || key { makeFormat(sps: sps, pps: pps) }
         guard let format, !frame.isEmpty else { return }
         // Annex B → AVCC (4 байта длины перед каждым NAL).
         var avcc = Data()
