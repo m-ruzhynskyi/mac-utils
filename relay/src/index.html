@@ -1008,6 +1008,12 @@ function stopWatch(keepStatus) {
 
 function playPCM(buffer) {
   if (!audio) { audio = new AudioContext(); playAt = 0; }
+  // Звук остановлен (страницу открыли по ссылке без нажатия — браузер не даёт играть): время стоит, и запланированные
+  // куски копились бы без конца (~350 МБ в час). Не планируем; просим запуск — он удастся после клика или клавиши.
+  if (audio.state !== "running") {
+    if (!audio.resumeAsked) { audio.resumeAsked = true; audio.resume().catch(() => {}).finally(() => { audio.resumeAsked = false; }); }
+    return;
+  }
   const ints = new Int16Array(buffer);
   const chunk = audio.createBuffer(1, ints.length, 24000);
   const data = chunk.getChannelData(0);
@@ -1019,6 +1025,10 @@ function playPCM(buffer) {
   if (playAt < audio.currentTime || playAt > audio.currentTime + 1) playAt = audio.currentTime + 0.15;
   source.start(playAt);
   playAt += chunk.duration;
+}
+// Первый клик или клавиша на странице запускает остановленный браузером звук зрителя.
+for (const kind of ["pointerdown", "keydown"]) {
+  document.addEventListener(kind, () => { if (audio && audio.state === "suspended") audio.resume().catch(() => {}); }, { passive: true });
 }
 
 // ---- Крестики-нолики: ведущий и один зритель ----
@@ -1461,6 +1471,12 @@ function startCapture(stream, code) {
   };
   forceKey = true;
   let canEncode = typeof VideoEncoder !== "undefined";
+  // Звук не ждёт сеть: очередь в сокете больше, чем у видео перед пропуском кадров, и ещё ~5 с звука — пакет звука
+  // выбрасывается. Иначе на медленной сети очередь звука росла без предела (до ~170 МБ в час), пока не кончится память.
+  const audioRoom = () => hostSocket.bufferedAmount <= Math.max(400_000, bitrate / 8) + 256_000;
+  // JPEG кодируется асинхронно и держит снимок холста (1920×1080 — 8 МБ). Пока прежний не готов, новый не начинаем:
+  // на медленном компьютере очередь снимков росла на гигабайты за минуты.
+  let jpegBusy = false;
   const encoderConfig = (width, height) => ({ codec: "avc1.4D4032", width, height, bitrate: Math.round(bitrate), framerate: fps,
                                               latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: ladder.acceleration });
   // Кодер не отдал ни одного кадра (ошибка, исключение, тишина) — следующий путь по `ladder`. Программный кодер — 30
@@ -1548,13 +1564,17 @@ function startCapture(stream, code) {
       frame.close(); if (keyFrame) lastKey = now; forceKey = false; frameIndex++;
       return;
     }
+    if (jpegBusy) return;
     lastEncodedAt = now;
+    jpegBusy = true;
     canvas.toBlob(async (blob) => {
-      if (!blob || !hostSocket || hostSocket.readyState !== 1) return;
-      const body = new Uint8Array(await blob.arrayBuffer());
-      const packet = new Uint8Array(body.length + 1);
-      packet[0] = 1; packet.set(body, 1);
-      hostSocket.send(packet);
+      try {
+        if (!blob || !hostSocket || hostSocket.readyState !== 1) return;
+        const body = new Uint8Array(await blob.arrayBuffer());
+        const packet = new Uint8Array(body.length + 1);
+        packet[0] = 1; packet.set(body, 1);
+        hostSocket.send(packet);
+      } finally { jpegBusy = false; }
     }, "image/jpeg", 0.55);
   };
   // Кадры берём по мере прихода от захвата (до 60/с), а не по таймеру; нет MediaStreamTrackProcessor — таймер, как раньше.
@@ -1592,7 +1612,7 @@ function startCapture(stream, code) {
   if (useHelperAudio) {
     // PCM 24 кГц моно уже готов — только добавляем тип пакета.
     window.mu.startAudio((data) => {
-      if (!hostSocket || hostSocket.readyState !== 1) return;
+      if (!hostSocket || hostSocket.readyState !== 1 || !audioRoom()) return;
       const packet = new Uint8Array(data.byteLength + 1);
       packet[0] = 2; packet.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), 1);
       hostSocket.send(packet);
@@ -1604,7 +1624,7 @@ function startCapture(stream, code) {
     const processor = audioContext.createScriptProcessor(4096, 2, 1);
     const ratio = audioContext.sampleRate / 24000;
     processor.onaudioprocess = (event) => {
-      if (!hostSocket || hostSocket.readyState !== 1) return;
+      if (!hostSocket || hostSocket.readyState !== 1 || !audioRoom()) return;
       const left = event.inputBuffer.getChannelData(0);
       const right = event.inputBuffer.numberOfChannels > 1 ? event.inputBuffer.getChannelData(1) : left;
       const count = Math.floor(left.length / ratio);
