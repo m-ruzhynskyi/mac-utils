@@ -406,8 +406,11 @@ final class DocRenderer {
     // MARK: - Абзац
 
     private func paragraphStyle(_ props: RTFParaProps, place: CellPlace?, model: RTFDocumentModel) -> NSParagraphStyle {
-        let blockKey = place.map { blockKey($0) }
-        let key = StyleKey(props: props, block: blockKey, defaultTab: model.defaultTab)
+        // Не `let blockKey = place.map { blockKey($0) }`: имя затеняло бы метод в собственном инициализаторе —
+        // новый компилятор (CI) это не принимает.
+        var cellKey: BlockKey?
+        if let place { cellKey = self.blockKey(place) }
+        let key = StyleKey(props: props, block: cellKey, defaultTab: model.defaultTab)
         if let style = styles[key] { return style }
         let style = NSMutableParagraphStyle()
         switch props.alignment {
