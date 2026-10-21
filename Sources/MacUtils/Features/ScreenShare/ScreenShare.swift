@@ -1158,6 +1158,48 @@ struct HUDIconButton: View {
     }
 }
 
+/// Отправка звука с пределом очереди: считает байты, отданные сокету и ещё не подтверждённые. Больше предела —
+/// новый пакет отбрасывается (короткий провал в звуке лучше, чем очередь, которая растёт, пока не кончится память).
+final class ShareAudioSender: @unchecked Sendable {
+    /// ≈ 2 с звука трансляции (24 кГц, моно, Int16 — 48 000 байт в секунду).
+    static let defaultLimit = 96_000
+
+    private let lock = NSLock()
+    private let limit: Int
+    private let transport: (Data, @escaping () -> Void) -> Void
+    private var pendingBytes = 0
+    private(set) var dropped = 0
+
+    /// `transport(данные, готово)` — отправить и вызвать `готово`, когда сокет закончил с пакетом (успешно или нет).
+    init(limit: Int = ShareAudioSender.defaultLimit, send transport: @escaping (Data, @escaping () -> Void) -> Void) {
+        self.limit = limit
+        self.transport = transport
+    }
+
+    var pending: Int {
+        lock.lock(); defer { lock.unlock() }
+        return pendingBytes
+    }
+
+    func send(_ packet: Data) {
+        let size = packet.count
+        lock.lock()
+        guard pendingBytes + size <= limit else {
+            dropped += 1
+            lock.unlock()
+            return
+        }
+        pendingBytes += size
+        lock.unlock()
+        transport(packet) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.pendingBytes = max(0, self.pendingBytes - size)
+            self.lock.unlock()
+        }
+    }
+}
+
 /// Кадры ScreenCaptureKit → JPEG → отправка (пока предыдущий кадр не ушёл, новые пропускаем).
 final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "macutils.share")
@@ -1173,6 +1215,8 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     func replace(_ socket: URLSessionWebSocketTask) {
         lock.lock()
         currentSocket = socket
+        // Новый сокет — свой счёт неотправленного звука: хвост старого больше не держит очередь.
+        audio = Self.audioSender(socket)
         lock.unlock()
         queue.async {
             self.pendingBytes = 0
@@ -1242,6 +1286,18 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
 
     init(socket: URLSessionWebSocketTask) {
         currentSocket = socket
+        audio = Self.audioSender(socket)
+    }
+
+    /// Звук — со своим пределом очереди: на медленной сети пакеты, которые не успевают уйти, отбрасываются,
+    /// а не копятся в `URLSessionWebSocketTask` (≈ 170 МБ в час без предела).
+    private var audio: ShareAudioSender
+    private static func audioSender(_ socket: URLSessionWebSocketTask) -> ShareAudioSender {
+        ShareAudioSender { data, done in socket.send(.data(data)) { _ in done() } }
+    }
+    private var currentAudio: ShareAudioSender {
+        lock.lock(); defer { lock.unlock() }
+        return audio
     }
 
     let audioQueue = DispatchQueue(label: "macutils.share.audio")
@@ -1265,7 +1321,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         if type == .audio {
             if !isPaused, let packet = ShareProtocol.audioPacket(sampleBuffer) {
-                socket.send(.data(packet)) { _ in }
+                currentAudio.send(packet)
             }
             return
         }
@@ -2594,11 +2650,42 @@ final class SharePlayer: @unchecked Sendable {
     private let node = AVAudioPlayerNode()
     private let format = AVAudioFormat(standardFormatWithSampleRate: ShareProtocol.sampleRate, channels: 1)!
     private var started = false
+    /// Запланировано и ещё не проиграно, в сэмплах. Больше `limit` — новые пакеты отбрасываются: если движок встал
+    /// (система остановила его при смене устройства вывода) или звук пришёл пачкой после паузы сети, очередь
+    /// не растёт, пока не кончится память (≈ 345 МБ в час без предела), и задержка звука не копится.
+    private let lock = NSLock()
+    private var queuedFrames = 0
+    private let limit: Int
+    private(set) var dropped = 0
+
+    /// ≈ 1 с звука трансляции.
+    static let defaultLimit = Int(ShareProtocol.sampleRate)
+
+    /// `silent` — для тестов и стендов: движок рендерит вручную, в динамики ничего не идёт и ничего не потребляется
+    /// (как остановленный системой движок).
+    init(silent: Bool = false, limit: Int = SharePlayer.defaultLimit) {
+        self.limit = limit
+        if silent {
+            try? engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 4096)
+        }
+    }
+
+    /// Сколько секунд звука ждёт проигрывания.
+    var queuedSeconds: Double {
+        lock.lock(); defer { lock.unlock() }
+        return Double(queuedFrames) / ShareProtocol.sampleRate
+    }
 
     func play(_ payload: Data) {
+        let count = payload.count / 2
+        guard count > 0 else { return }
+        lock.lock()
+        let full = queuedFrames + count > limit
+        if full { dropped += 1 }
+        lock.unlock()
+        guard !full else { return }
         let samples = ShareProtocol.samples(payload)
-        guard !samples.isEmpty,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else { return }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else { return }
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count) }
         if !started {
@@ -2607,8 +2694,20 @@ final class SharePlayer: @unchecked Sendable {
             guard (try? engine.start()) != nil else { return }
             node.play()
             started = true
+        } else if !engine.isRunning {
+            // Система остановила движок (наушники, AirPods, другое устройство вывода) — запускаем снова.
+            guard (try? engine.start()) != nil else { return }
+            node.play()
         }
-        node.scheduleBuffer(buffer)
+        lock.lock()
+        queuedFrames += count
+        lock.unlock()
+        node.scheduleBuffer(buffer) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.queuedFrames = max(0, self.queuedFrames - count)
+            self.lock.unlock()
+        }
     }
 
     func stop() {
@@ -2617,6 +2716,9 @@ final class SharePlayer: @unchecked Sendable {
         engine.stop()
         engine.detach(node)
         started = false
+        lock.lock()
+        queuedFrames = 0
+        lock.unlock()
     }
 }
 
