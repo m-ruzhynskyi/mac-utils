@@ -17,11 +17,17 @@ final class DesignSystemTests: XCTestCase {
         }
     }
 
+    /// Раздела «Команды и ссылки» больше нет: поиск «команды» ведёт на «Горячие клавиши».
+    func testShortcutsSearchLandsOnHotKeys() {
+        let hits = SettingsSection.allCases.filter { $0.searchText.lowercased().contains("команды") }
+        XCTAssertTrue(hits.contains(.hotKeys))
+    }
+
     /// Группы и порядок — как в концепте (`Settings.dc.html`).
     func testGroupsMatchConcept() {
         XCTAssertEqual(SettingsGroup.allCases.map(\.title), ["Основное", "Захват", "Окна и ввод", "Файлы и система", "Ещё"])
         XCTAssertEqual(SettingsGroup.general.sections.map(\.title),
-                       ["Общие", "Горячие клавиши", "Команды и ссылки", "Исключённые программы", "Панель в строке меню"])
+                       ["Общие", "Горячие клавиши", "Исключённые программы", "Панель в строке меню"])
         XCTAssertEqual(SettingsGroup.capture.sections.map(\.title),
                        ["Снимки экрана", "Мои снимки", "Рисование на экране", "QR-коды", "Записи встреч"])
         XCTAssertEqual(SettingsGroup.windowsInput.sections.map(\.title),

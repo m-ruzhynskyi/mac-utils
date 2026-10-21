@@ -337,7 +337,6 @@ struct SettingsSectionPage: View {
         switch section {
             case .general: GeneralPage()
             case .hotKeys: HotKeysPage()
-            case .shortcuts: ShortcutsPage()
             case .exclusions: ExclusionsPage()
             case .panel: PanelSettingsPage()
             case .music: NowPlayingView(compact: compact).navigationTitle("Музыка")
