@@ -6,7 +6,7 @@ import SwiftUI
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general, hotKeys, exclusions, panel, music, share, focus, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
-         uninstaller, monitor, tasks, cleanup, shots, textEditor, videoPlayer, shortcuts
+         uninstaller, monitor, tasks, cleanup, shots, textEditor, videoPlayer
 
     var id: String { rawValue }
 
@@ -20,7 +20,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "Снимки"
         case .textEditor: return "Редактор"
         case .videoPlayer: return "Плеер"
-        case .shortcuts: return "Команды"
         case .cutPaste: return "Вырезать"
         case .smoothScroll: return "Прокрутка"
         case .switcher: return "Переключатель"
@@ -79,7 +78,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "Мои снимки"
         case .textEditor: return "Текстовый редактор"
         case .videoPlayer: return "Видеоплеер"
-        case .shortcuts: return "Команды и ссылки"
         }
     }
 
@@ -115,7 +113,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "photo.on.rectangle.angled"
         case .textEditor: return "doc.plaintext"
         case .videoPlayer: return "play.rectangle"
-        case .shortcuts: return "square.stack.3d.forward.dottedline"
         }
     }
 }
@@ -127,7 +124,7 @@ extension SettingsSection {
     var keywords: String {
         switch self {
         case .general: return "автозапуск вход в систему dock значок строка меню разрешения универсальный доступ запись экрана полный доступ к диску обновления версия что нового репозиторий"
-        case .hotKeys: return "сочетания клавиш горячие клавиши шорткаты переназначить конфликт занято hotkey shortcut"
+        case .hotKeys: return "сочетания клавиш горячие клавиши шорткаты переназначить конфликт занято hotkey shortcut команды ссылки url macutils:// siri spotlight автоматизация действия"
         case .exclusions: return "исключения исключённые программы виртуальная машина parallels vmware utm виртуалбокс удалённый рабочий стол общий экран remote desktop teamviewer anydesk перехват клавиш колесо мыши не работает ⌥tab"
         case .panel: return "панель вкладки порядок инструменты значок 🔧"
         case .music: return "сейчас играет музыка spotify apple music плеер обложка"
@@ -156,7 +153,6 @@ extension SettingsSection {
         case .shots: return "мои снимки история поиск умная папка копии снимков"
         case .textEditor: return "текстовый редактор блокнот notepad frm rtf txt log json xml csv кодировка вкладки знаки $ доллар открыть с помощью"
         case .videoPlayer: return "видеоплеер видео плеер фильм сериал mp4 mov m4v mp3 субтитры srt ass дорожка скорость плейлист пропустить интро титры следующая серия кадр картинка в картинке pip"
-        case .shortcuts: return "команды shortcuts siri spotlight автоматизация ссылки url macutils:// открыть url действия"
         }
     }
 
@@ -189,7 +185,7 @@ enum SettingsGroup: String, CaseIterable, Identifiable {
 
     var sections: [SettingsSection] {
         switch self {
-        case .general: return [.general, .hotKeys, .shortcuts, .exclusions, .panel]
+        case .general: return [.general, .hotKeys, .exclusions, .panel]
         case .capture: return [.screenshot, .shots, .annotate, .qr, .meetings]
         case .windowsInput: return [.switcher, .windows, .volume, .layout, .smoothScroll, .cutPaste, .textInput]
         case .filesSystem: return [.shelf, .downloads, .textEditor, .videoPlayer, .cheatSheet, .uninstaller, .cleanup, .monitor, .tasks]
@@ -210,7 +206,6 @@ extension SettingsSection {
         case .general: return "Запуск, значки, обновления"
         case .screenshot: return "Куда сохранять и что делать после снимка"
         case .hotKeys: return "Все сочетания Mac Utils."
-        case .shortcuts: return "Все действия Mac Utils в приложении «Команды» и ссылки macutils:// к ним."
         case .exclusions: return "В этих программах Mac Utils не перехватывает клавиши и колесо мыши: не работают переключатель окон ⌥Tab, подсказки при удержании ⌘, плавная прокрутка и исправление раскладки."
         case .panel: return "Клик по значку — панель с вкладками прямо под ним (или \(HotKeyRegistry.combo(for: .tools).title))."
         case .textInput: return "Автозамены macOS при наборе текста во всех программах."

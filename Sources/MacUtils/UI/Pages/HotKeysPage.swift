@@ -106,6 +106,7 @@ struct HotKeysPage: View {
                 Text("Удерживание ⌘ — шпаргалка, ⌘Tab — переключатель приложений, ⌘X/⌘V в Finder — перенос файлов. Их меняют в разделах «Шпаргалка», «Переключатель приложений» и «Вырезать и вставить».")
                     .font(DS.Font.body).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
             }
+            ShortcutsLinksBlock()
         }
     }
 }
