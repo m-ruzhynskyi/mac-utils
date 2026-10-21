@@ -42,7 +42,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
     private(set) var rendering = DocRendering()
     private var renderedVersion = -1
     private var refreshScheduled = false
-    private var headerCache: [String: NSAttributedString] = [:]
+    private var headerCache: [String: DocRenderer.StoryRendering] = [:]
     private var headerSignature = 0
     private var highlighted = false
     private var observers: [NSObjectProtocol] = []
@@ -213,6 +213,15 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         pagesView.append(page)
         if pageCount != pagesView.pages.count { pageCount = pagesView.pages.count }
         layoutManager.addTextContainer(page.container)
+        // Колонтитулы новой страницы — до отрисовки (номера уточнятся по завершении раскладки), иначе она мигает без них.
+        // Не внутри обратного вызова раскладки: там смена рамки сбивает перенос по «\f».
+        DispatchQueue.main.async { [weak self, weak page] in
+            MainActor.assumeIsolated {
+                guard let self, let page, self.pagesView.pages.contains(where: { $0 === page }) else { return }
+                self.setHeaders(page, total: self.pagesView.pages.count,
+                                sectionTotal: self.pagesView.pages.filter { $0.section == page.section }.count)
+            }
+        }
     }
 
     nonisolated func layoutManager(_ layoutManager: NSLayoutManager, didCompleteLayoutFor container: NSTextContainer?, atEnd: Bool) {
@@ -303,17 +312,22 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         let total = pagesView.pages.count
         var sectionPages: [Int: Int] = [:]
         for page in pagesView.pages { sectionPages[page.section, default: 0] += 1 }
-        for page in pagesView.pages {
-            page.header = headerString(page, header: true, total: total, sectionTotal: sectionPages[page.section] ?? 1)
-            page.footer = headerString(page, header: false, total: total, sectionTotal: sectionPages[page.section] ?? 1)
-        }
+        for page in pagesView.pages { setHeaders(page, total: total, sectionTotal: sectionPages[page.section] ?? 1) }
     }
 
-    private func headerString(_ page: DocPageView, header: Bool, total: Int, sectionTotal: Int) -> NSAttributedString? {
+    /// Колонтитулы страницы вместе с выступом в поля (страница по ним подвигает текст).
+    private func setHeaders(_ page: DocPageView, total: Int, sectionTotal: Int) {
+        let header = headerString(page, header: true, total: total, sectionTotal: sectionTotal)
+        let footer = headerString(page, header: false, total: total, sectionTotal: sectionTotal)
+        page.setHeaders(header: header?.string, headerOutdent: (header?.outdentLeft ?? 0, header?.outdentRight ?? 0),
+                        footer: footer?.string, footerOutdent: (footer?.outdentLeft ?? 0, footer?.outdentRight ?? 0))
+    }
+
+    private func headerString(_ page: DocPageView, header: Bool, total: Int, sectionTotal: Int) -> DocRenderer.StoryRendering? {
         guard let kind = headerKind(for: page, header: header), let story = headers(of: page.section)[kind]?.story else { return nil }
         let key = "\(page.section)-\(kind.rawValue)-\(page.number)-\(total)-\(sectionTotal)"
         if let cached = headerCache[key] { return cached }
-        let (string, _) = renderer.renderStory(story, model: model) { field in
+        let rendering = renderer.renderMargins(story, model: model) { field in
             switch field {
             case .page: return "\(page.number)"
             case .numPages: return "\(total)"
@@ -321,8 +335,8 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
             case .other: return nil
             }
         }
-        headerCache[key] = string
-        return string
+        headerCache[key] = rendering
+        return rendering
     }
 
     /// Двойной клик по полю страницы — правка колонтитула (D-4а): `true` — обработан.

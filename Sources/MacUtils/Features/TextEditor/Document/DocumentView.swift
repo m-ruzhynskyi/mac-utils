@@ -174,8 +174,13 @@ final class DocPageView: NSView {
     var number = 1
     /// Первая страница своего раздела (для `\titlepg`).
     var firstInSection = false
-    var header: NSAttributedString? { didSet { if header != oldValue { needsDisplay = true } } }
-    var footer: NSAttributedString? { didSet { if footer != oldValue { needsDisplay = true } } }
+    private(set) var header: NSAttributedString?
+    private(set) var footer: NSAttributedString?
+    /// Насколько колонтитулы выходят в поля (отрицательные отступы абзацев) и их высота — по ним считается геометрия.
+    private var headerOutdent = (left: CGFloat(0), right: CGFloat(0))
+    private var footerOutdent = (left: CGFloat(0), right: CGFloat(0))
+    private(set) var headerHeight: CGFloat = 0
+    private(set) var footerHeight: CGFloat = 0
     /// Правится колонтитул: основной текст бледнее.
     var faded = false {
         didSet {
@@ -231,29 +236,64 @@ final class DocPageView: NSView {
         return NSRect(x: left, y: top, width: max(72, size.width - left - right), height: max(72, size.height - top - bottom))
     }
 
-    var bodyRect: NSRect { Self.bodyRect(props) }
-
-    /// Где рисуется верхний и нижний колонтитул.
-    var headerRect: NSRect {
-        let body = bodyRect
-        let top = CGFloat(max(props.headerY, 0)) / 20
-        return NSRect(x: body.minX, y: top, width: body.width, height: max(14, body.minY - top))
+    /// Текст страницы — как в Word: колонтитул выше своего поля сдвигает текст (верхний — вниз, нижний — вверх).
+    var bodyRect: NSRect {
+        var body = Self.bodyRect(props)
+        let top = max(body.minY, headerHeight > 0 ? CGFloat(max(props.headerY, 0)) / 20 + headerHeight : 0)
+        let bottom = min(body.maxY, footerHeight > 0 ? Self.size(props).height - CGFloat(max(props.footerY, 0)) / 20 - footerHeight : body.maxY)
+        if bottom - top >= 72 { body = NSRect(x: body.minX, y: top, width: body.width, height: bottom - top) }
+        return body
     }
 
+    /// Верхний колонтитул: верх — на `\headery` от края листа, ширина — поля текста плюс выступ в поля.
+    var headerRect: NSRect {
+        let base = Self.bodyRect(props)
+        let top = CGFloat(max(props.headerY, 0)) / 20
+        return NSRect(x: base.minX - headerOutdent.left, y: top, width: base.width + headerOutdent.left + headerOutdent.right,
+                      height: max(14, headerHeight))
+    }
+
+    /// Нижний колонтитул: низ — на `\footery` от низа листа (растёт вверх), так он всегда на своей странице.
     var footerRect: NSRect {
+        let base = Self.bodyRect(props)
+        let height = max(14, footerHeight)
+        let bottom = Self.size(props).height - CGFloat(max(props.footerY, 0)) / 20
+        return NSRect(x: base.minX - footerOutdent.left, y: max(0, bottom - height), width: base.width + footerOutdent.left + footerOutdent.right,
+                      height: height)
+    }
+
+    /// Поставить колонтитулы страницы (текст и выступ в поля); высота меряется, текст страницы подвигается.
+    func setHeaders(header: NSAttributedString?, headerOutdent: (CGFloat, CGFloat), footer: NSAttributedString?, footerOutdent: (CGFloat, CGFloat)) {
+        guard header != self.header || footer != self.footer || headerOutdent != self.headerOutdent || footerOutdent != self.footerOutdent else { return }
+        self.header = header
+        self.footer = footer
+        self.headerOutdent = (headerOutdent.0, headerOutdent.1)
+        self.footerOutdent = (footerOutdent.0, footerOutdent.1)
+        let width = Self.bodyRect(props).width
+        func height(_ string: NSAttributedString?, _ outdent: (CGFloat, CGFloat)) -> CGFloat {
+            guard let string, string.length > 0 else { return 0 }
+            return ceil(string.boundingRect(with: NSSize(width: width + outdent.0 + outdent.1, height: 10_000),
+                                            options: [.usesLineFragmentOrigin, .usesFontLeading]).height)
+        }
+        headerHeight = height(header, headerOutdent)
+        footerHeight = height(footer, footerOutdent)
+        applyBody()
+        needsDisplay = true
+    }
+
+    /// Рамка текста страницы — по `bodyRect` (после колонтитулов).
+    private func applyBody() {
         let body = bodyRect
-        let bottom = bounds.height - CGFloat(max(props.footerY, 0)) / 20
-        return NSRect(x: body.minX, y: body.maxY, width: body.width, height: max(14, bottom - body.maxY))
+        if textView.frame != body { textView.frame = body }
+        if container.size != body.size { container.size = body.size }
     }
 
     func update(props: RTFSectionProps, section: Int) {
         self.section = section
         guard props != self.props else { return }
         self.props = props
-        let body = Self.bodyRect(props)
         setFrameSize(Self.size(props))
-        container.size = body.size
-        textView.frame = body
+        applyBody()
         needsDisplay = true
         superview?.needsDisplay = true
     }
@@ -267,9 +307,7 @@ final class DocPageView: NSView {
                         options: [.usesLineFragmentOrigin, .usesFontLeading])
         }
         if let footer {
-            let height = footer.boundingRect(with: NSSize(width: footerRect.width, height: 10_000), options: [.usesLineFragmentOrigin, .usesFontLeading]).height
-            let y = bounds.height - CGFloat(max(props.footerY, 0)) / 20 - height
-            footer.draw(with: NSRect(x: footerRect.minX, y: max(footerRect.minY, y), width: footerRect.width, height: 10_000),
+            footer.draw(with: NSRect(x: footerRect.minX, y: footerRect.minY, width: footerRect.width, height: 10_000),
                         options: [.usesLineFragmentOrigin, .usesFontLeading])
         }
         if let frame = headerFrame {
