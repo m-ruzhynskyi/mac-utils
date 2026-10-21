@@ -1312,10 +1312,10 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         if changed { Log.capture.info("Трансляция: кодирование \(pause ? "на паузе (нет зрителей)" : "возобновлено", privacy: .public)") }
     }
 
-    /// Звук перехвата Core Audio (24 кГц моно) — тем же пакетом, что и от ScreenCaptureKit.
+    /// Звук перехвата Core Audio (24 кГц моно) — тем же пакетом и через ту же очередь с пределом, что и от ScreenCaptureKit.
     func sendAudio(_ samples: [Float]) {
         guard !isPaused, !samples.isEmpty else { return }
-        socket.send(.data(ShareProtocol.audioPacket(samples))) { _ in }
+        currentAudio.send(ShareProtocol.audioPacket(samples))
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
