@@ -132,7 +132,8 @@ final class DocHeaderSession: NSObject, NSTextViewDelegate {
         }
         let total = controller.pageCount
         let sectionTotal = controller.pagesView.pages.filter { $0.section == page.section }.count
-        let rendering = controller.renderer.renderMargins(header.story, model: controller.model) { field in
+        let width = DocPageView.bodyRect(page.props).width
+        let rendering = controller.renderer.renderMargins(header.story, model: controller.model, textWidth: width) { field in
             switch field {
             case .page: return "\(page.number)"
             case .numPages: return "\(total)"
