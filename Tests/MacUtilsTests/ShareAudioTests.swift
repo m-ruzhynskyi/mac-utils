@@ -82,4 +82,21 @@ final class ShareAudioTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertEqual(calls, 2, "закрыто — не работает")
     }
+
+    /// Буфер перехвата — после входов подустройства: у USB-гарнитуры первым идёт микрофон, его брать нельзя.
+    func testTapBufferIndexSkipsSubdeviceInputs() {
+        XCTAssertEqual(AggregateStreams.tapBufferIndex(aggregateInputs: 1, subdeviceInputs: [0], tapStreams: 1), 0, "встроенные динамики")
+        XCTAssertEqual(AggregateStreams.tapBufferIndex(aggregateInputs: 2, subdeviceInputs: [1], tapStreams: 1), 1, "гарнитура: микрофон первым")
+        XCTAssertEqual(AggregateStreams.tapBufferIndex(aggregateInputs: 4, subdeviceInputs: [3], tapStreams: 1), 3, "аудиоинтерфейс")
+        XCTAssertEqual(AggregateStreams.tapBufferIndex(aggregateInputs: 3, subdeviceInputs: [1, 1], tapStreams: 1), 2)
+    }
+
+    /// Раскладка не сходится — индекса нет (звук не передаём), а не «первый попавшийся» буфер.
+    func testTapBufferIndexRefusesMismatchedLayout() {
+        XCTAssertNil(AggregateStreams.tapBufferIndex(aggregateInputs: 1, subdeviceInputs: [1], tapStreams: 1), "потока перехвата нет")
+        XCTAssertNil(AggregateStreams.tapBufferIndex(aggregateInputs: 0, subdeviceInputs: [0], tapStreams: 1))
+        XCTAssertNil(AggregateStreams.tapBufferIndex(aggregateInputs: 3, subdeviceInputs: [1], tapStreams: 1), "лишний поток")
+        XCTAssertNil(AggregateStreams.tapBufferIndex(aggregateInputs: 1, subdeviceInputs: [], tapStreams: 0))
+        XCTAssertNil(AggregateStreams.tapBufferIndex(aggregateInputs: 1, subdeviceInputs: [-1], tapStreams: 2))
+    }
 }

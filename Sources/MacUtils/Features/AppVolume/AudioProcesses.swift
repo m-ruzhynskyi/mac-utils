@@ -18,8 +18,9 @@ enum CoreAudioHelper {
         return status == noErr ? result : value
     }
 
-    static func readArray(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> [AudioObjectID] {
-        var address = address(selector)
+    static func readArray(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
+                          scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> [AudioObjectID] {
+        var address = address(selector, scope: scope)
         var size: UInt32 = 0
         guard AudioObjectGetPropertyDataSize(object, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
         var items = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
@@ -38,6 +39,28 @@ enum CoreAudioHelper {
 
     static var defaultOutputDevice: AudioObjectID {
         read(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice, default: AudioObjectID(0))
+    }
+}
+
+/// Где во входе агрегата (подустройство + перехват) звук перехвата. Входные потоки агрегата идут так: сначала потоки
+/// подустройств (у USB-гарнитуры или аудиоинтерфейса у выхода есть свой вход — микрофон), за ними — потоки перехватов.
+/// Буферы IOProc — по одному на поток, в том же порядке.
+enum AggregateStreams {
+    /// Индекс первого буфера перехвата; nil — раскладка не сходится, и тогда звук не берём совсем (иначе можно взять микрофон).
+    static func tapBufferIndex(aggregateInputs: Int, subdeviceInputs: [Int], tapStreams: Int) -> Int? {
+        let before = subdeviceInputs.reduce(0, +)
+        guard tapStreams > 0, subdeviceInputs.allSatisfy({ $0 >= 0 }), aggregateInputs == before + tapStreams else { return nil }
+        return before
+    }
+
+    static func inputStreamCount(_ device: AudioObjectID) -> Int {
+        CoreAudioHelper.readArray(device, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput).count
+    }
+
+    /// По живому агрегату: перехват — один поток (моно или стерео-смесь).
+    static func tapBufferIndex(aggregate: AudioObjectID, subdevices: [AudioObjectID], tapStreams: Int = 1) -> Int? {
+        tapBufferIndex(aggregateInputs: inputStreamCount(aggregate), subdeviceInputs: subdevices.map(inputStreamCount),
+                       tapStreams: tapStreams)
     }
 }
 

@@ -153,6 +153,8 @@ final class ShareAudioTap: @unchecked Sendable {
     private(set) var excluded: [AudioObjectID]
     /// Выход, на часах которого собран агрегат.
     private(set) var outputDevice = AudioObjectID(kAudioObjectUnknown)
+    /// Буфер перехвата во входе агрегата (`AggregateStreams`); nil — не нашли, звук не передаём (но не микрофон).
+    private var tapBuffer: Int?
 
     init(excluding objects: [AudioObjectID], onSamples: @escaping @Sendable ([Float]) -> Void) throws {
         excluded = objects
@@ -212,6 +214,11 @@ final class ShareAudioTap: @unchecked Sendable {
         ]
         status = AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &aggregateID)
         guard status == noErr else { throw AppVolumeTap.TapError.status("Агрегатное устройство", status) }
+        // Первым входом агрегата может быть микрофон выхода (USB-гарнитура): буфер перехвата — по его месту.
+        tapBuffer = AggregateStreams.tapBufferIndex(aggregate: aggregateID, subdevices: [outputDevice])
+        if tapBuffer == nil {
+            Log.capture.error("Звук трансляции: поток перехвата среди входов агрегата не найден — звук не передаётся")
+        }
         status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) { [weak self] _, inputData, _, outputData, _ in
             for buffer in UnsafeMutableAudioBufferListPointer(outputData) {
                 if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
@@ -262,24 +269,28 @@ final class ShareAudioTap: @unchecked Sendable {
         }
     }
 
-    /// Вызывается в `queue`: вход перехвата → 24 кГц моно.
+    /// Вызывается в `queue`: вход перехвата → 24 кГц моно. Берётся только буфер перехвата, не весь вход агрегата.
     private func convert(_ inputData: UnsafePointer<AudioBufferList>, format: AVAudioFormat) {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
-        guard let first = list.first, first.mDataByteSize > 0, let converter else { return }
-        let frames = AVAudioFrameCount(first.mDataByteSize / max(1, format.streamDescription.pointee.mBytesPerFrame))
-        guard frames > 0, let source = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: inputData, deallocator: nil) else { return }
-        source.frameLength = frames
+        guard let tapBuffer, tapBuffer < list.count, list[tapBuffer].mDataByteSize > 0, let converter else { return }
+        var single = AudioBufferList(mNumberBuffers: 1, mBuffers: list[tapBuffer])
+        let frames = AVAudioFrameCount(single.mBuffers.mDataByteSize / max(1, format.streamDescription.pointee.mBytesPerFrame))
         let capacity = AVAudioFrameCount(Double(frames) * output.sampleRate / format.sampleRate) + 16
-        guard let result = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: capacity) else { return }
-        var consumed = false
-        converter.convert(to: result, error: nil) { _, status in
-            if consumed {
-                status.pointee = .noDataNow
-                return nil
+        guard frames > 0, let result = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: capacity) else { return }
+        // Буфер без копии живёт, пока жив указатель на `single`, — вся конвертация внутри.
+        withUnsafeMutablePointer(to: &single) { pointer in
+            guard let source = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: pointer, deallocator: nil) else { return }
+            source.frameLength = frames
+            var consumed = false
+            converter.convert(to: result, error: nil) { _, status in
+                if consumed {
+                    status.pointee = .noDataNow
+                    return nil
+                }
+                consumed = true
+                status.pointee = .haveData
+                return source
             }
-            consumed = true
-            status.pointee = .haveData
-            return source
         }
         guard result.frameLength > 0, let channel = result.floatChannelData?[0] else { return }
         let samples = Array(UnsafeBufferPointer(start: channel, count: Int(result.frameLength)))
