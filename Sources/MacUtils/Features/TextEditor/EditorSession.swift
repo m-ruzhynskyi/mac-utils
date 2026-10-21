@@ -18,6 +18,10 @@ enum EditorSession {
         var fileStamp: FileStamp?
         /// Текст отличается от файла — он в черновике.
         var draftID: UUID?
+        /// «Код» или «Документ» (у RTF); нет — по типу файла.
+        var mode: EditorViewMode?
+        /// Черновик правили в «Документе» — при записи нужны проверки без потерь.
+        var editedInDocument: Bool?
     }
 
     struct State: Codable, Equatable {
@@ -79,7 +83,8 @@ enum EditorSession {
                               language: tab.document.language,
                               selection: [tab.textView.selectedRange().location, tab.textView.selectedRange().length],
                               scroll: [Double(tab.scrollView.contentView.bounds.minX), Double(tab.scrollView.contentView.bounds.minY)],
-                              bookmarks: tab.bookmarks.sorted(), fileStamp: tab.document.fileStamp, draftID: nil)
+                              bookmarks: tab.bookmarks.sorted(), fileStamp: tab.document.fileStamp, draftID: nil,
+                              mode: tab.isRTF ? tab.mode : nil, editedInDocument: tab.editedInDocument ? true : nil)
             if tab.isDirty || untitled {
                 guard keepDrafts else {
                     // Без черновиков правки не хранятся, но файл вкладки откроется снова (как чистые).
@@ -175,6 +180,8 @@ enum EditorSession {
         tab.draftID = draft == nil ? nil : entry.draftID
         tab.fileMissing = missing
         tab.bookmarks = Set(entry.bookmarks)
+        if draft != nil, entry.editedInDocument == true { tab.editedInDocument = true }
+        tab.restoreMode(entry.mode ?? (tab.isRTF ? nil : .code))
         if missing || document.isConverted { tab.markChanged() }
         // Файл изменён снаружи после того, как правки ушли в черновик, — баннер «Перезагрузить / Оставить мою версию».
         if !missing, let saved = entry.fileStamp, let now = document.fileStamp, saved != now, draft != nil { tab.changedOnDisk = true }

@@ -7,21 +7,42 @@ struct EditorRootView: View {
     @ObservedObject var workspace: EditorWorkspace
     static let titleBarHeight: CGFloat = 50
     static let panelWidth: CGFloat = 272
+    /// Уже — панель «$» в «Документе» поверх страниц, а не рядом.
+    static let narrowDocumentWidth: CGFloat = 720
 
     var body: some View {
         VStack(spacing: 0) {
             EditorTitleBar(workspace: workspace)
             if let tab = workspace.current {
-                HStack(spacing: 0) {
-                    VStack(spacing: 0) {
-                        if workspace.findMode != nil { FindBar(workspace: workspace, search: workspace.search) }
-                        EditorBanners(tab: tab)
-                        // Текст — строго в своей области: AppKit-вид поверх SwiftUI не должен заходить на строку состояния.
-                        EditorTextHost(tab: tab).clipped()
+                GeometryReader { geometry in
+                    // Узкое окно (< 720 pt) в «Документе»: панель «$» выдвигается поверх страниц (`d06`).
+                    let overlayPanel = tab.mode == .document && geometry.size.width < Self.narrowDocumentWidth
+                    HStack(spacing: 0) {
+                        VStack(spacing: 0) {
+                            if workspace.findMode != nil { FindBar(workspace: workspace, search: workspace.search) }
+                            EditorBanners(tab: tab)
+                            if tab.mode == .document, let document = tab.documentController {
+                                DocFormatBar(tab: tab, document: document)
+                                DocumentHost(controller: document).clipped()
+                                    .overlay(alignment: .bottom) { DocNoticeView(document: document) }
+                            } else {
+                                // Текст — строго в своей области: AppKit-вид поверх SwiftUI не должен заходить на строку состояния.
+                                EditorTextHost(tab: tab).clipped()
+                            }
+                        }
+                        if workspace.dollarPanelVisible, !overlayPanel {
+                            Rectangle().fill(Color.dsLine).frame(width: 1).accessibilityHidden(true)
+                            DollarPanelView(tab: tab).frame(width: Self.panelWidth)
+                        }
                     }
-                    if workspace.dollarPanelVisible {
-                        Rectangle().fill(Color.dsLine).frame(width: 1).accessibilityHidden(true)
-                        DollarPanelView(tab: tab).frame(width: Self.panelWidth)
+                    .overlay(alignment: .trailing) {
+                        if workspace.dollarPanelVisible, overlayPanel {
+                            DollarPanelView(tab: tab).frame(width: Self.panelWidth)
+                                .background(Color.dsSide)
+                                .overlay(alignment: .leading) { Rectangle().fill(Color.dsLine).frame(width: 1) }
+                                .shadow(color: .black.opacity(0.25), radius: 14, x: -4)
+                                .transition(.move(edge: .trailing))
+                        }
                     }
                 }
                 if workspace.folderSearchVisible {
@@ -33,7 +54,11 @@ struct EditorRootView: View {
                         EditorWindowController.shared.confirmFolderReplace()
                     }
                 }
-                EditorStatusBar(workspace: workspace, tab: tab)
+                if tab.mode == .document, let document = tab.documentController {
+                    DocStatusBar(workspace: workspace, tab: tab, document: document)
+                } else {
+                    EditorStatusBar(workspace: workspace, tab: tab)
+                }
             } else {
                 EmptyState("Нет открытых документов", systemImage: "doc.plaintext",
                            message: "Создайте документ (⌘N) или откройте файл (⌘O) — можно перетащить его в окно",
@@ -126,6 +151,7 @@ struct EditorTitleBar: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            if let tab = workspace.current, tab.isRTF { ViewModeSwitch(tab: tab) }
             IconButton("Найти и заменить (⌘F)", systemImage: "magnifyingglass", active: workspace.findMode != nil, compact: true) {
                 if workspace.findMode == nil { EditorWindowController.shared.showFind(replace: false) } else {
                     EditorWindowController.shared.hideFind()
