@@ -104,6 +104,73 @@ final class DocTableFitTests: XCTestCase {
         XCTAssertEqual(page.footerRect.minX + rightRect.maxX, margin + CGFloat(9355) / 20, accuracy: 2)
     }
 
+    /// Демо (выдуманный текст): таблица тела шире полосы текста (`\trleft-900`, правый `\cellx` за правым полем), абзац
+    /// с `\li-567` в поле и абзац с табуляцией по умолчанию. Рамка текста страницы — шире полосы на выступ; полоса
+    /// (`bodyRect`) для линейки та же; правка и выделение работают, в линейке — исходные отступы.
+    nonisolated static var wideForm: String {
+        let border = #"\clbrdrt\brdrs\brdrw10\clbrdrl\brdrs\brdrw10\clbrdrb\brdrs\brdrw10\clbrdrr\brdrs\brdrw10"#
+        var s = #"{\rtf1\ansi\ansicpg1251\deff0\deftab720{\fonttbl{\f0\froman\fcharset204 Times New Roman;}}"#
+        s += #"\paperw11906\paperh16838\margl1701\margr850\margt1134\margb1134\sectd "#
+        s += #"\pard\plain\fs24 Звичайний абзац\par "#
+        s += #"\pard\plain\li-567\fs24 Абзац у полі\par "#
+        s += #"\pard\plain\fs24 Ключ\tab Значення\par "#
+        s += #"\trowd\trgaph108\trleft-900"# + border + #"\cellx4300"# + border + #"\cellx9639 "#
+        s += #"\pard\plain\intbl\fs24 Масова частка вологи в зразку, відсотків (м/м)\cell "#
+        s += #"\pard\plain\intbl\li-108\ri-138\fs24 Норма\cell \row "#
+        s += #"\pard\plain\fs24 Після таблиці\par}"#
+        return s.unicodeScalars.map { $0.isASCII ? String($0) : "\\u\($0.value)?" }.joined()
+    }
+
+    func testWideBodyTableLikeWord() throws {
+        let document = try XCTUnwrap(load(Data(Self.wideForm.utf8), url: URL(fileURLWithPath: "/tmp/wide.frm")))
+        let page = try XCTUnwrap(document.pagesView.pages.first)
+        let margin = CGFloat(1701) / 20
+        XCTAssertEqual(page.bodyRect.minX, margin, "полоса текста — та же (линейка, колонтитулы)")
+        XCTAssertEqual(page.textRect.minX, margin - 45, accuracy: 0.01, "рамка текста — от левого края таблицы")
+        XCTAssertGreaterThanOrEqual(page.textRect.maxX, margin + CGFloat(9639) / 20, "и до правого")
+        var fit = TableFit()
+        fit.check(document)
+        XCTAssertGreaterThanOrEqual(fit.checks, 2)
+        XCTAssertEqual(fit.violations, 0, fit.details.joined(separator: "; "))
+
+        // Где на странице начинается текст: x глифа в координатах страницы.
+        let manager = document.layoutManager
+        func x(_ text: String) -> CGFloat {
+            let range = (document.storage.string as NSString).range(of: text)
+            let glyph = manager.glyphIndexForCharacter(at: range.location)
+            return page.textRect.minX + manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minX + manager.location(forGlyphAt: glyph).x
+        }
+        XCTAssertEqual(x("Звичайний"), margin, accuracy: 0.5, "обычный абзац — от поля")
+        XCTAssertEqual(x("Абзац у"), margin - 28.35, accuracy: 0.5, "\\li-567 — в поле")
+        XCTAssertEqual(x("Значення"), margin + 36, accuracy: 0.5, "шаг табуляции по умолчанию — от поля, не от рамки")
+        XCTAssertEqual(x("Масова"), margin - 45 + 5, accuracy: 1, "ячейка — от \\trleft-900 плюс \\trgaph")
+        let cell = (document.storage.string as NSString).range(of: "Масова частка вологи в зразку, відсотків (м/м)")
+        var lines = 0
+        manager.enumerateLineFragments(forGlyphRange: manager.glyphRange(forCharacterRange: cell, actualCharacterRange: nil)) { _, _, _, _, _ in
+            lines += 1
+        }
+        XCTAssertEqual(lines, 1, "как в Word — в одну строку")
+
+        // Линейка и команды — по исходным отступам; правка в ячейке сохраняет рамку текста.
+        let view = try XCTUnwrap(document.textViews.first)
+        let formatter = DocFormatter.of(document)
+        view.setSelectedRange(NSRange(location: (document.storage.string as NSString).range(of: "Абзац у").location + 2, length: 0))
+        formatter.updateState()
+        XCTAssertEqual(formatter.state.paragraph?.left, -567)
+        let tab = try XCTUnwrap(document.tab)
+        let original = tab.text as String
+        view.setSelectedRange(NSRange(location: (document.storage.string as NSString).range(of: "Норма").location + 5, length: 0))
+        view.insertText("!", replacementRange: NSRange(location: NSNotFound, length: 0))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertNotEqual(tab.text as String, original, "правка — в исходнике")
+        XCTAssertTrue(document.storage.string.contains("Норма!"))
+        XCTAssertEqual(page.textRect.minX, margin - 45, accuracy: 0.01)
+        XCTAssertEqual(x("Значення"), margin + 36, accuracy: 0.5)
+        tab.undo.undo()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertEqual(tab.text as String, original, "отмена — байт в байт")
+    }
+
     /// Настоящие формы — только по `MU_REAL_FRM_DIR` (копии вне репозитория); в выводе — только числа.
     func testRealFormsTablesAndTabsFitLikeWord() throws {
         guard let dir = ProcessInfo.processInfo.environment["MU_REAL_FRM_DIR"] else { throw XCTSkip("MU_REAL_FRM_DIR не задан") }
@@ -114,6 +181,12 @@ final class DocTableFitTests: XCTestCase {
             guard let document = load(try Data(contentsOf: url), url: url) else { closed += 1; continue }
             var fit = TableFit()
             fit.check(document)
+            // Подробности — только числа (ширины, отступы), по `MU_FIT_DETAILS`.
+            if ProcessInfo.processInfo.environment["MU_FIT_DETAILS"] != nil {
+                let laid = document.layoutManager.firstUnlaidCharacterIndex() >= document.layoutManager.textStorage?.length ?? 0
+                print("REAL fit file #\(index): pages \(document.pagesView.pages.count) laid out \(laid)")
+                for line in fit.details { print("REAL fit file #\(index): \(line)") }
+            }
             if fit.violations > 0 || fit.unmapped > 0 {
                 print("REAL fit file #\(index): checks \(fit.checks) violations \(fit.violations) (body \(fit.bodyViolations), "
                       + "wide body tables \(fit.wideBodyTables)) unmapped \(fit.unmapped)")
@@ -123,9 +196,11 @@ final class DocTableFitTests: XCTestCase {
         }
         print("REAL fit files \(urls.count), checks \(total.checks) (cells \(total.cellChecks), tabs \(total.tabChecks)), "
               + "violations \(total.violations) (body \(total.bodyViolations), of them wide body tables \(total.wideBodyTables); "
-              + "headers \(total.violations - total.bodyViolations)), unmapped \(total.unmapped), not in Document mode \(closed)")
+              + "headers \(total.violations - total.bodyViolations)), wrap checks \(total.wrapChecks), one line where Word wraps \(total.overflows), "
+              + "unmapped \(total.unmapped), not in Document mode \(closed)")
         XCTAssertEqual(total.violations - total.bodyViolations, 0, "колонтитулы")
         XCTAssertEqual(total.bodyViolations - total.wideBodyTables, 0, "основной текст, таблицы в полосе текста")
+        XCTAssertEqual(total.overflows, 0, "не шире, чем в Word")
         XCTAssertEqual(total.unmapped, 0)
     }
 }
@@ -135,13 +210,15 @@ final class DocTableFitTests: XCTestCase {
 struct TableFit {
     var checks = 0, cellChecks = 0, tabChecks = 0
     var violations = 0, bodyViolations = 0, wideBodyTables = 0, unmapped = 0
+    /// Обратная проверка: где Word переносит, у нас тоже перенос.
+    var wrapChecks = 0, overflows = 0
     /// Только числа: где нарушение (тело/колонтитул, ширины в пунктах).
     var details: [String] = []
 
     mutating func add(_ other: TableFit) {
         checks += other.checks; cellChecks += other.cellChecks; tabChecks += other.tabChecks
         violations += other.violations; bodyViolations += other.bodyViolations; wideBodyTables += other.wideBodyTables
-        unmapped += other.unmapped
+        unmapped += other.unmapped; wrapChecks += other.wrapChecks; overflows += other.overflows
     }
 
     /// Раскладка колонтитула как на странице; хранилище возвращается — менеджер держит его слабой ссылкой.
@@ -258,23 +335,47 @@ struct TableFit {
             widths.append(max(0, width))
             location += length + 1
         }
-        guard let end = Self.wordEnd(widths, tabs: props.tabs, start: first, limit: limit, defaultTab: CGFloat(max(model.defaultTab, 1)) / 20),
-              end <= limit - 1 else { return }
+        guard let end = Self.wordEnd(widths, tabs: props.tabs, start: first, limit: limit, defaultTab: CGFloat(max(model.defaultTab, 1)) / 20)
+        else { return }
+        // Обратное: по RTF не помещается (запас 1 pt) — у нас тоже перенос, а не строка шире, чем в Word.
+        // Один знак не переносится и в Word.
+        if !tabbed, end >= limit + 1, attributed.string.trimmingCharacters(in: .whitespaces).count > 1 {
+            wrapChecks += 1
+            var lines = 0
+            manager.enumerateLineFragments(forGlyphRange: manager.glyphRange(forCharacterRange: text, actualCharacterRange: nil)) { _, _, _, _, _ in
+                lines += 1
+            }
+            if lines < 2 {
+                overflows += 1
+                details.append("\(body ? "body" : "header") one line, need \(String(format: "%.1f", end)) of \(String(format: "%.1f", limit))")
+            }
+            return
+        }
+        guard end <= limit - 1 else { return }
         checks += 1
         if tabbed { tabChecks += 1 } else { cellChecks += 1 }
         let glyphs = manager.glyphRange(forCharacterRange: text, actualCharacterRange: nil)
         var lines = 0
-        manager.enumerateLineFragments(forGlyphRange: glyphs) { _, _, _, _, _ in lines += 1 }
+        var fragments: [String] = []
+        manager.enumerateLineFragments(forGlyphRange: glyphs) { rect, used, _, _, _ in
+            lines += 1
+            fragments.append(String(format: "%.1f…%.1f used %.1f…%.1f", rect.minX, rect.maxX, used.minX, used.maxX))
+        }
         if lines > 1 {
             violations += 1
             if body { bodyViolations += 1 }
             // Таблица основного текста шире полосы текста (выходит в поля): текст страницы рисуется в ширину полосы,
             // и `NSTextTable` сжимает её столбцы — отдельный класс, считается отдельно.
+            var table = ""
             if body, let ref = paragraph.cell, let rows = story.tables[safe: ref.table]?.rows,
-               let left = rows.map(\.left).min(), let right = rows.compactMap({ $0.cells.last?.right }).max(), right - left > Int(textWidth * 20) {
-                wideBodyTables += 1
+               let left = rows.map(\.left).min(), let right = rows.compactMap({ $0.cells.last?.right }).max() {
+                if right - left > Int(textWidth * 20) { wideBodyTables += 1 }
+                let cell = Self.cellWidth(paragraph, story)
+                table = " table \(left)…\(right) text \(Int(textWidth * 20)) cell \(cell?.width ?? 0)/\(cell?.gap ?? 0)"
+                    + " li \(props.left) fi \(props.firstLine) ri \(props.right)"
+                    + " brdr \(Self.cellDef(paragraph, story).map { "\($0.borderLeft.isVisible ? $0.borderLeft.width : 0)/\($0.borderRight.isVisible ? $0.borderRight.width : 0)" } ?? "")"
             }
-            details.append("\(body ? "body" : "header") lines \(lines) need \(String(format: "%.1f", end)) of \(String(format: "%.1f", limit)) tabs \(tabbed)")
+            details.append("\(body ? "body" : "header")\(table) lines \(lines) [\(fragments.joined(separator: "; "))] need \(String(format: "%.1f", end)) of \(String(format: "%.1f", limit)) tabs \(tabbed)")
         }
     }
 
