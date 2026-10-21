@@ -85,6 +85,49 @@ function logPlacement(event) {
   } catch (_) {}
 }
 
+// Строка в overlay.log с меткой времени; файл больше 256 КБ — начинается заново.
+function appendOverlayLog(line) {
+  try {
+    const file = path.join(app.getPath("logs"), "overlay.log");
+    if (fs.existsSync(file) && fs.statSync(file).size > 256 * 1024) fs.rmSync(file);
+    fs.appendFileSync(file, `${new Date().toISOString()} ${line}\n`);
+  } catch (_) {}
+}
+// Журнал кодера трансляции от страницы (режим hw/sw/jpeg, причина, размер, очередь, ошибки): только коды и числа —
+// всё, кроме букв, цифр и знаков разметки, заменяется, длина ограничена. Начало эфира — ещё и сведения о видеокарте.
+const PAGE_LOG = /[^A-Za-z0-9 =().:;,_+\-[\]]/g;
+function logPage(line) {
+  if (typeof line !== "string") return;
+  appendOverlayLog(`page ${line.replace(PAGE_LOG, "?").slice(0, 400)}`);
+  if (line.startsWith("encoder start")) logGpu();
+}
+// Почему не работает аппаратное кодирование: видеокарты (вендор, модель — название и PCI-код модели, драйвер; без
+// LUID и других ID экземпляра), статусы ускорения Chromium (video_encode, gpu_compositing…), флаги запуска, которые
+// могут его отключить, строка рендерера ANGLE (там же Direct3D и версия драйвера), гибридная графика (optimus,
+// amdSwitchable) и профили аппаратного кодера, если Chromium их сообщает. Сведения «complete» собираются до 5 с;
+// не успели — «basic» (там только вендор и PCI-код модели).
+const GPU_VENDORS = { 0x10de: "nvidia", 0x1002: "amd", 0x1022: "amd", 0x8086: "intel", 0x1414: "microsoft", 0x5143: "qualcomm", 0x15ad: "vmware", 0x106b: "apple" };
+const GPU_FLAGS = ["disable-gpu", "disable-gpu-compositing", "disable-software-rasterizer", "disable-accelerated-video-encode",
+  "disable-accelerated-video-decode", "ignore-gpu-blocklist", "use-angle", "use-gl", "disable-features", "enable-features"];
+const GPU_AUX = ["glRenderer", "displayType", "optimus", "amdSwitchable", "inProcessGpu", "sandboxed", "passthroughCmdDecoder"];
+const clean = (v, max = 80) => String(v ?? "-").replace(PAGE_LOG, "_").replace(/ /g, "_").slice(0, max);
+async function logGpu() {
+  try {
+    const status = Object.entries(app.getGPUFeatureStatus() || {}).map(([k, v]) => `${clean(k)}=${clean(v)}`).join(" ");
+    const flags = GPU_FLAGS.filter((f) => app.commandLine?.hasSwitch(f)).map((f) => `${f}=${clean(app.commandLine.getSwitchValue(f) || "1")}`);
+    const info = (await Promise.race([app.getGPUInfo("complete").catch(() => null), new Promise((resolve) => setTimeout(resolve, 5000))])) ||
+      (await app.getGPUInfo("basic"));
+    const devices = (info?.gpuDevice || []).map((d, i) => `${i + 1}:${GPU_VENDORS[d.vendorId] || "other"}(${hex(d.vendorId)})` +
+      ` model=${hex(d.deviceId)} name=${clean(d.deviceString)} driver=${clean(d.driverVendor)}:${clean(d.driverVersion)}${d.active ? " active" : ""}`);
+    appendOverlayLog(`gpu devices=[${devices.join(" ") || "-"}] status=[${status || "-"}] flags=[${flags.join(" ") || "-"}] ` +
+      `electron=${clean(process.versions.electron)} chrome=${clean(process.versions.chrome)}`);
+    const aux = info?.auxAttributes || {};
+    const fields = Object.keys(aux).filter((k) => GPU_AUX.includes(k) || /encode/i.test(k))
+      .map((k) => `${clean(k)}=${clean(typeof aux[k] === "object" ? JSON.stringify(aux[k]) : aux[k], 300)}`);
+    appendOverlayLog(`gpu aux ${fields.join(" ") || "-"}`);
+  } catch (_) {}
+}
+
 // Разбор метки (первые 10 за трансляцию): точка зрителя `p`, область долями окна меток `fr`, где окно меток по словам
 // помощника (`phys`, физические пиксели и DPI) и где страница нарисовала метку, — в долях захваченной области `q`.
 // `q` должна совпасть с `p`; совпала, а у зрителя метка не там — захватывается не та область, что мы отслеживаем.
@@ -393,6 +436,7 @@ app.whenReady().then(() => {
     if (pendingMarks.length > 50) pendingMarks.splice(0, pendingMarks.length - 50);
     flushMarks();
   });
+  ipcMain.on("page-log", (event, line) => { if (window && event.sender === window.webContents) logPage(line); });
   ipcMain.on("stopped", () => { nextSource = null; previousSource = null; hideOverlay(); stopAudio(); });
   ipcMain.on("overlay-report", (event, report) => { if (overlay && !overlay.isDestroyed() && event.sender === overlay.webContents) logMark(report); });
 

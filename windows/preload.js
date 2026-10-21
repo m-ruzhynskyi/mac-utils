@@ -25,4 +25,6 @@ contextBridge.exposeInMainWorld("mu", {
   onDisplays: (callback) => { ipcRenderer.removeAllListeners("displays-changed"); ipcRenderer.on("displays-changed", () => callback()); },
   switchTo: (n) => ipcRenderer.invoke("switchTo", n),
   notice: (data) => ipcRenderer.send("notice", data),
+  // Журнал кодера трансляции (только коды и числа) — в overlay.log.
+  log: (line) => ipcRenderer.send("page-log", String(line).slice(0, 400)),
 });

@@ -143,7 +143,9 @@ function electron(world) {
     windows, ipc, handles, helper, helperCalls, get displayMedia() { return displayMedia; },
     module: {
       app: { requestSingleInstanceLock: () => true, quit() {}, whenReady: () => Promise.resolve(), on() {}, isPackaged: false,
-             getVersion: () => "1.1.0", getPath: () => world.logs },
+             getVersion: () => "1.1.0", getPath: () => world.logs,
+             getGPUInfo: async (kind) => (world.gpu ? world.gpu[kind] : {}), getGPUFeatureStatus: () => world.gpu?.status || {},
+             commandLine: { hasSwitch: (f) => !!world.gpu?.switches?.[f], getSwitchValue: (f) => world.gpu?.switches?.[f] || "" } },
       BrowserWindow, screen,
       desktopCapturer: { getSources: async () => world.sources },
       ipcMain: { on: (name, fn) => ipc.set(name, fn), handle: (name, fn) => handles.set(name, fn) },
@@ -678,5 +680,33 @@ test("удачное переключение не откатывается по
     assert.equal(await host.fake.handles.get("switchTo")({}, 1), true);
     assert.equal(await host.fake.handles.get("switchTo")({}, 0), false);
     assert.equal((await host.fake.handles.get("displays")()).current, 3, "остаётся C — последний удачный");
+  } finally { host.stop(); }
+});
+
+test("журнал кодера страницы — в overlay.log только коды и числа; начало эфира — видеокарта, статусы и флаги (без LUID)", async () => {
+  const w = world([monitor(1, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true)], []);
+  w.gpu = {
+    status: { video_encode: "disabled_software", gpu_compositing: "enabled" },
+    switches: { "disable-features": "MediaFoundationH264Encoding" },
+    basic: { gpuDevice: [{ vendorId: 0x10de, deviceId: 0x2504, active: true }] },
+    complete: { gpuDevice: [{ vendorId: 0x10de, deviceId: 0x2504, deviceString: "NVIDIA GeForce RTX 3060", driverVendor: "NVIDIA",
+      driverVersion: "31.0.15.3623", luid: { high: 0, low: 12345 }, active: true }, { vendorId: 0x8086, deviceId: 0x4680, active: false }],
+      auxAttributes: { glRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11-31.0.15.3623)", optimus: false,
+        videoEncodeAcceleratorSupportedProfile: [{ profile: "h264 main", maxResolutionWidth: 4096, maxResolutionHeight: 2304 }], machineModelName: "x" } },
+  };
+  const host = await start(w);
+  try {
+    const main = host.fake.windows.find((x) => !x.opts.transparent);
+    const send = host.fake.ipc.get("page-log");
+    send({ sender: main.webContents }, "encoder start reason=start mode=hw src=3840x2160 <img src=x> Катя");
+    send({ sender: {} }, "encoder start чужое окно");
+    await tick(20);
+    const log = host.log();
+    assert.match(log, / page encoder start reason=start mode=hw src=3840x2160 \?img src=x\? \?{4}\n/);
+    assert.ok(!log.includes("чужое"), "строки не из главного окна не пишутся");
+    assert.match(log, / gpu devices=\[1:nvidia\(0x10de\) model=0x2504 name=NVIDIA_GeForce_RTX_3060 driver=NVIDIA:31.0.15.3623 active 2:intel\(0x8086\) model=0x4680 /);
+    assert.match(log, /status=\[video_encode=disabled_software gpu_compositing=enabled\] flags=\[disable-features=MediaFoundationH264Encoding\]/);
+    assert.match(log, / gpu aux glRenderer=ANGLE_\(NVIDIA,_NVIDIA_GeForce_RTX_3060_Direct3D11.* optimus=false videoEncodeAcceleratorSupportedProfile=.*4096/);
+    assert.ok(!/12345|luid|machineModel/.test(log), "без LUID и модели компьютера");
   } finally { host.stop(); }
 });
