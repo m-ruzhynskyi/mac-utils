@@ -1676,7 +1676,10 @@ function startCapture(stream, code) {
   const timer = { cancel() {} };
   // Чтение кадров дорожки; при смене монитора (capture.replaceVideo) старое чтение останавливается, начинается новое.
   const readFrames = (videoTrack) => {
-    if (canEncode && typeof MediaStreamTrackProcessor !== "undefined") {
+    // Не `canEncode`: в мосте JPEG он ложный, а после возврата H.264 кадры нужны по мере прихода, а не 8 в секунду
+    // (смена монитора во время моста иначе оставляла таймер на 125 мс до конца эфира).
+    const h264 = typeof VideoEncoder !== "undefined" && !ladder.noH264;
+    if (h264 && typeof MediaStreamTrackProcessor !== "undefined") {
       let running = true, lastFrameAt = 0;
       const reader = new MediaStreamTrackProcessor({ track: videoTrack }).readable.getReader();
       // Статичный экран: захват может не присылать кадров, а новому зрителю нужен ключевой — берём кадр из <video>.
@@ -1697,7 +1700,7 @@ function startCapture(stream, code) {
         } catch (_) {}
       })();
     } else {
-      const interval = setInterval(() => tick(video, video.videoWidth, video.videoHeight), canEncode ? 17 : 125);
+      const interval = setInterval(() => tick(video, video.videoWidth, video.videoHeight), h264 ? 17 : 125);
       timer.cancel = () => clearInterval(interval);
     }
   };

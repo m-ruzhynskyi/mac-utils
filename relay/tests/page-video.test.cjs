@@ -290,6 +290,19 @@ test('ни один кодер временно не создаётся (6 с): 
   assert.equal(p.configs.at(-1).hardwareAcceleration, 'prefer-hardware', 'и аппаратный вернулся');
 });
 
+test('смена монитора во время моста JPEG: после возврата H.264 кадры снова из захвата, а не 8 в секунду', async () => {
+  const p = page({ outageAll: [2000, 8000] });
+  await p.run(4);
+  assert.ok(p.logs.some((l) => /^encoder mode reason=fail mode=jpeg /.test(l)), 'идёт мост JPEG');
+  assert.equal(p.replace([1280, 720]), true);
+  await p.run(16);
+  const after = p.sent.length;
+  await p.run(3);
+  const v = kinds(p.sent, after);
+  assert.equal(v.jpeg, 0);
+  assert.ok(v.h264 > 60, `видео вернулось с полной частотой: ${v.h264}`);
+});
+
 test('H.264 нет вообще (isConfigSupported — нет для обоих): JPEG без повторных попыток кодера', async () => {
   const p = page({ any: false, probe: { hw: false, sw: false } });
   await p.run(1);
