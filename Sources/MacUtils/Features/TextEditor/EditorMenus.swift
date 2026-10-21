@@ -105,6 +105,9 @@ enum EditorMenus {
                 ]),
             ]),
             submenu("Вид", [
+                item("Код", #selector(C.editorShowCode(_:))),
+                item("Документ", #selector(C.editorToggleDocument(_:)), "d", [.command, .shift]),
+                .separator(),
                 item("Перенос строк", #selector(C.editorToggleWrap(_:))),
                 item("Невидимые символы", #selector(C.editorToggleInvisibles(_:)), "i", [.command, .option]),
                 item("Парные скобки", #selector(C.editorToggleBrackets(_:))),

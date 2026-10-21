@@ -34,7 +34,7 @@ final class FocusBlur: ObservableObject {
             return
         }
         center.register(id: HotKeyID.focus, keyCode: kVK_ANSI_F, modifiers: controlKey | optionKey) {
-            FocusBlur.shared.toggle()
+            AppAction(hotKey: .focus).run()
         }
         if isOn { applyStyle() }
     }

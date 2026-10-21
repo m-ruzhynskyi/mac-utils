@@ -19,7 +19,7 @@ final class WindowPin: ObservableObject {
             return
         }
         center.register(id: HotKeyID.windowPin, keyCode: kVK_ANSI_P, modifiers: controlKey | optionKey) {
-            WindowPin.shared.toggleFocused()
+            AppAction(hotKey: .windowPin).run()
         }
     }
 

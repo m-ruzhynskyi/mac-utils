@@ -63,7 +63,7 @@ final class ScreenAnnotator: ObservableObject {
             return
         }
         center.register(id: HotKeyID.annotate, keyCode: kVK_ANSI_A, modifiers: controlKey | optionKey) {
-            ScreenAnnotator.shared.toggle()
+            AppAction(hotKey: .annotate).run()
         }
     }
 

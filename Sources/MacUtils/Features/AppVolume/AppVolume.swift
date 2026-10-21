@@ -52,7 +52,7 @@ final class AppVolume: ObservableObject {
         let key = LayoutHotKey.load(codeKey: Pref.appVolumeKeyCode, modifiersKey: Pref.appVolumeModifiers,
                                     default: .controlOptionV)
         center.register(id: HotKeyID.appVolume, keyCode: key.keyCode, modifiers: key.modifiers) {
-            AppVolume.shared.toggleHUD()
+            AppAction(hotKey: .appVolume).run()
         }
         installListeners()
         isRunning = true

@@ -446,7 +446,7 @@ final class EditorWorkspaceTests: XCTestCase {
 struct EditorDefaultsSnapshot {
     static let keys = [Pref.editorSkipFirst, Pref.editorSkipCount, Pref.editorRestoreSession, Pref.editorAutosaveDrafts,
                        Pref.editorInvisibles, Pref.editorBrackets, Pref.editorWrap, Pref.editorZoom, Pref.editorDollarPanel,
-                       Pref.editorRecent, Pref.editorTabWidth]
+                       Pref.editorRecent, Pref.editorTabWidth, Pref.editorViewModes]
     private let values: [String: Any]
 
     init() {

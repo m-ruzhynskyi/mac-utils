@@ -29,8 +29,11 @@ V_SHORT="$(version_field SHORT)"; V_BUILD="$(version_field BUILD)"; V_CHANNEL="$
 V_COMMIT="$(version_field COMMIT)"; V_SINCE="$(version_field SINCE)"
 [[ -n "$V_SHORT" && -n "$V_BUILD" && -n "$V_CHANNEL" ]] || { echo "version.sh вернул неполный вывод" >&2; exit 1; }
 
-swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"}
-BIN_DIR="$(swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} --show-bin-path)"
+# Константы для метаданных App Intents (действия в «Командах») — scripts/appintents-metadata.sh.
+INTENT_FLAGS=()
+while IFS= read -r flag; do INTENT_FLAGS+=("$flag"); done < <(./scripts/appintents-metadata.sh flags)
+swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} "${INTENT_FLAGS[@]}"
+BIN_DIR="$(swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} "${INTENT_FLAGS[@]}" --show-bin-path)"
 
 APP="build/$APP_NAME.app"
 rm -rf "$APP"
@@ -54,6 +57,9 @@ echo "Версия: $V_SHORT ($V_CHANNEL, $V_COMMIT)"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Шрифты интерфейса (Manrope, JetBrains Mono — SIL OFL 1.1) с лицензиями; регистрируются при запуске (DSFonts).
 cp -R Resources/Fonts "$APP/Contents/Resources/Fonts"
+
+# Действия Mac Utils в «Командах» и фразы Siri: Contents/Resources/Metadata.appintents (до подписи).
+./scripts/appintents-metadata.sh extract "$APP"
 
 # Помощник «Сейчас играет» (грузится в системный perl — см. Helpers/NowPlaying.m).
 clang -fobjc-arc -dynamiclib -arch arm64 -arch x86_64 -mmacosx-version-min=14.0 \

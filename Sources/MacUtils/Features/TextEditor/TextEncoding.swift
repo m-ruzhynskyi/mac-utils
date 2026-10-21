@@ -4,7 +4,7 @@ import Foundation
 /// Главное правило: открыть и сохранить без правок — байты те же. Однобайтовые кодировки декодируются таблицей
 /// на 256 значений, где у каждого байта свой символ (неопределённые байты — U+0080…U+009F и т. п.), поэтому
 /// обратное преобразование однозначно.
-enum TextEncoding: String, CaseIterable, Codable {
+enum TextEncoding: String, CaseIterable, Codable, Sendable {
     case utf8, utf8BOM, utf16LE, utf16BE
     case windows1251, windows1252, windows1250
     case koi8R, koi8U
@@ -363,7 +363,7 @@ struct SingleByteTable {
 
 // MARK: - Переводы строк
 
-enum LineEnding: String, CaseIterable, Codable {
+enum LineEnding: String, CaseIterable, Codable, Sendable {
     case crlf, lf, cr
 
     var title: String {

@@ -50,14 +50,27 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
 
     var showsInvisibles: Bool {
         get { (textView.layoutManager as? EditorLayoutManager)?.showsInvisibles ?? false }
-        set { (textView.layoutManager as? EditorLayoutManager)?.showsInvisibles = newValue }
+        set {
+            (textView.layoutManager as? EditorLayoutManager)?.showsInvisibles = newValue
+            documentController?.showsInvisibles = newValue
+        }
     }
+    /// Режим «Код» или «Документ» (только у RTF).
+    @Published var mode = EditorViewMode.code
+    /// Показ документом — создаётся при первом переходе в «Документ».
+    var documentController: DocumentController?
+    /// С последнего сохранения правили из «Документа» — запись только после проверок без потерь.
+    var editedInDocument = false
+    /// Нетронутые куски текста с открытия или сохранения (сверка байтов «вне правок» перед записью).
+    private(set) var journal = DocSourceJournal(length: 0)
     var matchesBrackets = true { didSet { refreshBrackets() } }
     /// Где сейчас подсвечены скобки (временный атрибут фона).
     private var bracketRanges: [NSRange] = []
 
     /// Растёт с каждой правкой текста: фоновый результат (поиск, замена) применяется, только если текст тот же.
     private(set) var textVersion = 0
+    /// Растёт с каждым изменением хранилища, в том числе отменой и повтором (по ним документ перерисовывается).
+    private(set) var sourceRevision = 0
 
     /// Счётчик правок от сохранения: +1 за каждый шаг отмены, −1 за отмену.
     private var changeCount = 0
@@ -93,7 +106,10 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         storage.delegate = self
         textView.onOverwriteChange = { [weak self] in self?.overwrite = $0 }
         textView.onCursorsChange = { [weak self] in self?.refreshCaret() }
-        dollars.onUpdate = { [weak self] in self?.rehighlight() }
+        dollars.onUpdate = { [weak self] in
+            self?.rehighlight()
+            self?.documentController?.highlightDollars()
+        }
         dollars.rule = Self.defaultRule(for: document)
         dollars.encoding = document.encoding
         load(text ?? document.decodedText, resetUndo: true)
@@ -101,6 +117,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
             // Восстановленный черновик отличается от файла — вкладка изменена.
             pendingChange = true
             updateDirty()
+            // Журнал — от файла на диске: правленая часть черновика (между общим началом и концом) — уже не «нетронутая».
+            journal = Self.journal(from: document.decodedText as NSString, to: text as NSString)
         }
         observeUndo()
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -161,10 +179,13 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         refreshCounts()
         refreshLineEnding()
         textView.setSelectedRange(NSRange(location: 0, length: 0))
+        journal = DocSourceJournal(length: storage.length)
+        editedInDocument = false
         dollars.removedCount = nil
         dollars.textChanged({ [weak self] in self?.text ?? "" }, immediately: true)
         ruler.updateThickness()
         rehighlight()
+        documentController?.sourceDidChange()
     }
 
     private var baseAttributes: [NSAttributedString.Key: Any] {
@@ -187,6 +208,20 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         textView.typingAttributes = baseAttributes
         ruler.zoom = zoom
         ruler.needsDisplay = true
+    }
+
+    /// Журнал для текста `draft`, полученного из `original`: всё, кроме средней части между общим началом и общим концом,
+    /// — нетронутые куски исходника.
+    static func journal(from original: NSString, to draft: NSString) -> DocSourceJournal {
+        var journal = DocSourceJournal(length: original.length)
+        let shorter = min(original.length, draft.length)
+        var prefix = 0
+        while prefix < shorter, original.character(at: prefix) == draft.character(at: prefix) { prefix += 1 }
+        var suffix = 0
+        while suffix < shorter - prefix,
+              original.character(at: original.length - 1 - suffix) == draft.character(at: draft.length - 1 - suffix) { suffix += 1 }
+        journal.record(edited: NSRange(location: prefix, length: draft.length - prefix - suffix), delta: draft.length - original.length)
+        return journal
     }
 
     // MARK: - Состояние «изменено»
@@ -234,6 +269,8 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
     func markSaved() {
         changeCount = 0
         pendingChange = false
+        journal = DocSourceJournal(length: storage.length)
+        editedInDocument = false
         updateDirty()
     }
 
@@ -251,7 +288,10 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
                                  range editedRange: NSRange, changeInLength delta: Int) {
         guard editedMask.contains(.editedCharacters) else { return }
         MainActor.assumeIsolated {
+            sourceRevision += 1
             guard !bulkLoading else { return }
+            journal.record(edited: editedRange, delta: delta)
+            documentController?.sourceDidChange()
             dollars.invalidate()
             let editLine = lines.line(at: editedRange.location)
             // Вставка в самом начале строки (Enter перед текстом) сдвигает и саму эту строку.
@@ -283,6 +323,7 @@ final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextViewDeleg
         ruler.updateThickness()
         ruler.needsDisplay = true
         highlightEdit()
+        documentController?.sourceDidChange()
         onEdit?()
     }
 
