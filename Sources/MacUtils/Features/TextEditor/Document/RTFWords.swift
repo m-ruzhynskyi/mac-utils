@@ -14,7 +14,7 @@ enum RTFWord: String, CaseIterable {
     // Абзац.
     case pard, par, ql, qc, qr, qj, qd, li, ri, fi, lin, rin, sb, sa, sl, slmult
     case tx, tb, tqr, tqc, tqdec, tldot, tlhyph, tlul, tlth, tleq, tlmdot
-    case intbl, keepn, pagebb, s, cbpat
+    case intbl, keepn, pagebb, s, cbpat, contextualspace
     case brdrt, brdrb, brdrl, brdrr, box, brdrw, brdrcf, brdrs, brdrth, brdrdb, brdrdot, brdrdash, brdrnone, brdrnil, brdrsh
     // Символ.
     case plain, f, fs, b, i, ul, uld, uldb, ulw, ulth, uldash, uldashd, uldashdd, ulwave, ulhwave, ululdbwave, ulthd, ulthdash
@@ -24,11 +24,12 @@ enum RTFWord: String, CaseIterable {
     case emdash, endash, lquote, rquote, ldblquote, rdblquote, bullet, emspace, enspace, qmspace, zwj, zwnj, ltrmark, rtlmark, chpgn
     // Таблица.
     case trowd, cellx, clvmgf, clvmrg, clmgf, clmrg, clbrdrt, clbrdrb, clbrdrl, clbrdrr, clcbpat, clvertalt, clvertalc, clvertalb
-    case trgaph, trleft, trrh, trhdr, trbrdrt, trbrdrb, trbrdrl, trbrdrr, trbrdrh, trbrdrv
+    case trgaph, trleft, trrh, trhdr, trpaddt, trpaddb, trbrdrt, trbrdrb, trbrdrl, trbrdrr, trbrdrh, trbrdrv
     // Рисунок.
     case pngblip, jpegblip, wmetafile, emfblip, macpict, dibitmap, wbitmap, pmmetafile, picw, pich, picwgoal, pichgoal, picscalex, picscaley
     // Фигуры и объекты рисования.
-    case shpleft, shpright, shptop, shpbottom, dpline, dprect, dpellipse, dptxbx, dppolyline, dppolygon, dparc, dpcallout, dpgroup
+    case shpleft, shpright, shptop, shpbottom, shpwr, shpfblwtxt, shpbxpage, shpbxmargin, shpbxcolumn, shpbypage, shpbymargin, shpbypara
+    case dpline, dprect, dpellipse, dptxbx, dppolyline, dppolygon, dparc, dpcallout, dpgroup
     case dpx, dpy, dpxsize, dpysize
     // Таблица шрифтов и цветов.
     case fnil, froman, fswiss, fmodern, fscript, fdecor, ftech, fbidi, fcharset, cpg, red, green, blue

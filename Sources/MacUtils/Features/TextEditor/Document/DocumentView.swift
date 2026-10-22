@@ -169,6 +169,9 @@ final class DocTextView: NSTextView {
 final class DocPageView: NSView {
     let textView: DocTextView
     let container: NSTextContainer
+    /// Плавающие фигуры (`DocFloatingLayer`): под текстом и над ним.
+    private let shapesBehind = DocFloatingLayer(behind: true)
+    private let shapesFront = DocFloatingLayer(behind: false)
     private(set) var props: RTFSectionProps
     var section: Int
     var number = 1
@@ -176,6 +179,9 @@ final class DocPageView: NSView {
     var firstInSection = false
     private(set) var header: NSAttributedString?
     private(set) var footer: NSAttributedString?
+    /// Раскладка колонтитулов — та же TextKit, что у основного текста (высота строк, таблицы).
+    private let headerLayout = DocStoryLayout()
+    private let footerLayout = DocStoryLayout()
     /// Насколько колонтитулы выходят в поля (отрицательные отступы абзацев) и их высота — по ним считается геометрия.
     private var headerOutdent = (left: CGFloat(0), right: CGFloat(0))
     private var footerOutdent = (left: CGFloat(0), right: CGFloat(0))
@@ -219,7 +225,19 @@ final class DocPageView: NSView {
         textView.insertionPointColor = .black
         textView.selectedTextAttributes = [.backgroundColor: NSColor(srgbRed: 0.7, green: 0.82, blue: 1, alpha: 1)]
         textView.disableSubstitutions()
+        for layer in [shapesBehind, shapesFront] {
+            layer.page = self
+            layer.frame = bounds
+        }
+        addSubview(shapesBehind)
         addSubview(textView)
+        addSubview(shapesFront)
+    }
+
+    /// Раскладка страницы изменилась — фигуры перерисовать от новых мест опор.
+    func refreshFloating() {
+        shapesBehind.needsDisplay = true
+        shapesFront.needsDisplay = true
     }
 
     @available(*, unavailable)
@@ -269,14 +287,14 @@ final class DocPageView: NSView {
         self.footer = footer
         self.headerOutdent = (headerOutdent.0, headerOutdent.1)
         self.footerOutdent = (footerOutdent.0, footerOutdent.1)
+        layoutHeaders()
+    }
+
+    /// Высота колонтитулов по ширине страницы — без пустой строки после последнего конца абзаца (у Word её нет).
+    private func layoutHeaders() {
         let width = Self.bodyRect(props).width
-        func height(_ string: NSAttributedString?, _ outdent: (CGFloat, CGFloat)) -> CGFloat {
-            guard let string, string.length > 0 else { return 0 }
-            return ceil(string.boundingRect(with: NSSize(width: width + outdent.0 + outdent.1, height: 10_000),
-                                            options: [.usesLineFragmentOrigin, .usesFontLeading]).height)
-        }
-        headerHeight = height(header, headerOutdent)
-        footerHeight = height(footer, footerOutdent)
+        headerHeight = headerLayout.set(header, width: width + headerOutdent.left + headerOutdent.right)
+        footerHeight = footerLayout.set(footer, width: width + footerOutdent.left + footerOutdent.right)
         applyBody()
         needsDisplay = true
     }
@@ -293,7 +311,7 @@ final class DocPageView: NSView {
         guard props != self.props else { return }
         self.props = props
         setFrameSize(Self.size(props))
-        applyBody()
+        layoutHeaders()
         needsDisplay = true
         superview?.needsDisplay = true
     }
@@ -302,14 +320,8 @@ final class DocPageView: NSView {
         // Только своя бумага: при отрисовке в картинку `dirtyRect` бывает шире страницы — иначе стёрли бы соседнюю.
         NSColor.white.setFill()
         dirtyRect.intersection(bounds).fill()
-        if let header {
-            header.draw(with: NSRect(x: headerRect.minX, y: headerRect.minY, width: headerRect.width, height: 10_000),
-                        options: [.usesLineFragmentOrigin, .usesFontLeading])
-        }
-        if let footer {
-            footer.draw(with: NSRect(x: footerRect.minX, y: footerRect.minY, width: footerRect.width, height: 10_000),
-                        options: [.usesLineFragmentOrigin, .usesFontLeading])
-        }
+        if header != nil { headerLayout.draw(at: headerRect.origin) }
+        if footer != nil { footerLayout.draw(at: NSPoint(x: footerRect.minX, y: footerRect.maxY - footerHeight)) }
         if let frame = headerFrame {
             let path = NSBezierPath(rect: frame.rect)
             path.setLineDash([5, 3], count: 2, phase: 0)
@@ -332,6 +344,46 @@ final class DocPageView: NSView {
         // Двойной клик по полю страницы — колонтитул (как в Word).
         if event.clickCount == 2, let handler = textView.onDoubleClickOutside, handler(event) { return }
         super.mouseDown(with: event)
+    }
+}
+
+/// Колонтитул на странице: своя раскладка TextKit (как у основного текста), высота и рисование.
+@MainActor
+final class DocStoryLayout {
+    private let storage = NSTextStorage()
+    let layoutManager = NSLayoutManager()
+    private let container = NSTextContainer(size: NSSize(width: 400, height: 10_000))
+
+    init() {
+        container.lineFragmentPadding = 0
+        container.widthTracksTextView = false
+        layoutManager.delegate = DocLineMetricsDelegate.shared
+        layoutManager.addTextContainer(container)
+        storage.addLayoutManager(layoutManager)
+    }
+
+    /// Новый текст и ширина; ответ — высота текста без пустой строки после последнего `\n` (0 — текста нет).
+    func set(_ string: NSAttributedString?, width: CGFloat) -> CGFloat {
+        let string = string ?? NSAttributedString()
+        if !storage.isEqual(to: string) { storage.setAttributedString(string) }
+        if container.size.width != width { container.size = NSSize(width: width, height: 10_000) }
+        guard storage.length > 0 else { return 0 }
+        return Self.height(layoutManager, container)
+    }
+
+    /// Высота разложенного текста контейнера без пустой строки после последнего `\n`.
+    static func height(_ layoutManager: NSLayoutManager, _ container: NSTextContainer) -> CGFloat {
+        layoutManager.ensureLayout(for: container)
+        let height = layoutManager.usedRect(for: container).height
+        guard layoutManager.extraLineFragmentTextContainer === container else { return height }
+        return max(0, min(height, layoutManager.extraLineFragmentRect.minY))
+    }
+
+    func draw(at origin: NSPoint) {
+        let glyphs = layoutManager.glyphRange(for: container)
+        guard glyphs.length > 0 else { return }
+        layoutManager.drawBackground(forGlyphRange: glyphs, at: origin)
+        layoutManager.drawGlyphs(forGlyphRange: glyphs, at: origin)
     }
 }
 

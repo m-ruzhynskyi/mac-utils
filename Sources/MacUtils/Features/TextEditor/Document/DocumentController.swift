@@ -224,6 +224,16 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         }
     }
 
+    /// Высота строк — как у Word (`DocLineMetrics`).
+    nonisolated func layoutManager(_ layoutManager: NSLayoutManager, shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
+                                   lineFragmentUsedRect: UnsafeMutablePointer<NSRect>, baselineOffset: UnsafeMutablePointer<CGFloat>,
+                                   in textContainer: NSTextContainer, forGlyphRange glyphRange: NSRange) -> Bool {
+        MainActor.assumeIsolated {
+            DocLineMetrics.adjust(layoutManager, rect: &lineFragmentRect.pointee, used: &lineFragmentUsedRect.pointee,
+                                  baseline: &baselineOffset.pointee, container: textContainer, glyphs: glyphRange)
+        }
+    }
+
     nonisolated func layoutManager(_ layoutManager: NSLayoutManager, didCompleteLayoutFor container: NSTextContainer?, atEnd: Bool) {
         MainActor.assumeIsolated { completedLayout(container, atEnd: atEnd) }
     }
@@ -234,6 +244,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
             if containers.isEmpty { addPage(section: 0) }
             return
         }
+        if index < pagesView.pages.count { pagesView.pages[index].refreshFloating() }
         if !atEnd, index == containers.count - 1 {
             // Текст не поместился — следующая страница: её раздел — у следующего символа.
             let glyphs = layoutManager.glyphRange(for: container)

@@ -133,6 +133,10 @@ private final class RTFParser {
     private var shapePropName: [UInt16] = []
     private var shapePropValue: [UInt16] = []
     private var shapePicture: RTFPicture?
+    /// Обтекание (`\shpwr`), опора и свойства `{\sp{\sn …}{\sv …}}` текущей фигуры.
+    private var shapeWrap = 0
+    private var shapeFloat = RTFFloat()
+    private var shapeProps: [String: String] = [:]
     private var drawingType = "Объект"
     private var drawingSize = (w: 0, h: 0)
     private var fieldInstructions: [Int: [UInt16]] = [:]
@@ -232,14 +236,15 @@ private final class RTFParser {
         case .shape:
             if top.destination != .shape {
                 let width = max(0, shapeBox.right - shapeBox.left), height = max(0, shapeBox.bottom - shapeBox.top)
+                let floating = floatingShape(width: width, height: height)
                 if var picture = shapePicture {
                     if width > 0, height > 0 { (picture.width, picture.height) = (width, height) }
-                    emitObject(.picture, range: range, group: group, picture: picture)
+                    emitObject(.picture, range: range, group: group, picture: picture, floating: floating)
                 } else {
                     var placeholder = RTFPlaceholder(kind: .shape(shapeType))
                     placeholder.width = width
                     placeholder.height = height
-                    emitObject(.placeholder(placeholder), range: range, group: group)
+                    emitObject(.placeholder(placeholder), range: range, group: group, floating: floating)
                 }
                 shapePicture = nil
             }
@@ -247,7 +252,9 @@ private final class RTFParser {
             if top.destination != .shapeProperty {
                 let name = String(utf16CodeUnits: shapePropName, count: shapePropName.count)
                 let value = String(utf16CodeUnits: shapePropValue, count: shapePropValue.count)
-                if name.trimmingCharacters(in: .whitespaces) == "shapeType" { shapeType = Int(value.trimmingCharacters(in: .whitespaces)) }
+                let key = name.trimmingCharacters(in: .whitespaces)
+                if key == "shapeType" { shapeType = Int(value.trimmingCharacters(in: .whitespaces)) }
+                shapeProps[key] = value.trimmingCharacters(in: .whitespaces)
             }
         case .drawing:
             if top.destination != .drawing {
@@ -449,6 +456,9 @@ private final class RTFParser {
             shapeType = nil
             shapeBox = (0, 0, 0, 0)
             shapePicture = nil
+            shapeWrap = 0
+            shapeFloat = RTFFloat()
+            shapeProps = [:]
         case .object:
             let groupStart = top.start
             let group = top
@@ -494,6 +504,14 @@ private final class RTFParser {
             case .shpright: shapeBox.right = number ?? 0
             case .shptop: shapeBox.top = number ?? 0
             case .shpbottom: shapeBox.bottom = number ?? 0
+            case .shpwr: shapeWrap = number ?? 0
+            case .shpfblwtxt: shapeFloat.behind = (number ?? 0) != 0
+            case .shpbxpage: shapeFloat.horizontal = .page
+            case .shpbxmargin: shapeFloat.horizontal = .margin
+            case .shpbxcolumn: shapeFloat.horizontal = .column
+            case .shpbypage: shapeFloat.vertical = .page
+            case .shpbymargin: shapeFloat.vertical = .margin
+            case .shpbypara: shapeFloat.vertical = .paragraph
             default: break
             }
             return
@@ -617,6 +635,7 @@ private final class RTFParser {
             top.para.pageBreakBefore = true
             token("pagebb", range)
         case .s: top.para.style = number
+        case .contextualspace: top.para.contextualSpace = (number ?? 1) != 0
         case .cbpat: top.para.shading = number ?? 0
         case .brdrt: top.border = .paraTop; top.para.borderTop = RTFBorder()
         case .brdrb: top.border = .paraBottom; top.para.borderBottom = RTFBorder()
@@ -719,6 +738,8 @@ private final class RTFParser {
         case .trgaph: row.gap = number ?? 108
         case .trleft: row.left = number ?? 0
         case .trrh: row.height = number ?? 0
+        case .trpaddt: row.padTop = max(0, number ?? 0)
+        case .trpaddb: row.padBottom = max(0, number ?? 0)
         case .trhdr: row.header = true
         default:
             break
@@ -862,8 +883,43 @@ private final class RTFParser {
         stories[story].lastKey = key
     }
 
+    /// Фигура без обтекания (`\shpwr3`), которую рисуем сами: рамка, опора и вид из свойств; иначе `nil` (заглушка в тексте).
+    private func floatingShape(width: Int, height: Int) -> RTFFloat? {
+        guard shapeWrap == 3 else { return nil }
+        var shape = shapeFloat
+        let type = shapePicture != nil ? 75 : (shapeType ?? 1)
+        guard RTFFloat.drawnTypes.contains(type), type != 75 || shapePicture != nil else { return nil }
+        func number(_ key: String) -> Int? { shapeProps[key].flatMap { Int($0) } }
+        func flag(_ key: String, _ value: Bool) -> Bool { number(key).map { $0 != 0 } ?? value }
+        shape.shapeType = type
+        (shape.left, shape.top, shape.width, shape.height) = (shapeBox.left, shapeBox.top, width, height)
+        // Новые свойства опоры (`posrelh`, `posrelv`) главнее старых `\shpbx*`/`\shpby*` (их Word пишет с `…ignore`).
+        switch number("posrelh") {
+        case 0: shape.horizontal = .margin
+        case 1: shape.horizontal = .page
+        case 2, 3: shape.horizontal = .column
+        default: break
+        }
+        switch number("posrelv") {
+        case 0: shape.vertical = .margin
+        case 1: shape.vertical = .page
+        case 2, 3: shape.vertical = .paragraph
+        default: break
+        }
+        shape.layoutInCell = flag("fLayoutInCell", true)
+        shape.behind = flag("fBehindDocument", shape.behind)
+        shape.filled = flag("fFilled", type != 75 && type != 20 && type != 32)
+        shape.fillColor = number("fillColor") ?? 0xFFFFFF
+        shape.line = flag("fLine", type != 75)
+        shape.lineColor = number("lineColor") ?? 0
+        shape.lineWidth = number("lineWidth") ?? 9_525
+        shape.flipH = flag("fFlipH", false)
+        shape.flipV = flag("fFlipV", false)
+        return shape
+    }
+
     /// Рисунок или заглушка — отдельный прогон из одного символа U+FFFC на всю группу.
-    private func emitObject(_ kind: RTFRun.Kind, range: NSRange, group: Group, picture: RTFPicture? = nil) {
+    private func emitObject(_ kind: RTFRun.Kind, range: NSRange, group: Group, picture: RTFPicture? = nil, floating: RTFFloat? = nil) {
         // Группа уже снята со стека: показываем, только если вокруг — текст (а не, например, значение свойства фигуры).
         guard top.destination == .text else { return }
         let story = top.story
@@ -871,6 +927,7 @@ private final class RTFParser {
         var run = RTFRun(kind: kind, text: "", props: group.char, map: [range], group: group.id, uc: group.uc)
         run.picture = picture
         run.objectGroup = range
+        run.floating = floating
         stories[story].current.runs.append(run)
         stories[story].units.append([0xFFFC])
         stories[story].lastKey = nil

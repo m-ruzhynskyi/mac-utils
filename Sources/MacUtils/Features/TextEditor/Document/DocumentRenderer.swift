@@ -5,6 +5,8 @@ extension NSAttributedString.Key {
     static let docChar = NSAttributedString.Key("MacUtilsDocChar")
     /// Свойства абзаца документа для панели и линейки (`DocParaInfo`).
     static let docPara = NSAttributedString.Key("MacUtilsDocPara")
+    /// Служебный абзац «\f\n» перед таблицей, которая начинается с новой страницы: высоты у него нет.
+    static let docBreakLine = NSAttributedString.Key("MacUtilsDocBreakLine")
 }
 
 /// Свойства символа в показанном тексте: что в файле (`fontName` — исходное имя) и чем показано.
@@ -119,6 +121,8 @@ final class DocRenderer {
         var width: Int
         var padLeft: Int
         var padRight: Int
+        var padTop: Int
+        var padBottom: Int
     }
 
     private struct StyleKey: Hashable {
@@ -147,6 +151,8 @@ final class DocRenderer {
         /// с `\li` < 0 заходит в поле ячейки; у `NSTextBlock` поле одно на ячейку).
         var padLeft: Int
         var padRight: Int
+        var padTop = 0
+        var padBottom = 0
     }
 
     fileprivate struct RunKey: Equatable {
@@ -163,6 +169,9 @@ final class DocRenderer {
         var place: CellPlace?
         var breakBefore: UInt8
         var end: UInt8
+        var endProps: RTFCharProps
+        /// Интервалы до и после с учётом соседей (`\contextualspace`).
+        var spacing: [Int]
         var font: [String]
     }
 
@@ -181,7 +190,7 @@ final class DocRenderer {
         plans.reserveCapacity(story.paragraphs.count)
         for (index, paragraph) in story.paragraphs.enumerated() {
             let place = paragraph.cell.flatMap { places[$0] }
-            let plan = self.plan(paragraph, index: index, model: model, place: place)
+            let plan = self.plan(paragraph, index: index, story: story, model: model, place: place)
             if paragraph.section < rendering.sectionStarts.count, model.sections[paragraph.section].firstParagraph == index {
                 rendering.sectionStarts[paragraph.section] = rendering.map.count
             }
@@ -242,7 +251,8 @@ final class DocRenderer {
         var map = DocSourceMap()
         let string = NSMutableAttributedString()
         for (index, paragraph) in story.paragraphs.enumerated() {
-            var plan = self.plan(paragraph, index: index, model: model, place: paragraph.cell.flatMap { places[$0] }, sectionBreaks: false)
+            var plan = self.plan(paragraph, index: index, story: story, model: model, place: paragraph.cell.flatMap { places[$0] },
+                                 sectionBreaks: false)
             // Вычисляемые поля — свой текст (номер страницы), весь — на кусок исходника поля.
             for (offset, piece) in plan.pieces.enumerated() where piece.kind == .field {
                 guard let run = piece.run, case .field(let kind) = paragraph.runs[run].kind, let value = field(kind) else { continue }
@@ -272,18 +282,23 @@ final class DocRenderer {
         var pieces: [Piece]
         var key: ParagraphKey
         var place: CellPlace?
+        var spacing: (before: Int, after: Int)?
     }
 
-    private func plan(_ paragraph: RTFParagraph, index: Int, model: RTFDocumentModel, place: CellPlace?,
+    private func plan(_ paragraph: RTFParagraph, index: Int, story: RTFStory, model: RTFDocumentModel, place: CellPlace?,
                       sectionBreaks: Bool = true) -> ParagraphPlan {
         var pieces: [Piece] = []
         var breakBefore: UInt8 = 0
         if place?.skip == true {
             return ParagraphPlan(pieces: [], key: ParagraphKey(text: "", runs: [], props: paragraph.props, place: place, breakBefore: 0, end: 0,
-                                                              font: []), place: place)
+                                                              endProps: paragraph.endProps, spacing: [], font: []), place: place)
         }
         // Новая страница раздела и разрыв перед абзацем (`\pagebb`) — «\f»: TextKit переносит текст в следующий контейнер.
-        if sectionBreaks, place == nil, index > 0 {
+        // Внутри таблицы «\f» не переносит — таблица с первой ячейкой на новой странице получает перед собой
+        // отдельный абзац «\f\n» нулевой высоты (`docBreakLine`), как Word переносит такую строку.
+        let tableStart = place != nil && paragraph.cell?.row == 0 && paragraph.cell?.cell == 0
+            && (index == 0 || story.paragraphs[index - 1].cell != paragraph.cell)
+        if sectionBreaks, place == nil || tableStart, index > 0 {
             let section = paragraph.section
             if section > 0, section < model.sections.count, model.sections[section].firstParagraph == index, model.sections[section].props.newPage {
                 pieces.append(Piece(units: [0x0C], ranges: [NSRange(location: paragraph.regionStart, length: 0)], kind: .sectionBreak))
@@ -293,6 +308,10 @@ final class DocRenderer {
                 pieces.append(Piece(units: [0x0C], ranges: [token ?? NSRange(location: paragraph.regionStart, length: 0)],
                                     kind: token == nil ? .sectionBreak : .pageBreak))
                 breakBefore = 2
+            }
+            if breakBefore > 0, place != nil {
+                pieces.append(Piece(units: [0x0A], ranges: [NSRange(location: paragraph.regionStart, length: 0)], kind: .sectionBreak))
+                breakBefore += 2
             }
         }
         var runKeys: [RunKey] = []
@@ -321,6 +340,7 @@ final class DocRenderer {
                 kind = .object
                 object = placeholder.hashValue
             }
+            if let floating = run.floating { object ^= floating.hashValue &* 7 }
             pieces.append(Piece(units: units, ranges: run.map, kind: kind, run: number))
             runKeys.append(RunKey(length: units.count, props: run.props, kind: Int(kind.rawValue), object: object))
             text += run.text
@@ -344,9 +364,20 @@ final class DocRenderer {
                 end = 4
             }
         }
+        let spacing = Self.spacing(story, index: index)
         let key = ParagraphKey(text: text, runs: runKeys, props: paragraph.props, place: place, breakBefore: breakBefore, end: end,
-                               font: fontNames)
-        return ParagraphPlan(pieces: pieces, key: key, place: place)
+                               endProps: paragraph.endProps, spacing: [spacing.before, spacing.after],
+                               font: fontNames + [model.font(paragraph.endProps.font)?.name ?? ""])
+        return ParagraphPlan(pieces: pieces, key: key, place: place, spacing: spacing)
+    }
+
+    /// Интервалы до и после абзаца, как их ставит Word: при `\contextualspace` между абзацами одного стиля их нет.
+    private static func spacing(_ story: RTFStory, index: Int) -> (before: Int, after: Int) {
+        let props = story.paragraphs[index].props
+        guard props.contextualSpace else { return (props.spaceBefore, props.spaceAfter) }
+        let previous = index > 0 ? story.paragraphs[index - 1].props : nil
+        let next = index + 1 < story.paragraphs.count ? story.paragraphs[index + 1].props : nil
+        return (previous?.style == props.style ? 0 : props.spaceBefore, next?.style == props.style ? 0 : props.spaceAfter)
     }
 
     // MARK: - Атрибуты
@@ -355,14 +386,28 @@ final class DocRenderer {
     private func attributed(_ plan: ParagraphPlan, paragraph: RTFParagraph, model: RTFDocumentModel,
                             shift: (left: Int, right: Int) = (0, 0)) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        let style = paragraphStyle(Self.shown(paragraph.props, place: plan.place, shift: shift), place: plan.place, model: model)
+        var shown = Self.shown(paragraph.props, place: plan.place, shift: shift)
+        if let spacing = plan.spacing { (shown.spaceBefore, shown.spaceAfter) = spacing }
+        let style = paragraphStyle(shown, place: plan.place, model: model)
         let paraInfo = DocParaInfo(props: paragraph.props)
-        // Атрибуты конца абзаца и разрыва — от ближайшего прогона (у пустого абзаца — по умолчанию).
+        // Разрыв — от первого прогона; знак конца абзаца — свои свойства (`\par`/`\cell` в их окружении): как в Word,
+        // от его шрифта высота пустого абзаца и последней строки. Скрытый знак — от последнего прогона.
         let firstRun = paragraph.runs.first { !$0.props.hidden || showsHidden }
         let lastRun = paragraph.runs.last { !$0.props.hidden || showsHidden }
-        for piece in plan.pieces {
+        let endProps = paragraph.endProps.hidden && !showsHidden ? lastRun?.props : paragraph.endProps
+        // Служебный абзац разрыва перед таблицей — свой стиль, без ячейки.
+        let breakPieces = plan.place != nil && plan.key.breakBefore > 2 ? 2 : 0
+        for (number, piece) in plan.pieces.enumerated() {
+            if number < breakPieces {
+                var attributes = characterAttributes(firstRun?.props ?? defaultProps(model), model: model)
+                attributes[.paragraphStyle] = NSParagraphStyle.default
+                attributes[.docPara] = paraInfo
+                attributes[.docBreakLine] = true
+                result.append(NSAttributedString(string: String(utf16CodeUnits: piece.units, count: piece.units.count), attributes: attributes))
+                continue
+            }
             let run = piece.run.map { paragraph.runs[$0] }
-            let props = run?.props ?? (piece.kind == .sectionBreak || piece.kind == .pageBreak ? firstRun?.props : lastRun?.props)
+            let props = run?.props ?? (piece.kind == .sectionBreak || piece.kind == .pageBreak ? firstRun?.props : endProps ?? lastRun?.props)
                 ?? defaultProps(model)
             var attributes = characterAttributes(props, model: model, hidden: piece.kind == .hidden)
             attributes[.paragraphStyle] = style
@@ -371,7 +416,32 @@ final class DocRenderer {
                 attributes[.attachment] = attachment(for: run)
             }
             let string = String(utf16CodeUnits: piece.units, count: piece.units.count)
-            result.append(NSAttributedString(string: string, attributes: attributes))
+            if (props.caps || props.smallCaps), piece.kind == .text || piece.kind == .hidden || piece.kind == .field {
+                result.append(capitals(string, props: props, attributes: attributes, model: model))
+            } else {
+                result.append(NSAttributedString(string: string, attributes: attributes))
+            }
+        }
+        return result
+    }
+
+    /// Все прописные (`\caps`) и капитель (`\scaps`: строчные — прописными на 80 % кегля, как в Word). Буква меняется,
+    /// только если её прописная — одна единица UTF-16 (карта «единица ↔ исходник» не сдвигается).
+    private func capitals(_ string: String, props: RTFCharProps, attributes: [NSAttributedString.Key: Any],
+                          model: RTFDocumentModel) -> NSAttributedString {
+        var small = attributes
+        if props.smallCaps, let font = attributes[.font] as? NSFont {
+            let entry = model.font(props.font)
+            let family = FontSubstitution.display(for: entry?.name ?? "Times New Roman", family: entry?.family ?? .roman, panose: entry?.panose)
+            small[.font] = self.font(family: family, size: (font.pointSize * 0.8 * 2).rounded() / 2, bold: props.bold, italic: props.italic)
+        }
+        let result = NSMutableAttributedString()
+        for unit in string.utf16 {
+            let character = String(utf16CodeUnits: [unit], count: 1)
+            let upper = character.uppercased()
+            let changed = upper != character && upper.utf16.count == 1
+            result.append(NSAttributedString(string: changed ? upper : character,
+                                             attributes: changed && props.smallCaps && !props.caps ? small : attributes))
         }
         return result
     }
@@ -498,7 +568,7 @@ final class DocRenderer {
             style.maximumLineHeight = CGFloat(-props.lineSpacing) / 20
         }
         style.defaultTabInterval = CGFloat(max(model.defaultTab, 1)) / 20
-        style.tabStops = props.tabs.filter { $0.kind != .bar }.map { tab in
+        var tabStops = props.tabs.filter { $0.kind != .bar }.map { tab in
             let alignment: NSTextAlignment
             switch tab.kind {
             case .left, .bar: alignment = .left
@@ -507,6 +577,12 @@ final class DocRenderer {
             }
             return NSTextTab(textAlignment: alignment, location: CGFloat(tab.position) / 20)
         }
+        // Выступ первой строки (`\fi` < 0): у Word левый отступ абзаца — ещё и позиция табуляции («1.→текст»).
+        if props.firstLine < 0, !props.tabs.contains(where: { $0.position == props.left }) {
+            tabStops.append(NSTextTab(textAlignment: .left, location: CGFloat(props.left) / 20))
+            tabStops.sort { $0.location < $1.location }
+        }
+        style.tabStops = tabStops
         if let place, let block = tableBlock(place, model: model) {
             style.textBlocks = [block]
         } else if props.hasBorders || props.shading > 0 {
@@ -601,7 +677,8 @@ final class DocRenderer {
                     let place = CellPlace(table: tableKey, row: rowIndex, column: start, rowSpan: rowSpan, columnSpan: max(1, end - start),
                                           start: left - (grid.first ?? 0), width: right - left, skip: cell.verticalMerged || cell.horizontalMerged,
                                           def: cell, gap: row.gap, height: row.height, columns: columns, tableWidth: tableWidth,
-                                          padLeft: max(0, gap + min(0, indentLeft)), padRight: max(0, gap + min(0, indentRight)))
+                                          padLeft: max(0, gap + min(0, indentLeft)), padRight: max(0, gap + min(0, indentRight)),
+                                          padTop: row.padTop, padBottom: row.padBottom)
                     for offset in 0..<span {
                         var placed = place
                         if offset > 0 { placed.skip = true }
@@ -627,7 +704,7 @@ final class DocRenderer {
     private func blockKey(_ place: CellPlace) -> BlockKey {
         BlockKey(table: place.table, row: place.row, column: place.column, rowSpan: place.rowSpan, columnSpan: place.columnSpan,
                  cell: place.def, gap: place.gap, height: place.height, start: place.start, width: place.width, padLeft: place.padLeft,
-                 padRight: place.padRight)
+                 padRight: place.padRight, padTop: place.padTop, padBottom: place.padBottom)
     }
 
     private func tableBlock(_ place: CellPlace, model: RTFDocumentModel) -> NSTextTableBlock? {
@@ -657,8 +734,9 @@ final class DocRenderer {
         let padLeft = floor(CGFloat(place.padLeft) / 20), padRight = floor(CGFloat(place.padRight) / 20)
         block.setWidth(padLeft, type: .absoluteValueType, for: .padding, edge: .minX)
         block.setWidth(padRight, type: .absoluteValueType, for: .padding, edge: .maxX)
-        block.setWidth(1, type: .absoluteValueType, for: .padding, edge: .minY)
-        block.setWidth(1, type: .absoluteValueType, for: .padding, edge: .maxY)
+        // Сверху и снизу — поля строки `\trpaddt`/`\trpaddb` (у Word по умолчанию 0: текст у самой линии сетки).
+        block.setWidth(CGFloat(place.padTop) / 20, type: .absoluteValueType, for: .padding, edge: .minY)
+        block.setWidth(CGFloat(place.padBottom) / 20, type: .absoluteValueType, for: .padding, edge: .maxY)
         let cell = place.def
         for (edge, border) in [(NSRectEdge.minY, cell.borderTop), (.maxY, cell.borderBottom), (.minX, cell.borderLeft), (.maxX, cell.borderRight)] {
             guard border.isVisible else { continue }
@@ -685,6 +763,16 @@ final class DocRenderer {
     // MARK: - Рисунки и заглушки
 
     private func attachment(for run: RTFRun) -> NSTextAttachment {
+        // Фигура без обтекания: в тексте — опора нулевой ширины, сама рисуется поверх страницы (`DocFloatingLayer`).
+        if let floating = run.floating {
+            let image = run.picture.flatMap { NSImage(data: $0.data) }
+            let key = floating.hashValue ^ (run.picture?.data.hashValue ?? 0) &* 31
+            if let cached = attachments[key] { return cached }
+            let attachment = NSTextAttachment()
+            attachment.attachmentCell = DocFloatingCell(shape: floating, image: image)
+            attachments[key] = attachment
+            return attachment
+        }
         let key: Int
         if let picture = run.picture {
             key = picture.data.hashValue ^ picture.width &* 31 ^ picture.height
