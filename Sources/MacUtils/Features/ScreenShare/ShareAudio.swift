@@ -122,6 +122,58 @@ struct ShareTapWatchdog: Equatable {
     }
 }
 
+/// Звук пошёл запасным способом (ScreenCaptureKit): помощников программ он не исключает. Включено «Не передавать
+/// звонки» или есть заглушённые программы — ведущему прямо говорим, что звонок или они могут попасть в трансляцию.
+enum ShareAudioFallback {
+    static func message(muteCalls: Bool, mutedApps: Int) -> String {
+        if muteCalls { return "Звук трансляции — запасным способом: звонок (Discord, FaceTime…) может попасть в трансляцию, зрители его услышат" }
+        if mutedApps > 0 { return "Звук трансляции — запасным способом: заглушённые программы могут быть слышны зрителям" }
+        return "Звук трансляции — запасным способом"
+    }
+}
+
+/// Устройство часов агрегата трансляции. Агрегат — в том числе «Устройство с несколькими выходами» (Audio MIDI) —
+/// нельзя вложить в другой агрегат: HAL молча отбрасывает такое подустройство, у агрегата не остаётся часов, IOProc не
+/// вызывается ни разу, а `AudioDeviceStart` возвращает успех (журнал пользователя: «колбэков за 3 с: 0»). Тогда часы —
+/// от его настоящего подустройства, нет его — от встроенного выхода. Выходу трансляция пишет только тишину.
+enum ShareTapClock {
+    struct Output: Equatable {
+        let id: AudioObjectID
+        let transport: UInt32
+        /// Первое активное подустройство, если выход — агрегат.
+        let subdevice: AudioObjectID?
+    }
+
+    static func choose(output: Output, builtIn: AudioObjectID?) -> AudioObjectID? {
+        guard output.transport == kAudioDeviceTransportTypeAggregate else { return output.id }
+        return output.subdevice ?? builtIn
+    }
+
+    /// Код транспорта для журнала (четыре буквы Core Audio: bltn, grup, virt, blue, usb …), без имён устройств.
+    static func code(_ transport: UInt32) -> String {
+        let bytes = [24, 16, 8, 0].map { UInt8((transport >> UInt32($0)) & 0xff) }
+        guard bytes.allSatisfy({ $0 >= 0x20 && $0 < 0x7f }) else { return String(transport) }
+        return String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespaces)
+    }
+
+    static func output(_ device: AudioObjectID) -> Output {
+        let transport = CoreAudioHelper.read(device, kAudioDevicePropertyTransportType, default: UInt32(0))
+        let subdevices = transport == kAudioDeviceTransportTypeAggregate
+            ? CoreAudioHelper.readArray(device, kAudioAggregateDevicePropertyActiveSubDeviceList)
+                .filter { CoreAudioHelper.read($0, kAudioDevicePropertyTransportType, default: UInt32(0)) != kAudioDeviceTransportTypeAggregate }
+            : []
+        return Output(id: device, transport: transport, subdevice: subdevices.first)
+    }
+
+    /// Встроенный выход (динамики или разъём), если есть.
+    static func builtInOutput() -> AudioObjectID? {
+        CoreAudioHelper.readArray(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDevices).first {
+            CoreAudioHelper.read($0, kAudioDevicePropertyTransportType, default: UInt32(0)) == kAudioDeviceTransportTypeBuiltIn
+                && !CoreAudioHelper.readArray($0, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeOutput).isEmpty
+        }
+    }
+}
+
 /// Повтор перехвата после явной ошибки Core Audio: при постоянной ошибке не создавать и не разрушать перехват
 /// и агрегат на каждой пересборке, а пробовать раз на новую обстановку — сменился выход или набор программ.
 struct ShareTapRetry: Equatable {
@@ -216,6 +268,9 @@ final class ShareAudioTap: @unchecked Sendable {
     private(set) var excluded: [AudioObjectID]
     /// Выход при сборке перехвата: сменился — собираем заново.
     private(set) var outputDevice = AudioObjectID(kAudioObjectUnknown)
+    /// Устройство часов агрегата (`ShareTapClock`); `builtInClock` — после «0 колбэков» взять встроенный выход.
+    private(set) var clockDevice = AudioObjectID(kAudioObjectUnknown)
+    private(set) var builtInClock = false
     /// Раскладка входа не сошлась — уже записано в журнал (только в `queue`).
     private var layoutLogged = false
     /// Входы выхода (микрофон AirPods/гарнитуры) — их число и выключены ли они для IOProc; пишутся до `AudioDeviceStart`.
@@ -261,13 +316,20 @@ final class ShareAudioTap: @unchecked Sendable {
 
     private func start() throws {
         uuid = UUID()
-        outputDevice = CoreAudioHelper.defaultOutputDevice
+        let current = CoreAudioHelper.defaultOutputDevice
+        // Другой выход — снова обычный выбор часов (встроенный — только после «0 колбэков» на этом выходе).
+        if current != outputDevice { builtInClock = false }
+        outputDevice = current
         var status = AudioHardwareCreateProcessTap(description(excluded), &tapID)
         guard status == noErr else { throw AppVolumeTap.TapError.status("Перехват звука", status) }
         layoutLogged = false
         watchLock.lock(); watchdog = ShareTapWatchdog(); watchLock.unlock()
         generation += 1
-        guard let outputUID = CoreAudioHelper.readString(outputDevice, kAudioDevicePropertyDeviceUID) else {
+        ioProven = false
+        let outputInfo = ShareTapClock.output(outputDevice)
+        let builtIn = ShareTapClock.builtInOutput()
+        clockDevice = (builtInClock ? builtIn : nil) ?? ShareTapClock.choose(output: outputInfo, builtIn: builtIn) ?? outputDevice
+        guard let outputUID = CoreAudioHelper.readString(clockDevice, kAudioDevicePropertyDeviceUID) else {
             throw AppVolumeTap.TapError.status("Устройство вывода", -1)
         }
         let aggregate = Self.aggregateDescription(outputUID: outputUID, tapUUID: uuid.uuidString, unique: UUID().uuidString)
@@ -285,7 +347,7 @@ final class ShareAudioTap: @unchecked Sendable {
         listen(tapID, kAudioTapPropertyFormat)
         listen(aggregateID, kAudioDevicePropertyNominalSampleRate)
         // Входы выхода (микрофон AirPods/гарнитуры) — свойство самого устройства; буфер перехвата — после них.
-        subdeviceInputs = AggregateStreams.inputStreamCount(outputDevice)
+        subdeviceInputs = AggregateStreams.inputStreamCount(clockDevice)
         subdeviceInputsOff = false
         status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) { [weak self] _, inputData, _, outputData, _ in
             for buffer in UnsafeMutableAudioBufferListPointer(outputData) {
@@ -301,7 +363,19 @@ final class ShareAudioTap: @unchecked Sendable {
             Log.capture.error("Звук трансляции: входы устройства вывода (\(self.subdeviceInputs, privacy: .public)) не выключены — раскладка агрегата ещё не собрана")
         }
         status = AudioDeviceStart(aggregateID, procID)
+        // Журнал — только коды и числа: транспорт выхода и часов, статус запуска, очередь IOProc, потоки входа.
+        let inputs = AggregateStreams.inputStreamCount(aggregateID)
+        let enabled = subdeviceInputsOff ? 1 : inputs
+        Log.capture.info("Звук трансляции: выход \(ShareTapClock.code(outputInfo.transport), privacy: .public), часы \(self.clockDevice == self.outputDevice ? "выход" : ShareTapClock.code(CoreAudioHelper.read(self.clockDevice, kAudioDevicePropertyTransportType, default: UInt32(0))), privacy: .public)\(self.builtInClock ? " (встроенный после 0 колбэков)" : "", privacy: .public), AudioDeviceStart \(status, privacy: .public), очередь macutils.share.tap, входных потоков \(inputs, privacy: .public), включено для IOProc \(enabled, privacy: .public)")
         guard status == noErr else { throw AppVolumeTap.TapError.status("Запуск перехвата", status) }
+    }
+
+    /// «0 колбэков» на выбранных часах: ещё раз на встроенном выходе (если он есть и ещё не пробовали). false — нечего пробовать.
+    func retryWithBuiltInClock() throws -> Bool {
+        guard !builtInClock, let builtIn = ShareTapClock.builtInOutput(), builtIn != clockDevice else { return false }
+        builtInClock = true
+        try restart()
+        return true
     }
 
     /// Агрегат трансляции: выход — основное подустройство (часы агрегата; без него IOProc может не вызываться вовсе —
@@ -326,7 +400,7 @@ final class ShareAudioTap: @unchecked Sendable {
         let state = watchdog
         watchLock.unlock()
         let stream = aggregateID == kAudioObjectUnknown ? nil : Self.streamFormat(aggregateID)
-        let outputRate = CoreAudioHelper.read(outputDevice, kAudioDevicePropertyNominalSampleRate, default: Float64(0))
+        let outputRate = CoreAudioHelper.read(clockDevice, kAudioDevicePropertyNominalSampleRate, default: Float64(0))
         return (state.verdict, state.summary(tapRate: Self.tapFormat(tapID).mSampleRate, streamRate: stream?.mSampleRate ?? 0, outputRate: outputRate))
     }
 
@@ -341,9 +415,42 @@ final class ShareAudioTap: @unchecked Sendable {
         }
     }
 
-    /// Новый список исключённых — на лету, тем же перехватом (без разрыва звука).
-    func update(excluding objects: [AudioObjectID]) throws {
-        guard objects != excluded else { return }
+    /// Колбэки IOProc пошли (сторож запуска): только теперь можно менять описание перехвата на ходу.
+    private(set) var ioProven = false
+    /// Смена описания на ходу остановила колбэки — дальше список меняем пересборкой перехвата.
+    private(set) var rebuildOnChange = false
+    /// Список, который ждёт подтверждения колбэков.
+    private var pendingExclusion: [AudioObjectID]?
+
+    enum UpdateResult: Equatable { case unchanged, deferred, applied, rebuilt }
+
+    /// Новый список исключённых. Пока колбэки не подтверждены — откладывается: смена описания работающего перехвата сразу
+    /// после `AudioDeviceStart` — главное отличие от «Громкости приложений» (там описание не меняется), и у пользователя
+    /// с этим путём IOProc не вызывался ни разу. Подтверждены — на лету тем же перехватом (без разрыва звука); если так уже
+    /// останавливало колбэки — пересборкой перехвата с новым списком.
+    /// Что делать со сменой списка (чистое правило, проверяется тестами).
+    static func plan(changed: Bool, ioProven: Bool, rebuildOnChange: Bool) -> UpdateResult {
+        guard changed else { return .unchanged }
+        guard ioProven else { return .deferred }
+        return rebuildOnChange ? .rebuilt : .applied
+    }
+
+    @discardableResult
+    func update(excluding objects: [AudioObjectID]) throws -> UpdateResult {
+        switch Self.plan(changed: objects != excluded, ioProven: ioProven, rebuildOnChange: rebuildOnChange) {
+        case .unchanged:
+            pendingExclusion = nil
+            return .unchanged
+        case .deferred:
+            pendingExclusion = objects
+            return .deferred
+        case .rebuilt:
+            excluded = objects
+            try restart()
+            return .rebuilt
+        case .applied:
+            break
+        }
         var address = CoreAudioHelper.address(kAudioTapPropertyDescription)
         var value = description(objects)
         let status = withUnsafeMutablePointer(to: &value) {
@@ -351,6 +458,27 @@ final class ShareAudioTap: @unchecked Sendable {
         }
         guard status == noErr else { throw AppVolumeTap.TapError.status("Список исключённых", status) }
         excluded = objects
+        return .applied
+    }
+
+    /// Сторож: колбэки идут. Отложенный список — применить (результат — для проверки, не встали ли колбэки).
+    func confirmIO() throws -> UpdateResult {
+        ioProven = true
+        guard let pending = pendingExclusion else { return .unchanged }
+        pendingExclusion = nil
+        return try update(excluding: pending)
+    }
+
+    /// Сколько колбэков IOProc с последнего запуска (для проверки после смены описания).
+    var callbackCount: Int {
+        watchLock.lock(); defer { watchLock.unlock() }
+        return watchdog.callbacks
+    }
+
+    /// После смены описания колбэки встали: дальше — пересборкой; сейчас — пересобрать с новым списком.
+    func rebuildAfterStalledUpdate() throws {
+        rebuildOnChange = true
+        try restart()
     }
 
     func stop() {

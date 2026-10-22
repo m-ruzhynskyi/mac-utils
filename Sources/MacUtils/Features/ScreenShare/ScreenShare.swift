@@ -411,8 +411,10 @@ final class ScreenShare: NSObject, ObservableObject {
             let objects = excluded.map(\.object).sorted()
             guard objects != tap.excluded else { return }
             do {
-                try tap.update(excluding: objects)
-                Log.capture.info("Звук трансляции: исключено \(ShareAudioExclusion.summary(excluded), privacy: .public)")
+                let result = try tap.update(excluding: objects)
+                Log.capture.info("Звук трансляции: исключено \(ShareAudioExclusion.summary(excluded), privacy: .public)\(result == .deferred ? " (после первых колбэков)" : "", privacy: .public)")
+                if result == .applied { watchTapAfterUpdate(tap) }
+                if result == .rebuilt { watchTapStart(tap) }
             } catch {
                 Log.capture.error("Звук трансляции: список исключённых не обновлён — \(error.localizedDescription, privacy: .public)")
             }
@@ -473,10 +475,47 @@ final class ScreenShare: NSObject, ObservableObject {
                 guard let current = share.audioTap as? ShareAudioTap, current === tap, tap.generation == generation else { return }
                 let report = tap.watchdogReport()
                 Log.capture.info("Звук трансляции: \(report.summary, privacy: .public)")
-                guard report.verdict != .ok else { return }
+                guard report.verdict != .ok else {
+                    // Колбэки идут — теперь применить отложенный список исключённых (свой процесс, поздние помощники).
+                    switch (try? tap.confirmIO()) ?? .unchanged {
+                    case .applied: share.watchTapAfterUpdate(tap)
+                    case .rebuilt: share.watchTapStart(tap)
+                    default: break
+                    }
+                    return
+                }
+                // Часы агрегата не пошли — ещё раз на встроенном выходе, потом уже запасной способ.
+                if report.verdict == .noCallbacks, (try? tap.retryWithBuiltInClock()) == true {
+                    Log.capture.error("Звук трансляции: нет колбэков — перехват пересобран на встроенном выходе")
+                    share.watchTapStart(tap)
+                    return
+                }
                 Log.capture.error("Звук трансляции: перехват не работает (\(report.verdict == .noCallbacks ? "нет колбэков" : "нет данных", privacy: .public)) — переходим на ScreenCaptureKit")
                 share.tapRetry.failed(in: ShareTapRetry.situation())
                 share.fallBackToStream()
+            }
+        }
+    }
+
+    /// После смены описания перехвата на ходу: колбэки за 1,5 с не прибавились — смена их остановила. Пересобираем перехват
+    /// с новым списком, дальше список меняется только пересборкой.
+    @available(macOS 14.2, *)
+    private func watchTapAfterUpdate(_ tap: ShareAudioTap) {
+        let generation = tap.generation, before = tap.callbackCount
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            MainActor.assumeIsolated {
+                let share = ScreenShare.shared
+                guard let current = share.audioTap as? ShareAudioTap, current === tap, tap.generation == generation else { return }
+                let after = tap.callbackCount
+                guard after == before else { return }
+                Log.capture.error("Звук трансляции: после смены списка исключённых колбэков нет (\(before, privacy: .public) → \(after, privacy: .public)) — пересобираю перехват")
+                do {
+                    try tap.rebuildAfterStalledUpdate()
+                    share.watchTapStart(tap)
+                } catch {
+                    share.tapRetry.failed(in: ShareTapRetry.situation())
+                    share.fallBackToStream()
+                }
             }
         }
     }
@@ -485,7 +524,8 @@ final class ScreenShare: NSObject, ObservableObject {
     private func showAudioFallback() {
         guard !audioFallbackShown else { return }
         audioFallbackShown = true
-        Toast.show("Звук трансляции — запасным способом: заглушённые программы могут быть слышны зрителям",
+        Toast.show(ShareAudioFallback.message(muteCalls: UserDefaults.standard.bool(forKey: Pref.shareMuteCalls),
+                                              mutedApps: (UserDefaults.standard.stringArray(forKey: Pref.shareMutedApps) ?? []).count),
                    symbol: "exclamationmark.triangle.fill", tint: .orange)
     }
 
@@ -549,8 +589,10 @@ final class ScreenShare: NSObject, ObservableObject {
         // Подсказка ведущему, как в «Громкости приложений»: иначе зрители молча остаются без звука.
         guard !audioSilenceShown else { return }
         audioSilenceShown = true
-        Toast.show("Нет звука из перехвата — если зрители не слышат звук, проверьте разрешение «Запись системного звука» для Mac Utils",
-                   symbol: "exclamationmark.triangle.fill", tint: .orange)
+        // Без разрешения «Запись системного звука» Core Audio отдаёт тишину: кнопка ведёт в настройки, сам запрос не делаем.
+        Toast.show("Нет звука из перехвата — если зрители не слышат звук, разрешите Mac Utils «Только системный звук» в «Запись экрана и системного звука»",
+                   symbol: "exclamationmark.triangle.fill", tint: .orange,
+                   action: Toast.Action(title: "Открыть настройки") { Permissions.open(.screenRecording) })
     }
 
     private static func configure(_ config: SCStreamConfiguration, for filter: SCContentFilter) {

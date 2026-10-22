@@ -191,4 +191,43 @@ final class ShareAudioTests: XCTestCase {
         XCTAssertEqual(AggregateStreams.tapBuffer(inputCount: 1, subdeviceInputs: 1, subdeviceInputsOff: true), 0, "AirPods, HAL опустил выключенный вход")
         XCTAssertNil(AggregateStreams.tapBuffer(inputCount: 1, subdeviceInputs: 1, subdeviceInputsOff: false), "один буфер при включённом микрофоне — это микрофон")
     }
+
+    /// Часы агрегата: выход-агрегат («Устройство с несколькими выходами») вложить нельзя — его подустройство, нет его —
+    /// встроенный выход; обычный выход (встроенный, USB, Bluetooth, виртуальный) — он сам.
+    func testTapClockAvoidsNestedAggregate() {
+        let multi = ShareTapClock.Output(id: 50, transport: kAudioDeviceTransportTypeAggregate, subdevice: 51)
+        XCTAssertEqual(ShareTapClock.choose(output: multi, builtIn: 7), 51)
+        let empty = ShareTapClock.Output(id: 50, transport: kAudioDeviceTransportTypeAggregate, subdevice: nil)
+        XCTAssertEqual(ShareTapClock.choose(output: empty, builtIn: 7), 7)
+        XCTAssertNil(ShareTapClock.choose(output: empty, builtIn: nil))
+        for transport in [kAudioDeviceTransportTypeBuiltIn, kAudioDeviceTransportTypeUSB, kAudioDeviceTransportTypeBluetooth,
+                          kAudioDeviceTransportTypeVirtual, kAudioDeviceTransportTypeHDMI] {
+            XCTAssertEqual(ShareTapClock.choose(output: .init(id: 9, transport: transport, subdevice: nil), builtIn: 7), 9)
+        }
+    }
+
+    /// Транспорт в журнале — код из четырёх букв, без имён устройств.
+    func testTapClockCode() {
+        XCTAssertEqual(ShareTapClock.code(kAudioDeviceTransportTypeAggregate), "grup")
+        XCTAssertEqual(ShareTapClock.code(kAudioDeviceTransportTypeBuiltIn), "bltn")
+        XCTAssertEqual(ShareTapClock.code(0), "0")
+    }
+
+    /// Запасной способ (SCK) помощников не исключает — при «Не передавать звонки» говорим прямо про звонок.
+    func testFallbackMessageWarnsAboutCalls() {
+        XCTAssertTrue(ShareAudioFallback.message(muteCalls: true, mutedApps: 0).contains("звонок"))
+        XCTAssertTrue(ShareAudioFallback.message(muteCalls: false, mutedApps: 2).contains("заглушённые программы"))
+        XCTAssertEqual(ShareAudioFallback.message(muteCalls: false, mutedApps: 0), "Звук трансляции — запасным способом")
+    }
+
+    /// Смена списка исключённых: до первых колбэков — откладывается (не трогаем описание только что запущенного перехвата);
+    /// после — на лету; если на лету уже останавливало колбэки — пересборкой.
+    @available(macOS 14.2, *)
+    func testExclusionUpdatePlan() {
+        XCTAssertEqual(ShareAudioTap.plan(changed: false, ioProven: false, rebuildOnChange: false), .unchanged)
+        XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: false, rebuildOnChange: false), .deferred)
+        XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: false, rebuildOnChange: true), .deferred)
+        XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: true, rebuildOnChange: false), .applied)
+        XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: true, rebuildOnChange: true), .rebuilt)
+    }
 }
