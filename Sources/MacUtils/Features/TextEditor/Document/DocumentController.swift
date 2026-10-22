@@ -420,14 +420,20 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
 
     // MARK: - Знаки $
 
+    /// Знаки `$` подсвечиваются, только пока открыта панель «Знаки $»; иначе страница — как в Word.
+    var showsDollarMarks = false {
+        didSet { if showsDollarMarks != oldValue { highlightDollars() } }
+    }
+
     /// Подсветка `$` на страницах: видимая часть диапазона значения (по окончательному правилу — до конца строки исходника).
+    /// Только заливка и подчёркивание: цвет текста — из документа, как в Word.
     func highlightDollars() {
         guard let tab else { return }
         let full = NSRange(location: 0, length: storage.length)
-        let keys: [NSAttributedString.Key] = [.backgroundColor, .underlineStyle, .underlineColor, .foregroundColor]
+        let keys: [NSAttributedString.Key] = [.backgroundColor, .underlineStyle, .underlineColor]
         if highlighted { for key in keys { layoutManager.removeTemporaryAttribute(key, forCharacterRange: full) } }
         highlighted = false
-        guard storage.length > 0, tab.dollars.isCurrent || !tab.dollars.entries.isEmpty else { return }
+        guard showsDollarMarks, storage.length > 0, tab.dollars.isCurrent || !tab.dollars.entries.isEmpty else { return }
         let skip = max(tab.dollars.skip ?? 0, 0)
         let map = rendering.map
         for entry in tab.dollars.entries where !entry.isHidden {
@@ -438,15 +444,14 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
             let order = entry.order ?? 0
             if order < skip {
                 let faint: [NSAttributedString.Key: Any] = [
-                    .foregroundColor: NSColor(srgbRed: 0.55, green: 0.58, blue: 0.62, alpha: 1),
                     .underlineStyle: NSUnderlineStyle([.single, .patternDot]).rawValue,
+                    .underlineColor: NSColor(srgbRed: 0.55, green: 0.58, blue: 0.62, alpha: 1),
                 ]
                 for range in [NSRange(location: dollar, length: 1)] + parts { layoutManager.addTemporaryAttributes(faint, forCharacterRange: range) }
             } else {
                 let selected = tab.dollars.selected == mark.dollar
                 let fill = EditorStyle.hueFill(entry.hue, selected: selected)
-                layoutManager.addTemporaryAttributes([.foregroundColor: EditorStyle.hue(entry.hue), .backgroundColor: fill],
-                                                     forCharacterRange: NSRange(location: dollar, length: 1))
+                layoutManager.addTemporaryAttributes([.backgroundColor: fill], forCharacterRange: NSRange(location: dollar, length: 1))
                 for range in parts {
                     layoutManager.addTemporaryAttributes([
                         .backgroundColor: fill, .underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: EditorStyle.hue(entry.hue),

@@ -467,6 +467,9 @@ final class DocRenderer {
     // MARK: - Атрибуты
 
     /// `frame` — рамка рисования: абзацы вне таблиц сдвигаются на выступ в поля вместе с табуляциями.
+    /// Знаки конца и разрывы: на странице не рисуются, и маркер с подчёркиванием на них не виден.
+    private static let endKinds: Set<DocSourceMap.Kind> = [.paragraphEnd, .cellEnd, .sectionEnd, .storyEnd, .pageBreak, .sectionBreak]
+
     private func attributed(_ plan: ParagraphPlan, paragraph: RTFParagraph, model: RTFDocumentModel, frame: StoryFrame) -> NSAttributedString {
         let result = NSMutableAttributedString()
         let props = plan.key.list.map { DocListNumbers.shownProps(paragraph.props, label: $0) } ?? paragraph.props
@@ -498,6 +501,13 @@ final class DocRenderer {
                 ?? (piece.kind == .sectionBreak || piece.kind == .pageBreak ? firstRun?.props : endProps ?? lastRun?.props)
                 ?? defaultProps(model)
             var attributes = characterAttributes(props, model: model, hidden: piece.kind == .hidden)
+            if Self.endKinds.contains(piece.kind) {
+                // Маркер и заливка знака на `\par`/`\cell` у Word не видны; у TextKit фон перевода строки тянется до края
+                // ячейки или полосы текста.
+                attributes[.backgroundColor] = nil
+                attributes[.underlineStyle] = nil
+                attributes[.strikethroughStyle] = nil
+            }
             attributes[.paragraphStyle] = style
             attributes[.docPara] = paraInfo
             if number < plan.breakUnits {

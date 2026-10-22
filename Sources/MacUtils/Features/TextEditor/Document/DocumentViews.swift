@@ -4,8 +4,11 @@ import SwiftUI
 /// Страницы документа вкладки (прокрутка контроллера) в окне редактора.
 struct DocumentHost: NSViewRepresentable {
     let controller: DocumentController
+    /// Открыта панель «Знаки $» — только тогда знаки подсвечены на страницах.
+    var showsDollarMarks = false
 
     func makeNSView(context: Context) -> NSView {
+        controller.showsDollarMarks = showsDollarMarks
         let container = NSView()
         container.wantsLayer = true
         container.clipsToBounds = true
@@ -14,6 +17,7 @@ struct DocumentHost: NSViewRepresentable {
     }
 
     func updateNSView(_ container: NSView, context: Context) {
+        controller.showsDollarMarks = showsDollarMarks
         guard container.subviews.first !== controller.scrollView else { return }
         container.subviews.forEach { $0.removeFromSuperview() }
         install(controller.scrollView, in: container)

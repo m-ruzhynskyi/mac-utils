@@ -223,7 +223,9 @@ final class DocPageView: NSView {
     private(set) var footerHeight: CGFloat = 0
     /// Выступ текста раздела в поля (таблицы шире полосы текста): рамка текста шире `bodyRect` на столько же.
     private(set) var outdent = DocOutdent()
-    /// Правится колонтитул: основной текст бледнее.
+    /// Прозрачность колонтитулов, пока правится основной текст.
+    static let marginsAlpha: CGFloat = 0.5
+    /// Правится колонтитул: основной текст бледнее, колонтитулы — в своих цветах.
     var faded = false {
         didSet {
             textView.alphaValue = faded ? 0.45 : 1
@@ -365,8 +367,14 @@ final class DocPageView: NSView {
         // Только своя бумага: при отрисовке в картинку `dirtyRect` бывает шире страницы — иначе стёрли бы соседнюю.
         NSColor.white.setFill()
         dirtyRect.intersection(bounds).fill()
+        // Как в Word: пока правится основной текст, колонтитулы на экране бледные; при правке колонтитула бледнеет тело
+        // (`faded`). В PDF и при печати — в своих цветах.
+        let context = NSGraphicsContext.current
+        let dims = !faded && context?.isDrawingToScreen == true
+        if dims { context?.cgContext.saveGState(); context?.cgContext.setAlpha(Self.marginsAlpha) }
         if header != nil { headerLayout.draw(at: headerRect.origin) }
         if footer != nil { footerLayout.draw(at: NSPoint(x: footerRect.minX, y: footerRect.maxY - footerHeight)) }
+        if dims { context?.cgContext.restoreGState() }
         if let frame = headerFrame {
             let path = NSBezierPath(rect: frame.rect)
             path.setLineDash([5, 3], count: 2, phase: 0)
