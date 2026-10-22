@@ -235,6 +235,9 @@ final class H264Encoder: @unchecked Sendable {
     private(set) var bitrate = ShareVideo.startBitrate
     /// Выбранный профиль (для журнала и проверки): High при аппаратном кодере, иначе Main.
     private(set) var profile: CFString?
+    /// Сессия кодирует аппаратно (видеокарта / медиадвижок); nil — сессии ещё нет. Для подписи у зрителей.
+    var usesHardware: Bool? { flightLock.lock(); defer { flightLock.unlock() }; return hardwareFlag }
+    private var hardwareFlag: Bool?
 
     func setBitrate(_ value: Int) {
         guard value != bitrate else { return }
@@ -303,6 +306,7 @@ final class H264Encoder: @unchecked Sendable {
             VTSessionSetProperty(created, key: kVTCompressionPropertyKey_ProfileLevel, value: chosen)
         }
         profile = chosen
+        flightLock.lock(); hardwareFlag = hardware; flightLock.unlock()
         Log.capture.info("Трансляция: H.264 \(width)×\(height), \(hardware ? "аппаратно" : "программно", privacy: .public), профиль \(chosen == kVTProfileLevel_H264_High_AutoLevel ? "High" : "Main", privacy: .public)")
         Self.applyBitrate(bitrate, to: created)
         VTCompressionSessionPrepareToEncodeFrames(created)

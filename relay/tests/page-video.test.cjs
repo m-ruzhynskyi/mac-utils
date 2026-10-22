@@ -86,7 +86,8 @@ function page(behaviour) {
   const element = () => ({ style: {}, textContent: '', title: '', insertAdjacentHTML() {} });
   const elements = {};
   const context = vm.createContext({
-    console: { ...console, info() {} }, Math, Promise, Uint8Array, Infinity, logs,
+    console: { ...console, info() {} }, Math, Promise, Uint8Array, Infinity, logs, String, devicePixelRatio: 1,
+    requestAnimationFrame: () => 0,
     performance: { now: () => clock },
     setInterval: (fn, ms) => { intervals.push({ fn, ms }); return intervals.length; }, clearInterval() {},
     document: { createElement: (tag) => tag === 'canvas'
@@ -100,7 +101,7 @@ function page(behaviour) {
     MediaStreamTrackProcessor: class { constructor() { this.readable = { getReader: () => ({
       read: () => new Promise((resolve) => { wake = resolve; }), cancel: async () => {} }) }; } },
   });
-  vm.runInContext(`var forceKey = true, watching = false, capture = null, useHelperAudio = false, window = { mu: { log: (l) => logs.push(l) } };
+  vm.runInContext(`var forceKey = true, watching = false, capture = null, useHelperAudio = false, window = { mu: { log: (l) => logs.push(l), mark() {} } };
     var hostSocket = { readyState: 1, bufferedAmount: 0, onclose: null, send: (p) => sent.push(p) };
     ${block}\n${monitors}\n${capture}`, Object.assign(context, { sent }));
   const track = { onended: null, stop() { if (this.onended) this.onended(); } };
@@ -109,6 +110,13 @@ function page(behaviour) {
   context.startCapture(stream, '1234567890');
   return {
     sent, configs, logs, get stopped() { return stopped; },
+    get videoMode() { return vm.runInContext('hostVideoMode', context); },
+    // Метка зрителя пришла ведущему; screen — что сказало приложение о метках поверх экрана (marks-state).
+    hostMark(mark, screen) {
+      if (screen !== undefined) vm.runInContext(`marksOnScreen = ${screen}; marksReason = ${screen ? '""' : '"old-windows"'};`, context);
+      context.hostShowMark(mark);
+      return { shown: vm.runInContext('hostMarks.length', context), box: elements.hostMarks?.style.display, note: elements.hostMarksNote?.textContent };
+    },
     // Зритель переключил монитор: новая дорожка (кадры другого размера), старое чтение остановлено.
     replace(size) {
       const next = { onended: null, stop() {} };
@@ -345,4 +353,27 @@ test('журнал кодера: смена режима, ошибки с код
   assert.ok(p.logs.some((l) => /^encoder error (crash|fail) code=Error:Encoder_failure /.test(l)));
   for (const line of p.logs) assert.match(line, /^encoder [a-z]+( [a-zA-Z0-9]+(=[A-Za-z0-9().:_,-]*)?)*$/, line);
   assert.ok(stats.every((l) => /queued=\d+ encodeQueue=\d+ .* outFps=\d+$/.test(l)));
+});
+
+test('режим видео ведущего: hw → при сбое sw → снова hw (строка «В эфире» и поле video у зрителей)', async () => {
+  const p = page({ outage: [2000, 5000] });
+  await p.run(1);
+  assert.equal(p.videoMode, 'hw');
+  await p.run(4);
+  assert.equal(p.videoMode, 'sw');
+  await p.run(32);
+  assert.equal(p.videoMode, 'hw');
+});
+
+test('метки у ведущего: приложение не может показать их поверх экрана — схема на странице; может — нет', async () => {
+  const p = page({});
+  await p.run(1);
+  const hidden = p.hostMark({ type: 'ping', x: 0.5, y: 0.5, color: 'red' }, false);
+  assert.equal(hidden.shown, 1);
+  assert.equal(hidden.box, 'block');
+  assert.match(hidden.note, /не умеет скрывать окно меток/);
+  const q = page({});
+  await q.run(1);
+  const onScreen = q.hostMark({ type: 'ping', x: 0.5, y: 0.5, color: 'red' }, true);
+  assert.equal(onScreen.shown, 0, 'метки поверх экрана — на странице не дублируются');
 });

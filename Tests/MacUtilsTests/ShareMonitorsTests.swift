@@ -54,6 +54,33 @@ final class ShareMonitorsTests: XCTestCase {
         XCTAssertNil(window["current"])
     }
 
+    /// Режим видео ведущего — необязательное поле `video` (hw / sw / jpeg); чужое не пишется. Зритель читает его отдельно
+    /// от списка: старый зритель поле не знает, а разбор списка от него не меняется.
+    func testVideoModeFieldInDisplays() throws {
+        for mode in ["hw", "sw", "jpeg"] {
+            let text = ShareDisplays.message(rev: 3, list: kate, current: nil, allowed: true, video: mode)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+            XCTAssertEqual(json["video"] as? String, mode)
+            XCTAssertEqual(ShareVideoMode.host(from: json), mode)
+            XCTAssertEqual(ShareDisplays.parse(json), ShareDisplays.parse(json.filter { $0.key != "video" }), "список тот же")
+        }
+        let plain = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(ShareDisplays.message(rev: 3, list: kate, current: nil, allowed: true, video: "gpu").utf8)) as? [String: Any])
+        XCTAssertNil(plain["video"])
+        XCTAssertNil(ShareVideoMode.host(from: ["type": "displays", "video": "<b>"]))
+        XCTAssertNil(ShareVideoMode.host(from: ["type": "displays", "video": 1]))
+    }
+
+    /// Подпись у зрителя — как у страницы (`videoModeLabel`).
+    func testVideoModeLabel() {
+        XCTAssertEqual(ShareVideoMode.label(pictures: false, host: "hw"), "Видео · видеокарта")
+        XCTAssertEqual(ShareVideoMode.label(pictures: false, host: "sw"), "Видео · без видеокарты")
+        XCTAssertEqual(ShareVideoMode.label(pictures: false, host: nil), "Видео", "старый ведущий")
+        XCTAssertEqual(ShareVideoMode.label(pictures: true, host: "hw"), "Картинки", "пришли картинки — так и пишем")
+        XCTAssertEqual(ShareVideoMode.label(pictures: nil, host: "sw"), "Видео · без видеокарты")
+        XCTAssertEqual(ShareVideoMode.label(pictures: nil, host: "jpeg"), "Картинки")
+        XCTAssertNil(ShareVideoMode.label(pictures: nil, host: nil))
+    }
+
     func testRevisionChangesOnlyWithTheList() {
         var revision = ShareDisplays.Revision()
         let first = revision.update(kate)
