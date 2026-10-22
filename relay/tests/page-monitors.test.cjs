@@ -10,7 +10,7 @@ const html = fs.readFileSync(`${__dirname}/../src/index.html`, 'utf8');
 const block = html.slice(html.indexOf('// <monitor-switch>'), html.indexOf('// </monitor-switch>'));
 assert.ok(block.length > 1000, 'метки <monitor-switch> на месте');
 const page = vm.createContext({});
-vm.runInContext(`${block}\nObject.assign(this, { switchDecision, displaysRevision, displaysMessage, swapVideoTrack, displayLabel, displaysLayout, monitorViewer, monitorKey, SWITCH_WAIT_MS, allowSwitchFrom, switchResult, shouldReannounce, videoModeLabel });`, page);
+vm.runInContext(`${block}\nObject.assign(this, { switchDecision, displaysRevision, displaysMessage, swapVideoTrack, displayLabel, displaysLayout, monitorViewer, monitorKey, SWITCH_WAIT_MS, allowSwitchFrom, switchResult, shouldReannounce, videoModeLabel, jpegIsBridge });`, page);
 const fixture = JSON.parse(fs.readFileSync(`${__dirname}/fixtures/displays.json`, 'utf8'));
 const KATE = fixture.valid[0].expected;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -58,6 +58,13 @@ test('displays с режимом видео ведущего: поле video т�
   assert.deepEqual(plain(page.displaysMessage(8, KATE.list, 2, false, 'jpeg')), { type: 'displays', v: 1, rev: 8, list: [], video: 'jpeg' });
   assert.deepEqual(plain(page.displaysMessage(8, KATE.list, 2, false, '')), { type: 'displays', v: 1, rev: 8, list: [] });
   assert.deepEqual(plain(page.displaysMessage(8, KATE.list, 2, false, 'gpu')), { type: 'displays', v: 1, rev: 8, list: [] });
+});
+
+test('JPEG после H.264: мост — только если H.264 не было дольше 0,7 с; кадры для старых зрителей не показываются', () => {
+  assert.equal(page.jpegIsBridge(1000, -Infinity), true, 'H.264 не было — старый ведущий или нет кодера');
+  assert.equal(page.jpegIsBridge(1000, 750), false, 'ведущий Mac шлёт JPEG раз в 0,25 с вперемешку с H.264');
+  assert.equal(page.jpegIsBridge(1000, 300), false, 'ровно 0,7 с — ещё нет');
+  assert.equal(page.jpegIsBridge(1000, 299), true, 'H.264 пропал дольше 0,7 с — мост');
 });
 
 test('подпись режима видео: видеокарта, без видеокарты, картинки; старый ведущий без поля — просто «Видео»', () => {

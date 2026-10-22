@@ -87,7 +87,7 @@ function page(behaviour) {
   const elements = {};
   const context = vm.createContext({
     console: { ...console, info() {} }, Math, Promise, Uint8Array, Infinity, logs, String, devicePixelRatio: 1,
-    requestAnimationFrame: () => 0,
+    requestAnimationFrame: () => 0, setTimeout: () => 0, clearTimeout() {},
     performance: { now: () => clock },
     setInterval: (fn, ms) => { intervals.push({ fn, ms }); return intervals.length; }, clearInterval() {},
     document: { createElement: (tag) => tag === 'canvas'
@@ -112,10 +112,11 @@ function page(behaviour) {
     sent, configs, logs, get stopped() { return stopped; },
     get videoMode() { return vm.runInContext('hostVideoMode', context); },
     // Метка зрителя пришла ведущему; screen — что сказало приложение о метках поверх экрана (marks-state).
-    hostMark(mark, screen) {
-      if (screen !== undefined) vm.runInContext(`marksOnScreen = ${screen}; marksReason = ${screen ? '""' : '"old-windows"'};`, context);
+    hostMark(mark, screen, covered = false) {
+      if (screen !== undefined) vm.runInContext(`marksOnScreen = ${screen}; marksReason = ${screen ? '""' : '"old-windows"'}; marksCovered = ${covered};`, context);
       context.hostShowMark(mark);
-      return { shown: vm.runInContext('hostMarks.length', context), box: elements.hostMarks?.style.display, note: elements.hostMarksNote?.textContent };
+      return { shown: vm.runInContext('hostMarks.length', context), box: elements.hostMarks?.style.display, note: elements.hostMarksNote?.textContent,
+               map: elements.hostMarksMap?.style.display };
     },
     // Зритель переключил монитор: новая дорожка (кадры другого размера), старое чтение остановлено.
     replace(size) {
@@ -376,4 +377,17 @@ test('метки у ведущего: приложение не может по�
   await q.run(1);
   const onScreen = q.hostMark({ type: 'ping', x: 0.5, y: 0.5, color: 'red' }, true);
   assert.equal(onScreen.shown, 0, 'метки поверх экрана — на странице не дублируются');
+});
+
+test('метки у ведущего: окно приложения над транслируемой областью — без схемы, только строка (схема попала бы в видео)', async () => {
+  const p = page({});
+  await p.run(1);
+  const covered = p.hostMark({ type: 'stroke', points: [[0.1, 0.1], [0.2, 0.2]], color: 'red' }, false, true);
+  assert.equal(covered.shown, 0, 'на схеме ничего');
+  assert.equal(covered.map, 'none', 'схема скрыта');
+  assert.equal(covered.box, 'block');
+  assert.match(covered.note, /^Зритель рисует — на экране не показываем/);
+  const free = p.hostMark({ type: 'ping', x: 0.5, y: 0.5, color: 'red' }, false, false);
+  assert.equal(free.shown, 1, 'окно на другом мониторе — схема');
+  assert.equal(free.map, '');
 });

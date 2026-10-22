@@ -81,6 +81,15 @@ final class ShareMonitorsTests: XCTestCase {
         XCTAssertNil(ShareVideoMode.label(pictures: nil, host: nil))
     }
 
+    /// JPEG после H.264 — мост, только если H.264 не было дольше 0,7 с; кадры для старых зрителей (раз в 0,25 с) — нет.
+    func testJpegBridgeOnlyAfterVideoGap() {
+        let now = Date()
+        XCTAssertTrue(ShareVideoMode.jpegIsBridge(now: now, lastVideo: nil), "H.264 не было")
+        XCTAssertFalse(ShareVideoMode.jpegIsBridge(now: now, lastVideo: now.addingTimeInterval(-0.25)))
+        XCTAssertFalse(ShareVideoMode.jpegIsBridge(now: now, lastVideo: now.addingTimeInterval(-0.69)))
+        XCTAssertTrue(ShareVideoMode.jpegIsBridge(now: now, lastVideo: now.addingTimeInterval(-0.71)))
+    }
+
     func testRevisionChangesOnlyWithTheList() {
         var revision = ShareDisplays.Revision()
         let first = revision.update(kate)

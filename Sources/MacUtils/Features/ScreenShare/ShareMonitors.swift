@@ -292,6 +292,15 @@ enum ShareVideoMode {
         (json["video"] as? String).flatMap { hostModes.contains($0) ? $0 : nil }
     }
 
+    /// JPEG после H.264 — мост ведущего (кодер пересоздаётся), только если H.264 не было дольше `bridgeGap`. Иначе это кадры
+    /// для старых зрителей, которые ведущий Mac шлёт параллельно (раз в 0,25 с): их не показываем, чтобы картинка и подпись
+    /// не мигали. Как у страницы (`jpegIsBridge`).
+    static let bridgeGap: TimeInterval = 0.7
+    static func jpegIsBridge(now: Date, lastVideo: Date?) -> Bool {
+        guard let lastVideo else { return true }
+        return now.timeIntervalSince(lastVideo) > bridgeGap
+    }
+
     /// pictures: true — приходят картинки, false — видео H.264, nil — кадров ещё нет.
     static func label(pictures: Bool?, host: String?) -> String? {
         if pictures == true || (pictures == nil && host == "jpeg") { return "Картинки" }

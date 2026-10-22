@@ -1503,6 +1503,8 @@ final class ShareViewer: ObservableObject {
     @Published private(set) var pictures: Bool?
     /// Как кодирует ведущий (`video` из displays: hw / sw / jpeg); nil — не сообщил (старая версия).
     @Published private(set) var hostVideo: String?
+    /// Когда пришёл последний кадр H.264 (главный поток): по нему отличаем мост картинками от кадров для старых зрителей.
+    private var lastVideoAt: Date?
     /// Подпись «Видео · видеокарта / без видеокарты / Картинки».
     var videoModeLabel: String? { ShareVideoMode.label(pictures: pictures, host: hostVideo) }
     /// Метки зрителей (свои и чужие) поверх картинки.
@@ -1543,6 +1545,7 @@ final class ShareViewer: ObservableObject {
         jpegFrames = 0
         pictures = nil
         hostVideo = nil
+        lastVideoAt = nil
         video.reset()
         resetMonitors()
         state = .connecting
@@ -1703,6 +1706,7 @@ final class ShareViewer: ObservableObject {
                         viewer.lastMessage = Date()
                         if viewer.state != .watching { viewer.state = .watching }
                         viewer.reconnectsMade = 0
+                        viewer.lastVideoAt = Date()
                         if viewer.pictures != false { viewer.pictures = false }
                     }
                 }
@@ -1720,7 +1724,8 @@ final class ShareViewer: ObservableObject {
                         switch data.first {
                         case ShareProtocol.frame:
                             viewer.jpegFrames += 1
-                            if let image = NSImage(data: data.dropFirst()) {
+                            if ShareVideoMode.jpegIsBridge(now: Date(), lastVideo: viewer.lastVideoAt),
+                               let image = NSImage(data: data.dropFirst()) {
                                 viewer.frame = image
                                 if viewer.pictures != true { viewer.pictures = true }
                             }
