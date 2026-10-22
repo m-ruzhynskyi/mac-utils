@@ -672,6 +672,9 @@ private final class RTFParser {
         case .dn: updateChar { $0.vertical = (number ?? 6) != 0 ? .subscript : .normal }
         case .caps: updateChar { $0.caps = (number ?? 1) != 0 }
         case .scaps: updateChar { $0.smallCaps = (number ?? 1) != 0 }
+        case .kerning: updateChar { $0.kerning = max(0, number ?? 0) }
+        case .expnd: updateChar { $0.expand = (number ?? 0) * 5 }
+        case .expndtw: updateChar { $0.expand = number ?? 0 }
         // Особые символы.
         case .uc: top.uc = max(0, number ?? 1)
         case .u:

@@ -49,6 +49,10 @@ struct RTFCharProps: Hashable {
     var vertical = RTFVertical.normal
     var caps = false
     var smallCaps = false
+    /// `\kerningN` — кернинг пар с размера N полупунктов; 0 — без кернинга (как у Word по умолчанию).
+    var kerning = 0
+    /// `\expndtwN` (`\expndN` — в четвертях пункта) — межзнаковый интервал в твипах, + разрежённый, − уплотнённый.
+    var expand = 0
 }
 
 /// Граница абзаца или ячейки (`\brdrs\brdrw10\brdrcf1`).

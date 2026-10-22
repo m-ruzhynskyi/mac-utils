@@ -574,7 +574,8 @@ final class DocRenderer {
         let name = fontEntry?.name ?? "Times New Roman"
         let family = FontSubstitution.display(for: name, family: fontEntry?.family ?? .roman, panose: fontEntry?.panose)
         var size = CGFloat(props.halfPoints) / 2
-        if props.vertical != .normal { size *= 0.65 }
+        // Индекс у Word — ⅔ размера в целых полупунктах: 11 pt → 7, 12 pt → 8.
+        if props.vertical != .normal { size = CGFloat(props.halfPoints * 2 / 3) / 2 }
         var attributes: [NSAttributedString.Key: Any] = [
             .font: font(family: family, size: size, bold: props.bold, italic: props.italic),
             .foregroundColor: color(props.color, model: model) ?? NSColor.black,
@@ -592,6 +593,10 @@ final class DocRenderer {
         case .wave: attributes[.underlineStyle] = NSUnderlineStyle([.single, .patternDashDot]).rawValue
         }
         if props.strike { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+        // Кернинг пар Word делает только с размера `\kerningN` (по умолчанию — нет), TextKit — всегда: `.kern = 0` его
+        // выключает. Межзнаковый интервал `\expndtw` — `.tracking`: он кернинг обратно не включает.
+        if props.kerning == 0 || props.halfPoints < props.kerning { attributes[.kern] = 0 }
+        if props.expand != 0 { attributes[.tracking] = CGFloat(props.expand) / 20 }
         switch props.vertical {
         case .normal: break
         case .superscript: attributes[.baselineOffset] = CGFloat(props.halfPoints) / 2 * 0.35

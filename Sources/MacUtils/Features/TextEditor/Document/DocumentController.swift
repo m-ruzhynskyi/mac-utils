@@ -245,6 +245,14 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         MainActor.assumeIsolated { completedLayout(container, atEnd: atEnd) }
     }
 
+    /// Перенос по словам — только там, где его делает Word (`WordLineBreaks`).
+    nonisolated func layoutManager(_ layoutManager: NSLayoutManager, shouldBreakLineByWordBeforeCharacterAt charIndex: Int) -> Bool {
+        MainActor.assumeIsolated {
+            guard let text = layoutManager.textStorage?.mutableString else { return true }
+            return WordLineBreaks.allowsBreak(before: charIndex, in: text)
+        }
+    }
+
     private func completedLayout(_ container: NSTextContainer?, atEnd: Bool) {
         let containers = layoutManager.textContainers
         guard let container, let index = containers.firstIndex(where: { $0 === container }) else {
