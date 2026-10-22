@@ -900,6 +900,64 @@ final class StitcherScenarioTests: XCTestCase {
         XCTAssertNil(chatProblem(feed, layout, offsets: scroll.offsets, motions: scroll.motions, "обои, «Ок», колесо вверх"))
     }
 
+    // MARK: - Прокрутка на дробную долю пикселя (1.9.3)
+
+    /// Окно мессенджера 1400×1200 со сплошным фоном, шапкой и полем ввода; лента сдвинута на `offset` px, в том числе
+    /// дробный: приложение со своей анимацией прокрутки рисует строки между пикселями (сглаживание).
+    private func offPixelChat(_ feed: CGImage, offset: Double) -> CGImage {
+        let width = 1400, height = 1200, top = 120, bottom = 100
+        let context = makeContext(width: width, height: height)
+        context.setFillColor(CGColor(red: 0.93, green: 0.9, blue: 0.86, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.saveGState()
+        context.clip(to: CGRect(x: 0, y: bottom, width: width, height: height - top - bottom))
+        context.interpolationQuality = .high
+        context.draw(feed, in: CGRect(x: 0, y: CGFloat(height - top) + CGFloat(offset) - CGFloat(feed.height),
+                                      width: CGFloat(feed.width), height: CGFloat(feed.height)))
+        context.restoreGState()
+        context.setFillColor(CGColor(gray: 0.97, alpha: 1))
+        context.fill(CGRect(x: 0, y: height - top, width: width, height: top))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: bottom))
+        return context.makeImage()!
+    }
+
+    /// Журналы 1.9.3 (scroll-2026-10-22_11-37-*): чат с шапкой и полем ввода, плавная прокрутка мелкими шагами, паузы.
+    /// Приложение остановило ленту на половине пикселя: побайтно с прошлым кадром не совпала ни одна строка, и после
+    /// первой точной склейки похожесть выключена — `lost noMatch` до конца съёмки, даже на неподвижных кадрах
+    /// (17 из 22 и 45 из 57 кадров). Теперь кадр на новой доле пикселя находится по похожести вместе с точными
+    /// событиями, дальше склейка снова точная. Без событий и при событиях, спорящих с картинкой, — не угадывает.
+    func testOffPixelScrollKeepsPlaceWithPreciseEvents() {
+        let feed = chatFeed(count: 60, width: 1400)
+        // Сдвиги кадров в px: от 1 до 200, две смены доли пикселя (.5), паузы — кадры без событий.
+        let steps: [Double] = [0, 0, 16, 20, 10, 1, 4, 0, 0, 8.5, 18, 14, 0, 0, 0, 52, 120, 6, 0, 0, 7.5, 0, 0, 200, 30, 2, 0, 0]
+        var stitcher = Stitcher(), offset = 0.0, results: [Stitcher.Result] = []
+        for step in steps {
+            offset += step
+            results.append(stitcher.add(offPixelChat(feed, offset: offset), motion: Stitcher.Motion(pixels: step)))
+        }
+        XCTAssertFalse(results.contains(.lost), "\(results)")
+        let height = stitcher.makeImage()?.height ?? 0
+        XCTAssertLessThanOrEqual(abs(Double(height) - (offset + 1200)), 2, "высота \(height), лента ушла на \(offset)")
+
+        // Только по изображению: после точной склейки похожесть без событий — по-прежнему не довод.
+        var blind = Stitcher(), blindResults: [Stitcher.Result] = []
+        offset = 0
+        for step in steps.prefix(11) {
+            offset += step
+            blindResults.append(blind.add(offPixelChat(feed, offset: offset), motion: nil))
+        }
+        XCTAssertNotEqual(blindResults[9], .appended, "кадр на половине пикселя без событий: \(blindResults)")
+
+        // События спорят с картинкой (по ним — 200 px, на экране — 8,5): кадр не клеится наугад.
+        var wrong = Stitcher()
+        offset = 0
+        for (i, step) in steps.prefix(10).enumerated() {
+            offset += step
+            let result = wrong.add(offPixelChat(feed, offset: offset), motion: Stitcher.Motion(pixels: i == 9 ? 200 : step))
+            if i == 9 { XCTAssertNotEqual(result, .appended, "события 200 px, сдвиг 8,5 px") }
+        }
+    }
+
     // MARK: - Терминал: кадр посреди перерисовки
 
     /// Кадр, снятый посреди перерисовки: верх `tear` строк — уже на месте `upper`, остальное — ещё на месте `lower`.
