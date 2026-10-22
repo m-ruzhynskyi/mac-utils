@@ -9,8 +9,12 @@ import XCTest
 /// страницы рисуются в PDF офскрин; строки и линии извлекаются из обоих PDF одинаково (`WordFidelity`).
 ///   MU_WORD_REF_DIR=~/Projects/Cowork/Form/LAB-word-ref [MU_WORD_REF_SUBSET_DIR=~/Projects/Cowork/Form/LAB]
 ///   [MU_WORD_REF_ONLY=f001,f002] [MU_WORD_FIDELITY_OUT=…/word-fidelity.md] [MU_WORD_FIDELITY_STRICT=1]
-/// Подмножество — копии, побайтно совпадающие с файлами из MU_WORD_REF_SUBSET_DIR: отдельная сводка.
 ///   swift test --filter WordFidelityTests
+/// Подмножество — копии, побайтно совпадающие с файлами из MU_WORD_REF_SUBSET_DIR: отдельная сводка.
+/// Гейт (`WordGate`, обычно через `scripts/word-gate.sh`): MU_WORD_FIDELITY_GATE=1 — падение, если форма хуже базы
+/// (MU_WORD_FIDELITY_BASELINE, по умолчанию `<MU_WORD_REF_DIR>/baseline.tsv`); MU_WORD_FIDELITY_WRITE_BASELINE=1 —
+/// записать прогон как базу; MU_WORD_FIDELITY_TSV — числа прогона в файл; MU_WORD_REF_SHARD=i/n — доля форм для
+/// параллельного прогона; MU_WORD_GATE_OUT — сводка «было/стало».
 /// В отчёт — только числа, номера fNNN и управляющие слова RTF; текст документов никуда не попадает.
 @MainActor
 final class WordFidelityTests: XCTestCase {
@@ -70,6 +74,54 @@ final class WordFidelityTests: XCTestCase {
         XCTAssertFalse(result.identical)
     }
 
+    /// Повтор одной строки в другом месте не сбивает пары: якорь — уникальная строка, повторы — по месту.
+    func testRepeatedLinesPairByPlace() {
+        let word = [line(0, "Шапка", 72, 72), line(0, "____", 72, 100), line(0, "Середина", 72, 400), line(0, "____", 72, 430)]
+        // У нас первая «____» потерялась: вторая не должна спариться с первой Word (300 pt выше).
+        let ours = [line(0, "Шапка", 72, 72), line(0, "Середина", 72, 402), line(0, "____", 72, 432)]
+        let pairs = WordFidelity.align(word, ours)
+        XCTAssertEqual(pairs.map(\.0), [0, 2, 3])
+        XCTAssertEqual(pairs.map(\.1), [0, 1, 2])
+        // Порядок строк у нас другой (соседние ячейки), пары те же.
+        let swapped = [ours[1], ours[2], ours[0]]
+        XCTAssertEqual(WordFidelity.align(word, swapped).map(\.0), [0, 2, 3])
+    }
+
+    /// Базовая линия — по началам текста в рамке строки, если она у обеих строк; иначе — верх рамки.
+    func testBaselineFromTextOrigins() {
+        let rect = CGRect(x: 72, y: 100, width: 200, height: 14)
+        let origins = [CGPoint(x: 72, y: 111), CGPoint(x: 150, y: 111), CGPoint(x: 200, y: 108), CGPoint(x: 72, y: 300)]
+        XCTAssertEqual(WordFidelity.baseline(of: rect, among: origins), 111)
+        XCTAssertNil(WordFidelity.baseline(of: rect, among: [CGPoint(x: 400, y: 111)]))
+        var a = line(0, "x", 72, 100), b = line(0, "x", 72, 103)
+        XCTAssertEqual(WordFidelity.top(a, b).1 - WordFidelity.top(a, b).0, 3)
+        a.baseline = 111; b.baseline = 111.5
+        XCTAssertEqual(WordFidelity.top(a, b).1 - WordFidelity.top(a, b).0, 0.5, accuracy: 0.001, "другой шрифт, та же базовая линия")
+    }
+
+    func testGateRulesAndTSV() {
+        var base = WordGate.Row(name: "f001")
+        base.pagesWord = 2; base.pagesOurs = 3; base.breaks = 0.9; base.shiftP95 = 4; base.cellWraps = 2; base.extraWords = 5
+        XCTAssertEqual(WordGate.rows(WordGate.tsv([base])), [base], "TSV туда и обратно")
+        XCTAssertTrue(WordGate.worse(base, than: base).isEmpty)
+
+        var now = base
+        now.shiftP95 = 4.4; now.breaks = 0.8996
+        XCTAssertTrue(WordGate.worse(now, than: base).isEmpty, "в допусках")
+        now.pagesOurs = 4; now.breaks = 0.85; now.shiftP95 = 4.6; now.cellWraps = 3; now.extraWords = 6
+        XCTAssertEqual(WordGate.worse(now, than: base).count, 5)
+        XCTAssertEqual(WordGate.worse(WordGate.Row(name: "f001", failed: true), than: base), ["не открылась"])
+
+        var improved = base
+        improved.pagesOurs = 2
+        let comparison = WordGate.compare([improved, WordGate.Row(name: "f009")], base: [base, WordGate.Row(name: "f002")])
+        XCTAssertTrue(comparison.passed)
+        XCTAssertEqual(comparison.better.map(\.name), ["f001"])
+        XCTAssertEqual(comparison.added, ["f009"])
+        XCTAssertEqual(comparison.missing, ["f002"])
+        XCTAssertTrue(WordGate.markdown(now: [now], base: [base]).contains("f001: страницы 2/3 → 2/4"))
+    }
+
     func testStatsPercentiles() {
         let stats = WordFidelity.Stats((1...100).map { CGFloat($0) })
         XCTAssertEqual(stats.median, 51)
@@ -117,8 +169,14 @@ final class WordFidelityTests: XCTestCase {
             let wanted = Set(only.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) })
             names = names.filter(wanted.contains)
         }
+        if let shard = environment["MU_WORD_REF_SHARD"], !shard.isEmpty {
+            let parts = shard.split(separator: "/").compactMap { Int($0) }
+            guard parts.count == 2, parts[1] > 0, (0..<parts[1]).contains(parts[0]) else { throw XCTSkip("MU_WORD_REF_SHARD=i/n") }
+            names = names.enumerated().filter { $0.offset % parts[1] == parts[0] }.map(\.element)
+        }
         XCTAssertFalse(names.isEmpty, "нет fNNN.rtf")
         var report = FidelityReport()
+        var rows: [WordGate.Row] = []
         if let subset = environment["MU_WORD_REF_SUBSET_DIR"], !subset.isEmpty {
             let folder = URL(fileURLWithPath: (subset as NSString).expandingTildeInPath)
             report.subsetLabel = folder.lastPathComponent
@@ -132,6 +190,7 @@ final class WordFidelityTests: XCTestCase {
             }
             guard let data = try? Data(contentsOf: rtf), let wordPDF = PDFDocument(url: wordURL) else {
                 report.failed.append(name)
+                rows.append(WordGate.Row(name: name, failed: true))
                 continue
             }
             let started = Date()
@@ -148,8 +207,10 @@ final class WordFidelityTests: XCTestCase {
                     let sizes = zip(WordFidelity.pageSizes(wordPDF), WordFidelity.pageSizes(ours))
                     result.sizeMismatch = sizes.contains { abs($0.width - $1.width) > 1 || abs($0.height - $1.height) > 1 }
                     report.add(name, result, lines: ourLines, category: geometry.category, constructs: geometry.constructs)
+                    rows.append(WordGate.Row(name: name, result))
                 } catch {
                     report.failed.append(name)
+                    rows.append(WordGate.Row(name: name, failed: true))
                 }
                 for window in windows { window.contentView = nil; window.close() }
                 windows = []
@@ -163,6 +224,50 @@ final class WordFidelityTests: XCTestCase {
         }
         if environment["MU_WORD_FIDELITY_STRICT"] == "1" {
             XCTAssertEqual(report.identical, report.files.count, "идентично Word: \(report.identical) из \(report.files.count)")
+        }
+        if let out = environment["MU_WORD_FIDELITY_TSV"], !out.isEmpty {
+            try WordGate.tsv(rows).write(toFile: (out as NSString).expandingTildeInPath, atomically: true, encoding: .utf8)
+        }
+        let baseline = Self.baselinePath(base)
+        if environment["MU_WORD_FIDELITY_GATE"] == "1" { try gate(rows, baseline: baseline) }
+        if environment["MU_WORD_FIDELITY_WRITE_BASELINE"] == "1" {
+            try WordGate.tsv(rows).write(toFile: baseline, atomically: true, encoding: .utf8)
+            print("word-gate: база записана, форм \(rows.count)")
+        }
+    }
+
+    /// Гейт по готовым числам прогона (склейка TSV шардов из `scripts/word-gate.sh`): раскладки здесь нет.
+    func testGateFromResults() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let results = environment["MU_WORD_FIDELITY_RESULTS"], !results.isEmpty else {
+            throw XCTSkip("Задайте MU_WORD_FIDELITY_RESULTS=<TSV прогона> (scripts/word-gate.sh)")
+        }
+        let rows = WordGate.rows(try String(contentsOfFile: (results as NSString).expandingTildeInPath, encoding: .utf8))
+        XCTAssertFalse(rows.isEmpty, "в TSV прогона нет форм")
+        let base = URL(fileURLWithPath: ((environment["MU_WORD_REF_DIR"] ?? "") as NSString).expandingTildeInPath)
+        try gate(rows, baseline: Self.baselinePath(base))
+    }
+
+    private static func baselinePath(_ reference: URL) -> String {
+        let custom = ProcessInfo.processInfo.environment["MU_WORD_FIDELITY_BASELINE"] ?? ""
+        return custom.isEmpty ? reference.appendingPathComponent("baseline.tsv").path : (custom as NSString).expandingTildeInPath
+    }
+
+    /// Сравнить с базой: сводка «было/стало» (MU_WORD_GATE_OUT), падение по каждой форме хуже базы.
+    private func gate(_ rows: [WordGate.Row], baseline: String) throws {
+        guard let text = try? String(contentsOfFile: baseline, encoding: .utf8) else {
+            XCTFail("Нет базы гейта; создайте её: scripts/word-gate.sh --update (или MU_WORD_FIDELITY_WRITE_BASELINE=1)")
+            return
+        }
+        let base = WordGate.rows(text)
+        let seconds = Double(ProcessInfo.processInfo.environment["MU_WORD_GATE_SECONDS"] ?? "")
+        let summary = WordGate.markdown(now: rows, base: base, seconds: seconds)
+        print(summary)
+        if let out = ProcessInfo.processInfo.environment["MU_WORD_GATE_OUT"], !out.isEmpty {
+            try summary.write(toFile: (out as NSString).expandingTildeInPath, atomically: true, encoding: .utf8)
+        }
+        for item in WordGate.compare(rows, base: base).worse {
+            XCTFail("\(item.name) хуже базы: \(item.what.joined(separator: "; "))")
         }
     }
 
