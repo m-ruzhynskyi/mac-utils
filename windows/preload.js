@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld("mu", {
   setMuted: (muted) => ipcRenderer.send("setMuted", muted),
   // Метки зрителей — на экран ведущего; трансляция закончилась — убрать окно меток.
   mark: (mark) => ipcRenderer.send("mark", mark),
+  // Где ведущий видит метки: { screen: false, reason } — поверх экрана нельзя (исключение из захвата не встало), страница
+  // рисует их у себя.
+  onMarksState: (callback) => { ipcRenderer.removeAllListeners("marks-state"); ipcRenderer.on("marks-state", (_e, state) => callback(state)); },
   stopped: () => { ipcRenderer.removeAllListeners("audio"); ipcRenderer.send("stopped"); },
   // Зрители переключают мониторы ведущего: список (без имён и ID устройств), его изменения, выбор монитора по номеру
   // и уведомление ведущему в окне меток.

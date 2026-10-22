@@ -36,7 +36,14 @@ let placedOn = null; // монитор, на который окно меток 
 let placing = null; // монитор, на который окно меток ставится сейчас (ждём помощника)
 let placed = null; // где окно меток по словам помощника: { x, y, width, height, dpi }
 let affinity = null; // исключение из захвата на окне меток по словам помощника (0x11 — исключено)
-let protectOrder = 1; // 1 — защита после setIgnoreMouseEvents, 2 — до него (если первый порядок не встал), 0 — снята (0x1)
+let protectOrder = 1; // 1 — защита после setIgnoreMouseEvents, 2 — до него (если первый порядок не встал)
+// Метки поверх экрана — только при исключении из захвата, подтверждённом помощником (0x11). Не подтвердилось (старая
+// Windows 10 — 0x1, отказ — 0x0, нет помощника) — окно меток не показывается вовсе, метки ведущий видит в окне
+// приложения (страница рисует схему): иначе они попадают в видео и зритель видит каждую дважды, со сдвигом.
+let marksBlocked = null; // null — ещё не проверено, false — метки на экране, строка — почему нет (код для журнала и страницы)
+let verifyTimer = null;
+const VERIFY_MS = Number(process.env.MU_OVERLAY_VERIFY_MS) || 15_000; // пока окно меток показано, исключение перепроверяется
+const overlays = new Set(); // все созданные окна меток: должно жить одно
 let shielded = false; // защита после показа проверена помощником: до этого метки ждут, чтобы не попасть в видео
 let checks = 0; // контрольных сверок рамки окна меток на этом мониторе (не больше MAX_CHECKS — без бесконечных циклов)
 let checkTimer = null;
@@ -81,7 +88,8 @@ function logPlacement(event) {
     const displays = all.map((d, i) => `${i + 1}:${rect(d.bounds)}@${d.scaleFactor}`).join(" ");
     const kind = /^window:/.test(chosen?.source?.id || "") ? "window" : "screen";
     fs.appendFileSync(file, `${new Date().toISOString()} ${event} ${kind} displays=[${displays}] primary=${number(primary)} source=${number(shared)} ` +
-      `target=${rect(target)} monitor=${rect(monitor)} phys=${placed ? `${rect(placed)}@${placed.dpi}` : "-"} affinity=${hex(affinity)} order=${protectOrder}\n`);
+      `target=${rect(target)} monitor=${rect(monitor)} phys=${placed ? `${rect(placed)}@${placed.dpi}` : "-"} affinity=${hex(affinity)} order=${protectOrder} ` +
+      `marks=${marksBlocked === null ? "-" : marksBlocked || "screen"} overlays=${overlays.size} build=${app.getVersion()} os=${require("os").release()}\n`);
   } catch (_) {}
 }
 
@@ -216,38 +224,81 @@ function scheduleCheck() {
 
 // Исключение из захвата ставит само приложение: SetWindowDisplayAffinity принимает только окна своего процесса.
 // Помощник читает, что встало (GetWindowDisplayAffinity читает окно любого процесса). Не 0x11 — второй порядок:
-// защита до setIgnoreMouseEvents (тот переписывает расширенный стиль окна), затем снова сквозные клики.
+// защита до setIgnoreMouseEvents (тот переписывает расширенный стиль окна), затем снова сквозные клики. И после него
+// не 0x11 — метки поверх экрана не показываем (`blockMarks`).
 function protectOverlay() {
   const mine = overlay;
   mine.setIgnoreMouseEvents(true);
   mine.setContentProtection(true);
-  shielded = !hasHelper();
-  if (shielded) return;
+  if (!hasHelper()) return blockMarks("no-helper");
   const check = (order) => runHelper(["protect", hwndOf(mine)], (out) => {
     if (mine !== overlay || mine.isDestroyed()) return;
     const match = /affinity=0x([0-9a-f]+)/i.exec(out);
     affinity = match ? parseInt(match[1], 16) : null;
     protectOrder = order;
-    if (affinity === MONITOR_ONLY) {
-      // Windows 10 до 2004: окно меток на весь монитор было бы в видео чёрным — вся трансляция чёрная. Лучше метка
-      // в видео (зритель видит её дважды), чем чёрный экран: защиту снимаем, в журнале order=0.
-      mine.setContentProtection(false);
-      protectOrder = 0;
-    } else if (affinity !== EXCLUDE_FROM_CAPTURE && order === 1) {
+    if (affinity !== EXCLUDE_FROM_CAPTURE && affinity !== MONITOR_ONLY && order === 1) {
       mine.setIgnoreMouseEvents(false);
       mine.setContentProtection(true);
       mine.setIgnoreMouseEvents(true);
       return check(2);
     }
-    logPlacement(protectOrder === 0 ? "unprotected" : "protect");
+    if (affinity !== EXCLUDE_FROM_CAPTURE) return blockMarks(affinity === MONITOR_ONLY ? "old-windows" : affinity === null ? "no-answer" : "unprotected");
     shielded = true;
+    setMarksState(false);
+    logPlacement("protect");
+    scheduleVerify();
     flushMarks();
   });
   check(1);
 }
 
+// Исключение не встало: окно меток прячем (скрытое окно в захват не попадает), метки — только на странице.
+function blockMarks(reason) {
+  shielded = false;
+  clearTimeout(verifyTimer); verifyTimer = null;
+  if (overlay && !overlay.isDestroyed()) {
+    // WDA_MONITOR (старая Windows 10) делает окно в захвате чёрным — снимаем, окно всё равно скрыто.
+    if (affinity === MONITOR_ONLY) overlay.setContentProtection(false);
+    overlay.hide();
+  }
+  overlayShown = false;
+  pendingMarks.length = 0; pendingNotice = null;
+  setMarksState(reason);
+  logPlacement("unprotected");
+}
+
+// Где ведущий видит метки: странице — чтобы при `screen: false` рисовала их у себя.
+function setMarksState(blocked) {
+  if (marksBlocked === blocked) return;
+  marksBlocked = blocked;
+  if (window && !window.isDestroyed()) window.webContents.send("marks-state", { screen: !blocked, reason: blocked || "" });
+}
+
+// Пока окно меток показано, исключение перепроверяется (смена монитора, DPI, перестановка окна Windows его не трогают
+// по документации, но проверка дешёвая): ушло — заново оба порядка, не встало — метки только на странице.
+function scheduleVerify() {
+  clearTimeout(verifyTimer);
+  if (!hasHelper() || !overlay || overlay.isDestroyed()) return;
+  const mine = overlay;
+  verifyTimer = setTimeout(() => {
+    if (mine !== overlay || mine.isDestroyed() || !overlayShown || !shielded) return;
+    runHelper(["protect", hwndOf(mine)], (out) => {
+      if (mine !== overlay || mine.isDestroyed() || !overlayShown || !shielded) return;
+      const match = /affinity=0x([0-9a-f]+)/i.exec(out);
+      const now = match ? parseInt(match[1], 16) : null;
+      if (now === EXCLUDE_FROM_CAPTURE) return scheduleVerify();
+      affinity = now;
+      logPlacement("protect-lost");
+      shielded = false;
+      protectOverlay();
+    });
+  }, VERIFY_MS);
+  verifyTimer.unref?.(); // проверка не держит приложение (и тесты) живыми
+}
+
 // Показ окна меток: показать, поставить на монитор (помощник), исключить из захвата. Метки ждут обоих ответов помощника.
 function showOverlay() {
+  if (marksBlocked) return;
   overlay.showInactive(); overlayShown = true;
   placeOverlay();
   protectOverlay();
@@ -268,7 +319,7 @@ function sendRegion() {
 
 function flushMarks() {
   if (!overlayReady || !target || (!pendingMarks.length && !pendingNotice)) return;
-  if (sourceHidden) { pendingMarks.length = 0; pendingNotice = null; return; }
+  if (sourceHidden || marksBlocked) { pendingMarks.length = 0; pendingNotice = null; return; }
   if (!overlayShown) showOverlay();
   if (!placedOn || !shielded) return;
   for (const mark of pendingMarks.splice(0)) overlay.webContents.send("mark", mark);
@@ -291,7 +342,10 @@ function prepareOverlay() {
   // Окно от прошлой трансляции (отказ после выбора источника, перезагрузка страницы) — с его областью и помощником.
   hideOverlay();
   overlayReady = false; overlayShown = false; sourceHidden = false; target = null; monitor = null; trackedRect = null; marksLogged = 0;
-  placedOn = null; placing = null; placed = null; affinity = null; protectOrder = 1; shielded = false;
+  placedOn = null; placing = null; placed = null; affinity = null; protectOrder = 1; shielded = false; marksBlocked = null;
+  // Окна меток прежних трансляций, если какое-то не закрылось, — закрыть: второе окно с метками было бы в видео.
+  for (const old of overlays) if (!old.isDestroyed()) old.close();
+  overlays.clear();
   const display = sharedDisplay() || screen.getPrimaryDisplay();
   overlay = new BrowserWindow({
     ...display.bounds,
@@ -301,6 +355,9 @@ function prepareOverlay() {
     enableLargerThanScreen: true,
     webPreferences: { contextIsolation: true, preload: path.join(__dirname, "overlay-preload.js") },
   });
+  const created = overlay;
+  overlays.add(created);
+  created.on("closed", () => overlays.delete(created));
   overlay.setAlwaysOnTop(true, "screen-saver");
   overlay.setIgnoreMouseEvents(true);
   overlay.on("move", scheduleCheck);
@@ -343,6 +400,7 @@ function trackWindow() {
 function hideOverlay() {
   if (tracker) { tracker.kill(); tracker = null; }
   clearTimeout(checkTimer); checkTimer = null;
+  clearTimeout(verifyTimer); verifyTimer = null;
   if (overlay && !overlay.isDestroyed()) overlay.close();
   overlay = null; overlayReady = false; overlayShown = false; target = null; monitor = null; trackedRect = null;
   placedOn = null; placing = null; placed = null;
