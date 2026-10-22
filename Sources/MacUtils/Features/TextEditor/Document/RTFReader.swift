@@ -14,7 +14,9 @@ enum RTFReader {
         return units.withUnsafeBufferPointer { buffer in
             let parser = RTFParser(buffer, fallback: fallback)
             parser.run()
-            return parser.model
+            var model = parser.model
+            model.lists = DocListReader.read(text, table: parser.listTable, overrides: parser.listOverrideTable, codePage: model.codePage)
+            return model
         }
     }
 
@@ -40,6 +42,9 @@ private final class RTFParser {
     private let count: Int
     private var i = 0
     private(set) var model = RTFDocumentModel()
+    /// Группы `{\*\listtable …}` и `{\*\listoverridetable …}` — разбираются отдельно (`DocListReader`).
+    private(set) var listTable: NSRange?
+    private(set) var listOverrideTable: NSRange?
 
     // MARK: Состояние групп
 
@@ -274,6 +279,9 @@ private final class RTFParser {
             attachHeader(kind, story: group.story, range: range)
             lastHeaderEnd[stories[group.story].section] = NSMaxRange(range)
         }
+        if group.listText, !top.listText, group.destination == .text, top.story == group.story {
+            stories[group.story].current.listTextGroup = range
+        }
         if let field = group.field, top.field != field, field < model.fields.count {
             model.fields[field].group = range
         }
@@ -355,6 +363,13 @@ private final class RTFParser {
 
     /// Первое слово группы — назначение. `true` — разобрано (или группа пропущена).
     private func destination(_ word: RTFWord?, key: Key, range: NSRange) -> Bool {
+        if key == Self.listTableKey || key == Self.listOverrideTableKey {
+            let start = top.start
+            skipGroup()
+            let group = NSRange(location: start, length: i - start)
+            if key == Self.listTableKey { listTable = group } else { listOverrideTable = group }
+            return true
+        }
         if RTFWord.skippedDestinations.contains(key) {
             skipGroup()
             return true
@@ -479,6 +494,8 @@ private final class RTFParser {
         }
         return true
     }
+
+    private static let listTableKey = Key("listtable"), listOverrideTableKey = Key("listoverridetable")
 
     // swiftlint:disable:next function_body_length cyclomatic_complexity
     private func handle(_ word: RTFWord, _ number: Int?, range: NSRange) {
@@ -636,6 +653,12 @@ private final class RTFParser {
             token("pagebb", range)
         case .s: top.para.style = number
         case .contextualspace: top.para.contextualSpace = (number ?? 1) != 0
+        case .ls:
+            top.para.list = number ?? 0
+            token("ls", range)
+        case .ilvl:
+            top.para.listLevel = number ?? 0
+            token("ilvl", range)
         case .cbpat: top.para.shading = number ?? 0
         case .brdrt: top.border = .paraTop; top.para.borderTop = RTFBorder()
         case .brdrb: top.border = .paraBottom; top.para.borderBottom = RTFBorder()

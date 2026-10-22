@@ -64,11 +64,15 @@ struct ParaChange: Equatable {
     var lineSpacing: (value: Int, multiple: Bool)?
     /// Табуляции с линейки (`FormatEdits.tabs`).
     var tabs: TabEdit?
+    /// Список `\lsN` (0 — не пункт списка) и уровень `\ilvlN` (`DocListEdit`).
+    var list: Int?
+    var listLevel: Int?
 
     static func == (lhs: ParaChange, rhs: ParaChange) -> Bool {
         lhs.tabs == rhs.tabs && lhs.alignment == rhs.alignment && lhs.left == rhs.left && lhs.right == rhs.right && lhs.firstLine == rhs.firstLine
             && lhs.spaceBefore == rhs.spaceBefore && lhs.spaceAfter == rhs.spaceAfter
             && lhs.lineSpacing?.value == rhs.lineSpacing?.value && lhs.lineSpacing?.multiple == rhs.lineSpacing?.multiple
+            && lhs.list == rhs.list && lhs.listLevel == rhs.listLevel
     }
 
     /// «Очистить формат» для абзаца: без отступов и интервалов, по левому краю. Табуляции, рамки и стиль не трогаются.
@@ -76,7 +80,7 @@ struct ParaChange: Equatable {
 
     /// Поля абзаца, которые команда пишет кодами: имя — как в `RTFParagraph.propTokens`.
     enum Field: String, CaseIterable {
-        case align, li, lin, ri, rin, fi, sb, sa, sl, slmult
+        case align, li, lin, ri, rin, fi, sb, sa, sl, slmult, ls, ilvl
     }
 
     var settings: [(Field, Int)] {
@@ -88,6 +92,8 @@ struct ParaChange: Equatable {
         if let spaceBefore { result.append((.sb, spaceBefore)) }
         if let spaceAfter { result.append((.sa, spaceAfter)) }
         if let lineSpacing { result += [(.sl, lineSpacing.value), (.slmult, lineSpacing.multiple ? 1 : 0)] }
+        if let list { result.append((.ls, list)) }
+        if let listLevel { result.append((.ilvl, listLevel)) }
         return result
     }
 
@@ -103,6 +109,8 @@ struct ParaChange: Equatable {
         case .sa: return props.spaceAfter
         case .sl: return props.lineSpacing
         case .slmult: return props.lineMultiple ? 1 : 0
+        case .ls: return props.list
+        case .ilvl: return props.listLevel
         }
     }
 
@@ -125,6 +133,8 @@ struct ParaChange: Equatable {
             props.lineSpacing = lineSpacing.value
             props.lineMultiple = lineSpacing.multiple
         }
+        if let list { props.list = list }
+        if let listLevel { props.listLevel = listLevel }
         switch tabs {
         case .add(let stop): props.tabs.append(stop)
         case .move(let index, let position) where props.tabs.indices.contains(index): props.tabs[index].position = position

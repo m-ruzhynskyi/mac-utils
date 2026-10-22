@@ -112,6 +112,12 @@ final class DocTextView: NSTextView {
         controller?.cancelComposition()
     }
 
+    /// ⇧Tab в пункте списка — уровень выше (E-2); иначе — как обычно.
+    override func insertBacktab(_ sender: Any?) {
+        if controller?.backtab() == true { return }
+        super.insertBacktab(sender)
+    }
+
     // Вставка: форматированная (RTF/HTML) — `DocFormatter` (D-4), иначе обычным текстом.
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { [.string] }
 

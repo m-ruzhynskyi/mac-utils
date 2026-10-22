@@ -534,7 +534,11 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
     @discardableResult
     func perform(replacing units: NSRange, with text: String) -> Bool {
         guard let tab else { return false }
-        let result = DocTextEditor.replace(units, with: text, model: model, map: rendering.map, source: tab.text)
+        // ↩ в пустом пункте, Tab в начале пункта, ⌫ у номера — команды списка (E-2).
+        if let list = DocListEdit.intercept(units, text: text, model: model, rendering: rendering, source: tab.text) {
+            return perform(list)
+        }
+        var result = DocTextEditor.replace(units, with: text, model: model, map: rendering.map, source: tab.text)
         if let refusal = result.refusal {
             show(notice: refusal)
             Feedback.beep()
@@ -544,8 +548,12 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
             if units.length > 0 || !text.isEmpty { Feedback.beep() }
             return false
         }
+        // Новые и сдвинутые пункты списков — готовый номер `{\listtext}` переписывается вместе с правкой.
+        if units.length > 0 || text.contains(where: \.isNewline) {
+            (result.edits, result.caretSource) = DocListText.synced(result.edits, caret: result.caretSource, model: model, source: tab.text)
+        }
         let caret = result.caretSource
-        let single = result.edits.count == 1 && result.edits[0].range.length == 0 && !text.isEmpty
+        let single = result.edits.count == 1 && result.edits[0].range.length == 0 && !text.isEmpty && !text.contains(where: \.isNewline)
         // Набор подряд — один шаг отмены, как в Word: прошлый шаг отменяется и применяется вместе с новым символом.
         if single, let burst = typingBurst, burst.revision == tab.sourceRevision, tab.undo.canUndo, tab.undo.undoActionName == "Ввод",
            result.edits[0].range.location == burst.source + (burst.text as NSString).length,
@@ -554,17 +562,41 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
             tab.undo.undo()
             let end = burst.source + (combined as NSString).length
             let done = apply([DocEdit(range: NSRange(location: burst.source, length: 0), text: combined)], actionName: "Ввод") { rendering in
-                NSRange(location: rendering.map.firstUnit(atOrAfter: end), length: 0)
+                NSRange(location: rendering.caretUnit(atSource: end), length: 0)
             }
             typingBurst = done ? TypingBurst(source: burst.source, text: combined, revision: tab.sourceRevision, time: Date()) : nil
             return done
         }
         let done = apply(result.edits, actionName: text.isEmpty ? "Удаление" : "Ввод") { rendering in
-            NSRange(location: rendering.map.firstUnit(atOrAfter: caret), length: 0)
+            NSRange(location: rendering.caretUnit(atSource: caret), length: 0)
         }
         typingBurst = done && single
             ? TypingBurst(source: result.edits[0].range.location, text: result.edits[0].text, revision: tab.sourceRevision, time: Date()) : nil
         return done
+    }
+
+    /// Команда списка: правки одним шагом отмены, курсор — в начале текста пункта.
+    @discardableResult
+    func perform(_ list: DocListEdit.Result) -> Bool {
+        typingBurst = nil
+        if let refusal = list.refusal {
+            show(notice: refusal)
+            Feedback.beep()
+            return false
+        }
+        guard !list.edits.isEmpty else {
+            Feedback.beep()
+            return false
+        }
+        let caret = list.caretSource
+        return apply(list.edits, actionName: list.actionName) { NSRange(location: $0.caretUnit(atSource: caret), length: 0) }
+    }
+
+    /// ⇧Tab: уровень пункта списка выше. `false` — не пункт списка (обычное поведение).
+    func backtab() -> Bool {
+        guard let tab, let list = DocListEdit.backtab(selectedUnits, model: model, rendering: rendering, source: tab.text) else { return false }
+        perform(list)
+        return true
     }
 
     /// Серия набора для склейки отмены: куда, что набрано, ревизия исходника после последнего символа, когда.
@@ -583,6 +615,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
     nonisolated func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,
                               toCharacterRange new: NSRange) -> NSRange {
         MainActor.assumeIsolated {
+            if let moved = DocListEdit.caretOutsideNumber(new, from: old, map: rendering.map) { return moved }
             guard new.length == 0, new.location > 0, new.location < rendering.map.count,
                   rendering.map.kind(at: new.location - 1) == .field, rendering.map.kind(at: new.location) == .field,
                   rendering.map.range(at: new.location - 1) == rendering.map.range(at: new.location) else { return new }

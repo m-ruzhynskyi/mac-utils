@@ -113,7 +113,7 @@ enum DocTextEditor {
             // Конец ячейки, как в Word, не удаляется и без подсказки: структура таблицы остаётся.
             case .cellEnd: continue
             case .sectionEnd, .sectionBreak: return "Разрыв раздела не удаляется в «Документе». " + codeHint
-            case .listText: return "Номера списков правятся в следующем выпуске. " + codeHint
+            case .listText: return "Номер списка не правится как текст: ⌫ после номера снимает его. " + codeHint
             case .paragraphEnd: return "Абзацы таблицы и текста не склеиваются. " + codeHint
             default: continue
             }
@@ -135,8 +135,10 @@ enum DocTextEditor {
         if first.props.inTable != second.props.inTable { return nil }
         if let a = first.cell, let b = second.cell, a != b { return nil }
         if first.props.inTable, first.cell == nil || second.cell == nil { return nil }
-        let start = second.regionStart, contentStart = second.contentStart
+        let start = second.regionStart, contentStart = second.textStart
         var tokens: [NSRange] = []
+        // Готовый номер второго абзаца (`{\listtext}`) уходит вместе с его свойствами.
+        if let group = second.listTextGroup, group.location >= start, NSMaxRange(group) <= contentStart { tokens.append(group) }
         if let pard = second.pard, pard.location >= start, NSMaxRange(pard) <= contentStart { tokens.append(pard) }
         for token in second.propTokens.values where token.location >= start && NSMaxRange(token) <= contentStart && token.location != end.location {
             tokens.append(token)

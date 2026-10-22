@@ -99,6 +99,10 @@ struct RTFParaProps: Hashable {
     var style: Int?
     /// `\contextualspace` — без интервалов `\sb`/`\sa` между соседними абзацами того же стиля.
     var contextualSpace = false
+    /// `\lsN` — замена списка (`\listoverride`), 0 — не пункт списка; `\ilvlN` — уровень. Список стиля `\sN` Word
+    /// при чтении RTF не берёт (коды стиля — только в `{\stylesheet}`), поэтому и здесь — только свои коды абзаца.
+    var list = 0
+    var listLevel = 0
 
     var hasBorders: Bool { borderTop.isVisible || borderBottom.isVisible || borderLeft.isVisible || borderRight.isVisible }
 }
@@ -395,12 +399,19 @@ struct RTFParagraph {
     var section = 0
     /// Ячейка таблицы: номер таблицы, строки и ячейки (заполняется на `\row`).
     var cell: RTFCellRef?
+    /// Группа готового номера `{\listtext …}` или `{\pntext …}` абзаца целиком.
+    var listTextGroup: NSRange?
     /// Первая видимая единица абзаца в исходнике (или `endRange.location`, если абзац пуст).
     var contentStart: Int {
         runs.first(where: { !$0.map.isEmpty })?.map.first?.location ?? endRange.location
     }
 
     var plainText: String { runs.map(\.text).joined() }
+
+    /// Начало текста абзаца без готового номера списка.
+    var textStart: Int {
+        runs.first(where: { !$0.map.isEmpty && $0.kind != .listText })?.map.first?.location ?? endRange.location
+    }
 }
 
 /// Где абзац лежит в таблице.
@@ -513,6 +524,8 @@ struct RTFDocumentModel {
     var body = RTFStory()
     var sections: [RTFSection] = [RTFSection()]
     var fields: [RTFField] = []
+    /// Списки (`\listtable`, `\listoverridetable`).
+    var lists = RTFListTable()
     /// Где можно вставить свойство документа (`\facingp`): перед первым `\sectd` или первым абзацем.
     var documentPropsInsertion = 0
     /// Начинается ли исходник с `{\rtf`.

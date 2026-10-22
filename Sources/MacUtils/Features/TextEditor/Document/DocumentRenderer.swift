@@ -199,6 +199,8 @@ final class DocRenderer {
         var spacing: [Int]
         var font: [String]
         var frame = StoryFrame()
+        /// Номер списка, посчитанный по `\listtable` (`DocListNumbers`).
+        var list: DocListLabel?
     }
 
     // MARK: - Основной текст
@@ -220,9 +222,10 @@ final class DocRenderer {
         rendering.sectionStarts = Array(repeating: 0, count: model.sections.count)
         var plans: [ParagraphPlan] = []
         plans.reserveCapacity(story.paragraphs.count)
+        let labels = DocListNumbers.labels(story, lists: model.lists)
         for (index, paragraph) in story.paragraphs.enumerated() {
             let place = paragraph.cell.flatMap { places[$0] }
-            var plan = self.plan(paragraph, index: index, story: story, model: model, place: place)
+            var plan = self.plan(paragraph, index: index, story: story, model: model, place: place, label: labels[index])
             plan.key.frame = frames[safe: paragraph.section] ?? StoryFrame()
             if paragraph.section < rendering.sectionStarts.count, model.sections[paragraph.section].firstParagraph == index {
                 rendering.sectionStarts[paragraph.section] = rendering.map.count
@@ -280,9 +283,10 @@ final class DocRenderer {
         let places = cellPlaces(story) { _, left in frame.left + left }
         var map = DocSourceMap()
         let string = NSMutableAttributedString()
+        let labels = DocListNumbers.labels(story, lists: model.lists)
         for (index, paragraph) in story.paragraphs.enumerated() {
             var plan = self.plan(paragraph, index: index, story: story, model: model, place: paragraph.cell.flatMap { places[$0] },
-                                 sectionBreaks: false)
+                                 sectionBreaks: false, label: labels[index])
             // Вычисляемые поля — свой текст (номер страницы), весь — на кусок исходника поля.
             for (offset, piece) in plan.pieces.enumerated() where piece.kind == .field {
                 guard let run = piece.run, case .field(let kind) = paragraph.runs[run].kind, let value = field(kind) else { continue }
@@ -342,6 +346,8 @@ final class DocRenderer {
         var ranges: [NSRange]
         var kind: DocSourceMap.Kind
         var run: Int?
+        /// Свойства символа куска без прогона (номер списка).
+        var props: RTFCharProps?
     }
 
     private struct ParagraphPlan {
@@ -354,7 +360,7 @@ final class DocRenderer {
     }
 
     private func plan(_ paragraph: RTFParagraph, index: Int, story: RTFStory, model: RTFDocumentModel, place: CellPlace?,
-                      sectionBreaks: Bool = true) -> ParagraphPlan {
+                      sectionBreaks: Bool = true, label: DocListLabel? = nil) -> ParagraphPlan {
         var pieces: [Piece] = []
         var breakBefore: UInt8 = 0
         if place?.skip == true {
@@ -385,7 +391,12 @@ final class DocRenderer {
         var runKeys: [RunKey] = []
         var text = ""
         var fontNames: [String] = []
+        // Номер списка — посчитанный, как у Word, вместо готового `\listtext`.
+        if let label, let piece = DocListNumbers.piece(label, paragraph: paragraph) {
+            pieces.append(Piece(units: piece.units, ranges: piece.ranges, kind: .listText, props: label.props))
+        }
         for (number, run) in paragraph.runs.enumerated() {
+            if label != nil, run.kind == .listText { continue }
             // Скрытый текст (`\v`) — только при ¶.
             if run.props.hidden, !showsHidden, run.isEditableText { continue }
             let units = Array(run.text.utf16)
@@ -440,7 +451,7 @@ final class DocRenderer {
         let spacing = Self.spacing(story, index: index)
         let key = ParagraphKey(text: text, runs: runKeys, props: paragraph.props, place: place, breakBefore: breakBefore, end: end,
                                endProps: paragraph.endProps, spacing: [spacing.before, spacing.after],
-                               font: fontNames + [model.font(paragraph.endProps.font)?.name ?? ""])
+                               font: fontNames + [model.font(paragraph.endProps.font)?.name ?? ""], list: label)
         return ParagraphPlan(pieces: pieces, key: key, place: place, spacing: spacing, breakUnits: breakBefore > 0 ? 1 : 0)
     }
 
@@ -458,7 +469,8 @@ final class DocRenderer {
     /// `frame` — рамка рисования: абзацы вне таблиц сдвигаются на выступ в поля вместе с табуляциями.
     private func attributed(_ plan: ParagraphPlan, paragraph: RTFParagraph, model: RTFDocumentModel, frame: StoryFrame) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        var shown = Self.shown(paragraph.props, place: plan.place, frame: frame, defaultTab: model.defaultTab)
+        let props = plan.key.list.map { DocListNumbers.shownProps(paragraph.props, label: $0) } ?? paragraph.props
+        var shown = Self.shown(props, place: plan.place, frame: frame, defaultTab: model.defaultTab)
         if let spacing = plan.spacing { (shown.spaceBefore, shown.spaceAfter) = spacing }
         let style = paragraphStyle(shown, place: plan.place, model: model, frame: frame)
         let paraInfo = DocParaInfo(props: paragraph.props)
@@ -482,7 +494,8 @@ final class DocRenderer {
                 continue
             }
             let run = piece.run.map { paragraph.runs[$0] }
-            let props = run?.props ?? (piece.kind == .sectionBreak || piece.kind == .pageBreak ? firstRun?.props : endProps ?? lastRun?.props)
+            let props = run?.props ?? piece.props
+                ?? (piece.kind == .sectionBreak || piece.kind == .pageBreak ? firstRun?.props : endProps ?? lastRun?.props)
                 ?? defaultProps(model)
             var attributes = characterAttributes(props, model: model, hidden: piece.kind == .hidden)
             attributes[.paragraphStyle] = style
