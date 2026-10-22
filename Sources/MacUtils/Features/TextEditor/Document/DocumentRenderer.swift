@@ -40,12 +40,21 @@ final class DocParaInfo: NSObject {
 }
 
 /// Показанный документ: карта всех единиц и где в показанном тексте каждый абзац модели.
+/// Выступ текста в поля страницы слева и справа, в пунктах.
+struct DocOutdent: Equatable {
+    var left: CGFloat = 0
+    var right: CGFloat = 0
+}
+
 struct DocRendering {
     var map = DocSourceMap()
     /// Показанный диапазон каждого абзаца модели вместе с его концом; у пропущенных (объединённая ячейка) — пустой.
     var paragraphRanges: [NSRange] = []
     /// Начало каждого раздела в показанном тексте.
     var sectionStarts: [Int] = [0]
+    /// Выступ текста каждого раздела в поля страницы (таблицы шире полосы текста, отрицательные отступы), в пунктах:
+    /// рамка текста страницы шире полосы на столько же.
+    var sectionOutdents: [DocOutdent] = []
     fileprivate var keys: [DocRenderer.ParagraphKey] = []
 
     var length: Int { map.count }
@@ -86,7 +95,7 @@ final class DocRenderer {
     private var fonts: [FontKey: NSFont] = [:]
     private var tables: [TableKey: NSTextTable] = [:]
     private var blocks: [BlockKey: NSTextTableBlock] = [:]
-    private var borderBlocks: [RTFParaProps: NSTextBlock] = [:]
+    private var borderBlocks: [BorderKey: NSTextBlock] = [:]
     private var styles: [StyleKey: NSParagraphStyle] = [:]
     private var attachments: [Int: NSTextAttachment] = [:]
     /// Нажата кнопка заглушки («Показать в коде», «Открыть в Word») у символа с этим номером.
@@ -115,7 +124,8 @@ final class DocRenderer {
         var rowSpan: Int
         var columnSpan: Int
         var cell: RTFCellDef
-        var gap: Int
+        var marginLeft: Int
+        var marginRight: Int
         var height: Int
         var start: Int
         var width: Int
@@ -129,6 +139,19 @@ final class DocRenderer {
         var props: RTFParaProps
         var block: BlockKey?
         var defaultTab: Int
+        var frame: StoryFrame
+    }
+
+    private struct BorderKey: Hashable {
+        var props: RTFParaProps
+        var frame: StoryFrame
+    }
+
+    /// Рамка рисования истории относительно полосы текста, твипы: выступ в поля слева и справа и ширина полосы.
+    fileprivate struct StoryFrame: Hashable {
+        var left = 0
+        var right = 0
+        var width = 0
     }
 
     /// Ячейка таблицы для показа: где в сетке, сколько занимает, пропускается ли (продолжение объединения).
@@ -143,11 +166,13 @@ final class DocRenderer {
         var width: Int
         var skip: Bool
         var def: RTFCellDef
-        var gap: Int
+        /// Поля ячейки по RTF, твипы (`RTFRow.margins`): от них отступы абзацев и табуляции.
+        var marginLeft: Int
+        var marginRight: Int
         var height: Int
         var columns: Int
         var tableWidth: Int
-        /// Поля ячейки для показа, твипы: `\trgaph`, уменьшенное на отрицательные отступы её абзацев (в Word абзац ячейки
+        /// Поля ячейки для показа, твипы: поля по RTF, уменьшенные на отрицательные отступы её абзацев (в Word абзац ячейки
         /// с `\li` < 0 заходит в поле ячейки; у `NSTextBlock` поле одно на ячейку).
         var padLeft: Int
         var padRight: Int
@@ -173,15 +198,22 @@ final class DocRenderer {
         /// Интервалы до и после с учётом соседей (`\contextualspace`).
         var spacing: [Int]
         var font: [String]
+        var frame = StoryFrame()
     }
 
     // MARK: - Основной текст
 
     /// Показать модель. С `previous` перерисовываются только изменившиеся абзацы (заплатка), карта — целиком.
     func render(_ model: RTFDocumentModel, previous: DocRendering?) -> (DocRendering, DocRenderPatch) {
-        let story = model.body
-        let places = cellPlaces(story)
+        let story = Self.aligningRows(model.body) { table in
+            model.sections[safe: Self.section(of: table, in: model.body)].map { Int((DocPageView.bodyRect($0.props).width * 20).rounded()) }
+        }
+        let frames = bodyFrames(model, story: story)
+        let places = cellPlaces(story) { table, left in
+            frames[safe: Self.section(of: table, in: story)].map { $0.left + left } ?? 0
+        }
         var rendering = DocRendering()
+        rendering.sectionOutdents = frames.map { DocOutdent(left: CGFloat($0.left) / 20, right: CGFloat($0.right) / 20) }
         rendering.map.reserve(previous?.map.count ?? 4_096)
         rendering.paragraphRanges.reserveCapacity(story.paragraphs.count)
         rendering.keys.reserveCapacity(story.paragraphs.count)
@@ -190,7 +222,8 @@ final class DocRenderer {
         plans.reserveCapacity(story.paragraphs.count)
         for (index, paragraph) in story.paragraphs.enumerated() {
             let place = paragraph.cell.flatMap { places[$0] }
-            let plan = self.plan(paragraph, index: index, story: story, model: model, place: place)
+            var plan = self.plan(paragraph, index: index, story: story, model: model, place: place)
+            plan.key.frame = frames[safe: paragraph.section] ?? StoryFrame()
             if paragraph.section < rendering.sectionStarts.count, model.sections[paragraph.section].firstParagraph == index {
                 rendering.sectionStarts[paragraph.section] = rendering.map.count
             }
@@ -213,7 +246,7 @@ final class DocRenderer {
         let oldEnd = old.count - suffix > prefix ? NSMaxRange(oldRanges[old.count - suffix - 1]) : oldStart
         let string = NSMutableAttributedString()
         for index in prefix..<(plans.count - suffix) {
-            string.append(attributed(plans[index], paragraph: story.paragraphs[index], model: model))
+            string.append(attributed(plans[index], paragraph: story.paragraphs[index], model: model, frame: plans[index].key.frame))
         }
         return (rendering, DocRenderPatch(range: NSRange(location: oldStart, length: oldEnd - oldStart), string: string))
     }
@@ -240,14 +273,11 @@ final class DocRenderer {
                        field: (RTFFieldKind) -> String?) -> StoryRendering {
         // Выступ в поля: абзацы вне таблиц с отрицательными отступами и таблицы за полями текста (`\trleft` < 0,
         // `\cellx` за правым полем). Отступы абзацев ячеек — от ячейки, не от поля.
-        let free = story.paragraphs.filter { $0.cell == nil }
-        let edges = Self.tableEdges(story)
         let width = Int(((textWidth ?? contentWidth) * 20).rounded())
-        let shiftLeft = max(0, -(free.map { min($0.props.left, $0.props.left + $0.props.firstLine) }.min() ?? 0),
-                            -(edges.map(\.left).min() ?? 0))
-        // Справа — на пункт больше: `NSTextTable` ставит таблицу на полпункта правее края рамки.
-        let shiftRight = max(0, -(free.map(\.props.right).min() ?? 0), (edges.map(\.right).max() ?? 0) + 20 - width)
-        let places = cellPlaces(story, offset: { shiftLeft + $0 })
+        let story = Self.aligningRows(story) { _ in width }
+        let frame = Self.frame(free: story.paragraphs.filter { $0.cell == nil }, edges: Self.tableEdges(story).map { ($0.left, $0.right) },
+                               width: width)
+        let places = cellPlaces(story) { _, left in frame.left + left }
         var map = DocSourceMap()
         let string = NSMutableAttributedString()
         for (index, paragraph) in story.paragraphs.enumerated() {
@@ -264,9 +294,45 @@ final class DocRenderer {
             for piece in plan.pieces {
                 for range in piece.ranges { map.append(range, kind: piece.kind) }
             }
-            string.append(attributed(plan, paragraph: paragraph, model: model, shift: (shiftLeft, shiftRight)))
+            string.append(attributed(plan, paragraph: paragraph, model: model, frame: frame))
         }
-        return StoryRendering(string: string, map: map, outdentLeft: CGFloat(shiftLeft) / 20, outdentRight: CGFloat(shiftRight) / 20)
+        return StoryRendering(string: string, map: map, outdentLeft: CGFloat(frame.left) / 20, outdentRight: CGFloat(frame.right) / 20)
+    }
+
+    /// Выступ в поля: абзацы вне таблиц с отрицательными отступами и таблицы за полосой текста (`\trleft` < 0,
+    /// `\cellx` за правым полем); `limit` — абзацы не дальше полей страницы. Отступы абзацев ячеек — от ячейки, не от поля.
+    private static func frame(free: [RTFParagraph], edges: [(left: Int, right: Int)], width: Int,
+                              limit: (left: Int, right: Int) = (.max, .max)) -> StoryFrame {
+        // Абзацы — не дальше края листа (`limit`), таблицы — как в Word, и за край листа (лишнее страница обрезает):
+        // иначе `NSTextTable` сдвинет или сожмёт таблицу.
+        let left = max(0, min(-(free.map { min($0.props.left, $0.props.left + $0.props.firstLine) }.min() ?? 0), limit.left),
+                       -(edges.map(\.left).min() ?? 0))
+        // Справа — на пункт больше: `NSTextTable` ставит таблицу на полпункта правее края рамки.
+        let right = max(0, min(-(free.map(\.props.right).min() ?? 0), limit.right),
+                        edges.isEmpty ? 0 : (edges.map(\.right).max() ?? 0) + 20 - width)
+        return StoryFrame(left: left, right: right, width: width)
+    }
+
+    /// Рамка основного текста каждого раздела: выступ его таблиц и абзацев в поля, не дальше края листа.
+    private func bodyFrames(_ model: RTFDocumentModel, story: RTFStory) -> [StoryFrame] {
+        var free = Array(repeating: [RTFParagraph](), count: model.sections.count)
+        for paragraph in story.paragraphs where paragraph.cell == nil && paragraph.section < free.count { free[paragraph.section].append(paragraph) }
+        var edges = Array(repeating: [(left: Int, right: Int)](), count: model.sections.count)
+        for edge in Self.tableEdges(story) {
+            let section = Self.section(of: edge.table, in: story)
+            if section < edges.count { edges[section].append((edge.left, edge.right)) }
+        }
+        return model.sections.enumerated().map { index, section in
+            let props = section.props
+            return Self.frame(free: free[index], edges: edges[index], width: Int((DocPageView.bodyRect(props).width * 20).rounded()),
+                              limit: (props.marginLeft, props.marginRight))
+        }
+    }
+
+    /// Раздел таблицы — по её первому абзацу.
+    private static func section(of table: Int, in story: RTFStory) -> Int {
+        guard let first = story.tables[safe: table]?.rows.first?.paragraphs.first?.first else { return 0 }
+        return story.paragraphs[safe: first]?.section ?? 0
     }
 
     // MARK: - План абзаца
@@ -389,13 +455,12 @@ final class DocRenderer {
 
     // MARK: - Атрибуты
 
-    /// `shift` — выступ колонтитула в поля (твипы): абзацы вне таблиц сдвигаются на него вместе с табуляциями.
-    private func attributed(_ plan: ParagraphPlan, paragraph: RTFParagraph, model: RTFDocumentModel,
-                            shift: (left: Int, right: Int) = (0, 0)) -> NSAttributedString {
+    /// `frame` — рамка рисования: абзацы вне таблиц сдвигаются на выступ в поля вместе с табуляциями.
+    private func attributed(_ plan: ParagraphPlan, paragraph: RTFParagraph, model: RTFDocumentModel, frame: StoryFrame) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        var shown = Self.shown(paragraph.props, place: plan.place, shift: shift)
+        var shown = Self.shown(paragraph.props, place: plan.place, frame: frame, defaultTab: model.defaultTab)
         if let spacing = plan.spacing { (shown.spaceBefore, shown.spaceAfter) = spacing }
-        let style = paragraphStyle(shown, place: plan.place, model: model)
+        let style = paragraphStyle(shown, place: plan.place, model: model, frame: frame)
         let paraInfo = DocParaInfo(props: paragraph.props)
         // Разрыв — от первого прогона; знак конца абзаца — свои свойства (`\par`/`\cell` в их окружении): как в Word,
         // от его шрифта высота пустого абзаца и последней строки. Скрытый знак — от последнего прогона.
@@ -461,28 +526,41 @@ final class DocRenderer {
         return result
     }
 
-    /// Отступы и табуляции абзаца для показа. В ячейке — от её поля для показа (`padLeft`) вместо `\trgaph`
-    /// (табуляции ячейки в Word — от её текста); вне таблицы — со сдвигом на выступ колонтитула в поле.
-    /// В `.docPara` остаются исходные — их правят линейка и команды.
-    private static func shown(_ props: RTFParaProps, place: CellPlace?, shift: (left: Int, right: Int)) -> RTFParaProps {
+    /// Отступы и табуляции абзаца для показа. В ячейке — от её поля для показа (`padLeft`) вместо её поля по RTF
+    /// (табуляции ячейки в Word — от её текста); вне таблицы — со сдвигом на выступ в поле (у абзаца с рамкой вместо
+    /// сдвига — поле блока). Шаг табуляции по умолчанию `NSParagraphStyle` отсчитывает от края рамки, Word — от поля:
+    /// при сдвиге позиции по умолчанию становятся явными. В `.docPara` остаются исходные — их правят линейка и команды.
+    private static func shown(_ props: RTFParaProps, place: CellPlace?, frame: StoryFrame, defaultTab: Int) -> RTFParaProps {
         var shown = props
-        let left: Int, right: Int
+        let left: Int, right: Int, width: Int
         if let place {
-            let gap = max(place.gap, 0)
-            (left, right) = (gap - place.padLeft, gap - place.padRight)
+            (left, right, width) = (place.marginLeft - place.padLeft, place.marginRight - place.padRight,
+                                    place.width - place.marginLeft - place.marginRight)
+        } else if hasBlock(props) {
+            return props
         } else {
-            (left, right) = shift
+            (left, right, width) = (frame.left, frame.right, frame.width)
         }
         guard left != 0 || right != 0 else { return props }
         shown.left += left
         shown.right += right
-        shown.tabs = props.tabs.map { tab in
+        var tabs = props.tabs
+        let interval = max(defaultTab, 1)
+        var position = ((tabs.filter { $0.kind != .bar }.map(\.position).max() ?? 0) / interval + 1) * interval
+        while position <= width {
+            tabs.append(RTFTabStop(position: position))
+            position += interval
+        }
+        shown.tabs = tabs.map { tab in
             var tab = tab
             tab.position += left
             return tab
         }
         return shown
     }
+
+    /// У абзаца своя рамка или заливка (`NSTextBlock`).
+    private static func hasBlock(_ props: RTFParaProps) -> Bool { props.hasBorders || props.shading > 0 }
 
     func defaultProps(_ model: RTFDocumentModel) -> RTFCharProps {
         var props = RTFCharProps()
@@ -553,12 +631,13 @@ final class DocRenderer {
 
     // MARK: - Абзац
 
-    private func paragraphStyle(_ props: RTFParaProps, place: CellPlace?, model: RTFDocumentModel) -> NSParagraphStyle {
+    private func paragraphStyle(_ props: RTFParaProps, place: CellPlace?, model: RTFDocumentModel, frame: StoryFrame) -> NSParagraphStyle {
         // Не `let blockKey = place.map { blockKey($0) }`: имя затеняло бы метод в собственном инициализаторе —
         // новый компилятор (CI) это не принимает.
         var cellKey: BlockKey?
         if let place { cellKey = self.blockKey(place) }
-        let key = StyleKey(props: props, block: cellKey, defaultTab: model.defaultTab)
+        // Рамка важна только абзацу с блоком (поля блока); остальным — уже в отступах.
+        let key = StyleKey(props: props, block: cellKey, defaultTab: model.defaultTab, frame: place == nil && Self.hasBlock(props) ? frame : StoryFrame())
         if let style = styles[key] { return style }
         let style = NSMutableParagraphStyle()
         switch props.alignment {
@@ -600,16 +679,20 @@ final class DocRenderer {
         style.tabStops = tabStops
         if let place, let block = tableBlock(place, model: model) {
             style.textBlocks = [block]
-        } else if props.hasBorders || props.shading > 0 {
-            style.textBlocks = [borderBlock(props, model: model)]
+        } else if Self.hasBlock(props) {
+            style.textBlocks = [borderBlock(props, model: model, frame: key.frame)]
         }
         styles[key] = style
         return style
     }
 
-    private func borderBlock(_ props: RTFParaProps, model: RTFDocumentModel) -> NSTextBlock {
-        if let block = borderBlocks[props] { return block }
+    private func borderBlock(_ props: RTFParaProps, model: RTFDocumentModel, frame: StoryFrame) -> NSTextBlock {
+        let key = BorderKey(props: props, frame: frame)
+        if let block = borderBlocks[key] { return block }
         let block = NSTextBlock()
+        // Рамка абзаца — в полосе текста, а не во всю рамку с выступом в поля.
+        if frame.left > 0 { block.setWidth(CGFloat(frame.left) / 20, type: .absoluteValueType, for: .margin, edge: .minX) }
+        if frame.right > 0 { block.setWidth(CGFloat(frame.right) / 20, type: .absoluteValueType, for: .margin, edge: .maxX) }
         for (edge, border) in [(NSRectEdge.minY, props.borderTop), (.maxY, props.borderBottom), (.minX, props.borderLeft), (.maxX, props.borderRight)] {
             guard border.isVisible else { continue }
             block.setWidth(max(0.5, CGFloat(border.width) / 20), type: .absoluteValueType, for: .border, edge: edge)
@@ -617,15 +700,36 @@ final class DocRenderer {
             block.setWidth(1, type: .absoluteValueType, for: .padding, edge: edge)
         }
         if props.shading > 0 { block.backgroundColor = color(props.shading, model: model) }
-        borderBlocks[props] = block
+        borderBlocks[key] = block
         return block
     }
 
     // MARK: - Таблицы
 
+    /// Строки `\trqc`/`\trqr` — по центру или вправо полосы текста (ширина по номеру таблицы, твипы), как в Word:
+    /// `\trleft` у них не учитывается, сдвигаются левый край и все `\cellx` строки.
+    private static func aligningRows(_ story: RTFStory, width: (Int) -> Int?) -> RTFStory {
+        guard story.tables.contains(where: { $0.rows.contains { $0.alignment != .left } }) else { return story }
+        var story = story
+        for table in story.tables.indices {
+            guard story.tables[table].rows.contains(where: { $0.alignment != .left }), let width = width(table) else { continue }
+            for index in story.tables[table].rows.indices {
+                var row = story.tables[table].rows[index]
+                guard row.alignment != .left else { continue }
+                let right = row.cells.reduce(row.left) { max($0, $1.right) }
+                let left = row.alignment == .center ? (width - (right - row.left)) / 2 : width - (right - row.left)
+                let shift = left - row.left
+                row.left += shift
+                for cell in row.cells.indices { row.cells[cell].right += shift }
+                story.tables[table].rows[index] = row
+            }
+        }
+        return story
+    }
+
     /// Левый и правый край каждой таблицы истории от поля текста (`\trleft`, наибольший `\cellx`), твипы.
-    private static func tableEdges(_ story: RTFStory) -> [(left: Int, right: Int)] {
-        story.tables.compactMap { table in
+    private static func tableEdges(_ story: RTFStory) -> [(table: Int, left: Int, right: Int)] {
+        story.tables.enumerated().compactMap { index, table in
             var left: Int?, right: Int?
             for row in table.rows {
                 left = min(left ?? row.left, row.left)
@@ -634,13 +738,13 @@ final class DocRenderer {
                 right = max(right ?? edge, edge)
             }
             guard let left, let right else { return nil }
-            return (left, right)
+            return (index, left, right)
         }
     }
 
     /// Место каждой ячейки в сетке таблицы: столбцы — все границы `\cellx` всех строк, объединение по вертикали.
-    /// `offset` — отступ таблицы от края рамки по её левому краю `\trleft` (в основном тексте таблица у поля).
-    private func cellPlaces(_ story: RTFStory, offset: (Int) -> Int = { _ in 0 }) -> [RTFCellRef: CellPlace] {
+    /// `offset` — отступ таблицы от края рамки по номеру таблицы и её левому краю `\trleft`.
+    private func cellPlaces(_ story: RTFStory, offset: (Int, Int) -> Int) -> [RTFCellRef: CellPlace] {
         var places: [RTFCellRef: CellPlace] = [:]
         for (ordinal, table) in story.tables.enumerated() {
             var hasher = Hasher()
@@ -648,6 +752,7 @@ final class DocRenderer {
             for row in table.rows {
                 hasher.combine(row.left)
                 hasher.combine(row.gap)
+                hasher.combine([row.padLeft, row.padLeftUnit, row.padRight, row.padRightUnit])
                 hasher.combine(row.height)
                 hasher.combine(row.cells)
                 var left = row.left
@@ -658,7 +763,7 @@ final class DocRenderer {
                 }
             }
             let grid = bounds.sorted()
-            let tableKey = TableKey(ordinal: ordinal, signature: hasher.finalize(), offset: max(0, offset(grid.first ?? 0)))
+            let tableKey = TableKey(ordinal: ordinal, signature: hasher.finalize(), offset: max(0, offset(ordinal, grid.first ?? 0)))
             let columns = max(1, grid.count - 1)
             let tableWidth = (grid.last ?? 0) - (grid.first ?? 0)
             for (rowIndex, row) in table.rows.enumerated() {
@@ -685,14 +790,15 @@ final class DocRenderer {
                         }
                     }
                     // Поле ячейки уменьшается на самый отрицательный отступ её абзацев (не меньше нуля).
-                    let gap = max(row.gap, 0)
+                    let margins = row.margins(cell)
                     let paragraphs = (row.paragraphs[safe: cellIndex] ?? []).compactMap { story.paragraphs[safe: $0]?.props }
                     let indentLeft = paragraphs.map { min($0.left, $0.left + $0.firstLine) }.min() ?? 0
                     let indentRight = paragraphs.map(\.right).min() ?? 0
                     let place = CellPlace(table: tableKey, row: rowIndex, column: start, rowSpan: rowSpan, columnSpan: max(1, end - start),
                                           start: left - (grid.first ?? 0), width: right - left, skip: cell.verticalMerged || cell.horizontalMerged,
-                                          def: cell, gap: row.gap, height: row.height, columns: columns, tableWidth: tableWidth,
-                                          padLeft: max(0, gap + min(0, indentLeft)), padRight: max(0, gap + min(0, indentRight)),
+                                          def: cell, marginLeft: margins.left, marginRight: margins.right, height: row.height, columns: columns, tableWidth: tableWidth,
+                                          padLeft: max(0, margins.left + min(0, indentLeft)),
+                                          padRight: max(0, margins.right + min(0, indentRight)),
                                           padTop: row.padTop, padBottom: row.padBottom)
                     for offset in 0..<span {
                         var placed = place
@@ -718,7 +824,8 @@ final class DocRenderer {
 
     private func blockKey(_ place: CellPlace) -> BlockKey {
         BlockKey(table: place.table, row: place.row, column: place.column, rowSpan: place.rowSpan, columnSpan: place.columnSpan,
-                 cell: place.def, gap: place.gap, height: place.height, start: place.start, width: place.width, padLeft: place.padLeft,
+                 cell: place.def, marginLeft: place.marginLeft,
+                 marginRight: place.marginRight, height: place.height, start: place.start, width: place.width, padLeft: place.padLeft,
                  padRight: place.padRight, padTop: place.padTop, padBottom: place.padBottom)
     }
 
@@ -742,11 +849,16 @@ final class DocRenderer {
             if offset > 0 { table.setWidth(offset, type: .absoluteValueType, for: .margin, edge: .minX) }
             tables[place.table] = table
         }
-        let block = NSTextTableBlock(table: table, startingRow: place.row, rowSpan: place.rowSpan,
-                                     startingColumn: place.column, columnSpan: place.columnSpan)
-        // Края ячейки — целые от левого края таблицы (без накопления ошибки), поля — вниз, остальное — тексту.
-        let width = Self.points(place.start + place.width) - Self.points(place.start)
-        let padLeft = floor(CGFloat(place.padLeft) / 20), padRight = floor(CGFloat(place.padRight) / 20)
+        let block = DocCellBlock(table: table, startingRow: place.row, rowSpan: place.rowSpan,
+                                 startingColumn: place.column, columnSpan: place.columnSpan)
+        // Края ячейки — целые от левого края таблицы (без накопления ошибки). Поля тоже целые: слева — до ближайшего
+        // к точному началу текста (Word: `\trleft` + края + поле), справа — правее точного конца (не уже Word). Всю таблицу
+        // `NSTextTable` ставит на полпункта правее рамки — это учтено.
+        let offset = Self.points(place.table.offset), cellLeft = offset + Self.points(place.start)
+        let cellRight = offset + Self.points(place.start + place.width), width = cellRight - cellLeft
+        let textLeft = (CGFloat(place.table.offset + place.start + place.padLeft) / 20 - 0.5).rounded()
+        let textRight = (CGFloat(place.table.offset + place.start + place.width - place.padRight) / 20 - 0.5).rounded(.up)
+        let padLeft = max(0, textLeft - cellLeft), padRight = max(0, cellRight - textRight)
         block.setWidth(padLeft, type: .absoluteValueType, for: .padding, edge: .minX)
         block.setWidth(padRight, type: .absoluteValueType, for: .padding, edge: .maxX)
         // Сверху и снизу — поля строки `\trpaddt`/`\trpaddb` (у Word по умолчанию 0: текст у самой линии сетки).
@@ -755,8 +867,8 @@ final class DocRenderer {
         let cell = place.def
         for (edge, border) in [(NSRectEdge.minY, cell.borderTop), (.maxY, cell.borderBottom), (.minX, cell.borderLeft), (.maxX, cell.borderRight)] {
             guard border.isVisible else { continue }
-            block.setWidth(max(0.5, CGFloat(border.width) / 20), type: .absoluteValueType, for: .border, edge: edge)
-            block.setBorderColor(color(border.color, model: model) ?? .black, for: edge)
+            block.lines.append(DocCellBlock.Line(edge: edge, width: max(0.5, CGFloat(border.width) / 20),
+                                                 color: color(border.color, model: model) ?? .black))
         }
         if cell.shading > 0 { block.backgroundColor = color(cell.shading, model: model) }
         block.setContentWidth(max(4, width - padLeft - padRight), type: .absoluteValueType)
@@ -825,5 +937,34 @@ final class DocRenderer {
         }
         attachments[key] = attachment
         return attachment
+    }
+}
+
+/// Ячейка таблицы, чьи рамки рисуются по её краю (как в Word — по линии сетки), а не внутри: рамка `NSTextBlock`
+/// занимает место в ширине столбца, и текст ячейки становится уже, чем в Word.
+final class DocCellBlock: NSTextTableBlock {
+    struct Line {
+        var edge: NSRectEdge
+        var width: CGFloat
+        var color: NSColor
+    }
+
+    var lines: [Line] = []
+
+    override func drawBackground(withFrame frameRect: NSRect, in controlView: NSView?, characterRange charRange: NSRange,
+                                 layoutManager: NSLayoutManager) {
+        super.drawBackground(withFrame: frameRect, in: controlView, characterRange: charRange, layoutManager: layoutManager)
+        for line in lines {
+            let half = line.width / 2
+            let rect: NSRect
+            switch line.edge {
+            case .minX: rect = NSRect(x: frameRect.minX - half, y: frameRect.minY - half, width: line.width, height: frameRect.height + line.width)
+            case .maxX: rect = NSRect(x: frameRect.maxX - half, y: frameRect.minY - half, width: line.width, height: frameRect.height + line.width)
+            case .minY: rect = NSRect(x: frameRect.minX - half, y: frameRect.minY - half, width: frameRect.width + line.width, height: line.width)
+            default: rect = NSRect(x: frameRect.minX - half, y: frameRect.maxY - half, width: frameRect.width + line.width, height: line.width)
+            }
+            line.color.setFill()
+            rect.fill()
+        }
     }
 }

@@ -53,17 +53,20 @@ final class DocLayoutManager: NSLayoutManager {
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: Self.markColor]
         let size = (title as NSString).size(withAttributes: attributes)
         let y = origin.y + line.maxY + 8
-        let width = container.size.width
+        // По полосе текста, без выступа рамки в поля.
+        let outdent = (container.textView as? DocTextView)?.page?.outdent ?? DocOutdent()
+        let x = origin.x + outdent.left
+        let width = container.size.width - outdent.left - outdent.right
         let path = NSBezierPath()
         path.setLineDash([3, 3], count: 2, phase: 0)
         path.lineWidth = 1
-        path.move(to: NSPoint(x: origin.x, y: y))
-        path.line(to: NSPoint(x: origin.x + (width - size.width) / 2 - 8, y: y))
-        path.move(to: NSPoint(x: origin.x + (width + size.width) / 2 + 8, y: y))
-        path.line(to: NSPoint(x: origin.x + width, y: y))
+        path.move(to: NSPoint(x: x, y: y))
+        path.line(to: NSPoint(x: x + (width - size.width) / 2 - 8, y: y))
+        path.move(to: NSPoint(x: x + (width + size.width) / 2 + 8, y: y))
+        path.line(to: NSPoint(x: x + width, y: y))
         Self.markColor.setStroke()
         path.stroke()
-        (title as NSString).draw(at: NSPoint(x: origin.x + (width - size.width) / 2, y: y - size.height / 2), withAttributes: attributes)
+        (title as NSString).draw(at: NSPoint(x: x + (width - size.width) / 2, y: y - size.height / 2), withAttributes: attributes)
     }
 }
 
@@ -73,6 +76,12 @@ final class DocTextView: NSTextView {
     weak var controller: DocumentController?
     /// Двойной клик по полю страницы (колонтитул) — передаётся странице.
     var onDoubleClickOutside: ((NSEvent) -> Bool)?
+
+    /// Таблица шире листа выходит за его край — как в Word, видно только то, что на листе.
+    override func draw(_ dirtyRect: NSRect) {
+        if let page { NSBezierPath(rect: convert(page.bounds, from: page)).addClip() }
+        super.draw(dirtyRect)
+    }
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2, let handler = onDoubleClickOutside, handler(event) { return }
@@ -187,6 +196,8 @@ final class DocPageView: NSView {
     private var footerOutdent = (left: CGFloat(0), right: CGFloat(0))
     private(set) var headerHeight: CGFloat = 0
     private(set) var footerHeight: CGFloat = 0
+    /// Выступ текста раздела в поля (таблицы шире полосы текста): рамка текста шире `bodyRect` на столько же.
+    private(set) var outdent = DocOutdent()
     /// Правится колонтитул: основной текст бледнее.
     var faded = false {
         didSet {
@@ -199,10 +210,11 @@ final class DocPageView: NSView {
 
     override var isFlipped: Bool { true }
 
-    init(props: RTFSectionProps, section: Int) {
+    init(props: RTFSectionProps, section: Int, outdent: DocOutdent = DocOutdent()) {
         self.props = props
         self.section = section
-        let body = Self.bodyRect(props)
+        self.outdent = outdent
+        let body = Self.textRect(Self.bodyRect(props), outdent)
         container = NSTextContainer(size: body.size)
         container.widthTracksTextView = false
         container.heightTracksTextView = false
@@ -299,17 +311,25 @@ final class DocPageView: NSView {
         needsDisplay = true
     }
 
-    /// Рамка текста страницы — по `bodyRect` (после колонтитулов).
+    /// Рамка текста: полоса текста плюс выступ в поля. `bodyRect` остаётся полосой — от неё линейка и колонтитулы.
+    var textRect: NSRect { Self.textRect(bodyRect, outdent) }
+
+    private static func textRect(_ body: NSRect, _ outdent: DocOutdent) -> NSRect {
+        NSRect(x: body.minX - outdent.left, y: body.minY, width: body.width + outdent.left + outdent.right, height: body.height)
+    }
+
+    /// Рамка текста страницы — по `textRect` (после колонтитулов).
     private func applyBody() {
-        let body = bodyRect
+        let body = textRect
         if textView.frame != body { textView.frame = body }
         if container.size != body.size { container.size = body.size }
     }
 
-    func update(props: RTFSectionProps, section: Int) {
+    func update(props: RTFSectionProps, section: Int, outdent: DocOutdent) {
         self.section = section
-        guard props != self.props else { return }
+        guard props != self.props || outdent != self.outdent else { return }
         self.props = props
+        self.outdent = outdent
         setFrameSize(Self.size(props))
         layoutHeaders()
         needsDisplay = true
