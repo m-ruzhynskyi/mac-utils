@@ -127,6 +127,8 @@ function sanitizeDisplays(command) {
     displays.current = command.current;
   }
   displays.list = list;
+  // Как ведущий кодирует видео (необязательно): hw — видеокарта, sw — программно, jpeg — картинки. Прочее — без поля.
+  if (["hw", "sw", "jpeg"].includes(command.video)) displays.video = command.video;
   return displays;
 }
 

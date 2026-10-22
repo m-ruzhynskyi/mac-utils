@@ -67,8 +67,10 @@ enum ShareDisplays {
     private static func clampPixels(_ value: CGFloat) -> Int { min(max(Int(value.rounded()), 1), 32768) }
 
     /// JSON `displays`; переключать нельзя (настройка, окно, нет текущего) — пустой список без `current`.
-    static func message(rev: Int, list: [ShareDisplay], current: Int?, allowed: Bool) -> String {
+    /// `video` — как ведущий кодирует (hw / sw / jpeg): необязательное поле, старые зрители его не читают.
+    static func message(rev: Int, list: [ShareDisplay], current: Int?, allowed: Bool, video: String? = nil) -> String {
         var object: [String: Any] = ["type": "displays", "v": 1, "rev": rev]
+        if let video, ShareVideoMode.hostModes.contains(video) { object["video"] = video }
         if allowed, let current, list.contains(where: { $0.n == current }) {
             object["current"] = current
             object["list"] = list.prefix(maxCount).map { display -> [String: Any] in
@@ -277,5 +279,36 @@ struct ShareMonitorPicker: Equatable {
     func monitor(forKey characters: String) -> Int? {
         guard characters.count == 1, let n = Int(characters), (1...9).contains(n), list.contains(where: { $0.n == n }) else { return nil }
         return n
+    }
+}
+
+/// Подпись режима видео у зрителя (как у страницы, `videoModeLabel`): тип кадров зритель знает сам (H.264 или картинки
+/// JPEG), аппаратно ли кодирует ведущий — из поля `video` сообщения `displays`.
+enum ShareVideoMode {
+    static let hostModes: Set<String> = ["hw", "sw", "jpeg"]
+
+    /// `video` из `displays`; нет поля (старый ведущий, старый relay) или чужое значение — nil.
+    static func host(from json: [String: Any]) -> String? {
+        (json["video"] as? String).flatMap { hostModes.contains($0) ? $0 : nil }
+    }
+
+    /// JPEG после H.264 — мост ведущего (кодер пересоздаётся), только если H.264 не было дольше `bridgeGap`. Иначе это кадры
+    /// для старых зрителей, которые ведущий Mac шлёт параллельно (раз в 0,25 с): их не показываем, чтобы картинка и подпись
+    /// не мигали. Как у страницы (`jpegIsBridge`).
+    static let bridgeGap: TimeInterval = 0.7
+    static func jpegIsBridge(now: Date, lastVideo: Date?) -> Bool {
+        guard let lastVideo else { return true }
+        return now.timeIntervalSince(lastVideo) > bridgeGap
+    }
+
+    /// pictures: true — приходят картинки, false — видео H.264, nil — кадров ещё нет.
+    static func label(pictures: Bool?, host: String?) -> String? {
+        if pictures == true || (pictures == nil && host == "jpeg") { return "Картинки" }
+        if pictures == nil && host == nil { return nil }
+        switch host {
+        case "hw": return "Видео · видеокарта"
+        case "sw": return "Видео · без видеокарты"
+        default: return "Видео"
+        }
     }
 }
