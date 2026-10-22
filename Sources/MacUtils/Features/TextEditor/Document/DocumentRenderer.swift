@@ -953,7 +953,14 @@ final class DocCellBlock: NSTextTableBlock {
 
     override func drawBackground(withFrame frameRect: NSRect, in controlView: NSView?, characterRange charRange: NSRange,
                                  layoutManager: NSLayoutManager) {
-        super.drawBackground(withFrame: frameRect, in: controlView, characterRange: charRange, layoutManager: layoutManager)
+        // До SDK macOS 27 `controlView` у `NSTextBlock` не опциональный (CI собирает старым Xcode): туда — развёрнутый.
+        if let controlView {
+            super.drawBackground(withFrame: frameRect, in: controlView, characterRange: charRange, layoutManager: layoutManager)
+        } else {
+            #if compiler(>=6.4)
+            super.drawBackground(withFrame: frameRect, in: nil, characterRange: charRange, layoutManager: layoutManager)
+            #endif
+        }
         for line in lines {
             let half = line.width / 2
             let rect: NSRect
