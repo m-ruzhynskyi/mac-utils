@@ -47,9 +47,8 @@ enum DocListNumbers {
             for deeper in (level + 1)..<levelCount where !levels[deeper].noRestart { values[deeper] = nil }
             counters[key] = values
             let number = text(found.level, level: level, values: values, levels: levels)
-            var props = found.level.char.applied(to: paragraph.endProps)
-            if number.bulletFontless { props.font = paragraph.endProps.font }
-            result[index] = DocListLabel(number: number.text, follow: found.level.follow, props: props, level: found.level, list: ls,
+            let props = found.level.char.applied(to: paragraph.endProps)
+            result[index] = DocListLabel(number: number, follow: found.level.follow, props: props, level: found.level, list: ls,
                                          levelIndex: level)
         }
         return result
@@ -76,11 +75,9 @@ enum DocListNumbers {
         return shown
     }
 
-    /// Текст номера по шаблону уровня. `bulletFontless` — маркер из символьного шрифта заменён знаком Юникода
-    /// (тогда шрифт — абзаца, а не Symbol/Wingdings).
-    static func text(_ level: RTFListLevel, level index: Int, values: [Int?], levels: [RTFListLevel]) -> (text: String, bulletFontless: Bool) {
+    /// Текст номера по шаблону уровня.
+    static func text(_ level: RTFListLevel, level index: Int, values: [Int?], levels: [RTFListLevel]) -> String {
         var units: [UInt16] = []
-        var replaced = false
         for (position, unit) in level.text.enumerated() {
             if let placeholder = level.placeholders[position] {
                 guard placeholder >= 0, placeholder < levelCount else { continue }
@@ -88,15 +85,10 @@ enum DocListNumbers {
                 let format = level.legal && placeholder < index ? 0 : other.format
                 units += Array(formatted(values[placeholder] ?? other.start, format: format).utf16)
             } else if unit >= 0x20 {
-                if let bullet = symbolBullets[unit] {
-                    units.append(bullet)
-                    replaced = true
-                } else {
-                    units.append(unit)
-                }
+                units.append(symbolBullets[unit] ?? unit)
             }
         }
-        return (String(utf16CodeUnits: units, count: units.count), replaced)
+        return String(utf16CodeUnits: units, count: units.count)
     }
 
     /// Число в виде `\levelnfc`.
@@ -134,8 +126,8 @@ enum DocListNumbers {
         return String(repeating: letter, count: (value - 1) / 26 + 1)
     }
 
-    /// Маркеры из Symbol и Wingdings (личная область `F0xx`) → знаки Юникода: на Mac этих шрифтов может не быть,
-    /// а знак выглядит так же.
+    /// Маркеры из Symbol и Wingdings (личная область `F0xx`) → знаки Юникода: шрифт номера остаётся тем же (по нему —
+    /// высота строки, как у Word; в Symbol на Mac знаки — по Юникоду), а знак виден и без шрифта Windows.
     static let symbolBullets: [UInt16: UInt16] = [
         0xF0B7: 0x2022,  // •
         0xF0A7: 0x25AA,  // ▪

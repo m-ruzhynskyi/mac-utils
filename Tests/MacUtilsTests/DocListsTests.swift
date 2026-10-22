@@ -330,6 +330,7 @@ final class DocListsTests: XCTestCase {
                 applied += 1
             }
         }
+        print("[lists] случайные правки на фикстурах: применено \(applied) из \(Self.fixtures.count * 120)")
         XCTAssertGreaterThan(applied, 150)
     }
 }

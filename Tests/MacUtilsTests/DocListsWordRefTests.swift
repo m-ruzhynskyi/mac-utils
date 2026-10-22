@@ -171,6 +171,12 @@ final class DocListsWordRefTests: XCTestCase {
             let number = flat(label.number)
             if label.level.format == 23 || number.isEmpty || number.unicodeScalars.allSatisfy({ !CharacterSet.alphanumerics.contains($0) }) {
                 score.bullets += 1
+                if ProcessInfo.processInfo.environment["MU_LISTS_DEBUG"] != nil {
+                    let run = paragraph.runs.first { $0.kind == .listText }
+                    print("[lists-debug] маркер \(label.number.unicodeScalars.map { String($0.value, radix: 16) }) f \(label.props.font ?? -1) fs \(label.props.halfPoints); "
+                          + "listtext \(run?.text.unicodeScalars.map { String($0.value, radix: 16) } ?? []) f \(run?.props.font ?? -1) fs \(run?.props.halfPoints ?? -1) "
+                          + "ур.f \(label.level.char.font ?? -1) шрифт \(model.font(label.level.char.font).map { $0.name.hasPrefix("Sym") || $0.name.hasPrefix("Wing") || $0.name.hasPrefix("Cour") ? $0.name : "другой" } ?? "-")")
+                }
                 continue
             }
             let before = text.substring(to: found.location)
@@ -178,7 +184,10 @@ final class DocListsWordRefTests: XCTestCase {
             if ProcessInfo.processInfo.environment["MU_LISTS_DEBUG"] != nil {
                 let listText = paragraph.runs.filter { $0.kind == .listText }.map { $0.text.unicodeScalars.map { $0.value < 0x30 ? "\\u\($0.value)" : "c" }.joined() }
                 print("[lists-debug] п.\(index) li \(paragraph.props.left) fi \(paragraph.props.firstLine) tabs \(paragraph.props.tabs.map(\.position)) "
-                      + "ур.li \(label.level.left ?? -1) fi \(label.level.firstLine ?? -1) follow \(label.follow) listtext \(listText) cell \(paragraph.cell != nil)")
+                      + "ур.li \(label.level.left ?? -1) fi \(label.level.firstLine ?? -1) follow \(label.follow) listtext \(listText) cell \(paragraph.cell != nil) "
+                      + "номер fs \(label.props.halfPoints) f \(label.props.font ?? -1) b \(label.props.bold); listtext fs \(paragraph.runs.first { $0.kind == .listText }?.props.halfPoints ?? -1) "
+                      + "f \(paragraph.runs.first { $0.kind == .listText }?.props.font ?? -1); текст fs \(paragraph.runs.first { $0.kind == .text }?.props.halfPoints ?? -1) "
+                      + "f \(paragraph.runs.first { $0.kind == .text }?.props.font ?? -1); ур.fs \(label.level.char.halfPoints ?? -1) ур.f \(label.level.char.font ?? -1)")
             }
             let line = onSameLine(number, text: paragraph.runs.filter { $0.kind == .text && !$0.props.hidden }.map(\.text).joined(), pdf: pdf)
             if line { score.sameLine += 1 }
