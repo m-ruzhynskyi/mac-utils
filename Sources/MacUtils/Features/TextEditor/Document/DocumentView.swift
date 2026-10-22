@@ -112,11 +112,6 @@ final class DocTextView: NSTextView {
         controller?.cancelComposition()
     }
 
-    /// ⇧Tab в пункте списка — уровень выше (E-2); иначе — как обычно.
-    override func insertBacktab(_ sender: Any?) {
-        if controller?.backtab() == true { return }
-        super.insertBacktab(sender)
-    }
 
     // Вставка: форматированная (RTF/HTML) — `DocFormatter` (D-4), иначе обычным текстом.
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { [.string] }
@@ -153,13 +148,15 @@ final class DocTextView: NSTextView {
     @objc func insertRowBelow(_ sender: Any?) { controller?.insertTableRow(below: true) }
     @objc func deleteRow(_ sender: Any?) { controller?.deleteTableRow() }
 
-    // Tab в таблице — по ячейкам, как в Word.
+    // Tab в таблице — по ячейкам, как в Word (и в пункте списка внутри ячейки); вне таблицы Tab в начале пункта
+    // списка — уровень ниже (ввод «\t» → `DocListEdit`), ⇧Tab — выше.
     override func insertTab(_ sender: Any?) {
         if controller?.tabInTable(forward: true) != true { super.insertTab(sender) }
     }
 
     override func insertBacktab(_ sender: Any?) {
-        if controller?.tabInTable(forward: false) != true { super.insertBacktab(sender) }
+        if controller?.tabInTable(forward: false) == true || controller?.backtab() == true { return }
+        super.insertBacktab(sender)
     }
 
     @objc func showInCode(_ sender: Any?) {

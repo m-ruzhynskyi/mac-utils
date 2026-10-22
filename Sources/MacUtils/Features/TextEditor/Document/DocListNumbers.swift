@@ -59,7 +59,7 @@ enum DocListNumbers {
     static func piece(_ label: DocListLabel, paragraph: RTFParagraph) -> (units: [UInt16], ranges: [NSRange])? {
         let units = Array(label.text.utf16)
         guard !units.isEmpty else { return nil }
-        let location = paragraph.listTextGroup?.location ?? paragraph.regionStart
+        let location = min(paragraph.listTextGroup?.location ?? paragraph.regionStart, paragraph.textStart)
         return (units, Array(repeating: NSRange(location: location, length: 0), count: units.count))
     }
 

@@ -169,6 +169,8 @@ enum DocTextEditor {
             unit = range.location
         }
         let count = map.count
+        // Перед номером списка набирать нельзя (номер не правится) — набранное встаёт за ним, в начало текста пункта.
+        while unit < count, map.kind(at: unit) == .listText { unit += 1 }
         // Курсор перед разрывом раздела или страницы в начале абзаца: набранное — после разрыва, в начало абзаца.
         while unit < count - 1, [.sectionBreak, .pageBreak].contains(map.kind(at: unit)), unit == 0 || !map.kind(at: unit - 1).isEditable {
             unit += 1

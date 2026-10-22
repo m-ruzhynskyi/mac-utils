@@ -2,9 +2,9 @@ import Foundation
 
 /// Правка списков в «Документе» (E-2), как в Word: ↩ в пункте — новый пункт (свойства абзаца в RTF наследуются через
 /// `\par`, номер считается сам), ↩ в пустом пункте — уровень выше, а на первом уровне — выход из списка; Tab в начале
-/// пункта — уровень ниже, ⇧Tab — выше; ⌫ сразу после номера — номер снимается. Уровень и список пишутся кодами
-/// `\ilvl`/`\ls` через `FormatEdits` (с проверкой `FormatCheck`), готовый номер `{\listtext}` переписывается, когда
-/// номер пункта изменился. Чистые функции — проверяются без окон.
+/// пункта — уровень ниже, ⇧Tab — выше (вне таблиц: в ячейке Tab — по ячейкам, как в Word); ⌫ сразу после номера —
+/// номер снимается. Уровень и список пишутся кодами `\ilvl`/`\ls` через `FormatEdits` (с проверкой `FormatCheck`),
+/// готовый номер `{\listtext}` переписывается, когда номер пункта изменился. Чистые функции — проверяются без окон.
 enum DocListEdit {
     struct Result: Equatable {
         var edits: [DocEdit] = []
@@ -29,7 +29,8 @@ enum DocListEdit {
             if label.levelIndex > 0 { return changeLevel([index], by: -1, model: model, labels: labels, source: source) }
             return removeNumber(index, model: model, labels: labels, source: source, resetIndent: true, name: "Конец списка")
         case "\t":
-            let paragraphs = targets(units, labels: labels, rendering: rendering)
+            // В таблице Tab — по ячейкам (E-1), как в Word: уровень там не меняется.
+            let paragraphs = targets(units, labels: labels, rendering: rendering).filter { model.body.paragraphs[$0].cell == nil }
             guard !paragraphs.isEmpty else { return nil }
             return changeLevel(paragraphs, by: 1, model: model, labels: labels, source: source)
         case "":
@@ -45,7 +46,7 @@ enum DocListEdit {
     /// ⇧Tab в начале пункта (или на выделенных пунктах) — уровень выше. `nil` — не пункт списка.
     static func backtab(_ units: NSRange, model: RTFDocumentModel, rendering: DocRendering, source: NSString) -> Result? {
         let labels = DocListNumbers.labels(model.body, lists: model.lists)
-        let paragraphs = targets(units, labels: labels, rendering: rendering)
+        let paragraphs = targets(units, labels: labels, rendering: rendering).filter { model.body.paragraphs[$0].cell == nil }
         guard !paragraphs.isEmpty else { return nil }
         return changeLevel(paragraphs, by: -1, model: model, labels: labels, source: source)
     }
