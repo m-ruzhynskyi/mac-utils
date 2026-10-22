@@ -763,6 +763,10 @@ final class DocRenderer {
         if place.height != 0 {
             block.setValue(CGFloat(abs(place.height)) / 20, type: .absoluteValueType, for: .minimumHeight)
         }
+        // `\trrh` < 0 — «точно»: у Word строка не растёт, лишний текст ячейки обрезается.
+        if place.height < 0, place.rowSpan == 1 {
+            block.setValue(CGFloat(-place.height) / 20, type: .absoluteValueType, for: .maximumHeight)
+        }
         switch cell.verticalAlign {
         case .top: block.verticalAlignment = .topAlignment
         case .center: block.verticalAlignment = .middleAlignment
