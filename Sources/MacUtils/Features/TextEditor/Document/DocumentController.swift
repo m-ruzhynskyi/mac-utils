@@ -132,6 +132,8 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         let sourceStart = rendering.map.sourceLocation(beforeUnit: oldSelection.location)
         let sourceEnd = rendering.map.sourceLocation(beforeUnit: NSMaxRange(oldSelection))
         let fresh = RTFReader.read(tab.text, fallback: tab.document.encoding)
+        // Шрифты Word (Calibri, Cambria…) — до раскладки, чтобы ширины строк были как у Word.
+        WordFonts.prepare(fresh.fonts.values.map(\.name))
         renderer.contentWidth = DocPageView.bodyRect(fresh.sections.first?.props ?? RTFSectionProps()).width
         // Полная перерисовка (первый показ, ¶) — весь текст заново; иначе заплатка на изменившиеся абзацы.
         let (next, patch) = renderer.render(fresh, previous: force ? nil : rendering)
