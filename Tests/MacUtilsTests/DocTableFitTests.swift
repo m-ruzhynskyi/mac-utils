@@ -121,6 +121,49 @@ final class DocTableFitTests: XCTestCase {
         return s.unicodeScalars.map { $0.isASCII ? String($0) : "\\u\($0.value)?" }.joined()
     }
 
+    /// Поля ячеек и положение строк — как у Word: `\trpaddl`/`\trpaddr` (`\trpaddfl3`) вместо `\trgaph`, поле ячейки
+    /// `\clpadt` (у Word это левое), без `\trgaph` — поле 0, `\trqc`/`\trqr` — по центру/вправо полосы, таблица за краем листа.
+    nonisolated static var alignedForm: String {
+        var s = #"{\rtf1\ansi\ansicpg1251\deff0\deftab720{\fonttbl{\f0\froman\fcharset204 Times New Roman;}}"#
+        s += #"\paperw11906\paperh16838\margl1701\margr850\margt1134\margb1134\sectd "#
+        s += #"\trowd\trqc\trgaph108\trleft0\trpaddl28\trpaddr28\trpaddfl3\trpaddfr3\cellx3000\clpadt0\clpadft3\clpadr0\clpadfr3\cellx5000 "#
+        s += #"\pard\plain\intbl\fs24 Центр\cell \pard\plain\intbl\fs24 Впритул\cell \row "#
+        s += #"\pard\plain\fs24 Між\par "#
+        s += #"\trowd\trleft0\cellx4000 \pard\plain\intbl\fs24 Без поля\cell \row "#
+        s += #"\pard\plain\fs24 Між\par "#
+        s += #"\trowd\trqr\trgaph108\trleft0\cellx3000 \pard\plain\intbl\fs24 Праворуч\cell \row "#
+        s += #"\pard\plain\fs24 Між\par "#
+        s += #"\trowd\trgaph108\trleft-1800\cellx3000 \pard\plain\intbl\fs24 За краєм\cell \row "#
+        s += #"\pard\plain\fs24 Кінець\par}"#
+        return s.unicodeScalars.map { $0.isASCII ? String($0) : "\\u\($0.value)?" }.joined()
+    }
+
+    func testCellMarginsAndRowAlignmentLikeWord() throws {
+        let document = try XCTUnwrap(load(Data(Self.alignedForm.utf8), url: URL(fileURLWithPath: "/tmp/aligned.frm")))
+        let page = try XCTUnwrap(document.pagesView.pages.first)
+        let margin = CGFloat(1701) / 20
+        let manager = document.layoutManager
+        func x(_ text: String) -> CGFloat {
+            let range = (document.storage.string as NSString).range(of: text)
+            let glyph = manager.glyphIndexForCharacter(at: range.location)
+            return page.textRect.minX + manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minX + manager.location(forGlyphAt: glyph).x
+        }
+        // Полоса 9355: \trqc ставит таблицу шириной 5000 с 2177, \trqr шириной 3000 — с 6355.
+        XCTAssertEqual(x("Центр"), margin + CGFloat(2177 + 28) / 20, accuracy: 0.6, "\\trqc и \\trpaddl28 вместо \\trgaph108")
+        XCTAssertEqual(x("Впритул"), margin + CGFloat(2177 + 3000) / 20, accuracy: 0.6, "\\clpadt0 — левое поле ячейки 0")
+        XCTAssertEqual(x("Без поля"), margin, accuracy: 0.6, "без \\trgaph поле 0")
+        XCTAssertEqual(x("Праворуч"), margin + CGFloat(6355 + 108) / 20, accuracy: 0.6, "\\trqr")
+        XCTAssertEqual(x("За краєм"), margin + CGFloat(-1800 + 108) / 20, accuracy: 0.6, "таблица за краем листа не сдвигается")
+        XCTAssertEqual(x("Кінець"), margin, accuracy: 0.5, "абзац — от поля")
+        XCTAssertEqual(page.bodyRect.minX, margin)
+
+        let row = try XCTUnwrap(document.model.body.tables.first?.rows.first)
+        XCTAssertEqual(row.alignment, .center)
+        XCTAssertEqual(row.margins(row.cells[0]).left, 28)
+        XCTAssertEqual(row.margins(row.cells[1]).left, 0)
+        XCTAssertEqual(document.model.body.tables[safe: 1]?.rows.first.map { $0.margins($0.cells[0]).left }, 0)
+    }
+
     func testWideBodyTableLikeWord() throws {
         let document = try XCTUnwrap(load(Data(Self.wideForm.utf8), url: URL(fileURLWithPath: "/tmp/wide.frm")))
         let page = try XCTUnwrap(document.pagesView.pages.first)
@@ -289,8 +332,8 @@ struct TableFit {
         return story.tables[safe: ref.table]?.rows[safe: ref.row]?.cells[safe: ref.cell]
     }
 
-    /// Ширина ячейки по RTF (с объединением по горизонтали) и поле `\trgaph`, в твипах.
-    static func cellWidth(_ paragraph: RTFParagraph, _ story: RTFStory) -> (width: Int, gap: Int)? {
+    /// Ширина ячейки по RTF (с объединением по горизонтали) и её поля (`RTFRow.margins`), в твипах.
+    static func cellWidth(_ paragraph: RTFParagraph, _ story: RTFStory) -> (width: Int, margins: Int)? {
         guard let ref = paragraph.cell, let row = story.tables[safe: ref.table]?.rows[safe: ref.row], ref.cell < row.cells.count else { return nil }
         var left = row.left
         for cell in row.cells[..<ref.cell] { left = max(cell.right, left) }
@@ -299,7 +342,8 @@ struct TableFit {
         if row.cells[ref.cell].horizontalMergeFirst {
             while next < row.cells.count, row.cells[next].horizontalMerged { right = max(row.cells[next].right, right); next += 1 }
         }
-        return (right - left, max(row.gap, 0))
+        let margins = row.margins(row.cells[ref.cell])
+        return (right - left, margins.left + margins.right)
     }
 
     private mutating func check(_ paragraph: RTFParagraph, story: RTFStory, range: NSRange, manager: NSLayoutManager, model: RTFDocumentModel,
@@ -315,7 +359,7 @@ struct TableFit {
         let tabbed = units.contains("\t")
         let available: CGFloat
         if let cell = Self.cellWidth(paragraph, story) {
-            available = CGFloat(cell.width - 2 * cell.gap) / 20
+            available = CGFloat(cell.width - cell.margins) / 20
         } else {
             guard tabbed else { return }
             available = textWidth
@@ -371,7 +415,7 @@ struct TableFit {
                let left = rows.map(\.left).min(), let right = rows.compactMap({ $0.cells.last?.right }).max() {
                 if right - left > Int(textWidth * 20) { wideBodyTables += 1 }
                 let cell = Self.cellWidth(paragraph, story)
-                table = " table \(left)…\(right) text \(Int(textWidth * 20)) cell \(cell?.width ?? 0)/\(cell?.gap ?? 0)"
+                table = " table \(left)…\(right) text \(Int(textWidth * 20)) cell \(cell?.width ?? 0)/\(cell?.margins ?? 0)"
                     + " li \(props.left) fi \(props.firstLine) ri \(props.right)"
                     + " brdr \(Self.cellDef(paragraph, story).map { "\($0.borderLeft.isVisible ? $0.borderLeft.width : 0)/\($0.borderRight.isVisible ? $0.borderRight.width : 0)" } ?? "")"
             }

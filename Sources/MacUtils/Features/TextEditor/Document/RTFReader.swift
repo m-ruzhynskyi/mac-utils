@@ -718,6 +718,17 @@ private final class RTFParser {
         case .trbrdrv: top.border = .rowInsideV; rowBorders.insideV = RTFBorder()
         case .trgaph: row.gap = number ?? 108
         case .trleft: row.left = number ?? 0
+        case .trql: row.alignment = .left
+        case .trqc: row.alignment = .center
+        case .trqr: row.alignment = .right
+        case .trpaddl: row.padLeft = number ?? 0
+        case .trpaddr: row.padRight = number ?? 0
+        case .trpaddfl: row.padLeftUnit = number ?? 0
+        case .trpaddfr: row.padRightUnit = number ?? 0
+        case .clpadt: cellInProgress.padLeft = number ?? 0
+        case .clpadr: cellInProgress.padRight = number ?? 0
+        case .clpadft: cellInProgress.padLeftUnit = number ?? 0
+        case .clpadfr: cellInProgress.padRightUnit = number ?? 0
         case .trrh: row.height = number ?? 0
         case .trhdr: row.header = true
         default:

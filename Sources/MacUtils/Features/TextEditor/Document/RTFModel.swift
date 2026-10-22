@@ -388,6 +388,10 @@ struct RTFCellDef: Hashable {
     var horizontalMerged = false
     enum VerticalAlign: Hashable { case top, center, bottom }
     var verticalAlign = VerticalAlign.top
+    /// Поля ячейки, твипы, при единице 3 (твипы): `\clpadt`/`\clpadft` — левое (Word меняет местами `l` и `t`),
+    /// `\clpadr`/`\clpadfr` — правое. Иначе — поля строки.
+    var padLeft = 0, padLeftUnit = 0
+    var padRight = 0, padRightUnit = 0
 }
 
 /// Строка таблицы.
@@ -396,12 +400,26 @@ struct RTFRow {
     /// Абзацы каждой ячейки (индексы в истории).
     var paragraphs: [[Int]] = []
     var left = 0
-    var gap = 108
+    /// `\trgaph`: без него поля ячеек нулевые.
+    var gap = 0
+    /// `\trpaddl`/`\trpaddr` при `\trpaddfl3`/`\trpaddfr3` (Word 2000+) — поля ячеек вместо `\trgaph`.
+    var padLeft = 0, padLeftUnit = 0
+    var padRight = 0, padRightUnit = 0
+    /// `\trql`/`\trqc`/`\trqr`: строка по левому краю (от `\trleft`), по центру или вправо полосы текста.
+    enum Alignment: Hashable { case left, center, right }
+    var alignment = Alignment.left
     /// `\trrhN`: > 0 — «не меньше», < 0 — «точно».
     var height = 0
     var header = false
     /// Код `\row` в исходнике.
     var endRange = NSRange(location: 0, length: 0)
+
+    /// Левое и правое поле ячейки, твипы, — как их берёт Word: поле ячейки, поле строки, `\trgaph`.
+    func margins(_ cell: RTFCellDef) -> (left: Int, right: Int) {
+        let left = cell.padLeftUnit == 3 ? cell.padLeft : padLeftUnit == 3 ? padLeft : gap
+        let right = cell.padRightUnit == 3 ? cell.padRight : padRightUnit == 3 ? padRight : gap
+        return (max(left, 0), max(right, 0))
+    }
 }
 
 struct RTFTable {

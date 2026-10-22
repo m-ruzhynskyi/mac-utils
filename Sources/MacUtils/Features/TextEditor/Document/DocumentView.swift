@@ -77,6 +77,12 @@ final class DocTextView: NSTextView {
     /// Двойной клик по полю страницы (колонтитул) — передаётся странице.
     var onDoubleClickOutside: ((NSEvent) -> Bool)?
 
+    /// Таблица шире листа выходит за его край — как в Word, видно только то, что на листе.
+    override func draw(_ dirtyRect: NSRect) {
+        if let page { NSBezierPath(rect: convert(page.bounds, from: page)).addClip() }
+        super.draw(dirtyRect)
+    }
+
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2, let handler = onDoubleClickOutside, handler(event) { return }
         super.mouseDown(with: event)

@@ -25,6 +25,7 @@ enum RTFWord: String, CaseIterable {
     // Таблица.
     case trowd, cellx, clvmgf, clvmrg, clmgf, clmrg, clbrdrt, clbrdrb, clbrdrl, clbrdrr, clcbpat, clvertalt, clvertalc, clvertalb
     case trgaph, trleft, trrh, trhdr, trbrdrt, trbrdrb, trbrdrl, trbrdrr, trbrdrh, trbrdrv
+    case trql, trqc, trqr, trpaddl, trpaddr, trpaddfl, trpaddfr, clpadt, clpadr, clpadft, clpadfr
     // Рисунок.
     case pngblip, jpegblip, wmetafile, emfblip, macpict, dibitmap, wbitmap, pmmetafile, picw, pich, picwgoal, pichgoal, picscalex, picscaley
     // Фигуры и объекты рисования.
