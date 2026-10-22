@@ -52,6 +52,7 @@ final class DocHeaderSession: NSObject, NSTextViewDelegate {
         self.section = section
         self.kind = kind
         storage.addLayoutManager(layoutManager)
+        layoutManager.delegate = DocLineMetricsDelegate.shared
         container.lineFragmentPadding = 0
         container.widthTracksTextView = false
         layoutManager.addTextContainer(container)
@@ -160,8 +161,7 @@ final class DocHeaderSession: NSObject, NSTextViewDelegate {
         guard let page else { return }
         let area = isHeader ? page.headerRect : page.footerRect
         container.size = NSSize(width: area.width, height: 10_000)
-        layoutManager.ensureLayout(for: container)
-        let height = max(16, ceil(layoutManager.usedRect(for: container).height))
+        let height = max(16, DocStoryLayout.height(layoutManager, container))
         // Как на странице (`DocPageView`): верхний — от `\headery` вниз, нижний — низом на `\footery`, растёт вверх.
         let y = isHeader ? area.minY : page.bounds.height - CGFloat(max(page.props.footerY, 0)) / 20 - height
         textView.frame = NSRect(x: area.minX, y: y, width: area.width, height: height)

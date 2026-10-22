@@ -158,6 +158,11 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         storage.replaceCharacters(in: replaced, with: string)
         storage.endEditing()
         if pagesView.pages.isEmpty { addPage(section: 0) }
+        // Выступ раздела в поля поменялся (таблица стала шире полосы) — рамки текста страниц тоже.
+        for page in pagesView.pages where page.section < model.sections.count {
+            page.update(props: model.sections[page.section].props, section: page.section,
+                        outdent: next.sectionOutdents[safe: page.section] ?? DocOutdent())
+        }
         // Разделы страниц и номера — по завершении раскладки (`finishPagination`): спрашивать раскладку всех страниц
         // на каждое нажатие — это разложить весь документ заново.
         // Колонтитулы — сразу (по уже известным страницам); разделы страниц уточнятся, когда раскладка дойдёт до конца.
@@ -199,7 +204,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
 
     private func addPage(section: Int) {
         let props = section < model.sections.count ? model.sections[section].props : (model.sections.first?.props ?? RTFSectionProps())
-        let page = DocPageView(props: props, section: section)
+        let page = DocPageView(props: props, section: section, outdent: rendering.sectionOutdents[safe: section] ?? DocOutdent())
         page.textView.delegate = self
         page.textView.controller = self
         page.textView.isEditable = true
@@ -224,6 +229,16 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         }
     }
 
+    /// Высота строк — как у Word (`DocLineMetrics`).
+    nonisolated func layoutManager(_ layoutManager: NSLayoutManager, shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
+                                   lineFragmentUsedRect: UnsafeMutablePointer<NSRect>, baselineOffset: UnsafeMutablePointer<CGFloat>,
+                                   in textContainer: NSTextContainer, forGlyphRange glyphRange: NSRange) -> Bool {
+        MainActor.assumeIsolated {
+            DocLineMetrics.adjust(layoutManager, rect: &lineFragmentRect.pointee, used: &lineFragmentUsedRect.pointee,
+                                  baseline: &baselineOffset.pointee, container: textContainer, glyphs: glyphRange)
+        }
+    }
+
     nonisolated func layoutManager(_ layoutManager: NSLayoutManager, didCompleteLayoutFor container: NSTextContainer?, atEnd: Bool) {
         MainActor.assumeIsolated { completedLayout(container, atEnd: atEnd) }
     }
@@ -234,6 +249,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
             if containers.isEmpty { addPage(section: 0) }
             return
         }
+        if index < pagesView.pages.count { pagesView.pages[index].refreshFloating() }
         if !atEnd, index == containers.count - 1 {
             // Текст не поместился — следующая страница: её раздел — у следующего символа.
             let glyphs = layoutManager.glyphRange(for: container)
@@ -269,7 +285,10 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
             let glyphs = layoutManager.glyphRange(for: page.container)
             let first = glyphs.length > 0 ? layoutManager.characterIndexForGlyph(at: glyphs.location) : storage.length
             let section = min(rendering.section(atUnit: first), max(0, model.sections.count - 1))
-            if section < model.sections.count { page.update(props: model.sections[section].props, section: section) }
+            if section < model.sections.count {
+                page.update(props: model.sections[section].props, section: section,
+                            outdent: rendering.sectionOutdents[safe: section] ?? DocOutdent())
+            }
             page.number = index + 1
             page.firstInSection = section != previousSection
             previousSection = section

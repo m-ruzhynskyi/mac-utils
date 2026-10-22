@@ -97,6 +97,8 @@ struct RTFParaProps: Hashable {
     var shading = 0
     /// `\sN` — стиль абзаца (показывается только номер; стили не правятся).
     var style: Int?
+    /// `\contextualspace` — без интервалов `\sb`/`\sa` между соседними абзацами того же стиля.
+    var contextualSpace = false
 
     var hasBorders: Bool { borderTop.isVisible || borderBottom.isVisible || borderLeft.isVisible || borderRight.isVisible }
 }
@@ -265,6 +267,40 @@ struct RTFPlaceholder: Hashable {
     }
 }
 
+/// Плавающая фигура или рисунок `\shp` без обтекания (`\shpwr3`): в тексте Word не занимает места и рисуется поверх
+/// страницы (или под текстом) там, где задано рамкой `\shpleft…\shpbottom` от своей опоры.
+struct RTFFloat: Hashable {
+    /// От чего отсчитывается рамка по горизонтали (`\shpbx*`, `posrelh`) и по вертикали (`\shpby*`, `posrelv`).
+    enum Horizontal: Hashable { case margin, page, column }
+    enum Vertical: Hashable { case margin, page, paragraph }
+
+    /// Рамка в твипах от опоры.
+    var left = 0
+    var top = 0
+    var width = 0
+    var height = 0
+    var horizontal = Horizontal.column
+    var vertical = Vertical.paragraph
+    /// В ячейке таблицы опора по горизонтали — ячейка (`fLayoutInCell`, по умолчанию — да).
+    var layoutInCell = true
+    /// Под текстом (`\shpfblwtxt1`).
+    var behind = false
+    /// `shapeType`: 1 — прямоугольник, 2 — скруглённый, 3 — овал, 20 и 32 — линии, 75 — рисунок, 202 — надпись.
+    var shapeType = 1
+    var filled = true
+    /// Цвета Word: R + G·256 + B·65536.
+    var fillColor = 0xFFFFFF
+    var line = true
+    var lineColor = 0
+    /// Толщина линии, EMU (12 700 на пункт).
+    var lineWidth = 9_525
+    var flipH = false
+    var flipV = false
+
+    /// Какие фигуры рисуются сами (остальные — заглушкой в тексте).
+    static let drawnTypes: Set<Int> = [1, 2, 3, 20, 32, 75, 202]
+}
+
 /// Кусок абзаца с одними свойствами. `map[i]` — диапазон исходника `i`-й единицы UTF-16 `text`.
 struct RTFRun {
     enum Kind: Hashable {
@@ -298,6 +334,8 @@ struct RTFRun {
     var field: Int?
     /// Группа `{…}` непрозрачного элемента или рисунка — целиком (для «Показать в коде»).
     var objectGroup: NSRange?
+    /// Фигура или рисунок без обтекания: в тексте — только опора нулевой ширины.
+    var floating: RTFFloat?
 
     var isEditableText: Bool {
         switch kind {
@@ -388,6 +426,10 @@ struct RTFCellDef: Hashable {
     var horizontalMerged = false
     enum VerticalAlign: Hashable { case top, center, bottom }
     var verticalAlign = VerticalAlign.top
+    /// Поля ячейки, твипы, при единице 3 (твипы): `\clpadt`/`\clpadft` — левое (Word меняет местами `l` и `t`),
+    /// `\clpadr`/`\clpadfr` — правое. Иначе — поля строки.
+    var padLeft = 0, padLeftUnit = 0
+    var padRight = 0, padRightUnit = 0
 }
 
 /// Строка таблицы.
@@ -396,12 +438,29 @@ struct RTFRow {
     /// Абзацы каждой ячейки (индексы в истории).
     var paragraphs: [[Int]] = []
     var left = 0
-    var gap = 108
+    /// `\trgaph`: без него поля ячеек нулевые.
+    var gap = 0
+    /// `\trpaddl`/`\trpaddr` при `\trpaddfl3`/`\trpaddfr3` (Word 2000+) — поля ячеек вместо `\trgaph`.
+    var padLeft = 0, padLeftUnit = 0
+    var padRight = 0, padRightUnit = 0
+    /// `\trql`/`\trqc`/`\trqr`: строка по левому краю (от `\trleft`), по центру или вправо полосы текста.
+    enum Alignment: Hashable { case left, center, right }
+    var alignment = Alignment.left
     /// `\trrhN`: > 0 — «не меньше», < 0 — «точно».
     var height = 0
+    /// Поля ячеек сверху и снизу (`\trpaddt`, `\trpaddb`), твипы; у Word по умолчанию 0.
+    var padTop = 0
+    var padBottom = 0
     var header = false
     /// Код `\row` в исходнике.
     var endRange = NSRange(location: 0, length: 0)
+
+    /// Левое и правое поле ячейки, твипы, — как их берёт Word: поле ячейки, поле строки, `\trgaph`.
+    func margins(_ cell: RTFCellDef) -> (left: Int, right: Int) {
+        let left = cell.padLeftUnit == 3 ? cell.padLeft : padLeftUnit == 3 ? padLeft : gap
+        let right = cell.padRightUnit == 3 ? cell.padRight : padRightUnit == 3 ? padRight : gap
+        return (max(left, 0), max(right, 0))
+    }
 }
 
 struct RTFTable {
