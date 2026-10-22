@@ -604,11 +604,27 @@ struct Stitcher {
             // спорит.
             let sizeRule = scrollSpan.map { $0 * 6 / 10 } ?? rows / 2
             let ambiguity = Ambiguity()
+            // Приложение прокрутило на дробную долю пикселя (своя анимация прокрутки): строки нарисованы со сглаживанием,
+            // и побайтно с прошлым кадром не совпадает ни одна — ни при каком сдвиге, даже когда экран уже стоит.
+            // Похожесть после первой точной склейки выключена, и место терялось до конца съёмки (1.9.3: `lost noMatch`
+            // на 17 кадрах из 22, в том числе неподвижных). Тогда — похожесть, но только вместе с точными событиями:
+            // сдвиг сходится с ними в пределах обычной ошибки подсказки. Повторы и ничьи (`.ambiguous`) так не решаются:
+            // похожесть ищется, лишь когда точных совпадений нет вовсе.
+            func offPixel() -> Found? {
+                guard shared, hint == nil, let events, let found = Stitcher.match(
+                    previous: previous, current: signature, expected: events, hintError: hintError, minSpan: sizeRule,
+                    spanKnown: scrollSpan != nil, allowFuzzy: true, allowBlank: false, background: background,
+                    partialHint: motion.lines != 0 || motion.pages != 0, minColumns: flipped ? 3 : 1, offPixel: true),
+                      found.source == .fuzzy,
+                      abs(found.match.shift - events) <= min(rows / 6, max(16, Int(2 * hintError * Double(max(abs(events), 50)))))
+                else { return nil }
+                return found
+            }
             guard let found = Stitcher.match(previous: previous, current: signature, expected: expected, hintError: hintError,
                                              minSpan: sizeRule, spanKnown: scrollSpan != nil, allowFuzzy: !shared,
                                              allowBlank: !lostSinceAppend, background: background,
                                              partialHint: motion.lines != 0 || motion.pages != 0, minColumns: flipped ? 3 : 1,
-                                             ambiguity: ambiguity) else {
+                                             ambiguity: ambiguity) ?? offPixel() else {
                 // Дальше назад, чем кадр цепочки: ближе к дальнему кадр нашёлся бы и по нему (на списке из одинаковых
                 // строк соседний кадр совпадает и со сдвигом на период).
                 if !strict, hint == nil, let chain = chained(signature, minSpan: sizeRule), chain.shift < -retreat.rows {
@@ -1221,10 +1237,11 @@ struct Stitcher {
     /// `hintError` — обычная относительная ошибка подсказки (по прошлым уверенным склейкам).
     /// `minSpan` — без подсказки (или когда изображение с ней спорит) движущаяся часть меньше этого — не прокрутка.
     /// `allowFuzzy` — разрешён ли поиск по похожести, когда точных совпадений нет вовсе (шумный захват).
+    /// `offPixel` — похожесть для кадра на дробной доле пикселя, `expected` — точные события (см. `Side.add`).
     static func match(previous p: Signature, current c: Signature, expected: Int? = nil, hintError: Double = 0.25,
                       minSpan: Int = 0, spanKnown: Bool = true, allowFuzzy: Bool = true, allowBlank: Bool = true,
                       background: Background? = nil, partialHint: Bool = false, minColumns: Int = 1,
-                      ambiguity given: Ambiguity? = nil) -> Found? {
+                      ambiguity given: Ambiguity? = nil, offPixel: Bool = false) -> Found? {
         let ambiguity = given ?? Ambiguity()
         // Закреплённые строки сначала ищутся мягко: в шапке меняются часы, значки, подсветка. Но так же «почти не
         // меняются» строки лога или таблицы в одном и том же месте при прокрутке (отличаются цифры) — и мягкое правило
@@ -1232,11 +1249,13 @@ struct Stitcher {
         // строки, точно совпавшие на месте.
         let loose = search(previous: p, current: c, expected: expected, hintError: hintError, minSpan: minSpan,
                            spanKnown: spanKnown, allowFuzzy: allowFuzzy, allowBlank: allowBlank, background: background,
-                           partialHint: partialHint, minColumns: minColumns, ambiguity: ambiguity, exactStatic: false)
+                           partialHint: partialHint, minColumns: minColumns, ambiguity: ambiguity, exactStatic: false,
+                           offPixel: offPixel)
         if let loose, loose.match.shift != 0 { return loose }
         let exact = search(previous: p, current: c, expected: expected, hintError: hintError, minSpan: minSpan,
                            spanKnown: spanKnown, allowFuzzy: allowFuzzy, allowBlank: allowBlank, background: background,
-                           partialHint: partialHint, minColumns: minColumns, ambiguity: ambiguity, exactStatic: true)
+                           partialHint: partialHint, minColumns: minColumns, ambiguity: ambiguity, exactStatic: true,
+                           offPixel: offPixel)
         if let exact, exact.match.shift != 0 { return exact }
         // Пустые строки у краёв совпадают и на месте, и при любом сдвиге — оба правила считают их шапкой и низом окна,
         // и на редкой странице (заголовок среди пустоты) от движущейся части остаётся узкая полоса, в которой сдвиг
@@ -1259,7 +1278,7 @@ struct Stitcher {
     private static func search(previous p: Signature, current c: Signature, expected: Int?, hintError: Double,
                                minSpan: Int, spanKnown: Bool, allowFuzzy: Bool, allowBlank: Bool, background: Background?,
                                partialHint: Bool, minColumns: Int, ambiguity: Ambiguity?, exactStatic: Bool,
-                               trimBlankStatic: Bool = false) -> Found? {
+                               trimBlankStatic: Bool = false, offPixel: Bool = false) -> Found? {
         let w = columns, h = p.rows
         guard h > 0, c.rows == h, p.fineColumns == c.fineColumns else { return nil }
         let pc = p.coarse, cc = c.coarse
@@ -1340,7 +1359,7 @@ struct Stitcher {
             // После `.lost` через пустоту не перескакиваем: пока место потеряно, мимо могли проехать строки текста.
             if allowBlank, let neutral = frame.blankShift(expected: expected) { return neutral }
             guard allowFuzzy else { return nil }
-            return frame.fuzzySearch(expected: expected, hintError: hintError)
+            return frame.fuzzySearch(expected: expected, hintError: hintError, subPixel: offPixel)
         }
     }
 
@@ -1846,7 +1865,8 @@ struct Stitcher {
 
         /// Захват неточный (шум, масштабирование): точных совпадений нет вовсе. Сдвиг ищется по похожести строк:
         /// кандидаты голосованием по грубой подписи, проверка по точной подписи с допуском.
-        func fuzzySearch(expected: Int?, hintError: Double) -> Found? {
+        /// `subPixel` — кадр на дробной доле пикселя, `expected` — точные события (см. `offPixel` в `Side.add`).
+        func fuzzySearch(expected: Int?, hintError: Double, subPixel: Bool = false) -> Found? {
             let w = Stitcher.columns
             let pc = p.coarse, cc = c.coarse
             // Колонки, которые стоят на месте, пока остальное движется: боковая панель, плавающая кнопка, ползунок.
@@ -2036,6 +2056,15 @@ struct Stitcher {
             }
             let found = { (shift: Int, confident: Bool) in
                 Found(match: match(shift), confident: confident, exact: false, source: .fuzzy)
+            }
+            // Строки между пикселями размыты: сдвиги на 1–8 px от верного похожи почти так же (это то же место), и
+            // перевеса вдвое над ними нет. Довод — точные события: лучший сдвиг рядом с ними в полтора раза похожее
+            // любого сдвига дальше 8 px (другого места: повтор, чужое содержимое).
+            if subPixel, let expected {
+                let accuracy = max(4, Int(2 * hintError * Double(max(abs(expected), 50))))
+                guard let near = ranked.first(where: { abs($0.shift - expected) <= accuracy }), near.matched >= 24 else { return nil }
+                let rival = ranked.filter { abs($0.shift - near.shift) > 8 }.map(rate).max() ?? 0
+                return rate(near) >= 1.5 * rival + 0.02 ? found(near.shift, false) : nil
             }
             guard let expected, let window else {
                 return unique(best) ? found(best.shift, true) : nil
