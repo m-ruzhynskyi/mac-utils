@@ -267,12 +267,29 @@ function blockMarks(reason) {
   logPlacement("unprotected");
 }
 
-// Где ведущий видит метки: странице — чтобы при `screen: false` рисовала их у себя.
+// Где ведущий видит метки: странице — чтобы при `screen: false` рисовала их у себя. `covered` — главное окно приложения
+// пересекается с транслируемой областью: тогда схема меток на странице сама попала бы в видео, и страница пишет только
+// строку «… поставил метку».
+let mainCovered = null;
 function setMarksState(blocked) {
   if (marksBlocked === blocked) return;
   marksBlocked = blocked;
-  if (window && !window.isDestroyed()) window.webContents.send("marks-state", { screen: !blocked, reason: blocked || "" });
+  sendMarksState();
 }
+function sendMarksState() {
+  if (!window || window.isDestroyed()) return;
+  mainCovered = mainWindowCovered();
+  window.webContents.send("marks-state", { screen: !marksBlocked, reason: marksBlocked || "", covered: mainCovered });
+}
+// Главное окно (не свёрнутое) пересекается с транслируемой областью — в физических пикселях, как `target`.
+// Области ещё нет — считаем, что пересекается (схему не показываем, пока не ясно).
+function mainWindowCovered() {
+  if (!window || window.isDestroyed() || window.isMinimized()) return false;
+  if (!target) return true;
+  const r = screen.dipToScreenRect(window, window.getBounds());
+  return r.x < target.x + target.width && target.x < r.x + r.width && r.y < target.y + target.height && target.y < r.y + r.height;
+}
+function coveredChanged() { if (marksBlocked && mainWindowCovered() !== mainCovered) sendMarksState(); }
 
 // Пока окно меток показано, исключение перепроверяется (смена монитора, DPI, перестановка окна Windows его не трогают
 // по документации, но проверка дешёвая): ушло — заново оба порядка, не встало — метки только на странице.
@@ -335,6 +352,7 @@ function setTarget(rect, event) {
   monitor = place.monitorOf(rect, monitors());
   logPlacement(event);
   layout();
+  coveredChanged();
 }
 
 // Окно меток — в начале трансляции; область экрана известна сразу, область окна — после первой строки помощника.
@@ -430,6 +448,8 @@ function createWindow() {
   });
   // Закрыли главное окно — выходим совсем (окно меток не должно держать приложение без окна).
   window.on("closed", () => { window = null; app.quit(); });
+  // Главное окно двигают, сворачивают — схема меток на странице только когда оно не над транслируемой областью.
+  for (const event of ["move", "resize", "minimize", "restore"]) window.on(event, coveredChanged);
   window.loadURL(RELAY).catch(() => window.loadFile(path.join(__dirname, "offline.html")));
   window.webContents.on("did-fail-load", () => window.loadFile(path.join(__dirname, "offline.html")));
   // Внешние ссылки — в браузере.

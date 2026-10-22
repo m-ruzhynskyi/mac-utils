@@ -84,7 +84,7 @@ function electron(world) {
     hide() { this.visible = false; }
     close() { if (this.destroyed) return; this.destroyed = true; this.emit("closed"); }
     isDestroyed() { return this.destroyed; }
-    isMinimized() { return false; }
+    isMinimized() { return !!this.minimized; }
     setAlwaysOnTop() {} flashFrame() {} focus() {} restore() {}
   }
   // Помощник: place — SetWindowPos в физических пикселях; переезд на монитор с другим DPI в первый раз даёт размер по
@@ -213,7 +213,9 @@ async function start(world) {
     log() { const file = path.join(world.logs, "overlay.log"); return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : ""; },
     marksSent() { return this.overlay.sent.filter(([c]) => c === "mark").length; },
     // Что приложение сказало странице о метках (последнее marks-state главному окну).
-    marksState() { return fake.windows.find((x) => !x.opts.transparent).sent.filter(([c]) => c === "marks-state").at(-1)?.[1]; },
+    marksState() { const m = this.lastMarksState(); return m && { screen: m.screen, reason: m.reason }; },
+    lastMarksState() { return fake.windows.find((x) => !x.opts.transparent).sent.filter(([c]) => c === "marks-state").at(-1)?.[1]; },
+    get main() { return fake.windows.find((x) => !x.opts.transparent); },
     places() { return fake.helperCalls.filter(([c]) => c === "place").map((a) => a.slice(2).map(Number)); },
   };
   return host;
@@ -785,5 +787,29 @@ test("журнал кодера страницы — в overlay.log только
     assert.match(log, /status=\[video_encode=disabled_software gpu_compositing=enabled\] flags=\[disable-features=MediaFoundationH264Encoding\]/);
     assert.match(log, / gpu aux glRenderer=ANGLE_\(NVIDIA,_NVIDIA_GeForce_RTX_3060_Direct3D11.* optimus=false videoEncodeAcceleratorSupportedProfile=.*4096/);
     assert.ok(!/12345|luid|machineModel/.test(log), "без LUID и модели компьютера");
+  } finally { host.stop(); }
+});
+
+test("схема меток на странице только когда главное окно не над транслируемой областью (covered)", async () => {
+  const a = laptop(), b = external();
+  const host = await start(world([a, b], [screenSource(a, 1), screenSource(b, 2)], { oldWindows: true }));
+  try {
+    const main = host.main;
+    // Главное окно — на мониторе, который транслируется.
+    main.setBounds({ x: a.bounds.x + 40, y: a.bounds.y + 40, width: 800, height: 600 });
+    await host.share("screen:1:0");
+    host.mark(0.5, 0.5);
+    await tick(80);
+    assert.deepEqual(host.lastMarksState(), { screen: false, reason: "old-windows", covered: true });
+    // Перенесли на другой монитор — схему можно.
+    main.setBounds({ x: b.bounds.x + 40, y: b.bounds.y + 40, width: 800, height: 600 });
+    main.emit("move");
+    assert.equal(host.lastMarksState().covered, false);
+    // Свернули — тоже можно.
+    main.setBounds({ x: a.bounds.x + 40, y: a.bounds.y + 40, width: 800, height: 600 });
+    main.emit("move");
+    assert.equal(host.lastMarksState().covered, true);
+    main.minimized = true; main.emit("minimize");
+    assert.equal(host.lastMarksState().covered, false);
   } finally { host.stop(); }
 });
