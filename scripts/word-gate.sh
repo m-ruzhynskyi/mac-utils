@@ -33,14 +33,14 @@ trap 'rm -rf "$WORK"' EXIT
 START=$SECONDS
 
 echo "Сборка тестов…"
-nice -n 10 swift build --build-tests > "$WORK/build.txt" 2>&1 || { tail -20 "$WORK/build.txt"; exit 3; }
+nice -n 20 swift build --build-tests -j 2 > "$WORK/build.txt" 2>&1 || { tail -20 "$WORK/build.txt"; exit 3; }
 BUNDLE="$(swift build --show-bin-path)/MacUtilsTests.xctest"
 echo "Сборка: $((SECONDS - START)) с"
 
 echo "Прогон по эталону: $JOBS процесса(ов)…"
 run_shard() {
     MU_WORD_REF_DIR="$REF" MU_WORD_REF_SHARD="$1/$JOBS" MU_WORD_REF_ONLY="$ONLY" MU_WORD_FIDELITY_TSV="$WORK/part$1.tsv" \
-        nice -n 10 xcrun xctest -XCTest MacUtilsTests.WordFidelityTests/testAgainstWordReference "$BUNDLE" > "$WORK/log$1.txt" 2>&1
+        nice -n 20 xcrun xctest -XCTest MacUtilsTests.WordFidelityTests/testAgainstWordReference "$BUNDLE" > "$WORK/log$1.txt" 2>&1
 }
 PIDS=()
 for ((i = 0; i < JOBS; i++)); do
