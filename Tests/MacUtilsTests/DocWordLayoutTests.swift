@@ -167,6 +167,28 @@ final class DocWordLayoutTests: XCTestCase {
                                  "служебный абзац разрыва — нулевой высоты")
     }
 
+    func testWhollyHiddenParagraphTakesNoLine() throws {
+        let body = #"\pard\plain\fs20 {\v\fs16 $}{\v\fs16 \par }\pard\plain\fs24 Visible\par "#
+        let document = try open(body)
+        let visible = try XCTUnwrap(try lines(document, "Visible").first)
+        XCTAssertEqual(visible.minY, 0, accuracy: 0.01, "скрытый целиком абзац (и знак \\par) — без пустой строки")
+        document.showsInvisibles = true
+        document.layoutManager.ensureLayout(for: document.layoutManager.textContainers[0])
+        XCTAssertGreaterThan(try XCTUnwrap(try lines(document, "Visible").first).minY, 0, "при ¶ — виден")
+    }
+
+    func testPageBreakLineAtFullPageLeavesNoBlankPage() throws {
+        // Страница заполнена почти до низа, следующий абзац — с \pagebb: «\f» внизу места не просит.
+        var body = ""
+        for number in 1...52 { body += #"\pard\plain\fs24 Line "# + "\(number)" + #"\par "# }
+        body += #"\pard\plain\pagebb\fs24 Next page\par "#
+        let document = try open(body)
+        XCTAssertEqual(document.pagesView.pages.count, 2)
+        let manager = document.layoutManager
+        let glyph = manager.glyphIndexForCharacter(at: (document.storage.string as NSString).range(of: "Next page").location)
+        XCTAssertTrue(manager.textContainer(forGlyphAt: glyph, effectiveRange: nil) === document.pagesView.pages[1].container)
+    }
+
     func testCapsAndHangingIndentTab() throws {
         var body = #"\pard\plain\fs24 {\caps upper words}\par "#
         body += #"\pard\plain\fs24 {\scaps Small caps}\par "#

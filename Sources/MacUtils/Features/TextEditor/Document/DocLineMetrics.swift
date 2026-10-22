@@ -44,8 +44,12 @@ enum DocLineMetrics {
         guard let storage = layoutManager.textStorage, glyphs.length > 0 else { return false }
         let characters = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
         guard characters.length > 0, NSMaxRange(characters) <= storage.length else { return false }
-        // Служебный абзац разрыва перед таблицей — нулевой высоты.
-        if storage.attribute(.docBreakLine, at: characters.location, effectiveRange: nil) != nil {
+        // Строка разрыва («\f» перед абзацем, служебный абзац перед таблицей) — нулевой высоты.
+        var breakOnly = true
+        storage.enumerateAttribute(.docBreakLine, in: characters) { value, _, stop in
+            if value == nil { breakOnly = false; stop.pointee = true }
+        }
+        if breakOnly {
             rect.size.height = 0
             used.size.height = 0
             baseline = 0
@@ -85,7 +89,9 @@ enum DocLineMetrics {
                 height = max(single, value)
             }
         }
+        // Первая строка абзаца — и та, что идёт после его «\f».
         let first = characters.location == paragraph.location
+            || (characters.location == paragraph.location + 1 && storage.attribute(.docBreakLine, at: paragraph.location, effectiveRange: nil) != nil)
         let last = NSMaxRange(characters) >= NSMaxRange(paragraph)
         let before = first ? style.paragraphSpacingBefore : 0
         let after = last ? style.paragraphSpacing : 0

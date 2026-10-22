@@ -283,6 +283,8 @@ final class DocRenderer {
         var key: ParagraphKey
         var place: CellPlace?
         var spacing: (before: Int, after: Int)?
+        /// Сколько первых кусков — разрыв перед абзацем («\f»).
+        var breakUnits = 0
     }
 
     private func plan(_ paragraph: RTFParagraph, index: Int, story: RTFStory, model: RTFDocumentModel, place: CellPlace?,
@@ -347,7 +349,12 @@ final class DocRenderer {
             fontNames.append(model.font(run.props.font)?.name ?? "")
         }
         var end: UInt8 = 0
+        // Абзац, скрытый целиком (`\v` и на тексте, и на знаке `\par`), Word не показывает вовсе — даже пустой строкой.
+        let hiddenWhole = !showsHidden && place == nil && paragraph.end == .paragraph && paragraph.endProps.hidden && pieces.isEmpty
+            && paragraph.runs.contains { $0.props.hidden }
         switch paragraph.end {
+        case .paragraph where hiddenWhole:
+            break
         case .paragraph:
             pieces.append(Piece(units: [0x0A], ranges: [paragraph.endRange], kind: .paragraphEnd))
             end = 1
@@ -368,7 +375,7 @@ final class DocRenderer {
         let key = ParagraphKey(text: text, runs: runKeys, props: paragraph.props, place: place, breakBefore: breakBefore, end: end,
                                endProps: paragraph.endProps, spacing: [spacing.before, spacing.after],
                                font: fontNames + [model.font(paragraph.endProps.font)?.name ?? ""])
-        return ParagraphPlan(pieces: pieces, key: key, place: place, spacing: spacing)
+        return ParagraphPlan(pieces: pieces, key: key, place: place, spacing: spacing, breakUnits: breakBefore > 0 ? 1 : 0)
     }
 
     /// Интервалы до и после абзаца, как их ставит Word: при `\contextualspace` между абзацами одного стиля их нет.
@@ -400,7 +407,10 @@ final class DocRenderer {
         for (number, piece) in plan.pieces.enumerated() {
             if number < breakPieces {
                 var attributes = characterAttributes(firstRun?.props ?? defaultProps(model), model: model)
-                attributes[.paragraphStyle] = NSParagraphStyle.default
+                // Высота почти нулевая уже для TextKit: «\f» не должен не поместиться внизу полной страницы
+                // (иначе он уходит на следующую и оставляет пустую страницу).
+                attributes[.paragraphStyle] = Self.breakStyle
+                attributes[.font] = font(family: "Times New Roman", size: 1, bold: false, italic: false)
                 attributes[.docPara] = paraInfo
                 attributes[.docBreakLine] = true
                 result.append(NSAttributedString(string: String(utf16CodeUnits: piece.units, count: piece.units.count), attributes: attributes))
@@ -412,6 +422,11 @@ final class DocRenderer {
             var attributes = characterAttributes(props, model: model, hidden: piece.kind == .hidden)
             attributes[.paragraphStyle] = style
             attributes[.docPara] = paraInfo
+            if number < plan.breakUnits {
+                // «\f» перед абзацем — строка без высоты: внизу полной страницы она не уходит на следующую.
+                attributes[.font] = font(family: "Times New Roman", size: 1, bold: false, italic: false)
+                attributes[.docBreakLine] = true
+            }
             if let run, piece.kind == .object {
                 attributes[.attachment] = attachment(for: run)
             }
@@ -756,6 +771,14 @@ final class DocRenderer {
         blocks[key] = block
         return block
     }
+
+    /// Стиль служебного абзаца разрыва перед таблицей.
+    private static let breakStyle: NSParagraphStyle = {
+        let style = NSMutableParagraphStyle()
+        style.minimumLineHeight = 0.01
+        style.maximumLineHeight = 0.01
+        return style
+    }()
 
     /// Твипы → целые пункты (вниз: таблица не шире своей рамки, иначе `NSTextTable` сожмёт все столбцы).
     private static func points(_ twips: Int) -> CGFloat { floor(CGFloat(twips) / 20) }
