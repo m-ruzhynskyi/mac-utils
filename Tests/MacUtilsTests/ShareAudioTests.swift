@@ -145,4 +145,50 @@ final class ShareAudioTests: XCTestCase {
         XCTAssertTrue(ShareTapFormat.needsRebuild(converterRate: 48_000, tap: format(44_100), stream: nil), "Audio-MIDI")
         XCTAssertFalse(ShareTapFormat.needsRebuild(converterRate: 48_000, tap: format(0), stream: nil), "формат не прочитан — не трогаем")
     }
+
+    /// Сторож запуска: нет колбэков или ни одного буфера перехвата с данными — ошибка Core Audio; тишина — не ошибка.
+    func testWatchdogVerdicts() {
+        var watchdog = ShareTapWatchdog()
+        XCTAssertEqual(watchdog.verdict, .noCallbacks, "агрегат без часов: IOProc не вызывается (1.9.2)")
+        watchdog.record(inputBuffers: 1, tapData: false)
+        watchdog.record(inputBuffers: 1, tapData: false)
+        XCTAssertEqual(watchdog.verdict, .noData, "колбэки идут, но буфер перехвата NULL или пустой")
+        watchdog.record(inputBuffers: 2, tapData: true)
+        XCTAssertEqual(watchdog.verdict, .ok, "буфер с данными (даже тишиной) — перехват работает")
+        XCTAssertEqual(watchdog.callbacks, 3)
+        XCTAssertEqual(watchdog.withData, 1)
+        XCTAssertEqual(watchdog.inputBuffers, 2)
+    }
+
+    /// Журнал сторожа — только числа.
+    func testWatchdogSummaryHasOnlyNumbers() {
+        var watchdog = ShareTapWatchdog()
+        for _ in 0..<150 { watchdog.record(inputBuffers: 1, tapData: true) }
+        let line = watchdog.summary(tapRate: 48_000, streamRate: 48_000, outputRate: 44_100)
+        XCTAssertEqual(line, "колбэков за 3 с: 150, с данными перехвата: 150, входных буферов: 1, частоты: перехват 48000, вход агрегата 48000, выход 44100 Гц")
+    }
+
+    /// Агрегат трансляции — с выходом как основным подустройством (часы) и перехватом в списке перехватов (как до 99363c8
+    /// и как в «Громкости приложений»); без основного подустройства у агрегата нет часов и звука нет совсем.
+    @available(macOS 14.2, *)
+    func testShareAggregateHasMainSubdeviceAndTap() {
+        let description = ShareAudioTap.aggregateDescription(outputUID: "out-uid", tapUUID: "tap-uuid", unique: "u1")
+        XCTAssertEqual(description[kAudioAggregateDeviceMainSubDeviceKey] as? String, "out-uid")
+        XCTAssertEqual(description[kAudioAggregateDeviceSubDeviceListKey] as? [[String: String]], [[kAudioSubDeviceUIDKey: "out-uid"]])
+        let taps = description[kAudioAggregateDeviceTapListKey] as? [[String: Any]]
+        XCTAssertEqual(taps?.count, 1)
+        XCTAssertEqual(taps?.first?[kAudioSubTapUIDKey] as? String, "tap-uuid")
+        XCTAssertEqual(description[kAudioAggregateDeviceIsPrivateKey] as? Bool, true)
+        XCTAssertEqual(description[kAudioAggregateDeviceTapAutoStartKey] as? Bool, true)
+        XCTAssertEqual(description[kAudioAggregateDeviceUIDKey] as? String, "com.mruzhynskyi.macutils.share.u1")
+    }
+
+    /// Буфер перехвата у трансляции с выходом-подустройством: последний после входов выхода; входы выключены и HAL их
+    /// опустил — единственный; только входы выхода (перехвата ещё нет) — ничего, микрофон никогда.
+    func testShareTapBufferWithOutputSubdevice() {
+        XCTAssertEqual(AggregateStreams.tapBuffer(inputCount: 1, subdeviceInputs: 0), 0, "встроенные динамики: входов нет")
+        XCTAssertEqual(AggregateStreams.tapBuffer(inputCount: 2, subdeviceInputs: 1, subdeviceInputsOff: true), 1, "AirPods, входы выключены, но в списке")
+        XCTAssertEqual(AggregateStreams.tapBuffer(inputCount: 1, subdeviceInputs: 1, subdeviceInputsOff: true), 0, "AirPods, HAL опустил выключенный вход")
+        XCTAssertNil(AggregateStreams.tapBuffer(inputCount: 1, subdeviceInputs: 1, subdeviceInputsOff: false), "один буфер при включённом микрофоне — это микрофон")
+    }
 }
