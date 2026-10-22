@@ -14,7 +14,7 @@ enum RTFWord: String, CaseIterable {
     // Абзац.
     case pard, par, ql, qc, qr, qj, qd, li, ri, fi, lin, rin, sb, sa, sl, slmult
     case tx, tb, tqr, tqc, tqdec, tldot, tlhyph, tlul, tlth, tleq, tlmdot
-    case intbl, keepn, pagebb, s, cbpat, contextualspace, ls, ilvl
+    case intbl, keepn, keep, pagebb, s, cbpat, contextualspace, ls, ilvl
     case brdrt, brdrb, brdrl, brdrr, box, brdrw, brdrcf, brdrs, brdrth, brdrdb, brdrdot, brdrdash, brdrnone, brdrnil, brdrsh
     // Символ.
     case plain, f, fs, b, i, ul, uld, uldb, ulw, ulth, uldash, uldashd, uldashdd, ulwave, ulhwave, ululdbwave, ulthd, ulthdash

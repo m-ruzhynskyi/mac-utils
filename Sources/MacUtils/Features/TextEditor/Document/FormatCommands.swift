@@ -10,6 +10,11 @@ struct DocFormatState: Equatable {
     var italic = false
     var underline = false
     var strike = false
+    /// E-4: положение (смешанное — `nil`), капитель, все прописные, скрытый.
+    var vertical: RTFVertical?
+    var smallCaps = false
+    var caps = false
+    var hidden = false
     var color: RTFColor??
     var highlight: RTFColor??
     var alignment: RTFAlignment?
@@ -212,6 +217,10 @@ final class DocFormatter: ObservableObject {
         state.italic = !chars.isEmpty && chars.allSatisfy(\.props.italic)
         state.underline = !chars.isEmpty && chars.allSatisfy { $0.props.underline != .none }
         state.strike = !chars.isEmpty && chars.allSatisfy(\.props.strike)
+        state.vertical = same(chars.map(\.props.vertical))
+        state.smallCaps = !chars.isEmpty && chars.allSatisfy(\.props.smallCaps)
+        state.caps = !chars.isEmpty && chars.allSatisfy(\.props.caps)
+        state.hidden = !chars.isEmpty && chars.allSatisfy(\.props.hidden)
         if let model {
             state.color = same(chars.map { model.color($0.props.color) })
             state.highlight = same(chars.map { model.color($0.props.highlight) })

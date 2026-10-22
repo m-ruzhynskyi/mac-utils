@@ -647,9 +647,14 @@ private final class RTFParser {
         case .intbl:
             noteContent(range.location)
             top.para.inTable = true
-        case .keepn: top.para.keepNext = true
+        case .keepn:
+            top.para.keepNext = (number ?? 1) != 0
+            token("keepn", range)
+        case .keep:
+            top.para.keepTogether = (number ?? 1) != 0
+            token("keep", range)
         case .pagebb:
-            top.para.pageBreakBefore = true
+            top.para.pageBreakBefore = (number ?? 1) != 0
             token("pagebb", range)
         case .s: top.para.style = number
         case .contextualspace: top.para.contextualSpace = (number ?? 1) != 0

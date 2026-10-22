@@ -59,6 +59,11 @@ enum DocTextEditor {
         // Ввод: куда встаёт текст и чем его записать.
         let insertion = insertionPoint(range, model: model, story: story, map: map)
         result.insertionUnit = insertion.unit
+        // Разрыв страницы в ячейке таблицы Word не ставит (E-4).
+        if text.utf16.contains(0x0C), story.paragraphs[safe: FormatEdits.firstParagraph(in: story, atOrAfter: insertion.source)]?.props.inTable == true {
+            result.refusal = "В таблице разрыв страницы не ставится — поставьте курсор вне таблицы"
+            return result
+        }
         if text.isEmpty {
             guard !deletions.isEmpty else {
                 result.refusal = range.length > 0 ? refusalReason(range, map: map) : nil
@@ -243,6 +248,7 @@ enum DocTextEditor {
             case 0x0A, 0x0D, 0x2029: out += "\\par "
             case 0x2028, 0x0B: out += "\\line "
             case 0x09: out += "\\tab "
+            case 0x0C: out += "\\page "
             case 0x5C: out += "\\\\"
             case 0x7B: out += "\\{"
             case 0x7D: out += "\\}"

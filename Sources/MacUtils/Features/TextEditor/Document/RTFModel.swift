@@ -88,6 +88,8 @@ struct RTFParaProps: Hashable {
     var tabs: [RTFTabStop] = []
     var inTable = false
     var keepNext = false
+    /// `\keep` — не разрывать абзац между страницами.
+    var keepTogether = false
     var pageBreakBefore = false
     var borderTop = RTFBorder()
     var borderBottom = RTFBorder()
