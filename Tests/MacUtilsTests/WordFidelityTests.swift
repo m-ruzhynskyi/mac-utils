@@ -4,12 +4,14 @@ import SwiftUI
 import XCTest
 @testable import MacUtils
 
-/// «Документ» против эталона Word. Эталон — PDF, которые сделал сам Word из копий форм (`fNN.pdf` рядом с `fNN.rtf`).
+/// «Документ» против эталона Word. Эталон — PDF, которые сделал сам Word из копий форм (`pdf/fNNN.pdf` к `rtf/fNNN.rtf`).
 /// Наша сторона раскладывается тем же путём, что в приложении (вкладка в «Документе», `DocPageView`, колонтитулы),
 /// страницы рисуются в PDF офскрин; строки и линии извлекаются из обоих PDF одинаково (`WordFidelity`).
-///   MU_WORD_REF_DIR=~/Projects/Cowork/Form/LAB-word-ref [MU_WORD_FIDELITY_OUT=…/word-fidelity.md] [MU_WORD_FIDELITY_STRICT=1]
+///   MU_WORD_REF_DIR=~/Projects/Cowork/Form/LAB-word-ref [MU_WORD_REF_SUBSET_DIR=~/Projects/Cowork/Form/LAB]
+///   [MU_WORD_REF_ONLY=f001,f002] [MU_WORD_FIDELITY_OUT=…/word-fidelity.md] [MU_WORD_FIDELITY_STRICT=1]
+/// Подмножество — копии, побайтно совпадающие с файлами из MU_WORD_REF_SUBSET_DIR: отдельная сводка.
 ///   swift test --filter WordFidelityTests
-/// В отчёт — только числа, номера fNN и управляющие слова RTF; текст документов никуда не попадает.
+/// В отчёт — только числа, номера fNNN и управляющие слова RTF; текст документов никуда не попадает.
 @MainActor
 final class WordFidelityTests: XCTestCase {
     private var windows: [NSWindow] = []
@@ -46,6 +48,13 @@ final class WordFidelityTests: XCTestCase {
         XCTAssertEqual(result.dy[.body]?.median ?? 0, 3, accuracy: 0.001)
         XCTAssertFalse(result.identical, "сдвиг 3 pt — не идентично")
         XCTAssertEqual(result.discrepancies.filter { $0.kind == .shiftY }.count, 3)
+        XCTAssertEqual(result.pitch[.body], [0], "сдвиг целиком — шаг строк тот же")
+        XCTAssertEqual(result.firstOffset?.y ?? 0, 3, accuracy: 0.001)
+
+        var drifting = word
+        drifting[1].rect.origin.y += 2
+        XCTAssertEqual(WordFidelity.compare(word: word, ours: drifting, pagesWord: 2, pagesOurs: 2, category: { _ in .body }).pitch[.body], [2],
+                       "строка ниже на 2 pt — шаг больше на 2")
     }
 
     func testCellWrapMissingWordsAndPages() {
@@ -67,6 +76,7 @@ final class WordFidelityTests: XCTestCase {
         XCTAssertEqual(stats.p95, 95)
         XCTAssertEqual(stats.max, 100)
         XCTAssertEqual(WordFidelity.Stats([-4, 2]).max, 4, "по модулю")
+        XCTAssertEqual(WordFidelity.Stats([-4, 2, -1]).signedMedian, -1, "со знаком")
     }
 
     /// Наш PDF против нашего же: идентично, линии таблицы находятся — проверка извлечения на настоящей раскладке.
@@ -95,45 +105,84 @@ final class WordFidelityTests: XCTestCase {
     // MARK: - Прогон по эталону Word
 
     func testAgainstWordReference() throws {
-        guard let path = ProcessInfo.processInfo.environment["MU_WORD_REF_DIR"], !path.isEmpty else {
+        let environment = ProcessInfo.processInfo.environment
+        guard let path = environment["MU_WORD_REF_DIR"], !path.isEmpty else {
             throw XCTSkip("Задайте MU_WORD_REF_DIR=<папка с rtf/ и pdf/>")
         }
         let base = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-        let names = try FileManager.default.contentsOfDirectory(atPath: base.appendingPathComponent("pdf").path)
-            .filter { $0.hasSuffix(".pdf") }.map { ($0 as NSString).deletingPathExtension }.sorted()
-        XCTAssertFalse(names.isEmpty, "нет fNN.pdf")
+        let manager = FileManager.default
+        var names = try manager.contentsOfDirectory(atPath: base.appendingPathComponent("rtf").path)
+            .filter { $0.hasSuffix(".rtf") && !$0.hasPrefix("~") }.map { ($0 as NSString).deletingPathExtension }.sorted()
+        if let only = environment["MU_WORD_REF_ONLY"], !only.isEmpty {
+            let wanted = Set(only.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) })
+            names = names.filter(wanted.contains)
+        }
+        XCTAssertFalse(names.isEmpty, "нет fNNN.rtf")
         var report = FidelityReport()
+        if let subset = environment["MU_WORD_REF_SUBSET_DIR"], !subset.isEmpty {
+            let folder = URL(fileURLWithPath: (subset as NSString).expandingTildeInPath)
+            report.subsetLabel = folder.lastPathComponent
+            report.subset = Self.copies(of: folder, among: names.map { base.appendingPathComponent("rtf/\($0).rtf") })
+        }
         for name in names {
             let rtf = base.appendingPathComponent("rtf/\(name).rtf"), wordURL = base.appendingPathComponent("pdf/\(name).pdf")
+            guard manager.fileExists(atPath: wordURL.path) else {
+                report.noReference.append(name)
+                continue
+            }
             guard let data = try? Data(contentsOf: rtf), let wordPDF = PDFDocument(url: wordURL) else {
                 report.failed.append(name)
                 continue
             }
+            let started = Date()
             autoreleasepool {
                 do {
                     let document = try open(data, name: "\(name).rtf")
                     let ours = try render(document)
                     let geometry = PageGeometry(document)
-                    let result = WordFidelity.compare(word: WordFidelity.lines(wordPDF), ours: WordFidelity.lines(ours),
+                    let ourLines = WordFidelity.lines(ours)
+                    var result = WordFidelity.compare(word: WordFidelity.lines(wordPDF), ours: ourLines,
                                                       pagesWord: wordPDF.pageCount, pagesOurs: ours.pageCount,
                                                       category: geometry.category, wordSegments: WordFidelity.segments(wordPDF),
                                                       ourSegments: WordFidelity.segments(ours))
-                    report.add(name, result, constructs: geometry.constructs)
+                    let sizes = zip(WordFidelity.pageSizes(wordPDF), WordFidelity.pageSizes(ours))
+                    result.sizeMismatch = sizes.contains { abs($0.width - $1.width) > 1 || abs($0.height - $1.height) > 1 }
+                    report.add(name, result, lines: ourLines, category: geometry.category, constructs: geometry.constructs)
                 } catch {
                     report.failed.append(name)
                 }
                 for window in windows { window.contentView = nil; window.close() }
                 windows = []
             }
+            print("word-fidelity \(name): \(String(format: "%.1f", Date().timeIntervalSince(started))) с")
         }
         let text = report.markdown()
         print(text)
-        if let out = ProcessInfo.processInfo.environment["MU_WORD_FIDELITY_OUT"], !out.isEmpty {
+        if let out = environment["MU_WORD_FIDELITY_OUT"], !out.isEmpty {
             try text.write(toFile: (out as NSString).expandingTildeInPath, atomically: true, encoding: .utf8)
         }
-        if ProcessInfo.processInfo.environment["MU_WORD_FIDELITY_STRICT"] == "1" {
+        if environment["MU_WORD_FIDELITY_STRICT"] == "1" {
             XCTAssertEqual(report.identical, report.files.count, "идентично Word: \(report.identical) из \(report.files.count)")
         }
+    }
+
+    /// Какие копии побайтно совпадают с файлами папки — подмножество без списка имён (map.tsv не нужен).
+    private static func copies(of folder: URL, among copies: [URL]) -> Set<String> {
+        let originals = (FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.fileSizeKey])?
+            .compactMap { $0 as? URL } ?? [])
+        var bySize: [Int: [URL]] = [:]
+        for url in originals {
+            if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize { bySize[size, default: []].append(url) }
+        }
+        var found: Set<String> = []
+        for copy in copies {
+            guard let size = try? copy.resourceValues(forKeys: [.fileSizeKey]).fileSize, let candidates = bySize[size],
+                  let data = try? Data(contentsOf: copy) else { continue }
+            if candidates.contains(where: { (try? Data(contentsOf: $0)) == data }) {
+                found.insert(copy.deletingPathExtension().lastPathComponent)
+            }
+        }
+        return found
     }
 
     // MARK: - Наша раскладка
@@ -267,50 +316,66 @@ private struct PageGeometry {
     }
 }
 
-/// Сводка прогона: по файлам и топ причин по категориям. Только числа, fNN и управляющие слова.
+/// Сводка прогона: общая и по подмножеству, по файлам и топ причин. Только числа, fNNN и управляющие слова.
 private struct FidelityReport {
     struct File {
         let name: String
         let result: WordFidelity.Result
+        /// (вид расхождения · категория) → управляющее слово → число строк.
+        let causes: [String: [String: Int]]
+        /// Все наши строки: категория → управляющее слово → число строк (база для «подъёма» причины).
+        let base: [WordFidelity.Category: [String: Int]]
+        let lines: [WordFidelity.Category: Int]
     }
 
     var files: [File] = []
     var failed: [String] = []
-    /// (вид расхождения, категория) → управляющее слово → (число строк, файлы).
-    private var causes: [String: [String: (count: Int, files: Set<String>)]] = [:]
+    /// Word не сделал PDF (ошибка Word или ещё не готово).
+    var noReference: [String] = []
+    var subset: Set<String> = []
+    var subsetLabel = ""
 
     var identical: Int { files.filter(\.result.identical).count }
 
-    mutating func add(_ name: String, _ result: WordFidelity.Result, constructs: (WordFidelity.Line) -> [String]) {
-        files.append(File(name: name, result: result))
+    mutating func add(_ name: String, _ result: WordFidelity.Result, lines: [WordFidelity.Line],
+                      category: (WordFidelity.Line) -> WordFidelity.Category, constructs: (WordFidelity.Line) -> [String]) {
+        func words(_ line: WordFidelity.Line) -> [String] {
+            let found = constructs(line)
+            return found.isEmpty ? ["(без особых свойств)"] : found
+        }
+        var causes: [String: [String: Int]] = [:]
         for discrepancy in result.discrepancies {
             let key = "\(discrepancy.kind.rawValue) · \(discrepancy.category.rawValue)"
-            let words = constructs(discrepancy.ours)
-            for word in words.isEmpty ? ["(без особых свойств)"] : words {
-                var entry = causes[key, default: [:]][word, default: (0, [])]
-                entry.count += 1
-                entry.files.insert(name)
-                causes[key, default: [:]][word] = entry
-            }
+            for word in words(discrepancy.ours) { causes[key, default: [:]][word, default: 0] += 1 }
         }
+        var base: [WordFidelity.Category: [String: Int]] = [:], counts: [WordFidelity.Category: Int] = [:]
+        for line in lines {
+            let kind = category(line)
+            counts[kind, default: 0] += 1
+            for word in words(line) { base[kind, default: [:]][word, default: 0] += 1 }
+        }
+        files.append(File(name: name, result: result, causes: causes, base: base, lines: counts))
     }
 
     private static func pt(_ value: CGFloat) -> String { String(format: "%.1f", value).replacingOccurrences(of: ".", with: ",") }
+    private static func signed(_ value: CGFloat) -> String { (value > 0.05 ? "+" : "") + pt(value) }
     private static func percent(_ value: Double) -> String { String(format: "%.0f %%", value * 100) }
+    private static func list(_ names: [String]) -> String { names.isEmpty ? "" : " (\(names.joined(separator: ", ")))" }
 
     func markdown() -> String {
         var lines: [String] = ["# «Документ» против Word: сравнение по PDF", ""]
-        lines.append("Файлов: \(files.count), не открылись: \(failed.count)\(failed.isEmpty ? "" : " (\(failed.joined(separator: ", ")))").")
-        lines.append("Идентично Word (страницы совпадают, разрывы строк 100 %, сдвиг ≤ 1 pt, слова на месте): **\(identical) из \(files.count)**.")
-        let pagesOK = files.filter { $0.result.pagesWord == $0.result.pagesOurs }.count
-        let breaks = files.map(\.result.sameBreaks)
-        lines.append("Число страниц совпадает: \(pagesOK) из \(files.count). Разрывы строк — медиана по файлам \(Self.percent(median(breaks))), худший \(Self.percent(breaks.min() ?? 1)).")
+        lines.append("Порог «идентично»: число страниц совпадает, разрывы строк 100 %, сдвиг строк ≤ 1 pt, слова на месте.")
+        lines.append("Без PDF Word: \(noReference.count)\(Self.list(noReference)). Не открылись: \(failed.count)\(Self.list(failed)).")
+        if !subsetLabel.isEmpty {
+            lines += summary(files.filter { subset.contains($0.name) }, title: "Сводка: подмножество \(subsetLabel)")
+        }
+        lines += summary(files, title: "Сводка: все формы")
         lines.append("")
         lines.append("## По файлам")
-        lines.append("Сдвиги — |наш − Word| в pt: медиана / p95 / max; по X и по Y.")
+        lines.append("Сдвиги — |наш − Word| в pt: медиана / p95 / max; по X и по Y.\(subsetLabel.isEmpty ? "" : " «\(subsetLabel)» — файл из подмножества.")")
         lines.append("")
-        lines.append("| Файл | Стр. Word / наши | Разрывы строк | Тело X | Тело Y | Таблицы X | Таблицы Y | Колонтитулы X | Колонтитулы Y | Лишние переносы в ячейках | На другой стр. | Нет слов / лишние | Линии: найдено / сдвиг max |")
-        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("| Файл | Стр. Word / наши | Разрывы строк | Тело X | Тело Y | Таблицы X | Таблицы Y | Колонтитулы X | Колонтитулы Y | Лишние переносы в ячейках | На другой стр. | Нет слов / лишние | Линии: найдено / сдвиг max | Первая строка X / Y |")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         func stats(_ s: WordFidelity.Stats?) -> String {
             guard let s, s.count > 0 else { return "—" }
             return "\(Self.pt(s.median)) / \(Self.pt(s.p95)) / \(Self.pt(s.max))"
@@ -318,24 +383,90 @@ private struct FidelityReport {
         for file in files {
             let r = file.result
             let segments = r.segmentsWord == 0 ? "—" : "\(r.segmentsMatched) из \(r.segmentsWord) / \(Self.pt(r.segmentOffset.max))"
-            lines.append("| \(file.name)\(r.identical ? " ✓" : "") | \(r.pagesWord) / \(r.pagesOurs) | \(Self.percent(r.sameBreaks)) | "
+            let first = r.firstOffset.map { "\(Self.signed($0.x)) / \(Self.signed($0.y))" } ?? "—"
+            let mark = (subset.contains(file.name) ? " \(subsetLabel)" : "") + (r.identical ? " ✓" : "")
+            lines.append("| \(file.name)\(mark) | \(r.pagesWord) / \(r.pagesOurs) | \(Self.percent(r.sameBreaks)) | "
                 + "\(stats(r.dx[.body])) | \(stats(r.dy[.body])) | \(stats(r.dx[.table])) | \(stats(r.dy[.table])) | "
-                + "\(stats(r.dx[.margins])) | \(stats(r.dy[.margins])) | \(r.extraCellWraps) | \(r.otherPage) | \(r.missingWords) / \(r.extraWords) | \(segments) |")
-        }
-        lines.append("")
-        lines.append("## Топ-10 причин по видам расхождений")
-        lines.append("Управляющие слова абзаца нашей строки, где расхождение; число строк и файлов. Одна строка может дать несколько слов.")
-        for key in causes.keys.sorted() {
-            let top = causes[key]!.sorted { $0.value.count > $1.value.count }.prefix(10)
-            let total = causes[key]!.values.map(\.count).max() ?? 0
-            lines.append("")
-            lines.append("**\(key)** (строк — до \(total))")
-            lines.append("")
-            for (word, entry) in top {
-                lines.append("- `\(word)` — \(entry.count) строк в \(entry.files.count) файлах (\(entry.files.sorted().prefix(6).joined(separator: ", "))\(entry.files.count > 6 ? ", …" : ""))")
-            }
+                + "\(stats(r.dx[.margins])) | \(stats(r.dy[.margins])) | \(r.extraCellWraps) | \(r.otherPage) | \(r.missingWords) / \(r.extraWords) | \(segments) | \(first) |")
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// Итоги по группе файлов и топ-10 причин по каждому виду расхождений.
+    private func summary(_ group: [File], title: String) -> [String] {
+        var lines = ["", "## \(title)", ""]
+        guard !group.isEmpty else { return lines + ["Нет файлов с эталоном."] }
+        let identical = group.filter(\.result.identical).count
+        let pagesOK = group.filter { $0.result.pagesWord == $0.result.pagesOurs }.count
+        let breaks = group.map(\.result.sameBreaks)
+        let fullBreaks = group.filter { $0.result.sameBreaks >= 1 }.count
+        lines.append("- Идентично Word: **\(identical) из \(group.count)**.")
+        lines.append("- Число страниц совпадает: \(pagesOK) из \(group.count); больше, чем у Word: \(group.filter { $0.result.pagesOurs > $0.result.pagesWord }.count), меньше: \(group.filter { $0.result.pagesOurs < $0.result.pagesWord }.count).")
+        let first = group.compactMap(\.result.firstOffset)
+        lines.append("- Размер страниц отличается от Word: \(group.filter(\.result.sizeMismatch).count) из \(group.count).")
+        lines.append("- Первая строка (до накопления сдвигов), наш − Word со знаком: медиана X \(Self.pt(CGFloat(median(first.map { Double($0.x) })))) / Y \(Self.pt(CGFloat(median(first.map { Double($0.y) })))) pt; |Y| ≤ 1 pt в \(first.filter { abs($0.y) <= 1 }.count) из \(first.count).")
+        lines.append("- Разрывы строк 100 %: \(fullBreaks) из \(group.count); медиана по файлам \(Self.percent(median(breaks))), худший \(Self.percent(breaks.min() ?? 1)).")
+        for category in [WordFidelity.Category.body, .table, .margins] {
+            let x = group.compactMap { $0.result.dx[category] }.filter { $0.count > 0 }
+            let y = group.compactMap { $0.result.dy[category] }.filter { $0.count > 0 }
+            guard !x.isEmpty || !y.isEmpty else { continue }
+            let within = group.filter { ($0.result.dx[category]?.count ?? 0) > 0 && max($0.result.dx[category]?.max ?? 0, $0.result.dy[category]?.max ?? 0) <= 1 }.count
+            let pitch = group.flatMap { $0.result.pitch[category] ?? [] }
+            let pitchText = pitch.isEmpty ? "" : "; шаг строк наш − Word: медиана \(Self.signed(CGFloat(median(pitch.map(Double.init))))) pt, |Δ| ≤ 0,5 pt у \(Self.percent(Double(pitch.filter { abs($0) <= 0.5 }.count) / Double(pitch.count))) пар, больше +0,5 у \(Self.percent(Double(pitch.filter { $0 > 0.5 }.count) / Double(pitch.count))), меньше −0,5 у \(Self.percent(Double(pitch.filter { $0 < -0.5 }.count) / Double(pitch.count)))"
+            let signedX = Self.signed(CGFloat(median(x.map { Double($0.signedMedian) })))
+            let signedY = Self.signed(CGFloat(median(y.map { Double($0.signedMedian) })))
+            lines.append("- \(category.rawValue.capitalized): файлов \(x.count), сдвиг ≤ 1 pt в \(within); со знаком (наш − Word, + — правее/ниже) X \(signedX) / Y \(signedY) pt; медиана модулей X \(Self.pt(CGFloat(median(x.map { Double($0.median) })))) / Y \(Self.pt(CGFloat(median(y.map { Double($0.median) })))) pt, max X \(Self.pt(x.map(\.max).max() ?? 0)) / Y \(Self.pt(y.map(\.max).max() ?? 0)) pt\(pitchText).")
+        }
+        lines.append("- Лишние переносы в ячейках: \(group.map(\.result.extraCellWraps).reduce(0, +)) строк в \(group.filter { $0.result.extraCellWraps > 0 }.count) файлах; строк на другой странице: \(group.map(\.result.otherPage).reduce(0, +)); слов нет / лишние: \(group.map(\.result.missingWords).reduce(0, +)) / \(group.map(\.result.extraWords).reduce(0, +)).")
+        let worst = group.filter { !$0.result.identical }.sorted { $0.result.sameBreaks < $1.result.sameBreaks }.prefix(10).map(\.name)
+        if !worst.isEmpty { lines.append("- Худшие по разрывам строк: \(worst.joined(separator: ", ")).") }
+
+        var causes: [String: [String: (count: Int, files: Set<String>)]] = [:]
+        var base: [String: [String: Int]] = [:], totals: [String: Int] = [:]
+        for file in group {
+            for (key, words) in file.causes {
+                for (word, count) in words {
+                    var entry = causes[key, default: [:]][word, default: (0, [])]
+                    entry.count += count
+                    entry.files.insert(file.name)
+                    causes[key, default: [:]][word] = entry
+                }
+            }
+            for (category, words) in file.base {
+                totals[category.rawValue, default: 0] += file.lines[category] ?? 0
+                for (word, count) in words { base[category.rawValue, default: [:]][word, default: 0] += count }
+            }
+        }
+        lines.append("")
+        lines.append("### Топ-10 причин")
+        lines.append("Управляющие слова абзаца нашей строки, где расхождение. «Подъём» — во сколько раз слово чаще среди строк с этим расхождением, "
+            + "чем среди всех наших строк той же категории (> 1 — связано с расхождением, ≈ 1 — просто встречается везде). "
+            + "Порядок — по подъёму среди слов с ≥ 20 строками в ≥ 3 файлах, затем остальные по числу строк.")
+        for key in causes.keys.sorted() {
+            let category = String(key.split(separator: "·").last ?? "").trimmingCharacters(in: .whitespaces)
+            let entries = causes[key]!
+            let discrepant = discrepancyCount(group, key: key)
+            func lift(_ word: String, _ count: Int) -> Double {
+                let all = Double(base[category]?[word] ?? 0), total = Double(totals[category] ?? 0)
+                guard all > 0, total > 0, discrepant > 0 else { return 0 }
+                return (Double(count) / Double(discrepant)) / (all / total)
+            }
+            let strong = entries.filter { $0.value.count >= 20 && $0.value.files.count >= 3 }
+                .sorted { lift($0.key, $0.value.count) > lift($1.key, $1.value.count) }
+            let rest = entries.filter { !($0.value.count >= 20 && $0.value.files.count >= 3) }.sorted { ($0.value.count, $1.key) > ($1.value.count, $0.key) }
+            lines.append("")
+            lines.append("**\(key)** (строк с расхождением: \(discrepant))")
+            lines.append("")
+            for (word, entry) in (strong + rest).prefix(10) {
+                lines.append("- `\(word)` — подъём \(String(format: "%.1f", lift(word, entry.count)).replacingOccurrences(of: ".", with: ",")); \(entry.count) строк в \(entry.files.count) файлах (\(entry.files.sorted().prefix(6).joined(separator: ", "))\(entry.files.count > 6 ? ", …" : ""))")
+            }
+        }
+        return lines
+    }
+
+    /// Сколько строк с расхождением этого вида в группе (каждая строка — один раз).
+    private func discrepancyCount(_ group: [File], key: String) -> Int {
+        group.map { file in file.result.discrepancies.filter { "\($0.kind.rawValue) · \($0.category.rawValue)" == key }.count }.reduce(0, +)
     }
 
     private func median(_ values: [Double]) -> Double {

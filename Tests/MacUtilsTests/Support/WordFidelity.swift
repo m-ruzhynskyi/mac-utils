@@ -73,8 +73,11 @@ enum WordFidelity {
         var median: CGFloat = 0
         var p95: CGFloat = 0
         var max: CGFloat = 0
+        /// Медиана со знаком (наш − Word): в какую сторону сдвиг.
+        var signedMedian: CGFloat = 0
 
         init(_ values: [CGFloat] = []) {
+            if !values.isEmpty { signedMedian = values.sorted()[values.count / 2] }
             let sorted = values.map(abs).sorted()
             count = sorted.count
             guard !sorted.isEmpty else { return }
@@ -115,6 +118,12 @@ enum WordFidelity {
         var segmentsWord = 0
         var segmentsMatched = 0
         var segmentOffset = Stats()
+        /// Шаг строк: (наш y₂ − y₁) − (Word y₂ − y₁) со знаком для соседних совпавших строк одной страницы.
+        var pitch: [Category: [CGFloat]] = [:]
+        /// Первая совпавшая строка на той же странице: наш − Word со знаком (смещение до накопления сдвигов).
+        var firstOffset: CGPoint?
+        /// Размер страниц Word и наш различаются больше чем на 1 pt (выставляет вызывающий по `pageSizes`).
+        var sizeMismatch = false
         var discrepancies: [Discrepancy] = []
 
         var maxShift: CGFloat { (dx.values.map(\.max) + dy.values.map(\.max)).max() ?? 0 }
@@ -141,10 +150,18 @@ enum WordFidelity {
                 continue
             }
             let x = b.rect.minX - a.rect.minX, y = b.rect.minY - a.rect.minY
+            if result.firstOffset == nil { result.firstOffset = CGPoint(x: x, y: y) }
             dx[kind, default: []].append(x)
             dy[kind, default: []].append(y)
             if abs(x) > 1 { result.discrepancies.append(Discrepancy(kind: .shiftX, category: kind, ours: b)) }
             if abs(y) > 1 { result.discrepancies.append(Discrepancy(kind: .shiftY, category: kind, ours: b)) }
+        }
+        for ((w1, o1), (w2, o2)) in zip(pairs, pairs.dropFirst()) where w2 == w1 + 1 && o2 == o1 + 1 {
+            let a1 = word[w1], a2 = word[w2], b1 = ours[o1], b2 = ours[o2]
+            guard a1.page == a2.page, b1.page == b2.page, a1.page == b1.page, a2.rect.minY > a1.rect.maxY - 1 else { continue }
+            let kind = category(b2)
+            guard kind == category(b1) else { continue }
+            result.pitch[kind, default: []].append((b2.rect.minY - b1.rect.minY) - (a2.rect.minY - a1.rect.minY))
         }
         for kind in Category.allCases {
             result.dx[kind] = Stats(dx[kind] ?? [])
