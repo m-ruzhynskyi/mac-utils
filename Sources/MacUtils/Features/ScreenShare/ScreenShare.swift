@@ -676,7 +676,8 @@ final class ScreenShare: NSObject, ObservableObject {
         hostDisplays = ShareDisplays.list(ShareDisplays.screens())
         let list = hostDisplays.map(\.display)
         let message = ShareDisplays.message(rev: displaysRevision.update(list), list: list, current: currentDisplayNumber,
-                                            allowed: UserDefaults.standard.bool(forKey: Pref.shareAllowMonitorSwitch))
+                                            allowed: UserDefaults.standard.bool(forKey: Pref.shareAllowMonitorSwitch),
+                                            video: sender?.videoMode)
         socket.send(.string(message)) { _ in }
         lastDisplaysAnnounce = Date()
     }
@@ -1318,9 +1319,26 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         }
         // Новая сессия (старт, смена размера) — прогрев; частота — текущая, а не всегда 60.
         encoder.setFrameRate(governor.fps)
-        encoder.onSession = { [weak self] in self?.governor.warmUp(now: ProcessInfo.processInfo.systemUptime) }
+        encoder.onSession = { [weak self, weak encoder] in
+            self?.governor.warmUp(now: ProcessInfo.processInfo.systemUptime)
+            self?.noteVideoMode(encoder?.usesHardware)
+        }
         return encoder
     }()
+
+    /// Как кодируется видео — зрителям в `displays` (`video`): hw — видеокарта, sw — программно.
+    private let modeLock = NSLock()
+    private var mode: String?
+    var videoMode: String? { modeLock.lock(); defer { modeLock.unlock() }; return mode }
+    private func noteVideoMode(_ hardware: Bool?) {
+        let next = hardware.map { $0 ? "hw" : "sw" }
+        modeLock.lock()
+        let changed = next != mode
+        mode = next
+        modeLock.unlock()
+        guard changed else { return }
+        DispatchQueue.main.async { MainActor.assumeIsolated { ScreenShare.shared.announceDisplays() } }
+    }
 
     init(socket: URLSessionWebSocketTask) {
         currentSocket = socket
@@ -1502,6 +1520,15 @@ final class ShareViewer: ObservableObject {
     let video = H264Player()
     /// Ведущий потерял связь и переподключается — показываем последний кадр с подписью.
     @Published var hostReconnecting = false
+    /// Что приходит: true — картинки JPEG, false — видео H.264, nil — кадров ещё нет. Показывается то, что пришло последним:
+    /// ведущий Windows на время пересоздания кодера шлёт картинки, и застывший кадр видео их бы закрывал.
+    @Published private(set) var pictures: Bool?
+    /// Как кодирует ведущий (`video` из displays: hw / sw / jpeg); nil — не сообщил (старая версия).
+    @Published private(set) var hostVideo: String?
+    /// Когда пришёл последний кадр H.264 (главный поток): по нему отличаем мост картинками от кадров для старых зрителей.
+    private var lastVideoAt: Date?
+    /// Подпись «Видео · видеокарта / без видеокарты / Картинки».
+    var videoModeLabel: String? { ShareVideoMode.label(pictures: pictures, host: hostVideo) }
     /// Метки зрителей (свои и чужие) поверх картинки.
     let marks = ShareMarkStore()
 
@@ -1538,6 +1565,9 @@ final class ShareViewer: ObservableObject {
         keyChange = nil
         frame = nil
         jpegFrames = 0
+        pictures = nil
+        hostVideo = nil
+        lastVideoAt = nil
         video.reset()
         resetMonitors()
         state = .connecting
@@ -1698,6 +1728,8 @@ final class ShareViewer: ObservableObject {
                         viewer.lastMessage = Date()
                         if viewer.state != .watching { viewer.state = .watching }
                         viewer.reconnectsMade = 0
+                        viewer.lastVideoAt = Date()
+                        if viewer.pictures != false { viewer.pictures = false }
                     }
                 }
                 return
@@ -1714,7 +1746,11 @@ final class ShareViewer: ObservableObject {
                         switch data.first {
                         case ShareProtocol.frame:
                             viewer.jpegFrames += 1
-                            if let image = NSImage(data: data.dropFirst()) { viewer.frame = image }
+                            if ShareVideoMode.jpegIsBridge(now: Date(), lastVideo: viewer.lastVideoAt),
+                               let image = NSImage(data: data.dropFirst()) {
+                                viewer.frame = image
+                                if viewer.pictures != true { viewer.pictures = true }
+                            }
                         case ShareProtocol.audio:
                             viewer.player.play(data.dropFirst())
                         default:
@@ -1849,6 +1885,7 @@ final class ShareViewer: ObservableObject {
     }
 
     fileprivate func received(displays json: [String: Any]) {
+        if hostVideo != ShareVideoMode.host(from: json) { hostVideo = ShareVideoMode.host(from: json) }
         guard let parsed = ShareDisplays.parse(json) else { return }
         let change = monitors.apply(parsed)
         if change.done { monitorWaitTask?.cancel() }
@@ -1998,8 +2035,10 @@ private struct ShareViewerView: View {
     @ObservedObject private var video = ShareViewer.shared.video
     @State private var stroke: [CGPoint] = []
 
-    /// Размер кадра: видео H.264 или картинка (старые версии ведущего).
-    private var frameSize: CGSize? { video.size ?? viewer.frame?.size }
+    /// Показываются картинки JPEG: их шлют старые ведущие и ведущий Windows, пока пересоздаёт кодер.
+    private var showsPictures: Bool { viewer.frame != nil && (video.size == nil || viewer.pictures == true) }
+    /// Размер кадра: видео H.264 или картинка.
+    private var frameSize: CGSize? { showsPictures ? viewer.frame?.size : video.size ?? viewer.frame?.size }
 
     var body: some View {
         GeometryReader { proxy in
@@ -2008,8 +2047,8 @@ private struct ShareViewerView: View {
                 Color.black
                 Group {
                     H264View(player: video)
-                        .opacity(video.size == nil ? 0 : 1)
-                    if video.size == nil, let frame = viewer.frame {
+                        .opacity(video.size == nil || showsPictures ? 0 : 1)
+                    if showsPictures, let frame = viewer.frame {
                         Image(nsImage: frame).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
                     }
                 }
@@ -2110,7 +2149,7 @@ private struct ShareViewerView: View {
     /// Метка в углу: идёт трансляция и качество картинки.
     @ViewBuilder private var badge: some View {
         if viewer.state == .watching, frameSize != nil || viewer.frame != nil {
-            ShareViewerBadge(height: frameSize.map { Int($0.height) })
+            ShareViewerBadge(height: frameSize.map { Int($0.height) }, mode: viewer.videoModeLabel)
                 .padding(12)
         }
     }
@@ -2189,20 +2228,33 @@ struct ViewerStatusCard: View {
 /// «В ЭФИРЕ · 1080p» в углу окна зрителя (качество — в нижнем регистре, как принято).
 struct ShareViewerBadge: View {
     var height: Int?
+    /// «Видео · видеокарта», «Видео · без видеокарты», «Картинки» (`ShareVideoMode`); nil — не показываем.
+    var mode: String?
 
     var body: some View {
-        HStack(spacing: 0) {
-            Text("В ЭФИРЕ").tracking(DS.Font.tracking(0.06, size: 11))
-            if let height { Text(" · \(height)p").monospacedDigit() }
+        VStack(alignment: .trailing, spacing: DS.Space.xs) {
+            HStack(spacing: 0) {
+                Text("В ЭФИРЕ").tracking(DS.Font.tracking(0.06, size: 11))
+                if let height { Text(" · \(height)p").monospacedDigit() }
+            }
+            .font(DS.Font.groupLabel)
+            .foregroundStyle(Color.dsRecInk)
+            .padding(.vertical, DS.Space.xs)
+            .padding(.horizontal, 10)
+            .background(Color.dsRec, in: Capsule())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("В эфире")
+            if let mode {
+                Text(mode)
+                    .font(DS.Font.caption)
+                    .foregroundStyle(.dsText)
+                    .padding(.vertical, DS.Space.xs)
+                    .padding(.horizontal, 10)
+                    .background(.regularMaterial, in: Capsule())
+                    .help("Как идёт трансляция: видео через видеокарту ведущего, видео без неё (программно) или картинками")
+            }
         }
-        .font(DS.Font.groupLabel)
-        .foregroundStyle(Color.dsRecInk)
-        .padding(.vertical, DS.Space.xs)
-        .padding(.horizontal, 10)
-        .background(Color.dsRec, in: Capsule())
         .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("В эфире")
     }
 }
 

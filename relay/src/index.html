@@ -158,6 +158,11 @@
   #monitorNote::before { content: "i"; position: absolute; left: 18px; top: 16px; width: 26px; height: 26px; border-radius: 9px; display: grid; place-items: center;
                          background: var(--acc); color: var(--acc-ink); font: 800 14px/1 var(--mono); }
   #monitorNote .muted { display: block; margin-top: 4px; font-weight: 500; }
+  #hostMarks { position: absolute; z-index: 1; top: 16px; left: 50%; transform: translateX(-50%); display: none; max-width: calc(100% - 32px); padding: 10px;
+               border-radius: 16px; background: var(--side); border: 1px solid var(--line); box-shadow: var(--shadow); font-weight: 600; }
+  #hostMarksMap { display: block; width: min(420px, calc(100vw - 64px)); aspect-ratio: 16 / 9; background: #000; border-radius: 10px; }
+  #hostMarksNote { margin-top: 8px; max-width: min(420px, calc(100vw - 64px)); font-size: 13px; font-weight: 500; }
+  #videoMode { font-size: 12px; font-weight: 600; color: var(--mute, inherit); white-space: nowrap; }
   #switchButton.on { border-color: var(--acc-line); color: var(--acc-text); }
   .new { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 99px; background: var(--acc); color: var(--acc-ink); font: 800 11px/18px var(--font); letter-spacing: .08em; vertical-align: 1px; }
   #allowSwitchHint { margin: -10px 0 0 28px; }
@@ -270,6 +275,7 @@
   <button id="sideToggle" aria-label="Скрыть панель (Ctrl+B)" title="Скрыть панель (Ctrl+B)" aria-expanded="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
   <b>Mac Utils · трансляция</b>
   <button id="leave" style="display:none" title="Перестать смотреть эту трансляцию">Отключиться</button>
+  <span id="videoMode" style="display:none" title="Как идёт трансляция: видео через видеокарту ведущего, видео без неё (программно) или картинками"></span>
   <button id="historyButton" aria-label="История"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 3-6.2M4 4v4h4M12 8v4l3 2"/></svg><span>История</span></button>
   <button id="share" class="primary">Транслировать свой экран</button>
   <span id="live"><span class="dot"></span><span id="liveText"></span><button id="muteButton" style="display:none" title="Звук каких программ не передавать — можно менять прямо в эфире">🔇 Звук</button><button id="switchButton" style="display:none" aria-pressed="true"></button><button id="gameButton" style="display:none" title="Крестики-нолики со зрителем">＃ Сыграть</button><button class="danger" id="stop">Стоп</button></span>
@@ -294,6 +300,7 @@
     <div class="mon" id="monitors" role="group" aria-label="Монитор ведущего"><span class="lbl2" id="monitorsLabel">Монитор</span><div class="map" id="monitorMap"></div></div>
   </div>
   <div id="monitorNote" role="status"></div>
+  <div id="hostMarks" role="status"><canvas id="hostMarksMap"></canvas><div id="hostMarksNote"></div></div>
   <div id="status">Введите ID собеседника и нажмите «Смотреть» — или транслируйте свой экран.<br>
   <span class="muted">Свой ID сообщите тому, кто будет смотреть вас. Каждого зрителя вы сначала разрешаете.</span></div>
 </div>
@@ -693,10 +700,27 @@ function displaysRevision(memo, list) {
   return memo.rev;
 }
 
-// Сообщение displays; переключать нельзя (настройка, окно, нет списка) — пустой список без current.
-function displaysMessage(rev, list, current, allowed) {
+// Сообщение displays; переключать нельзя (настройка, окно, нет списка) — пустой список без current. `video` — как
+// ведущий кодирует (hw — видеокарта, sw — программно, jpeg — картинки): необязательное поле, старые зрители его не читают.
+function displaysMessage(rev, list, current, allowed, video) {
   const shown = allowed && list.some((d) => d.n === current) ? list.slice(0, MAX_DISPLAYS) : [];
-  return shown.length ? { type: "displays", v: 1, rev, current, list: shown } : { type: "displays", v: 1, rev, list: [] };
+  const message = shown.length ? { type: "displays", v: 1, rev, current, list: shown } : { type: "displays", v: 1, rev, list: [] };
+  if (VIDEO_MODES.includes(video)) message.video = video;
+  return message;
+}
+
+// JPEG после H.264 — мост ведущего (кодер пересоздаётся), только если H.264 не было дольше JPEG_BRIDGE_MS. Иначе это
+// кадры для старых зрителей, которые ведущий Mac шлёт параллельно (раз в 0,25 с): их не показываем, иначе картинка
+// и подпись мигают «видео ↔ картинки».
+const JPEG_BRIDGE_MS = 700;
+const jpegIsBridge = (now, lastH264At) => now - lastH264At > JPEG_BRIDGE_MS;
+
+// Подпись режима видео у зрителя и ведущего. kind — что приходит (h264 / jpeg), host — что сообщил ведущий (`video`).
+const VIDEO_MODES = ["hw", "sw", "jpeg"];
+function videoModeLabel(kind, host) {
+  if (kind === "jpeg" || (!kind && host === "jpeg")) return "Картинки";
+  if (kind !== "h264" && !host) return "";
+  return host === "hw" ? "Видео · видеокарта" : host === "sw" ? "Видео · без видеокарты" : "Видео";
 }
 
 // Новая дорожка видео вместо старой. Старая не должна остановить эфир (onended), звук первого захвата остаётся,
@@ -909,20 +933,26 @@ async function watch() {
       else if (m.type === "reconnecting") status("Ведущий переподключается…");
       else if (m.type === "resumed") status("");
       else if (m.type === "ping" || m.type === "stroke") addMark(m);
-      else if (m.type === "displays") onViewerDisplays(m);
+      else if (m.type === "displays") { setViewVideo(viewKind, VIDEO_MODES.includes(m.video) ? m.video : ""); onViewerDisplays(m); }
       else if (m.type === "switch-result") onSwitchResult(m);
       return;
     }
     const bytes = new Uint8Array(event.data);
     if (bytes[0] === 1) {
+      if (!jpegIsBridge(performance.now(), lastH264At)) return;
       const url = URL.createObjectURL(new Blob([bytes.subarray(1)], { type: "image/jpeg" }));
       $("screen").src = url;
       if (lastUrl) URL.revokeObjectURL(lastUrl);
       lastUrl = url;
+      // Ведущий перешёл на картинки (мост, пока кодер пересоздаётся): показываем их, а не застывший кадр видео.
+      if ($("video").style.display === "block") { $("video").style.display = "none"; $("screen").style.display = ""; }
+      if (viewKind !== "jpeg") setViewVideo("jpeg", viewHostVideo);
       status("");
     } else if (bytes[0] === 2) {
       playPCM(event.data.slice(1));
     } else if (bytes[0] === 3) {
+      lastH264At = performance.now();
+      if (viewKind !== "h264") setViewVideo("h264", viewHostVideo);
       playH264(bytes.subarray(1));
     }
   };
@@ -993,8 +1023,18 @@ function playH264(bytes) {
 }
 
 $("leave").onclick = () => { stopWatch(); status("Вы отключились от трансляции"); };
+// Подпись «Видео · видеокарта / без видеокарты / Картинки» у зрителя: тип кадров — по пакетам, режим — от ведущего.
+let viewKind = "", viewHostVideo = "", lastH264At = -Infinity;
+function setViewVideo(kind, host) {
+  viewKind = kind; viewHostVideo = host;
+  const label = watching || kind ? videoModeLabel(kind, host) : "";
+  $("videoMode").textContent = label;
+  $("videoMode").style.display = label ? "" : "none";
+}
+
 function stopWatch(keepStatus) {
   $("leave").style.display = "none";
+  setViewVideo("", ""); lastH264At = -Infinity;
   if (game.peer === "host") gamePeerGone("host");
   if (decoder && decoder.state !== "closed") { try { decoder.close(); } catch (_) {} }
   decoder = null;
@@ -1557,7 +1597,18 @@ function startCapture(stream, code) {
     softwareCap = ladder.mode === 1;
     if (softwareCap) fps = 30;
     logEncoder(`mode reason=${ladder.reason}`);
+    videoModeChanged();
   };
+  // Режим видео — в строку «В эфире» и зрителям (поле `video` в displays).
+  const videoModeChanged = () => {
+    if (hostVideoMode === ladder.name) return;
+    hostVideoMode = ladder.name;
+    if (typeof renderLiveText === "function") renderLiveText();
+    if (typeof announceDisplays === "function") announceDisplays();
+  };
+  hostVideoMode = ladder.name;
+  marksOnScreen = null; marksReason = ""; marksCovered = null;
+  try { hostSurface = stream.getVideoTracks()[0]?.getSettings?.().displaySurface || ""; } catch (_) { hostSurface = ""; }
   if (!canEncode) { ladder.supported(false, false, performance.now()); applyMode(); }
   else probeEncoders((hardware, software) => { if (ladder.supported(hardware, software, performance.now())) applyMode(); });
   logEncoder(`start reason=${ladder.reason}`);
@@ -1585,6 +1636,7 @@ function startCapture(stream, code) {
     if (!hostSocket || hostSocket.readyState !== 1 || !sourceWidth) { forceKey = true; return; }
     const now = performance.now(), queued = hostSocket.bufferedAmount;
     sourceSize = `${sourceWidth}x${sourceHeight}`;
+    hostSourceAspect = sourceWidth / sourceHeight;
     if (ladder.retry(now)) applyMode();
     if (now - lastStatsAt >= 60_000) { logEncoder("stats"); lastStatsAt = now; counts.statsOutputs = counts.outputs; }
     if (queued > 250_000 && now - lastAdapt > 500) { bitrate = Math.max(700_000, bitrate * 0.7); lastAdapt = now; }
@@ -1775,7 +1827,7 @@ function announceDisplays() {
     hostMonitors.rev = displaysRevision(hostMonitors.memo, list);
     renderSwitchButton();
     if (!capture || !hostSocket || hostSocket.readyState !== 1) return;
-    hostSocket.send(JSON.stringify(displaysMessage(hostMonitors.rev, list, hostMonitors.current, allowSwitch())));
+    hostSocket.send(JSON.stringify(displaysMessage(hostMonitors.rev, list, hostMonitors.current, allowSwitch(), hostVideoMode)));
     hostMonitors.announcedAt = Date.now();
   }).catch(() => {});
   return announceChain;
@@ -1839,9 +1891,72 @@ async function onSwitchRequest(msg) {
   if (typeof window.mu?.notice === "function") window.mu.notice({ name, n: display, list: hostMonitors.list });
 }
 
+// Режим видео ведущего (hw / sw / jpeg) — для строки «В эфире» и зрителям в displays.
+let hostVideoMode = "";
+
+// ---- Метки у ведущего на странице ----
+// Приложение для Windows не может показать их поверх экрана так, чтобы их не было в видео (исключение из захвата не
+// встало: старая Windows 10, отказ Windows, нет помощника) — или это обычный браузер, где поверх экрана рисовать нечем.
+// Тогда ведущий видит их здесь, на схеме транслируемой области, а зрители — только свои (без копии в видео).
+const hostMarks = [];
+let marksOnScreen = null, marksReason = "", marksCovered = null, hostSurface = "", hostSourceAspect = 16 / 9, hostMarkTextTimer = 0;
+const HOST_MARKS_NOTES = {
+  "old-windows": "Метки зрителей — здесь: эта версия Windows не умеет скрывать окно меток из трансляции.",
+  "unprotected": "Метки зрителей — здесь: Windows не дала скрыть окно меток из трансляции.",
+  "no-answer": "Метки зрителей — здесь: не удалось проверить, скрыто ли окно меток из трансляции.",
+  "no-helper": "Метки зрителей — здесь: не удалось проверить, скрыто ли окно меток из трансляции.",
+};
+const hostMarksHere = () => !(window.mu && window.mu.mark) || marksOnScreen === false;
+// Окно ведущего над транслируемой областью — схема меток сама попала бы в видео (зритель увидел бы метку ещё раз).
+// Приложение знает это точно (`covered`); в браузере — только «транслируется весь монитор» (вкладка, скорее всего, на нём).
+const hostMarksCovered = () => window.mu && window.mu.mark ? marksCovered !== false : !["window", "browser"].includes(hostSurface);
+function hostShowMark(mark) {
+  if (!capture || !hostMarksHere()) return;
+  if (hostMarksCovered()) {
+    // Только строка, без схемы: кто и что сделал.
+    const who = liveViewers.length === 1 && liveViewers[0].name ? liveViewers[0].name : "Зритель";
+    hostMarks.length = 0;
+    $("hostMarksMap").style.display = "none";
+    $("hostMarksNote").textContent = `${who} ${mark.type === "stroke" ? "рисует" : "ставит метку"} — на экране не показываем, иначе метка попадёт в трансляцию`;
+    $("hostMarks").style.display = "block";
+    clearTimeout(hostMarkTextTimer);
+    hostMarkTextTimer = setTimeout(() => { if (!hostMarks.length) $("hostMarks").style.display = "none"; }, 3000);
+    return;
+  }
+  $("hostMarksMap").style.display = "";
+  hostMarks.push({ ...mark, born: performance.now() });
+  $("hostMarksNote").textContent = window.mu && window.mu.mark ? (HOST_MARKS_NOTES[marksReason] || HOST_MARKS_NOTES.unprotected)
+                                                                : "Метки зрителей — здесь: в браузере их нельзя показать поверх экрана.";
+  $("hostMarksMap").style.aspectRatio = String(hostSourceAspect);
+  $("hostMarks").style.display = "block";
+  if (hostMarks.length === 1) requestAnimationFrame(renderHostMarks);
+}
+function renderHostMarks() {
+  const canvas = $("hostMarksMap"), ctx = canvas.getContext("2d"), dpr = devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const now = performance.now();
+  for (let i = hostMarks.length - 1; i >= 0; i--) {
+    const m = hostMarks[i], age = (now - m.born) / 1000, life = m.type === "ping" ? 1.6 : 5;
+    if (age > life) { hostMarks.splice(i, 1); continue; }
+    drawMark(ctx, m, age, life, (p) => [p[0] * w, p[1] * h]);
+  }
+  if (hostMarks.length) requestAnimationFrame(renderHostMarks);
+  else $("hostMarks").style.display = "none";
+}
+if (window.mu && typeof window.mu.onMarksState === "function") {
+  window.mu.onMarksState((state) => {
+    marksOnScreen = !!state?.screen; marksReason = typeof state?.reason === "string" ? state.reason : "";
+    marksCovered = typeof state?.covered === "boolean" ? state.covered : null;
+  });
+}
+
 function renderLiveText() {
   const people = liveViewers.length ? `смотрят: ${liveViewers.map((v) => v.name).join(", ")}` : "никто не смотрит";
-  $("liveText").textContent = `В эфире · ${people}${hostMonitors.note ? ` · ${hostMonitors.note}` : ""}`;
+  const mode = videoModeLabel(hostVideoMode === "jpeg" ? "jpeg" : "h264", hostVideoMode);
+  $("liveText").textContent = `В эфире · ${mode ? `${mode} · ` : ""}${people}${hostMonitors.note ? ` · ${hostMonitors.note}` : ""}`;
 }
 
 function onHostMessage(ws, event) {
@@ -1859,6 +1974,7 @@ function onHostMessage(ws, event) {
   }
   // Метка или рисунок зрителя — на экран ведущего (в приложении для Windows — поверх всего).
   if ((msg.type === "ping" || msg.type === "stroke") && window.mu && window.mu.mark) window.mu.mark(msg);
+  if (msg.type === "ping" || msg.type === "stroke") hostShowMark(msg);
   if (msg.type === "request") onRequest(msg);
   if (msg.type === "game") gameReceive(msg, msg.from, msg.name, hostGameSend(msg.from));
   if (msg.type === "switch-request") onSwitchRequest(msg);
@@ -1899,6 +2015,7 @@ async function reconnectHost(code) {
 
 function stopHost(message) {
   audience = []; $("gameButton").style.display = "none";
+  hostVideoMode = ""; hostMarks.length = 0; $("hostMarks").style.display = "none";
   liveViewers = []; Object.assign(hostMonitors, { list: [], current: 0, switching: false, lastSwitchAt: -Infinity, announcedAt: -Infinity, note: "" });
   $("switchButton").style.display = "none";
   $("muteButton").style.display = "none"; $("mutePanel").style.display = "none";

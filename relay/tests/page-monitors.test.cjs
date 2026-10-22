@@ -10,7 +10,7 @@ const html = fs.readFileSync(`${__dirname}/../src/index.html`, 'utf8');
 const block = html.slice(html.indexOf('// <monitor-switch>'), html.indexOf('// </monitor-switch>'));
 assert.ok(block.length > 1000, 'метки <monitor-switch> на месте');
 const page = vm.createContext({});
-vm.runInContext(`${block}\nObject.assign(this, { switchDecision, displaysRevision, displaysMessage, swapVideoTrack, displayLabel, displaysLayout, monitorViewer, monitorKey, SWITCH_WAIT_MS, allowSwitchFrom, switchResult, shouldReannounce });`, page);
+vm.runInContext(`${block}\nObject.assign(this, { switchDecision, displaysRevision, displaysMessage, swapVideoTrack, displayLabel, displaysLayout, monitorViewer, monitorKey, SWITCH_WAIT_MS, allowSwitchFrom, switchResult, shouldReannounce, videoModeLabel, jpegIsBridge });`, page);
 const fixture = JSON.parse(fs.readFileSync(`${__dirname}/fixtures/displays.json`, 'utf8'));
 const KATE = fixture.valid[0].expected;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -51,6 +51,30 @@ test('сообщение displays: как в фикстуре; выключен�
   assert.deepEqual(plain(page.displaysMessage(8, KATE.list, 0, true)), { type: 'displays', v: 1, rev: 8, list: [] });
   const many = fixture.valid[2].expected.list.concat([{ ...KATE.list[0], n: 9 }]);
   assert.equal(page.displaysMessage(1, many, 1, true).list.length, 8);
+});
+
+test('displays с режимом видео ведущего: поле video только из hw / sw / jpeg', () => {
+  assert.deepEqual(plain(page.displaysMessage(7, KATE.list, 2, true, 'hw')), { ...KATE, video: 'hw' });
+  assert.deepEqual(plain(page.displaysMessage(8, KATE.list, 2, false, 'jpeg')), { type: 'displays', v: 1, rev: 8, list: [], video: 'jpeg' });
+  assert.deepEqual(plain(page.displaysMessage(8, KATE.list, 2, false, '')), { type: 'displays', v: 1, rev: 8, list: [] });
+  assert.deepEqual(plain(page.displaysMessage(8, KATE.list, 2, false, 'gpu')), { type: 'displays', v: 1, rev: 8, list: [] });
+});
+
+test('JPEG после H.264: мост — только если H.264 не было дольше 0,7 с; кадры для старых зрителей не показываются', () => {
+  assert.equal(page.jpegIsBridge(1000, -Infinity), true, 'H.264 не было — старый ведущий или нет кодера');
+  assert.equal(page.jpegIsBridge(1000, 750), false, 'ведущий Mac шлёт JPEG раз в 0,25 с вперемешку с H.264');
+  assert.equal(page.jpegIsBridge(1000, 300), false, 'ровно 0,7 с — ещё нет');
+  assert.equal(page.jpegIsBridge(1000, 299), true, 'H.264 пропал дольше 0,7 с — мост');
+});
+
+test('подпись режима видео: видеокарта, без видеокарты, картинки; старый ведущий без поля — просто «Видео»', () => {
+  assert.equal(page.videoModeLabel('h264', 'hw'), 'Видео · видеокарта');
+  assert.equal(page.videoModeLabel('h264', 'sw'), 'Видео · без видеокарты');
+  assert.equal(page.videoModeLabel('h264', ''), 'Видео', 'старый ведущий (Mac до этой версии, старый relay)');
+  assert.equal(page.videoModeLabel('jpeg', 'hw'), 'Картинки', 'пришли картинки — так и пишем, что бы ни сказал ведущий');
+  assert.equal(page.videoModeLabel('jpeg', ''), 'Картинки');
+  assert.equal(page.videoModeLabel('', 'sw'), 'Видео · без видеокарты', 'кадров ещё нет — по словам ведущего');
+  assert.equal(page.videoModeLabel('', ''), '');
 });
 
 test('зритель: первый список без плашки, клик → запрос с ревизией, ok и новый current — готово, метки заново', () => {
