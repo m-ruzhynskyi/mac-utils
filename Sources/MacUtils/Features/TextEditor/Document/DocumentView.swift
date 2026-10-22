@@ -124,14 +124,36 @@ final class DocTextView: NSTextView {
 
     // MARK: Меню и перетаскивание
 
-    /// Контекстное меню: «Показать в коде» — то же место в исходнике.
+    /// Контекстное меню: «Показать в коде» — то же место в исходнике; в таблице — строки.
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for: event) ?? NSMenu()
         let item = NSMenuItem(title: "Показать в коде", action: #selector(showInCode(_:)), keyEquivalent: "")
         item.target = self
         menu.insertItem(item, at: 0)
         menu.insertItem(.separator(), at: 1)
+        if controller?.cellAtSelection != nil {
+            for (index, (title, action)) in [("Вставить строку выше", #selector(insertRowAbove(_:))), ("Вставить строку ниже", #selector(insertRowBelow(_:))),
+                                             ("Удалить строку", #selector(deleteRow(_:)))].enumerated() {
+                let row = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                row.target = self
+                menu.insertItem(row, at: 2 + index)
+            }
+            menu.insertItem(.separator(), at: 5)
+        }
         return menu
+    }
+
+    @objc func insertRowAbove(_ sender: Any?) { controller?.insertTableRow(below: false) }
+    @objc func insertRowBelow(_ sender: Any?) { controller?.insertTableRow(below: true) }
+    @objc func deleteRow(_ sender: Any?) { controller?.deleteTableRow() }
+
+    // Tab в таблице — по ячейкам, как в Word.
+    override func insertTab(_ sender: Any?) {
+        if controller?.tabInTable(forward: true) != true { super.insertTab(sender) }
+    }
+
+    override func insertBacktab(_ sender: Any?) {
+        if controller?.tabInTable(forward: false) != true { super.insertBacktab(sender) }
     }
 
     @objc func showInCode(_ sender: Any?) {

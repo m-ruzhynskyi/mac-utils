@@ -110,7 +110,8 @@ enum DocTextEditor {
         for unit in range.location..<NSMaxRange(range) {
             switch map.kind(at: unit) {
             case .object: return "Рисунки и фигуры не правятся в «Документе». " + codeHint
-            case .cellEnd: return "Ячейки таблиц не удаляются в этом выпуске. " + codeHint
+            // Конец ячейки, как в Word, не удаляется и без подсказки: структура таблицы остаётся.
+            case .cellEnd: continue
             case .sectionEnd, .sectionBreak: return "Разрыв раздела не удаляется в «Документе». " + codeHint
             case .listText: return "Номера списков правятся в следующем выпуске. " + codeHint
             case .paragraphEnd: return "Абзацы таблицы и текста не склеиваются. " + codeHint

@@ -120,7 +120,7 @@ final class DocEditUITests: XCTestCase {
         XCTAssertEqual(view.selectedRange().location, start - 1)
         let model = RTFReader.read(tab.text)
         XCTAssertEqual(model.body.paragraphs.first?.props.alignment, .center)
-        // Удаление конца ячейки — нельзя: подсказка, текст не тронут.
+        // Удаление конца ячейки — нельзя, как в Word: текст не тронут, подсказки «в коде» нет.
         let before = tab.text as String
         let cell = (document.storage.string as NSString).range(of: "Показатель").location
         view.setSelectedRange(NSRange(location: cell, length: 0))
@@ -128,7 +128,7 @@ final class DocEditUITests: XCTestCase {
         XCTAssertEqual(tab.text as String, before, "через границу ячейки NSTextView не удаляет")
         XCTAssertFalse(document.perform(replacing: NSRange(location: cell - 1, length: 1), with: ""))
         XCTAssertEqual(tab.text as String, before)
-        XCTAssertNotNil(document.notice, "подсказка «Изменить в коде»")
+        XCTAssertNil(document.notice, "без подсказки")
     }
 
     func testInputMethodCommitsOnce() throws {
