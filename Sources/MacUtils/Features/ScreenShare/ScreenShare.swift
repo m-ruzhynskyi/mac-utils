@@ -400,6 +400,7 @@ final class ScreenShare: NSObject, ObservableObject {
                 do {
                     try tap.restart()
                     Log.capture.info("Звук трансляции: выход или частота сменились, перехват пересобран")
+                    watchTapStart(tap)
                 } catch {
                     Log.capture.error("Звук трансляции: перехват не пересобран — \(error.localizedDescription, privacy: .public); переходим на ScreenCaptureKit")
                     fallBackToStream()
@@ -454,9 +455,30 @@ final class ScreenShare: NSObject, ObservableObject {
         Log.capture.info("Звук трансляции: перехват, исключено \(ShareAudioExclusion.summary(excluded), privacy: .public)")
         // Частота сменилась посреди трансляции — та же пересборка, что при смене выхода.
         (audioTap as? ShareAudioTap)?.onFormatChange = { ScreenShare.shared.refreshAudioFilter() }
+        if let tap = audioTap as? ShareAudioTap { watchTapStart(tap) }
         audioPermission = PermissionWatch()
         startAudioCheck()
         return true
+    }
+
+    /// Сторож запуска перехвата (`ShareTapWatchdog`): через 3 с после запуска — ни одного колбэка IOProc или ни одного
+    /// буфера перехвата с данными — это ошибка Core Audio, звук через ScreenCaptureKit (с Toast), перехват — снова при
+    /// новой обстановке (`tapRetry`). Тишина при идущих колбэках не откатывает (там помощники Discord не исключаются).
+    @available(macOS 14.2, *)
+    private func watchTapStart(_ tap: ShareAudioTap) {
+        let generation = tap.generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + ShareTapWatchdog.window) {
+            MainActor.assumeIsolated {
+                let share = ScreenShare.shared
+                guard let current = share.audioTap as? ShareAudioTap, current === tap, tap.generation == generation else { return }
+                let report = tap.watchdogReport()
+                Log.capture.info("Звук трансляции: \(report.summary, privacy: .public)")
+                guard report.verdict != .ok else { return }
+                Log.capture.error("Звук трансляции: перехват не работает (\(report.verdict == .noCallbacks ? "нет колбэков" : "нет данных", privacy: .public)) — переходим на ScreenCaptureKit")
+                share.tapRetry.failed(in: ShareTapRetry.situation())
+                share.fallBackToStream()
+            }
+        }
     }
 
     /// Звук пошёл через ScreenCaptureKit: помощники заглушённых программ (Discord) там не исключаются — говорим об этом.
