@@ -23,6 +23,15 @@ enum DocTextEditor {
                         source: NSString) -> Result {
         let story = story ?? model.body
         var result = Result()
+        // Пустой абзац у таблицы — удаляется целиком, как в Word (E-1).
+        if text.isEmpty, story.range == model.body.range,
+           let removal = DocTableEdit.emptyParagraphNearTable(units, model: model, map: map, source: source) {
+            result.edits = removal.edits
+            result.deletedUnits = [removal.removedUnit]
+            result.insertionUnit = removal.caretUnit
+            result.caretSource = removal.caretSource
+            return result
+        }
         let range = NSRange(location: min(units.location, map.count), length: max(0, min(NSMaxRange(units), map.count) - min(units.location, map.count)))
         var deletions: [NSRange] = []
         var fieldsDeleted = Set<Int>()
@@ -71,7 +80,8 @@ enum DocTextEditor {
             // Пустой абзац со скрытым знаком конца: набранное иначе было бы невидимым.
             if insertion.run == nil, insertion.paragraphEnd?.endProps.hidden == true { encoded = "{\\v0 " + encoded + "}" }
             let prefix = needsDelimiter(before: insertion.source, source: source) ? " " : ""
-            var edits = deletions.map { DocEdit(range: $0, text: "") }
+            // Удалённый кусок не должен склеить управляющее слово со следующей буквой (`{\b` + `a` → `\ba`).
+            var edits = deletions.map { DocEdit(range: $0, text: delimiterAfterRemoval($0, source: source) ? " " : "") }
             // Набранное — на месте первого удалённого куска (его свойства), иначе — отдельной вставкой.
             if let index = edits.firstIndex(where: { $0.range.location == insertion.source }) {
                 edits[index].text = prefix + encoded
@@ -175,6 +185,8 @@ enum DocTextEditor {
         while unit < count - 1, [.sectionBreak, .pageBreak].contains(map.kind(at: unit)), unit == 0 || !map.kind(at: unit - 1).isEditable {
             unit += 1
         }
+        // После последнего ¶ курсора в Word нет: набранное — в конец последнего абзаца, перед его концом.
+        if unit >= count, count > 0, [.paragraphEnd, .storyEnd, .sectionEnd].contains(map.kind(at: count - 1)) { unit = count - 1 }
         let previous = unit > 0 ? map.kind(at: unit - 1) : nil
         let next = unit < count ? map.kind(at: unit) : nil
         // Внутри или на границе неделимого поля — снаружи поля.
