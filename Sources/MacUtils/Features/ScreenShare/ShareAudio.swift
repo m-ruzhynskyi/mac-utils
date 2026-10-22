@@ -469,6 +469,9 @@ final class ShareAudioTap: @unchecked Sendable {
         return try update(excluding: pending)
     }
 
+    /// Перехват собран и запущен (неудачная пересборка его останавливает).
+    var isRunning: Bool { aggregateID != kAudioObjectUnknown && procID != nil }
+
     /// Сколько колбэков IOProc с последнего запуска (для проверки после смены описания).
     var callbackCount: Int {
         watchLock.lock(); defer { watchLock.unlock() }

@@ -417,6 +417,11 @@ final class ScreenShare: NSObject, ObservableObject {
                 if result == .rebuilt { watchTapStart(tap) }
             } catch {
                 Log.capture.error("Звук трансляции: список исключённых не обновлён — \(error.localizedDescription, privacy: .public)")
+                // Пересборка с новым списком не удалась — перехват остановлен: запасной способ, а не тишина.
+                if !tap.isRunning {
+                    tapRetry.failed(in: ShareTapRetry.situation())
+                    fallBackToStream()
+                }
             }
             return
         }
@@ -477,10 +482,18 @@ final class ScreenShare: NSObject, ObservableObject {
                 Log.capture.info("Звук трансляции: \(report.summary, privacy: .public)")
                 guard report.verdict != .ok else {
                     // Колбэки идут — теперь применить отложенный список исключённых (свой процесс, поздние помощники).
-                    switch (try? tap.confirmIO()) ?? .unchanged {
-                    case .applied: share.watchTapAfterUpdate(tap)
-                    case .rebuilt: share.watchTapStart(tap)
-                    default: break
+                    do {
+                        switch try tap.confirmIO() {
+                        case .applied: share.watchTapAfterUpdate(tap)
+                        case .rebuilt: share.watchTapStart(tap)
+                        default: break
+                        }
+                    } catch {
+                        Log.capture.error("Звук трансляции: отложенный список исключённых не применён — \(error.localizedDescription, privacy: .public)")
+                        if !tap.isRunning {
+                            share.tapRetry.failed(in: ShareTapRetry.situation())
+                            share.fallBackToStream()
+                        }
                     }
                     return
                 }
