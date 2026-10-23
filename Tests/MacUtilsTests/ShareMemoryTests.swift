@@ -45,8 +45,10 @@ final class SharePlayerOutputChangeTests: XCTestCase {
         defer { player.stop() }
         for _ in 0..<5 { player.play(payload) }
         center.post(name: .AVAudioEngineConfigurationChange, object: AVAudioEngine())
+        player.waitForRestart()
         XCTAssertEqual(player.restarts, 0, "уведомление чужого движка игнорируется")
         center.post(name: .AVAudioEngineConfigurationChange, object: player.engine)
+        player.waitForRestart()
         XCTAssertEqual(player.restarts, 1)
         XCTAssertEqual(player.queuedSeconds, 0, accuracy: 0.0001)
     }
