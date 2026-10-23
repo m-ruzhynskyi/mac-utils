@@ -7,6 +7,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
+import MUAudio
 
 /// «Запись»: видео выделенной области из режима снимка (MP4 или GIF).
 /// Кадры идут из SCStream с sourceRect; MP4 пишет AVAssetWriter (H.264),

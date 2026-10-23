@@ -3,6 +3,7 @@ import CoreVideo
 import CoreMedia
 import VideoToolbox
 @testable import MacUtils
+@testable import MUAudio
 
 /// Стенд частоты кадров кодера: синтетическое анимированное «демо-окно» (не экран пользователя) в H264Encoder.
 final class ShareFps60Tests: XCTestCase {

@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Окно редактора: одно окно — много вкладок. Пока оно открыто, Mac Utils — обычное приложение со значком в Dock
 /// и строкой меню «Файл / Правка / Поиск / Вид / Кодировка / Синтаксис»; с последним окном — снова фоновое.

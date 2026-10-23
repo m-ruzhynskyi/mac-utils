@@ -7,12 +7,12 @@ import MUCore
 /// раскладке (ghbdtn → привет и обратно). Выделенный текст — целиком,
 /// без выделения — последнее набранное слово. По желанию переключает раскладку.
 @MainActor
-final class LayoutFix: ObservableObject {
-    static let shared = LayoutFix()
+package final class LayoutFix: ObservableObject {
+    package static let shared = LayoutFix()
 
-    @Published private(set) var isRunning = false
+    @Published package private(set) var isRunning = false
     /// Горячая клавиша зарегистрирована (не занята другим приложением).
-    @Published private(set) var hotKeyRegistered = false
+    @Published package private(set) var hotKeyRegistered = false
 
     /// Метка наших синтетических нажатий, чтобы не записывать их в слово.
     private static let marker: Int64 = SelectedText.marker
@@ -37,7 +37,7 @@ final class LayoutFix: ObservableObject {
         }
     }
 
-    func sync() {
+    package func sync() {
         let defaults = UserDefaults.standard
         let wanted = defaults.bool(forKey: Pref.layoutFix) && Permissions.accessibility
         let key = LayoutHotKey.current
@@ -80,7 +80,7 @@ final class LayoutFix: ObservableObject {
     }
 
     /// Пока в настройках записывается новое сочетание, старое не должно срабатывать.
-    func suspendHotKey(_ suspended: Bool) {
+    package func suspendHotKey(_ suspended: Bool) {
         if suspended {
             HotKeyCenter.shared.unregister(id: HotKeyID.layoutFix)
             hotKey = nil
@@ -124,7 +124,7 @@ final class LayoutFix: ObservableObject {
 
     // MARK: - Перевод
 
-    func fix() {
+    package func fix() {
         guard !busy else { return }
         // Виртуальная машина / удалённый рабочий стол: синтетические Backspace и ввод ушли бы в гостевую систему.
         guard !AppExclusions.shared.isFrontExcluded else {
@@ -188,7 +188,7 @@ final class LayoutFix: ObservableObject {
     }
 
     /// Печатает строку юникодом — не зависит от текущей раскладки.
-    static func type(_ text: String) {
+    package static func type(_ text: String) {
         let source = CGEventSource(stateID: .combinedSessionState)
         let units = Array(text.utf16)
         var index = 0
@@ -210,10 +210,10 @@ final class LayoutFix: ObservableObject {
 
     // MARK: - Выделенный текст
 
-    static func selectedTextViaAX() -> String? { SelectedText.viaAX() }
+    package static func selectedTextViaAX() -> String? { SelectedText.viaAX() }
 
     /// Запасной путь для приложений без AX: ⌘C с сохранением и возвратом буфера обмена.
-    static func selectedTextViaCopy() async -> String? { await SelectedText.viaCopy() }
+    package static func selectedTextViaCopy() async -> String? { await SelectedText.viaCopy() }
 
     // MARK: - Раскладка
 
@@ -229,13 +229,13 @@ final class LayoutFix: ObservableObject {
     }
 
     /// Русская или украинская: настройка «Кириллица» (авто / русская / украинская).
-    static func cyrillicLayout() -> LayoutMap.CyrillicLayout {
+    package static func cyrillicLayout() -> LayoutMap.CyrillicLayout {
         let setting = UserDefaults.standard.string(forKey: cyrillicSettingKey)
         // В режиме «авто» включённые раскладки смотрим только если выбор вообще нужен.
         return LayoutMap.cyrillicLayout(setting: setting, enabledLanguages: setting == "russian" || setting == "ukrainian" ? [] : enabledKeyboardLanguages())
     }
 
-    static let cyrillicSettingKey = "layoutFixCyrillic"
+    package static let cyrillicSettingKey = "layoutFixCyrillic"
 
     private static func selectInputSource(for direction: LayoutMap.Direction) {
         let language = LayoutMap.inputLanguage(for: direction)

@@ -1,5 +1,6 @@
 import AppKit
 import MUDesign
+import MUAudio
 
 extension NSAttributedString.Key {
     /// Свойства символа документа для панели форматирования (`DocCharInfo`).

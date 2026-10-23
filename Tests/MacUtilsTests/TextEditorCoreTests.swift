@@ -2,6 +2,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUDesign
+@testable import MUAudio
 
 /// Ядро текстового редактора: правило «$ и значение», кодировки без потери байтов, переводы строк.
 final class DollarMarksTests: XCTestCase {

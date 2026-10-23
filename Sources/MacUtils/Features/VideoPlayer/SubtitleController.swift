@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Субтитры текущего файла: встроенные (tx3g, WebVTT в MP4) и внешние (SRT, ASS, VTT).
 /// Встроенные читаются из файла заранее и рисуются тем же слоем, что внешние: один вид, размер, подложка и сдвиг

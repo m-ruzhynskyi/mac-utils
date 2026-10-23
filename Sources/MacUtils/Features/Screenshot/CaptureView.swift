@@ -4,6 +4,7 @@ import Carbon.HIToolbox
 import CoreImage
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Полноэкранное окно с «замороженным» снимком одного монитора.
 @MainActor

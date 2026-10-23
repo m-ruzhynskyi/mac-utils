@@ -1,6 +1,7 @@
 import Foundation
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Знаки `$` в RTF по видимому тексту документа. Word делит текст на группы с форматированием и rsid:
 /// `$}{\rtlch\fcs1 \af0\afs32 \insrsid4548749  }{…\fs0  Иванов` — значение здесь «Иванов», а не пустое.

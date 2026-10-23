@@ -1,4 +1,5 @@
 import AppKit
+import MUAudio
 
 /// Кодирование и запись снимков без обращения к главному потоку и без перезаписи чужих файлов.
 enum ScreenshotEncoding {

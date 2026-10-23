@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import CoreImage
 import MUCore
+import MUAudio
 
 /// Снимок кадра (⇧S): ровно показанный кадр, HDR сводится в SDR, сохраняется в «Мои снимки» (папка дня, как у
 /// снимков экрана) и копируется в буфер. Отдельного диалога нет — тост v08c.

@@ -71,9 +71,30 @@ let package = Package(
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUUpdate"
         ),
+        // Core Audio: тапы процессов, агрегатные устройства, громкость. Общее для «Громкости» и «Трансляции».
+        .target(
+            name: "MUAudio",
+            dependencies: ["MUCore"],
+            path: "Sources/MUAudio"
+        ),
+        .target(
+            name: "MULayoutFix",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MULayoutFix"
+        ),
+        .target(
+            name: "MUAppVolume",
+            dependencies: ["MUCore", "MUDesign", "MUAudio"],
+            path: "Sources/MUAppVolume"
+        ),
+        .target(
+            name: "MUWindowSnap",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUWindowSnap"
+        ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -82,7 +103,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap"],
             path: "Tests/MacUtilsTests"
         ),
     ]

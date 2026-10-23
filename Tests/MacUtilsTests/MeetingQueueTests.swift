@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacUtils
 @testable import MUMeetings
+@testable import MUAudio
 
 /// Очередь расшифровки на диске (MAJOR-1): метка «В очереди», порядок, попытки, план восстановления при запуске.
 final class MeetingQueueTests: XCTestCase {

@@ -1,5 +1,6 @@
 import Foundation
 import MUCore
+import MUAudio
 
 // MARK: - Модель
 

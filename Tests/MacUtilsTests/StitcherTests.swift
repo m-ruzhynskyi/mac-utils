@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import XCTest
 @testable import MacUtils
+@testable import MUAudio
 
 final class StitcherTests: XCTestCase {
     private let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!

@@ -4,7 +4,7 @@ import Foundation
 import MUCore
 
 /// Общий интерфейс перехвата (сам перехват есть только с macOS 14.2).
-protocol VolumeTapping: AnyObject {
+package protocol VolumeTapping: AnyObject {
     func stop()
 }
 
@@ -12,10 +12,10 @@ protocol VolumeTapping: AnyObject {
 /// вывод, а приватное агрегатное устройство (tap + текущий выход) проигрывает
 /// тот же звук с нужной громкостью.
 @available(macOS 14.2, *)
-final class AppVolumeTap: VolumeTapping, @unchecked Sendable {
-    let bundleID: String
-    let processObjects: [AudioObjectID]
-    let outputDevice: AudioObjectID
+package final class AppVolumeTap: VolumeTapping, @unchecked Sendable {
+    package let bundleID: String
+    package let processObjects: [AudioObjectID]
+    package let outputDevice: AudioObjectID
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -28,29 +28,29 @@ final class AppVolumeTap: VolumeTapping, @unchecked Sendable {
     /// Пики входа и выхода за последнее окно (для проверки и индикатора).
     private let levels = UnsafeMutablePointer<Float>.allocate(capacity: 2)
 
-    var gain: Float {
+    package var gain: Float {
         get { gainPointer.pointee }
         set { gainPointer.pointee = newValue }
     }
 
     /// (вход, выход) — пиковые уровни с прошлого чтения.
-    func takeLevels() -> (input: Float, output: Float) {
+    package func takeLevels() -> (input: Float, output: Float) {
         let result = (levels[0], levels[1])
         levels[0] = 0
         levels[1] = 0
         return result
     }
 
-    enum TapError: LocalizedError {
+    package enum TapError: LocalizedError {
         case status(String, OSStatus)
-        var errorDescription: String? {
+        package var errorDescription: String? {
             switch self {
             case .status(let step, let status): return "\(step): ошибка Core Audio \(status)"
             }
         }
     }
 
-    init(bundleID: String, processObjects: [AudioObjectID], outputDevice: AudioObjectID, gain: Float) throws {
+    package init(bundleID: String, processObjects: [AudioObjectID], outputDevice: AudioObjectID, gain: Float) throws {
         self.bundleID = bundleID
         self.processObjects = processObjects
         self.outputDevice = outputDevice
@@ -122,7 +122,7 @@ final class AppVolumeTap: VolumeTapping, @unchecked Sendable {
         guard status == noErr else { throw TapError.status("Запуск вывода", status) }
     }
 
-    func stop() {
+    package func stop() {
         if aggregateID != kAudioObjectUnknown {
             if let procID {
                 AudioDeviceStop(aggregateID, procID)

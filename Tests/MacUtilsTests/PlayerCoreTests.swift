@@ -1,6 +1,7 @@
 import AVFoundation
 import XCTest
 @testable import MacUtils
+@testable import MUAudio
 
 /// Детерминированный генератор для перемешивания в тестах.
 struct PlayerTestRandom: RandomNumberGenerator {

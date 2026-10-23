@@ -2,6 +2,7 @@ import Carbon.HIToolbox
 import Foundation
 import MUCore
 import MUDesign
+import MUWindowSnap
 
 /// Сочетание Mac Utils, которое можно переназначить.
 /// Функции регистрируют свои сочетания как раньше (`HotKeyCenter.register` со значением по умолчанию),

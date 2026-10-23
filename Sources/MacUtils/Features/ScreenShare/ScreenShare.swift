@@ -6,6 +6,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Код комнаты и адрес (без сети — для тестов).
 enum ShareCode {

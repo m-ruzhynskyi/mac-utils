@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUAudio
 
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {

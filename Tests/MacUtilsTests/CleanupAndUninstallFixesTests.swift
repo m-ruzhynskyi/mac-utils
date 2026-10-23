@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacUtils
 @testable import MUUninstaller
+@testable import MUAudio
 
 /// T2–T5 (очистка диска) и U2–U3 (удаление программ).
 @MainActor

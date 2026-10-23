@@ -1,5 +1,6 @@
 import AppKit
 import CoreText
+import MUAudio
 
 /// Чем показать шрифт Word на Mac. В файле всегда остаётся исходное имя — замена только для экрана.
 enum FontSubstitution {

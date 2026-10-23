@@ -4,6 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Встряхивание мышью: несколько резких смен направления по горизонтали за короткое время.
 struct ShakeDetector {

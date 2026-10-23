@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUAudio
 
 final class VolumeMathTests: XCTestCase {
     func testGain() {

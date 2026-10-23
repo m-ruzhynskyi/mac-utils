@@ -5,6 +5,8 @@ import MUDesign
 import MUWellbeing
 import MUMeetings
 import MUQR
+import MUAppVolume
+import MUWindowSnap
 
 extension Notification.Name {
     /// Открыть в настройках нужный раздел (object — SettingsSection).
