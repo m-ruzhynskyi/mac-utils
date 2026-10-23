@@ -11,6 +11,7 @@ const { spawn } = require("node:child_process");
 const { TITLES, downloadURL, programOf } = require("./models");
 const { createConnector } = require("./connect");
 const { createUia } = require("./uia");
+const { createConcealedWriter } = require("./concealed");
 const { createHud } = require("./hud");
 const editor = require("./editor");
 const templates = require("./templates");
@@ -39,7 +40,7 @@ function sanitizePatch(patch) {
 }
 
 // electron: { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, dialog, nativeImage, screen };
-// options: { icon, userData, connector?, editor?, templates?, hud?, log?, copyText? } — copyText(text) кладёт в буфер обмена ID
+// options: { icon, userData, connector?, editor?, templates?, hud?, log?, copyText?, writeConcealed? } — writeConcealed(secret) → Promise<boolean> кладёт секрет в буфер мимо журнала Win+V и облака; copyText(text) кладёт в буфер обмена ID
 // TeamViewer, когда подключение не подтвердилось (передаётся из main.js; пароль через него не идёт). Возвращает управляющий объект (тесты и main.js).
 function init(electron, options = {}) {
   const { app, BrowserWindow, Tray, Menu, MenuItem, globalShortcut, ipcMain, shell, dialog, nativeImage, screen } = electron;
@@ -53,6 +54,9 @@ function init(electron, options = {}) {
   const hud = { show(state) { if (state.kind === "success" && !settings.data.notify) return; realHud.show(state); } };
   const connector = options.connector || createConnector({ exists: fs.existsSync, customPaths: () => settings.data.programPaths, spawn,
     uia: createUia(spawn), hud, openExternal: (url) => shell.openExternal(url), log, copyText: options.copyText });
+  // Секреты (пароль учётки, «Доступ») — в буфер только мимо журнала буфера Windows и облачной синхронизации (W2-5). Не Windows —
+  // такого помощника нет (null): секрет тогда в буфер не кладётся.
+  const writeConcealed = options.writeConcealed || (process.platform === "win32" ? createConcealedWriter(spawn) : null);
   const service = new RemoteService({ settings, store, connector });
   let windowRef = null, paletteRef = null, tray = null, hotkeyOk = true, registered = "";
 
@@ -251,7 +255,7 @@ function init(electron, options = {}) {
   } catch (_) {}
 
   return {
-    service, settings, store, entryMenu, openWindow, openPalette, registerHotkey, trayTemplate, connect, hudAction, titles: TITLES,
+    service, settings, store, entryMenu, openWindow, openPalette, registerHotkey, trayTemplate, connect, hudAction, writeConcealed, titles: TITLES,
     get hotkeyOk() { return hotkeyOk; },
     dispose() { try { globalShortcut.unregisterAll?.(); } catch (_) {} store.stop(); tray?.destroy?.(); },
   };

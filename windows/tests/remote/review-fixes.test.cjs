@@ -71,11 +71,12 @@ test("W-R3: пароль не на латинице уходит в stdin PowerS
     const child = new EventEmitter();
     child.stdout = new EventEmitter(); child.kill = () => {};
     child.stdin = Object.assign(new EventEmitter(), { write: (d, cb) => { written.push(Buffer.from(d)); cb?.(); }, end() {} });
-    setImmediate(() => { child.stdout.emit("data", Buffer.from('{"state":"entered"}\n')); child.emit("exit", 0); });
+    // Пароль — только по «passwordField» (W2-3): скрипт просит его, когда нашёл поле.
+    setImmediate(() => { child.stdout.emit("data", Buffer.from('{"state":"passwordField"}\n')); setTimeout(() => { child.stdout.emit("data", Buffer.from('{"state":"connected"}\n')); child.emit("exit", 0); }, 5); });
     return child;
   };
   return createUia(spawn).enter({ timeoutMs: 5000 }, new SecretBuffer(password)).then((result) => {
-    assert.equal(result.state, "entered");
+    assert.equal(result.state, "connected");
     assert.equal(Buffer.concat(written).toString("utf8"), `{"timeoutMs":5000}\n${password}\n`);
   });
 });
@@ -132,7 +133,7 @@ test("W-R5: копия пароля с переводом строки зати�
     const child = new EventEmitter();
     child.stdout = new EventEmitter(); child.kill = () => {}; child.unref = () => {};
     child.stdin = Object.assign(new EventEmitter(), { write: (d, cb) => { captured.push(d); cb?.(); return true; }, end() {} });
-    setImmediate(() => { child.stdout.emit("data", Buffer.from('{"state":"entered"}\n')); child.emit("exit", 0); });
+    setImmediate(() => { child.stdout.emit("data", Buffer.from('{"state":"passwordField"}\n')); setTimeout(() => { child.stdout.emit("data", Buffer.from('{"state":"connected"}\n')); child.emit("exit", 0); }, 5); });
     return child;
   };
   const connector = createConnector({ exists: (p) => p === AD, spawn, hud: { show() {} } });
@@ -174,7 +175,7 @@ test("W-R9: TeamViewer запускается, только когда скри�
     child.stdin = Object.assign(new EventEmitter(), { write: (_d, cb) => { cb?.(); return true; }, end() {} });
     if (/powershell/i.test(file)) {
       order.push("powershell");
-      setImmediate(() => { order.push("ready"); child.stdout.emit("data", Buffer.from('{"state":"ready"}\n')); setTimeout(() => { child.stdout.emit("data", Buffer.from('{"state":"entered"}\n')); child.emit("exit", 0); }, 20); });
+      setImmediate(() => { order.push("ready"); child.stdout.emit("data", Buffer.from('{"state":"ready"}\n')); setTimeout(() => { child.stdout.emit("data", Buffer.from('{"state":"connected"}\n')); child.emit("exit", 0); }, 20); });
     } else order.push("teamviewer");
     return child;
   };

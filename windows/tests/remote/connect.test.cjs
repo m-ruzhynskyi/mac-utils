@@ -16,7 +16,7 @@ const PASSWORD = "PWD-CANARY-секрет-77";
 const settings = { defaultProgram: "anyDesk", timeoutSeconds: 20, programPaths: {} };
 const record = (extra = {}) => ({ sourceRow: 2, name: "Лаборатория Север", id: "123456789", program: null, hasPassword: true, ...extra });
 
-function rig({ installed = [AD, TV], secret = PASSWORD, uiaResult = { state: "entered" }, exit = null, passwordThrows = false } = {}) {
+function rig({ installed = [AD, TV], secret = PASSWORD, uiaResult = { state: "connected" }, exit = null, passwordThrows = false } = {}) {
   const log = [], states = [], spawned = [], opened = [];
   const fakeSpawn = (file, args, opts) => {
     const child = new EventEmitter();
@@ -30,7 +30,7 @@ function rig({ installed = [AD, TV], secret = PASSWORD, uiaResult = { state: "en
   let secretRef = null;
   const store = { password: async () => { if (passwordThrows) throw new Error("gone"); if (secret == null) return null; secretRef = new SecretBuffer(secret); return secretRef; } };
   const uiaCalls = [];
-  const uia = { enter: async (opts, s, onEvent) => { await opts.afterReady?.(); uiaCalls.push({ opts, bytes: s ? Buffer.from(s.bytes) : null }); onEvent({ state: "waiting" }); return uiaResult; }, cancel() { uiaCalls.cancelled = true; } };
+  const uia = { enter: async (opts, password, onEvent) => { await opts.afterReady?.(); const s = typeof password === "function" ? await password() : password; uiaCalls.push({ opts, bytes: s ? Buffer.from(s.bytes) : null }); onEvent({ state: "waiting" }); return uiaResult; }, cancel() { uiaCalls.cancelled = true; } };
   const connector = createConnector({ exists: (p) => installed.includes(p), spawn: fakeSpawn, uia, hud: { show: (s) => states.push(s) }, openExternal: (u) => opened.push(u), log: (l) => log.push(l) });
   return { connector, states, spawned, log, opened, store, uiaCalls, get secret() { return secretRef; } };
 }
@@ -106,12 +106,14 @@ test("TeamViewer: запуск с -i ID без пароля в аргумент�
   assert.ok(!everything(r).includes(PASSWORD));
   assert.ok(r.secret.isWiped);
   assert.ok(r.states.some((s) => /Жду окно пароля/.test(s.title)));
-  assert.match(r.states.at(-1).title, /Пароль введён/);
+  assert.equal(r.states.at(-1).title, "Подключено");
 });
 
 test("TeamViewer: исходы UI Automation → тосты по дизайну; пароль затёрт в каждом", async () => {
   const cases = [
-    ["session", true, /Подключено без пароля/], ["noPrompt", false, /Не удалось подтвердить подключение/], ["noWindow", false, /Введите пароль вручную/], ["passwordNeeded", true, /Введите пароль в окне TeamViewer/],
+    ["connected", true, /^Подключено$/], ["entered", false, /сеанс не подтверждён/], ["submitted", false, /сеанс не подтверждён/], ["sessionClosed", false, /закрыл сеанс/],
+    ["session", true, /Подключено без пароля/], ["noPrompt", false, /Не удалось подключиться — ID скопирован|Не удалось подтвердить подключение/],
+    ["noWindow", false, /TeamViewer не открылся/], ["passwordNeeded", true, /Введите пароль в окне TeamViewer/], ["idMismatch", false, /от другого компьютера/],
     ["wrongPassword", false, /Проверьте пароль в файле/], ["focusLost", false, /Ввод прерван/],
     ["elevated", false, /запущен от администратора/], ["fieldNotFound", false, /Введите пароль вручную/], ["cancelled", false, /Отменено/],
   ];
@@ -160,20 +162,28 @@ function fakePowerShell(lines, { exitAfter = true } = {}) {
     child.stdin = { write: (d, cb) => { written.push(Buffer.from(d)); cb?.(); }, end() {} };
     child.kill = () => child.emit("exit", 1);
     calls.push({ file, args, opts, written });
-    setImmediate(() => { for (const l of lines) child.stdout.emit("data", Buffer.from(JSON.stringify(l) + "\n")); if (exitAfter) child.emit("exit", 0); });
+    // Как скрипт: после «passwordField» ждёт вторую строку stdin (пароль) и только потом продолжает.
+    setImmediate(async () => {
+      for (const l of lines) {
+        const had = written.length;
+        child.stdout.emit("data", Buffer.from(JSON.stringify(l) + "\n"));
+        if (l.state === "passwordField") for (let i = 0; i < 50 && written.length === had; i++) await new Promise((r) => setTimeout(r, 2));
+      }
+      if (exitAfter) child.emit("exit", 0);
+    });
     return child;
   };
   return { spawn, calls };
 }
 
 test("UI Automation: пароль и параметры — только через stdin, в аргументах PowerShell пароля нет; события доходят", async () => {
-  const ps = fakePowerShell([{ state: "waiting" }, { state: "waiting" }, { state: "entered" }]);
+  const ps = fakePowerShell([{ state: "waiting" }, { state: "waiting" }, { state: "passwordField" }, { state: "confirming" }, { state: "connected" }]);
   const uia = createUia(ps.spawn);
   const events = [];
   const secret = new SecretBuffer(PASSWORD);
   const result = await uia.enter({ timeoutMs: 20_000 }, secret, (e) => events.push(e.state));
-  assert.deepEqual(result, { state: "entered" });
-  assert.deepEqual(events, ["waiting", "waiting"]);
+  assert.deepEqual(result, { state: "connected" });
+  assert.deepEqual(events, ["waiting", "waiting", "confirming"], "passwordField — запрос пароля, не событие для окна");
   assert.ok(!JSON.stringify(ps.calls[0].args).includes(PASSWORD));
   assert.ok(ps.calls[0].args.includes("-NoProfile") && ps.calls[0].args.includes("-File"));
   const stdin = Buffer.concat(ps.calls[0].written).toString();
@@ -213,8 +223,11 @@ test("пароль нигде: исходники модуля не трогаю
   const files = [];
   (function walk(d) { for (const f of fs.readdirSync(d, { withFileTypes: true })) f.isDirectory() ? walk(path.join(d, f.name)) : files.push(path.join(d, f.name)); })(dir);
   const bad = /clipboard|localStorage|sessionStorage|keytar|safeStorage|CredWrite|cmdkey|reg\s+add|HKEY_|console\.(log|info|warn|error)|child_process.*password/i;
+  // Буфер обмена — только помощник для секретов мимо журнала Win+V и облака (concealed.js + clip-conceal.ps1, W2-5).
+  const clipboardOK = new Set(["concealed.js", "clip-conceal.ps1"]);
   for (const file of files.filter((f) => /\.(js|ps1|html)$/.test(f))) {
     const code = fs.readFileSync(file, "utf8").split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("#")).join("\n");
-    assert.ok(!bad.test(code), `${path.basename(file)}: ${(bad.exec(code) || [])[0]}`);
+    const rule = clipboardOK.has(path.basename(file)) ? new RegExp(bad.source.replace("clipboard|", ""), "i") : bad;
+    assert.ok(!rule.test(code), `${path.basename(file)}: ${(rule.exec(code) || [])[0]}`);
   }
 });

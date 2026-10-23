@@ -23,7 +23,7 @@ const record = (extra = {}) => ({ sourceRow: 2, name: "Лаборатория С
 
 // ---------- двойники ----------
 
-function rig({ installed = [AD, TV], secret = PW, uiaResult = { state: "entered" }, uiaThrows = false, exit = null, spawnThrows = false, passwordThrows = false } = {}) {
+function rig({ installed = [AD, TV], secret = PW, uiaResult = { state: "connected" }, uiaThrows = false, exit = null, spawnThrows = false, passwordThrows = false } = {}) {
   const r = { states: [], log: [], spawned: [], opened: [], uiaCalls: [], secrets: [], passwordCalls: 0 };
   const spawn = (file, args, opts) => {
     if (spawnThrows) throw new Error("spawn failed");
@@ -35,7 +35,7 @@ function rig({ installed = [AD, TV], secret = PW, uiaResult = { state: "entered"
     return child;
   };
   const store = { password: async () => { r.passwordCalls++; if (passwordThrows) throw new Error("gone"); if (secret == null) return null; const s = new SecretBuffer(secret); r.secrets.push(s); return s; } };
-  const uia = { enter: async (opts, s, onEvent) => { await opts.afterReady?.(); r.uiaCalls.push({ opts, bytes: s ? Buffer.from(s.bytes) : null }); onEvent({ state: "waiting" }); if (uiaThrows) throw new Error("uia crashed"); return uiaResult; }, cancel() { r.cancelled = true; } };
+  const uia = { enter: async (opts, password, onEvent) => { await opts.afterReady?.(); const s = typeof password === "function" ? await password() : password; r.uiaCalls.push({ opts, bytes: s ? Buffer.from(s.bytes) : null }); onEvent({ state: "waiting" }); if (uiaThrows) throw new Error("uia crashed"); return uiaResult; }, cancel() { r.cancelled = true; } };
   r.connector = createConnector({ exists: (p) => installed.includes(p), spawn, uia, hud: { show: (s) => r.states.push(s) }, openExternal: (u) => r.opened.push(u), log: (l) => r.log.push(l) });
   r.store = store;
   r.run = (rec = record(), opts = {}) => r.connector.connectRecord(rec, { settings, store, noPassword: false, ...opts });
@@ -148,8 +148,10 @@ test("TeamViewer: алиас не поддерживается; пароль н�
 
 test("TeamViewer: все исходы окна → правильные сообщения, пароль затёрт, в журнале только коды", async () => {
   const cases = [
-    [{ state: "entered" }, true, null, "success"], [{ state: "session" }, true, null, "success"],
-    [{ state: "noPrompt" }, false, "unconfirmed", "info"], [{ state: "noWindow" }, false, "noWindow", "warning"], [{ state: "passwordNeeded" }, true, null, "info"],
+    [{ state: "connected" }, true, null, "success"], [{ state: "session" }, true, null, "success"],
+    [{ state: "entered" }, false, "submitted", "info"], [{ state: "submitted" }, false, "submitted", "info"], [{ state: "sessionClosed" }, false, "sessionClosed", "warning"],
+    [{ state: "noPrompt" }, false, "unconfirmed", "info"], [{ state: "noWindow" }, false, "noWindow", "warning"],
+    [{ state: "passwordNeeded" }, true, null, "info"], [{ state: "idMismatch" }, false, "idMismatch", "warning"],
     [{ state: "wrongPassword" }, false, "wrongPassword", "danger"], [{ state: "focusLost" }, false, "focusLost", "warning"],
     [{ state: "elevated" }, false, "elevated", "warning"], [{ state: "fieldNotFound" }, false, "fieldNotFound", "warning"],
     [{ state: "cancelled" }, false, "cancelled", "info"], [{ state: "что-то-новое" }, false, "fieldNotFound", "warning"],
@@ -205,11 +207,14 @@ function psRig(script) {
 const say = (child, ...states) => states.forEach((s) => child.stdout.emit("data", Buffer.from(JSON.stringify({ state: s }) + "\n")));
 
 test("PowerShell: пароль только в stdin, параметры — первая строка JSON; в аргументах пароля нет; пароль не логируется", async () => {
-  const { uia, state } = psRig((c) => { say(c, "waiting", "entered"); });
+  // Пароль уходит в stdin только после «passwordField»: до этого во входе скрипта — одни параметры.
+  const before = [];
+  const { uia, state } = psRig((c, st) => { say(c, "waiting"); before.push(Buffer.concat(st.stdin).toString("utf8")); say(c, "passwordField"); setTimeout(() => say(c, "connected"), 5); });
   const events = [];
   const out = await uia.enter({ timeoutMs: 12_000 }, new SecretBuffer(PW), (e) => events.push(e));
-  assert.deepEqual(out, { state: "entered" });
-  assert.deepEqual(events, [{ state: "waiting" }]);
+  assert.deepEqual(out, { state: "connected" });
+  assert.deepEqual(events, [{ state: "waiting" }], "passwordField — не событие для окна, а запрос пароля");
+  assert.equal(before[0], JSON.stringify({ timeoutMs: 12_000 }) + "\n", "до поля пароля в stdin — только параметры");
   const args = state.calls[0].args;
   assert.ok(!args.join(" ").includes("КАНАРЕЙКА") && args.includes("-NoProfile") && args.includes("-NonInteractive"));
   assert.ok(args.includes(SCRIPT) && fs.existsSync(SCRIPT));
@@ -255,7 +260,12 @@ test("скрипт tv-uia.ps1: проверка процесса и фокуса
   assert.ok(!/Emit[^\n]*\$password/.test(ps), "Emit не принимает пароль");
   assert.ok(/\$password = \$null/.test(ps), "пароль в скрипте обнуляется");
   const sendkeys = [...ps.matchAll(/SendWait\([^)]*\)/g)].map((m) => m[0]);
-  assert.deepEqual(sendkeys, ["SendWait('{ENTER}')"], "SendKeys — только Enter, пароль клавиатурой не набирается");
+  assert.ok(sendkeys.length >= 1 && sendkeys.every((k) => k === "SendWait('{ENTER}')"), "SendKeys — только Enter, пароль клавиатурой не набирается");
+  // Пароль читается из stdin только после проверок и события «passwordField» (W2-3), фокус проверяется ещё раз после чтения.
+  assert.ok(at("Emit 'passwordField'") < at("$password = $reader.ReadLine()") && at("$password = $reader.ReadLine()") < at(enter));
+  assert.ok(at("Emit 'focusLost'") < at("Emit 'passwordField'"));
+  const afterRead = ps.slice(at("$password = $reader.ReadLine()"), at(enter));
+  assert.match(afterRead, /Get-ForegroundPid\) -ne \$pid2\) \{ Emit 'focusLost'/);
 });
 
 // ---------- Перебор ----------
@@ -263,7 +273,7 @@ test("скрипт tv-uia.ps1: проверка процесса и фокуса
 test("перебор 200 сценариев: пароль только в stdin AnyDesk / вход UIA, затёрт, нигде больше", async () => {
   let seed = 31337;
   const rnd = (n) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) >> 8) % n;
-  const uiaStates = ["entered", "noWindow", "noPrompt", "wrongPassword", "focusLost", "elevated", "fieldNotFound", "cancelled", "unknown"];
+  const uiaStates = ["entered", "connected", "submitted", "sessionClosed", "session", "passwordNeeded", "idMismatch", "noWindow", "noPrompt", "wrongPassword", "focusLost", "elevated", "fieldNotFound", "cancelled", "unknown"];
   const seen = new Set();
   for (let i = 0; i < 200; i++) {
     const program = rnd(2) ? "anyDesk" : "teamViewer";

@@ -56,7 +56,8 @@
       }
     ],
     "asarUnpack": [
-      "remote/tv-uia.ps1"
+      "remote/tv-uia.ps1",
+      "remote/clip-conceal.ps1"
     ]
   }
 }
