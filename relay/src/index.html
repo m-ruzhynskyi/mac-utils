@@ -1840,13 +1840,13 @@ function startCapture(stream, code) {
     source.connect(processor);
     processor.connect(audioContext.destination);
   }
-  stream.getVideoTracks()[0].onended = () => stopHost("Трансляция остановлена");
+  stream.getVideoTracks()[0].onended = onVideoEnded;
   // Другой монитор (зритель переключил): новая дорожка видео в тот же эфир — без переподключения, звук остаётся.
   // Кодер пересоздаётся сам по размеру кадра, первым идёт ключевой.
   const replaceVideo = (next) => {
     const track = swapVideoTrack(stream, next, () => timer.cancel());
     if (!track) return false;
-    track.onended = () => stopHost("Трансляция остановлена");
+    track.onended = onVideoEnded;
     video.srcObject = new MediaStream([track]);
     video.play();
     forceKey = true;
@@ -1899,6 +1899,30 @@ function setAllowSwitch(allowed) {
 $("switchButton").onclick = () => setAllowSwitch(!allowSwitch());
 $("allowSwitch").onchange = () => setAllowSwitch($("allowSwitch").checked);
 if (window.mu && typeof window.mu.onDisplays === "function") window.mu.onDisplays(() => announceDisplays());
+
+// Захват остановился сам (сон, выдернули монитор): в приложении для Windows пробуем взять тот же или основной монитор и
+// продолжить эфир; закрыли транслируемое окно или не вышло — эфир заканчивается с понятной причиной.
+let videoRecovering = false;
+const videoRecoveries = [];   // моменты попыток: не больше 3 за минуту, иначе дорожка кончается снова и снова — эфир заканчивается
+async function onVideoEnded() {
+  if (videoRecovering) return;
+  const now = Date.now();
+  while (videoRecoveries.length && now - videoRecoveries[0] > 60_000) videoRecoveries.shift();
+  if (canSwitchMonitors() && capture?.replaceVideo && hostMonitors.current > 0 && videoRecoveries.length < 3) {
+    videoRecoveries.push(now);
+    videoRecovering = true;
+    await new Promise((r) => setTimeout(r, 1000));   // пауза: монитор/система должны успокоиться
+    if (!capture) { videoRecovering = false; return; }
+    try {
+      const info = await window.mu.displays();
+      const list = Array.isArray(info?.list) ? info.list : [];
+      const target = list.find((d) => d.n === hostMonitors.current) || list.find((d) => d.primary) || list[0];
+      if (target && await switchCapture(target.n)) { videoRecovering = false; announceDisplays(); return; }
+    } catch (_) {}
+    videoRecovering = false;
+  }
+  stopHost("Захват остановлен (монитор отключён или окно закрыто) — трансляция завершена");
+}
 
 // Новый монитор в тот же эфир: приложение выбирает источник, страница берёт его новым getDisplayMedia (только видео).
 async function switchCapture(n) {

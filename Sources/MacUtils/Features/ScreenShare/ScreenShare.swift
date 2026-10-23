@@ -719,6 +719,8 @@ final class ScreenShare: NSObject, ObservableObject {
     private var lastDisplaySwitch: Date?
     private var lastDisplaysAnnounce: Date?
     private var screensObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+    private var recoveringCapture = false
 
     /// Номер транслируемого монитора (nil — окно или программа).
     private var currentDisplayNumber: Int? {
@@ -744,11 +746,91 @@ final class ScreenShare: NSObject, ObservableObject {
                                                                  object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { ScreenShare.shared.announceDisplays() }
         }
+        // После сна захват часто молча замирает: пересоздаём его (зрители видят последний кадр, потом картинка идёт).
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
+                                                                         object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { ScreenShare.shared.checkCaptureAfterWake() }
+        }
+    }
+
+    /// После пробуждения поток обычно жив: пересоздаём, только если экран молчит (даже «пустых» кадров нет) дольше 3 с.
+    func checkCaptureAfterWake() {
+        guard isLive, let sender else { return }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, self.isLive, self.sender === sender else { return }
+            if sender.secondsSinceScreenSample > 3 { self.recoverCapture(afterSleep: true) }
+        }
+    }
+
+    /// Захват экрана остановился (сон, выдернули монитор): для экрана пробуем собрать поток заново, для окна и программы
+    /// такого экрана нет — эфир заканчивается с понятной причиной.
+    func captureStopped(_ stopped: SCStream) {
+        // Остановился не текущий поток (старый, уже заменённый) или пересборка уже идёт — ничего не делаем.
+        guard isLive, !recoveringCapture, stream == nil || stream === stopped else { return }
+        guard videoDisplayID != nil else { return stop(reason: "Захват остановлен: окно закрыто или недоступно") }
+        recoverCapture(afterSleep: false)
+    }
+
+    /// Пересоздать поток экрана: тот же монитор, если он есть, иначе основной. Попытки с паузой 1, 2, 4, 8, 15 с;
+    /// звук, сокет и кодер остаются, ключевой кадр уходит сразу после запуска.
+    func recoverCapture(afterSleep: Bool) {
+        guard isLive, let sender, videoDisplayID != nil, !recoveringCapture else { return }
+        recoveringCapture = true
+        let old = stream
+        stream = nil
+        Log.capture.info("Трансляция: захват пересоздаётся (сон \(afterSleep ? 1 : 0))")
+        let oldAudio = audioStream
+        Task { [weak self] in
+            try? await old?.stopCapture()
+            // Запасной звук ScreenCaptureKit (без tap) живёт на том же делегате: после сна пересоздаём и его.
+            if let oldAudio {
+                try? await oldAudio.stopCapture()
+                if let self, self.isLive, self.sender === sender { self.audioStream = nil; try? await self.startAudio(sender: sender) }
+            }
+            for delay in [1.0, 2, 4, 8, 15] {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard let self, self.isLive, self.sender === sender else { return }
+                guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
+                      let display = content.displays.first(where: { $0.displayID == self.videoDisplayID })
+                        ?? content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first else { continue }
+                let filter = Self.displayFilter(display, content: content)
+                let fresh = SCStream(filter: filter, configuration: Self.videoConfiguration(for: filter), delegate: sender)
+                do {
+                    try fresh.addStreamOutput(sender, type: .screen, sampleHandlerQueue: sender.queue)
+                    try await fresh.startCapture()
+                } catch {
+                    Log.capture.error("Трансляция: захват не пересоздан, код \((error as NSError).code)")
+                    continue
+                }
+                // Эфир могли остановить (или начать новый) за время запуска — тогда новый поток никому не нужен.
+                guard self.isLive, self.sender === sender else {
+                    try? await fresh.stopCapture()
+                    self.recoveringCapture = false
+                    return
+                }
+                self.stream = fresh
+                self.videoFilter = filter
+                self.streamSizeOverride = nil
+                self.videoDisplayID = display.displayID
+                ShareMarksOverlay.shared.attach(to: filter, display: display.displayID)
+                sender.requestKeyFrame()
+                self.recoveringCapture = false
+                self.announceDisplays()
+                return
+            }
+            guard let self else { return }
+            self.recoveringCapture = false
+            if self.isLive { self.stop(reason: "Захват экрана остановлен") }
+        }
     }
 
     private func stopWatchingDisplays() {
         if let screensObserver { NotificationCenter.default.removeObserver(screensObserver) }
         screensObserver = nil
+        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        wakeObserver = nil
+        recoveringCapture = false
         hostDisplays = []
         switchingDisplay = false
         lastDisplaySwitch = nil
@@ -1306,6 +1388,14 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         return currentSocket
     }
 
+    private var lastSampleAt = ProcessInfo.processInfo.systemUptime
+    private func noteScreenSample() { lock.lock(); lastSampleAt = ProcessInfo.processInfo.systemUptime; lock.unlock() }
+    /// Сколько секунд от экрана не было ни одного кадра (в том числе «без изменений»).
+    var secondsSinceScreenSample: Double { lock.lock(); defer { lock.unlock() }; return ProcessInfo.processInfo.systemUptime - lastSampleAt }
+
+    /// Захват пересоздан: ключевой кадр сразу, чтобы зрители не ждали следующего.
+    func requestKeyFrame() { queue.async { self.encoder.requestKeyFrame() } }
+
     func replace(_ socket: URLSessionWebSocketTask) {
         lock.lock()
         currentSocket = socket
@@ -1436,6 +1526,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
             }
             return
         }
+        if type == .screen { noteScreenSample() }
         guard type == .screen, sampleBuffer.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
                 as? [[SCStreamFrameInfo: Any]],
@@ -1514,7 +1605,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         DispatchQueue.main.async {
-            MainActor.assumeIsolated { ScreenShare.shared.stop(reason: "Захват экрана остановлен") }
+            MainActor.assumeIsolated { ScreenShare.shared.captureStopped(stream) }
         }
     }
 }
