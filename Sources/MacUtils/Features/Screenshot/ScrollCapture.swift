@@ -405,10 +405,6 @@ final class ScrollCapture: NSObject, ObservableObject {
     }
 }
 
-final class HUDPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-}
-
 private struct ScrollCaptureHUD: View {
     @ObservedObject var capture: ScrollCapture
 
