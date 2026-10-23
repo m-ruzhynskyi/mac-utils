@@ -99,6 +99,40 @@ final class WordFidelityTests: XCTestCase {
         XCTAssertEqual(WordFidelity.top(a, b).1 - WordFidelity.top(a, b).0, 0.5, accuracy: 0.001, "другой шрифт, та же базовая линия")
     }
 
+    /// Растр своего же PDF против себя — 0 %; против пустого листа — доля закрашенного; старая база без колонок читается.
+    func testVisualComparison() throws {
+        var rtf = #"{\rtf1\ansi\deff0{\fonttbl{\f0\froman Times New Roman;}}{\colortbl;\red200\green0\blue0;}\paperw11906\paperh16838"#
+        for number in 1...30 { rtf += #"\pard\plain\fs24 Line "# + "\(number)" + #" of demo text\par "# }
+        rtf += #"\pard\plain\cf1\fs24 Red line\par}"#
+        let pdf = try render(try open(Data(rtf.utf8), name: "visual.rtf"))
+        let lines = WordFidelity.lines(pdf)
+        let same = WordVisual.compare(word: pdf, ours: pdf, wordLines: lines, ourLines: lines, wordSegments: [], ourSegments: [])
+        XCTAssertEqual(same.maxDifference, 0)
+        XCTAssertTrue(same.identical)
+        XCTAssertGreaterThan(same.inked[.text] ?? 0, 1000, "текст попал в область «текст»")
+        XCTAssertEqual(same.color(.text), 0)
+
+        let blank = WordVisual.compare(word: pdf, ours: PDFDocument(), wordLines: lines, ourLines: [], wordSegments: [], ourSegments: [])
+        XCTAssertEqual(blank.pages.count, pdf.pageCount, "нет нашей страницы — против пустого листа")
+        XCTAssertGreaterThan(blank.maxDifference, 0.005)
+        XCTAssertFalse(blank.identical)
+
+        // Тот же текст другим цветом: пикселей почти не меньше, а «цвет другой» в тексте — почти весь.
+        let red = try render(try open(Data(rtf.replacingOccurrences(of: #"\cf1"#, with: "").replacingOccurrences(of: #"\fs24 Line"#, with: #"\cf1\fs24 Line"#).utf8), name: "red.rtf"))
+        let colored = WordVisual.compare(word: pdf, ours: red, wordLines: lines, ourLines: WordFidelity.lines(red), wordSegments: [], ourSegments: [])
+        XCTAssertGreaterThan(colored.color(.text), 0.5, "чёрный против красного")
+
+        var row = WordGate.Row(name: "f001")
+        row.add(same)
+        XCTAssertEqual(WordGate.rows(WordGate.tsv([row])).first?.visualIdentical, true)
+        let old = WordGate.Row.header.prefix(WordGate.Row.headerWithoutVisual).joined(separator: "\t") + "\n"
+            + WordGate.Row(name: "f002").fields.prefix(WordGate.Row.headerWithoutVisual).joined(separator: "\t")
+        XCTAssertEqual(WordGate.rows(old).first.map { ($0.name, $0.hasVisual) }?.1, false)
+        var worse = row
+        worse.visualMax = 0.01
+        XCTAssertEqual(WordGate.worse(worse, than: row), ["пиксели 0,00 % → 1,00 %"])
+    }
+
     func testGateRulesAndTSV() {
         var base = WordGate.Row(name: "f001")
         base.pagesWord = 2; base.pagesOurs = 3; base.breaks = 0.9; base.shiftP95 = 4; base.cellWraps = 2; base.extraWords = 5
@@ -205,15 +239,22 @@ final class WordFidelityTests: XCTestCase {
                     let document = try open(data, name: "\(name).rtf")
                     let ours = try render(document)
                     let geometry = PageGeometry(document)
-                    let ourLines = WordFidelity.lines(ours)
-                    var result = WordFidelity.compare(word: WordFidelity.lines(wordPDF), ours: ourLines,
+                    let ourLines = WordFidelity.lines(ours), wordLines = WordFidelity.lines(wordPDF)
+                    let wordSegments = WordFidelity.segments(wordPDF), ourSegments = WordFidelity.segments(ours)
+                    var result = WordFidelity.compare(word: wordLines, ours: ourLines,
                                                       pagesWord: wordPDF.pageCount, pagesOurs: ours.pageCount,
-                                                      category: geometry.category, wordSegments: WordFidelity.segments(wordPDF),
-                                                      ourSegments: WordFidelity.segments(ours))
+                                                      category: geometry.category, wordSegments: wordSegments, ourSegments: ourSegments)
                     let sizes = zip(WordFidelity.pageSizes(wordPDF), WordFidelity.pageSizes(ours))
                     result.sizeMismatch = sizes.contains { abs($0.width - $1.width) > 1 || abs($0.height - $1.height) > 1 }
                     report.add(name, result, lines: ourLines, category: geometry.category, constructs: geometry.constructs)
-                    rows.append(WordGate.Row(name: name, result))
+                    var row = WordGate.Row(name: name, result)
+                    // Растры только в памяти (реальные формы): ни файлов, ни снимков. MU_WORD_VISUAL=0 — без них.
+                    if environment["MU_WORD_VISUAL"] != "0" {
+                        // Строка на каждую страницу — сторож скрипта видит, что длинная форма не зависла.
+                        row.add(WordVisual.compare(word: wordPDF, ours: ours, wordLines: wordLines, ourLines: ourLines,
+                                                   wordSegments: wordSegments, ourSegments: ourSegments) { Self.progress("word-fidelity \(name) пиксели, стр. \($0 + 1)") })
+                    }
+                    rows.append(row)
                 } catch {
                     report.failed.append(name)
                     rows.append(WordGate.Row(name: name, failed: true))
