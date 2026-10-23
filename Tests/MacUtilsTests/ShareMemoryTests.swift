@@ -69,3 +69,15 @@ final class SharePlayerOutputChangeTests: XCTestCase {
         XCTAssertEqual(player.restarts, 0)
     }
 }
+
+final class ShareVideoAckTests: XCTestCase {
+    func testAckEveryTenPacketsAndResetsOnNewSocket() {
+        let ack = ShareVideoAck()
+        let a = NSObject(), b = NSObject()
+        var sent: [Int] = []
+        for _ in 0..<25 { if let n = ack.received(on: a) { sent.append(n) } }
+        XCTAssertEqual(sent, [10, 20])
+        XCTAssertNil(ack.received(on: b), "новый сокет — счёт заново")
+        XCTAssertEqual(ShareVideoAck.message(10), #"{"type":"ack","n":10}"#)
+    }
+}
