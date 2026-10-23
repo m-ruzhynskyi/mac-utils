@@ -213,7 +213,7 @@ async function start(world) {
     log() { const file = path.join(world.logs, "overlay.log"); return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : ""; },
     marksSent() { return this.overlay.sent.filter(([c]) => c === "mark").length; },
     // Что приложение сказало странице о метках (последнее marks-state главному окну).
-    marksState() { const m = this.lastMarksState(); return m && { screen: m.screen, reason: m.reason }; },
+    marksState() { const m = this.lastMarksState(); return m && { screen: m.screen, inVideo: m.inVideo, reason: m.reason }; },
     lastMarksState() { return fake.windows.find((x) => !x.opts.transparent).sent.filter(([c]) => c === "marks-state").at(-1)?.[1]; },
     get main() { return fake.windows.find((x) => !x.opts.transparent); },
     places() { return fake.helperCalls.filter(([c]) => c === "place").map((a) => a.slice(2).map(Number)); },
@@ -440,10 +440,10 @@ test("помощник не ответил на place и protect: метки н�
     await host.share("screen:1:0");
     host.mark(...P);
     await tick(80);
-    // Исключение из захвата не подтвердилось — метки поверх экрана не показываются (иначе они в видео), только на странице.
-    assert.equal(host.marksSent(), 0);
-    assert.equal(host.overlay.visible, false, "окно меток скрыто");
-    assert.deepEqual(host.marksState(), { screen: false, reason: "no-answer" });
+    // Исключение из захвата не подтвердилось — метки всё равно поверх экрана (ведущая их видит), страница знает, что они в видео.
+    assert.equal(host.marksSent(), 1);
+    assert.equal(host.overlay.visible, true, "окно меток на экране");
+    assert.deepEqual(host.marksState(), { screen: true, inVideo: true, reason: "no-answer" });
     assert.equal(host.places().length, 2, "одна повторная попытка, не больше");
     assert.match(host.log(), / unprotected .* phys=- affinity=- order=2 marks=no-answer overlays=1 /);
     assert.match(host.log(), / place-dip /, "помощник не поставил окно — по-старому, в DIP");
@@ -516,7 +516,7 @@ test("отказ Windows в place (окно не сдвинулось): окно
   } finally { host.stop(); }
 });
 
-test("старая Windows 10 (affinity 0x1 — в видео чёрное): окно меток скрыто, защита снята, метки только на странице", async () => {
+test("старая Windows 10 (affinity 0x1 — в видео чёрное): защита снята (не чёрный экран), метки поверх экрана и в видео", async () => {
   const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1.25, [0, 0], true);
   const host = await start(world([d], [screenSource(d, 1)], { oldWindows: true }));
   try {
@@ -528,9 +528,9 @@ test("старая Windows 10 (affinity 0x1 — в видео чёрное): о�
     assert.equal(host.overlay.affinity, 0);
     assert.ok(!host.fake.helperCalls.some(([c], i, all) => c === "protect" && all.slice(0, i).some(([p]) => p === "protect")), "второй порядок не нужен");
     assert.match(host.log(), / unprotected .* affinity=0x1 order=1 marks=old-windows overlays=1 build=1\.1\.0 os=\S+\n/);
-    assert.equal(host.marksSent(), 0, "метка поверх экрана не показана — в видео её не будет");
-    assert.equal(host.overlay.visible, false);
-    assert.deepEqual(host.marksState(), { screen: false, reason: "old-windows" });
+    assert.equal(host.marksSent(), 1, "метка поверх экрана показана");
+    assert.equal(host.overlay.visible, true);
+    assert.deepEqual(host.marksState(), { screen: true, inVideo: true, reason: "old-windows" });
   } finally { host.stop(); }
 });
 
@@ -547,16 +547,16 @@ test("журнал размещения: мониторы номерами по 
   } finally { host.stop(); }
 });
 
-test("без помощника исключение из захвата не проверить: метки поверх экрана не показываются, только на странице", async () => {
+test("без помощника исключение из захвата не проверить: метки поверх экрана всё равно показываются, страница знает, что они в видео", async () => {
   const a = laptop(), b = external();
   const host = await start(world([a, b], [screenSource(a, 1), screenSource(b, 2)], { helper: false }));
   try {
     await host.share("screen:2:0");
     host.mark(0.8, 0.6);
     await tick(80);
-    assert.equal(host.marksSent(), 0);
-    assert.equal(host.overlay.visible, false);
-    assert.deepEqual(host.marksState(), { screen: false, reason: "no-helper" });
+    assert.equal(host.marksSent(), 1);
+    assert.equal(host.overlay.visible, true);
+    assert.deepEqual(host.marksState(), { screen: true, inVideo: true, reason: "no-helper" });
   } finally { host.stop(); }
 });
 
@@ -568,12 +568,12 @@ test("исключение подтверждено — метки поверх 
     host.mark(0.5, 0.5);
     await tick(80);
     assert.equal(host.marksSent(), 1);
-    assert.deepEqual(host.marksState(), { screen: true, reason: "" });
+    assert.deepEqual(host.marksState(), { screen: true, inVideo: false, reason: "" });
     assert.match(host.log(), / protect .* affinity=0x11 order=1 marks=screen overlays=1 /);
   } finally { host.stop(); }
 });
 
-test("исключение пропало посреди эфира и не встаёт снова: окно меток скрывается, метки уходят на страницу", async () => {
+test("исключение пропало посреди эфира и не встаёт снова: окно меток остаётся, страница знает, что метки в видео", async () => {
   const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1.25, [0, 0], true);
   const w = world([d], [screenSource(d, 1)]);
   const host = await start(w);
@@ -585,12 +585,12 @@ test("исключение пропало посреди эфира и не вс
     // Windows сняла исключение (например, после смены стиля окна), и оно больше не ставится.
     host.overlay.affinity = 0; w.protectFails = true;
     await tick(VERIFY_MS + 120);
-    assert.equal(host.overlay.visible, false, "окно меток скрыто");
-    assert.deepEqual(host.marksState(), { screen: false, reason: "unprotected" });
+    assert.equal(host.overlay.visible, true, "окно меток на экране");
+    assert.deepEqual(host.marksState(), { screen: true, inVideo: true, reason: "unprotected" });
     assert.match(host.log(), / protect-lost .*\n.* unprotected .* marks=unprotected /);
     host.mark(0.3, 0.3);
     await tick(80);
-    assert.equal(host.marksSent(), 1, "новые метки поверх экрана не показываются");
+    assert.equal(host.marksSent(), 2, "новые метки поверх экрана показываются");
   } finally { host.stop(); }
 });
 
@@ -800,7 +800,7 @@ test("схема меток на странице только когда гла
     await host.share("screen:1:0");
     host.mark(0.5, 0.5);
     await tick(80);
-    assert.deepEqual(host.lastMarksState(), { screen: false, reason: "old-windows", covered: true });
+    assert.deepEqual(host.lastMarksState(), { screen: true, inVideo: true, reason: "old-windows", covered: true });
     // Перенесли на другой монитор — схему можно.
     main.setBounds({ x: b.bounds.x + 40, y: b.bounds.y + 40, width: 800, height: 600 });
     main.emit("move");
@@ -811,5 +811,23 @@ test("схема меток на странице только когда гла
     assert.equal(host.lastMarksState().covered, true);
     main.minimized = true; main.emit("minimize");
     assert.equal(host.lastMarksState().covered, false);
+  } finally { host.stop(); }
+});
+
+test("у окна меток осталась рамка: клиентская область меньше монитора — доли считаются от неё, в журнале числа", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true);
+  const host = await start(world([d], [screenSource(d, 1)]));
+  try {
+    await host.share("screen:1:0");
+    host.mark(0.5, 0.5);
+    await tick(80);
+    const normal = host.overlay.sent.filter(([c]) => c === "region").at(-1)[1];
+    assert.deepEqual(normal, { fx: 0, fy: 0, fw: 1, fh: 1 });
+    host.fake.ipc.get("overlay-report")({ sender: host.overlay.webContents }, { mark: [0.5, 0.5], point: [960, 500], area: {}, region: normal,
+      innerWidth: 1904, innerHeight: 1041, dpr: 1 });
+    const fixed = host.overlay.sent.filter(([c]) => c === "region").at(-1)[1];
+    assert.ok(Math.abs(fixed.fw - 1920 / 1904) < 1e-9 && Math.abs(fixed.fh - 1080 / 1041) < 1e-9);
+    assert.ok(fixed.fy < 0, "область начинается выше клиентской: заголовок сверху");
+    assert.match(host.log(), / client-mismatch monitor=0,0,1920x1080 client=8,31,1904x1041 page=1904x1041@1\n/);
   } finally { host.stop(); }
 });

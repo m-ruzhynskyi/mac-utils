@@ -32,6 +32,7 @@ const hasHelper = () => fs.existsSync(HELPER);
 let overlayReady = false; // страница меток загружена
 let target = null; // транслируемая область, физические пиксели; null — ещё не известна (окно: ждём помощника)
 let monitor = null; // физическая рамка монитора этой области: на неё ставится окно меток
+let clientRect = null; // клиентская область окна меток, если она не совпадает с рамкой (физические пиксели): доли считаются от неё
 let placedOn = null; // монитор, на который окно меток поставлено (ответ помощника получен); null — метки ждут
 let placing = null; // монитор, на который окно меток ставится сейчас (ждём помощника)
 let placed = null; // где окно меток по словам помощника: { x, y, width, height, dpi }
@@ -40,10 +41,11 @@ let protectOrder = 1; // 1 — защита после setIgnoreMouseEvents, 2 �
 // Метки поверх экрана — только при исключении из захвата, подтверждённом помощником (0x11). Не подтвердилось (старая
 // Windows 10 — 0x1, отказ — 0x0, нет помощника) — окно меток не показывается вовсе, метки ведущий видит в окне
 // приложения (страница рисует схему): иначе они попадают в видео и зритель видит каждую дважды, со сдвигом.
-let marksBlocked = null; // null — ещё не проверено, false — метки на экране, строка — почему нет (код для журнала и страницы)
+let marksInVideo = null; // null — ещё не проверено, false — окно меток исключено из захвата, строка — почему нет: метки идут в видео (код для журнала и страницы)
 let verifyTimer = null;
 const VERIFY_MS = Number(process.env.MU_OVERLAY_VERIFY_MS) || 15_000; // пока окно меток показано, исключение перепроверяется
 const overlays = new Set(); // все созданные окна меток: должно жить одно
+let settled = false; // проверка защиты закончилась (исключено или нет): метки больше не ждут
 let shielded = false; // защита после показа проверена помощником: до этого метки ждут, чтобы не попасть в видео
 let checks = 0; // контрольных сверок рамки окна меток на этом мониторе (не больше MAX_CHECKS — без бесконечных циклов)
 let checkTimer = null;
@@ -89,7 +91,7 @@ function logPlacement(event) {
     const kind = /^window:/.test(chosen?.source?.id || "") ? "window" : "screen";
     fs.appendFileSync(file, `${new Date().toISOString()} ${event} ${kind} displays=[${displays}] primary=${number(primary)} source=${number(shared)} ` +
       `target=${rect(target)} monitor=${rect(monitor)} phys=${placed ? `${rect(placed)}@${placed.dpi}` : "-"} affinity=${hex(affinity)} order=${protectOrder} ` +
-      `marks=${marksBlocked === null ? "-" : marksBlocked || "screen"} overlays=${overlays.size} build=${app.getVersion()} os=${require("os").release()}\n`);
+      `marks=${marksInVideo === null ? "-" : marksInVideo || "screen"} overlays=${overlays.size} build=${app.getVersion()} os=${require("os").release()}\n`);
   } catch (_) {}
 }
 
@@ -174,7 +176,7 @@ function placeOverlay(fresh = true) {
   if (!overlay || overlay.isDestroyed() || !monitor) return;
   const mine = overlay, want = monitor;
   placedOn = null; placing = want;
-  if (fresh) checks = 0;
+  if (fresh) { checks = 0; clientRect = null; }
   if (!hasHelper()) {
     placeByDip(mine, want);
     placedOn = want; placing = null; flushMarks();
@@ -197,6 +199,24 @@ function placeOverlay(fresh = true) {
     flushMarks();
   });
   attempt(1);
+}
+
+// Самопроверка по ответу страницы: окно меток стоит на мониторе, а клиентская область страницы (innerWidth/Height × DPR)
+// меньше — значит у окна осталась рамка или заголовок, и метка ляжет ниже и левее. Тогда доли области считаются от
+// фактической клиентской области (заголовок сверху, боковые рамки поровну), в журнал — числа. Допуск: округление DPR.
+function checkClient(report) {
+  if (!report || !monitor || !place.same(placed, monitor) || !report.innerWidth || !report.innerHeight || !(report.dpr > 0)) return;
+  const width = Math.round(report.innerWidth * report.dpr), height = Math.round(report.innerHeight * report.dpr);
+  const dw = monitor.width - width, dh = monitor.height - height;
+  const tolerance = (size) => Math.max(12, size * 0.01);
+  if (Math.abs(dw) <= tolerance(monitor.width) && Math.abs(dh) <= tolerance(monitor.height)) return;
+  if (dw < 0 || dh < 0) return; // страница больше окна — не рамка, трогать нечего
+  const side = Math.round(dw / 2);
+  const next = { x: monitor.x + side, y: monitor.y + Math.max(0, dh - side), width, height };
+  if (place.same(clientRect, next)) return;
+  clientRect = next;
+  appendOverlayLog(`client-mismatch monitor=${rect(monitor)} client=${rect(next)} page=${report.innerWidth}x${report.innerHeight}@${report.dpr}`);
+  sendRegion();
 }
 
 // Контрольная сверка: Chromium может поменять рамку окна меток уже после ответа помощника (WM_DPICHANGED обработан
@@ -225,12 +245,12 @@ function scheduleCheck() {
 // Исключение из захвата ставит само приложение: SetWindowDisplayAffinity принимает только окна своего процесса.
 // Помощник читает, что встало (GetWindowDisplayAffinity читает окно любого процесса). Не 0x11 — второй порядок:
 // защита до setIgnoreMouseEvents (тот переписывает расширенный стиль окна), затем снова сквозные клики. И после него
-// не 0x11 — метки поверх экрана не показываем (`blockMarks`).
+// не 0x11 — метки всё равно показываем (`marksIntoVideo`): ведущая должна их видеть; зрители узнают, что метки идут в видео.
 function protectOverlay() {
   const mine = overlay;
   mine.setIgnoreMouseEvents(true);
   mine.setContentProtection(true);
-  if (!hasHelper()) return blockMarks("no-helper");
+  if (!hasHelper()) return marksIntoVideo("no-helper");
   const check = (order) => runHelper(["protect", hwndOf(mine)], (out) => {
     if (mine !== overlay || mine.isDestroyed()) return;
     const match = /affinity=0x([0-9a-f]+)/i.exec(out);
@@ -242,8 +262,8 @@ function protectOverlay() {
       mine.setIgnoreMouseEvents(true);
       return check(2);
     }
-    if (affinity !== EXCLUDE_FROM_CAPTURE) return blockMarks(affinity === MONITOR_ONLY ? "old-windows" : affinity === null ? "no-answer" : "unprotected");
-    shielded = true;
+    if (affinity !== EXCLUDE_FROM_CAPTURE) return marksIntoVideo(affinity === MONITOR_ONLY ? "old-windows" : affinity === null ? "no-answer" : "unprotected");
+    shielded = true; settled = true;
     setMarksState(false);
     logPlacement("protect");
     scheduleVerify();
@@ -252,34 +272,31 @@ function protectOverlay() {
   check(1);
 }
 
-// Исключение не встало: окно меток прячем (скрытое окно в захват не попадает), метки — только на странице.
-function blockMarks(reason) {
-  shielded = false;
+// Исключение не встало: окно меток остаётся на экране — ведущий должен видеть, куда нажимают зрители, — и метки попадают
+// в видео. Страница сообщает зрителям (`marks: "video"` в displays), и они свою копию метки не рисуют.
+function marksIntoVideo(reason) {
+  shielded = false; settled = true;
   clearTimeout(verifyTimer); verifyTimer = null;
-  if (overlay && !overlay.isDestroyed()) {
-    // WDA_MONITOR (старая Windows 10) делает окно в захвате чёрным — снимаем, окно всё равно скрыто.
-    if (affinity === MONITOR_ONLY) overlay.setContentProtection(false);
-    overlay.hide();
-  }
-  overlayShown = false;
-  pendingMarks.length = 0; pendingNotice = null;
+  // WDA_MONITOR (старая Windows 10) делает окно в захвате чёрным — снимаем: лучше метка в видео, чем чёрный экран.
+  if (affinity === MONITOR_ONLY && overlay && !overlay.isDestroyed()) overlay.setContentProtection(false);
   setMarksState(reason);
   logPlacement("unprotected");
+  flushMarks();
 }
 
-// Где ведущий видит метки: странице — чтобы при `screen: false` рисовала их у себя. `covered` — главное окно приложения
+// Где ведущий видит метки: странице — чтобы знала, идут ли метки в видео (`inVideo`). `covered` — главное окно приложения
 // пересекается с транслируемой областью: тогда схема меток на странице сама попала бы в видео, и страница пишет только
 // строку «… поставил метку».
 let mainCovered = null;
 function setMarksState(blocked) {
-  if (marksBlocked === blocked) return;
-  marksBlocked = blocked;
+  if (marksInVideo === blocked) return;
+  marksInVideo = blocked;
   sendMarksState();
 }
 function sendMarksState() {
   if (!window || window.isDestroyed()) return;
   mainCovered = mainWindowCovered();
-  window.webContents.send("marks-state", { screen: !marksBlocked, reason: marksBlocked || "", covered: mainCovered });
+  window.webContents.send("marks-state", { screen: true, inVideo: !!marksInVideo, reason: marksInVideo || "", covered: mainCovered });
 }
 // Главное окно (не свёрнутое) пересекается с транслируемой областью — в физических пикселях, как `target`.
 // Области ещё нет — считаем, что пересекается (схему не показываем, пока не ясно).
@@ -289,7 +306,7 @@ function mainWindowCovered() {
   const r = screen.dipToScreenRect(window, window.getBounds());
   return r.x < target.x + target.width && target.x < r.x + r.width && r.y < target.y + target.height && target.y < r.y + r.height;
 }
-function coveredChanged() { if (marksBlocked && mainWindowCovered() !== mainCovered) sendMarksState(); }
+function coveredChanged() { if (marksInVideo && mainWindowCovered() !== mainCovered) sendMarksState(); }
 
 // Пока окно меток показано, исключение перепроверяется (смена монитора, DPI, перестановка окна Windows его не трогают
 // по документации, но проверка дешёвая): ушло — заново оба порядка, не встало — метки только на странице.
@@ -306,7 +323,7 @@ function scheduleVerify() {
       if (now === EXCLUDE_FROM_CAPTURE) return scheduleVerify();
       affinity = now;
       logPlacement("protect-lost");
-      shielded = false;
+      shielded = false; settled = false;
       protectOverlay();
     });
   }, VERIFY_MS);
@@ -315,7 +332,6 @@ function scheduleVerify() {
 
 // Показ окна меток: показать, поставить на монитор (помощник), исключить из захвата. Метки ждут обоих ответов помощника.
 function showOverlay() {
-  if (marksBlocked) return;
   overlay.showInactive(); overlayShown = true;
   placeOverlay();
   protectOverlay();
@@ -330,15 +346,15 @@ function layout() {
 
 function sendRegion() {
   if (!overlay || overlay.isDestroyed() || !overlayReady || !target) return;
-  overlay.webContents.send("region", place.fractions(target, monitor));
+  overlay.webContents.send("region", place.fractions(target, clientRect || monitor));
   flushMarks();
 }
 
 function flushMarks() {
   if (!overlayReady || !target || (!pendingMarks.length && !pendingNotice)) return;
-  if (sourceHidden || marksBlocked) { pendingMarks.length = 0; pendingNotice = null; return; }
+  if (sourceHidden) { pendingMarks.length = 0; pendingNotice = null; return; }
   if (!overlayShown) showOverlay();
-  if (!placedOn || !shielded) return;
+  if (!placedOn || !settled) return;
   for (const mark of pendingMarks.splice(0)) overlay.webContents.send("mark", mark);
   // Уведомление — только если исключение из захвата подтверждено помощником: иначе зрители увидели бы его в картинке
   // (без помощника и на старой Windows 10 о переключении говорит строка «В эфире» на странице).
@@ -360,7 +376,7 @@ function prepareOverlay() {
   // Окно от прошлой трансляции (отказ после выбора источника, перезагрузка страницы) — с его областью и помощником.
   hideOverlay();
   overlayReady = false; overlayShown = false; sourceHidden = false; target = null; monitor = null; trackedRect = null; marksLogged = 0;
-  placedOn = null; placing = null; placed = null; affinity = null; protectOrder = 1; shielded = false; marksBlocked = null;
+  placedOn = null; placing = null; placed = null; clientRect = null; affinity = null; protectOrder = 1; shielded = false; settled = false; marksInVideo = null;
   // Окна меток прежних трансляций, если какое-то не закрылось, — закрыть: второе окно с метками было бы в видео.
   for (const old of overlays) if (!old.isDestroyed()) old.close();
   overlays.clear();
@@ -516,7 +532,11 @@ app.whenReady().then(() => {
   });
   ipcMain.on("page-log", (event, line) => { if (window && event.sender === window.webContents) logPage(line); });
   ipcMain.on("stopped", () => { nextSource = null; previousSource = null; hideOverlay(); stopAudio(); });
-  ipcMain.on("overlay-report", (event, report) => { if (overlay && !overlay.isDestroyed() && event.sender === overlay.webContents) logMark(report); });
+  ipcMain.on("overlay-report", (event, report) => {
+    if (!overlay || overlay.isDestroyed() || event.sender !== overlay.webContents) return;
+    checkClient(report);
+    logMark(report);
+  });
 
   // Программы, у которых сейчас есть звук, — для списка «Не передавать звук программ».
   ipcMain.handle("audioApps", () => new Promise((resolve) => {
