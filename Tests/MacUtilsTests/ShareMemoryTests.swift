@@ -95,3 +95,23 @@ final class SharePlayerCatchUpTests: XCTestCase {
         XCTAssertLessThanOrEqual(player.queuedSeconds, 0.6)
     }
 }
+
+final class SharePlayerOwnerTests: XCTestCase {
+    func testPacketsOfAClosedSocketStartNothing() {
+        let player = SharePlayer(silent: true)
+        defer { player.stop() }
+        let payload = Data(ShareProtocol.audioPacket([Float](repeating: 0.1, count: 2_400)).dropFirst())
+        let old = NSObject(), fresh = NSObject()
+        player.attach(old)
+        player.play(payload, from: old)
+        XCTAssertGreaterThan(player.queuedSeconds, 0)
+        player.stop()
+        player.play(payload, from: old)
+        XCTAssertEqual(player.queuedSeconds, 0, "после выхода звук старого сокета не запускает движок")
+        player.attach(fresh)
+        player.play(payload, from: old)
+        XCTAssertEqual(player.queuedSeconds, 0, "старый сокет после переподключения молчит")
+        player.play(payload, from: fresh)
+        XCTAssertGreaterThan(player.queuedSeconds, 0)
+    }
+}

@@ -1647,6 +1647,7 @@ final class ShareViewer: ObservableObject {
             let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url, token: keyed ? ShareRelay.keyedToken : ShareRelay.legacyToken))
             socket.maximumMessageSize = 4 << 20
             self.socket = socket
+            player.attach(socket)
             socket.resume()
             lastMessage = Date()
             sawHeartbeat = false
@@ -1796,7 +1797,7 @@ final class ShareViewer: ObservableObject {
             }
             // Звук и картинки JPEG — тоже вне главного потока: занятый Mac не прерывает звук и не откладывает следующее чтение.
             if case .success(.data(let data)) = result, data.first == ShareProtocol.audio {
-                player.play(data.dropFirst())
+                player.play(data.dropFirst(), from: socket)
                 listen(socket, video: video, acks: acks, player: player)
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
@@ -2869,6 +2870,8 @@ final class SharePlayer: @unchecked Sendable {
     private(set) var catchUps = 0
     private(set) var restarts = 0
     private var observer: NSObjectProtocol?
+    /// Сокет, чей звук сейчас играет: после `stop()` (выход, переподключение) пакеты старого сокета ничего не запускают.
+    private var owner: ObjectIdentifier?
     private let center: NotificationCenter
     /// Перезапуск — на своей очереди: обработчик уведомления не ждёт замок на внутренней очереди AVAudioEngine
     /// (иначе взаимная блокировка с play(), который держит замок и запускает движок).
@@ -2925,7 +2928,14 @@ final class SharePlayer: @unchecked Sendable {
         return Double(queuedFrames) / ShareProtocol.sampleRate
     }
 
-    func play(_ payload: Data) {
+    /// Новый сокет просмотра — его звук разрешён, прежнего — нет.
+    func attach(_ socket: AnyObject) {
+        engineLock.lock(); defer { engineLock.unlock() }
+        owner = ObjectIdentifier(socket)
+    }
+
+    /// `socket` — откуда пакет (nil — без проверки, для тестов и стендов).
+    func play(_ payload: Data, from socket: AnyObject? = nil) {
         let count = payload.count / 2
         guard count > 0 else { return }
         let samples = ShareProtocol.samples(payload)
@@ -2933,6 +2943,7 @@ final class SharePlayer: @unchecked Sendable {
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count) }
         engineLock.lock(); defer { engineLock.unlock() }
+        if let socket, owner != ObjectIdentifier(socket) { return }
         // Движок — до проверки очереди: остановленный движок очередь не разбирает, и при полной очереди звук не вернулся бы.
         if !started {
             engine.attach(node)
@@ -2972,6 +2983,7 @@ final class SharePlayer: @unchecked Sendable {
 
     func stop() {
         engineLock.lock(); defer { engineLock.unlock() }
+        owner = nil
         guard started else { return }
         node.stop()
         engine.stop()
