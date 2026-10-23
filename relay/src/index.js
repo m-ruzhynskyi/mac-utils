@@ -789,8 +789,9 @@ export class Room {
         try { viewer.send(JSON.stringify({ type: "heartbeat" })); }
         catch (_) { this.closed(viewer); }
       }
-      // Older clients resend their last frame on a viewers update, even on a static screen.
-      this.notifyHost();
+      // Периодическое напоминание (`tick`): новые ведущие по нему не шлют ключевой кадр и список мониторов (только состав зрителей,
+      // он не менялся); старые клиенты не знают поля и по-прежнему повторяют последний кадр.
+      this.notifyHost(undefined, { tick: true });
       await this.state.storage.setAlarm(Date.now() + HOST_CHECK_MS);
     }
   }
@@ -856,7 +857,7 @@ export class Room {
       if (key && debt <= DEBT_RESUME) flow.skipping = false;
       else {
         flow.skipped++;
-        if (debt <= DEBT_RESUME && now - this.lastKeyAsk >= KEY_ASK_MS) { this.lastKeyAsk = now; this.notifyHost(); }
+        if (debt <= DEBT_RESUME && now - this.lastKeyAsk >= KEY_ASK_MS) { this.lastKeyAsk = now; this.notifyHost(undefined, { key: true }); }
         return false;
       }
     }
@@ -1090,7 +1091,8 @@ export class Room {
     }
   }
 
-  notifyHost(leaving) {
+  // flags: tick — периодическое напоминание, key — просьба о ключевом кадре (медленный зритель); без флагов — состав изменился.
+  notifyHost(leaving, flags = {}) {
     const watching = this.approvedViewers().filter((s) => s !== leaving);
     // Count viewer devices, not overlapping sockets after a reconnect.
     // Anonymous legacy viewers remain separate rather than sharing an empty ID.
@@ -1102,6 +1104,7 @@ export class Room {
       type: "viewers",
       count: people.length,
       list: people,
+      ...flags,
     });
   }
 }

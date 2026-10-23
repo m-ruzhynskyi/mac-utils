@@ -21,6 +21,8 @@ final class ShareHistory: ObservableObject {
         var key: String?
         /// Публичный ключ ведущего, к которому подключались (pinning, §4.3).
         var hostKey: String?
+        /// Ключ ведущего, у которого мы уже видели подписанное принятие (`hostSig`): с ним подпись обязательна (защита от отката).
+        var hostSignedKey: String?
         var keyConfirmedAt: Date?
 
         var title: String { label?.isEmpty == false ? label! : (name.isEmpty ? ShareCode.display(id) : name) }
@@ -142,7 +144,18 @@ final class ShareHistory: ObservableObject {
     /// Забыть ключ ведущего: он больше не подтверждает ключ (ID освобождён или стоит старая версия), пользователь согласился.
     func unpinHost(id: String) {
         guard Self.isValidID(id), entries.contains(where: { $0.id == id }) else { return }
-        update(id) { $0.hostKey = nil }
+        update(id) { $0.hostKey = nil; $0.hostSignedKey = nil }
+    }
+
+    /// Ведущий с этим ключом подписал принятие, подпись сошлась: дальше без подписи он не принимается.
+    func noteHostSigned(id: String, key: String) {
+        guard Self.isValidID(id), Self.isPublicKey(key), entries.contains(where: { $0.id == id }) else { return }
+        update(id) { $0.hostSignedKey = key }
+    }
+
+    /// Подпись принятия обязательна: этот ключ ведущего уже подписывал.
+    func requiresHostSignature(id: String, key: String) -> Bool {
+        entries.first { $0.id == id }?.hostSignedKey == key
     }
 
     func hostKey(for id: String) -> String? { entries.first { $0.id == id }?.hostKey }

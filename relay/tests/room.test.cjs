@@ -1217,3 +1217,20 @@ test('вид кадров: JPEG — зрителю без H.264, H.264 — зр�
   f.room.webSocketMessage(host, jpeg);
   assert.deepEqual(got.modern, [3, 2, 1]);
 });
+
+test('viewers: периодическое напоминание помечено tick, просьба о ключевом кадре — key, смена состава — без флагов', async () => {
+  const f = fixture(), host = hostLive(f);
+  f.socket('viewer', { id: '1', approved: true, h264: true, lastSeen: 1_000_000 });
+  f.room.notifyHost();
+  assert.equal(host.messages.at(-1).tick, undefined);
+  assert.equal(host.messages.at(-1).key, undefined);
+  f.room.notifyHost(undefined, { tick: true });
+  assert.equal(host.messages.at(-1).tick, true);
+  assert.equal(host.messages.at(-1).count, 1);
+  f.room.notifyHost(undefined, { key: true });
+  assert.equal(host.messages.at(-1).key, true);
+  // Будильник: периодическое напоминание идёт с tick.
+  f.advance(31_000);
+  await f.room.alarm();
+  assert.ok(host.messages.some((m) => m.type === 'viewers' && m.tick === true), 'тревога шлёт tick');
+});
