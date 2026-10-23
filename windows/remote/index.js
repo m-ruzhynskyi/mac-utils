@@ -6,7 +6,12 @@ const path = require("node:path");
 const { ConnectionsFileStore } = require("./filestore");
 const { RemoteSettings } = require("./settings");
 const { RemoteService } = require("./service");
-const { TITLES } = require("./models");
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+const { TITLES, downloadURL, programOf } = require("./models");
+const { createConnector } = require("./connect");
+const { createUia } = require("./uia");
+const { createHud } = require("./hud");
 
 const UI = path.join(__dirname, "ui");
 const PRELOAD = path.join(UI, "preload.js");
@@ -21,8 +26,14 @@ function init(electron, options = {}) {
   const userData = options.userData || app.getPath("userData");
   const settings = new RemoteSettings(path.join(userData, "remote-connections.json"));
   const store = new ConnectionsFileStore(options.timing);
-  const service = new RemoteService({ settings, store, connector: options.connector || null });
   const log = options.log || (() => {});
+  let lastRequest = null;
+  // Тост хода подключения; «успех» можно отключить в настройках (уведомление после подключения).
+  const realHud = options.hud || createHud({ BrowserWindow, screen, ipcMain }, (id) => hudAction(id));
+  const hud = { show(state) { if (state.kind === "success" && !settings.data.notify) return; realHud.show(state); } };
+  const connector = options.connector || createConnector({ exists: fs.existsSync, customPaths: () => settings.data.programPaths, spawn,
+    uia: createUia(spawn), hud, openExternal: (url) => shell.openExternal(url), log });
+  const service = new RemoteService({ settings, store, connector });
   let windowRef = null, paletteRef = null, tray = null, hotkeyOk = true, registered = "";
 
   const alive = (w) => w && !w.isDestroyed();
@@ -96,12 +107,22 @@ function init(electron, options = {}) {
   };
 
   async function connect(key, noPassword) {
+    lastRequest = { key, noPassword };
     const record = service.recordByKey(key);
-    if (!record) { options.hud?.show?.({ kind: "danger", title: "Записи больше нет в файле", detail: "Список обновлён." }); store.reload(); return { ok: false, error: "gone" }; }
-    if (!options.connector) return { ok: false, error: "unsupported" };
-    const result = await options.connector.connectRecord(record, { noPassword, settings: settings.data, store, service });
+    if (!record) { hud.show(connector.MESSAGES.gone()); store.reload(); return { ok: false, error: "gone" }; }
+    const result = await connector.connectRecord(record, { noPassword, settings: settings.data, store, service });
     if (result && result.ok) service.noteConnected(record);
     return result;
+  }
+
+  // Кнопки тоста: повторить, открыть файл, скачать программу, отмена, закрыть.
+  function hudAction(id) {
+    const record = lastRequest && service.recordByKey(lastRequest.key);
+    if (id === "retry" && lastRequest) connect(lastRequest.key, lastRequest.noPassword);
+    else if (id === "openFile") openFile();
+    else if (id === "download" && record) shell.openExternal(downloadURL(programOf(record, settings.data.defaultProgram)));
+    else if (id === "download") shell.openExternal(downloadURL(settings.data.defaultProgram));
+    else connector.hudAction(id);
   }
 
   function openFile() {
@@ -149,7 +170,7 @@ function init(electron, options = {}) {
   buildTray();
 
   return {
-    service, settings, store, openWindow, openPalette, registerHotkey, trayTemplate, connect, titles: TITLES,
+    service, settings, store, openWindow, openPalette, registerHotkey, trayTemplate, connect, hudAction, titles: TITLES,
     get hotkeyOk() { return hotkeyOk; },
     dispose() { try { globalShortcut.unregisterAll?.(); } catch (_) {} store.stop(); tray?.destroy?.(); },
   };

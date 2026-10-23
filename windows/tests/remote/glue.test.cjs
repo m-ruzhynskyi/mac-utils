@@ -17,7 +17,7 @@ function fakeElectron({ registerOk = true } = {}) {
     on(e, fn) { this.handlers[e] = fn; }
     isDestroyed() { return this.destroyed; }
     isMinimized() { return false; }
-    show() { this.shown = true; } hide() { this.shown = false; } focus() {} restore() {}
+    show() { this.shown = true; } showInactive() { this.shown = true; } hide() { this.shown = false; } focus() {} restore() {} setAlwaysOnTop() {}
     setBounds(b) { this.bounds = b; }
   }
   const trays = [];
@@ -33,7 +33,7 @@ function fakeElectron({ registerOk = true } = {}) {
       shell: { openPath: (p) => opened.push(["path", p]), openExternal: (u) => opened.push(["url", u]) },
       dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
       nativeImage: { createFromPath: () => ({ resize: () => ({}) }), createEmpty: () => ({}) },
-      screen: { getCursorScreenPoint: () => ({ x: 10, y: 10 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }) },
+      screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }), getCursorScreenPoint: () => ({ x: 10, y: 10 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }) },
     },
   };
 }
