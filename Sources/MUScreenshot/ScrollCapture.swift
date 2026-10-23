@@ -9,13 +9,13 @@ import MUSmoothScroll
 /// в секунду, пока пользователь прокручивает содержимое вниз, а новые строки
 /// приклеиваются снизу.
 @MainActor
-final class ScrollCapture: NSObject, ObservableObject {
-    private(set) static var current: ScrollCapture?
+package final class ScrollCapture: NSObject, ObservableObject {
+    package private(set) static var current: ScrollCapture?
 
-    @Published private(set) var capturedHeight = 0
-    @Published private(set) var lostTrack = false
+    @Published package private(set) var capturedHeight = 0
+    @Published package private(set) var lostTrack = false
     /// Место потеряно на одинаковых строках: HUD советует вернуться к отличающемуся месту, а не «медленнее».
-    @Published private(set) var lostOnRepeats = false
+    @Published package private(set) var lostOnRepeats = false
 
     private let rect: NSRect
     private let screen: NSScreen
@@ -50,7 +50,7 @@ final class ScrollCapture: NSObject, ObservableObject {
         super.init()
     }
 
-    static func start(rect: NSRect) {
+    package static func start(rect: NSRect) {
         guard current == nil else {
             Log.capture.error("Длинный снимок уже идёт")
             return
@@ -119,7 +119,7 @@ final class ScrollCapture: NSObject, ObservableObject {
         self.timer = timer
     }
 
-    func finish() {
+    package func finish() {
         // Enter, «Готово» и предел высоты могут прийти почти одновременно: второй вызов отдал бы снимок дважды.
         guard !stopped else { return }
         // `current` обнуляется в stop(): пока склеивается и доставляется результат, занятость держит отдельная причина.
@@ -138,7 +138,7 @@ final class ScrollCapture: NSObject, ObservableObject {
         }
     }
 
-    func cancel() {
+    package func cancel() {
         guard !stopped else { return }
         stop(reason: "cancel")
         Toast.show("Длинный снимок отменён", symbol: "xmark.circle.fill", tint: .secondary)
@@ -356,13 +356,13 @@ final class ScrollCapture: NSObject, ObservableObject {
     // MARK: - Панели
 
     /// Через сколько секунд после показа панелей снимается первый кадр.
-    static let firstFrameDelay: TimeInterval = 0.3
+    package static let firstFrameDelay: TimeInterval = 0.3
     /// Рамка лежит снаружи области съёмки: линия — в полях панели, внутри области — ни одной точки.
-    static let borderMargin: CGFloat = 3
+    package static let borderMargin: CGFloat = 3
 
     /// Рамка вокруг области: без анимации появления — анимацию рисует система, а не наше приложение (её кадры фильтр
     /// захвата не исключает), и рамка в ней меньше настоящей, то есть внутри области.
-    static func makeBorderPanel(around rect: NSRect) -> NSPanel {
+    package static func makeBorderPanel(around rect: NSRect) -> NSPanel {
         let border = NSPanel(contentRect: rect.insetBy(dx: -borderMargin, dy: -borderMargin),
                              styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         border.isOpaque = false
@@ -407,9 +407,9 @@ final class ScrollCapture: NSObject, ObservableObject {
 }
 
 private struct ScrollCaptureHUD: View {
-    @ObservedObject var capture: ScrollCapture
+    @ObservedObject package var capture: ScrollCapture
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 12) {
             Image(systemName: capture.lostTrack ? "exclamationmark.triangle.fill" : "scroll")
                 .foregroundStyle(capture.lostTrack ? Color.orange : Color.accentColor)
@@ -440,27 +440,27 @@ private struct ScrollCaptureHUD: View {
 // MARK: - Склейка
 
 /// `Stitcher` на отдельной последовательной очереди: вызовы выстраиваются по порядку, главный поток не занят.
-final class StitchWorker: @unchecked Sendable {
+package final class StitchWorker: @unchecked Sendable {
     private let queue = DispatchQueue(label: "macutils.stitch", qos: .userInitiated)
     private var stitcher = Stitcher()
 
     /// Итог кадра: результат, высота, предел достигнут, `.lost` ли из-за одинаковых строк, как решён кадр (для
     /// журнала) и сколько заняла склейка.
-    struct Report {
-        var result: Stitcher.Result
-        var height: Int
-        var isFull: Bool
-        var lostOnRepeats: Bool
-        var trace: Stitcher.Trace
-        var milliseconds: Double
+    package struct Report {
+        package var result: Stitcher.Result
+        package var height: Int
+        package var isFull: Bool
+        package var lostOnRepeats: Bool
+        package var trace: Stitcher.Trace
+        package var milliseconds: Double
     }
 
-    func add(_ frame: CGImage, motion: Stitcher.Motion? = nil) async -> (Stitcher.Result, Int, Bool) {
+    package func add(_ frame: CGImage, motion: Stitcher.Motion? = nil) async -> (Stitcher.Result, Int, Bool) {
         let report = await addReporting(frame, motion: motion)
         return (report.result, report.height, report.isFull)
     }
 
-    func addReporting(_ frame: CGImage, motion: Stitcher.Motion? = nil) async -> Report {
+    package func addReporting(_ frame: CGImage, motion: Stitcher.Motion? = nil) async -> Report {
         let boxed = UncheckedSendable(frame)
         return await withCheckedContinuation { continuation in
             queue.async {
@@ -474,7 +474,7 @@ final class StitchWorker: @unchecked Sendable {
         }
     }
 
-    func makeImage() async -> CGImage? {
+    package func makeImage() async -> CGImage? {
         await withCheckedContinuation { continuation in
             queue.async { continuation.resume(returning: self.stitcher.makeImage().map(UncheckedSendable.init)) }
         }?.value

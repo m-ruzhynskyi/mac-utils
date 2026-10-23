@@ -1,15 +1,14 @@
 import AppKit
 import MUCore
 import MUDesign
-import MUAudio
 
 /// Фон под оформленным снимком или коллажем.
-enum ShotBackground: String, CaseIterable, Identifiable {
+package enum ShotBackground: String, CaseIterable, Identifiable {
     case sky, sunset, mint, graphite, white, transparent
 
-    var id: String { rawValue }
+    package var id: String { rawValue }
 
-    var title: String {
+    package var title: String {
         switch self {
         case .sky: return "Небо"
         case .sunset: return "Закат"
@@ -21,7 +20,7 @@ enum ShotBackground: String, CaseIterable, Identifiable {
     }
 
     /// Цвета градиента сверху вниз (для белого — один цвет, для прозрачного — нет).
-    var colors: [NSColor] {
+    package var colors: [NSColor] {
         switch self {
         case .sky: return [NSColor(srgbHex: 0x74B9FF), NSColor(srgbHex: 0xA29BFE)]
         case .sunset: return [NSColor(srgbHex: 0xFF9A8B), NSColor(srgbHex: 0xFF6A88), NSColor(srgbHex: 0xFF99AC)]
@@ -32,13 +31,13 @@ enum ShotBackground: String, CaseIterable, Identifiable {
         }
     }
 
-    static var current: ShotBackground {
+    package static var current: ShotBackground {
         ShotBackground(rawValue: UserDefaults.standard.string(forKey: Pref.screenshotBackground) ?? "") ?? .sky
     }
 }
 
 extension NSColor {
-    convenience init(srgbHex hex: Int) {
+    package convenience init(srgbHex hex: Int) {
         self.init(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
                   blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }
@@ -52,59 +51,59 @@ extension NSColor {
 /// размеру. Итог не больше `maxSide` по стороне и `maxPixels` по площади: иначе он уменьшается целиком.
 ///
 /// Сборка не привязана к главному потоку (рисует в свой битмап): большой коллаж собирается в фоне.
-enum ShotComposer {
-    struct Options: Sendable {
-        var layout: StepsLayout = .auto
-        var equalSize = false
-        var windowFrame = false
-        var titles = false
-        var badges = false
+package enum ShotComposer {
+    package struct Options: Sendable {
+        package var layout: StepsLayout = .auto
+        package var equalSize = false
+        package var windowFrame = false
+        package var titles = false
+        package var badges = false
         /// Стрелки между соседними шагами (в ряду — вправо, в столбике — вниз).
-        var arrows = false
+        package var arrows = false
         /// Подписи под шагами по порядку; пустая строка — без подписи.
-        var captions: [String] = []
-        var background: ShotBackground = .white
+        package var captions: [String] = []
+        package var background: ShotBackground = .white
         /// Пикселей в точке (2 на Retina) — для одного снимка; у шагов коллажа плотность своя у каждого.
-        var unit: CGFloat = 2
-        var dark = false
+        package var unit: CGFloat = 2
+        package var dark = false
         /// Предел итога: сторона и площадь в пикселях.
-        var maxSide: CGFloat = 16_000
-        var maxPixels: CGFloat = 80_000_000
+        package var maxSide: CGFloat = 16_000
+        package var maxPixels: CGFloat = 80_000_000
     }
 
     /// Раскладка коллажа без рисования. Координаты — в пикселях холста до уменьшения, начало сверху слева.
-    struct Plan: Equatable {
+    package struct Plan: Equatable {
         /// Холст до уменьшения.
-        var canvas: CGSize
+        package var canvas: CGSize
         /// Итог = холст × `scale` (≤ 1, уменьшение под предел размера).
-        var scale: CGFloat
+        package var scale: CGFloat
         /// Плотность итога (пикселей в точке до уменьшения): по ней — отступы, рамки, номера.
-        var unit: CGFloat
-        var columns: Int
-        var gap: CGFloat
+        package var unit: CGFloat
+        package var columns: Int
+        package var gap: CGFloat
         /// Где рисуется содержимое каждого шага (без рамки окна).
-        var content: [CGRect]
+        package var content: [CGRect]
         /// Рамка окна (заголовок + содержимое) или само содержимое без рамки.
-        var window: [CGRect]
+        package var window: [CGRect]
         /// Подпись под шагом; nil — без подписи.
-        var caption: [CGRect?]
+        package var caption: [CGRect?]
 
         /// Размер итоговой картинки в пикселях.
-        var outputSize: CGSize {
+        package var outputSize: CGSize {
             CGSize(width: max(1, (canvas.width * scale).rounded(.down)), height: max(1, (canvas.height * scale).rounded(.down)))
         }
     }
 
     /// Тёмная ли тема системы; без приложения (тесты, ранний запуск) — светлая.
     @MainActor
-    static var systemIsDark: Bool {
+    package static var systemIsDark: Bool {
         guard let app = NSApp else { return false }
         return app.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     }
 
     /// Один снимок в рамке окна на фоне (кнопка «Рамка» / клавиша F).
     @MainActor
-    static func framedSingle(_ image: CGImage, unit: CGFloat) -> CGImage? {
+    package static func framedSingle(_ image: CGImage, unit: CGFloat) -> CGImage? {
         var options = Options()
         options.windowFrame = true
         options.background = .current
@@ -114,12 +113,12 @@ enum ShotComposer {
     }
 
     /// Снимки одной плотности (`options.unit`).
-    static func compose(_ source: [CGImage], options: Options) -> CGImage? {
+    package static func compose(_ source: [CGImage], options: Options) -> CGImage? {
         compose(steps: source.map { ($0, options.unit) }, options: options)
     }
 
     /// Шаги со своей плотностью каждый.
-    static func compose(steps: [(image: CGImage, unit: CGFloat)], options: Options) -> CGImage? {
+    package static func compose(steps: [(image: CGImage, unit: CGFloat)], options: Options) -> CGImage? {
         guard !steps.isEmpty else { return nil }
         let plan = plan(sizes: steps.map { CGSize(width: $0.image.width, height: $0.image.height) },
                         units: steps.map(\.unit), options: options)
@@ -135,13 +134,13 @@ enum ShotComposer {
     private static let badgeRadiusPoints: CGFloat = 18
 
     /// Плотность итога и множитель для каждого шага: всё приводится к самой высокой плотности.
-    static func normalizedScales(units: [CGFloat]) -> (unit: CGFloat, scales: [CGFloat]) {
+    package static func normalizedScales(units: [CGFloat]) -> (unit: CGFloat, scales: [CGFloat]) {
         let clean = units.map { $0.isFinite && $0 > 0 ? $0 : 1 }
         let unit = clean.max() ?? 1
         return (unit, clean.map { unit / $0 })
     }
 
-    static func plan(sizes: [CGSize], units: [CGFloat], options: Options) -> Plan {
+    package static func plan(sizes: [CGSize], units: [CGFloat], options: Options) -> Plan {
         let (u, density) = normalizedScales(units: units.count == sizes.count ? units : sizes.map { _ in options.unit })
         var shown = zip(sizes, density).map { CGSize(width: $0.width * $1, height: $0.height * $1) }
         if options.equalSize { shown = equalized(shown, layout: options.layout) }
@@ -200,11 +199,11 @@ enum ShotComposer {
                     content: content, window: window, caption: caption)
     }
 
-    static func columnCount(for items: [CGImage], layout: StepsLayout) -> Int {
+    package static func columnCount(for items: [CGImage], layout: StepsLayout) -> Int {
         columnCount(for: items.map { CGSize(width: $0.width, height: $0.height) }, layout: layout)
     }
 
-    static func columnCount(for items: [CGSize], layout: StepsLayout) -> Int {
+    package static func columnCount(for items: [CGSize], layout: StepsLayout) -> Int {
         let n = items.count
         guard n > 0 else { return 1 }
         switch layout {
@@ -229,7 +228,7 @@ enum ShotComposer {
 
     /// Столбик — общая ширина, ряд — общая высота, сетка — общая ячейка.
     /// Цель — медиана; увеличиваем не больше чем вдвое, чтобы не размыть.
-    static func equalized(_ sizes: [CGSize], layout: StepsLayout) -> [CGSize] {
+    package static func equalized(_ sizes: [CGSize], layout: StepsLayout) -> [CGSize] {
         guard sizes.count > 1 else { return sizes }
         func median(_ values: [CGFloat]) -> CGFloat { values.sorted()[values.count / 2] }
         let targetWidth = median(sizes.map(\.width))

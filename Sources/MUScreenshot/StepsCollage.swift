@@ -6,17 +6,17 @@ import MUDesign
 
 /// Откуда начинается захват, куда уходит коллаж и как сообщается результат — подменяется в тестах сессии.
 @MainActor
-struct StepsEnvironment {
-    var startCapture: () -> Bool = { ScreenshotService.shared.start(.edit) }
-    var save: (CGImage, @escaping @MainActor (Result<URL, Error>) -> Void) -> Void = { ScreenshotService.shared.saveCollage($0, done: $1) }
-    var copy: (CGImage, @escaping @MainActor (Bool) -> Void) -> Void = { ScreenshotService.shared.copyCollage($0, done: $1) }
+package struct StepsEnvironment {
+    package var startCapture: () -> Bool = { ScreenshotService.shared.start(.edit) }
+    package var save: (CGImage, @escaping @MainActor (Result<URL, Error>) -> Void) -> Void = { ScreenshotService.shared.saveCollage($0, done: $1) }
+    package var copy: (CGImage, @escaping @MainActor (Bool) -> Void) -> Void = { ScreenshotService.shared.copyCollage($0, done: $1) }
     /// Выдача без вопросов (выход из приложения): туда же, куда обычные снимки.
-    var deliverQuietly: (CGImage) -> Void = { ScreenshotService.shared.deliver($0) }
-    var toast: (String, String, Color) -> Void = { Toast.show($0, symbol: $1, tint: $2) }
+    package var deliverQuietly: (CGImage) -> Void = { ScreenshotService.shared.deliver($0) }
+    package var toast: (String, String, Color) -> Void = { Toast.show($0, symbol: $1, tint: $2) }
     /// Идёт запись экрана или длинный снимок: панель и предпросмотр ждут, пока они закончатся.
-    var captureBusy: () -> Bool = { ScreenRecorder.current != nil || ScrollCapture.current != nil }
+    package var captureBusy: () -> Bool = { ScreenRecorder.current != nil || ScrollCapture.current != nil }
     /// Тесты сессии окон не открывают.
-    var showsWindows = true
+    package var showsWindows = true
 }
 
 /// «Коллаж шагов»: несколько снимков подряд складываются в одну картинку с номерами 1, 2, 3.
@@ -26,15 +26,15 @@ struct StepsEnvironment {
 /// «Готово» открывает предпросмотр коллажа: раскладка, рамка, номера, подписи; там же «Сохранить» и «Скопировать».
 /// Панель и предпросмотр в снимок не попадают: на время захвата прячутся и исключаются из него.
 @MainActor
-final class StepsSession: ObservableObject {
-    private(set) static var current: StepsSession?
-    static var environment = StepsEnvironment()
+package final class StepsSession: ObservableObject {
+    package private(set) static var current: StepsSession?
+    package static var environment = StepsEnvironment()
 
-    @Published private(set) var model = StepsModel()
+    @Published package private(set) var model = StepsModel()
     /// Панель спрашивает «Удалить все шаги?» (отмена при двух шагах и больше).
-    @Published private(set) var confirmingCancel = false
+    @Published package private(set) var confirmingCancel = false
     /// Когда шаги последний раз менялись (забытая сессия не должна вечно считаться «занятостью»).
-    private(set) var lastActivity = Date()
+    package private(set) var lastActivity = Date()
 
     private var hudPanel: NSPanel?
     private var preview: StepsPreviewWindowController?
@@ -48,7 +48,7 @@ final class StepsSession: ObservableObject {
 
     /// Добавляет снятый шаг (или заменяет переснимаемый); первая же картинка начинает сессию.
     /// `rect` — выделенная область в глобальных точках: её предложит следующий «Ещё шаг».
-    static func add(_ image: CGImage, unit: CGFloat, rect: CGRect?) {
+    package static func add(_ image: CGImage, unit: CGFloat, rect: CGRect?) {
         let session = current ?? StepsSession()
         current = session
         let wasRetake = session.model.retakeNumber
@@ -70,36 +70,36 @@ final class StepsSession: ObservableObject {
     }
 
     /// Номер следующего шага и что сделает Enter — для подсказки в режиме снимка; nil — коллажа нет.
-    static var captureHint: String? {
+    package static var captureHint: String? {
         guard let session = current else { return nil }
         if let number = session.model.retakeNumber { return "Пересъёмка шага \(number) · Enter — заменить" }
         return "Шаг \(session.model.count + 1) коллажа · Enter — добавить"
     }
 
     /// Область для следующего снимка (глобальные точки): прошлого шага или переснимаемого.
-    static var proposedRect: CGRect? { current?.model.proposedRect }
+    package static var proposedRect: CGRect? { current?.model.proposedRect }
 
     /// Последний шаг тоже можно удалить: панель остаётся — «Вернуть удалённый» или «Ещё шаг».
-    func remove(_ id: UUID) {
+    package func remove(_ id: UUID) {
         model.remove(id)
         touch()
     }
 
-    func undoRemove() {
+    package func undoRemove() {
         if model.undoRemove() { touch() }
     }
 
-    func move(_ id: UUID, to index: Int) {
+    package func move(_ id: UUID, to index: Int) {
         model.move(id, to: index)
         touch()
     }
 
-    func setCaption(_ text: String, for id: UUID) {
+    package func setCaption(_ text: String, for id: UUID) {
         model.setCaption(text, for: id)
         touch()
     }
 
-    func retake(_ id: UUID) {
+    package func retake(_ id: UUID) {
         model.beginRetake(id)
         nextStep()
     }
@@ -112,7 +112,7 @@ final class StepsSession: ObservableObject {
 
     /// Перед снимком: панель и предпросмотр прячутся. Возвращает номера их окон — их исключает и сам захват
     /// (окно, ещё не успевшее исчезнуть с экрана, не попадёт в кадр).
-    static func prepareForCapture() -> [CGWindowID] {
+    package static func prepareForCapture() -> [CGWindowID] {
         guard let session = current else { return [] }
         var ids: [CGWindowID] = []
         for window in [session.hudPanel, session.preview?.window] {
@@ -127,7 +127,7 @@ final class StepsSession: ObservableObject {
     /// возвращаются. `resume == false` — захват уступил место записи экрана или длинному снимку: вернутся,
     /// когда те закончатся. Возвращает true, если показан предпросмотр (ему и остаётся фокус).
     @discardableResult
-    static func captureClosed(resume: Bool = true) -> Bool {
+    package static func captureClosed(resume: Bool = true) -> Bool {
         guard let session = current else { return false }
         session.model.cancelRetake()
         guard resume else {
@@ -164,7 +164,7 @@ final class StepsSession: ObservableObject {
         }
     }
 
-    func nextStep() {
+    package func nextStep() {
         confirmingCancel = false
         guard env.startCapture() else {
             // Захват не начался (идёт запись, нет разрешения): пересъёмка не висит до следующего снимка.
@@ -215,7 +215,7 @@ final class StepsSession: ObservableObject {
     // MARK: - Готово и отмена
 
     /// «Готово»: предпросмотр коллажа (панель на это время прячется).
-    func showPreview() {
+    package func showPreview() {
         guard !model.isEmpty else { return }
         confirmingCancel = false
         hudPanel?.orderOut(nil)
@@ -226,7 +226,7 @@ final class StepsSession: ObservableObject {
     }
 
     /// «Назад к шагам» или закрытие окна предпросмотра: шаги остаются.
-    func closePreview(showHUD: Bool = true) {
+    package func closePreview(showHUD: Bool = true) {
         guard let controller = preview else { return }
         preview = nil
         controller.dismiss()
@@ -236,7 +236,7 @@ final class StepsSession: ObservableObject {
     /// Сохранить или скопировать собранный коллаж. Шаги закрываются только когда картинка точно на месте:
     /// если сохранить не вышло, она кладётся в буфер обмена, а шаги, подписи и предпросмотр остаются.
     /// `done(true)` — коллаж выдан и сессия закрыта.
-    func deliver(_ image: CGImage, action: StepsPreviewModel.Delivery, done: @escaping @MainActor (Bool) -> Void = { _ in }) {
+    package func deliver(_ image: CGImage, action: StepsPreviewModel.Delivery, done: @escaping @MainActor (Bool) -> Void = { _ in }) {
         let env = self.env
         let count = model.count
         switch action {
@@ -277,7 +277,7 @@ final class StepsSession: ObservableObject {
 
     /// Собрать и выдать без вопросов, с сохранёнными настройками (выход из приложения, выключение Mac).
     /// Если на полный размер не хватило памяти — собирается поменьше; не вышло и так — тост, а не тишина.
-    func finish() {
+    package func finish() {
         let steps = model.steps
         end()
         guard !steps.isEmpty else { return }
@@ -300,7 +300,7 @@ final class StepsSession: ObservableObject {
     }
 
     /// «Отмена»: при двух шагах и больше — сначала вопрос в самой панели (окна-вопросы мешали бы работе).
-    func cancel() {
+    package func cancel() {
         if model.count >= 2 && !confirmingCancel {
             confirmingCancel = true
             return
@@ -308,11 +308,11 @@ final class StepsSession: ObservableObject {
         discard()
     }
 
-    func keepSteps() {
+    package func keepSteps() {
         confirmingCancel = false
     }
 
-    func discard() {
+    package func discard() {
         end()
         env.toast("Коллаж отменён", "xmark.circle.fill", .secondary)
     }
@@ -330,9 +330,9 @@ final class StepsSession: ObservableObject {
 }
 
 private struct StepsHUD: View {
-    @ObservedObject var session: StepsSession
+    @ObservedObject package var session: StepsSession
 
-    var body: some View {
+    package var body: some View {
         StepsPanelContent(
             items: session.model.steps.map { StepsPanelItem(id: $0.id, thumbnail: $0.thumbnail) },
             confirmingCancel: session.confirmingCancel,
@@ -353,41 +353,41 @@ private struct StepsHUD: View {
 
 // MARK: - Панель шагов (представление)
 
-struct StepsPanelItem: Identifiable {
-    let id: UUID
-    let thumbnail: CGImage
+package struct StepsPanelItem: Identifiable {
+    package let id: UUID
+    package let thumbnail: CGImage
 }
 
-struct StepsPanelActions {
-    var cancel: () -> Void = {}
-    var keep: () -> Void = {}
-    var discard: () -> Void = {}
-    var next: () -> Void = {}
-    var finish: () -> Void = {}
-    var remove: (UUID) -> Void = { _ in }
-    var retake: (UUID) -> Void = { _ in }
-    var move: (UUID, Int) -> Void = { _, _ in }
-    var undo: () -> Void = {}
+package struct StepsPanelActions {
+    package var cancel: () -> Void = {}
+    package var keep: () -> Void = {}
+    package var discard: () -> Void = {}
+    package var next: () -> Void = {}
+    package var finish: () -> Void = {}
+    package var remove: (UUID) -> Void = { _ in }
+    package var retake: (UUID) -> Void = { _ in }
+    package var move: (UUID, Int) -> Void = { _, _ in }
+    package var undo: () -> Void = {}
 }
 
 /// Панель коллажа шагов: заголовок, счётчик, «Отмена / Ещё шаг / Готово» и полоса миниатюр.
 /// Значения готовые, без модели (её же снимают UI-тесты на демо-данных).
-struct StepsPanelContent: View {
-    let items: [StepsPanelItem]
-    var confirmingCancel = false
-    var canUndo = false
-    var isFull = false
-    var actions = StepsPanelActions()
+package struct StepsPanelContent: View {
+    package let items: [StepsPanelItem]
+    package var confirmingCancel = false
+    package var canUndo = false
+    package var isFull = false
+    package var actions = StepsPanelActions()
 
-    static let thumbSize = CGSize(width: 112, height: 72)
-    static let thumbSpacing: CGFloat = DS.Space.s
+    package static let thumbSize = CGSize(width: 112, height: 72)
+    package static let thumbSpacing: CGFloat = DS.Space.s
     /// Шире полоса прокручивается.
-    static let stripMaxWidth: CGFloat = 640
+    package static let stripMaxWidth: CGFloat = 640
 
     @State private var dragging: UUID?
     @State private var dragOffset: CGFloat = 0
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             header
             if !items.isEmpty || !isFull { strip }
@@ -489,16 +489,16 @@ struct StepsPanelContent: View {
 
 /// Миниатюра шага: номер, при наведении — «Переснять» и «Удалить»; меню по правому щелчку — то же и перенос.
 private struct StepThumb: View {
-    let item: StepsPanelItem
-    let number: Int
-    let retake: () -> Void
-    let remove: () -> Void
-    let moveLeft: (() -> Void)?
-    let moveRight: (() -> Void)?
+    package let item: StepsPanelItem
+    package let number: Int
+    package let retake: () -> Void
+    package let remove: () -> Void
+    package let moveLeft: (() -> Void)?
+    package let moveRight: (() -> Void)?
 
     @State private var hovered = false
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
         ZStack(alignment: .topLeading) {
             Image(decorative: item.thumbnail, scale: 1)
@@ -555,12 +555,12 @@ private struct StepThumb: View {
 
 // MARK: - Раскладка
 
-enum StepsLayout: String, CaseIterable, Identifiable {
+package enum StepsLayout: String, CaseIterable, Identifiable {
     case auto, vertical, horizontal, grid
 
-    var id: String { rawValue }
+    package var id: String { rawValue }
 
-    var title: String {
+    package var title: String {
         switch self {
         case .auto: return "Авто (ближе к квадрату)"
         case .vertical: return "Столбиком"
@@ -570,7 +570,7 @@ enum StepsLayout: String, CaseIterable, Identifiable {
     }
 
     /// Короткое название для переключателя в предпросмотре.
-    var shortTitle: String {
+    package var shortTitle: String {
         switch self {
         case .auto: return "Авто"
         case .vertical: return "Столбик"

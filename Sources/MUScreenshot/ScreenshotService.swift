@@ -9,12 +9,12 @@ import MUDesign
 ///   ⌘⇧X  — выделить область (или кликнуть по окну), разметить, скопировать / сохранить.
 ///   ⌘⇧⌥X — выделить область и сразу распознать в ней текст (OCR) в буфер обмена.
 @MainActor
-final class ScreenshotService: ObservableObject {
-    static let shared = ScreenshotService()
+package final class ScreenshotService: ObservableObject {
+    package static let shared = ScreenshotService()
 
-    enum Mode { case edit, ocr }
+    package enum Mode { case edit, ocr }
 
-    @Published private(set) var isRunning = false
+    @Published package private(set) var isRunning = false
 
     private var windows: [CaptureWindow] = []
     private var capturing = false
@@ -24,7 +24,7 @@ final class ScreenshotService: ObservableObject {
 
     private init() {}
 
-    func sync() {
+    package func sync() {
         let center = HotKeyCenter.shared
         if UserDefaults.standard.bool(forKey: Pref.screenshot) {
             if !center.isRegistered(id: HotKeyID.screenshot) {
@@ -51,7 +51,7 @@ final class ScreenshotService: ObservableObject {
 
     /// false — захват не начался (идёт запись или длинный снимок, нет разрешения, уже открыт).
     @discardableResult
-    func start(_ mode: Mode) -> Bool {
+    package func start(_ mode: Mode) -> Bool {
         // ⌘⇧X во время записи экрана — остановить её.
         if let recorder = ScreenRecorder.current {
             recorder.stop()
@@ -141,12 +141,12 @@ final class ScreenshotService: ObservableObject {
     }
 
     /// Перерисовать оверлеи всех экранов (сменился режим выбора окна).
-    func redrawAll() {
+    package func redrawAll() {
         for window in windows { window.captureView.needsDisplay = true }
     }
 
         /// Новое выделение на одном экране сбрасывает выделение на остальных.
-    func selectionBegan(in view: CaptureView) {
+    package func selectionBegan(in view: CaptureView) {
         for window in windows where window.captureView !== view {
             window.captureView.resetSelection()
         }
@@ -154,7 +154,7 @@ final class ScreenshotService: ObservableObject {
 
     /// `resumeSteps` — вернуть панель шагов или предпросмотр коллажа; не нужно, когда захват уступает место
     /// записи экрана или длинному снимку (тогда они вернутся сами, когда те закончатся).
-    func close(resumeSteps: Bool = true) {
+    package func close(resumeSteps: Bool = true) {
         keyTap?.stop()
         for window in windows {
             window.orderOut(nil)
@@ -173,14 +173,14 @@ final class ScreenshotService: ObservableObject {
 
     // MARK: - Результат
 
-    func copy(_ image: CGImage) {
+    package func copy(_ image: CGImage) {
         close()
         complete(image, prefix: "Снимок экрана", clipboard: true, folder: false) { _, copied in
             if copied { Toast.show("Снимок скопирован", symbol: "doc.on.clipboard.fill", tint: .accentColor) }
         }
     }
 
-    func save(_ image: CGImage) {
+    package func save(_ image: CGImage) {
         close()
         complete(image, prefix: "Снимок экрана", clipboard: false, folder: true) { saved, _ in
             switch saved {
@@ -196,7 +196,7 @@ final class ScreenshotService: ObservableObject {
     }
 
     /// Основное действие (Enter, двойной клик): куда — по настройке «Куда сохранять».
-    func deliver(_ image: CGImage) {
+    package func deliver(_ image: CGImage) {
         switch Pref.screenshotDestinationValue {
         case .clipboard:
             copy(image)
@@ -212,7 +212,7 @@ final class ScreenshotService: ObservableObject {
 
     /// Сохранить коллаж в папку снимков. Захват не закрывается (его нет), тостов нет: результат — в `done`,
     /// и коллаж решает сам — закрыть шаги или оставить их и положить картинку в буфер.
-    func saveCollage(_ image: CGImage, done: @escaping @MainActor (Result<URL, Error>) -> Void) {
+    package func saveCollage(_ image: CGImage, done: @escaping @MainActor (Result<URL, Error>) -> Void) {
         complete(image, prefix: "Коллаж шагов", clipboard: false, folder: true,
                  encodeFailed: { done(.failure(CollageEncodingError())) }) { saved, _ in
             done(saved ?? .failure(CollageEncodingError()))
@@ -221,13 +221,13 @@ final class ScreenshotService: ObservableObject {
 
     /// Скопировать коллаж в буфер обмена. `done(false)` — не получилось (не закодировался, или за это время
     /// в буфер скопировали что-то новее).
-    func copyCollage(_ image: CGImage, done: @escaping @MainActor (Bool) -> Void) {
+    package func copyCollage(_ image: CGImage, done: @escaping @MainActor (Bool) -> Void) {
         complete(image, prefix: "Коллаж шагов", clipboard: true, folder: false,
                  encodeFailed: { done(false) }) { _, copied in done(copied) }
     }
 
     /// Запись экрана: оверлей закрывается, область снимается видео.
-    func startRecording(rect: NSRect) {
+    package func startRecording(rect: NSRect) {
         close(resumeSteps: false)
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 200_000_000)
@@ -236,7 +236,7 @@ final class ScreenshotService: ObservableObject {
     }
 
     /// Длинный снимок: закрываем оверлей, пользователь прокручивает, мы склеиваем кадры.
-    func startScrollCapture(rect: NSRect) {
+    package func startScrollCapture(rect: NSRect) {
         close(resumeSteps: false)
         Task { @MainActor in
             // Даём оверлею исчезнуть, а фокусу вернуться к прокручиваемому окну.
@@ -246,7 +246,7 @@ final class ScreenshotService: ObservableObject {
     }
 
     /// Длинный снимок готов: туда же, куда и обычные снимки.
-    func deliverLongImage(_ image: CGImage) {
+    package func deliverLongImage(_ image: CGImage) {
         let size = "\(image.height) px"
         switch Pref.screenshotDestinationValue {
         case .clipboard:
@@ -359,7 +359,7 @@ final class ScreenshotService: ObservableObject {
         return ScreenshotLibrary.shared.destination(fileName: "\(prefix) \(formatter.string(from: Date())).png", root: folder)
     }
 
-    func recognizeText(_ image: CGImage) {
+    package func recognizeText(_ image: CGImage) {
         close()
         Task.detached(priority: .userInitiated) {
             let text = TextRecognizer.recognize(image)
@@ -379,14 +379,14 @@ final class ScreenshotService: ObservableObject {
 
 // MARK: - Снимок экранов
 
-struct CollageEncodingError: LocalizedError {
-    var errorDescription: String? { "не удалось закодировать картинку" }
+package struct CollageEncodingError: LocalizedError {
+    package var errorDescription: String? { "не удалось закодировать картинку" }
 }
 
 /// Рамки видимых окон (в координатах Cocoa) для «прилипания» выделения к окну.
 @MainActor
-enum WindowSnap {
-    static func visibleWindowFrames() -> [CGRect] {
+package enum WindowSnap {
+    package static func visibleWindowFrames() -> [CGRect] {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                     kCGNullWindowID) as? [[String: Any]] else { return [] }
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0

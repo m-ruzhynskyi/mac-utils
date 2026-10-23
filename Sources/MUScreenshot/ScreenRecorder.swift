@@ -7,22 +7,21 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
-import MUAudio
 
 /// «Запись»: видео выделенной области из режима снимка (MP4 или GIF).
 /// Кадры идут из SCStream с sourceRect; MP4 пишет AVAssetWriter (H.264),
 /// GIF собирается из MP4 после остановки.
 @MainActor
-final class ScreenRecorder: NSObject, ObservableObject {
-    private(set) static var current: ScreenRecorder?
+package final class ScreenRecorder: NSObject, ObservableObject {
+    package private(set) static var current: ScreenRecorder?
 
-    enum Format: String, CaseIterable, Identifiable {
+    package enum Format: String, CaseIterable, Identifiable {
         case mp4, gif
-        var id: String { rawValue }
-        var title: String { self == .mp4 ? "Видео MP4" : "GIF" }
+        package var id: String { rawValue }
+        package var title: String { self == .mp4 ? "Видео MP4" : "GIF" }
     }
 
-    @Published private(set) var elapsed: TimeInterval = 0
+    @Published package private(set) var elapsed: TimeInterval = 0
 
     private let rect: NSRect
     private let screen: NSScreen
@@ -36,7 +35,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     private var filterDisplayID: CGDirectDisplayID?
 
     /// Заголовок своих окон, которые должны попасть в запись (рисунки поверх экрана).
-    static let recordedWindowTitle = RecordingWindow.title
+    package static let recordedWindowTitle = RecordingWindow.title
 
     /// Свои окна (рамка, HUD, уведомления) в запись не попадают — кроме рисунков поверх экрана.
     private static func filter(content: SCShareableContent, display: SCDisplay) -> SCContentFilter {
@@ -49,7 +48,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     }
 
     /// Появились или исчезли рисунки поверх экрана — обновить, что пишем.
-    func refreshFilter() {
+    package func refreshFilter() {
         guard let stream, let displayID = filterDisplayID else { return }
         Task {
             guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
@@ -71,7 +70,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
 
     // MARK: - Старт
 
-    static func start(rect: NSRect) {
+    package static func start(rect: NSRect) {
         guard current == nil else { return }
         let center = NSPoint(x: rect.midX, y: rect.midY)
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(center, $0.frame, false) }) ?? NSScreen.main,
@@ -188,7 +187,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
 
     // MARK: - Стоп
 
-    func stop() {
+    package func stop() {
         guard !finishing, let stream, let writer else { return }
         finishing = true
         teardownUI()
@@ -212,7 +211,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     /// Пока открыто окно подтверждения, Esc принадлежит ему (глобальный перехват не должен останавливать запись под ним).
     private var confirmingCancel = false
 
-    func confirmCancel() {
+    package func confirmCancel() {
         guard !finishing, !confirmingCancel else { return }
         confirmingCancel = true
         defer { confirmingCancel = false }
@@ -227,7 +226,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         if alert.runModal() == .alertSecondButtonReturn { cancel() }
     }
 
-    func cancel() {
+    package func cancel() {
         guard !finishing else { return }
         finishing = true
         teardownUI()
@@ -322,7 +321,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     }
 
     /// Перенести временный MP4 к пользователю; не вышло — удалить его, чтобы не копить мусор в temp.
-    nonisolated static func saveFallback(_ temp: URL, to destination: URL) -> Bool {
+    package nonisolated static func saveFallback(_ temp: URL, to destination: URL) -> Bool {
         do {
             try FileManager.default.moveItem(at: temp, to: destination)
             return true
@@ -401,10 +400,10 @@ final class ScreenRecorder: NSObject, ObservableObject {
     }
 }
 
-enum RecordingError: LocalizedError {
+package enum RecordingError: LocalizedError {
     case noDisplay, writer
 
-    var errorDescription: String? {
+    package var errorDescription: String? {
         switch self {
         case .noDisplay: return "дисплей не найден"
         case .writer: return "не удалось создать файл записи"
@@ -413,20 +412,20 @@ enum RecordingError: LocalizedError {
 }
 
 private struct RecordingHUD: View {
-    @ObservedObject var recorder: ScreenRecorder
+    @ObservedObject package var recorder: ScreenRecorder
 
-    var body: some View {
+    package var body: some View {
         RecordingHUDContent(elapsed: recorder.elapsed, cancel: { recorder.confirmCancel() }, stop: { recorder.stop() })
     }
 }
 
 /// Индикатор записи экрана: «ЗАПИСЬ» с пульсирующей точкой, время, «Отмена» и «Стоп». Значения готовые, без модели.
-struct RecordingHUDContent: View {
-    let elapsed: TimeInterval
-    let cancel: () -> Void
-    let stop: () -> Void
+package struct RecordingHUDContent: View {
+    package let elapsed: TimeInterval
+    package let cancel: () -> Void
+    package let stop: () -> Void
 
-    var body: some View {
+    package var body: some View {
         LiveIndicator(.recording, since: Date().addingTimeInterval(-elapsed)) {
             Button("Отмена", action: cancel)
                 .buttonStyle(.graphite(.ghost, size: .compact))
@@ -442,9 +441,9 @@ struct RecordingHUDContent: View {
 // MARK: - Запись в файл
 
 /// Принимает кадры SCStream на своей очереди и пишет MP4 (H.264 + AAC).
-final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    let url: URL
-    let queue = DispatchQueue(label: "macutils.recording")
+package final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    package let url: URL
+    package let queue = DispatchQueue(label: "macutils.recording")
 
     private let writer: AVAssetWriter
     private let video: AVAssetWriterInput
@@ -454,7 +453,7 @@ final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var finished = false
     private var frames = 0
 
-    init(url: URL, width: Int, height: Int, audio wantsAudio: Bool, microphone wantsMic: Bool) throws {
+    package init(url: URL, width: Int, height: Int, audio wantsAudio: Bool, microphone wantsMic: Bool) throws {
         self.url = url
         writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         video = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -493,7 +492,7 @@ final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
 
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    package func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard !finished, sampleBuffer.isValid, writer.status == .writing else { return }
         switch type {
         case .screen:
@@ -515,17 +514,17 @@ final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     /// Вызывается на queue.
-    func appendMicrophone(_ sampleBuffer: CMSampleBuffer) {
+    package func appendMicrophone(_ sampleBuffer: CMSampleBuffer) {
         guard !finished, sessionStarted, let microphone, microphone.isReadyForMoreMediaData else { return }
         microphone.append(sampleBuffer)
     }
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
+    package func stream(_ stream: SCStream, didStopWithError error: Error) {
         Log.capture.error("Запись: поток остановлен: \(error.localizedDescription, privacy: .public)")
     }
 
     /// Захват не стартовал: закрыть писатель и удалить временный файл.
-    func discard() {
+    package func discard() {
         queue.sync {
             finished = true
             if writer.status == .writing { writer.cancelWriting() }
@@ -534,7 +533,7 @@ final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     /// Закрывает файл; возвращает число записанных кадров.
-    func finish() async -> Int {
+    package func finish() async -> Int {
         await withCheckedContinuation { continuation in
             queue.async {
                 self.finished = true
@@ -557,9 +556,9 @@ final class RecordingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
 // MARK: - GIF
 
-enum GIFMaker {
+package enum GIFMaker {
     /// Кадры из видео с шагом 1/fps, ширина не больше maxWidth, бесконечный повтор.
-    static func make(from video: URL, to destination: URL, fps: Int, maxWidth: CGFloat,
+    package static func make(from video: URL, to destination: URL, fps: Int, maxWidth: CGFloat,
                      progress: (@Sendable (Int) -> Void)? = nil) async throws {
         let asset = AVURLAsset(url: video)
         let duration = try await asset.load(.duration).seconds
@@ -591,22 +590,22 @@ enum GIFMaker {
 }
 
 /// Правила GIF-записи: предупреждение, предел длительности, проценты прогресса.
-enum GIFPolicy {
+package enum GIFPolicy {
     /// После скольких секунд записи предупреждаем, что GIF получится тяжёлым.
-    static let warnAfter: TimeInterval = 30
+    package static let warnAfter: TimeInterval = 30
     /// Дольше GIF не пишем: запись останавливается и сохраняется (15 кадров/с × 960 px — сотни МБ).
-    static let maxDuration: TimeInterval = 90
+    package static let maxDuration: TimeInterval = 90
 
-    enum Action: Equatable { case none, warn, stop }
+    package enum Action: Equatable { case none, warn, stop }
 
-    static func check(elapsed: TimeInterval, warned: Bool) -> Action {
+    package static func check(elapsed: TimeInterval, warned: Bool) -> Action {
         if elapsed >= maxDuration { return .stop }
         if elapsed >= warnAfter, !warned { return .warn }
         return .none
     }
 
     /// Проценты 0…100 для «Создаю GIF… N %».
-    static func percent(done: Int, total: Int) -> Int {
+    package static func percent(done: Int, total: Int) -> Int {
         guard total > 0 else { return 100 }
         return min(100, max(0, done * 100 / total))
     }

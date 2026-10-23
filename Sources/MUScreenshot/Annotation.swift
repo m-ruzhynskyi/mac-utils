@@ -1,10 +1,10 @@
 import AppKit
 import MUDesign
 
-enum Tool: CaseIterable {
+package enum Tool: CaseIterable {
     case select, arrow, rectangle, pen, marker, text, counter, pixelate
 
-    var symbol: String {
+    package var symbol: String {
         switch self {
         case .select: return "cursorarrow"
         case .arrow: return "arrow.up.right"
@@ -17,7 +17,7 @@ enum Tool: CaseIterable {
         }
     }
 
-    var title: String {
+    package var title: String {
         switch self {
         case .select: return "Выбор и перемещение (V)"
         case .arrow: return "Стрелка (1)"
@@ -31,7 +31,7 @@ enum Tool: CaseIterable {
     }
 
     /// Подпись под значком на панели.
-    var shortTitle: String {
+    package var shortTitle: String {
         switch self {
         case .select: return "Выбор"
         case .arrow: return "Стрелка"
@@ -45,27 +45,27 @@ enum Tool: CaseIterable {
     }
 
     /// Клавиша-цифра для инструмента (без «выбора», у него V).
-    static let numbered: [Tool] = [.arrow, .rectangle, .pen, .marker, .text, .counter, .pixelate]
+    package static let numbered: [Tool] = [.arrow, .rectangle, .pen, .marker, .text, .counter, .pixelate]
 }
 
-struct Annotation: Equatable {
-    var tool: Tool
-    var color: NSColor
-    var width: CGFloat
+package struct Annotation: Equatable {
+    package var tool: Tool
+    package var color: NSColor
+    package var width: CGFloat
     /// Стрелка / прямоугольник / размытие: [начало, конец]. Карандаш / маркер: путь.
     /// Текст: [левый нижний угол]. Номер: [центр].
-    var points: [NSPoint]
-    var text = ""
-    var fontSize: CGFloat = 22
-    var number = 0
+    package var points: [NSPoint]
+    package var text = ""
+    package var fontSize: CGFloat = 22
+    package var number = 0
     /// Масштаб кружка с номером (меняется ручками).
-    var counterScale: CGFloat = 1
+    package var counterScale: CGFloat = 1
 
-    static let counterRadius: CGFloat = 15
+    package static let counterRadius: CGFloat = 15
 
-    var counterRadius: CGFloat { Self.counterRadius * counterScale }
+    package var counterRadius: CGFloat { Self.counterRadius * counterScale }
 
-    var isMeaningful: Bool {
+    package var isMeaningful: Bool {
         switch tool {
         case .text:
             return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -79,19 +79,19 @@ struct Annotation: Equatable {
         }
     }
 
-    mutating func offset(dx: CGFloat, dy: CGFloat) {
+    package mutating func offset(dx: CGFloat, dy: CGFloat) {
         points = points.map { NSPoint(x: $0.x + dx, y: $0.y + dy) }
     }
 
     // MARK: - Изменение размера
 
     /// Текст и номер масштабируются целиком; остальное — по рамке.
-    var scalesUniformly: Bool { tool == .text || tool == .counter }
+    package var scalesUniformly: Bool { tool == .text || tool == .counter }
 
     /// Вписывает элемент из рамки `old` (его прежние bounds) в рамку `new`.
     /// `anchor` — точка, которая остаётся на месте при пропорциональном масштабе.
     @MainActor
-    mutating func fit(from old: NSRect, to new: NSRect, anchor: NSPoint) {
+    package mutating func fit(from old: NSRect, to new: NSRect, anchor: NSPoint) {
         switch tool {
         case .rectangle, .pixelate:
             points = [NSPoint(x: new.minX, y: new.minY), NSPoint(x: new.maxX, y: new.maxY)]
@@ -121,7 +121,7 @@ struct Annotation: Equatable {
     // MARK: - Попадание курсора
 
     @MainActor
-    var bounds: NSRect {
+    package var bounds: NSRect {
         switch tool {
         case .text:
             guard let origin = points.first else { return .zero }
@@ -140,7 +140,7 @@ struct Annotation: Equatable {
     }
 
     @MainActor
-    func hitTest(_ p: NSPoint) -> Bool {
+    package func hitTest(_ p: NSPoint) -> Bool {
         let slop = max(width, 4) + 5
         switch tool {
         case .text, .counter, .pixelate:
@@ -175,7 +175,7 @@ struct Annotation: Equatable {
     // MARK: - Отрисовка
 
     @MainActor
-    static func textAttributes(color: NSColor, size: CGFloat) -> [NSAttributedString.Key: Any] {
+    package static func textAttributes(color: NSColor, size: CGFloat) -> [NSAttributedString.Key: Any] {
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
         shadow.shadowOffset = NSSize(width: 0, height: -1)
@@ -189,7 +189,7 @@ struct Annotation: Equatable {
 
     /// Рисует аннотацию в текущем NSGraphicsContext (координаты вида, не перевёрнутые).
     @MainActor
-    func draw(pixelated: NSImage?, canvas: NSRect) {
+    package func draw(pixelated: NSImage?, canvas: NSRect) {
         switch tool {
         case .select:
             return
@@ -295,7 +295,7 @@ struct Annotation: Equatable {
         tip.fill()
     }
 
-    static func rect(_ a: NSPoint, _ b: NSPoint) -> NSRect {
+    package static func rect(_ a: NSPoint, _ b: NSPoint) -> NSRect {
         NSRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
 }

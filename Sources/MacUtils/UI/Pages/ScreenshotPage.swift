@@ -3,6 +3,7 @@ import SwiftUI
 import MUCore
 import MUDesign
 import MUScreenShare
+import MUScreenshot
 
 /// Образец фона в настройках снимков.
 private struct BackgroundSwatch: View {

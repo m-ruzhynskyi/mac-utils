@@ -4,6 +4,7 @@ import MUCore
 import MUDesign
 import MUMeetings
 import MUScreenShare
+import MUScreenshot
 
 // MARK: - Записи встреч
 

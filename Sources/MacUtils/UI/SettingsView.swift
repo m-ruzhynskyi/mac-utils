@@ -6,6 +6,7 @@ import MUFocus
 import MUMusic
 import MUDownloadsSorter
 import MUScreenShare
+import MUScreenshot
 
 // MARK: - Модель разрешений
 

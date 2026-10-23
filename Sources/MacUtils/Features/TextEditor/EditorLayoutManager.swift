@@ -1,6 +1,7 @@
 import AppKit
 import MUCore
 import MUDesign
+import MUScreenshot
 
 /// Раскладка редактора: «Невидимые символы» рисуются поверх текста (системный `showsInvisibleCharacters` не различает
 /// виды переводов строк). Пробел — ·, табуляция — →, LF — ¶, CR — ¤ (CRLF — ¤¶). Неопределённые байты однобайтовых

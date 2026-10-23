@@ -1,20 +1,19 @@
 import AppKit
 import SwiftUI
 import MUDesign
-import MUAudio
 
 /// Панель инструментов под выделенной областью (Graphite: `panel`, обводка `line`, радиус 20, кнопки 36×36).
 @MainActor
-final class CaptureToolbar: NSView {
+package final class CaptureToolbar: NSView {
     private weak var owner: CaptureView?
     private var toolButtons: [Tool: ToolbarButton] = [:]
     private var colorButton: ToolbarButton?
     private var frameButton: ToolbarButton?
 
     /// Для снимков интерфейса: панель без владельца (кнопки ничего не делают).
-    convenience init() { self.init(owner: nil) }
+    package convenience init() { self.init(owner: nil) }
 
-    init(owner: CaptureView?) {
+    package init(owner: CaptureView?) {
         self.owner = owner
         super.init(frame: .zero)
         wantsLayer = true
@@ -76,9 +75,9 @@ final class CaptureToolbar: NSView {
         refreshColors()
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    package required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func viewDidChangeEffectiveAppearance() {
+    package override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         refreshColors()
     }
@@ -91,7 +90,7 @@ final class CaptureToolbar: NSView {
         }
     }
 
-    func update(tool: Tool, color: NSColor) {
+    package func update(tool: Tool, color: NSColor) {
         for (candidate, button) in toolButtons {
             button.look = candidate == tool ? .active : .plain
         }
@@ -155,7 +154,7 @@ final class CaptureToolbar: NSView {
         hintLabel?.isHidden = true
     }
 
-    override func removeFromSuperview() {
+    package override func removeFromSuperview() {
         hintLabel?.removeFromSuperview()
         super.removeFromSuperview()
     }
@@ -198,14 +197,14 @@ final class CaptureToolbar: NSView {
     @objc private func framePressed() { owner?.toggleFrame() }
     @objc private func recordPressed() { owner?.startRecording() }
 
-    func update(framed: Bool) {
+    package func update(framed: Bool) {
         frameButton?.look = framed ? .active : .plain
     }
 }
 
 /// Вертикальный разделитель групп кнопок: линия 1 pt `line` по центру.
 private final class SeparatorLine: NSView {
-    override func draw(_ dirtyRect: NSRect) {
+    package override func draw(_ dirtyRect: NSRect) {
         DS.Palette.line.setFill()
         NSRect(x: bounds.midX - 0.5, y: bounds.midY - 14, width: 1, height: 28).fill()
     }
@@ -213,33 +212,33 @@ private final class SeparatorLine: NSView {
 
 /// Кнопка срабатывает с первого клика, даже если окно оверлея не ключевое.
 /// Вид: обычная — прозрачная, `text`; активная и главная — лайм (`acc`/`accInk`); запись — `field`, значок `rec`.
-final class ToolbarButton: NSButton {
-    enum Look { case plain, active, record, main }
+package final class ToolbarButton: NSButton {
+    package enum Look { case plain, active, record, main }
 
-    var hint = ""
-    var onHover: ((Bool) -> Void)?
-    var look = Look.plain {
+    package var hint = ""
+    package var onHover: ((Bool) -> Void)?
+    package var look = Look.plain {
         didSet { if look != oldValue { refresh() } }
     }
     private var hovered = false
 
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    package override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func updateTrackingAreas() {
+    package override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for area in trackingAreas where area.owner === self { removeTrackingArea(area) }
         addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                                        owner: self))
     }
 
-    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true; onHover?(true) }
-    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true; onHover?(false) }
+    package override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true; onHover?(true) }
+    package override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true; onHover?(false) }
 
-    override func resetCursorRects() {
+    package override func resetCursorRects() {
         addCursorRect(bounds, cursor: .arrow)
     }
 
-    override func viewDidChangeEffectiveAppearance() {
+    package override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         refresh()
     }
@@ -253,7 +252,7 @@ final class ToolbarButton: NSButton {
         needsDisplay = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    package override func draw(_ dirtyRect: NSRect) {
         refresh()
         let shape = NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10)
         switch look {
@@ -267,15 +266,15 @@ final class ToolbarButton: NSButton {
 }
 
 /// NSFont из шрифтов дизайн-системы (если не зарегистрированы — системный).
-enum CaptureFont {
-    static func manrope(_ size: CGFloat, _ weight: Font.Weight) -> NSFont {
+package enum CaptureFont {
+    package static func manrope(_ size: CGFloat, _ weight: Font.Weight) -> NSFont {
         guard DSFonts.isAvailable(DSFonts.manrope), let font = NSFont(name: DSFonts.manropeName(weight), size: size) else {
             return .systemFont(ofSize: size, weight: NSFont.Weight(rawValue: weight == .heavy ? 0.56 : weight == .bold ? 0.4 : 0.3))
         }
         return font
     }
 
-    static func mono(_ size: CGFloat) -> NSFont {
+    package static func mono(_ size: CGFloat) -> NSFont {
         guard DSFonts.isAvailable(DSFonts.jetBrainsMono), let font = NSFont(name: "JetBrainsMonoRoman-Medium", size: size) else {
             return .monospacedSystemFont(ofSize: size, weight: .medium)
         }

@@ -6,6 +6,7 @@ import XCTest
 @testable import MUDesign
 @testable import MUAudio
 @testable import MUScreenShare
+@testable import MUScreenshot
 
 /// Макеты текстового редактора (этап дизайна): вьюхи SwiftUI на компонентах Graphite рисуются офскрин в PNG 2x.
 /// Код макетов живёт только здесь, в продукте его нет. Текст — выдуманный .frm-подобный RTF; `$` и значения

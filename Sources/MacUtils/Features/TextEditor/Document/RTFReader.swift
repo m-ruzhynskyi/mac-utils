@@ -2,6 +2,7 @@ import Foundation
 import MUCore
 import MUDesign
 import MUAudio
+import MUScreenshot
 
 /// Разбор RTF в `RTFDocumentModel` с картой «видимый символ ↔ диапазон исходника». Тот же подход, что у
 /// `RTFDollarScanner`: группы, управляющие слова с числом и одним пробелом-разделителем, `\'hh` по кодовой странице

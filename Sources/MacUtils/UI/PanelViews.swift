@@ -11,6 +11,7 @@ import MUAI
 import MUDownloadsSorter
 import MUDropShelf
 import MUAnnotate
+import MUScreenshot
 
 extension Notification.Name {
     /// Открыть в настройках нужный раздел (object — SettingsSection).

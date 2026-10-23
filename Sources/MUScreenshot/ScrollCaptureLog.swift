@@ -3,7 +3,6 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 import MUCore
-import MUAudio
 
 /// Журнал длинного снимка для разбора «плохо склеилось»: каждая съёмка — свой файл
 /// `~/Library/Logs/MacUtils/scroll-<дата-время>.log`, хранятся последние 10. Только числа и имена режимов: размеры,
@@ -11,26 +10,26 @@ import MUAudio
 ///
 /// Скрытая настройка `defaults write com.mruzhynskyi.macutils scrollDebugFrames -bool YES` ещё и сохраняет кадры
 /// в `scroll-frames/<дата-время>/` (последние 3 съёмки) — только для локального разбора, по умолчанию выключена.
-final class ScrollCaptureLog: @unchecked Sendable {
-    static let framesKey = "scrollDebugFrames"
-    static let keptLogs = 10
-    static let keptFrameSessions = 3
+package final class ScrollCaptureLog: @unchecked Sendable {
+    package static let framesKey = "scrollDebugFrames"
+    package static let keptLogs = 10
+    package static let keptFrameSessions = 3
     /// Предел строк в одном журнале: трекпад шлёт события ~100 раз в секунду, а съёмку могут забыть остановить.
-    static let maxLines = 50_000
+    package static let maxLines = 50_000
 
-    static var defaultDirectory: URL {
+    package static var defaultDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/MacUtils", isDirectory: true)
     }
 
-    let url: URL
+    package let url: URL
     /// Куда сохраняются кадры; nil — настройка выключена.
-    let framesDirectory: URL?
+    package let framesDirectory: URL?
     private let queue = DispatchQueue(label: "macutils.scroll-log", qos: .utility)
     private var handle: FileHandle?
     private var lines = 0
 
     /// nil — журнал не создать (нет доступа к папке): съёмка идёт и без него.
-    init?(directory: URL = defaultDirectory, date: Date = Date(),
+    package init?(directory: URL = defaultDirectory, date: Date = Date(),
           saveFrames: Bool = UserDefaults.standard.bool(forKey: framesKey)) {
         let files = FileManager.default
         let stamp = Self.stamp(date)
@@ -62,7 +61,7 @@ final class ScrollCaptureLog: @unchecked Sendable {
     }
 
     /// Журнал в уже открытый файл (тесты: запись, которая падает).
-    init(handle: FileHandle, url: URL) {
+    package init(handle: FileHandle, url: URL) {
         self.url = url
         self.handle = handle
         framesDirectory = nil
@@ -71,7 +70,7 @@ final class ScrollCaptureLog: @unchecked Sendable {
     deinit { try? handle?.close() }
 
     /// Строки после предела отбрасываются, кроме итоговой `end`: она самая нужная для разбора.
-    func write(_ line: String) {
+    package func write(_ line: String) {
         queue.async {
             guard self.handle != nil else { return }
             self.lines += 1
@@ -96,10 +95,10 @@ final class ScrollCaptureLog: @unchecked Sendable {
     }
 
     /// Журнал ещё пишется (не выключен ошибкой записи) — тесты.
-    var isWriting: Bool { queue.sync { handle != nil } }
+    package var isWriting: Bool { queue.sync { handle != nil } }
 
     /// Кадр в PNG — только при включённой настройке; кодирование на очереди журнала, не на главном потоке.
-    func saveFrame(_ image: CGImage, index: Int) {
+    package func saveFrame(_ image: CGImage, index: Int) {
         guard let framesDirectory else { return }
         let boxed = UncheckedSendable(image)
         queue.async {
@@ -111,7 +110,7 @@ final class ScrollCaptureLog: @unchecked Sendable {
         }
     }
 
-    func close() {
+    package func close() {
         queue.async {
             try? self.handle?.close()
             self.handle = nil
@@ -119,11 +118,11 @@ final class ScrollCaptureLog: @unchecked Sendable {
     }
 
     /// Дождаться записи всего отданного (тесты).
-    func flush() { queue.sync {} }
+    package func flush() { queue.sync {} }
 
     // MARK: - Строки журнала
 
-    static func stamp(_ date: Date) -> String {
+    package static func stamp(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
@@ -131,17 +130,17 @@ final class ScrollCaptureLog: @unchecked Sendable {
     }
 
     /// Ошибка — только домен и код: текст ошибки может содержать имена окон и приложений.
-    static func code(_ error: Error) -> String {
+    package static func code(_ error: Error) -> String {
         let error = error as NSError
         return "\(error.domain)#\(error.code)"
     }
 
-    static func number(_ value: Double, digits: Int = 1) -> String {
+    package static func number(_ value: Double, digits: Int = 1) -> String {
         String(format: "%.\(digits)f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
     /// События кадра: `none` — сведений о вводе ещё не было (склейка по изображению), `0` — событий не было.
-    static func describe(_ motion: Stitcher.Motion?) -> String {
+    package static func describe(_ motion: Stitcher.Motion?) -> String {
         guard let motion else { return "none" }
         var parts: [String] = []
         if motion.pixels != 0 { parts.append("px=\(number(motion.pixels))") }
@@ -151,9 +150,9 @@ final class ScrollCaptureLog: @unchecked Sendable {
         return parts.isEmpty ? "0" : parts.joined(separator: ",")
     }
 
-    static let frameColumns = "frame index t grab_ms add_ms result added height dir shift header footer source expected reason motion"
+    package static let frameColumns = "frame index t grab_ms add_ms result added height dir shift header footer source expected reason motion"
 
-    static func frameLine(index: Int, time: Double, grabMs: Double, addMs: Double, result: Stitcher.Result, added: Int,
+    package static func frameLine(index: Int, time: Double, grabMs: Double, addMs: Double, result: Stitcher.Result, added: Int,
                           height: Int, trace: Stitcher.Trace, motion: Stitcher.Motion?) -> String {
         [
             "frame", "\(index)", number(time, digits: 3), number(grabMs), number(addMs), "\(result)", added < 0 ? "\(added)" : "+\(added)", "\(height)",
@@ -166,7 +165,7 @@ final class ScrollCaptureLog: @unchecked Sendable {
 
     /// Оставить `count` самых новых журналов. Имена с датой сортируются по времени; второй журнал той же секунды
     /// (`…-2.log`) — после первого.
-    static func prune(_ directory: URL, keeping count: Int) {
+    package static func prune(_ directory: URL, keeping count: Int) {
         let files = FileManager.default
         func order(_ name: String) -> (String, Int) {
             let base = String(name.dropFirst("scroll-".count).dropLast(".log".count))
@@ -180,7 +179,7 @@ final class ScrollCaptureLog: @unchecked Sendable {
     }
 
     /// Оставить кадры `count` последних съёмок, включая текущую.
-    static func pruneFrames(_ root: URL, keeping count: Int, current: URL) {
+    package static func pruneFrames(_ root: URL, keeping count: Int, current: URL) {
         let files = FileManager.default
         let sessions = ((try? files.contentsOfDirectory(atPath: root.path)) ?? [])
             .filter { $0.hasPrefix("scroll-") && $0 != current.lastPathComponent }
