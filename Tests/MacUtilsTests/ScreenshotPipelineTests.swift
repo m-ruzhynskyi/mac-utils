@@ -3,6 +3,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUDesign
+@testable import MUAudio
 
 func isOnMainThread() -> Bool { pthread_main_np() != 0 }
 

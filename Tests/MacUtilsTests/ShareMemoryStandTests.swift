@@ -3,6 +3,7 @@ import Network
 import VideoToolbox
 import XCTest
 @testable import MacUtils
+@testable import MUAudio
 
 /// Стенды памяти долгой трансляции: синтетические данные, локальный WebSocket-сервер, который не читает
 /// (медленная сеть), без захвата экрана, звука и окон. Время ускорено: 10 минут трансляции — за секунды.

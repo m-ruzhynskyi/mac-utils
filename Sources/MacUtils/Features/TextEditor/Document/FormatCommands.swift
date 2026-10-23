@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import MUAudio
 
 /// Что панель форматирования показывает про выделение (смешанное — `nil`): шрифт, размер, начертания, цвета, абзац.
 struct DocFormatState: Equatable {

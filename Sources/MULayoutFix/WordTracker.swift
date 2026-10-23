@@ -2,19 +2,20 @@ import Carbon.HIToolbox
 
 /// Последнее набранное слово и пробелы после него — как они были набраны (чистая логика, без событий системы).
 /// Нужно, чтобы горячая клавиша знала, сколько символов стереть и что перевести.
-struct WordTracker: Equatable {
-    struct Modifiers: OptionSet, Equatable {
-        let rawValue: Int
-        static let shift = Modifiers(rawValue: 1)
-        static let option = Modifiers(rawValue: 2)
-        static let control = Modifiers(rawValue: 4)
-        static let command = Modifiers(rawValue: 8)
+package struct WordTracker: Equatable {
+    package struct Modifiers: OptionSet, Equatable {
+        package let rawValue: Int
+        package init(rawValue: Int) { self.rawValue = rawValue }
+        package static let shift = Modifiers(rawValue: 1)
+        package static let option = Modifiers(rawValue: 2)
+        package static let control = Modifiers(rawValue: 4)
+        package static let command = Modifiers(rawValue: 8)
     }
 
-    static let maxWordLength = 64
+    package static let maxWordLength = 64
 
-    private(set) var word = ""
-    private(set) var trailing = ""
+    package private(set) var word = ""
+    package private(set) var trailing = ""
 
     /// Клавиши, после которых курсор мог уйти или текст изменился не так, как набрано.
     private static let resettingKeys: Set<Int> = [
@@ -23,19 +24,19 @@ struct WordTracker: Equatable {
         kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown,
     ]
 
-    mutating func reset() {
+    package mutating func reset() {
         word = ""
         trailing = ""
     }
 
     /// После замены слово хранится в новом виде — повторное нажатие вернёт как было.
-    mutating func replace(word: String, trailing: String) {
+    package mutating func replace(word: String, trailing: String) {
         self.word = word
         self.trailing = trailing
     }
 
     /// Нажатие клавиши (не наше синтетическое). `characters` — что она напечатала в текущей раскладке.
-    mutating func feed(keyCode: Int, modifiers: Modifiers, characters: String?) {
+    package mutating func feed(keyCode: Int, modifiers: Modifiers, characters: String?) {
         // ⌘ и ⌃ — команды, текст мог измениться как угодно.
         if modifiers.contains(.command) || modifiers.contains(.control) {
             reset()

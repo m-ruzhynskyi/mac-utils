@@ -3,6 +3,7 @@ import AVFoundation
 import SwiftUI
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Окно плеера (макеты v01–v07): заголовок 50 pt, видео на чёрном, панель под видео, плейлист справа.
 /// В полном экране и в режиме «Только видео» заголовка нет, панель плавает поверх видео.

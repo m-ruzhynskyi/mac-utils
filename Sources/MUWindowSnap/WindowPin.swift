@@ -3,18 +3,17 @@ import Carbon.HIToolbox
 import ScreenCaptureKit
 import MUCore
 import MUDesign
-import MUAppSwitcher
 
 /// «Поверх всех» для любого окна (⌃⌥P): macOS не даёт поднять чужое окно над остальными,
 /// поэтому поверх показывается живая копия окна (ScreenCaptureKit) — с настраиваемой прозрачностью.
 /// Клик по копии переключает на настоящее окно.
 @MainActor
-final class WindowPin: ObservableObject {
-    static let shared = WindowPin()
+package final class WindowPin: ObservableObject {
+    package static let shared = WindowPin()
 
-    @Published private(set) var pins: [PinnedWindow] = []
+    @Published package private(set) var pins: [PinnedWindow] = []
 
-    func sync() {
+    package func sync() {
         let center = HotKeyCenter.shared
         guard UserDefaults.standard.bool(forKey: Pref.windowPin) else {
             center.unregister(id: HotKeyID.windowPin)
@@ -26,7 +25,7 @@ final class WindowPin: ObservableObject {
         }
     }
 
-    func toggleFocused() {
+    package func toggleFocused() {
         guard let window = WindowTiler.focusedWindow(), let id = AXWindowID.of(window) else {
             Toast.show("Нет активного окна", symbol: "pin.slash", tint: .orange)
             return
@@ -56,12 +55,12 @@ final class WindowPin: ObservableObject {
         }
     }
 
-    func unpin(_ pin: PinnedWindow) {
+    package func unpin(_ pin: PinnedWindow) {
         pin.stop()
         pins.removeAll { $0 === pin }
     }
 
-    func unpinAll() {
+    package func unpinAll() {
         for pin in pins { pin.stop() }
         pins.removeAll()
     }
@@ -69,13 +68,13 @@ final class WindowPin: ObservableObject {
 
 /// Одна закреплённая копия окна.
 @MainActor
-final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutput, SCStreamDelegate {
-    let windowID: CGWindowID
-    let element: AXUIElement
-    let app: NSRunningApplication
-    let title: String
+package final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutput, SCStreamDelegate {
+    package let windowID: CGWindowID
+    package let element: AXUIElement
+    package let app: NSRunningApplication
+    package let title: String
 
-    @Published var opacity: Double {
+    @Published package var opacity: Double {
         didSet { panel?.alphaValue = opacity }
     }
 
@@ -84,14 +83,14 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
     private let layer = CALayer()
     private var poll: Timer?
     /// Закрепление снято: после любого `await` в `start()` это надо проверять, иначе возникнет «осиротевшая» копия.
-    private(set) var isStopped = false
+    package private(set) var isStopped = false
     /// Копия сейчас скрыта (программа окна впереди): захват замедлен.
     private var isHiddenCopy = false
     private var lastFrame: CGRect = .zero
     private var observer: Any?
     private let queue = DispatchQueue(label: "macutils.pin")
 
-    init(windowID: CGWindowID, element: AXUIElement, app: NSRunningApplication) {
+    package init(windowID: CGWindowID, element: AXUIElement, app: NSRunningApplication) {
         self.windowID = windowID
         self.element = element
         self.app = app
@@ -104,7 +103,7 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
         super.init()
     }
 
-    func start() async throws {
+    package func start() async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
         guard !isStopped else { throw CancellationError() }
         guard let window = content.windows.first(where: { $0.windowID == windowID }),
@@ -132,7 +131,7 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
         updateVisibility()
     }
 
-    func stop() {
+    package func stop() {
         isStopped = true
         poll?.invalidate()
         poll = nil
@@ -145,7 +144,7 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
         panel = nil
     }
 
-    func setOpacity(_ value: Double) {
+    package func setOpacity(_ value: Double) {
         opacity = value
         UserDefaults.standard.set(value, forKey: Pref.windowPinOpacity)
     }
@@ -224,12 +223,12 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
     }
 
     /// Клик по копии — к настоящему окну.
-    func activateOriginal() {
+    package func activateOriginal() {
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)
         app.activate()
     }
 
-    func menu() -> NSMenu {
+    package func menu() -> NSMenu {
         let menu = NSMenu()
         let header = NSMenuItem(title: "Прозрачность", action: nil, keyEquivalent: "")
         header.isEnabled = false
@@ -248,14 +247,14 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
     }
 
     /// AX-координаты (от верхнего левого угла главного экрана) → координаты Cocoa.
-    static func cocoaRect(_ rect: CGRect) -> NSRect {
+    package static func cocoaRect(_ rect: CGRect) -> NSRect {
         let height = NSScreen.screens.first?.frame.height ?? 0
         return NSRect(x: rect.minX, y: height - rect.maxY, width: rect.width, height: rect.height)
     }
 
     // MARK: - SCStream
 
-    nonisolated func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    package nonisolated func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen, sampleBuffer.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let raw = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
@@ -272,7 +271,7 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
         }
     }
 
-    nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
+    package nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -283,48 +282,48 @@ final class PinnedWindow: NSObject, ObservableObject, Identifiable, SCStreamOutp
 }
 
 private struct SurfaceBox: @unchecked Sendable {
-    let surface: IOSurface
+    package let surface: IOSurface
 }
 
 private final class PinPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
+    package override var canBecomeKey: Bool { false }
 }
 
 @MainActor
 private final class PinView: NSView {
-    weak var pin: PinnedWindow?
+    package weak var pin: PinnedWindow?
 
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    package override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func mouseDown(with event: NSEvent) {
+    package override func mouseDown(with event: NSEvent) {
         pin?.activateOriginal()
     }
 
-    override func rightMouseDown(with event: NSEvent) {
+    package override func rightMouseDown(with event: NSEvent) {
         guard let menu = pin?.menu() else { return }
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
 }
 
 /// Пункт меню с замыканием вместо target/action.
-final class ClosureMenuItem: NSMenuItem {
+package final class ClosureMenuItem: NSMenuItem {
     private let handler: () -> Void
 
-    init(title: String, handler: @escaping () -> Void) {
+    package init(title: String, handler: @escaping () -> Void) {
         self.handler = handler
         super.init(title: title, action: #selector(run), keyEquivalent: "")
         target = self
     }
 
-    required init(coder: NSCoder) { fatalError() }
+    package required init(coder: NSCoder) { fatalError() }
 
     @objc private func run() { handler() }
 }
 
 /// Частота захвата копии «поверх всех»: пока копия скрыта, достаточно изредка (чтобы при показе не было пустого кадра).
-enum PinFrameRate {
-    static let visibleFPS = 30
-    static let hiddenFPS = 1
+package enum PinFrameRate {
+    package static let visibleFPS = 30
+    package static let hiddenFPS = 1
 
-    static func fps(hidden: Bool) -> Int { hidden ? hiddenFPS : visibleFPS }
+    package static func fps(hidden: Bool) -> Int { hidden ? hiddenFPS : visibleFPS }
 }

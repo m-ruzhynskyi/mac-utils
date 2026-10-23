@@ -3,6 +3,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUDesign
+@testable import MUWindowSnap
 
 final class HotKeyRegistryTests: XCTestCase {
     private var defaults: UserDefaults!

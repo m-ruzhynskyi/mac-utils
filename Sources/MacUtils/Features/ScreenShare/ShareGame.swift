@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Крестики-нолики: поле и правила. Ходят по очереди, первым — крестики.
 /// Кто пригласил — играет крестиками в первой партии, дальше начинают по очереди.

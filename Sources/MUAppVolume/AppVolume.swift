@@ -3,27 +3,28 @@ import CoreAudio
 import SwiftUI
 import MUCore
 import MUDesign
+import MUAudio
 
 /// «Громкость»: своя громкость для каждого приложения (0–150 %, выключение).
 /// Перехватываются только приложения, у которых громкость не 100 % —
 /// остальные звучат как обычно, без задержек и нагрузки.
 @MainActor
-final class AppVolume: ObservableObject {
-    static let shared = AppVolume()
+package final class AppVolume: ObservableObject {
+    package static let shared = AppVolume()
 
-    @Published private(set) var apps: [AudioApp] = []
-    @Published private(set) var store: VolumeStore
-    @Published private(set) var lastError: String?
+    @Published package private(set) var apps: [AudioApp] = []
+    @Published package private(set) var store: VolumeStore
+    @Published package private(set) var lastError: String?
     /// Перехват идёт, а звука нет — похоже, macOS не дала разрешение на запись звука.
-    @Published private(set) var permissionSuspect = false
-    @Published private(set) var isRunning = false
+    @Published package private(set) var permissionSuspect = false
+    @Published package private(set) var isRunning = false
 
     private var taps: [String: VolumeTapping] = [:]
     private var listenersInstalled = false
     /// Раз в секунду — только пока список приложений на экране (что играет, меняется без событий) или пока у живых
     /// перехватов ещё не доказано разрешение на запись звука. Состав процессов и выход звука — слушатели Core Audio.
     private var refreshTimer: Timer?
-    private(set) var viewers = ViewerCount()
+    package private(set) var viewers = ViewerCount()
     private var watch = PermissionWatch()
     private let hud = VolumeHUDController()
 
@@ -31,14 +32,14 @@ final class AppVolume: ObservableObject {
         store = VolumeStore(data: UserDefaults.standard.data(forKey: Pref.appVolumes))
     }
 
-    static var isSupported: Bool {
+    package static var isSupported: Bool {
         if #available(macOS 14.2, *) { return true }
         return false
     }
 
     // MARK: - Включение
 
-    func sync() {
+    package func sync() {
         let enabled = UserDefaults.standard.bool(forKey: Pref.appVolume) && Self.isSupported
         let center = HotKeyCenter.shared
         center.unregister(id: HotKeyID.appVolume)
@@ -61,16 +62,16 @@ final class AppVolume: ObservableObject {
         refresh()
     }
 
-    var isPolling: Bool { refreshTimer != nil }
+    package var isPolling: Bool { refreshTimer != nil }
 
     /// Список приложений со звуком появился на экране или ушёл с него (`onScreen`).
-    func viewerChanged(_ shown: Bool) {
+    package func viewerChanged(_ shown: Bool) {
         viewers.update(shown)
         if shown { refresh() } else { updatePolling() }
     }
 
     /// Нужен ли опрос раз в секунду: функция включена и список на экране или перехваты ждут проверки разрешения.
-    static func pollNeeded(running: Bool, onScreen: Bool, tapping: Bool, proven: Bool) -> Bool {
+    package static func pollNeeded(running: Bool, onScreen: Bool, tapping: Bool, proven: Bool) -> Bool {
         running && (onScreen || (tapping && !proven))
     }
 
@@ -89,9 +90,9 @@ final class AppVolume: ObservableObject {
 
     // MARK: - Громкость
 
-    func entry(for bundleID: String) -> VolumeStore.Entry { store.entry(for: bundleID) }
+    package func entry(for bundleID: String) -> VolumeStore.Entry { store.entry(for: bundleID) }
 
-    func set(percent: Int? = nil, muted: Bool? = nil, for bundleID: String) {
+    package func set(percent: Int? = nil, muted: Bool? = nil, for bundleID: String) {
         var entry = store.entry(for: bundleID)
         // Пользователь сам меняет громкость — пробуем перехват снова (после отказа в разрешении он был снят).
         permissionSuspect = false
@@ -104,7 +105,7 @@ final class AppVolume: ObservableObject {
         updatePolling()
     }
 
-    func reset(_ bundleID: String) {
+    package func reset(_ bundleID: String) {
         set(percent: 100, muted: false, for: bundleID)
     }
 
@@ -142,7 +143,7 @@ final class AppVolume: ObservableObject {
 
     // MARK: - Список и слежение
 
-    func refresh() {
+    package func refresh() {
         // Слушатели Core Audio не снимаются при выключении: без этой проверки смена списка процессов
         // заново перехватила бы приложения при выключенной функции.
         guard isRunning else { return }
@@ -214,7 +215,7 @@ final class AppVolume: ObservableObject {
 
     // MARK: - Панель
 
-    func toggleHUD() {
+    package func toggleHUD() {
         if hud.isVisible {
             hud.hide()
         } else {
@@ -223,7 +224,7 @@ final class AppVolume: ObservableObject {
         }
     }
 
-    func openPrivacySettings() {
+    package func openPrivacySettings() {
         Permissions.open(.screenRecording)
     }
 }
@@ -231,11 +232,16 @@ final class AppVolume: ObservableObject {
 // MARK: - Вид
 
 /// Список приложений со звуком: ползунок, выключение, проценты.
-struct AppVolumeList: View {
-    @ObservedObject var model: AppVolume
-    var compact = false
+package struct AppVolumeList: View {
+    package init(model: AppVolume, compact: Bool = false) {
+        self.model = model
+        self.compact = compact
+    }
 
-    var body: some View {
+    @ObservedObject package var model: AppVolume
+    package var compact = false
+
+    package var body: some View {
         // Пока список на экране (настройки, панель, ⌃⌥V), он обновляется раз в секунду; ушёл — опрос стоп.
         list.onScreen { AppVolume.shared.viewerChanged($0) }
     }
@@ -257,10 +263,10 @@ struct AppVolumeList: View {
 }
 
 private struct AppVolumeRow: View {
-    @ObservedObject var model: AppVolume
-    let app: AudioApp
+    @ObservedObject package var model: AppVolume
+    package let app: AudioApp
 
-    var body: some View {
+    package var body: some View {
         let entry = model.entry(for: app.bundleID)
         HStack(spacing: 10) {
             Image(nsImage: app.icon).resizable().frame(width: 24, height: 24)
@@ -294,14 +300,14 @@ private struct AppVolumeRow: View {
 /// Плавающая панель громкости (⌃⌥V): не активирует приложение, закрывается
 /// по Esc или клику мимо.
 @MainActor
-final class VolumeHUDController {
+package final class VolumeHUDController {
     private var panel: NSPanel?
     private var outsideMonitor: Any?
     private var keyTap: EventTap?
 
-    var isVisible: Bool { panel?.isVisible ?? false }
+    package var isVisible: Bool { panel?.isVisible ?? false }
 
-    func show() {
+    package func show() {
         let panel = self.panel ?? make()
         relayout()
         panel.orderFrontRegardlessOnScreen()
@@ -318,7 +324,7 @@ final class VolumeHUDController {
     }
 
     /// Размер под текущий список; верхний край остаётся на месте.
-    func relayout() {
+    package func relayout() {
         guard let panel, let host = panel.contentView as? NSHostingView<VolumeHUDView> else { return }
         let size = host.fittingSize
         if panel.isVisible {
@@ -332,7 +338,7 @@ final class VolumeHUDController {
         }
     }
 
-    func hide() {
+    package func hide() {
         panel?.orderOut(nil)
         if let outsideMonitor { NSEvent.removeMonitor(outsideMonitor) }
         outsideMonitor = nil
@@ -356,10 +362,10 @@ final class VolumeHUDController {
     }
 }
 
-struct VolumeHUDView: View {
-    @ObservedObject var model: AppVolume
+package struct VolumeHUDView: View {
+    @ObservedObject package var model: AppVolume
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: "speaker.wave.3.fill").foregroundStyle(Color.accentColor)
@@ -379,29 +385,4 @@ struct VolumeHUDView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .padding(4)
     }
-}
-
-/// Разрешение на запись звука действует на весь процесс. «Нет разрешения» — только если ни один перехват за сессию
-/// ни разу не получил звука и тишина длится долго; пауза в разговоре у приложения, которое держит вывод, разрешением не считается.
-struct PermissionWatch: Equatable {
-    static let silentTicksToTrip = 10
-
-    private(set) var silentTicks = 0
-    private(set) var proven = false
-
-    /// Один тик (раз в секунду). true — пора снимать перехваты и сообщить об отказе в разрешении.
-    mutating func record(anyPlaying: Bool, anySound: Bool) -> Bool {
-        if anySound {
-            proven = true
-            silentTicks = 0
-            return false
-        }
-        silentTicks = anyPlaying ? silentTicks + 1 : 0
-        guard !proven, silentTicks >= Self.silentTicksToTrip else { return false }
-        silentTicks = 0
-        return true
-    }
-
-    /// Счётчик тишины заново (пользователь трогал громкость, перехватов нет); доказанное разрешение остаётся.
-    mutating func reset() { silentTicks = 0 }
 }

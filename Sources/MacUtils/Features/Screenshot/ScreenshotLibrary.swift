@@ -4,6 +4,7 @@ import SwiftUI
 import Vision
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Запись в индексе: путь, день, программа и распознанный текст.
 struct ShotRecord: Codable, Hashable, Identifiable {

@@ -1,6 +1,7 @@
 import CryptoKit
 import XCTest
 @testable import MacUtils
+@testable import MUAudio
 
 /// Общие векторы раздела 9 .audit/auth-design.md: те же значения должны совпасть в auth.js (R1) и Windows (W1).
 /// Seed 0x01…0x20, roomId 1234567890, viewerId 9876543210, rid 00000000-0000-4000-8000-000000000000, nonce — 32 нулевых байта.

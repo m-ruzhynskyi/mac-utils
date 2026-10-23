@@ -3,6 +3,7 @@ import SwiftUI
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUAudio
 
 /// Правка в окне «Документа»: набор и удаление в странице, общая отмена с «Кодом», метод ввода, запись с проверками
 /// без потерь и лист `d10`, скорость ввода.

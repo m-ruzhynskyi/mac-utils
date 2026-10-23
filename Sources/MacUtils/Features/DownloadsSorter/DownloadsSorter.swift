@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Правила раскладки (без UI — для тестов).
 enum DownloadsRules {

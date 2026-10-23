@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import MUCore
+import MUWindowSnap
 
 // MARK: - Горячие клавиши (сводный список)
 

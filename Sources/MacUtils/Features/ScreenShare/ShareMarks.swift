@@ -3,6 +3,7 @@ import ScreenCaptureKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUAudio
 
 /// Метки и рисунки зрителей поверх трансляции (как пинг в League of Legends).
 /// Координаты — доли кадра (0…1, от левого верхнего угла), так они одинаковы у всех.

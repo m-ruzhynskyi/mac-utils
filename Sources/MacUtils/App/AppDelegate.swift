@@ -11,6 +11,10 @@ import MUAppInputSource
 import MUMeetings
 import MUQR
 import MUUpdate
+import MUAudio
+import MULayoutFix
+import MUAppVolume
+import MUWindowSnap
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения

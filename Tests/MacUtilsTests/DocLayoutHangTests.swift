@@ -3,6 +3,7 @@ import SwiftUI
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUAudio
 
 /// Раскладка «Документа» заканчивается при любом месте разрыва страницы (зависание 1.9.6): абзацы с заливкой
 /// (`NSTextBlock`) у нижнего края страницы — с выступом рамки истории в поля и отрицательными отступами, как в формах,

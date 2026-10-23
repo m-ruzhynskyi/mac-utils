@@ -3,6 +3,7 @@ import Darwin
 import PDFKit
 import MUCore
 import MUDesign
+import MUAudio
 
 // MARK: - Очередь фоновых задач ИИ
 

@@ -3,14 +3,14 @@ import MUCore
 import MUDesign
 
 /// Набор мониторов и положения окон для него (без UI — для тестов).
-enum WindowLayoutRules {
+package enum WindowLayoutRules {
     /// Подпись набора мониторов: порядок не важен.
-    static func signature(_ displays: [String]) -> String {
+    package static func signature(_ displays: [String]) -> String {
         displays.sorted().joined(separator: "+")
     }
 
     /// Ключ окна: программа и заголовок; одинаковые заголовки нумеруются.
-    static func keys(bundleID: String, titles: [String]) -> [String] {
+    package static func keys(bundleID: String, titles: [String]) -> [String] {
         var seen: [String: Int] = [:]
         return titles.map { title in
             let base = "\(bundleID)|\(title)"
@@ -24,19 +24,19 @@ enum WindowLayoutRules {
 /// Запоминает, где стояли окна при каждом наборе мониторов, и расставляет их обратно,
 /// когда этот набор снова подключён (например, ноутбук вернулся к внешнему монитору).
 @MainActor
-final class WindowMemory: ObservableObject {
-    static let shared = WindowMemory()
+package final class WindowMemory: ObservableObject {
+    package static let shared = WindowMemory()
 
-    struct Frame: Codable, Equatable {
-        var x, y, width, height: Double
-        var rect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
-        init(_ rect: CGRect) {
+    package struct Frame: Codable, Equatable {
+        package var x, y, width, height: Double
+        package var rect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+        package init(_ rect: CGRect) {
             x = rect.minX; y = rect.minY; width = rect.width; height = rect.height
         }
     }
 
-    @Published private(set) var layouts: [String: [String: Frame]] = [:]
-    @Published private(set) var lastRestored = 0
+    @Published package private(set) var layouts: [String: [String: Frame]] = [:]
+    @Published package private(set) var lastRestored = 0
 
     private var timer: Timer?
     private var observer: Any?
@@ -51,7 +51,7 @@ final class WindowMemory: ObservableObject {
         return folder.appendingPathComponent("window-layouts.json")
     }
 
-    func sync() {
+    package func sync() {
         let enabled = UserDefaults.standard.bool(forKey: Pref.windowMemory) && Permissions.accessibility
         if enabled, timer == nil {
             if let data = try? Data(contentsOf: file),
@@ -78,11 +78,11 @@ final class WindowMemory: ObservableObject {
         }
     }
 
-    var monitorsDescription: String {
+    package var monitorsDescription: String {
         "\(NSScreen.screens.count) \(plural(NSScreen.screens.count, "монитор", "монитора", "мониторов"))"
     }
 
-    static func currentSignature() -> String {
+    package static func currentSignature() -> String {
         WindowLayoutRules.signature(NSScreen.screens.compactMap { screen in
             guard let id = screen.displayID else { return nil }
             let size = CGDisplayBounds(id).size
@@ -102,7 +102,7 @@ final class WindowMemory: ObservableObject {
     }
 
     /// Запомнить, где сейчас окна (для текущего набора мониторов).
-    func snapshot(force: Bool = false) {
+    package func snapshot(force: Bool = false) {
         guard force || Date() > quietUntil else { return }
         let signature = Self.currentSignature()
         var frames: [String: Frame] = [:]
@@ -120,7 +120,7 @@ final class WindowMemory: ObservableObject {
 
     /// Расставить окна так, как они стояли при этом наборе мониторов.
     @discardableResult
-    func restore() -> Int {
+    package func restore() -> Int {
         guard let saved = layouts[Self.currentSignature()] else { return 0 }
         var moved = 0
         for (key, window) in Self.windows() {
@@ -134,7 +134,7 @@ final class WindowMemory: ObservableObject {
         return moved
     }
 
-    func forget() {
+    package func forget() {
         layouts.removeAll()
         save()
     }

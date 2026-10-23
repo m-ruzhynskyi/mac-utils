@@ -71,6 +71,27 @@ let package = Package(
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUUpdate"
         ),
+        // Core Audio: тапы процессов, агрегатные устройства, громкость. Общее для «Громкости» и «Трансляции».
+        .target(
+            name: "MUAudio",
+            dependencies: ["MUCore"],
+            path: "Sources/MUAudio"
+        ),
+        .target(
+            name: "MULayoutFix",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MULayoutFix"
+        ),
+        .target(
+            name: "MUAppVolume",
+            dependencies: ["MUCore", "MUDesign", "MUAudio"],
+            path: "Sources/MUAppVolume"
+        ),
+        .target(
+            name: "MUWindowSnap",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUWindowSnap"
+        ),
         // Удалённые подключения: вся логика без зависимости от приложения и других модулей
         // (см. .audit/task-remote-connections.md).
         .target(
@@ -79,7 +100,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MURemoteConnections"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MURemoteConnections"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -93,7 +114,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MURemoteConnections"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MURemoteConnections"],
             path: "Tests/MacUtilsTests"
         ),
     ]

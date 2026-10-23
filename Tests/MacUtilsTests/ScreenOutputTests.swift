@@ -3,6 +3,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUDesign
+@testable import MUWindowSnap
 
 /// Окна процесса тестов, которые сейчас на экране пользователя: видимые и пересекающие хоть один монитор.
 /// Офскрин-рендер тестов (окна за экраном, x = −20 000) сюда не входит.

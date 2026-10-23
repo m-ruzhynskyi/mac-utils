@@ -1,6 +1,7 @@
 import AppKit
 import PDFKit
 @testable import MUDesign
+@testable import MUAudio
 
 /// Инструмент сравнения «Документа» с эталоном Word по PDF (`WordFidelityTests`). Извлечение одинаково для обеих
 /// сторон: строки текста — PDFKit (`selectionsByLine`), линии таблиц и рамок — разбор путей PDF (`CGPDFScanner`).

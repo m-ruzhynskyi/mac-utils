@@ -2,11 +2,11 @@ import Foundation
 
 /// Перевод текста, набранного не в той раскладке: QWERTY ↔ ЙЦУКЕН (русская и украинская)
 /// по положению клавиш (ghbdtn ↔ привет, ghbdsn ↔ привіт), с регистром и знаками препинания.
-enum LayoutMap {
-    enum Direction { case toRussian, toUkrainian, toEnglish }
+package enum LayoutMap {
+    package enum Direction { case toRussian, toUkrainian, toEnglish }
 
     /// Какую кириллическую раскладку подставлять при переводе с английской.
-    enum CyrillicLayout: String, CaseIterable {
+    package enum CyrillicLayout: String, CaseIterable {
         case russian, ukrainian
     }
 
@@ -40,7 +40,7 @@ enum LayoutMap {
 
     /// Направление по тому, каких букв больше. С английской переводим в `cyrillic` (по умолчанию русскую).
     /// Кириллица, в которой есть буквы только украинской раскладки, и так идёт в английскую; выбор нужен только для латиницы.
-    static func direction(of text: String, cyrillic: CyrillicLayout = .russian) -> Direction {
+    package static func direction(of text: String, cyrillic: CyrillicLayout = .russian) -> Direction {
         var latin = 0, cyrillicCount = 0
         for scalar in text.unicodeScalars {
             switch scalar.value {
@@ -53,7 +53,7 @@ enum LayoutMap {
         return cyrillic == .ukrainian ? .toUkrainian : .toRussian
     }
 
-    static func convert(_ text: String, _ direction: Direction) -> String {
+    package static func convert(_ text: String, _ direction: Direction) -> String {
         let map: [Character: Character]
         switch direction {
         case .toRussian: map = toRussianMap
@@ -64,7 +64,7 @@ enum LayoutMap {
     }
 
     /// Язык системной раскладки, на которую переключаемся после перевода.
-    static func inputLanguage(for direction: Direction) -> String {
+    package static func inputLanguage(for direction: Direction) -> String {
         switch direction {
         case .toRussian: return "ru"
         case .toUkrainian: return "uk"
@@ -74,7 +74,7 @@ enum LayoutMap {
 
     /// Кириллическая раскладка для перевода с английской: выбор пользователя, а в режиме «авто» — по включённым в системе
     /// раскладкам (`enabledLanguages`, коды «ru», «uk», «en»…): только украинская → украинская, иначе русская.
-    static func cyrillicLayout(setting: String?, enabledLanguages: [String]) -> CyrillicLayout {
+    package static func cyrillicLayout(setting: String?, enabledLanguages: [String]) -> CyrillicLayout {
         switch setting {
         case "russian": return .russian
         case "ukrainian": return .ukrainian

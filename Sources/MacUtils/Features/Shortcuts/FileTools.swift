@@ -1,5 +1,6 @@
 import Foundation
 import MUCore
+import MUAudio
 
 /// Действия над файлом без окна редактора («Команды», ссылки `macutils://…`): знаки `$`, кодировка, переводы строк.
 /// Чтение — как в редакторе (`EditorDocument`: BOM → UTF-8 → `\ansicpg` → Windows-1252), запись — как «Сохранить»

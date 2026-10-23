@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import MUDesign
+import MUAudio
 
 /// Панель инструментов под выделенной областью (Graphite: `panel`, обводка `line`, радиус 20, кнопки 36×36).
 @MainActor

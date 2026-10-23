@@ -3,6 +3,7 @@ import SwiftUI
 import MUCore
 import MUDesign
 import MUUninstaller
+import MUAudio
 
 /// Группа того, что можно убрать, и правила отбора (без UI — для тестов).
 struct CleanupCategory: Identifiable {

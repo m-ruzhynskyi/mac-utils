@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUAudio
 
 final class ProcessIdentityTests: XCTestCase {
     private func id(_ bundle: String?, _ start: TimeInterval?) -> ProcessIdentity {

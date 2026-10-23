@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacUtils
 @testable import MUMusic
+@testable import MUAudio
 
 final class NowPlayingSupportTests: XCTestCase {
     private func strings(_ lines: [Data]) -> [String] { lines.map { String(decoding: $0, as: UTF8.self) } }

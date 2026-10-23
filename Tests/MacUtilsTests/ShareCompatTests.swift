@@ -2,6 +2,7 @@ import AVFoundation
 import XCTest
 @testable import MacUtils
 @testable import MUDesign
+@testable import MUAudio
 
 /// Совместимость сторон трансляции по общим фикстурам `relay/tests/fixtures` (их же читает relay/tests/compat.test.cjs):
 /// видео страницы relay (браузер, клиент для Windows) показывает зритель Mac, метки Mac и страницы — один формат,

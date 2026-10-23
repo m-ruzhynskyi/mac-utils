@@ -2,6 +2,7 @@ import AVFoundation
 import AppKit
 import CoreAudio
 import MUCore
+import MUAudio
 
 @_silgen_name("responsibility_get_pid_responsible_for_pid")
 private func responsibility_get_pid_responsible_for_pid(_ pid: pid_t) -> pid_t

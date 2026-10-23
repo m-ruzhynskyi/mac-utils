@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacUtils
 @testable import MUUpdate
+@testable import MUAudio
 
 @MainActor
 final class UpdaterTests: XCTestCase {
