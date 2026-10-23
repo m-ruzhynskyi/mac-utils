@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import SwiftUI
+import MUCore
 
 /// Процесс в «Диспетчере задач».
 struct ProcessRow: Identifiable, Equatable {

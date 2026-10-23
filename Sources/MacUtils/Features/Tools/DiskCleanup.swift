@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MUCore
 
 /// Группа того, что можно убрать, и правила отбора (без UI — для тестов).
 struct CleanupCategory: Identifiable {

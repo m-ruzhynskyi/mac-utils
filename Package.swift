@@ -5,8 +5,14 @@ let package = Package(
     name: "MacUtils",
     platforms: [.macOS(.v14)],
     targets: [
+        // Общее для всех функций: настройки, журнал, горячие клавиши, разрешения. Функций не знает.
+        .target(
+            name: "MUCore",
+            path: "Sources/MUCore"
+        ),
         .executableTarget(
             name: "MacUtils",
+            dependencies: ["MUCore"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -15,7 +21,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils"],
+            dependencies: ["MacUtils", "MUCore"],
             path: "Tests/MacUtilsTests"
         ),
     ]

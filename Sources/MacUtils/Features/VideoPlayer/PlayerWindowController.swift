@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 import AVFoundation
 import SwiftUI
 import UniformTypeIdentifiers
+import MUCore
 
 /// Состояние интерфейса одного окна: режимы, меню, подсказки поверх видео, тосты.
 @MainActor

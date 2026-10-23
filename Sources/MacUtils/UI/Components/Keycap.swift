@@ -1,4 +1,5 @@
 import SwiftUI
+import MUCore
 
 /// Кейкап сочетания: JetBrains Mono, фон `field`, обводка 1 pt и нижняя грань 3 pt, радиус 7.
 /// VoiceOver читает словами («Control Option M»). `onPanel` — фон `panel` (для строк поповера на `field`).

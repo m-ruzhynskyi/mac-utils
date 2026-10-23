@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import SwiftUI
 import UniformTypeIdentifiers
+import MUCore
 
 /// Встряхивание мышью: несколько резких смен направления по горизонтали за короткое время.
 struct ShakeDetector {

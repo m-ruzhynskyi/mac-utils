@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import MUCore
 
 /// Режим вкладки: исходник или документ (только для RTF).
 enum EditorViewMode: String, Codable, CaseIterable {

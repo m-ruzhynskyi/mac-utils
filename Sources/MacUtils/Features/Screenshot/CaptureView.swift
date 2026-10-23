@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Carbon.HIToolbox
 import CoreImage
+import MUCore
 
 /// Полноэкранное окно с «замороженным» снимком одного монитора.
 @MainActor

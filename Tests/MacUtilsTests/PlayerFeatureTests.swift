@@ -1,6 +1,7 @@
 import AVFoundation
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// Этап 4 плеера на демо-файлах: субтитры (встроенные и внешние), аудиодорожки, пропуск по главам,
 /// следующая серия, снимок кадра (точный кадр и HDR → SDR). Звука нет, позиции — в памяти.

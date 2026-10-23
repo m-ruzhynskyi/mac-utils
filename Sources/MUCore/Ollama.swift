@@ -1,16 +1,16 @@
 import AppKit
 
 /// Разбор ответов модели (без сети — для тестов).
-enum AIParsing {
+package enum AIParsing {
     /// Первый JSON-объект в ответе: модели любят обрамлять его текстом или ```json.
-    static func jsonObject(in text: String) -> [String: Any]? {
+    package static func jsonObject(in text: String) -> [String: Any]? {
         guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else { return nil }
         let data = Data(text[start...end].utf8)
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     /// Имя файла из ответа: 2–6 слов, без кавычек, точек и запрещённых символов.
-    static func fileName(from answer: String, maxLength: Int = 60) -> String? {
+    package static func fileName(from answer: String, maxLength: Int = 60) -> String? {
         var line = answer.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         line = line.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"'«»`.")))
         for bad in ["/", ":", "\\", "*", "?", "<", ">", "|"] { line = line.replacingOccurrences(of: bad, with: " ") }
@@ -20,7 +20,7 @@ enum AIParsing {
     }
 
     /// Ответ «как есть» без обрамляющих кавычек и пояснений вида «Исправленный текст:».
-    static func cleanedText(_ answer: String) -> String {
+    package static func cleanedText(_ answer: String) -> String {
         var text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         for prefix in ["Исправленный текст:", "Corrected text:", "Виправлений текст:"] where text.hasPrefix(prefix) {
             text = String(text.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -33,7 +33,7 @@ enum AIParsing {
     }
 
     /// «ТекстовыеЗаметки» / «Счёт_Киевстар» → «Текстовые Заметки» / «Счёт Киевстар».
-    static func spaced(_ name: String) -> String {
+    package static func spaced(_ name: String) -> String {
         var result = ""
         var previous: Character?
         for char in name.replacingOccurrences(of: "_", with: " ") {
@@ -45,7 +45,7 @@ enum AIParsing {
     }
 
     /// Регистр и пробелы по краям — как в исходном тексте (модель часто их теряет).
-    static func keepingEdges(of original: String, _ fixed: String) -> String {
+    package static func keepingEdges(of original: String, _ fixed: String) -> String {
         let leading = original.prefix { $0.isWhitespace }
         let trailing = String(original.reversed().prefix { $0.isWhitespace }.reversed())
         return leading + fixed.trimmingCharacters(in: .whitespacesAndNewlines) + trailing
@@ -54,30 +54,30 @@ enum AIParsing {
 
 /// Локальная модель через Ollama (http://localhost:11434). Ничего не уходит в интернет.
 @MainActor
-final class Ollama: ObservableObject {
-    static let shared = Ollama()
+package final class Ollama: ObservableObject {
+    package static let shared = Ollama()
 
-    enum Status: Equatable {
+    package enum Status: Equatable {
         case unknown, checking, ready, noServer, noModel
     }
 
-    @Published private(set) var status: Status = .unknown
-    @Published private(set) var models: [String] = []
-    @Published private(set) var pullProgress: Double?
+    @Published package private(set) var status: Status = .unknown
+    @Published package private(set) var models: [String] = []
+    @Published package private(set) var pullProgress: Double?
 
-    static var enabled: Bool { UserDefaults.standard.bool(forKey: Pref.ai) }
-    static var model: String { UserDefaults.standard.string(forKey: Pref.aiModel) ?? "qwen2.5:7b" }
+    package static var enabled: Bool { UserDefaults.standard.bool(forKey: Pref.ai) }
+    package static var model: String { UserDefaults.standard.string(forKey: Pref.aiModel) ?? "qwen2.5:7b" }
     private static var base: URL {
         URL(string: UserDefaults.standard.string(forKey: Pref.aiURL) ?? "") ?? URL(string: "http://localhost:11434")!
     }
 
     /// Функция включена и в настройках ИИ, и отдельным переключателем.
-    static func isOn(_ key: String) -> Bool { enabled && UserDefaults.standard.bool(forKey: key) }
+    package static func isOn(_ key: String) -> Bool { enabled && UserDefaults.standard.bool(forKey: key) }
 
     /// Загрузить модель в память заранее — первый запрос не ждёт 3–5 секунд загрузки.
     private var warmedModel: String?
 
-    func warmUp() {
+    package func warmUp() {
         guard Self.enabled, warmedModel != Self.model else { return }
         warmedModel = Self.model
         var request = URLRequest(url: Self.base.appendingPathComponent("api/generate"))
@@ -86,7 +86,7 @@ final class Ollama: ObservableObject {
         URLSession.shared.dataTask(with: request).resume()
     }
 
-    func refresh() {
+    package func refresh() {
         status = .checking
         Task {
             do {
@@ -102,12 +102,12 @@ final class Ollama: ObservableObject {
         }
     }
 
-    static func has(_ model: String, in names: [String]) -> Bool {
+    package static func has(_ model: String, in names: [String]) -> Bool {
         names.contains(model) || names.contains(model + ":latest")
     }
 
     /// Запуск Ollama.app, если сервер не отвечает.
-    func launchServer() {
+    package func launchServer() {
         let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.electron.ollama")
             ?? URL(fileURLWithPath: "/Applications/Ollama.app")
         let configuration = NSWorkspace.OpenConfiguration()
@@ -120,7 +120,7 @@ final class Ollama: ObservableObject {
     }
 
     /// Скачать выбранную модель (ollama pull) с прогрессом.
-    func pull() {
+    package func pull() {
         guard pullProgress == nil else { return }
         pullProgress = 0
         let model = Self.model
@@ -147,12 +147,14 @@ final class Ollama: ObservableObject {
 
     // MARK: - Запросы
 
-    struct Failure: LocalizedError {
-        let errorDescription: String?
+    package struct Failure: LocalizedError {
+        package let errorDescription: String?
+
+        package init(errorDescription: String?) { self.errorDescription = errorDescription }
     }
 
     /// Один ответ модели. json — просить строго JSON (format: "json").
-    nonisolated static func generate(_ prompt: String, system: String? = nil, json: Bool = false,
+    package nonisolated static func generate(_ prompt: String, system: String? = nil, json: Bool = false,
                                      temperature: Double = 0.2, timeout: TimeInterval = 90,
                                      context: Int? = nil, maxTokens: Int = 600,
                                      background: Bool = false) async throws -> String {
@@ -187,7 +189,7 @@ final class Ollama: ObservableObject {
     }
 
     /// Ответ-JSON, разобранный в словарь.
-    nonisolated static func generateJSON(_ prompt: String, system: String? = nil,
+    package nonisolated static func generateJSON(_ prompt: String, system: String? = nil,
                                          maxTokens: Int = 600, background: Bool = false) async throws -> [String: Any] {
         let text = try await generate(prompt, system: system, json: true, maxTokens: maxTokens, background: background)
         guard let object = AIParsing.jsonObject(in: text) else { throw Failure(errorDescription: "Модель ответила не JSON") }

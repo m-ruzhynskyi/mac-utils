@@ -3,25 +3,25 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class PermissionsModel: NSObject, ObservableObject {
-    static let shared = PermissionsModel()
+package final class PermissionsModel: NSObject, ObservableObject {
+    package static let shared = PermissionsModel()
 
-    @Published private(set) var accessibility = Permissions.accessibility
-    @Published private(set) var screenRecording = Permissions.screenRecording
-    @Published private(set) var microphone = Permissions.microphone
-    @Published private(set) var fullDiskAccess = Permissions.fullDiskAccess
-    @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @Published package private(set) var accessibility = Permissions.accessibility
+    @Published package private(set) var screenRecording = Permissions.screenRecording
+    @Published package private(set) var microphone = Permissions.microphone
+    @Published package private(set) var fullDiskAccess = Permissions.fullDiskAccess
+    @Published package var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     /// Опрос раз в 1,5 с — только пока экран с разрешениями виден и чего-то не хватает, или пока ждём выдачи после
     /// «Открыть настройки». В остальное время — при возврате в приложение и при открытии настроек (опрос держал ~4 % ядра).
     private var timer: Timer?
-    private(set) var viewers = ViewerCount()
+    package private(set) var viewers = ViewerCount()
     /// До какого момента ждём выдачи разрешения после «Открыть настройки» (Системные настройки закрывают наше окно).
     private var waitingUntil: Date?
-    static let pollInterval: TimeInterval = 1.5
-    nonisolated static let waitForGrant: TimeInterval = 180
+    package static let pollInterval: TimeInterval = 1.5
+    package nonisolated static let waitForGrant: TimeInterval = 180
 
-    var isPolling: Bool { timer != nil }
+    package var isPolling: Bool { timer != nil }
 
     private override init() {
         super.init()
@@ -31,24 +31,24 @@ final class PermissionsModel: NSObject, ObservableObject {
     }
 
     /// Вид с разрешениями появился на экране или ушёл с него (`onScreen`).
-    func viewerChanged(_ shown: Bool) {
+    package func viewerChanged(_ shown: Bool) {
         viewers.update(shown)
         if shown { refresh() } else { updatePolling() }
     }
 
     /// Пользователь ушёл выдавать разрешение в Системные настройки: опрашиваем, пока оно не появится (не дольше 3 минут).
-    func awaitGrant(for seconds: TimeInterval = waitForGrant) {
+    package func awaitGrant(for seconds: TimeInterval = waitForGrant) {
         waitingUntil = Date().addingTimeInterval(seconds)
         updatePolling()
     }
 
     /// Нужен ли опрос: что-то не выдано и его ждут на экране или после «Открыть настройки».
-    static func pollNeeded(missing: Bool, onScreen: Bool, waiting: Bool) -> Bool {
+    package static func pollNeeded(missing: Bool, onScreen: Bool, waiting: Bool) -> Bool {
         missing && (onScreen || waiting)
     }
 
     /// Не выдано то, что ловим опросом. Микрофон — по ответу на запрос и при возврате в приложение (проверка ~8 мс).
-    var missing: Bool {
+    package var missing: Bool {
         !accessibility || !screenRecording || fullDiskAccess == false
     }
 
@@ -77,7 +77,7 @@ final class PermissionsModel: NSObject, ObservableObject {
 
     /// `includingLogin` — ещё и «Открывать при входе» (запрос к службе входа дорогой; меняется из наших настроек или
     /// Системных, после чего мы снова становимся активными).
-    func refresh(includingLogin: Bool = true) {
+    package func refresh(includingLogin: Bool = true) {
         let ax = Permissions.accessibility
         let screen = Permissions.screenRecording
         if ax != accessibility { accessibility = ax }
@@ -95,7 +95,7 @@ final class PermissionsModel: NSObject, ObservableObject {
         updatePolling()
     }
 
-    func setLaunchAtLogin(_ enabled: Bool) {
+    package func setLaunchAtLogin(_ enabled: Bool) {
         do {
             if enabled {
                 try SMAppService.mainApp.register()

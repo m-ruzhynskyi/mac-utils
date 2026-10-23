@@ -1,230 +1,230 @@
 import Foundation
 
 /// Ключи UserDefaults. Значения по умолчанию регистрируются при запуске.
-enum Pref {
-    static let didShowWelcome = "didShowWelcome"
+package enum Pref {
+    package static let didShowWelcome = "didShowWelcome"
     /// Первый запуск: `false` — вводные шаги ещё не пройдены (ставится только на чистой установке), `true` — пройдены.
     /// Нет значения — вводных шагов не было (обновление с прежней версии): настройки открываются сразу.
-    static let onboardingDone = "onboardingDone"
+    package static let onboardingDone = "onboardingDone"
 
-    static let cutPaste = "cutPasteEnabled"
-    static let cutPanel = "cutPanelEnabled"
+    package static let cutPaste = "cutPasteEnabled"
+    package static let cutPanel = "cutPanelEnabled"
 
-    static let smoothScroll = "smoothScrollEnabled"
-    static let smoothSpeed = "smoothScrollSpeed"
-    static let smoothDuration = "smoothScrollDuration"
+    package static let smoothScroll = "smoothScrollEnabled"
+    package static let smoothSpeed = "smoothScrollSpeed"
+    package static let smoothDuration = "smoothScrollDuration"
 
-    static let switcher = "appSwitcherEnabled"
+    package static let switcher = "appSwitcherEnabled"
     /// "option" — ⌥Tab, "command" — заменить системный ⌘Tab.
-    static let switcherModifier = "appSwitcherModifier"
-    static let switcherPreviews = "appSwitcherPreviews"
+    package static let switcherModifier = "appSwitcherModifier"
+    package static let switcherPreviews = "appSwitcherPreviews"
 
-    static let screenshot = "screenshotEnabled"
-    static let screenshotFolder = "screenshotFolder"
+    package static let screenshot = "screenshotEnabled"
+    package static let screenshotFolder = "screenshotFolder"
     /// Куда отправлять снимок по Enter / двойному клику: "clipboard", "folder", "both".
-    static let screenshotDestination = "screenshotDestination"
+    package static let screenshotDestination = "screenshotDestination"
     /// Раскладка коллажа шагов: "auto" (по умолчанию), "vertical", "horizontal", "grid".
-    static let screenshotStepsLayout = "screenshotStepsLayout"
-    static let screenshotStepsEqualSize = "screenshotStepsEqualSize"
-    static let screenshotStepsFrame = "screenshotStepsFrame"
-    static let screenshotStepsTitles = "screenshotStepsTitles"
-    static let screenshotStepsBadges = "screenshotStepsBadges"
-    static let screenshotStepsArrows = "screenshotStepsArrows"
+    package static let screenshotStepsLayout = "screenshotStepsLayout"
+    package static let screenshotStepsEqualSize = "screenshotStepsEqualSize"
+    package static let screenshotStepsFrame = "screenshotStepsFrame"
+    package static let screenshotStepsTitles = "screenshotStepsTitles"
+    package static let screenshotStepsBadges = "screenshotStepsBadges"
+    package static let screenshotStepsArrows = "screenshotStepsArrows"
     /// Рамка окна macOS для обычных снимков включена по умолчанию (кнопка / F в оверлее).
-    static let screenshotFrameDefault = "screenshotFrameDefault"
+    package static let screenshotFrameDefault = "screenshotFrameDefault"
     /// Фон под рамкой и коллажем: см. ShotBackground.
-    static let screenshotBackground = "screenshotBackground"
+    package static let screenshotBackground = "screenshotBackground"
     /// Наводишь на окно — оно выделяется и снимается кликом; выключено — область только вручную.
-    static let screenshotWindowSnap = "screenshotWindowSnap"
+    package static let screenshotWindowSnap = "screenshotWindowSnap"
 
     /// Запись экрана: "mp4" или "gif", кадров в секунду (MP4), курсор, звук системы, микрофон.
-    static let recordingFormat = "recordingFormat"
-    static let recordingFPS = "recordingFPS"
-    static let recordingCursor = "recordingCursor"
-    static let recordingAudio = "recordingAudio"
-    static let recordingMicrophone = "recordingMicrophone"
+    package static let recordingFormat = "recordingFormat"
+    package static let recordingFPS = "recordingFPS"
+    package static let recordingCursor = "recordingCursor"
+    package static let recordingAudio = "recordingAudio"
+    package static let recordingMicrophone = "recordingMicrophone"
     /// Папка для видео; пусто — как у снимков.
-    static let recordingFolder = "recordingFolder"
-    static let recordingCopy = "recordingCopy"
+    package static let recordingFolder = "recordingFolder"
+    package static let recordingCopy = "recordingCopy"
 
-    static let windowSnap = "windowSnapEnabled"
-    static let windowSnapDrag = "windowSnapDrag"
+    package static let windowSnap = "windowSnapEnabled"
+    package static let windowSnapDrag = "windowSnapDrag"
     /// Отступ между окнами: 0, 4 или 8 pt.
-    static let windowSnapGap = "windowSnapGap"
+    package static let windowSnapGap = "windowSnapGap"
     /// "controlOption" (⌃⌥, по умолчанию), "controlCommand", "optionCommand".
-    static let windowSnapModifier = "windowSnapModifier"
+    package static let windowSnapModifier = "windowSnapModifier"
 
-    static let appVolume = "appVolumeEnabled"
+    package static let appVolume = "appVolumeEnabled"
     /// JSON: bundle id → громкость и выключение (только не 100 %).
-    static let appVolumes = "appVolumes"
-    static let appVolumeKeyCode = "appVolumeKeyCode"
-    static let appVolumeModifiers = "appVolumeModifiers"
+    package static let appVolumes = "appVolumes"
+    package static let appVolumeKeyCode = "appVolumeKeyCode"
+    package static let appVolumeModifiers = "appVolumeModifiers"
 
     /// Последняя открытая вкладка окна «Инструменты».
-    static let toolsTab = "toolsTab"
+    package static let toolsTab = "toolsTab"
     /// Скрытые вкладки панели 🔧 (через запятую) — прежняя настройка.
-    static let toolsHiddenTabs = "toolsHiddenTabs"
+    package static let toolsHiddenTabs = "toolsHiddenTabs"
     /// Вкладки панели 🔧: разделы настроек через запятую, в порядке настроек.
-    static let toolsPanelTabs = "toolsPanelTabs"
+    package static let toolsPanelTabs = "toolsPanelTabs"
     /// Вкладка «Музыка» уже добавлена в панель 🔧 (один раз при обновлении).
-    static let panelTabsMusicAdded = "panelTabsMusicAdded"
+    package static let panelTabsMusicAdded = "panelTabsMusicAdded"
     /// Согласие на значок «Инструменты» в Программах: нет ключа — ещё не спрашивали.
-    static let toolsLauncherInstall = "toolsLauncherInstall"
+    package static let toolsLauncherInstall = "toolsLauncherInstall"
     /// «Полка» для файлов (встряхнуть мышь при перетаскивании или ⌃⌥D).
-    static let dropShelf = "dropShelfEnabled"
+    package static let dropShelf = "dropShelfEnabled"
     /// «Шпаргалка»: удержание ⌘ показывает сочетания клавиш; задержка в секундах.
-    static let cheatSheet = "cheatSheetEnabled"
-    static let cheatSheetDelay = "cheatSheetDelay"
+    package static let cheatSheet = "cheatSheetEnabled"
+    package static let cheatSheetDelay = "cheatSheetDelay"
     /// Автосортировка «Загрузок» (по умолчанию выключена) и срок до Корзины в днях (0 — никогда).
-    static let downloadsSort = "downloadsSortEnabled"
-    static let downloadsTrashDays = "downloadsTrashDays"
+    package static let downloadsSort = "downloadsSortEnabled"
+    package static let downloadsTrashDays = "downloadsTrashDays"
     /// Свои правила «Загрузок»: расширение (без точки) → папка.
-    static let downloadsCustomRules = "downloadsCustomRules"
+    package static let downloadsCustomRules = "downloadsCustomRules"
     /// Умная папка снимков (по дням и программам, поиск по тексту) и сбор системных снимков ⌘⇧3/4.
-    static let screenshotLibrary = "screenshotLibraryEnabled"
-    static let screenshotLibrarySystem = "screenshotLibrarySystem"
-    static let screenshotLibraryImported = "screenshotLibraryImported"
+    package static let screenshotLibrary = "screenshotLibraryEnabled"
+    package static let screenshotLibrarySystem = "screenshotLibrarySystem"
+    package static let screenshotLibraryImported = "screenshotLibraryImported"
     /// Сохранять в умную папку и то, что скопировано только в буфер.
-    static let screenshotLibraryClipboard = "screenshotLibraryClipboard"
+    package static let screenshotLibraryClipboard = "screenshotLibraryClipboard"
     /// Через сколько дней снимки и видео уходят в Корзину (0 — никогда).
-    static let screenshotLibraryTrashDays = "screenshotLibraryTrashDays"
+    package static let screenshotLibraryTrashDays = "screenshotLibraryTrashDays"
     /// Мгновенный QR (⌃⌥Q).
-    static let qr = "qrEnabled"
+    package static let qr = "qrEnabled"
     /// Раскладка по программам: включено, запоминать последнюю, правила и запомненное (bundle id → id раскладки).
-    static let appInputSource = "appInputSourceEnabled"
-    static let appInputRemember = "appInputSourceRemember"
-    static let appInputRules = "appInputSourceRules"
-    static let appInputRemembered = "appInputSourceRemembered"
+    package static let appInputSource = "appInputSourceEnabled"
+    package static let appInputRemember = "appInputSourceRemember"
+    package static let appInputRules = "appInputSourceRules"
+    package static let appInputRemembered = "appInputSourceRemembered"
     /// Значок Mac Utils в строке меню (клик — «Инструменты»).
-    static let menuBarIcon = "menuBarIconEnabled"
+    package static let menuBarIcon = "menuBarIconEnabled"
     /// Показывать Mac Utils в Dock (по умолчанию нет — работает в фоне).
-    static let showInDock = "showInDock"
+    package static let showInDock = "showInDock"
     /// Режим «Фокус»: размытие всего позади программы (⌃⌥F).
-    static let focus = "focusEnabled"
-    static let focusFollow = "focusFollow"
-    static let focusStrength = "focusStrength"
+    package static let focus = "focusEnabled"
+    package static let focusFollow = "focusFollow"
+    package static let focusStrength = "focusStrength"
     /// Музыка: что играло последним и плеер по умолчанию (bundle id или https://…).
-    static let musicLast = "musicLast"
-    static let musicPlayer = "musicPlayer"
+    package static let musicLast = "musicLast"
+    package static let musicPlayer = "musicPlayer"
     /// Адрес ретранслятора трансляции экрана (relay/, Cloudflare Workers).
-    static let shareServer = "shareServer"
-    static let shareAudio = "shareAudio"
+    package static let shareServer = "shareServer"
+    package static let shareAudio = "shareAudio"
     /// Зрители могут ставить метки и рисовать поверх экрана ведущего.
-    static let shareAllowMarks = "shareAllowMarks"
+    package static let shareAllowMarks = "shareAllowMarks"
     /// Зрители сами переключают, какой монитор ведущего транслируется (без вопроса; ведущему — уведомление).
     /// По умолчанию выключено (приватность): ведущий включает один раз в настройках трансляции.
-    static let shareAllowMonitorSwitch = "shareAllowMonitorSwitch"
+    package static let shareAllowMonitorSwitch = "shareAllowMonitorSwitch"
     /// Свой постоянный 10-значный ID и история подключений (JSON).
-    static let shareID = "shareID"
-    static let shareHistory = "shareHistory"
+    package static let shareID = "shareID"
+    package static let shareHistory = "shareHistory"
     /// Программы, чей звук не идёт в трансляцию (bundle id).
-    static let shareMutedApps = "shareMutedApps"
+    package static let shareMutedApps = "shareMutedApps"
     /// «Не передавать звонки»: программы звонков (`ShareAudioExclusion.callApps`) заглушены для трансляции.
-    static let shareMuteCalls = "shareMuteCalls"
+    package static let shareMuteCalls = "shareMuteCalls"
     /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.
-    static let cheatSheetSticky = "cheatSheetSticky"
+    package static let cheatSheetSticky = "cheatSheetSticky"
 
     /// Напоминание о перерыве: каждые N минут, длительность перерыва в секундах.
-    static let breakReminder = "breakReminderEnabled"
-    static let breakInterval = "breakIntervalMinutes"
-    static let breakDuration = "breakDurationSeconds"
+    package static let breakReminder = "breakReminderEnabled"
+    package static let breakInterval = "breakIntervalMinutes"
+    package static let breakDuration = "breakDurationSeconds"
     /// Тёплый экран вечером: сила (0…1) для встроенного и внешних мониторов, часы начала и конца.
-    static let warmScreen = "warmScreenEnabled"
-    static let warmStrength = "warmScreenStrength"
-    static let warmExternalStrength = "warmScreenExternalStrength"
-    static let warmFrom = "warmScreenFromHour"
-    static let warmTo = "warmScreenToHour"
+    package static let warmScreen = "warmScreenEnabled"
+    package static let warmStrength = "warmScreenStrength"
+    package static let warmExternalStrength = "warmScreenExternalStrength"
+    package static let warmFrom = "warmScreenFromHour"
+    package static let warmTo = "warmScreenToHour"
     /// «Поверх всех» (⌃⌥P) и прозрачность копии; запоминание окон по мониторам.
-    static let windowPin = "windowPinEnabled"
-    static let windowPinOpacity = "windowPinOpacity"
-    static let windowMemory = "windowMemoryEnabled"
+    package static let windowPin = "windowPinEnabled"
+    package static let windowPinOpacity = "windowPinOpacity"
+    package static let windowMemory = "windowMemoryEnabled"
     /// Рисование поверх экрана (⌃⌥A).
-    static let annotate = "annotateEnabled"
+    package static let annotate = "annotateEnabled"
 
     /// ИИ через локальную Ollama: общий выключатель, адрес, модель и отдельные функции.
-    static let ai = "aiEnabled"
-    static let aiURL = "aiURL"
-    static let aiModel = "aiModel"
-    static let aiFixText = "aiFixText"
-    static let aiShotNames = "aiShotNames"
-    static let aiShotSearch = "aiShotSearch"
-    static let aiDownloads = "aiDownloadsSuggest"
-    static let aiDownloadsTags = "aiDownloadsTags"
-    static let aiTasks = "aiTasks"
-    static let aiCleanup = "aiCleanup"
-    static let aiShelf = "aiShelf"
+    package static let ai = "aiEnabled"
+    package static let aiURL = "aiURL"
+    package static let aiModel = "aiModel"
+    package static let aiFixText = "aiFixText"
+    package static let aiShotNames = "aiShotNames"
+    package static let aiShotSearch = "aiShotSearch"
+    package static let aiDownloads = "aiDownloadsSuggest"
+    package static let aiDownloadsTags = "aiDownloadsTags"
+    package static let aiTasks = "aiTasks"
+    package static let aiCleanup = "aiCleanup"
+    package static let aiShelf = "aiShelf"
     /// Записи встреч (⌃⌥M): микрофон, язык расшифровки, отчёт ИИ.
-    static let meetings = "meetingsEnabled"
-    static let meetingsMicrophone = "meetingsMicrophone"
-    static let meetingsLanguage = "meetingsLanguage"
-    static let meetingsReport = "meetingsReport"
+    package static let meetings = "meetingsEnabled"
+    package static let meetingsMicrophone = "meetingsMicrophone"
+    package static let meetingsLanguage = "meetingsLanguage"
+    package static let meetingsReport = "meetingsReport"
     /// Движок расшифровки: "whisper" (если установлен) или "apple".
-    static let meetingsEngine = "meetingsEngine"
+    package static let meetingsEngine = "meetingsEngine"
 
-    static let layoutFix = "layoutFixEnabled"
+    package static let layoutFix = "layoutFixEnabled"
     /// Горячая клавиша: код клавиши и модификаторы Carbon (по умолчанию ⌘P).
-    static let layoutFixKeyCode = "layoutFixKeyCode"
-    static let layoutFixModifiers = "layoutFixModifiers"
+    package static let layoutFixKeyCode = "layoutFixKeyCode"
+    package static let layoutFixModifiers = "layoutFixModifiers"
     /// Переключать раскладку системы после исправления.
-    static let layoutFixSwitchSource = "layoutFixSwitchSource"
+    package static let layoutFixSwitchSource = "layoutFixSwitchSource"
 
-    static let autoUpdate = "autoUpdateEnabled"
-    static let updateRepo = "updateRepository"
-    static let justUpdatedTo = "justUpdatedTo"
+    package static let autoUpdate = "autoUpdateEnabled"
+    package static let updateRepo = "updateRepository"
+    package static let justUpdatedTo = "justUpdatedTo"
     /// Линейка версий (например, «1.3»), для которой уже показали «Что нового».
-    static let lastSeenChangelog = "lastSeenChangelog"
+    package static let lastSeenChangelog = "lastSeenChangelog"
     /// Тёплый экран: "schedule" — по времени, "manual" — включается вручную.
-    static let warmMode = "warmScreenMode"
-    static let warmManualOn = "warmScreenManualOn"
+    package static let warmMode = "warmScreenMode"
+    package static let warmManualOn = "warmScreenManualOn"
     /// «Не засыпать»: последний выбранный срок (сама функция после запуска всегда выключена).
-    static let keepAwakeDuration = "keepAwakeDuration"
+    package static let keepAwakeDuration = "keepAwakeDuration"
 
     /// Текстовый редактор: «Пропускать первые N» знаков `$` (одна настройка на все файлы), новые документы,
     /// восстановление вкладок, черновики, вид и недавние файлы (пути, последний — первым).
-    static let editorSkipFirst = "editorSkipFirst"
-    static let editorSkipCount = "editorSkipCount"
-    static let editorNewEncoding = "editorNewEncoding"
-    static let editorNewLineEnding = "editorNewLineEnding"
-    static let editorRestoreSession = "editorRestoreSession"
-    static let editorAutosaveDrafts = "editorAutosaveDrafts"
-    static let editorWrap = "editorWrap"
-    static let editorZoom = "editorZoom"
-    static let editorDollarPanel = "editorDollarPanel"
+    package static let editorSkipFirst = "editorSkipFirst"
+    package static let editorSkipCount = "editorSkipCount"
+    package static let editorNewEncoding = "editorNewEncoding"
+    package static let editorNewLineEnding = "editorNewLineEnding"
+    package static let editorRestoreSession = "editorRestoreSession"
+    package static let editorAutosaveDrafts = "editorAutosaveDrafts"
+    package static let editorWrap = "editorWrap"
+    package static let editorZoom = "editorZoom"
+    package static let editorDollarPanel = "editorDollarPanel"
     /// Вид: невидимые символы и подсветка парных скобок.
-    static let editorInvisibles = "editorInvisibles"
-    static let editorBrackets = "editorBrackets"
+    package static let editorInvisibles = "editorInvisibles"
+    package static let editorBrackets = "editorBrackets"
     /// Ширина табуляции в пробелах (табы ↔ пробелы, отступ таба на экране).
-    static let editorTabWidth = "editorTabWidth"
+    package static let editorTabWidth = "editorTabWidth"
     /// Поиск в папке: последняя папка и маска имён.
-    static let editorFolderSearchPath = "editorFolderSearchPath"
-    static let editorFolderSearchMask = "editorFolderSearchMask"
-    static let editorRecent = "editorRecent"
+    package static let editorFolderSearchPath = "editorFolderSearchPath"
+    package static let editorFolderSearchMask = "editorFolderSearchMask"
+    package static let editorRecent = "editorRecent"
     /// Режим «Код» / «Документ» по расширению (последний выбор).
-    static let editorViewModes = "editorViewModes"
+    package static let editorViewModes = "editorViewModes"
     /// Вкладка «Редактор» уже добавлена в панель 🔧 (один раз при обновлении).
-    static let panelTabsEditorAdded = "panelTabsEditorAdded"
+    package static let panelTabsEditorAdded = "panelTabsEditorAdded"
 
     /// Видеоплеер: просмотр, субтитры, пропуск, «Мои снимки», последние выбранные языки и недавние файлы.
-    static let playerRememberPosition = "playerRememberPosition"
-    static let playerSeekStep = "playerSeekStep"
-    static let playerKeepAwake = "playerKeepAwake"
-    static let playerKeepPitch = "playerKeepPitch"
-    static let playerVolume = "playerVolume"
-    static let playerSubtitlesNearby = "playerSubtitlesNearby"
-    static let playerSubtitleSize = "playerSubtitleSize"
-    static let playerSubtitleBackground = "playerSubtitleBackground"
-    static let playerSubtitleLanguage = "playerSubtitleLanguage"
-    static let playerAudioLanguage = "playerAudioLanguage"
-    static let playerSkipAuto = "playerSkipAuto"
-    static let playerNextEpisode = "playerNextEpisode"
+    package static let playerRememberPosition = "playerRememberPosition"
+    package static let playerSeekStep = "playerSeekStep"
+    package static let playerKeepAwake = "playerKeepAwake"
+    package static let playerKeepPitch = "playerKeepPitch"
+    package static let playerVolume = "playerVolume"
+    package static let playerSubtitlesNearby = "playerSubtitlesNearby"
+    package static let playerSubtitleSize = "playerSubtitleSize"
+    package static let playerSubtitleBackground = "playerSubtitleBackground"
+    package static let playerSubtitleLanguage = "playerSubtitleLanguage"
+    package static let playerAudioLanguage = "playerAudioLanguage"
+    package static let playerSkipAuto = "playerSkipAuto"
+    package static let playerNextEpisode = "playerNextEpisode"
     /// Папки, где кнопку «Пропустить…» просили не показывать.
-    static let playerSkipHiddenFolders = "playerSkipHiddenFolders"
+    package static let playerSkipHiddenFolders = "playerSkipHiddenFolders"
     /// Двойной клик по видео в «Моих снимках»: true — плеер Mac Utils, false — программа по умолчанию.
-    static let playerOpensShots = "playerOpensShots"
-    static let playerRecent = "playerRecent"
-    static let playerFinished = "playerFinished"
+    package static let playerOpensShots = "playerOpensShots"
+    package static let playerRecent = "playerRecent"
+    package static let playerFinished = "playerFinished"
 
-    static func register() {
+    package static func register() {
         UserDefaults.standard.register(defaults: [
             cutPaste: true,
             cutPanel: true,
@@ -316,8 +316,8 @@ enum Pref {
             autoUpdate: true,
             editorSkipFirst: true,
             editorSkipCount: 3,
-            editorNewEncoding: TextEncoding.utf8.rawValue,
-            editorNewLineEnding: LineEnding.lf.rawValue,
+            editorNewEncoding: "utf8", // TextEncoding.utf8.rawValue (тип остаётся в приложении: App Intents не берут перечисления из другого модуля)
+            editorNewLineEnding: "lf", // LineEnding.lf.rawValue
             editorRestoreSession: true,
             editorAutosaveDrafts: true,
             editorWrap: false,
@@ -340,23 +340,23 @@ enum Pref {
         ])
     }
 
-    enum ScreenshotDestination: String {
+    package enum ScreenshotDestination: String {
         case clipboard, folder, both
     }
 
-    static var screenshotDestinationValue: ScreenshotDestination {
+    package static var screenshotDestinationValue: ScreenshotDestination {
         ScreenshotDestination(rawValue: UserDefaults.standard.string(forKey: screenshotDestination) ?? "") ?? .clipboard
     }
 
     /// Папка для записей экрана (по умолчанию — папка снимков).
-    static var recordingDirectory: URL {
+    package static var recordingDirectory: URL {
         if let path = UserDefaults.standard.string(forKey: recordingFolder), !path.isEmpty {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
         return screenshotDirectory
     }
 
-    static var screenshotDirectory: URL {
+    package static var screenshotDirectory: URL {
         if let path = UserDefaults.standard.string(forKey: screenshotFolder), !path.isEmpty {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
@@ -366,7 +366,7 @@ enum Pref {
 }
 
 /// Русское склонение по числу: 1 объект, 2 объекта, 5 объектов.
-func plural(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
+package func plural(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
     let mod10 = n % 10, mod100 = n % 100
     if mod10 == 1 && mod100 != 11 { return one }
     if (2...4).contains(mod10) && !(12...14).contains(mod100) { return few }

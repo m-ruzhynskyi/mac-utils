@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MUCore
 
 // MARK: - Общие части страниц-инструментов (Программы, Монитор, Задачи, Очистка)
 

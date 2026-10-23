@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// Этап 3 плеера: окно с настоящей моделью (без звука, окно не показывается), события клавиш — как от системы.
 @MainActor

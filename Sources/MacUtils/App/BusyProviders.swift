@@ -1,4 +1,5 @@
 import Foundation
+import MUCore
 
 /// Что считается «занято»: подключает состояние функций к реестру из Core (сам реестр функций не знает).
 extension BusyRegistry {
