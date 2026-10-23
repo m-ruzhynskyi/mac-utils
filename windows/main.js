@@ -20,6 +20,8 @@ let pendingNotice = null; // уведомление «‹имя› перекл�
 let overlay = null; // прозрачное окно поверх экрана ведущего: метки и рисунки зрителей
 let tracker = null; // следит, где транслируемое окно, — метки ложатся точно на него
 let audioHelper = null; // звук программ без выбранных (mu-audio.exe capture …)
+let audioPending = 0; // байт звука, отправленных странице и ещё не подтверждённых (audio-ack): страница подвисла — не копим
+const AUDIO_PENDING_MAX = 96_000; // ≈ 2 с звука 24 кГц моно
 
 // Помощник mu-audio.exe (native/mu-audio.cpp): звук отдельных программ и положение окон.
 const HELPER = app.isPackaged ? path.join(process.resourcesPath, "mu-audio.exe") : path.join(__dirname, "bin", "mu-audio.exe");
@@ -545,7 +547,6 @@ app.whenReady().then(() => {
   }
 
   ipcMain.on("version", (event) => { event.returnValue = app.getVersion(); });
-  ipcMain.on("hostname", (event) => { event.returnValue = require("os").hostname(); });
   // Кто-то просится смотреть — привлекаем внимание (мигание на панели задач).
   ipcMain.on("attention", () => {
     if (!window || window.isDestroyed()) return;
@@ -598,8 +599,11 @@ app.whenReady().then(() => {
     if (audioHelper) startAudio(event.sender);
   });
 
+  ipcMain.on("audio-ack", (_event, bytes) => { audioPending = Math.max(0, audioPending - (Number.isFinite(bytes) ? bytes : 0)); });
+
   function startAudio(sender) {
     stopAudio();
+    audioPending = 0;
     if (!chosen?.audio || !hasHelper()) return;
     const helper = spawn(HELPER, ["capture", ...mutedProcesses(chosen)], { windowsHide: true });
     audioHelper = helper;
@@ -608,7 +612,8 @@ app.whenReady().then(() => {
       let data = odd ? Buffer.concat([odd, chunk]) : chunk;
       odd = data.length % 2 ? data.subarray(data.length - 1) : null;
       if (odd) data = data.subarray(0, data.length - 1);
-      if (data.length && !sender.isDestroyed()) sender.send("audio", data);
+      // Страница не забирает звук (интерфейс завис) — пропускаем, иначе он копится в памяти и приходит пачкой.
+      if (data.length && !sender.isDestroyed() && audioPending <= AUDIO_PENDING_MAX) { audioPending += data.length; sender.send("audio", data); }
     });
     helper.on("exit", () => { if (audioHelper === helper) audioHelper = null; });
   }

@@ -4,7 +4,6 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("mu", {
   // В изолированном preload нельзя require локальных файлов — версию спрашиваем у приложения.
   version: ipcRenderer.sendSync("version"),
-  hostname: ipcRenderer.sendSync("hostname"),
   attention: () => ipcRenderer.send("attention"),
   sources: () => ipcRenderer.invoke("sources"),
   choose: (id, audio, muted, muteCalls) => ipcRenderer.invoke("choose", id, audio, muted, muteCalls),
@@ -12,7 +11,7 @@ contextBridge.exposeInMainWorld("mu", {
   audioApps: () => ipcRenderer.invoke("audioApps"),
   startAudio: (onChunk) => {
     ipcRenderer.removeAllListeners("audio");
-    ipcRenderer.on("audio", (_e, data) => onChunk(data));
+    ipcRenderer.on("audio", (_e, data) => { try { onChunk(data); } finally { ipcRenderer.send("audio-ack", data.length); } });
     ipcRenderer.send("startAudio");
   },
   setMuted: (muted) => ipcRenderer.send("setMuted", muted),

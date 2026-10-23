@@ -915,3 +915,21 @@ test("страница с эфиром ушла (перезагрузка, па�
     assert.equal(w.dialogs, 3);
   } finally { host.stop(); }
 });
+
+test("страница не подтверждает звук (подвисла): приложение пропускает его, а не копит; подтвердила — звук снова идёт", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true);
+  const host = await start(world([d], [screenSource(d, 1)]));
+  try {
+    await host.fake.handles.get("choose")({}, "screen:1:0", true, []);
+    const sent = [];
+    host.fake.ipc.get("startAudio")({ sender: { isDestroyed: () => false, send: (...a) => sent.push(a) } });
+    const helper = host.trackers.at(-1);
+    const chunk = Buffer.alloc(9600);
+    for (let i = 0; i < 40; i++) helper.stdout.emit("data", chunk);
+    assert.ok(sent.length <= 11, `отправлено ${sent.length} кусков, предел ≈ 2 с`);
+    const stuck = sent.length;
+    host.fake.ipc.get("audio-ack")({}, 9600 * stuck);
+    helper.stdout.emit("data", chunk);
+    assert.equal(sent.length, stuck + 1, "после подтверждения звук идёт");
+  } finally { host.stop(); }
+});
