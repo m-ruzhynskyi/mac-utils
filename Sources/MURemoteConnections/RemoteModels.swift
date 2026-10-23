@@ -63,6 +63,31 @@ public enum RemoteProgram: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// Записи не через AnyDesk/TeamViewer: удалённый рабочий стол, только VPN, другое (телефон и т. п.).
+/// У них ID может быть пустым; для RDP в ID — адрес компьютера.
+public enum ConnectionMethod: String, Codable, CaseIterable, Sendable {
+    case rdp, vpn, other
+
+    public var title: String {
+        switch self {
+        case .rdp: return "RDP"
+        case .vpn: return "VPN"
+        case .other: return RL("Другое")
+        }
+    }
+
+    private static let names: [String: ConnectionMethod] = [
+        "rdp": .rdp, "рдп": .rdp, "remotedesktop": .rdp, "mstsc": .rdp, "windowsapp": .rdp,
+        "vpn": .vpn, "впн": .vpn,
+        "другое": .other, "другие": .other, "інше": .other, "other": .other, "прочее": .other, "иное": .other,
+        "телефон": .other, "phone": .other,
+    ]
+
+    public static func parse(_ raw: String) -> ConnectionMethod? {
+        names[ConnectionHeaders.key(raw)]
+    }
+}
+
 /// Запись о подключении в памяти. Пароля здесь нет и быть не должно:
 /// он читается из файла в момент подключения (`ConnectionsFileStore.password(for:)`).
 public struct ConnectionRecord: Equatable, Identifiable, Sendable {
@@ -77,28 +102,48 @@ public struct ConnectionRecord: Equatable, Identifiable, Sendable {
     /// nil — в файле программа не указана: берётся программа по умолчанию из настроек.
     public let program: RemoteProgram?
     public let hasPassword: Bool
+    /// RDP, VPN или «Другое» вместо AnyDesk/TeamViewer; тогда `program` — nil, ID может быть пустым.
+    public let method: ConnectionMethod?
+    /// Логин учётки Windows (не секрет: показывается в строке).
+    public let account: String
+    public let hasAccountPassword: Bool
+    /// Сколько строк в «Доступе» — самого текста в памяти нет.
+    public let accessLines: Int
 
     public init(sourceRow: Int, name: String, id: String, group: String = "", tags: [String] = [],
-                note: String = "", program: RemoteProgram? = nil, hasPassword: Bool = false) {
+                note: String = "", program: RemoteProgram? = nil, hasPassword: Bool = false,
+                method: ConnectionMethod? = nil, account: String = "", hasAccountPassword: Bool = false, accessLines: Int = 0) {
         self.sourceRow = sourceRow
         self.name = name
         self.id = id
         self.group = group
         self.tags = tags
         self.note = note
-        self.program = program
+        self.program = method == nil ? program : nil
         self.hasPassword = hasPassword
+        self.method = method
+        self.account = account
+        self.hasAccountPassword = hasAccountPassword
+        self.accessLines = accessLines
     }
+
+    /// Нужен VPN: программа «VPN» или метка VPN.
+    public var needsVPN: Bool { method == .vpn || tags.contains { ConnectionTag.key($0) == ConnectionTag.vpn } }
+    /// Подключение через удалённый рабочий стол: программа «RDP» или метка RDP.
+    public var usesRDP: Bool { method == .rdp || tags.contains { ConnectionTag.key($0) == ConnectionTag.rdp } }
+    /// Метки для показа: без VPN и RDP — они значками.
+    public var labels: [String] { tags.filter { !ConnectionTag.isBadge($0) } }
 
     /// Уникален в списке: один и тот же ID может встретиться дважды (дубликат показываются оба).
     public var identity: String { "\(sourceRow):\(id)" }
 
-    /// Ключ избранного и недавних — нормализованный ID (номер строки меняется при правке файла).
-    public var favoriteKey: String { id }
+    /// Ключ избранного и недавних — нормализованный ID (номер строки меняется при правке файла); без ID — название.
+    public var favoriteKey: String { id.isEmpty ? "name:" + name : id }
 
     public var isAlias: Bool { id.contains("@") }
 
     /// Программа для подключения: из файла, иначе алиас — AnyDesk, иначе программа по умолчанию.
+    /// У записей RDP/VPN/«Другое» не используется (`method`).
     public func program(default fallback: RemoteProgram) -> RemoteProgram {
         program ?? (isAlias ? .anyDesk : fallback)
     }

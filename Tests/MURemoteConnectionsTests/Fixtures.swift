@@ -114,16 +114,7 @@ enum Fixtures {
     static func xml(rows: [[String]]) -> Data {
         let header = rows[0]
         let tags = header.map { h -> String in
-            switch ConnectionHeaders.field(for: h) {
-            case .name?: return "name"
-            case .id?: return "id"
-            case .password?: return "password"
-            case .group?: return "group"
-            case .tags?: return "tags"
-            case .note?: return "note"
-            case .program?: return "app"
-            case nil: return "extra"
-            }
+            ConnectionHeaders.field(for: h).map(XMLConnectionsEditor.tag) ?? "extra"
         }
         var out = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<connections>\n"
         for row in rows.dropFirst() {

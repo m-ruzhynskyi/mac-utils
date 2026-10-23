@@ -1,6 +1,6 @@
 import Foundation
 
-/// Поиск по названию, ID, группе, тегам и заметке: без регистра и диакритики, по частям слов,
+/// Поиск по названию, ID, группе, тегам, заметке и логину учётки («Доступ» — никогда: там бывают пароли): без регистра и диакритики, по частям слов,
 /// ID — с пробелами и без. Если по запросу ничего нет, пробует его в другой раскладке («ctdth» → «север»).
 public struct ConnectionSearch: Sendable {
     /// Запрос, набранный не в той раскладке, и во что он превратился — для плашки «ctdth → север».
@@ -28,7 +28,8 @@ public struct ConnectionSearch: Sendable {
     public init(_ records: [ConnectionRecord]) {
         entries = records.map { r in
             Entry(record: r, name: Self.fold(r.name), id: r.id,
-                  rest: Self.fold(([r.group] + r.tags + [r.note]).joined(separator: "\u{1F}")))
+                  rest: Self.fold(([r.group] + r.tags + r.tags.map(ConnectionTag.display) + [r.note, r.account])
+                      .joined(separator: "\u{1F}")))
         }
     }
 

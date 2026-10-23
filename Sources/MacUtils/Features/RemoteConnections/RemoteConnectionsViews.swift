@@ -57,25 +57,8 @@ private func highlighted(_ text: String, _ ranges: [Range<String.Index>]) -> Att
     return out
 }
 
-/// Тег записи в строке списка: маленький чип, длинный — с обрезкой.
-struct RemoteTagChip: View {
-    let text: AttributedString
-
-    var body: some View {
-        Text(text)
-            .font(DS.Font.manrope(11, .semibold, relativeTo: .caption2))
-            .foregroundStyle(.dsMute)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .padding(.vertical, 1)
-            .padding(.horizontal, 7)
-            .frame(maxWidth: 110, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .capsuleFill(Color.dsField, border: Color.dsLine)
-    }
-}
-
-/// Строка записи: значок, название, ID (и группа), теги и заметка, программа, ключ, звезда; выбранная — с ↩.
+/// Строка записи (макет rc-tags-design): название и значки VPN/RDP; ID (никогда не переносится) и логин учётки;
+/// метки одной строкой; заметка; справа — программа, «i» (подробности) и ключ. Выбранная — с лаймовой рамкой.
 struct RemoteRow: View {
     let record: ConnectionRecord
     let program: RemoteProgram
@@ -86,41 +69,72 @@ struct RemoteRow: View {
     var dimmed = false
     var onFavorite: () -> Void
     var onConnect: () -> Void
+    var onDetails: () -> Void = {}
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             RowTile(systemImage: "display", kind: selected ? .accent : .neutral)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(highlighted(record.name, ConnectionSearch.highlights(in: record.name, query: query)))
-                    .font(DS.Font.rowTitle).foregroundStyle(.dsText).lineLimit(1)
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
-                    // ID не переносится никогда: ужимается группа.
-                    Text(highlighted(record.displayID, ConnectionSearch.highlightsInID(record.displayID, query: query)))
-                        .font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText)
-                        .lineLimit(1).fixedSize().layoutPriority(1)
-                    if showGroup, !record.group.isEmpty {
+                    Text(highlighted(record.name, ConnectionSearch.highlights(in: record.name, query: query)))
+                        .font(DS.Font.rowTitle).foregroundStyle(.dsText).lineLimit(1)
+                    ForEach(record.badges, id: \.title) { badge in
+                        Button(action: onDetails) { RemoteMethodBadge(kind: badge) }.buttonStyle(.plain)
+                    }
+                }
+                HStack(spacing: 8) {
+                    // ID не переносится никогда: ужимаются логин и группа.
+                    idText.lineLimit(1).fixedSize().layoutPriority(1)
+                    if !record.account.isEmpty {
+                        Label {
+                            Text(highlighted(record.account, ConnectionSearch.highlights(in: record.account, query: query)))
+                                .lineLimit(1).truncationMode(.tail)
+                        } icon: {
+                            Image(systemName: "person").font(.system(size: 10, weight: .semibold))
+                        }
+                        .labelStyle(CompactLabelStyle())
+                        .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                        .help(RL("Учётка Windows"))
+                    } else if showGroup, !record.group.isEmpty {
                         Text("· \(record.group)").font(DS.Font.rowSub).foregroundStyle(.dsMute)
                             .lineLimit(1).truncationMode(.tail)
                     }
                 }
-                if !record.tags.isEmpty || !note.isEmpty { details }
+                if !record.labels.isEmpty { RemoteLabelStrip(labels: record.labels) }
+                if !note.isEmpty {
+                    Label {
+                        Text(highlighted(note, ConnectionSearch.highlights(in: note, query: query)))
+                            .lineLimit(1).truncationMode(.tail)
+                    } icon: {
+                        Image(systemName: "note.text").font(.system(size: 11, weight: .semibold))
+                    }
+                    .labelStyle(CompactLabelStyle())
+                    .font(DS.Font.manrope(12.5, .regular, relativeTo: .subheadline)).foregroundStyle(.dsMute)
+                    .help(record.note)
+                }
             }
             Spacer(minLength: 8)
-            RemoteProgramBadge(program: program, dimmed: dimmed)
-            RemotePasswordBadge(has: record.hasPassword)
-            Button(action: onFavorite) {
-                Image(systemName: favorite ? "star.fill" : "star")
-                    .font(.system(size: 13))
-                    .foregroundStyle(favorite ? Color.dsAccText : Color.dsMute)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
+            VStack(alignment: .trailing, spacing: 8) {
+                RemoteKindBadge(record: record, program: program, dimmed: dimmed)
+                HStack(spacing: 6) {
+                    Button(action: onDetails) {
+                        Image(systemName: "info")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Color.dsMute)
+                            .frame(width: 26, height: 26)
+                            .background(Color.dsPanel, in: Circle())
+                            .overlay(Circle().strokeBorder(Color.dsLine, lineWidth: 1))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(RL("Подробности"))
+                    .accessibilityLabel(RL("Подробности"))
+                    RemotePasswordBadge(has: record.hasPassword)
+                }
             }
-            .buttonStyle(.plain)
-            .help(favorite ? RL("Убрать из избранного") : RL("В избранное"))
-            if selected { Keycap(["↩"], compact: true, onPanel: true) }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .background(selected ? Color.dsPanel : .clear, in: shape)
         .overlay(shape.strokeBorder(selected ? Color.dsAccLine : .clear, lineWidth: selected ? DS.State.focusRing : 0))
@@ -130,33 +144,29 @@ struct RemoteRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
         .accessibilityAction(named: RL("Подключиться"), onConnect)
+        .accessibilityAction(named: RL("Подробности"), onDetails)
+        .accessibilityAction(named: favorite ? RL("Убрать из избранного") : RL("В избранное"), onFavorite)
+    }
+
+    @ViewBuilder private var idText: some View {
+        if record.id.isEmpty {
+            Text(RL("без ID")).font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute)
+        } else {
+            Text(highlighted(record.displayID, ConnectionSearch.highlightsInID(record.displayID, query: query)))
+                .font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText)
+        }
     }
 
     /// Заметка одной строкой: переводы строк — пробелы. Полная — в подсказке.
     private var note: String {
         record.note.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
     }
+}
 
-    /// Теги чипами (2–3, остальные — «+N») и заметка серым, с обрезкой.
-    private var details: some View {
-        let limit = note.isEmpty ? 3 : 2
-        let shown = record.tags.prefix(limit)
-        return HStack(spacing: 4) {
-            ForEach(Array(shown.enumerated()), id: \.offset) { _, tag in
-                RemoteTagChip(text: highlighted(tag, ConnectionSearch.highlights(in: tag, query: query)))
-            }
-            if record.tags.count > limit {
-                RemoteTagChip(text: AttributedString("+\(record.tags.count - limit)"))
-                    .help(record.tags.dropFirst(limit).joined(separator: ", "))
-            }
-            if !note.isEmpty {
-                Text(highlighted(note, ConnectionSearch.highlights(in: note, query: query)))
-                    .font(DS.Font.rowSub).foregroundStyle(.dsMute)
-                    .lineLimit(1).truncationMode(.tail)
-                    .help(record.note)
-            }
-        }
-        .padding(.top, 1)
+/// Значок и текст вплотную (4 pt), значок по центру строки.
+private struct CompactLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) { configuration.icon; configuration.title }
     }
 }
 
@@ -202,7 +212,7 @@ extension ConnectionSection {
 /// Поле поиска с подсказкой клавиши и плашкой раскладки («ctdth → север»).
 struct RemoteSearchField: View {
     @Binding var text: String
-    var placeholder = RL("Название, ID, группа, тег…")
+    var placeholder = RL("Название, ID, группа, метка…")
     var large = false
     var hint: ConnectionSearch.LayoutHint?
     var programPill: String?
@@ -268,7 +278,8 @@ struct RemoteSectionsList: View {
                                           showGroup: section.kind == .results || section.kind == .recents || section.kind == .favorites,
                                           favorite: center.isFavorite(record), dimmed: dimmed.contains(program),
                                           onFavorite: { center.toggleFavorite(record) },
-                                          onConnect: { model.select(row); model.connectSelected() })
+                                          onConnect: { model.select(row); model.connectSelected() },
+                                          onDetails: { model.select(row); center.detailsRecord = record })
                                     .id(row.id)
                                     .onTapGesture { model.select(row) }
                                     .contextMenu {
@@ -276,6 +287,10 @@ struct RemoteSectionsList: View {
                                         Button(RL("Открыть без пароля")) { model.select(row); model.connectSelected(withPassword: false) }
                                         Button(center.isFavorite(record) ? RL("Убрать из избранного") : RL("В избранное")) {
                                             center.toggleFavorite(record)
+                                        }
+                                        Button(RL("Подробности")) { center.detailsRecord = record }
+                                        if record.hasAccountPassword {
+                                            Button(RL("Скопировать пароль учётки")) { center.copySecret(.accountPassword, of: record) }
                                         }
                                         if let onEdit {
                                             Divider()
@@ -320,6 +335,10 @@ extension ConnectionField {
         case .tags: return RL("Теги")
         case .note: return RL("Заметка")
         case .program: return RL("Программа")
+        case .account: return RL("Учётная запись")
+        case .accountPassword: return RL("Пароль учётной записи")
+        case .access: return RL("Доступ")
+        case .contacts: return RL("Контакты")
         }
     }
 }
@@ -328,9 +347,13 @@ extension ConnectionField {
 struct RemoteDiagnosticsSummary: View {
     let diagnostics: ConnectionsDiagnostics
     @Binding var expanded: Bool
+    var vpn = 0
+    var rdp = 0
 
     private var text: String {
         var parts = [RL("Загружено %@", diagnostics.loaded)]
+        if vpn > 0 { parts.append("VPN \(vpn)") }
+        if rdp > 0 { parts.append("RDP \(rdp)") }
         if !diagnostics.skipped.isEmpty { parts.append(RL("пропущено %@", diagnostics.skipped.count)) }
         if diagnostics.duplicateCount > 0 { parts.append(RL("дубликатов %@", diagnostics.duplicateCount)) }
         let other = diagnostics.unrecognizedColumns.count + diagnostics.lossyIDRows.count + diagnostics.ambiguousProgramRows.count
@@ -540,6 +563,7 @@ struct RemoteConnectionsPanel: View {
     var body: some View {
         let listing = model.listing
         VStack(spacing: DS.Space.s) {
+if center.detailsRecord == nil {
             RemoteSearchField(text: $model.query, hint: listing.hint, focused: $searchFocused, hotKey: .remoteConnections)
                 .disabled(center.state != .ready)
                 .opacity(center.state == .ready ? 1 : DS.State.disabledOpacity)
@@ -549,14 +573,24 @@ struct RemoteConnectionsPanel: View {
                     model.connectSelected(withPassword: !press.modifiers.contains(.command)) ? .handled : .ignored
                 }
                 .padding(.horizontal, DS.Space.l)
-            if center.state == .ready {
-                HStack(spacing: 6) {
-                    ForEach([ProgramFilter.all] + RemoteProgram.allCases.map { .program($0) }, id: \.self) { f in
-                        Chip(model.chipTitle(f, counts: listing.counts), selected: model.filter == f) { model.filter = f }
+            }
+            if let record = center.detailsRecord, center.state == .ready {
+                RemoteDetailsView(record: record, center: center) { center.detailsRecord = nil }
+                    .padding(.horizontal, DS.Space.l)
+                    .frame(maxHeight: .infinity, alignment: .top)
+            } else if center.state == .ready {
+                FlowLayout(spacing: 6) {
+                    ForEach(model.filters(listing.counts), id: \.self) { f in
+                        RemoteFilterChip(title: model.chipTitle(f, counts: listing.counts),
+                                         badge: f == .rdp ? .rdp : f == .vpn ? .vpn : nil,
+                                         selected: model.filter == f) { model.filter = f }
                     }
-                    Spacer()
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, DS.Space.l)
+                RemoteTagFilterRow(tags: listing.tags, selected: $model.tags)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, DS.Space.l)
                 missingProgramBanner(listing).padding(.horizontal, DS.Space.l)
                 Group {
                     if diagnosticsExpanded {
@@ -629,7 +663,9 @@ struct RemoteConnectionsPanel: View {
                 }
                 Spacer()
                 if center.state == .ready {
-                    RemoteDiagnosticsSummary(diagnostics: center.snapshot.diagnostics, expanded: $diagnosticsExpanded)
+                    RemoteDiagnosticsSummary(diagnostics: center.snapshot.diagnostics, expanded: $diagnosticsExpanded,
+                                             vpn: center.snapshot.records.filter(\.needsVPN).count,
+                                             rdp: center.snapshot.records.filter(\.usesRDP).count)
                 }
             }
             .padding(.horizontal, DS.Space.l)
