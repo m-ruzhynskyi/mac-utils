@@ -2,6 +2,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUVideoPlayer
+@testable import MUTextEditor
 
 /// Разборщики плеера не падают ни на каком входе (ревью 2, B1): случайные тексты собираются из «опасных» кусков —
 /// длинные числа на месте времени, разделители, `-->`, вставки ASS, теги, заголовки — и мутации настоящих файлов.

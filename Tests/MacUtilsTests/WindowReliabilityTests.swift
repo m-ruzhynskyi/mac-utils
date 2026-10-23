@@ -8,6 +8,7 @@ import XCTest
 @testable import MUAppSwitcher
 @testable import MUWindowSnap
 @testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Чистая логика пакета 6: переключатель окон, перетаскивание к краю, «Поверх всех», «Фокус», служебные события tap.
 @MainActor

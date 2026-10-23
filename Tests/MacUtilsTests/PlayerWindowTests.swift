@@ -6,6 +6,7 @@ import XCTest
 @testable import MUAudio
 @testable import MUScreenshot
 @testable import MUVideoPlayer
+@testable import MUTextEditor
 
 /// Этап 3 плеера: окно с настоящей моделью (без звука, окно не показывается), события клавиш — как от системы.
 @MainActor

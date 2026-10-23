@@ -4,6 +4,7 @@ import XCTest
 @testable import MUDesign
 @testable import MUAudio
 @testable import MUScreenshot
+@testable import MUTextEditor
 
 /// `RTFReader`: видимый текст, карта «символ ↔ исходник», свойства, структура (таблицы, разделы, колонтитулы, поля,
 /// рисунки). Документы — выдуманные, в стиле Word.

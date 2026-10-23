@@ -4,6 +4,7 @@ import SwiftUI
 import XCTest
 import MUCore
 import MUDesign
+@testable import MUTextEditor
 
 /// Вкладка «Удалённые» и палитра офскрин в PNG на выдуманных данных — для сверки с макетами m01…m11.
 /// Без переменной окружения тест пропускается:  MU_RC_SNAPSHOTS=/папка swift test --filter RemoteConnectionsSnapshotTests

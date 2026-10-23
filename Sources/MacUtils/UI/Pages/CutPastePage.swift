@@ -3,6 +3,7 @@ import SwiftUI
 import MUCore
 import MUDesign
 import MUCutPaste
+import MUTextEditor
 
 // MARK: - Вырезать и вставить
 

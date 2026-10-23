@@ -6,6 +6,7 @@ import XCTest
 @testable import MUDesign
 @testable import MUAudio
 @testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Панель форматирования и колонтитулы в окне (офскрин): команды меняют только свои байты, отмена возвращает файл
 /// байт в байт, колонтитул правится по двойному клику.

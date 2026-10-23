@@ -4,6 +4,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUAudio
 @testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Сессия коллажа без окон и без настоящего захвата: окружение (`StepsEnvironment`) подменено.
 @MainActor

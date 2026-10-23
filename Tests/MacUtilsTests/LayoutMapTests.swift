@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacUtils
 @testable import MULayoutFix
+@testable import MUTextEditor
 
 final class LayoutMapTests: XCTestCase {
     func testEnglishToRussian() {

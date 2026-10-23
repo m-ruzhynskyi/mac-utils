@@ -3,6 +3,7 @@ import Darwin
 import PDFKit
 import MUCore
 import MUAudio
+import MUTextEditor
 
 @MainActor
 final class ProcessExplainer: ObservableObject {

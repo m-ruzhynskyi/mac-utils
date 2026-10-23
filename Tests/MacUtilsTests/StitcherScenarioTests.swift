@@ -5,6 +5,7 @@ import XCTest
 @testable import MUDesign
 @testable import MUAudio
 @testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Сценарии повторного ревью (`.audit/review-scroll2.md`) на настоящем тексте CoreText: после потери места чужое
 /// содержимое не вклеивается, похожие строки на широкой области и при шаге, кратном строке или блоку, не теряются,

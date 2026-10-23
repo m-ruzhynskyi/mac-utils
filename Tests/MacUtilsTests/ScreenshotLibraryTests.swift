@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUTextEditor
 
 final class ScreenshotLibraryTests: XCTestCase {
     func testFolderByDayAndApp() {

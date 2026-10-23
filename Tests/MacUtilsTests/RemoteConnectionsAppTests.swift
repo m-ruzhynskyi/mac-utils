@@ -5,6 +5,7 @@ import XCTest
 import MUCore
 import MUDesign
 @testable import MUWindowSnap
+@testable import MUTextEditor
 
 /// Тонкий слой приложения над MURemoteConnections: адаптер настроек и вкладка панели.
 /// Логика модуля проверяется в MURemoteConnectionsTests.

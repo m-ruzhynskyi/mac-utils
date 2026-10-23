@@ -3,6 +3,7 @@ import XCTest
 @testable import MUCutPaste
 @testable import MUAudio
 @testable import MUScreenshot
+@testable import MUTextEditor
 
 /// `FileMover` (⌘X/⌘V в Finder): всё на временных папках, без прав доступа и без UserDefaults.
 final class FileMoverTests: XCTestCase {
