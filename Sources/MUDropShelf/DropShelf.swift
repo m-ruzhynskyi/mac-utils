@@ -4,13 +4,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
-import MUAudio
 
 /// Встряхивание мышью: несколько резких смен направления по горизонтали за короткое время.
-struct ShakeDetector {
-    var window: TimeInterval = 0.6
-    var minimumStroke: CGFloat = 25
-    var reversalsNeeded = 4
+package struct ShakeDetector {
+    package var window: TimeInterval = 0.6
+    package var minimumStroke: CGFloat = 25
+    package var reversalsNeeded = 4
 
     private var lastX: CGFloat?
     private var direction = 0
@@ -18,7 +17,7 @@ struct ShakeDetector {
     private var reversals: [TimeInterval] = []
 
     /// Новая точка; true — это встряхивание.
-    mutating func add(x: CGFloat, time: TimeInterval) -> Bool {
+    package mutating func add(x: CGFloat, time: TimeInterval) -> Bool {
         defer { lastX = x }
         guard let lastX else {
             strokeStart = x
@@ -43,7 +42,7 @@ struct ShakeDetector {
         return false
     }
 
-    mutating func reset() {
+    package mutating func reset() {
         lastX = nil
         direction = 0
         reversals.removeAll()
@@ -54,22 +53,22 @@ struct ShakeDetector {
 /// Пастборд `.drag` хранит данные **прошлого** перетаскивания: проверять только его типы нельзя — тогда любое «шарканье»
 /// мышью с зажатой кнопкой после давнего перетаскивания файла открывает полку. Новое перетаскивание пишет пастборд заново,
 /// поэтому его `changeCount` должен измениться после нажатия кнопки мыши.
-enum DragSession {
-    static func isFileDrag(changeCountAtMouseDown: Int?, changeCountNow: Int, hasFileURLs: Bool) -> Bool {
+package enum DragSession {
+    package static func isFileDrag(changeCountAtMouseDown: Int?, changeCountNow: Int, hasFileURLs: Bool) -> Bool {
         guard let down = changeCountAtMouseDown else { return false }
         return hasFileURLs && changeCountNow != down
     }
 }
 
 /// Файлы полки: без дублей одного файла под разными путями и без исчезнувших (без UI — для тестов).
-enum ShelfItems {
+package enum ShelfItems {
     /// `/var/…` и `/private/var/…`, «папка/» и «папка», `a/../b` — один и тот же файл.
-    static func normalized(_ url: URL) -> URL {
+    package static func normalized(_ url: URL) -> URL {
         url.standardizedFileURL.resolvingSymlinksInPath()
     }
 
     /// Добавить файлы к списку: в порядке появления, каждый один раз.
-    static func adding(_ urls: [URL], to items: [URL]) -> [URL] {
+    package static func adding(_ urls: [URL], to items: [URL]) -> [URL] {
         var result = items
         var seen = Set(items.map(normalized))
         for url in urls.map(normalized) where seen.insert(url).inserted { result.append(url) }
@@ -77,7 +76,7 @@ enum ShelfItems {
     }
 
     /// Убрать переименованные и удалённые файлы.
-    static func existing(_ items: [URL], exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> [URL] {
+    package static func existing(_ items: [URL], exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> [URL] {
         items.filter(exists)
     }
 }
@@ -85,17 +84,17 @@ enum ShelfItems {
 /// «Полка»: временное место для файлов. Встряхните мышь, перетаскивая файлы
 /// (или ⌃⌥D), бросьте их на полку, перейдите в нужное место и вытащите обратно.
 @MainActor
-final class DropShelf: ObservableObject {
-    static let shared = DropShelf()
+package final class DropShelf: ObservableObject {
+    package static let shared = DropShelf()
 
     /// Для снимков интерфейса: полка с готовыми файлами (список на экране не меняется).
-    static func demo(items: [URL]) -> DropShelf {
+    package static func demo(items: [URL]) -> DropShelf {
         let shelf = DropShelf()
         shelf.items = items
         return shelf
     }
 
-    @Published private(set) var items: [URL] = [] {
+    @Published package private(set) var items: [URL] = [] {
         didSet {
             // Новые файлы — обычный список; убранные — убираем и из групп.
             guard let current = groups else { return }
@@ -112,10 +111,10 @@ final class DropShelf: ObservableObject {
         }
     }
     /// Группы по смыслу от ИИ (nil — обычный список).
-    @Published var groups: [ShelfGroup]?
-    @Published private(set) var grouping = false
+    @Published package var groups: [ShelfGroup]?
+    @Published package private(set) var grouping = false
 
-    func groupWithAI() {
+    package func groupWithAI() {
         guard !grouping, items.count >= 2 else { return }
         grouping = true
         let files = items
@@ -128,7 +127,7 @@ final class DropShelf: ObservableObject {
             }
         }
     }
-    @Published private(set) var isRunning = false
+    @Published package private(set) var isRunning = false
 
     private var panel: NSPanel?
     private var dragMonitor: Any?
@@ -139,7 +138,7 @@ final class DropShelf: ObservableObject {
     /// `changeCount` пастборда перетаскивания в момент нажатия кнопки мыши (см. `DragSession`).
     private var dragChangeAtMouseDown: Int?
 
-    func sync() {
+    package func sync() {
         let enabled = UserDefaults.standard.bool(forKey: Pref.dropShelf)
         let center = HotKeyCenter.shared
         center.unregister(id: HotKeyID.dropShelf)
@@ -196,11 +195,11 @@ final class DropShelf: ObservableObject {
 
     // MARK: - Полка
 
-    func toggle() {
+    package func toggle() {
         if panel?.isVisible == true { hide() } else { show(near: NSEvent.mouseLocation) }
     }
 
-    func show(near point: NSPoint) {
+    package func show(near point: NSPoint) {
         pruneMissing()
         let panel = self.panel ?? make()
         let size = panel.frame.size
@@ -215,31 +214,31 @@ final class DropShelf: ObservableObject {
         panel.orderFrontRegardlessOnScreen()
     }
 
-    func hide() {
+    package func hide() {
         panel?.orderOut(nil)
     }
 
-    func add(_ urls: [URL]) {
+    package func add(_ urls: [URL]) {
         let updated = ShelfItems.adding(urls, to: items)
         if updated != items { items = updated }
     }
 
     /// Переименованные и удалённые файлы убираются: иначе строка остаётся, а перетаскивание тихо ничего не делает.
-    func pruneMissing() {
+    package func pruneMissing() {
         let alive = ShelfItems.existing(items)
         if alive != items { items = alive }
     }
 
-    func remove(_ url: URL) {
+    package func remove(_ url: URL) {
         items.removeAll { $0 == url }
     }
 
-    func clear() {
+    package func clear() {
         items.removeAll()
     }
 
     /// Вытащили файлы с полки — убираем их (если не зажата ⌥: тогда оставить).
-    func draggedOut(_ urls: [URL]) {
+    package func draggedOut(_ urls: [URL]) {
         guard !NSEvent.modifierFlags.contains(.option) else { return }
         items.removeAll { urls.contains($0) }
         if items.isEmpty { hide() }
@@ -289,11 +288,11 @@ final class DropShelf: ObservableObject {
 
 // MARK: - Вид
 
-struct DropShelfView: View {
-    @ObservedObject var shelf: DropShelf
+package struct DropShelfView: View {
+    @ObservedObject package var shelf: DropShelf
     @State private var targeted = false
 
-    var body: some View {
+    package var body: some View {
         VStack(spacing: DS.Space.s) {
             HStack(spacing: 6) {
                 Image(systemName: "tray.full").font(.system(size: 14, weight: .medium)).foregroundStyle(.dsAccText)
@@ -392,12 +391,12 @@ struct DropShelfView: View {
 
 /// Кнопка-значок в шапке полки: 28×28, `mute`, при наведении — фон `field`.
 private struct ShelfIconButton: View {
-    let symbol: String
-    let help: String
-    let action: () -> Void
+    package let symbol: String
+    package let help: String
+    package let action: () -> Void
     @State private var hovered = false
 
-    var body: some View {
+    package var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 13, weight: .medium))
                 .foregroundStyle(hovered ? Color.dsText : .dsMute)
@@ -413,10 +412,10 @@ private struct ShelfIconButton: View {
 }
 
 private struct ShelfRow: View {
-    let url: URL
-    let remove: () -> Void
+    package let url: URL
+    package let remove: () -> Void
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 8) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 22, height: 22)
             Text(url.lastPathComponent).font(DS.Font.manrope(12, .semibold, relativeTo: .caption)).foregroundStyle(.dsText)
@@ -435,11 +434,11 @@ private struct ShelfRow: View {
 }
 
 private struct DragOutHandle<Label: View>: NSViewRepresentable {
-    let urls: [URL]
-    let ended: ([URL]) -> Void
-    @ViewBuilder let label: () -> Label
+    package let urls: [URL]
+    package let ended: ([URL]) -> Void
+    @ViewBuilder package let label: () -> Label
 
-    func makeNSView(context: Context) -> DragSourceView {
+    package func makeNSView(context: Context) -> DragSourceView {
         let view = DragSourceView()
         let host = NSHostingView(rootView: label())
         host.translatesAutoresizingMaskIntoConstraints = false
@@ -454,7 +453,7 @@ private struct DragOutHandle<Label: View>: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: DragSourceView, context: Context) {
+    package func updateNSView(_ view: DragSourceView, context: Context) {
         (view.subviews.first as? NSHostingView<Label>)?.rootView = label()
         update(view)
     }
@@ -465,25 +464,25 @@ private struct DragOutHandle<Label: View>: NSViewRepresentable {
     }
 }
 
-final class DragSourceView: NSView, NSDraggingSource {
-    var urls: [URL] = []
-    var ended: (([URL]) -> Void)?
+package final class DragSourceView: NSView, NSDraggingSource {
+    package var urls: [URL] = []
+    package var ended: (([URL]) -> Void)?
     private var downEvent: NSEvent?
 
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    package override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     /// Клики по кнопкам внутри (крестик) работают, остальное — начало перетаскивания.
-    override func hitTest(_ point: NSPoint) -> NSView? {
+    package override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
         if let hit, hit !== self, hit is NSButton || hit.superview is NSButton { return hit }
         return frame.contains(point) ? self : nil
     }
 
-    override func mouseDown(with event: NSEvent) {
+    package override func mouseDown(with event: NSEvent) {
         downEvent = event
     }
 
-    override func mouseDragged(with event: NSEvent) {
+    package override func mouseDragged(with event: NSEvent) {
         guard let downEvent, !urls.isEmpty else { return }
         self.downEvent = nil
         // Файл могли переименовать или удалить, пока он лежал на полке: тащим только существующие.
@@ -503,11 +502,11 @@ final class DragSourceView: NSView, NSDraggingSource {
         beginDraggingSession(with: items, event: downEvent, source: self)
     }
 
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+    package func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         context == .outsideApplication ? [.copy, .move, .link, .generic] : []
     }
 
-    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+    package func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
         guard operation != [] else { return }
         let urls = self.urls
         ended?(urls)

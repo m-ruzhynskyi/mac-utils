@@ -2,6 +2,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUAudio
+@testable import MUDownloadsSorter
 
 final class DownloadsRulesTests: XCTestCase {
     func testCategories() {

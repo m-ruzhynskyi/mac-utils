@@ -1,6 +1,7 @@
 import Foundation
 import MUCore
 import MUDesign
+import MUDownloadsSorter
 
 extension SettingsSection {
     /// Подписи страниц, зависящие от функций: у MUDesign о них знания нет.

@@ -7,6 +7,9 @@ import MUMeetings
 import MUQR
 import MUAppVolume
 import MUWindowSnap
+import MUAI
+import MUDownloadsSorter
+import MUDropShelf
 
 extension Notification.Name {
     /// Открыть в настройках нужный раздел (object — SettingsSection).

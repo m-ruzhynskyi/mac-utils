@@ -4,6 +4,7 @@ import SwiftUI
 import MUDesign
 import MUFocus
 import MUMusic
+import MUDownloadsSorter
 
 // MARK: - Модель разрешений
 
