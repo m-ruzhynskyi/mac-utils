@@ -5,13 +5,13 @@ import MUCore
 import MUDesign
 
 /// Сколько уже работаем без перерыва (без UI — для тестов).
-struct BreakSchedule {
+package struct BreakSchedule {
     /// Отошёл от компьютера на столько — перерыв засчитан, счёт заново.
-    var restAfter: TimeInterval = 5 * 60
-    private(set) var worked: TimeInterval = 0
+    package var restAfter: TimeInterval = 5 * 60
+    package private(set) var worked: TimeInterval = 0
 
     /// Прошло dt секунд; idle — сколько секунд нет ввода. true — пора на перерыв.
-    mutating func tick(dt: TimeInterval, idle: TimeInterval, interval: TimeInterval) -> Bool {
+    package mutating func tick(dt: TimeInterval, idle: TimeInterval, interval: TimeInterval) -> Bool {
         if idle >= restAfter {
             worked = 0
             return false
@@ -20,26 +20,26 @@ struct BreakSchedule {
         return worked >= interval
     }
 
-    mutating func reset(postpone: TimeInterval = 0) {
+    package mutating func reset(postpone: TimeInterval = 0) {
         worked = -postpone
     }
 }
 
 /// Когда экран перерыва показывать нельзя (без системных вызовов — для тестов).
 /// Полноэкранный оверлей перекрыл бы запись, трансляцию или звонок: перерыв откладывается до их конца.
-enum BreakGuard {
+package enum BreakGuard {
     /// Занятости Mac Utils, во время которых экран перерыва мешает (идёт запись или показ экрана).
-    static let blockingReasons: [BusyRegistry.Reason] = [.screenRecording, .meetingRecording, .broadcast, .viewing, .scrollCapture]
+    package static let blockingReasons: [BusyRegistry.Reason] = [.screenRecording, .meetingRecording, .broadcast, .viewing, .scrollCapture]
 
     /// Почему перерыв откладывается (nil — можно показывать).
-    static func deferReason(busy: [BusyRegistry.Reason], microphoneInUse: Bool) -> String? {
+    package static func deferReason(busy: [BusyRegistry.Reason], microphoneInUse: Bool) -> String? {
         if let reason = busy.first(where: blockingReasons.contains) { return "идёт \(reason.title)" }
         if microphoneInUse { return "микрофон занят (звонок)" }
         return nil
     }
 
     /// Что сделать, когда перерыв уже пора показать.
-    enum Action: Equatable {
+    package enum Action: Equatable {
         case show
         case postpone(String)
         /// Микрофон занят дольше `microphoneLimit`: экран не показываем (возможно, идёт долгий звонок), но напоминаем.
@@ -48,11 +48,11 @@ enum BreakGuard {
 
     /// Отсрочка из-за микрофона не бесконечна: его могут постоянно держать фоновые программы (Krisp, шумоподавление,
     /// голосовые помощники), и тогда перерыв не появился бы никогда.
-    static let microphoneLimit: TimeInterval = 30 * 60
+    package static let microphoneLimit: TimeInterval = 30 * 60
 
     /// `microphoneSince` — с какого момента перерыв подряд откладывается из-за микрофона (хранит вызывающий).
     /// Запись и показ экрана Mac Utils откладывают без предела: они видны и заканчиваются.
-    static func action(busy: [BusyRegistry.Reason], microphoneInUse: Bool, microphoneSince: inout Date?, now: Date) -> Action {
+    package static func action(busy: [BusyRegistry.Reason], microphoneInUse: Bool, microphoneSince: inout Date?, now: Date) -> Action {
         if let reason = busy.first(where: blockingReasons.contains) { return .postpone("идёт \(reason.title)") }
         guard microphoneInUse else {
             microphoneSince = nil
@@ -68,11 +68,11 @@ enum BreakGuard {
 
 /// Мягкое напоминание: каждые N минут работы — экран «встаньте, посмотрите вдаль».
 @MainActor
-final class BreakReminder: ObservableObject {
-    static let shared = BreakReminder()
+package final class BreakReminder: ObservableObject {
+    package static let shared = BreakReminder()
 
-    @Published private(set) var remaining = 0
-    @Published private(set) var workedMinutes = 0
+    @Published package private(set) var remaining = 0
+    @Published package private(set) var workedMinutes = 0
 
     private var schedule = BreakSchedule()
     private var timer: Timer?
@@ -85,7 +85,7 @@ final class BreakReminder: ObservableObject {
     private var microphoneSince: Date?
     private static let step: TimeInterval = 15
 
-    func sync() {
+    package func sync() {
         let enabled = UserDefaults.standard.bool(forKey: Pref.breakReminder)
         if enabled, timer == nil {
             schedule.reset()
@@ -131,7 +131,7 @@ final class BreakReminder: ObservableObject {
     }
 
     /// Микрофон по умолчанию сейчас кем-то используется (звонок в Zoom, Meet, Telegram…).
-    static func microphoneInUse() -> Bool {
+    package static func microphoneInUse() -> Bool {
         var device = AudioDeviceID(0)
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice,
@@ -146,7 +146,7 @@ final class BreakReminder: ObservableObject {
     }
 
     /// Показать перерыв сейчас (и из настроек — «Попробовать»).
-    func show() {
+    package func show() {
         close()
         remaining = max(5, UserDefaults.standard.integer(forKey: Pref.breakDuration))
         let front = NSWorkspace.shared.frontmostApplication
@@ -180,12 +180,12 @@ final class BreakReminder: ObservableObject {
         self.countdown = countdown
     }
 
-    func finish() {
+    package func finish() {
         schedule.reset()
         close()
     }
 
-    func postpone() {
+    package func postpone() {
         schedule.reset(postpone: 5 * 60 - TimeInterval(max(5, UserDefaults.standard.integer(forKey: Pref.breakInterval)) * 60))
         close()
     }
@@ -207,9 +207,9 @@ final class BreakReminder: ObservableObject {
 }
 
 private struct BreakView: View {
-    @ObservedObject var reminder: BreakReminder
+    @ObservedObject package var reminder: BreakReminder
 
-    var body: some View {
+    package var body: some View {
         ZStack {
             Rectangle().fill(.ultraThinMaterial)
             Color.black.opacity(0.25)

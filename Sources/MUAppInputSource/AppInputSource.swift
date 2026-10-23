@@ -4,22 +4,22 @@ import SwiftUI
 import MUCore
 
 /// Какую раскладку включить для программы (без системных вызовов — для тестов).
-enum InputSourceRules {
+package enum InputSourceRules {
     /// Правило важнее запомненного; запомненное — только если включено «запоминать».
-    static func target(for bundleID: String, rules: [String: String], remembered: [String: String],
+    package static func target(for bundleID: String, rules: [String: String], remembered: [String: String],
                        remember: Bool) -> String? {
         rules[bundleID] ?? (remember ? remembered[bundleID] : nil)
     }
 
     /// Сразу после смены программы уведомление о раскладке может относиться к прошлой программе
     /// (или к нашему же переключению, пришедшему с задержкой) — не запоминаем.
-    static let settleAfterActivation: TimeInterval = 0.5
+    package static let settleAfterActivation: TimeInterval = 0.5
 
     /// Запомнить ли текущую раскладку как выбранную пользователем в программе `front`.
     /// - secure: включён защищённый ввод (поле пароля): система сама переключает на латиницу, это не выбор пользователя;
     /// - ownUntil: до этого момента смена раскладки — наша собственная;
     /// - activatedAt: когда активировалась текущая программа.
-    static func shouldRemember(now: Date, ownUntil: Date, activatedAt: Date?, secure: Bool,
+    package static func shouldRemember(now: Date, ownUntil: Date, activatedAt: Date?, secure: Bool,
                                front: String?, ownBundleID: String?) -> Bool {
         guard !secure, now > ownUntil, let front, !front.isEmpty, front != ownBundleID else { return false }
         if let activatedAt, now.timeIntervalSince(activatedAt) < settleAfterActivation { return false }
@@ -27,21 +27,21 @@ enum InputSourceRules {
     }
 }
 
-struct KeyboardInputSource: Identifiable, Hashable {
-    let id: String
-    let name: String
+package struct KeyboardInputSource: Identifiable, Hashable {
+    package let id: String
+    package let name: String
 }
 
 /// «Раскладка по программам»: при переключении программ включается её раскладка —
 /// заданная правилом или последняя, с которой в ней работали (Telegram — русская,
 /// Терминал — английская).
 @MainActor
-final class AppInputSource: ObservableObject {
-    static let shared = AppInputSource()
+package final class AppInputSource: ObservableObject {
+    package static let shared = AppInputSource()
 
-    @Published private(set) var rules: [String: String]
-    @Published private(set) var remembered: [String: String]
-    @Published private(set) var sources: [KeyboardInputSource] = []
+    @Published package private(set) var rules: [String: String]
+    @Published package private(set) var remembered: [String: String]
+    @Published package private(set) var sources: [KeyboardInputSource] = []
 
     /// Когда мы сами переключили раскладку — это не выбор пользователя.
     private var ownSwitchUntil = Date.distantPast
@@ -60,7 +60,7 @@ final class AppInputSource: ObservableObject {
     private var enabled: Bool { UserDefaults.standard.bool(forKey: Pref.appInputSource) }
     private var remember: Bool { UserDefaults.standard.bool(forKey: Pref.appInputRemember) }
 
-    func sync() {
+    package func sync() {
         sources = Self.availableSources()
         guard !observing else { return }
         observing = true
@@ -106,23 +106,23 @@ final class AppInputSource: ObservableObject {
 
     // MARK: - Правила
 
-    func setRule(_ bundleID: String, sourceID: String?) {
+    package func setRule(_ bundleID: String, sourceID: String?) {
         rules[bundleID] = sourceID
         UserDefaults.standard.set(rules, forKey: Pref.appInputRules)
     }
 
-    func forgetRemembered() {
+    package func forgetRemembered() {
         remembered = [:]
         UserDefaults.standard.removeObject(forKey: Pref.appInputRemembered)
     }
 
-    func name(of sourceID: String) -> String {
+    package func name(of sourceID: String) -> String {
         sources.first { $0.id == sourceID }?.name ?? sourceID
     }
 
     // MARK: - TIS
 
-    static func availableSources() -> [KeyboardInputSource] {
+    package static func availableSources() -> [KeyboardInputSource] {
         let filter = [kTISPropertyInputSourceCategory as String: kTISCategoryKeyboardInputSource as String,
                       kTISPropertyInputSourceIsSelectCapable as String: true] as CFDictionary
         guard let list = TISCreateInputSourceList(filter, false)?.takeRetainedValue() as? [TISInputSource] else { return [] }
@@ -132,7 +132,7 @@ final class AppInputSource: ObservableObject {
         }
     }
 
-    static func currentSourceID() -> String? {
+    package static func currentSourceID() -> String? {
         guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else { return nil }
         return string(source, kTISPropertyInputSourceID)
     }
@@ -149,7 +149,7 @@ final class AppInputSource: ObservableObject {
 }
 
 /// Раздел настроек «Раскладка по программам» (внутри страницы «Раскладка»).
-struct AppInputSourceSection: View {
+package struct AppInputSourceSection: View {
     @AppStorage(Pref.appInputSource) private var enabled = true
     @AppStorage(Pref.appInputRemember) private var remember = true
     @ObservedObject private var service = AppInputSource.shared
@@ -161,7 +161,7 @@ struct AppInputSourceSection: View {
             .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
     }
 
-    var body: some View {
+    package var body: some View {
         Section("Раскладка по программам") {
             Toggle("Переключать раскладку при смене программы", isOn: $enabled)
             Toggle("Запоминать последнюю раскладку в каждой программе", isOn: $remember)

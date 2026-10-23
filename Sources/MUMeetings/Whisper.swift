@@ -2,9 +2,9 @@ import AppKit
 import Foundation
 
 /// Разбор вывода whisper-cli (без процесса — для тестов).
-enum WhisperOutput {
+package enum WhisperOutput {
     /// JSON из `whisper-cli -oj`: реплики с началом в миллисекундах.
-    static func lines(fromJSON data: Data, speaker: String) -> [TranscriptLine] {
+    package static func lines(fromJSON data: Data, speaker: String) -> [TranscriptLine] {
         guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let segments = json["transcription"] as? [[String: Any]] else { return [] }
         return segments.compactMap { segment in
@@ -16,7 +16,7 @@ enum WhisperOutput {
     }
 
     /// Типичные «галлюцинации» Whisper на тишине и музыке.
-    static func isNoise(_ text: String) -> Bool {
+    package static func isNoise(_ text: String) -> Bool {
         let lower = text.lowercased()
         let noise = ["[музыка]", "[music]", "(музыка)", "субтитры", "продолжение следует", "дякую за перегляд",
                      "спасибо за просмотр", "thank you for watching", "[blank_audio]", "[тишина]"]
@@ -24,13 +24,13 @@ enum WhisperOutput {
     }
 
     /// «progress = 37%» из stderr whisper-cli.
-    static func progress(in line: String) -> Int? {
+    package static func progress(in line: String) -> Int? {
         guard let range = line.range(of: #"progress\s*=\s*(\d+)%"#, options: .regularExpression) else { return nil }
         return Int(line[range].filter(\.isNumber))
     }
 
     /// ru_RU → ru, auto → auto.
-    static func language(_ setting: String) -> String {
+    package static func language(_ setting: String) -> String {
         setting == "auto" ? "auto" : String(setting.prefix(2))
     }
 }
@@ -38,42 +38,42 @@ enum WhisperOutput {
 /// Локальная расшифровка Whisper (whisper.cpp из Homebrew + модель large-v3-turbo).
 /// Понимает украинский, русский и английский, сама определяет язык и ставит знаки препинания.
 @MainActor
-final class Whisper: ObservableObject {
-    static let shared = Whisper()
+package final class Whisper: ObservableObject {
+    package static let shared = Whisper()
 
-    @Published private(set) var downloadProgress: Double?
-    @Published private(set) var installing = false
-    @Published private(set) var message: String?
+    @Published package private(set) var downloadProgress: Double?
+    @Published package private(set) var installing = false
+    @Published package private(set) var message: String?
 
-    nonisolated static let modelName = "ggml-large-v3-turbo-q5_0.bin"
-    nonisolated static let vadName = "ggml-silero-v5.1.2.bin"
+    package nonisolated static let modelName = "ggml-large-v3-turbo-q5_0.bin"
+    package nonisolated static let vadName = "ggml-silero-v5.1.2.bin"
     private static let modelURL = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(modelName)")!
     private static let vadURL = URL(string: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/\(vadName)")!
 
-    nonisolated static var folder: URL {
+    package nonisolated static var folder: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Mac Utils/whisper", isDirectory: true)
     }
 
-    nonisolated static var binary: URL? {
+    package nonisolated static var binary: URL? {
         ["/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"]
             .map(URL.init(fileURLWithPath:))
             .first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
-    nonisolated static var model: URL? {
+    package nonisolated static var model: URL? {
         let url = folder.appendingPathComponent(modelName)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    nonisolated static var vad: URL? {
+    package nonisolated static var vad: URL? {
         let url = folder.appendingPathComponent(vadName)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    nonisolated static var isReady: Bool { binary != nil && model != nil }
+    package nonisolated static var isReady: Bool { binary != nil && model != nil }
 
-    nonisolated static var brew: URL? {
+    package nonisolated static var brew: URL? {
         ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].map(URL.init(fileURLWithPath:))
             .first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
@@ -81,7 +81,7 @@ final class Whisper: ObservableObject {
     // MARK: - Установка
 
     /// whisper.cpp через Homebrew (если нет) и модель (~550 МБ).
-    func install() {
+    package func install() {
         guard !installing else { return }
         installing = true
         message = nil
@@ -146,7 +146,7 @@ final class Whisper: ObservableObject {
     // MARK: - Расшифровка
 
     /// Дорожка → 16 кГц моно WAV → whisper-cli → реплики. progress — проценты.
-    nonisolated static func transcribe(_ url: URL, speaker: String, language: String,
+    package nonisolated static func transcribe(_ url: URL, speaker: String, language: String,
                                        progress: @escaping @Sendable (Int) -> Void) async throws -> [TranscriptLine] {
         guard let binary, let model else { throw Transcriber.Failure(errorDescription: "Whisper не установлен") }
         let work = FileManager.default.temporaryDirectory.appendingPathComponent("MacUtils-whisper-\(UUID().uuidString)")
@@ -196,17 +196,17 @@ final class Whisper: ObservableObject {
 
 /// Прогресс скачивания модели.
 private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    let onProgress: @Sendable (Double) -> Void
+    package let onProgress: @Sendable (Double) -> Void
 
-    init(onProgress: @escaping @Sendable (Double) -> Void) {
+    package init(onProgress: @escaping @Sendable (Double) -> Void) {
         self.onProgress = onProgress
     }
 
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+    package func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         guard totalBytesExpectedToWrite > 0 else { return }
         onProgress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
     }
 
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
+    package func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
 }

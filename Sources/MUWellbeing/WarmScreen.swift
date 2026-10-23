@@ -4,13 +4,13 @@ import MUCore
 import MUDesign
 
 /// Сила «тёплого» экрана по времени (без UI — для тестов).
-enum WarmSchedule {
+package enum WarmSchedule {
     /// Плавный вход и выход, в часах.
-    static let ramp = 1.0
+    package static let ramp = 1.0
 
     /// 0…1: насколько сейчас включено (с плавным переходом у начала и конца).
     /// from/to — часы (from > to — через полночь, например 21 → 7).
-    static func level(hour: Double, from: Double, to: Double) -> Double {
+    package static func level(hour: Double, from: Double, to: Double) -> Double {
         guard from != to else { return 1 }
         let length = (to - from + 24).truncatingRemainder(dividingBy: 24)
         let sinceStart = (hour - from + 24).truncatingRemainder(dividingBy: 24)
@@ -20,7 +20,7 @@ enum WarmSchedule {
     }
 
     /// Множители каналов для силы 0…1: красный не трогаем, синий гасим сильнее зелёного.
-    static func gains(strength: Double) -> (red: Double, green: Double, blue: Double) {
+    package static func gains(strength: Double) -> (red: Double, green: Double, blue: Double) {
         let s = min(max(strength, 0), 1)
         return (1, 1 - 0.28 * s, 1 - 0.68 * s)
     }
@@ -28,16 +28,16 @@ enum WarmSchedule {
 
 /// Свой Night Shift: тёплый экран вечером, отдельная сила для внешних мониторов.
 @MainActor
-final class WarmScreen: ObservableObject {
-    static let shared = WarmScreen()
+package final class WarmScreen: ObservableObject {
+    package static let shared = WarmScreen()
 
-    @Published private(set) var currentLevel: Double = 0
+    @Published package private(set) var currentLevel: Double = 0
     /// Показать на 4 секунды, как будет выглядеть (из настроек).
     private var previewUntil: Date?
     private var timer: Timer?
     private var applied = false
 
-    func sync() {
+    package func sync() {
         let enabled = UserDefaults.standard.bool(forKey: Pref.warmScreen)
         if enabled {
             if timer == nil {
@@ -64,7 +64,7 @@ final class WarmScreen: ObservableObject {
         }
     }
 
-    func preview() {
+    package func preview() {
         previewUntil = Date().addingTimeInterval(4)
         apply()
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.1) {
@@ -84,7 +84,7 @@ final class WarmScreen: ObservableObject {
                                   to: defaults.double(forKey: Pref.warmTo))
     }
 
-    func apply() {
+    package func apply() {
         guard UserDefaults.standard.bool(forKey: Pref.warmScreen) || previewUntil.map({ $0 > Date() }) == true else {
             restore()
             return
@@ -116,7 +116,7 @@ final class WarmScreen: ObservableObject {
     }
 
     /// Включить или выключить вручную (ручной режим, кнопка в панели 🔧, macutils://warm-toggle).
-    func toggleManual() {
+    package func toggleManual() {
         let defaults = UserDefaults.standard
         let on = !(defaults.string(forKey: Pref.warmMode) == "manual" && defaults.bool(forKey: Pref.warmManualOn))
         defaults.set(true, forKey: Pref.warmScreen)
@@ -129,7 +129,7 @@ final class WarmScreen: ObservableObject {
     }
 
     /// При выходе из программы возвращаем цвета.
-    func shutdown() {
+    package func shutdown() {
         restore()
     }
 }

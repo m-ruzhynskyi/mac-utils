@@ -7,6 +7,9 @@ import XCTest
 @testable import MUCutPaste
 @testable import MUAppSwitcher
 @testable import MUUninstaller
+@testable import MUWellbeing
+@testable import MUMeetings
+@testable import MUQR
 
 /// Снимки интерфейса в PNG, чтобы дизайн можно было посмотреть без запуска приложения.
 /// Работает только с `MU_SNAPSHOTS=<папка>`; без неё тест пропускается.

@@ -1,6 +1,7 @@
 import Foundation
 import MUCore
 import MUUninstaller
+import MUMeetings
 
 /// Что считается «занято»: подключает состояние функций к реестру из Core (сам реестр функций не знает).
 extension BusyRegistry {

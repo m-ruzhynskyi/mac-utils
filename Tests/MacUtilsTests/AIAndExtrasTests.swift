@@ -1,6 +1,9 @@
 @testable import MacUtils
 import XCTest
 @testable import MUCore
+@testable import MUWellbeing
+@testable import MUMeetings
+@testable import MUUpdate
 
 final class AIAndExtrasTests: XCTestCase {
     func testJSONInsideChatter() {

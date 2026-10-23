@@ -8,16 +8,16 @@ import MUCore
 import MUDesign
 
 /// Реплика расшифровки: кто и когда.
-struct TranscriptLine: Equatable {
-    var start: Double
-    var speaker: String
-    var text: String
+package struct TranscriptLine: Equatable {
+    package var start: Double
+    package var speaker: String
+    package var text: String
 }
 
 /// Склейка и форматирование расшифровки (без UI — для тестов).
-enum MeetingText {
+package enum MeetingText {
     /// Реплики двух дорожек по времени; соседние реплики одного человека — вместе.
-    static func merge(_ lines: [TranscriptLine]) -> [TranscriptLine] {
+    package static func merge(_ lines: [TranscriptLine]) -> [TranscriptLine] {
         var result: [TranscriptLine] = []
         for line in lines.sorted(by: { $0.start < $1.start }) {
             let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -32,19 +32,19 @@ enum MeetingText {
         return result
     }
 
-    static func timestamp(_ seconds: Double) -> String {
+    package static func timestamp(_ seconds: Double) -> String {
         let total = Int(seconds)
         return total >= 3600
             ? String(format: "%d:%02d:%02d", total / 3600, total / 60 % 60, total % 60)
             : String(format: "%02d:%02d", total / 60, total % 60)
     }
 
-    static func format(_ lines: [TranscriptLine]) -> String {
+    package static func format(_ lines: [TranscriptLine]) -> String {
         lines.map { "[\(timestamp($0.start))] \($0.speaker): \($0.text)" }.joined(separator: "\n")
     }
 
     /// Длинную расшифровку режем на куски по строкам, чтобы влезло в контекст модели.
-    static func chunks(_ text: String, limit: Int) -> [String] {
+    package static func chunks(_ text: String, limit: Int) -> [String] {
         var chunks: [String] = []
         var current = ""
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -65,36 +65,40 @@ enum MeetingText {
 /// Запись и расшифровка независимы: пока идёт расшифровка, можно записывать следующую встречу (очередь `queue`).
 /// Дорожки пишутся кусками (`MeetingFiles`), поэтому сбой или ⌘Q стоят не больше одного куска.
 @MainActor
-final class MeetingRecorder: NSObject, ObservableObject {
-    static let shared = MeetingRecorder()
+package final class MeetingRecorder: NSObject, ObservableObject {
+    package static let shared = MeetingRecorder()
 
-    struct Meeting: Identifiable, Hashable {
-        let folder: URL
-        var id: URL { folder }
-        var title: String { folder.lastPathComponent }
-        var report: URL { folder.appendingPathComponent("Отчёт.md") }
-        var transcript: URL { folder.appendingPathComponent("Расшифровка.txt") }
-        var hasReport: Bool { FileManager.default.fileExists(atPath: report.path) }
-        var hasTranscript: Bool { FileManager.default.fileExists(atPath: transcript.path) }
+    package struct Meeting: Identifiable, Hashable {
+        package init(folder: URL) {
+            self.folder = folder
+        }
+
+        package let folder: URL
+        package var id: URL { folder }
+        package var title: String { folder.lastPathComponent }
+        package var report: URL { folder.appendingPathComponent("Отчёт.md") }
+        package var transcript: URL { folder.appendingPathComponent("Расшифровка.txt") }
+        package var hasReport: Bool { FileManager.default.fileExists(atPath: report.path) }
+        package var hasTranscript: Bool { FileManager.default.fileExists(atPath: transcript.path) }
     }
 
     /// `.recording` — идёт запись (даже если параллельно что-то расшифровывается); `.processing` — записи нет, но идёт
     /// сохранение или расшифровка; `.idle` — ничего. Считается из `recordingSince`, активностей и очереди (`refreshState`).
-    enum State: Equatable {
+    package enum State: Equatable {
         case idle
         case recording(since: Date)
         case processing(String)
     }
 
-    @Published fileprivate(set) var state: State = .idle
-    @Published private(set) var meetings: [Meeting] = []
+    @Published package fileprivate(set) var state: State = .idle
+    @Published package private(set) var meetings: [Meeting] = []
     /// Встреча, которая сейчас расшифровывается (её нельзя удалить).
-    @Published private(set) var busyFolder: URL?
-    @Published private(set) var lastError: String?
+    @Published package private(set) var busyFolder: URL?
+    @Published package private(set) var lastError: String?
     /// Запись прервалась (поток остановился): показывается в HUD, пока идёт перезапуск.
-    @Published fileprivate(set) var interruption: String?
+    @Published package fileprivate(set) var interruption: String?
     /// Давно нет звука от потока — запись может идти вхолостую.
-    @Published fileprivate(set) var audioStalled = false
+    @Published package fileprivate(set) var audioStalled = false
 
     private var stream: SCStream?
     private var writer: MeetingWriter?
@@ -124,7 +128,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
     private var activities: [Int: String] = [:]
     private var nextActivity = 0
 
-    static var root: URL {
+    package static var root: URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return documents.appendingPathComponent("Встречи", isDirectory: true)
     }
@@ -158,9 +162,9 @@ final class MeetingRecorder: NSObject, ObservableObject {
     }
 
     /// Идёт ли расшифровка или в очереди есть встречи.
-    var hasPendingWork: Bool { currentJob != nil || !queue.isEmpty || !activities.isEmpty }
+    package var hasPendingWork: Bool { currentJob != nil || !queue.isEmpty || !activities.isEmpty }
 
-    func sync() {
+    package func sync() {
         observeWake()
         let center = HotKeyCenter.shared
         center.unregister(id: HotKeyID.meeting)
@@ -173,28 +177,28 @@ final class MeetingRecorder: NSObject, ObservableObject {
         reload()
     }
 
-    func reload() {
+    package func reload() {
         let folders = (try? FileManager.default.contentsOfDirectory(at: Self.root, includingPropertiesForKeys: nil,
                                                                     options: [.skipsHiddenFiles])) ?? []
         meetings = folders.filter { $0.hasDirectoryPath }.map(Meeting.init).sorted { $0.title > $1.title }
     }
 
     /// Встречу целиком (звук, расшифровка, отчёт) — в Корзину. Идущую расшифровку и ожидающую в очереди не трогаем.
-    func delete(_ meeting: Meeting) {
+    package func delete(_ meeting: Meeting) {
         guard currentJob?.folder != meeting.folder, !queue.contains(where: { $0.job.folder == meeting.folder }),
               folder != meeting.folder || recordingSince == nil else { return }
         try? FileManager.default.trashItem(at: meeting.folder, resultingItemURL: nil)
         reload()
     }
 
-    func toggle() {
+    package func toggle() {
         // Запись не зависит от расшифровки: ⌃⌥M во время расшифровки начинает новую запись.
         if recordingSince != nil { stop() } else { start() }
     }
 
     // MARK: - Запись
 
-    func start() {
+    package func start() {
         guard recordingSince == nil, !starting else { return }
         starting = true
         lastError = nil
@@ -232,7 +236,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
     }
 
     /// Папка по минуте: «2026-10-16 10.30» (повтор в ту же минуту получает « (2)» — см. `MeetingFiles.uniqueFolder`).
-    static func folderName(for date: Date) -> String {
+    package static func folderName(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH.mm"
         return formatter.string(from: date)
@@ -291,7 +295,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
         self.folder = folder
     }
 
-    func stop() {
+    package func stop() {
         finishRecording(note: nil)
     }
 
@@ -421,7 +425,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
 
     /// При запуске: оборванные записи (сбой, ⌘Q во время сохранения) склеиваются из кусков, а встречи, которые стояли
     /// в очереди до выхода (метка «В очереди»), снова ставятся в очередь. Обо всём — одно уведомление.
-    func recoverUnfinishedOnce() {
+    package func recoverUnfinishedOnce() {
         guard !recovered else { return }
         recovered = true
         let root = Self.root
@@ -452,7 +456,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
     // MARK: - Готовый файл
 
     /// Расшифровать готовую запись (Zoom, Telegram, диктофон — аудио или видео).
-    func importFile() {
+    package func importFile() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.audio, .movie]
         panel.prompt = "Расшифровать"
@@ -477,7 +481,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
     }
 
     /// Звуковая дорожка в M4A (из видео тоже).
-    nonisolated static func extractAudio(from source: URL, to target: URL) async throws {
+    package nonisolated static func extractAudio(from source: URL, to target: URL) async throws {
         try? FileManager.default.removeItem(at: target)
         let asset = AVURLAsset(url: source)
         guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
@@ -496,7 +500,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
     // MARK: - Очередь расшифровки и отчёта
 
     /// reportOnly — расшифровка уже есть, заново делаем только отчёт. Возвращается, когда эта встреча обработана.
-    func process(_ meeting: Meeting, reportOnly: Bool = false) async {
+    package func process(_ meeting: Meeting, reportOnly: Bool = false) async {
         let job = Job(folder: meeting.folder, reportOnly: reportOnly)
         guard !isQueued(job) else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -603,7 +607,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
         refreshState()
     }
 
-    static let reportSystem = """
+    package static let reportSystem = """
     Ты опытный секретарь встреч. Тебе дают расшифровку созвона (речь может быть на украинском, русском \
     или английском; в расшифровке бывают ошибки распознавания — восстанавливай смысл по контексту).
     «Я» — владелец записи, «Собеседники» — остальные участники.
@@ -618,7 +622,7 @@ final class MeetingRecorder: NSObject, ObservableObject {
     """
 
     /// Длинные встречи — сначала конспект по частям, затем общий отчёт.
-    nonisolated static func report(for transcript: String,
+    package nonisolated static func report(for transcript: String,
                                    progress: @escaping @Sendable (String) -> Void = { _ in }) async throws -> String {
         let parts = MeetingText.chunks(transcript, limit: 9_000)
         if parts.count == 1 {
@@ -665,9 +669,9 @@ final class MeetingRecorder: NSObject, ObservableObject {
 }
 
 private struct MeetingHUD: View {
-    @ObservedObject var recorder: MeetingRecorder
+    @ObservedObject package var recorder: MeetingRecorder
 
-    var body: some View {
+    package var body: some View {
         var since: Date?
         if case .recording(let started) = recorder.state { since = started }
         return MeetingHUDContent(since: since, interruption: recorder.interruption, stalled: recorder.audioStalled) { recorder.stop() }
@@ -676,13 +680,13 @@ private struct MeetingHUD: View {
 
 /// Индикатор записи встречи: «ВСТРЕЧА», время, предупреждение (обрыв потока или «Нет звука») и «Стоп».
 /// Значения готовые, без модели.
-struct MeetingHUDContent: View {
-    var since: Date?
-    var interruption: String?
-    var stalled = false
-    let stop: () -> Void
+package struct MeetingHUDContent: View {
+    package var since: Date?
+    package var interruption: String?
+    package var stalled = false
+    package let stop: () -> Void
 
-    var body: some View {
+    package var body: some View {
         LiveIndicator(.meeting, since: interruption == nil ? since : nil,
                       warning: interruption ?? (stalled ? "Нет звука" : nil)) {
             HUDIconButton(symbol: "stop.fill", help: "Остановить и расшифровать (⌃⌥M)", kind: .stop, action: stop)
@@ -693,9 +697,9 @@ struct MeetingHUDContent: View {
 }
 
 /// Звук молчит дольше этого — HUD предупреждает.
-enum MeetingStall {
-    static let threshold: TimeInterval = 10
-    static func isStalled(secondsSinceAudio: TimeInterval, threshold: TimeInterval = MeetingStall.threshold) -> Bool {
+package enum MeetingStall {
+    package static let threshold: TimeInterval = 10
+    package static func isStalled(secondsSinceAudio: TimeInterval, threshold: TimeInterval = MeetingStall.threshold) -> Bool {
         secondsSinceAudio > threshold
     }
 }
@@ -707,11 +711,11 @@ enum MeetingStall {
 /// времени пропускал куски, когда был занят, и речь распознавалась обрывками).
 /// Кусок закрывается каждые `MeetingChunking.seconds` секунд: M4A читается только закрытым,
 /// а закрытые куски переживают сбой.
-final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    let queue = DispatchQueue(label: "macutils.meeting")
-    enum Track {
+package final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    package let queue = DispatchQueue(label: "macutils.meeting")
+    package enum Track {
         case system, microphone
-        var name: String { self == .system ? MeetingFiles.systemTrack : MeetingFiles.micTrack }
+        package var name: String { self == .system ? MeetingFiles.systemTrack : MeetingFiles.micTrack }
     }
 
     private let folder: URL
@@ -730,9 +734,9 @@ final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
     private let lock = NSLock()
     private var lastAudio = Date()
     /// Поток остановился сам или запись на диск не удалась (диск полон).
-    var onFailure: (@Sendable (Error) -> Void)?
+    package var onFailure: (@Sendable (Error) -> Void)?
 
-    init(folder: URL, microphone: Bool) {
+    package init(folder: URL, microphone: Bool) {
         self.folder = folder
         tracks = microphone ? [.system, .microphone] : [.system]
         super.init()
@@ -740,19 +744,19 @@ final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
     }
 
     /// Сколько секунд от последнего буфера звука.
-    var secondsSinceAudio: TimeInterval {
+    package var secondsSinceAudio: TimeInterval {
         lock.lock(); defer { lock.unlock() }
         return Date().timeIntervalSince(lastAudio)
     }
 
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    package func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard sampleBuffer.isValid, type != .screen, let description = sampleBuffer.formatDescription,
               let buffer = Self.pcm(from: sampleBuffer, description: description) else { return }
         write(buffer, at: sampleBuffer.presentationTimeStamp, track: type == .audio ? .system : .microphone)
     }
 
     /// Вызывается на queue.
-    func write(_ buffer: AVAudioPCMBuffer, at pts: CMTime, track type: Track) {
+    package func write(_ buffer: AVAudioPCMBuffer, at pts: CMTime, track type: Track) {
         guard !finished, tracks.contains(type) else { return }
         lock.lock(); lastAudio = Date(); lock.unlock()
         if start == nil { start = pts }
@@ -807,12 +811,12 @@ final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
         return status == noErr ? buffer : nil
     }
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
+    package func stream(_ stream: SCStream, didStopWithError error: Error) {
         Log.audio.error("Встреча: поток остановлен: \(error.localizedDescription, privacy: .public)")
         onFailure?(error)
     }
 
-    func finish() async {
+    package func finish() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             queue.async {
                 self.finished = true
@@ -870,18 +874,18 @@ final class MeetingWriter: NSObject, SCStreamOutput, SCStreamDelegate, @unchecke
 
 // MARK: - Локальная расшифровка
 
-enum Transcriber {
-    struct Failure: LocalizedError {
-        let errorDescription: String?
+package enum Transcriber {
+    package struct Failure: LocalizedError {
+        package let errorDescription: String?
     }
 
-    static var locale: Locale {
+    package static var locale: Locale {
         let setting = UserDefaults.standard.string(forKey: Pref.meetingsLanguage) ?? "auto"
         return Locale(identifier: setting == "auto" ? "ru_RU" : setting)
     }
 
     /// Расшифровка на устройстве: SpeechAnalyzer (macOS 26+), иначе SFSpeechRecognizer без сети.
-    static func transcribe(_ url: URL, speaker: String) async throws -> [TranscriptLine] {
+    package static func transcribe(_ url: URL, speaker: String) async throws -> [TranscriptLine] {
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             return try await analyze(url, speaker: speaker)

@@ -3,15 +3,14 @@ import Foundation
 import Security
 import MUCore
 import MUDesign
-import MUAppSwitcher
 
 /// Автообновление из GitHub Releases: раз в несколько часов смотрит последний
 /// релиз репозитория, скачивает MacUtils.zip, подменяет приложение и перезапускает его.
 @MainActor
-final class Updater: NSObject, ObservableObject {
-    static let shared = Updater()
+package final class Updater: NSObject, ObservableObject {
+    package static let shared = Updater()
 
-    enum State: Equatable {
+    package enum State: Equatable {
         case idle
         case checking
         case upToDate
@@ -20,42 +19,42 @@ final class Updater: NSObject, ObservableObject {
         case failed(String)
     }
 
-    @Published private(set) var state: State = .idle
-    @Published private(set) var lastCheck: Date?
+    @Published package private(set) var state: State = .idle
+    @Published package private(set) var lastCheck: Date?
 
     private static let assetName = "MacUtils.zip"
     private var timer: Timer?
 
-    var currentVersion: String {
+    package var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
     /// Канал сборки. Ключ `MUReleaseChannel` прописывает `build.sh`: `release` при `MU_RELEASE=1`, иначе `dev`.
     /// Нет ключа (запуск без бандла, чужая сборка) — `dev`: сам ничего не ставит.
-    enum Channel: Equatable {
+    package enum Channel: Equatable {
         case release, dev
 
-        init(infoValue: Any?) {
+        package init(infoValue: Any?) {
             self = (infoValue as? String) == "release" ? .release : .dev
         }
 
         /// Только релизные сборки ставят обновления без нажатия кнопки.
-        var installsAutomatically: Bool { self == .release }
+        package var installsAutomatically: Bool { self == .release }
     }
 
-    var releaseChannel: Channel {
+    package var releaseChannel: Channel {
         Channel(infoValue: Bundle.main.object(forInfoDictionaryKey: "MUReleaseChannel"))
     }
 
     /// Версия для интерфейса: `1.4.3` у релиза, `1.4.3 · dev abc1234+12` у dev-сборки (см. docs/VERSIONING.md).
-    var displayVersion: String {
+    package var displayVersion: String {
         let info = Bundle.main
         return Self.displayVersion(short: currentVersion, channel: releaseChannel,
                                    commit: info.object(forInfoDictionaryKey: "MUGitCommit") as? String,
                                    since: info.object(forInfoDictionaryKey: "MUCommitsSinceRelease") as? String)
     }
 
-    nonisolated static func displayVersion(short: String, channel: Channel, commit: String?, since: String?) -> String {
+    package nonisolated static func displayVersion(short: String, channel: Channel, commit: String?, since: String?) -> String {
         guard channel == .dev else { return short }
         var text = "\(short) · dev"
         if let commit, !commit.isEmpty, commit != "unknown" {
@@ -66,7 +65,7 @@ final class Updater: NSObject, ObservableObject {
     }
 
     /// Репозиторий «владелец/имя»: из настроек или из Info.plist (его прописывает сборка на GitHub).
-    var repository: String {
+    package var repository: String {
         let custom = UserDefaults.standard.string(forKey: Pref.updateRepo)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !custom.isEmpty { return custom }
@@ -75,7 +74,7 @@ final class Updater: NSObject, ObservableObject {
 
     // MARK: - Расписание
 
-    func start() {
+    package func start() {
         let defaults = UserDefaults.standard
         if let updated = defaults.string(forKey: Pref.justUpdatedTo) {
             defaults.removeObject(forKey: Pref.justUpdatedTo)
@@ -88,7 +87,7 @@ final class Updater: NSObject, ObservableObject {
         }
         // Новая линейка версий — один раз показываем «Что нового».
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            MainActor.assumeIsolated { WhatsNewWindowController.shared.showIfUpdated() }
+            MainActor.assumeIsolated { AppRouter.shared.showWhatsNewIfUpdated() }
         }
         let timer = Timer(timeInterval: 6 * 3600, target: self, selector: #selector(scheduledCheck),
                           userInfo: nil, repeats: true)
@@ -103,7 +102,7 @@ final class Updater: NSObject, ObservableObject {
 
     /// Повторная попытка отложена: одна цепочка, а не по одной на каждую «занятую» проверку.
     private var deferredCheck: DispatchWorkItem?
-    static let deferDelay: TimeInterval = 600
+    package static let deferDelay: TimeInterval = 600
 
     @objc private func scheduledCheck() {
         guard UserDefaults.standard.bool(forKey: Pref.autoUpdate) else { return }
@@ -124,7 +123,7 @@ final class Updater: NSObject, ObservableObject {
 
     // MARK: - Проверка
 
-    func check(install: Bool, userInitiated: Bool) {
+    package func check(install: Bool, userInitiated: Bool) {
         switch state {
         case .checking, .installing: return
         default: break
@@ -160,7 +159,7 @@ final class Updater: NSObject, ObservableObject {
         }
     }
 
-    func installAvailable() {
+    package func installAvailable() {
         if case .available = state {
             check(install: true, userInitiated: true)
         }
@@ -168,28 +167,28 @@ final class Updater: NSObject, ObservableObject {
 
     // MARK: - GitHub
 
-    struct ReleaseInfo {
-        let version: String
-        let zipURL: URL
+    package struct ReleaseInfo {
+        package let version: String
+        package let zipURL: URL
     }
 
     private struct ReleaseDTO: Decodable {
-        let tagName: String
-        let draft: Bool
-        let prerelease: Bool
-        let assets: [Asset]
+        package let tagName: String
+        package let draft: Bool
+        package let prerelease: Bool
+        package let assets: [Asset]
 
-        struct Asset: Decodable {
-            let name: String
-            let browserDownloadURL: URL
+        package struct Asset: Decodable {
+            package let name: String
+            package let browserDownloadURL: URL
 
-            enum CodingKeys: String, CodingKey {
+            package enum CodingKeys: String, CodingKey {
                 case name
                 case browserDownloadURL = "browser_download_url"
             }
         }
 
-        enum CodingKeys: String, CodingKey {
+        package enum CodingKeys: String, CodingKey {
             case tagName = "tag_name"
             case draft, prerelease, assets
         }
@@ -215,7 +214,7 @@ final class Updater: NSObject, ObservableObject {
 
     /// Компоненты версии из тега строго вида `v<цифры>.<цифры>.<цифры>`; всё остальное
     /// (`windows-latest`, `v1.4.0-beta.1`, `v1.4`, `v1.4.0.1`) — nil.
-    nonisolated static func strictVersion(tag: String) -> [Int]? {
+    package nonisolated static func strictVersion(tag: String) -> [Int]? {
         guard tag.hasPrefix("v") else { return nil }
         let parts = tag.dropFirst().split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 3 else { return nil }
@@ -228,7 +227,7 @@ final class Updater: NSObject, ObservableObject {
     }
 
     /// Самый новый Mac-релиз из ответа GitHub (список релизов), независимо от порядка в списке.
-    static func parseRelease(_ data: Data) throws -> ReleaseInfo {
+    package static func parseRelease(_ data: Data) throws -> ReleaseInfo {
         let releases = try JSONDecoder().decode([ReleaseDTO].self, from: data)
         var best: (numbers: [Int], tag: String, url: URL)?
         for release in releases where !release.draft && !release.prerelease {
@@ -241,7 +240,7 @@ final class Updater: NSObject, ObservableObject {
         return ReleaseInfo(version: String(best.tag.dropFirst()), zipURL: best.url)
     }
 
-    nonisolated static func isVersion(_ candidate: String, newerThan current: String) -> Bool {
+    package nonisolated static func isVersion(_ candidate: String, newerThan current: String) -> Bool {
         let a = candidate.split(separator: ".").map { Int($0) ?? 0 }
         let b = current.split(separator: ".").map { Int($0) ?? 0 }
         for i in 0..<max(a.count, b.count) {
@@ -275,7 +274,7 @@ final class Updater: NSObject, ObservableObject {
         let target = Bundle.main.bundleURL
         let parent = target.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: parent.path) else {
-            throw UpdateError(MoveToApplications.isInApplications
+            throw UpdateError(AppRouter.shared.isInApplications()
                 ? "Нет прав на запись в \(parent.path)"
                 : "Перенесите Mac Utils в «Программы» и запустите оттуда — тогда он сможет обновляться")
         }
@@ -345,12 +344,12 @@ final class Updater: NSObject, ObservableObject {
         }
 
         UserDefaults.standard.set(release.version, forKey: Pref.justUpdatedTo)
-        AppSwitcher.shared.shutdown()
+        AppRouter.shared.prepareForRelaunch()
         NSApp.terminate(nil)
     }
 
     /// Версия внутри скачанного бандла: совпадает с релизом, новее текущей, номер сборки больше текущего.
-    nonisolated static func checkVersions(bundleShort: String?, bundleBuild: String?, release: String,
+    package nonisolated static func checkVersions(bundleShort: String?, bundleBuild: String?, release: String,
                                           currentShort: String, currentBuild: String?) throws {
         guard bundleShort == release else {
             throw UpdateError("Версия в архиве (\(bundleShort ?? "нет")) не совпадает с релизом \(release)")
@@ -365,7 +364,7 @@ final class Updater: NSObject, ObservableObject {
 
     /// Скрипт замены: `target` → `target.old`, `staged` → `target`; если второй `mv` не удался, старая версия возвращается.
     /// Ждёт выхода процесса не дольше `waitSeconds`: иначе убирает `staged` и ничего не меняет.
-    nonisolated static func installScript(pid: Int32, target: URL, staged: URL, work: URL, waitSeconds: Int = 60) -> String {
+    package nonisolated static func installScript(pid: Int32, target: URL, staged: URL, work: URL, waitSeconds: Int = 60) -> String {
         let old = quote(target.path + ".old")
         let target = quote(target.path)
         let staged = quote(staged.path)
@@ -398,7 +397,7 @@ final class Updater: NSObject, ObservableObject {
 
     /// Designated requirement запущенного приложения. Ad-hoc сборка требует точного cdhash,
     /// поэтому проверить издателя обновления по ней нельзя — отказываем.
-    nonisolated static func currentRequirement() throws -> SecRequirement {
+    package nonisolated static func currentRequirement() throws -> SecRequirement {
         var selfCode: SecCode?
         var staticCode: SecStaticCode?
         var requirement: SecRequirement?
@@ -417,7 +416,7 @@ final class Updater: NSObject, ObservableObject {
     }
 
     /// То же по требованию бандла на диске (для тестов; в установке требование берётся из запущенного кода).
-    nonisolated static func verifySignature(of app: URL, matchingBundleAt current: URL) throws {
+    package nonisolated static func verifySignature(of app: URL, matchingBundleAt current: URL) throws {
         var code: SecStaticCode?
         var requirement: SecRequirement?
         guard SecStaticCodeCreateWithPath(current as CFURL, [], &code) == errSecSuccess, let code,
@@ -433,7 +432,7 @@ final class Updater: NSObject, ObservableObject {
     }
 
     /// Бандл целостный и подписан по `requirement` (тот же издатель), без символических ссылок внутри.
-    nonisolated static func verifySignature(of app: URL, requirement: SecRequirement) throws {
+    package nonisolated static func verifySignature(of app: URL, requirement: SecRequirement) throws {
         var newCode: SecStaticCode?
         guard SecStaticCodeCreateWithPath(app as CFURL, [], &newCode) == errSecSuccess, let newCode else {
             throw UpdateError("Не удалось прочитать подпись обновления")
@@ -447,7 +446,7 @@ final class Updater: NSObject, ObservableObject {
         }
     }
 
-    nonisolated static func run(_ tool: String, _ arguments: [String], timeout: TimeInterval = 120) throws {
+    package nonisolated static func run(_ tool: String, _ arguments: [String], timeout: TimeInterval = 120) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
@@ -466,13 +465,13 @@ final class Updater: NSObject, ObservableObject {
     }
 
     /// Экранирование для sh: 'путь с пробелами'.
-    nonisolated static func quote(_ path: String) -> String {
+    package nonisolated static func quote(_ path: String) -> String {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
 
-struct UpdateError: LocalizedError {
-    let message: String
-    init(_ message: String) { self.message = message }
-    var errorDescription: String? { message }
+package struct UpdateError: LocalizedError {
+    package let message: String
+    package init(_ message: String) { self.message = message }
+    package var errorDescription: String? { message }
 }

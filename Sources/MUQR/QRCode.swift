@@ -7,21 +7,21 @@ import MUCore
 import MUDesign
 
 /// Создание и распознавание QR-кодов (без UI — для тестов).
-enum QRTools {
+package enum QRTools {
     /// Можно ли брать выделение через ⌘C в этой программе (в Finder ⌘C копирует файлы, а не текст).
-    static func copyFallbackAllowed(frontmost bundleID: String?) -> Bool {
+    package static func copyFallbackAllowed(frontmost bundleID: String?) -> Bool {
         bundleID != "com.apple.finder"
     }
 
     /// Пробовать ли ⌘C, когда на экране QR не нашёлся. `selectionLength` — длина выделения по AX:
     /// 0 — выделения точно нет (⌘C скопировал бы строку или ячейку, а не выделенный текст); nil — AX не ответил.
-    static func shouldTryCopy(frontmost bundleID: String?, selectionLength: Int?) -> Bool {
+    package static func shouldTryCopy(frontmost bundleID: String?, selectionLength: Int?) -> Bool {
         copyFallbackAllowed(frontmost: bundleID) && selectionLength != 0
     }
 
     /// Длина выделения в поле в фокусе (`kAXSelectedTextRangeAttribute`); nil — программа не отдаёт его через AX.
     @MainActor
-    static func focusedSelectionLength() -> Int? {
+    package static func focusedSelectionLength() -> Int? {
         guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.2)
@@ -37,7 +37,7 @@ enum QRTools {
     }
 
     /// Белое поле вокруг кода в модулях: по стандарту не меньше 4, иначе на тёмном фоне телефон его не читает.
-    static let quietZone = 4
+    package static let quietZone = 4
     /// `CIQRCodeGenerator` уже оставляет поле в один модуль: добавляем недостающее.
     private static let generatorMargin = 1
 
@@ -45,7 +45,7 @@ enum QRTools {
     private static let context = CIContext()
 
     /// QR-код как картинка: каждый модуль — `scale` пикселей (целое), без размытия, с белым полем `quietZone` модулей.
-    static func make(_ text: String, scale: Int = 12) -> CGImage? {
+    package static func make(_ text: String, scale: Int = 12) -> CGImage? {
         guard let code = modules(text) else { return nil }
         let border = CGFloat(quietZone - generatorMargin)
         let background = CIImage(color: .white).cropped(to: code.extent.insetBy(dx: -border, dy: -border))
@@ -65,22 +65,22 @@ enum QRTools {
     }
 
     /// Сторона кода с полем в модулях.
-    static func side(_ text: String) -> Int? {
+    package static func side(_ text: String) -> Int? {
         modules(text).map { Int($0.extent.width) + 2 * (quietZone - generatorMargin) }
     }
 
     /// Целое число точек на модуль, чтобы код (с полем) помещался в `maxPoints`: при дробном масштабе модули плотного
     /// кода выходят разной ширины. Не меньше 1.
-    static func pointsPerModule(side: Int, maxPoints: CGFloat) -> Int {
+    package static func pointsPerModule(side: Int, maxPoints: CGFloat) -> Int {
         guard side > 0 else { return 1 }
         return max(1, Int((maxPoints / CGFloat(side)).rounded(.down)))
     }
 
     /// Wi-Fi QR: `WIFI:T:WPA;S:сеть;P:пароль;;`.
-    static func isWiFi(_ payload: String) -> Bool { payload.uppercased().hasPrefix("WIFI:") }
+    package static func isWiFi(_ payload: String) -> Bool { payload.uppercased().hasPrefix("WIFI:") }
 
     /// Текст для показа на экране: у Wi-Fi QR пароль (`P:…`, с экранированием `\;`) заменён точками.
-    static func masked(_ payload: String) -> String {
+    package static func masked(_ payload: String) -> String {
         guard isWiFi(payload) else { return payload }
         var fields: [String] = []
         var current = ""
@@ -97,7 +97,7 @@ enum QRTools {
     }
 
     /// Все QR (и другие 2D-коды) на картинке.
-    static func detect(in image: CGImage) -> [String] {
+    package static func detect(in image: CGImage) -> [String] {
         let request = VNDetectBarcodesRequest()
         request.symbologies = [.qr, .aztec, .dataMatrix, .pdf417]
         try? VNImageRequestHandler(cgImage: image).perform([request])
@@ -109,17 +109,17 @@ enum QRTools {
 /// «QR»: ⌃⌥Q. Выделен текст — сделать из него QR. Нет — найти QR-коды на экране
 /// и скопировать их содержимое (ссылку можно сразу открыть).
 @MainActor
-final class QRCodeService: ObservableObject {
-    static let shared = QRCodeService()
+package final class QRCodeService: ObservableObject {
+    package static let shared = QRCodeService()
 
-    @Published private(set) var text = ""
-    @Published private(set) var image: NSImage?
+    @Published package private(set) var text = ""
+    @Published package private(set) var image: NSImage?
 
     private var panel: NSPanel?
     private var outsideMonitor: Any?
     private var keyTap: EventTap?
 
-    func sync() {
+    package func sync() {
         let center = HotKeyCenter.shared
         guard UserDefaults.standard.bool(forKey: Pref.qr) else {
             center.unregister(id: HotKeyID.qr)
@@ -131,8 +131,8 @@ final class QRCodeService: ObservableObject {
         }
     }
 
-    func run() {
-        if let selected = LayoutFix.selectedTextViaAX()?.trimmingCharacters(in: .whitespacesAndNewlines), !selected.isEmpty {
+    package func run() {
+        if let selected = SelectedText.viaAX()?.trimmingCharacters(in: .whitespacesAndNewlines), !selected.isEmpty {
             show(selected)
             return
         }
@@ -150,7 +150,7 @@ final class QRCodeService: ObservableObject {
                     return
                 }
             }
-            if tryCopy, let copied = await LayoutFix.selectedTextViaCopy()?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if tryCopy, let copied = await SelectedText.viaCopy()?.trimmingCharacters(in: .whitespacesAndNewlines),
                !copied.isEmpty {
                 self.show(copied)
                 return
@@ -161,7 +161,7 @@ final class QRCodeService: ObservableObject {
 
     // MARK: - Сканирование экрана
 
-    func scanScreen() {
+    package func scanScreen() {
         guard Permissions.screenRecording else {
             askForScreenRecording()
             return
@@ -213,7 +213,7 @@ final class QRCodeService: ObservableObject {
 
     // MARK: - QR из текста
 
-    func show(_ text: String) {
+    package func show(_ text: String) {
         // Панель неактивирующая: ⌃⌥Q можно нажать при открытой — прежние монитор мыши и tap клавиш надо снять.
         hide()
         self.text = text
@@ -250,7 +250,7 @@ final class QRCodeService: ObservableObject {
         keyTap = tap
     }
 
-    func hide() {
+    package func hide() {
         panel?.orderOut(nil)
         if let outsideMonitor { NSEvent.removeMonitor(outsideMonitor) }
         outsideMonitor = nil
@@ -258,7 +258,7 @@ final class QRCodeService: ObservableObject {
         keyTap = nil
     }
 
-    func copyImage() {
+    package func copyImage() {
         guard let cg = QRTools.make(text, scale: 16) else { return }
         let rep = NSBitmapImageRep(cgImage: cg)
         NSPasteboard.general.clearContents()
@@ -268,7 +268,7 @@ final class QRCodeService: ObservableObject {
         Toast.show("QR-код скопирован", symbol: "qrcode", tint: .green)
     }
 
-    func saveImage() {
+    package func saveImage() {
         guard let cg = QRTools.make(text, scale: 16),
               let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else { return }
         let formatter = DateFormatter()
@@ -300,23 +300,23 @@ final class QRCodeService: ObservableObject {
 }
 
 private struct QRPanelView: View {
-    @ObservedObject var service: QRCodeService
+    @ObservedObject package var service: QRCodeService
 
-    var body: some View {
+    package var body: some View {
         QRPanelContent(image: service.image, text: service.text,
                        copy: { service.copyImage() }, save: { service.saveImage() }, close: { service.hide() })
     }
 }
 
 /// Панель с QR-кодом (Graphite: `panel`, обводка `line`, радиус 20). Без модели — для снимков интерфейса.
-struct QRPanelContent: View {
-    let image: NSImage?
-    let text: String
-    var copy: () -> Void = {}
-    var save: () -> Void = {}
-    var close: () -> Void = {}
+package struct QRPanelContent: View {
+    package let image: NSImage?
+    package let text: String
+    package var copy: () -> Void = {}
+    package var save: () -> Void = {}
+    package var close: () -> Void = {}
 
-    var body: some View {
+    package var body: some View {
         VStack(spacing: DS.Space.m) {
             if let image {
                 // Белое поле уже в картинке (тихая зона): без растяжения и отступов.
