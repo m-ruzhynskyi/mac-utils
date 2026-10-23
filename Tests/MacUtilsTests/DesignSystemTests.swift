@@ -3,6 +3,7 @@ import SwiftUI
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUDesign
 
 /// Дизайн-система Graphite (волна 0 редизайна v2): группы боковой панели, контраст токенов в обеих темах, шрифты.
 @MainActor
@@ -46,6 +47,7 @@ final class DesignSystemTests: XCTestCase {
     }
 
     func testSubtitlesContainNoVersionNumbers() {
+        SettingsSection.installAppSubtitles()
         let version = try! NSRegularExpression(pattern: #"\b\d+\.\d+(\.\d+)?\b"#)
         for section in SettingsSection.allCases {
             let text = section.subtitle

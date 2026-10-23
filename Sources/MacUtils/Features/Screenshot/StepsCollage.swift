@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 import MUCore
+import MUDesign
 
 /// Откуда начинается захват, куда уходит коллаж и как сообщается результат — подменяется в тестах сессии.
 @MainActor

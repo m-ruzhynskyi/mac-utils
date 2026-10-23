@@ -3,6 +3,7 @@ import ApplicationServices
 import Carbon.HIToolbox
 import SwiftUI
 import MUCore
+import MUDesign
 
 /// «Окна»: раскладка окон как в Windows. Окно, перетащенное к краю экрана,
 /// встаёт на половину, к углу — на четверть, к верхнему краю — на весь экран.

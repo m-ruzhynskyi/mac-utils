@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
+import MUDesign
 
 /// «Удаление программ»: приложение и все его файлы — в Корзину.
 @MainActor

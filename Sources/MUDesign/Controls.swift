@@ -9,7 +9,7 @@ import SwiftUI
 extension View {
     /// Фон-капсула с обводкой: внешняя капсула цвета обводки, на ней — внутренняя с отступом `width`.
     /// (`Capsule().strokeBorder` даёт на концах плоские выступы за скруглённую заливку.)
-    func capsuleFill(_ fill: Color, border: Color? = nil, width: CGFloat = 1) -> some View {
+    package func capsuleFill(_ fill: Color, border: Color? = nil, width: CGFloat = 1) -> some View {
         background {
             if let border {
                 Capsule().fill(border).overlay(Capsule().fill(fill).padding(width))
@@ -25,10 +25,10 @@ extension View {
 /// Переключатель Graphite: дорожка 42×24, включён — лайм с тёмной ручкой справа, выключен — `off` с ручкой `mute` слева.
 /// Семантика `Toggle` сохраняется (VoiceOver, клавиатура). Подпись не рисуется — её даёт строка (`ToggleRow`),
 /// но остаётся именем для VoiceOver; `showsLabel` — подпись слева от дорожки.
-struct GraphiteToggleStyle: ToggleStyle {
-    var showsLabel = false
+package struct GraphiteToggleStyle: ToggleStyle {
+    package var showsLabel = false
 
-    func makeBody(configuration: Configuration) -> some View {
+    package func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: DS.Space.m) {
             if showsLabel {
                 configuration.label.font(DS.Font.bodyStrong).foregroundStyle(.dsText)
@@ -44,20 +44,20 @@ struct GraphiteToggleStyle: ToggleStyle {
 }
 
 extension ToggleStyle where Self == GraphiteToggleStyle {
-    static var graphite: GraphiteToggleStyle { GraphiteToggleStyle() }
-    static var graphiteLabeled: GraphiteToggleStyle { GraphiteToggleStyle(showsLabel: true) }
+    package static var graphite: GraphiteToggleStyle { GraphiteToggleStyle() }
+    package static var graphiteLabeled: GraphiteToggleStyle { GraphiteToggleStyle(showsLabel: true) }
 }
 
 /// Дорожка переключателя.
-struct ToggleTrack: View {
-    @Binding var isOn: Bool
+package struct ToggleTrack: View {
+    @Binding package var isOn: Bool
 
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused
 
-    var body: some View {
+    package var body: some View {
         let size = DS.Size.toggleTrack
         ZStack(alignment: isOn ? .trailing : .leading) {
             // Светлая тема: лайм и `off` почти сливаются с фоном — обводка даёт границу ≥ 3:1 (WCAG 1.4.11).
@@ -97,32 +97,32 @@ struct ToggleTrack: View {
 // MARK: - Кнопки
 
 /// Кнопка Graphite: главная (лайм), вторичная (`field` + обводка), призрачная (без фона), разрушительная (`rec`).
-struct GraphiteButtonStyle: ButtonStyle {
-    enum Kind { case primary, secondary, ghost, danger }
-    enum Size { case compact, regular, large }
+package struct GraphiteButtonStyle: ButtonStyle {
+    package enum Kind { case primary, secondary, ghost, danger }
+    package enum Size { case compact, regular, large }
 
-    var kind: Kind = .secondary
-    var size: Size = .regular
+    package var kind: Kind = .secondary
+    package var size: Size = .regular
     /// Растянуть на всю ширину.
-    var fill = false
+    package var fill = false
 
-    func makeBody(configuration: Configuration) -> some View {
+    package func makeBody(configuration: Configuration) -> some View {
         GraphiteButtonBody(configuration: configuration, kind: kind, size: size, fill: fill)
     }
 }
 
 extension ButtonStyle where Self == GraphiteButtonStyle {
-    static func graphite(_ kind: GraphiteButtonStyle.Kind = .secondary, size: GraphiteButtonStyle.Size = .regular,
+    package static func graphite(_ kind: GraphiteButtonStyle.Kind = .secondary, size: GraphiteButtonStyle.Size = .regular,
                          fill: Bool = false) -> GraphiteButtonStyle {
         GraphiteButtonStyle(kind: kind, size: size, fill: fill)
     }
 }
 
 private struct GraphiteButtonBody: View {
-    let configuration: ButtonStyleConfiguration
-    let kind: GraphiteButtonStyle.Kind
-    let size: GraphiteButtonStyle.Size
-    let fill: Bool
+    package let configuration: ButtonStyleConfiguration
+    package let kind: GraphiteButtonStyle.Kind
+    package let size: GraphiteButtonStyle.Size
+    package let fill: Bool
 
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
@@ -164,7 +164,7 @@ private struct GraphiteButtonBody: View {
         }
     }
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         let pressed = configuration.isPressed
         configuration.label
@@ -188,18 +188,18 @@ private struct GraphiteButtonBody: View {
 }
 
 /// Кнопка-иконка 40×40: подпись обязательна — она и подсказка, и имя для VoiceOver. `active` — включённое состояние (лайм).
-struct IconButton: View {
-    let title: String
-    let systemImage: String
-    var active = false
-    var compact = false
-    let action: () -> Void
+package struct IconButton: View {
+    package let title: String
+    package let systemImage: String
+    package var active = false
+    package var compact = false
+    package let action: () -> Void
 
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
     @State private var hovered = false
 
-    init(_ title: String, systemImage: String, active: Bool = false, compact: Bool = false, action: @escaping () -> Void) {
+    package init(_ title: String, systemImage: String, active: Bool = false, compact: Bool = false, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
         self.active = active
@@ -207,7 +207,7 @@ struct IconButton: View {
         self.action = action
     }
 
-    var body: some View {
+    package var body: some View {
         let side = compact ? DS.Size.rowTile : DS.Size.iconButton
         let shape = RoundedRectangle(cornerRadius: compact ? DS.Radius.control : DS.Radius.iconButton, style: .continuous)
         Button(action: action) {
@@ -232,8 +232,10 @@ struct IconButton: View {
 }
 
 /// Нажатие: лёгкое уменьшение и затемнение (для кнопок со своим фоном).
-struct PressScaleStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
+package struct PressScaleStyle: ButtonStyle {
+    package init() {}
+
+    package func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(configuration.isPressed ? DS.State.pressedOpacity : 1)
             .scaleEffect(configuration.isPressed ? DS.State.pressedScale : 1)
@@ -243,20 +245,20 @@ struct PressScaleStyle: ButtonStyle {
 // MARK: - Чипы, сегменты, таблетки
 
 /// Чип: выбран — лайм, иначе `field` с обводкой (например, вкладки панели в настройках).
-struct Chip: View {
-    let title: String
-    var selected: Bool
-    var action: (() -> Void)?
+package struct Chip: View {
+    package let title: String
+    package var selected: Bool
+    package var action: (() -> Void)?
 
     @Environment(\.colorScheme) private var scheme
 
-    init(_ title: String, selected: Bool, action: (() -> Void)? = nil) {
+    package init(_ title: String, selected: Bool, action: (() -> Void)? = nil) {
         self.title = title
         self.selected = selected
         self.action = action
     }
 
-    var body: some View {
+    package var body: some View {
         let label = Text(title)
             .font(selected ? DS.Font.chip : DS.Font.manrope(13, .semibold, relativeTo: .callout))
             .foregroundStyle(selected ? Color.dsAccInk : Color.dsMute)
@@ -275,20 +277,20 @@ struct Chip: View {
 }
 
 /// Сегментный выбор (MP4 / GIF и т. п.): выбранный сегмент — лайм. ← → с клавиатуры.
-struct Segmented<Value: Hashable>: View {
-    @Binding var selection: Value
-    let options: [(value: Value, title: String)]
+package struct Segmented<Value: Hashable>: View {
+    @Binding package var selection: Value
+    package let options: [(value: Value, title: String)]
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused
 
-    init(selection: Binding<Value>, options: [(value: Value, title: String)]) {
+    package init(selection: Binding<Value>, options: [(value: Value, title: String)]) {
         _selection = selection
         self.options = options
     }
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 6) {
             ForEach(options, id: \.value) { option in
                 let on = option.value == selection
@@ -333,20 +335,20 @@ struct Segmented<Value: Hashable>: View {
 /// Таблетка статуса — мягкая, чтобы не путать с залитыми кнопками: капсула `field` с тонкой обводкой, точка цвета тона
 /// и обычный текст («● Выдано», «● Нужно», «● Позже»). Цветной текст на `field` не ставим (контраст, §1.1).
 /// `caps` — сигнал «В ЭФИРЕ» / «ЗАПИСЬ»: залитый цветом тона, капсом, как в концепте.
-struct Pill: View {
-    let tone: DS.Tone
-    let text: String
-    var caps = false
+package struct Pill: View {
+    package let tone: DS.Tone
+    package let text: String
+    package var caps = false
 
     @Environment(\.colorScheme) private var scheme
 
-    init(_ tone: DS.Tone, _ text: String, caps: Bool = false) {
+    package init(_ tone: DS.Tone, _ text: String, caps: Bool = false) {
         self.tone = tone
         self.text = text
         self.caps = caps
     }
 
-    var body: some View {
+    package var body: some View {
         if caps {
             Text(text.uppercased())
                 .font(DS.Font.groupLabel)
@@ -376,10 +378,14 @@ struct Pill: View {
 }
 
 /// Полоса прогресса: 8 pt, `off` и лайм.
-struct ProgressBar: View {
-    let value: Double
+package struct ProgressBar: View {
+    package init(value: Double) {
+        self.value = value
+    }
 
-    var body: some View {
+    package let value: Double
+
+    package var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.dsOff)
@@ -393,12 +399,18 @@ struct ProgressBar: View {
 }
 
 /// Плитка инструмента в сетке (как «Инструменты редактора» в концепте): значок, название, клавиша моноширинным.
-struct ToolTile: View {
-    let systemImage: String
-    let title: String
-    var key: String?
+package struct ToolTile: View {
+    package init(systemImage: String, title: String, key: String? = nil) {
+        self.systemImage = systemImage
+        self.title = title
+        self.key = key
+    }
 
-    var body: some View {
+    package let systemImage: String
+    package let title: String
+    package var key: String?
+
+    package var body: some View {
         HStack(spacing: 10) {
             Image(systemName: systemImage).font(.system(size: 15, weight: .medium)).foregroundStyle(.dsText).frame(width: 18)
                 .accessibilityHidden(true)
@@ -420,20 +432,20 @@ struct ToolTile: View {
 // MARK: - Поле ввода и выбор
 
 /// Поле ввода Graphite: `field`, обводка `line`, радиус 10; фокус — рамка `accLine`.
-struct GraphiteFieldStyle: TextFieldStyle {
-    var monospaced = false
+package struct GraphiteFieldStyle: TextFieldStyle {
+    package var monospaced = false
 
-    func _body(configuration: TextField<Self._Label>) -> some View {
+    package func _body(configuration: TextField<Self._Label>) -> some View {
         GraphiteFieldBody(content: configuration, monospaced: monospaced)
     }
 }
 
 private struct GraphiteFieldBody<Content: View>: View {
-    let content: Content
-    let monospaced: Bool
+    package let content: Content
+    package let monospaced: Bool
     @FocusState private var focused: Bool
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
         content
             .textFieldStyle(.plain)
@@ -448,13 +460,13 @@ private struct GraphiteFieldBody<Content: View>: View {
 }
 
 extension TextFieldStyle where Self == GraphiteFieldStyle {
-    static var graphite: GraphiteFieldStyle { GraphiteFieldStyle() }
-    static var graphiteMono: GraphiteFieldStyle { GraphiteFieldStyle(monospaced: true) }
+    package static var graphite: GraphiteFieldStyle { GraphiteFieldStyle() }
+    package static var graphiteMono: GraphiteFieldStyle { GraphiteFieldStyle(monospaced: true) }
 }
 
 extension View {
     /// Выбор из списка в строке карточки: системное меню без подписи (подпись — заголовок строки), по ширине содержимого.
-    func graphitePicker() -> some View {
+    package func graphitePicker() -> some View {
         labelsHidden()
             .pickerStyle(.menu)
             .fixedSize()

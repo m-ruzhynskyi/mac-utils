@@ -2,6 +2,7 @@ import AppKit
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUDesign
 
 /// Простой без нагрузки (1.6.10: 3–5 % ядра с закрытыми настройками): модели опрашивают, только пока их видно на экране
 /// или пока ждут события, и останавливаются, когда вид ушёл.

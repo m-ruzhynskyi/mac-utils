@@ -1,6 +1,7 @@
 import Charts
 import SwiftUI
 import MUCore
+import MUDesign
 
 /// «Монитор системы»: процессор, память, диск, сеть, батарея — раз в секунду,
 /// пока вкладка открыта.

@@ -1,4 +1,5 @@
 import SwiftUI
+import MUDesign
 
 /// Виды сочетаний из реестра: компоненты оформления клавиш не знают о каталоге действий.
 extension Keycap {

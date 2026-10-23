@@ -3,13 +3,21 @@ import SwiftUI
 import MUCore
 
 /// Запись сочетания: нажмите кнопку, затем нужные клавиши (нужен ⌘, ⌥ или ⌃). Esc — отмена.
-struct ShortcutRecorder: View {
-    let hotKey: LayoutHotKey
+package struct ShortcutRecorder: View {
+    package init(hotKey: LayoutHotKey, suspend: @escaping (Bool) -> Void = { _ in },
+                 validate: @escaping (LayoutHotKey) -> String? = { _ in nil }, onChange: @escaping (LayoutHotKey) -> Void) {
+        self.hotKey = hotKey
+        self.suspend = suspend
+        self.validate = validate
+        self.onChange = onChange
+    }
+
+    package let hotKey: LayoutHotKey
     /// Пока идёт запись, старое сочетание нужно отключить, чтобы оно не сработало.
-    var suspend: (Bool) -> Void = { _ in }
+    package var suspend: (Bool) -> Void = { _ in }
     /// Почему сочетание нельзя сохранить (например, оно уже занято другой функцией Mac Utils); nil — можно.
-    var validate: (LayoutHotKey) -> String? = { _ in nil }
-    let onChange: (LayoutHotKey) -> Void
+    package var validate: (LayoutHotKey) -> String? = { _ in nil }
+    package let onChange: (LayoutHotKey) -> Void
 
     @State private var recording = false
     @State private var monitor: Any?
@@ -18,7 +26,7 @@ struct ShortcutRecorder: View {
     @State private var hovered = false
     @Environment(\.isEnabled) private var enabled
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: DS.Space.s) {
             if let hint {
                 Text(hint).font(DS.Font.rowSub).foregroundStyle(DS.Tone.warning.text)

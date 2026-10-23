@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUDesign
 
 /// QR: тихая зона, целый масштаб, граничные тексты.
 final class QRQuietZoneTests: XCTestCase {

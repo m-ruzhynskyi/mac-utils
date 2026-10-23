@@ -1,5 +1,6 @@
 import AppKit
 import MUCore
+import MUDesign
 
 /// Фон под оформленным снимком или коллажем.
 enum ShotBackground: String, CaseIterable, Identifiable {

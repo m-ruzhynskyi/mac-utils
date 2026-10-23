@@ -5,6 +5,7 @@ import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
+import MUDesign
 
 /// Код комнаты и адрес (без сети — для тестов).
 enum ShareCode {

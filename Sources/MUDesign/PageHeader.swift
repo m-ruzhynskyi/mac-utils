@@ -1,12 +1,12 @@
 import SwiftUI
 
 /// Плитка шапки страницы: 46×46, радиус 14, лайм, значок раздела цветом `accInk`.
-struct HeaderTile: View {
-    let systemImage: String
+package struct HeaderTile: View {
+    package let systemImage: String
     @Environment(\.colorScheme) private var scheme
     @ScaledMetric(relativeTo: .largeTitle) private var side = DS.Size.headerTile
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
         Image(systemName: systemImage)
             .font(.system(size: side * 0.48, weight: .medium))
@@ -19,16 +19,16 @@ struct HeaderTile: View {
 }
 
 /// Шапка страницы настроек: лаймовая плитка, заголовок, подзаголовок, справа — дополнительный контрол и главный переключатель.
-struct PageHeader<Accessory: View>: View {
-    let section: SettingsSection
-    var subtitle: String?
-    var isOn: Binding<Bool>?
-    var toggleLabel: String?
+package struct PageHeader<Accessory: View>: View {
+    package let section: SettingsSection
+    package var subtitle: String?
+    package var isOn: Binding<Bool>?
+    package var toggleLabel: String?
     /// Переключатель виден, но недоступен (например, функция не поддерживается этой macOS).
-    var toggleEnabled = true
-    let accessory: Accessory
+    package var toggleEnabled = true
+    package let accessory: Accessory
 
-    init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
+    package init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
          toggleEnabled: Bool = true, @ViewBuilder accessory: () -> Accessory) {
         self.section = section
         self.subtitle = subtitle
@@ -42,7 +42,7 @@ struct PageHeader<Accessory: View>: View {
 
     @ScaledMetric(relativeTo: .largeTitle) private var tileSide = DS.Size.headerTile
 
-    var body: some View {
+    package var body: some View {
         // По верху: при подзаголовке в 2–3 строки плитка остаётся рядом с заголовком, а переключатель — по центру плитки.
         HStack(alignment: .top, spacing: 14) {
             HeaderTile(systemImage: section.symbol)
@@ -75,19 +75,19 @@ struct PageHeader<Accessory: View>: View {
 }
 
 extension PageHeader where Accessory == EmptyView {
-    init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
+    package init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
          toggleEnabled: Bool = true) {
         self.init(section, subtitle: subtitle, isOn: isOn, toggleLabel: toggleLabel, toggleEnabled: toggleEnabled) { EmptyView() }
     }
 }
 
 /// Заголовок группы: точка `accLine` и капс 11/800 цветом `mute`.
-struct GroupLabel: View {
-    let title: String
+package struct GroupLabel: View {
+    package let title: String
 
-    init(_ title: String) { self.title = title }
+    package init(_ title: String) { self.title = title }
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: DS.Space.s) {
             Circle().fill(Color.dsAccLine).frame(width: 6, height: 6).accessibilityHidden(true)
             Text(title.uppercased())
@@ -103,16 +103,16 @@ struct GroupLabel: View {
 }
 
 /// Страница настроек Graphite: фон `bg`, поля 30×36, шапка, затем блоки через 18 pt; ширина содержимого ≤ 760, по центру.
-struct SettingsPage<Content: View, Accessory: View>: View {
-    let section: SettingsSection
-    var subtitle: String?
-    var isOn: Binding<Bool>?
-    var toggleLabel: String?
-    var toggleEnabled = true
-    let accessory: Accessory
-    let content: Content
+package struct SettingsPage<Content: View, Accessory: View>: View {
+    package let section: SettingsSection
+    package var subtitle: String?
+    package var isOn: Binding<Bool>?
+    package var toggleLabel: String?
+    package var toggleEnabled = true
+    package let accessory: Accessory
+    package let content: Content
 
-    init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
+    package init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
          toggleEnabled: Bool = true, @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content) {
         self.section = section
         self.subtitle = subtitle
@@ -123,7 +123,7 @@ struct SettingsPage<Content: View, Accessory: View>: View {
         self.content = content()
     }
 
-    var body: some View {
+    package var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.Space.section) {
                 PageHeader(section, subtitle: subtitle, isOn: isOn, toggleLabel: toggleLabel, toggleEnabled: toggleEnabled) { accessory }
@@ -140,7 +140,7 @@ struct SettingsPage<Content: View, Accessory: View>: View {
 }
 
 extension SettingsPage where Accessory == EmptyView {
-    init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
+    package init(_ section: SettingsSection, subtitle: String? = nil, isOn: Binding<Bool>? = nil, toggleLabel: String? = nil,
          toggleEnabled: Bool = true, @ViewBuilder content: () -> Content) {
         self.init(section, subtitle: subtitle, isOn: isOn, toggleLabel: toggleLabel, toggleEnabled: toggleEnabled,
                   accessory: { EmptyView() }, content: content)
@@ -148,12 +148,12 @@ extension SettingsPage where Accessory == EmptyView {
 }
 
 /// Сноска под карточкой или шапкой: мелкий текст `mute` с отступом как у строк карточки.
-struct Footnote: View {
-    let text: String
+package struct Footnote: View {
+    package let text: String
 
-    init(_ text: String) { self.text = text }
+    package init(_ text: String) { self.text = text }
 
-    var body: some View {
+    package var body: some View {
         Text(text)
             .font(DS.Font.rowSub)
             .foregroundStyle(.dsMute)

@@ -6,35 +6,35 @@ extension View {
     /// (true — показан, false — скрыт), поэтому пары «показан/скрыт» всегда сходятся и модели могут считать зрителей.
     /// В отличие от onAppear/onDisappear ловит и закрытие окна (окно настроек не освобождается при закрытии, и
     /// onDisappear не приходит), сворачивание, закрытие поповера и окно, целиком закрытое другим.
-    func onScreen(_ changed: @escaping @MainActor (Bool) -> Void) -> some View {
+    package func onScreen(_ changed: @escaping @MainActor (Bool) -> Void) -> some View {
         background(OnScreenProbe(changed: changed))
     }
 }
 
 private struct OnScreenProbe: NSViewRepresentable {
-    let changed: @MainActor (Bool) -> Void
+    package let changed: @MainActor (Bool) -> Void
 
-    func makeNSView(context: Context) -> OnScreenView {
+    package func makeNSView(context: Context) -> OnScreenView {
         let view = OnScreenView()
         view.changed = changed
         return view
     }
 
-    func updateNSView(_ view: OnScreenView, context: Context) {
+    package func updateNSView(_ view: OnScreenView, context: Context) {
         view.changed = changed
     }
 
-    static func dismantleNSView(_ view: OnScreenView, coordinator: ()) {
+    package static func dismantleNSView(_ view: OnScreenView, coordinator: ()) {
         view.detach()
     }
 }
 
-final class OnScreenView: NSView {
-    var changed: (@MainActor (Bool) -> Void)?
+package final class OnScreenView: NSView {
+    package var changed: (@MainActor (Bool) -> Void)?
     private var shown = false
     private var observers: [NSObjectProtocol] = []
 
-    override func viewDidMoveToWindow() {
+    package override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers = []
@@ -50,7 +50,7 @@ final class OnScreenView: NSView {
     }
 
     /// Вид убран из окна насовсем: сообщаем «скрыт», если ещё не сообщили.
-    func detach() {
+    package func detach() {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers = []
         set(false)
@@ -67,5 +67,5 @@ final class OnScreenView: NSView {
         changed?(now)
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    package override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

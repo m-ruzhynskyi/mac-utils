@@ -3,15 +3,15 @@ import SwiftUI
 
 /// Витрина компонентов Graphite во всех состояниях — для снимков (`UISnapshotTests`) и сверки с концептом.
 /// Только в отладочной сборке.
-struct ComponentsGallery: View {
-    enum Part: String, CaseIterable {
+package struct ComponentsGallery: View {
+    package enum Part: String, CaseIterable {
         /// Как страница настроек: шапка, карточки-списки, группы, кейкапы, переключатели, чипы, сегменты, баннеры.
         case settings
         /// Поповер, первый запуск, пустые состояния, плавающие панели, таблетки, кнопки во всех состояниях.
         case surfaces
     }
 
-    var part: Part = .settings
+    package var part: Part = .settings
 
     @State private var login = true
     @State private var autoUpdate = true
@@ -21,7 +21,7 @@ struct ComponentsGallery: View {
     @State private var speed = 1.4
     @State private var switcher = true
 
-    var body: some View {
+    package var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.Space.section) {
                 switch part {
@@ -51,8 +51,8 @@ struct ComponentsGallery: View {
         }
         GroupLabel("Горячие клавиши")
         ListCard {
-            KeyRow("Снимок экрана", action: .screenshot)
-            KeyRow("Распознать текст", action: .screenshotOCR)
+            KeyRow("Снимок экрана", keys: ["⇧", "⌘", "X"])
+            KeyRow("Распознать текст", keys: ["⌥", "⇧", "⌘", "X"])
             KeyRow("Переключатель приложений", keys: ["⌥", " Tab"])
             KeyRow("Рисование на экране", keys: ["⌃", "⌥", "A"])
         }
@@ -119,9 +119,9 @@ struct ComponentsGallery: View {
                 }
                 GroupLabel("Захват")
                 ListCard(style: .field) {
-                    Row("Снять область или окно", systemImage: "camera.viewfinder", tile: .accent) { Keycap(action: .screenshot, compact: true, onPanel: true) }
+                    Row("Снять область или окно", systemImage: "camera.viewfinder", tile: .accent) { Keycap(["⇧", "⌘", "X"], compact: true, onPanel: true) }
                     Row("Распознать текст", subtitle: "Текст сразу в буфер", systemImage: "text.viewfinder") {
-                        Keycap(action: .screenshotOCR, compact: true, onPanel: true)
+                        Keycap(["⌥", "⇧", "⌘", "X"], compact: true, onPanel: true)
                     }
                     Row("Записать экран", subtitle: "Выделите область и нажмите R", systemImage: "record.circle", tile: .record) {
                         Keycap(["R"], compact: true, onPanel: true)

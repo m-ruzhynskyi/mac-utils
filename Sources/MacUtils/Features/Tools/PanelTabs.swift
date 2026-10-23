@@ -1,5 +1,6 @@
 import Foundation
 import MUCore
+import MUDesign
 
 /// Какие разделы Mac Utils показываются вкладками в панели 🔧.
 enum PanelTabs {
