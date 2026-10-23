@@ -823,16 +823,19 @@ export class Room {
     const type = bytes[0];
     if (type !== 1 && type !== 3) return true; // звук и прочее — как раньше
     let flow = this.flow.get(viewer);
-    if (!flow) { flow = { sent: 0, acked: 0, acking: false, skipping: false, skipped: 0 }; this.flow.set(viewer, flow); }
+    if (!flow) { flow = { sent: 0, acked: 0, acking: false, skipping: false, skipped: 0, lastH264: 0 }; this.flow.set(viewer, flow); }
     if (!flow.acking) { flow.sent++; return true; }
     const debt = flow.sent - flow.acked;
-    const key = type === 1 || bytes[1] === 1;
+    const now = Date.now();
+    if (type === 3) flow.lastH264 = now;
+    // H.264-зритель возобновляется только на ключевом H.264, пока ведущий его шлёт (JPEG при этом — параллельные картинки
+    // для старых зрителей или мост); ведущий только с картинками (H.264 нет дольше секунды) — на любом JPEG.
+    const key = type === 3 ? bytes[1] === 1 : (!viewer.deserializeAttachment()?.h264 || now - flow.lastH264 > 1000);
     if (!flow.skipping && debt > DEBT_LIMIT) { flow.skipping = true; flow.skipped = 0; }
     if (flow.skipping) {
       if (key && debt <= DEBT_RESUME) flow.skipping = false;
       else {
         flow.skipped++;
-        const now = Date.now();
         if (debt <= DEBT_RESUME && now - this.lastKeyAsk >= KEY_ASK_MS) { this.lastKeyAsk = now; this.notifyHost(); }
         return false;
       }

@@ -1169,3 +1169,23 @@ test('медленный зритель: долг больше предела �
   ack(slow, 9999); // подтвердить больше отправленного нельзя
   assert.equal(f.room.flow.get(slow).acked, 62);
 });
+
+test('медленный H.264-зритель возобновляется на ключевом H.264, а не на параллельном JPEG', () => {
+  const f = fixture(), host = hostLive(f);
+  const slow = f.socket('viewer', { id: '1', approved: true, h264: true, lastSeen: 1_000_000 });
+  let got = 0;
+  slow.send = (m) => { if (typeof m !== 'string') got++; else slow.messages.push(JSON.parse(m)); };
+  const h264 = (key) => new Uint8Array([3, key ? 1 : 0, 0, 0, 1]).buffer;
+  const jpeg = new Uint8Array([1, 0xff, 0xd8]).buffer;
+  f.room.webSocketMessage(host, h264(true));
+  f.room.webSocketMessage(slow, JSON.stringify({ type: 'ack', n: 1 }));
+  for (let i = 0; i < 70; i++) f.room.webSocketMessage(host, h264(false));
+  const stuck = got;
+  f.room.webSocketMessage(slow, JSON.stringify({ type: 'ack', n: stuck }));
+  f.room.webSocketMessage(host, jpeg);
+  assert.equal(got, stuck, 'JPEG не возобновляет, пока идёт H.264');
+  f.room.webSocketMessage(host, h264(false));
+  assert.equal(got, stuck, 'дельта не возобновляет');
+  f.room.webSocketMessage(host, h264(true));
+  assert.equal(got, stuck + 1, 'ключевой H.264 возобновляет');
+});

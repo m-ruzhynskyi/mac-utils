@@ -914,13 +914,13 @@ async function watch() {
   stopWatch();
   status("Подключаюсь…");
   watchingId = id;
-  viewRetries = 0;
+  viewRetries = 0; viewEverOpened = false;
   openView(id);
 }
 
 // Повторы после обрыва: как на Mac (`ShareViewerReconnect`) — 1, 2, 4, 8, 15, 15, 15 с, последний кадр остаётся на экране.
 const VIEW_RETRY_SECONDS = [1, 2, 4, 8, 15, 15, 15];
-let viewRetries = 0, viewRetryTimer = 0;
+let viewRetries = 0, viewRetryTimer = 0, viewEverOpened = false;
 function scheduleViewRetry(id) {
   if (viewRetries >= VIEW_RETRY_SECONDS.length) { status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); return; }
   const delay = VIEW_RETRY_SECONDS[viewRetries++];
@@ -938,7 +938,7 @@ function openView(id) {
   viewSocket.binaryType = "arraybuffer";
   // Подтверждаем приём видео каждые ACK_EVERY пакетов: relay по этому видит, не отстал ли зритель, и ему не копит очередь.
   let videoSeen = 0;
-  viewSocket.onopen = () => { viewRetries = 0; };
+  viewSocket.onopen = () => { viewEverOpened = true; };
   viewSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
       let m; try { m = JSON.parse(event.data); } catch (_) { return; }
@@ -949,7 +949,7 @@ function openView(id) {
       }
       else if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
       else if (m.type === "game") gameReceive(m, "host", hostName || display(id), viewGameSend);
-      else if (m.type === "accepted") { hostName = m.name || ""; visited(id, m.name, viewHostKey); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; renderMonitors(); }
+      else if (m.type === "accepted") { viewRetries = 0; hostName = m.name || ""; visited(id, m.name, viewHostKey); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; renderMonitors(); }
       else if (m.type === "declined") { status("Вам не разрешили подключиться"); stopWatch(true); }
       else if (m.type === "ended") { status("Трансляция завершена"); stopWatch(true); }
       else if (m.type === "reconnecting") status("Ведущий переподключается…");
@@ -986,6 +986,9 @@ function openView(id) {
     // Обрыв сети, сон, перезапуск relay: до 7 попыток; не повторяем, если ведущий отказал (`declined`) или закончил (`ended`) —
     // там stopWatch сам закрывает сокет с кодом 1000 и сюда не попадаем.
     viewSocket = null;
+    // ID без трансляции (relay отвечает 404 на подключение, код 1006 без открытия) и опечатка в ID — сразу сообщение,
+    // без повторов: они нужны, только если соединение уже было.
+    if (!viewEverOpened) { status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); return; }
     scheduleViewRetry(id);
   };
 }
