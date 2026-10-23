@@ -112,7 +112,8 @@ function electron(world) {
       if (world.driftAfterPlace) setTimeout(() => { win.phys = { ...win.phys, width: win.phys.width + 7 }; win.emit("resize"); }, 5);
       const to = world.displays.find((d) => contains(d.phys, x, y));
       const k = to && to.scaleFactor !== win.scale ? to.scaleFactor / win.scale : 1;
-      win.phys = { x, y, width: Math.round(width * k), height: Math.round(height * k) };
+      // world.clampHeight: система ужимает окно до рабочей области (без панели задач): монитор 1080 → 1040.
+      win.phys = { x, y, width: Math.round(width * k), height: Math.min(Math.round(height * k), world.clampHeight ?? Infinity) };
       if (to) win.scale = to.scaleFactor;
       return setImmediate(() => done(null, `${win.phys.x} ${win.phys.y} ${win.phys.width} ${win.phys.height} ${Math.round(96 * win.scale)}\n`));
     }
@@ -445,7 +446,7 @@ test("помощник не ответил на place и protect: метки н�
     assert.equal(host.overlay.visible, true, "окно меток на экране");
     assert.deepEqual(host.marksState(), { screen: true, inVideo: true, reason: "no-answer" });
     assert.equal(host.places().length, 2, "одна повторная попытка, не больше");
-    assert.match(host.log(), / unprotected .* phys=- affinity=- order=2 marks=no-answer overlays=1 /);
+    assert.match(host.log(), / unprotected .* phys=- affinity=- order=3 err=- exstyle=- marks=no-answer overlays=1 /);
     assert.match(host.log(), / place-dip /, "помощник не поставил окно — по-старому, в DIP");
     assert.ok(host.overlay.calls.includes("setBounds"));
   } finally { host.stop(); }
@@ -527,7 +528,7 @@ test("старая Windows 10 (affinity 0x1 — в видео чёрное): з�
     assert.equal(calls.at(-1), "protect:false", `защита снята: ${calls}`);
     assert.equal(host.overlay.affinity, 0);
     assert.ok(!host.fake.helperCalls.some(([c], i, all) => c === "protect" && all.slice(0, i).some(([p]) => p === "protect")), "второй порядок не нужен");
-    assert.match(host.log(), / unprotected .* affinity=0x1 order=1 marks=old-windows overlays=1 build=1\.1\.0 os=\S+\n/);
+    assert.match(host.log(), / unprotected .* affinity=0x1 order=1 err=\d+ exstyle=0x[0-9a-f]+ marks=old-windows overlays=1 build=1\.1\.0 os=\S+\n/);
     assert.equal(host.marksSent(), 1, "метка поверх экрана показана");
     assert.equal(host.overlay.visible, true);
     assert.deepEqual(host.marksState(), { screen: true, inVideo: true, reason: "old-windows" });
@@ -569,7 +570,7 @@ test("исключение подтверждено — метки поверх 
     await tick(80);
     assert.equal(host.marksSent(), 1);
     assert.deepEqual(host.marksState(), { screen: true, inVideo: false, reason: "" });
-    assert.match(host.log(), / protect .* affinity=0x11 order=1 marks=screen overlays=1 /);
+    assert.match(host.log(), / protect .* affinity=0x11 order=1 err=\d+ exstyle=0x[0-9a-f]+ marks=screen overlays=1 /);
   } finally { host.stop(); }
 });
 
@@ -829,5 +830,19 @@ test("у окна меток осталась рамка: клиентская �
     assert.ok(Math.abs(fixed.fw - 1920 / 1904) < 1e-9 && Math.abs(fixed.fh - 1080 / 1041) < 1e-9);
     assert.ok(fixed.fy < 0, "область начинается выше клиентской: заголовок сверху");
     assert.match(host.log(), / client-mismatch monitor=0,0,1920x1080 client=8,31,1904x1041 page=1904x1041@1\n/);
+  } finally { host.stop(); }
+});
+
+test("система ужала окно меток до рабочей области: доли считаются от фактического окна, метка на месте", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true);
+  const host = await start(world([d], [screenSource(d, 1)], { clampHeight: 1040 }));
+  try {
+    await host.share("screen:1:0");
+    host.mark(0.5, 0.25);
+    await tick(80);
+    const region = host.overlay.sent.filter(([c]) => c === "region").at(-1)[1];
+    assert.ok(Math.abs(region.fh - 1080 / 1040) < 1e-9, `доля высоты ${region.fh}`);
+    near(host.landed(), [960, 270], "метка при окне 1920x1040");
+    assert.match(host.log(), / place-mismatch .* phys=0,0,1920x1040@/);
   } finally { host.stop(); }
 });

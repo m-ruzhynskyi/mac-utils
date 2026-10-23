@@ -45,6 +45,7 @@ let marksInVideo = null; // null — ещё не проверено, false — �
 let verifyTimer = null;
 const VERIFY_MS = Number(process.env.MU_OVERLAY_VERIFY_MS) || 15_000; // пока окно меток показано, исключение перепроверяется
 const overlays = new Set(); // все созданные окна меток: должно жить одно
+let protectErr = null, exStyle = null; // что сказал помощник о последней попытке: код ошибки Windows и расширенный стиль окна
 let settled = false; // проверка защиты закончилась (исключено или нет): метки больше не ждут
 let shielded = false; // защита после показа проверена помощником: до этого метки ждут, чтобы не попасть в видео
 let checks = 0; // контрольных сверок рамки окна меток на этом мониторе (не больше MAX_CHECKS — без бесконечных циклов)
@@ -90,7 +91,7 @@ function logPlacement(event) {
     const displays = all.map((d, i) => `${i + 1}:${rect(d.bounds)}@${d.scaleFactor}`).join(" ");
     const kind = /^window:/.test(chosen?.source?.id || "") ? "window" : "screen";
     fs.appendFileSync(file, `${new Date().toISOString()} ${event} ${kind} displays=[${displays}] primary=${number(primary)} source=${number(shared)} ` +
-      `target=${rect(target)} monitor=${rect(monitor)} phys=${placed ? `${rect(placed)}@${placed.dpi}` : "-"} affinity=${hex(affinity)} order=${protectOrder} ` +
+      `target=${rect(target)} monitor=${rect(monitor)} phys=${placed ? `${rect(placed)}@${placed.dpi}` : "-"} affinity=${hex(affinity)} order=${protectOrder} err=${protectErr ?? "-"} exstyle=${exStyle == null ? "-" : "0x" + exStyle.toString(16)} ` +
       `marks=${marksInVideo === null ? "-" : marksInVideo || "screen"} overlays=${overlays.size} build=${app.getVersion()} os=${require("os").release()}\n`);
   } catch (_) {}
 }
@@ -188,12 +189,16 @@ function placeOverlay(fresh = true) {
     if (!place.same(placed, want) && n < 2) return attempt(n + 1);
     placedOn = want; placing = null;
     if (place.same(placed, want)) {
+      clientRect = null;
       logPlacement("placed");
       scheduleCheck();
     } else {
       // Помощник окно на монитор не поставил (нет ответа, старый помощник, отказ Windows) — по-старому, в DIP.
       const away = !placed || !place.same(place.monitorOf(placed, monitors()), want);
       if (away) { placeByDip(mine, want); checks = MAX_CHECKS; } // сверять нечего: помощник окно не двигает
+      // Система ужала окно (рабочая область без панели задач и т. п.): доли области считаем от фактического
+      // прямоугольника окна, иначе метки уедут по вертикали (журнал: 1920x1040 вместо 1920x1080).
+      else { clientRect = { x: placed.x, y: placed.y, width: placed.width, height: placed.height }; sendRegion(); }
       logPlacement(away ? "place-dip" : "place-mismatch");
     }
     flushMarks();
@@ -256,11 +261,22 @@ function protectOverlay() {
     const match = /affinity=0x([0-9a-f]+)/i.exec(out);
     affinity = match ? parseInt(match[1], 16) : null;
     protectOrder = order;
+    const err = /err=(\d+)/.exec(out), style = /exstyle=0x([0-9a-f]+)/i.exec(out);
+    protectErr = err ? Number(err[1]) : null; exStyle = style ? parseInt(style[1], 16) : null;
     if (affinity !== EXCLUDE_FROM_CAPTURE && affinity !== MONITOR_ONLY && order === 1) {
       mine.setIgnoreMouseEvents(false);
       mine.setContentProtection(true);
       mine.setIgnoreMouseEvents(true);
       return check(2);
+    }
+    if (affinity !== EXCLUDE_FROM_CAPTURE && affinity !== MONITOR_ONLY && order === 2) {
+      // Третий порядок: защита на скрытом окне, затем показ (журнал: на показанном окне affinity оставался 0x0 дважды).
+      mine.hide();
+      mine.setContentProtection(false);
+      mine.setContentProtection(true);
+      mine.showInactive();
+      mine.setIgnoreMouseEvents(true);
+      return check(3);
     }
     if (affinity !== EXCLUDE_FROM_CAPTURE) return marksIntoVideo(affinity === MONITOR_ONLY ? "old-windows" : affinity === null ? "no-answer" : "unprotected");
     shielded = true; settled = true;
@@ -376,7 +392,7 @@ function prepareOverlay() {
   // Окно от прошлой трансляции (отказ после выбора источника, перезагрузка страницы) — с его областью и помощником.
   hideOverlay();
   overlayReady = false; overlayShown = false; sourceHidden = false; target = null; monitor = null; trackedRect = null; marksLogged = 0;
-  placedOn = null; placing = null; placed = null; clientRect = null; affinity = null; protectOrder = 1; shielded = false; settled = false; marksInVideo = null;
+  placedOn = null; placing = null; placed = null; clientRect = null; affinity = null; protectErr = null; exStyle = null; protectOrder = 1; shielded = false; settled = false; marksInVideo = null;
   // Окна меток прежних трансляций, если какое-то не закрылось, — закрыть: второе окно с метками было бы в видео.
   for (const old of overlays) if (!old.isDestroyed()) old.close();
   overlays.clear();

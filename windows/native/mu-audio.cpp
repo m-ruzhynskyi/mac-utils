@@ -295,7 +295,11 @@ static int track(HWND window) {
 // не совпадают с монитором. Здесь — сразу физические пиксели (помощник Per-Monitor V2); что вышло, проверяет приложение.
 static int place(HWND window, int x, int y, int w, int h) {
   if (!IsWindow(window)) return 1;
-  SetWindowPos(window, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE);
+  // SWP_NOSENDCHANGING: окно не успевает «поправить» размер в WM_WINDOWPOSCHANGING (ужатие до рабочей области).
+  SetWindowPos(window, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+  RECT after = {};
+  GetWindowRect(window, &after);
+  if (after.right - after.left != w || after.bottom - after.top != h) SetWindowPos(window, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_NOSENDCHANGING | SWP_FRAMECHANGED);
   RECT rect = {};
   GetWindowRect(window, &rect);
   printf("%ld %ld %ld %ld %u\n", rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, GetDpiForWindow(window));
