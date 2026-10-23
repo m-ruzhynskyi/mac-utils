@@ -76,7 +76,7 @@ struct XLSXSource: ConnectionsSource {
             // Вторая колонка того же поля не читается — показываем её как нераспознанную.
             if let f = ConnectionHeaders.field(for: title), columns[f] == nil {
                 columns[f] = i
-                matched.append(MatchedColumn(title: title, field: f))
+                matched.append(MatchedColumn(title: title, field: f, column: i))
             } else {
                 unrecognized.append(title)
             }

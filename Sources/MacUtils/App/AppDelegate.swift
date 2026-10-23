@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         BusyRegistry.shared.installDefaultProviders()
         observeSystemShutdown()
         PanelTabs.migrate()
+        RemoteConnectionsCenter.addPanelTabOnce()
         MainMenu.install()
         lastTrusted = Permissions.accessibility
 
@@ -52,6 +53,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             modifiers: cmdKey | optionKey | controlKey
         ) {
             AppAction(hotKey: .videoPlayer).run()
+        }
+        HotKeyCenter.shared.register(
+            id: HotKeyID.remoteConnections,
+            keyCode: kVK_ANSI_A,
+            modifiers: cmdKey | optionKey
+        ) {
+            AppAction(hotKey: .remoteConnections).run()
         }
 
         // Чистая установка: «Что нового» не нужно (оно только после обновления). Делаем до `Updater.start()`.
@@ -335,6 +343,7 @@ enum HotKeyID {
     static let focus: UInt32 = 33
     static let textEditor: UInt32 = 34
     static let videoPlayer: UInt32 = 35
+    static let remoteConnections: UInt32 = 36
 }
 
 /// Куда открыть файлы из Finder и Dock: видео и звук — в плеер; субтитры — в плеер, если он открыт (к текущему видео),

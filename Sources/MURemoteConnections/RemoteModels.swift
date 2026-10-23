@@ -19,6 +19,24 @@ public enum RemoteProgram: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// Ссылка, которая открывает подключение без пароля. AnyDesk: `anydesk:<ID или алиас>` (документирована с 6.3.1).
+    /// TeamViewer: `teamviewer10://control?device=<ID>` — схема из сообщества, поведение в TeamViewer 15 проверяется в A-3.
+    /// ID уже нормализован (цифры или алиас из латиницы, цифр и `._-@`), экранировать нечего.
+    public func connectURL(id: String) -> URL? {
+        switch self {
+        case .anyDesk: return URL(string: "anydesk:\(id)")
+        case .teamViewer: return id.contains("@") ? nil : URL(string: "teamviewer10://control?device=\(id)")
+        }
+    }
+
+    /// Страница загрузки программы (для ошибки «не установлена»).
+    public var downloadURL: URL {
+        switch self {
+        case .anyDesk: return URL(string: "https://anydesk.com/download")!
+        case .teamViewer: return URL(string: "https://www.teamviewer.com/download/")!
+        }
+    }
+
     /// Поддерживает ли программа алиасы вида `имя@ad`.
     public var supportsAliases: Bool { self == .anyDesk }
 
@@ -102,6 +120,20 @@ public struct DuplicateGroup: Equatable, Sendable {
 public struct MatchedColumn: Equatable, Sendable {
     public let title: String
     public let field: ConnectionField
+    /// Номер колонки листа с нуля (XLSX); у XML — nil.
+    public let column: Int?
+
+    /// Буква колонки («A», «AB»); у XML — nil.
+    public var columnLetter: String? {
+        guard var n = column.map({ $0 + 1 }) else { return nil }
+        var s = ""
+        while n > 0 {
+            let r = (n - 1) % 26
+            s = String(UnicodeScalar(UInt8(65 + r))) + s
+            n = (n - 1) / 26
+        }
+        return s
+    }
 }
 
 /// Итог проверки файла. Всё показывается в меню подключений, отдельного окна нет.

@@ -365,6 +365,7 @@ struct SettingsSectionPage: View {
             case .shots: ScreenshotLibraryView(library: .shared, compact: compact).navigationTitle("Мои снимки")
             case .textEditor: TextEditorPage()
             case .videoPlayer: VideoPlayerPage()
+            case .remote: RemoteConnectionsPanel()
         }
     }
 }
