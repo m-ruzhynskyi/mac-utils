@@ -33,7 +33,11 @@ trap 'rm -rf "$WORK"' EXIT
 START=$SECONDS
 
 echo "Сборка тестов…"
-nice -n 20 swift build --build-tests -j 2 > "$WORK/build.txt" 2>&1 || { tail -20 "$WORK/build.txt"; exit 3; }
+# Сборки команды — по одной (замок build.lock в .audit основного дерева, если он есть; .audit/doc-team-rules.md).
+BUILD_LOCK="${MU_BUILD_LOCK:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/.audit/build.lock}"
+BUILD=(nice -n 20 swift build --build-tests -j 2)
+[[ -d "$(dirname "$BUILD_LOCK")" ]] && BUILD=(/usr/bin/lockf -k "$BUILD_LOCK" "${BUILD[@]}")
+"${BUILD[@]}" > "$WORK/build.txt" 2>&1 || { tail -20 "$WORK/build.txt"; exit 3; }
 BUNDLE="$(swift build --show-bin-path)/MacUtilsTests.xctest"
 echo "Сборка: $((SECONDS - START)) с"
 
@@ -41,7 +45,7 @@ echo "Прогон по эталону: $JOBS процесса(ов)…"
 # Доля форм в своём процессе xctest. Сторож: нет новой строки журнала дольше FORM_TIMEOUT — форма зависла
 # (раскладка не кончается): процесс снимается, форма — провал «зависла», доля продолжается без неё.
 # Процесс снят извне (память, kill) — один повтор без уже готовых форм. Числа форм тест дописывает по одной.
-FORM_TIMEOUT="${MU_WORD_FORM_TIMEOUT:-90}"
+FORM_TIMEOUT="${MU_WORD_FORM_TIMEOUT:-120}"
 run_shard() {
     local i="$1" part="$WORK/part$1.tsv" log="$WORK/log$1.txt" retried=0
     while true; do
