@@ -2,51 +2,50 @@ import AVFoundation
 import Foundation
 import MUCore
 import MUDesign
-import MUAudio
 
 /// Субтитры текущего файла: встроенные (tx3g, WebVTT в MP4) и внешние (SRT, ASS, VTT).
 /// Встроенные читаются из файла заранее и рисуются тем же слоем, что внешние: один вид, размер, подложка и сдвиг
 /// для всех. Системный рендер AVPlayer выключен.
 @MainActor
-final class SubtitleController: ObservableObject {
-    struct Embedded: Identifiable, Equatable {
-        let id: Int32
-        let title: String
-        let language: String?
-        let codec: String
-        let track: SubtitleTrack
+package final class SubtitleController: ObservableObject {
+    package struct Embedded: Identifiable, Equatable {
+        package let id: Int32
+        package let title: String
+        package let language: String?
+        package let codec: String
+        package let track: SubtitleTrack
     }
 
-    struct External: Identifiable, Equatable {
-        let id = UUID()
-        let url: URL
-        let language: String?
-        var track: SubtitleTrack
-        var encoding: TextEncoding
+    package struct External: Identifiable, Equatable {
+        package let id = UUID()
+        package let url: URL
+        package let language: String?
+        package var track: SubtitleTrack
+        package var encoding: TextEncoding
         /// Найден рядом с видео (а не добавлен руками).
-        let nearby: Bool
+        package let nearby: Bool
 
-        var title: String { url.lastPathComponent }
+        package var title: String { url.lastPathComponent }
     }
 
-    enum Selection: Equatable {
+    package enum Selection: Equatable {
         case off
         case embedded(Int32)
         case external(UUID)
     }
 
-    @Published private(set) var embedded: [Embedded] = []
-    @Published private(set) var external: [External] = []
-    @Published private(set) var selection: Selection = .off
+    @Published package private(set) var embedded: [Embedded] = []
+    @Published package private(set) var external: [External] = []
+    @Published package private(set) var selection: Selection = .off
     /// Сдвиг (Z / X): плюс — позже.
-    @Published private(set) var delay: Double = 0
-    @Published var lastError: String?
+    @Published package private(set) var delay: Double = 0
+    @Published package var lastError: String?
 
     private weak var model: PlayerModel?
 
-    init(model: PlayerModel) { self.model = model }
+    package init(model: PlayerModel) { self.model = model }
 
-    var activeTrack: SubtitleTrack? {
+    package var activeTrack: SubtitleTrack? {
         switch selection {
         case .off: return nil
         case .embedded(let id): return embedded.first { $0.id == id }?.track
@@ -54,22 +53,22 @@ final class SubtitleController: ObservableObject {
         }
     }
 
-    var selectedExternal: External? {
+    package var selectedExternal: External? {
         guard case .external(let id) = selection else { return nil }
         return external.first { $0.id == id }
     }
 
     /// Реплики на экране.
-    func cues(at time: Double) -> [SubtitleCue] { activeTrack?.cues(at: time - delay) ?? [] }
+    package func cues(at time: Double) -> [SubtitleCue] { activeTrack?.cues(at: time - delay) ?? [] }
 
-    var delayTitle: String {
+    package var delayTitle: String {
         let tenths = (delay * 10).rounded() / 10
         if tenths == 0 { return "Сдвиг субтитров 0 с" }
         let text = String(format: "%+.1f", tenths).replacingOccurrences(of: ".", with: ",").replacingOccurrences(of: "-", with: "−")
         return "Сдвиг субтитров \(text) с"
     }
 
-    func reset() {
+    package func reset() {
         pending.values.forEach { $0.cancel() }
         pending = [:]
         embedded = []
@@ -82,7 +81,7 @@ final class SubtitleController: ObservableObject {
     // MARK: - Загрузка
 
     /// Встроенные дорожки и файлы рядом; выбор по умолчанию — язык, выбранный в прошлый раз, или язык системы.
-    func load(asset: AVURLAsset, url: URL) async {
+    package func load(asset: AVURLAsset, url: URL) async {
         let tracks = (try? await asset.loadTracks(withMediaType: .subtitle)) ?? []
         var found: [Embedded] = []
         for track in tracks {
@@ -108,7 +107,7 @@ final class SubtitleController: ObservableObject {
 
     /// Выключены, если в прошлый раз выключили; иначе — дорожка или файл на запомненном языке или языке системы;
     /// файл `имя.srt` без языка рядом с видео — тоже.
-    func defaultSelection(preferred: [String] = Locale.preferredLanguages) -> Selection {
+    package func defaultSelection(preferred: [String] = Locale.preferredLanguages) -> Selection {
         let remembered = PlayerPrefs.subtitleLanguage
         if remembered == "off" { return .off }
         let languages = ([remembered].compactMap { $0 } + preferred.map { SubtitleFinder.languageCode($0) })
@@ -121,7 +120,7 @@ final class SubtitleController: ObservableObject {
     }
 
     /// Разбор файла вне главного потока. Отмена задачи (смена файла, закрытие окна) прерывает разбор.
-    nonisolated static func parseFile(_ url: URL, encoding: TextEncoding? = nil) async throws
+    package nonisolated static func parseFile(_ url: URL, encoding: TextEncoding? = nil) async throws
         -> (track: SubtitleTrack, encoding: TextEncoding) {
         let loaded = try SubtitleParser.load(url, encoding: encoding)
         try Task.checkCancellation()
@@ -130,7 +129,7 @@ final class SubtitleController: ObservableObject {
 
     /// Текст дорожки tx3g / WebVTT целиком (дорожка субтитров — килобайты). Другие форматы не показываем.
     /// Читается вне главного потока; отмена задачи останавливает чтение.
-    nonisolated static func read(_ track: AVAssetTrack, asset: AVAsset) async -> Embedded? {
+    package nonisolated static func read(_ track: AVAssetTrack, asset: AVAsset) async -> Embedded? {
         guard let format = try? await track.load(.formatDescriptions).first else { return nil }
         let subtype = format.mediaSubType.rawValue
         guard subtype == kCMTextFormatType_3GText || subtype == kCMSubtitleFormatType_WebVTT else { return nil }
@@ -173,7 +172,7 @@ final class SubtitleController: ObservableObject {
     }
 
     /// tx3g: 2 байта длины (big-endian), затем текст UTF-8 или UTF-16 с BOM; стилевые атомы после текста не нужны.
-    nonisolated static func tx3gText(_ data: Data) -> String {
+    package nonisolated static func tx3gText(_ data: Data) -> String {
         guard data.count >= 2 else { return "" }
         let length = Int(data[data.startIndex]) << 8 | Int(data[data.startIndex + 1])
         guard length > 0, data.count >= 2 + length else { return "" }
@@ -183,13 +182,13 @@ final class SubtitleController: ObservableObject {
     }
 
     /// WebVTT в MP4 (ISO 14496-30): `vttc` → `payl` с текстом; пустые образцы — `vtte`.
-    nonisolated static func webVTTText(_ data: Data) -> String {
+    package nonisolated static func webVTTText(_ data: Data) -> String {
         NeroChapters.boxes(in: data).filter { $0.type == "vttc" }.flatMap { NeroChapters.boxes(in: Data($0.payload)) }
             .filter { $0.type == "payl" }.map { String(decoding: $0.payload, as: UTF8.self) }.joined(separator: "\n")
     }
 
     /// Язык своим названием, как в списках дорожек плееров: «ru» → «Русский», «en» → «English».
-    nonisolated static func languageName(_ code: String?) -> String? {
+    package nonisolated static func languageName(_ code: String?) -> String? {
         guard let code, !code.isEmpty, code != "und" else { return nil }
         let short = SubtitleFinder.languageCode(code)
         guard let name = Locale(identifier: short).localizedString(forLanguageCode: short) else { return code }
@@ -198,7 +197,7 @@ final class SubtitleController: ObservableObject {
 
     // MARK: - Выбор
 
-    func select(_ selection: Selection) {
+    package func select(_ selection: Selection) {
         self.selection = selection
         lastError = nil
         let language: String?
@@ -213,7 +212,7 @@ final class SubtitleController: ObservableObject {
     /// «Добавить файл…» или перетаскивание `.srt` на окно — к текущему видео, сразу включается.
     /// Файл разбирается вне главного потока; сменили видео или закрыли окно — результат не нужен.
     @discardableResult
-    func addExternal(_ url: URL) -> Task<Void, Never> {
+    package func addExternal(_ url: URL) -> Task<Void, Never> {
         if let existing = external.first(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
             select(.external(existing.id))
             return Task {}
@@ -239,7 +238,7 @@ final class SubtitleController: ObservableObject {
 
     /// Ручной выбор кодировки внешнего файла: те же байты перечитываются (вне главного потока).
     @discardableResult
-    func reencode(_ encoding: TextEncoding) -> Task<Void, Never> {
+    package func reencode(_ encoding: TextEncoding) -> Task<Void, Never> {
         guard let current = selectedExternal else { return Task {} }
         return run { [weak self] in
             let result: Result<(track: SubtitleTrack, encoding: TextEncoding), Error>
@@ -268,9 +267,9 @@ final class SubtitleController: ObservableObject {
         return task
     }
 
-    func shiftDelay(_ step: Double) {
+    package func shiftDelay(_ step: Double) {
         delay = ((delay + step) * 10).rounded() / 10
     }
 
-    func resetDelay() { delay = 0 }
+    package func resetDelay() { delay = 0 }
 }

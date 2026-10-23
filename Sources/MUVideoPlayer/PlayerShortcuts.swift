@@ -1,10 +1,9 @@
 import AppKit
 import Carbon.HIToolbox
 import MUCore
-import MUScreenshot
 
 /// Действие плеера по клавише (§ 8.1 плана). Клавиши — только в окне плеера, без глобальных `HotKeyRegistry`.
-enum PlayerAction: String, CaseIterable {
+package enum PlayerAction: String, CaseIterable {
     case togglePlay
     case seekBackward, seekForward, seekBackwardMinute, seekForwardMinute, jumpBackward, jumpForward
     case frameBackward, frameForward
@@ -18,41 +17,41 @@ enum PlayerAction: String, CaseIterable {
 }
 
 /// Одна строка таблицы: название, раздел «Шпаргалки», клавиши для показа и для разбора событий.
-struct PlayerShortcut: Equatable {
-    struct Key: Hashable {
-        let keyCode: Int
-        let modifiers: NSEvent.ModifierFlags
+package struct PlayerShortcut: Equatable {
+    package struct Key: Hashable {
+        package let keyCode: Int
+        package let modifiers: NSEvent.ModifierFlags
 
-        init(_ keyCode: Int, _ modifiers: NSEvent.ModifierFlags = []) {
+        package init(_ keyCode: Int, _ modifiers: NSEvent.ModifierFlags = []) {
             self.keyCode = keyCode
             self.modifiers = modifiers.intersection(PlayerShortcuts.relevantModifiers)
         }
 
-        static func == (a: Key, b: Key) -> Bool { a.keyCode == b.keyCode && a.modifiers == b.modifiers }
-        func hash(into hasher: inout Hasher) {
+        package static func == (a: Key, b: Key) -> Bool { a.keyCode == b.keyCode && a.modifiers == b.modifiers }
+        package func hash(into hasher: inout Hasher) {
             hasher.combine(keyCode)
             hasher.combine(modifiers.rawValue)
         }
     }
 
-    let action: PlayerAction
-    let title: String
-    let section: String
+    package let action: PlayerAction
+    package let title: String
+    package let section: String
     /// Как показать: «Пробел / K», «⇧S».
-    let label: String
-    let keys: [Key]
+    package let label: String
+    package let keys: [Key]
 }
 
 /// Единая таблица клавиш плеера: по ней работает обработчик окна, по ней же «Шпаргалка» показывает группу «Видеоплеер».
 /// `PlayerShortcutsTests` сверяет таблицу и разбор событий в обе стороны.
-enum PlayerShortcuts {
-    static let relevantModifiers: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
+package enum PlayerShortcuts {
+    package static let relevantModifiers: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
 
-    static let playback = "Воспроизведение"
-    static let navigation = "Перемотка"
-    static let view = "Вид и дорожки"
+    package static let playback = "Воспроизведение"
+    package static let navigation = "Перемотка"
+    package static let view = "Вид и дорожки"
 
-    static let all: [PlayerShortcut] = [
+    package static let all: [PlayerShortcut] = [
         PlayerShortcut(action: .togglePlay, title: "Пауза / играть", section: playback, label: "Пробел / K",
                        keys: [.init(kVK_Space), .init(kVK_ANSI_K)]),
         PlayerShortcut(action: .seekBackward, title: "Назад на шаг перемотки", section: navigation, label: "←",
@@ -112,17 +111,17 @@ enum PlayerShortcuts {
     }()
 
     /// Действие по клавише; `nil` — клавиша не плеера (пусть идёт дальше по цепочке).
-    static func action(keyCode: Int, modifiers: NSEvent.ModifierFlags) -> PlayerAction? {
+    package static func action(keyCode: Int, modifiers: NSEvent.ModifierFlags) -> PlayerAction? {
         byKey[PlayerShortcut.Key(keyCode, modifiers)]
     }
 
-    static func shortcut(for action: PlayerAction) -> PlayerShortcut? { all.first { $0.action == action } }
+    package static func shortcut(for action: PlayerAction) -> PlayerShortcut? { all.first { $0.action == action } }
 
     /// Подпись клавиши для подсказок («Снимок кадра (⇧S)»).
-    static func label(_ action: PlayerAction) -> String { shortcut(for: action)?.label ?? "" }
+    package static func label(_ action: PlayerAction) -> String { shortcut(for: action)?.label ?? "" }
 
     /// Группа «Видеоплеер» для «Шпаргалки».
-    static var cheatGroup: CheatGroup {
+    package static var cheatGroup: CheatGroup {
         CheatGroup(title: "Видеоплеер", items: all.map { CheatItem(title: $0.title, shortcut: $0.label) })
     }
 }
@@ -131,28 +130,28 @@ enum PlayerShortcuts {
 
 /// → коротко — перемотка вперёд на отпускание; удержание ≥ 0,3 с — 2×, пока держите (§ 8.1).
 /// Повторы клавиши (`isARepeat`) не учитываются. Чистый автомат: время — снаружи.
-struct HoldToFastForward: Equatable {
-    static let threshold: Double = 0.3
+package struct HoldToFastForward: Equatable {
+    package static let threshold: Double = 0.3
 
-    enum Event: Equatable { case none, seekForward, beginHold, endHold }
+    package enum Event: Equatable { case none, seekForward, beginHold, endHold }
 
-    private(set) var pressedAt: Double?
-    private(set) var holding = false
+    package private(set) var pressedAt: Double?
+    package private(set) var holding = false
 
-    mutating func keyDown(at time: Double, isRepeat: Bool) -> Event {
+    package mutating func keyDown(at time: Double, isRepeat: Bool) -> Event {
         guard !isRepeat, pressedAt == nil else { return .none }
         pressedAt = time
         return .none
     }
 
     /// Проверка по таймеру через `threshold` после нажатия.
-    mutating func tick(at time: Double) -> Event {
+    package mutating func tick(at time: Double) -> Event {
         guard let pressedAt, !holding, time - pressedAt >= Self.threshold - 0.0001 else { return .none }
         holding = true
         return .beginHold
     }
 
-    mutating func keyUp(at time: Double) -> Event {
+    package mutating func keyUp(at time: Double) -> Event {
         defer { reset() }
         if holding { return .endHold }
         guard let pressedAt else { return .none }
@@ -160,7 +159,7 @@ struct HoldToFastForward: Equatable {
     }
 
     /// Окно потеряло фокус посреди удержания — вернуть скорость.
-    mutating func cancel() -> Event {
+    package mutating func cancel() -> Event {
         defer { reset() }
         return holding ? .endHold : .none
     }
@@ -171,7 +170,7 @@ struct HoldToFastForward: Equatable {
     }
 
     /// Что сделать в начале удержания: скорость 2× (если выбрана меньше) и играть, если стояла пауза.
-    static func boost(rate: Float, playing: Bool) -> (rate: Float?, play: Bool) {
+    package static func boost(rate: Float, playing: Bool) -> (rate: Float?, play: Bool) {
         (rate >= 2 ? nil : 2, !playing)
     }
 }
@@ -179,10 +178,10 @@ struct HoldToFastForward: Equatable {
 // MARK: - Клики по видео
 
 /// Треть кадра под курсором: двойной клик слева — назад, справа — вперёд, посередине — полный экран.
-enum ClickZone: Equatable {
+package enum ClickZone: Equatable {
     case left, middle, right
 
-    static func at(x: CGFloat, width: CGFloat) -> ClickZone {
+    package static func at(x: CGFloat, width: CGFloat) -> ClickZone {
         guard width > 0 else { return .middle }
         if x < width / 3 { return .left }
         if x > width * 2 / 3 { return .right }
@@ -192,10 +191,10 @@ enum ClickZone: Equatable {
 
 /// Серия кликов по видео (§ 8.1): одиночный — пауза сразу; второй клик серии возвращает паузу как было и перематывает
 /// на 10 с (или полный экран посередине); каждый следующий быстрый — ещё 10 с. `count` — `NSEvent.clickCount`.
-struct ClickSeries: Equatable {
-    static let step: Double = 10
+package struct ClickSeries: Equatable {
+    package static let step: Double = 10
 
-    enum Action: Equatable {
+    package enum Action: Equatable {
         case togglePlay
         case restore(playing: Bool)
         case seek(Double)
@@ -206,7 +205,7 @@ struct ClickSeries: Equatable {
 
     private var playingBeforeSeries = false
 
-    mutating func click(count: Int, zone: ClickZone, playing: Bool) -> [Action] {
+    package mutating func click(count: Int, zone: ClickZone, playing: Bool) -> [Action] {
         switch count {
         case ...1:
             playingBeforeSeries = playing

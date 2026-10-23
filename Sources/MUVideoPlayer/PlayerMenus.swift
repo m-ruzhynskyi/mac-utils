@@ -3,23 +3,21 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
-import MUAudio
-import MUScreenShare
 
 // MARK: - Пункт меню
 
 /// Пункт плавающего меню: ✓ и лайм у текущего, подзаголовок, клавиша справа.
-struct PlayerMenuItem: View {
-    let title: String
-    var subtitle: String?
-    var current = false
-    var symbol: String?
-    var width: CGFloat = 230
-    let action: () -> Void
+package struct PlayerMenuItem: View {
+    package let title: String
+    package var subtitle: String?
+    package var current = false
+    package var symbol: String?
+    package var width: CGFloat = 230
+    package let action: () -> Void
 
     @State private var hovered = false
 
-    var body: some View {
+    package var body: some View {
         Button(action: action) {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: symbol ?? "checkmark").font(.system(size: 10, weight: .heavy))
@@ -46,10 +44,10 @@ struct PlayerMenuItem: View {
 }
 
 private struct MenuHeader: View {
-    let title: String
-    let keys: [String]
+    package let title: String
+    package let keys: [String]
 
-    var body: some View {
+    package var body: some View {
         HStack {
             Text(title).font(DS.Font.manrope(15, .heavy, relativeTo: .headline)).foregroundStyle(.dsText)
             Spacer()
@@ -60,10 +58,10 @@ private struct MenuHeader: View {
 }
 
 private struct MenuSetting<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: Content
+    package let title: String
+    @ViewBuilder package let content: Content
 
-    var body: some View {
+    package var body: some View {
         HStack {
             Text(title).font(DS.Font.manrope(12.5, .semibold, relativeTo: .callout)).foregroundStyle(.dsText)
             Spacer(minLength: 0)
@@ -74,21 +72,21 @@ private struct MenuSetting<Content: View>: View {
 }
 
 private struct MenuDivider: View {
-    var body: some View { Rectangle().fill(Color.dsLine).frame(height: 1).padding(.vertical, 6) }
+    package var body: some View { Rectangle().fill(Color.dsLine).frame(height: 1).padding(.vertical, 6) }
 }
 
 private extension View {
-    func playerMenu(width: CGFloat) -> some View {
+    package func playerMenu(width: CGFloat) -> some View {
         frame(width: width).floating().shadow(color: .black.opacity(0.3), radius: 18, y: 8)
     }
 }
 
 /// Компактные вкладки S / M / L: равные доли, выбранная — лайм.
 private struct CompactTabs: View {
-    let titles: [String]
-    @Binding var selected: Int
+    package let titles: [String]
+    @Binding package var selected: Int
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 2) {
             ForEach(titles.indices, id: \.self) { index in
                 let on = index == selected
@@ -111,14 +109,14 @@ private struct CompactTabs: View {
 
 // MARK: - Субтитры (v04)
 
-struct SubtitlesMenu: View {
-    @ObservedObject var subtitles: SubtitleController
-    let controller: PlayerWindowController
+package struct SubtitlesMenu: View {
+    @ObservedObject package var subtitles: SubtitleController
+    package let controller: PlayerWindowController
 
     @AppStorage(Pref.playerSubtitleSize) private var size = 1
     @AppStorage(Pref.playerSubtitleBackground) private var background = false
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             MenuHeader(title: "Субтитры", keys: ["V"])
             PlayerMenuItem(title: "Выключены", current: subtitles.selection == .off, width: 280) { subtitles.select(.off) }
@@ -185,10 +183,10 @@ struct SubtitlesMenu: View {
 
 // MARK: - Аудиодорожка и скорость (v05)
 
-struct AudioMenu: View {
-    @ObservedObject var model: PlayerModel
+package struct AudioMenu: View {
+    @ObservedObject package var model: PlayerModel
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             MenuHeader(title: "Аудиодорожка", keys: ["A"])
             if model.audioOptions.isEmpty {
@@ -204,10 +202,10 @@ struct AudioMenu: View {
     }
 }
 
-struct SpeedMenu: View {
-    @ObservedObject var model: PlayerModel
+package struct SpeedMenu: View {
+    @ObservedObject package var model: PlayerModel
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             MenuHeader(title: "Скорость", keys: ["[", "]"])
             ForEach(PlaybackRate.presets, id: \.self) { rate in
@@ -239,14 +237,14 @@ struct SpeedMenu: View {
 
 // MARK: - Плейлист (v03)
 
-struct PlaylistPanel: View {
-    @ObservedObject var model: PlayerModel
-    let controller: PlayerWindowController
+package struct PlaylistPanel: View {
+    @ObservedObject package var model: PlayerModel
+    package let controller: PlayerWindowController
 
     @ObservedObject private var info = PlayerMediaInfoCache.shared
     @State private var selection: UUID?
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack {
                 Text("Плейлист").font(DS.Font.manrope(16, .heavy, relativeTo: .headline)).foregroundStyle(.dsText)
@@ -362,10 +360,10 @@ struct PlaylistPanel: View {
 
 /// «23:10 из 48:10» у текущего файла.
 private struct CurrentProgress: View {
-    @ObservedObject var clock: PlayerClock
-    let duration: Double
+    @ObservedObject package var clock: PlayerClock
+    package let duration: Double
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 6) {
             ProgressBar(value: clock.time / max(duration, 1)).frame(width: 60).scaleEffect(y: 0.6)
             Text("\(PlayerFormat.time(clock.time)) из \(PlayerFormat.time(duration))")

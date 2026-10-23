@@ -5,6 +5,7 @@ import MUDesign
 import MUMeetings
 import MUScreenShare
 import MUScreenshot
+import MUVideoPlayer
 
 // MARK: - Записи встреч
 

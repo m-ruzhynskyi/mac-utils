@@ -5,6 +5,7 @@ import XCTest
 @testable import MUDesign
 @testable import MUAudio
 @testable import MUScreenshot
+@testable import MUVideoPlayer
 
 /// Этап 4 плеера на демо-файлах: субтитры (встроенные и внешние), аудиодорожки, пропуск по главам,
 /// следующая серия, снимок кадра (точный кадр и HDR → SDR). Звука нет, позиции — в памяти.

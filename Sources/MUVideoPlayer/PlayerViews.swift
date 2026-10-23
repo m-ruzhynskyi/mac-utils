@@ -3,21 +3,19 @@ import AVFoundation
 import SwiftUI
 import MUCore
 import MUDesign
-import MUAudio
-import MUScreenshot
 
 /// Окно плеера (макеты v01–v07): заголовок 50 pt, видео на чёрном, панель под видео, плейлист справа.
 /// В полном экране и в режиме «Только видео» заголовка нет, панель плавает поверх видео.
-struct PlayerRootView: View {
-    @ObservedObject var model: PlayerModel
-    let clock: PlayerClock
-    @ObservedObject var ui: PlayerUIState
-    let controller: PlayerWindowController
+package struct PlayerRootView: View {
+    @ObservedObject package var model: PlayerModel
+    package let clock: PlayerClock
+    @ObservedObject package var ui: PlayerUIState
+    package let controller: PlayerWindowController
 
     @State private var pictureInPicture = false
     @State private var dropTargeted = false
 
-    var body: some View {
+    package var body: some View {
         VStack(spacing: 0) {
             if !ui.floatingChrome { PlayerTitleBar(model: model, ui: ui) }
             HStack(spacing: 0) {
@@ -51,11 +49,11 @@ struct PlayerRootView: View {
 
 // MARK: - Заголовок
 
-struct PlayerTitleBar: View {
-    @ObservedObject var model: PlayerModel
-    @ObservedObject var ui: PlayerUIState
+package struct PlayerTitleBar: View {
+    @ObservedObject package var model: PlayerModel
+    @ObservedObject package var ui: PlayerUIState
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: DS.Space.m) {
             // Место под «светофор».
             Color.clear.frame(width: 64, height: 1)
@@ -93,14 +91,14 @@ struct PlayerTitleBar: View {
 
 // MARK: - Видео и всё поверх него
 
-struct PlayerStage: View {
-    @ObservedObject var model: PlayerModel
-    let clock: PlayerClock
-    @ObservedObject var ui: PlayerUIState
-    let controller: PlayerWindowController
-    @Binding var pictureInPicture: Bool
+package struct PlayerStage: View {
+    @ObservedObject package var model: PlayerModel
+    package let clock: PlayerClock
+    @ObservedObject package var ui: PlayerUIState
+    package let controller: PlayerWindowController
+    @Binding package var pictureInPicture: Bool
 
-    var body: some View {
+    package var body: some View {
         ZStack {
             if model.phase == .empty {
                 if ui.floatingChrome { Color.black } else { EmptyPlayerView(controller: controller) }
@@ -145,7 +143,7 @@ struct PlayerStage: View {
 private struct LoadingIndicator: View {
     @State private var visible = false
 
-    var body: some View {
+    package var body: some View {
         ProgressView().controlSize(.large).tint(.white).opacity(visible ? 1 : 0)
             .task {
                 // Короткая загрузка не мигает индикатором.
@@ -156,9 +154,9 @@ private struct LoadingIndicator: View {
 }
 
 private struct AudioOnlyView: View {
-    let title: String
+    package let title: String
 
-    var body: some View {
+    package var body: some View {
         VStack(spacing: DS.Space.s) {
             Image(systemName: "waveform").font(.system(size: 44, weight: .regular)).foregroundStyle(Color.dsAcc)
             Text(title).font(DS.Font.headline).foregroundStyle(.white).lineLimit(1).truncationMode(.middle)
@@ -171,9 +169,9 @@ private struct AudioOnlyView: View {
 
 /// Полный экран (v06): сверху на градиенте — имя, место в плейлисте и следующий файл, «esc — выйти».
 private struct FullScreenTopBar: View {
-    @ObservedObject var model: PlayerModel
+    @ObservedObject package var model: PlayerModel
 
-    var body: some View {
+    package var body: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.info.title).font(DS.Font.manrope(15, .heavy, relativeTo: .headline)).lineLimit(1)
@@ -203,17 +201,17 @@ private struct FullScreenTopBar: View {
 // MARK: - Субтитры
 
 /// Субтитры поверх нижней части кадра: белый Manrope Bold с тенью, без подложки (решение 7); размер S/M/L.
-struct SubtitleOverlay: View {
-    @ObservedObject var clock: PlayerClock
-    @ObservedObject var subtitles: SubtitleController
-    let videoSize: CGSize
+package struct SubtitleOverlay: View {
+    @ObservedObject package var clock: PlayerClock
+    @ObservedObject package var subtitles: SubtitleController
+    package let videoSize: CGSize
     /// Поднять над плавающей панелью.
-    var liftedBy: CGFloat = 0
+    package var liftedBy: CGFloat = 0
 
     @AppStorage(Pref.playerSubtitleSize) private var size = 1
     @AppStorage(Pref.playerSubtitleBackground) private var background = false
 
-    var body: some View {
+    package var body: some View {
         let cues = subtitles.cues(at: clock.time)
         GeometryReader { geometry in
             let frame = videoFrame(in: geometry.size)
@@ -282,22 +280,22 @@ struct SubtitleOverlay: View {
 
 /// Панель управления (v01): шкала со временем, «Пауза», ±шаг, громкость; справа скорость, субтитры, дорожка,
 /// снимок кадра, PiP, полный экран. В окне — под видео; в полном экране и «Только видео» — плавает, крупнее.
-struct PlayerControls: View {
-    @ObservedObject var model: PlayerModel
-    let clock: PlayerClock
-    @ObservedObject var skip: SkipController
-    @ObservedObject var subtitles: SubtitleController
-    @ObservedObject var ui: PlayerUIState
-    let controller: PlayerWindowController
-    let pictureInPicture: Bool
-    let floating: Bool
+package struct PlayerControls: View {
+    @ObservedObject package var model: PlayerModel
+    package let clock: PlayerClock
+    @ObservedObject package var skip: SkipController
+    @ObservedObject package var subtitles: SubtitleController
+    @ObservedObject package var ui: PlayerUIState
+    package let controller: PlayerWindowController
+    package let pictureInPicture: Bool
+    package let floating: Bool
 
     @AppStorage(Pref.playerSeekStep) private var seekStep = 5.0
 
     private var large: Bool { floating && ui.fullScreen }
     private var button: CGFloat { large ? 34 : 30 }
 
-    var body: some View {
+    package var body: some View {
         let ready = model.phase == .ready
         VStack(spacing: floating ? 8 : 6) {
             HStack(spacing: DS.Space.s) {
@@ -354,10 +352,10 @@ struct PlayerControls: View {
 
 /// Под видео — полоса цвета боковых панелей; поверх видео — плавающая панель Graphite.
 private struct ControlsChrome: ViewModifier {
-    let floating: Bool
-    let width: CGFloat
+    package let floating: Bool
+    package let width: CGFloat
 
-    func body(content: Content) -> some View {
+    package func body(content: Content) -> some View {
         if floating {
             content.frame(width: width).floating().shadow(color: .black.opacity(0.35), radius: 20, y: 8)
         } else {
@@ -371,11 +369,11 @@ private struct ControlsChrome: ViewModifier {
 }
 
 private struct TimeLabel: View {
-    @ObservedObject var clock: PlayerClock
-    let duration: Double
-    let remaining: Bool
+    @ObservedObject package var clock: PlayerClock
+    package let duration: Double
+    package let remaining: Bool
 
-    var body: some View {
+    package var body: some View {
         Text(remaining ? PlayerFormat.remaining(clock.time, of: duration) : PlayerFormat.time(clock.time))
             .font(DS.Font.mono(11.5, relativeTo: .caption))
             .foregroundStyle(remaining ? Color.dsMute : Color.dsText)
@@ -387,16 +385,16 @@ private struct TimeLabel: View {
 
 /// Шкала: просмотрено — лайм, загружено — серым, отрезки пропуска — полосами, главы — зазорами, белая ручка.
 /// Клик и перетаскивание — перемотка; при наведении — время и название главы.
-struct SeekBar: View {
-    @ObservedObject var model: PlayerModel
-    @ObservedObject var clock: PlayerClock
-    @ObservedObject var skip: SkipController
-    var thick: CGFloat = 5
+package struct SeekBar: View {
+    @ObservedObject package var model: PlayerModel
+    @ObservedObject package var clock: PlayerClock
+    @ObservedObject package var skip: SkipController
+    package var thick: CGFloat = 5
 
     @State private var scrubbing: Double?
     @State private var hover: CGFloat?
 
-    var body: some View {
+    package var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
             let duration = max(model.duration, 0.001)
@@ -469,10 +467,10 @@ struct SeekBar: View {
 
 /// Громкость: значок (клик — без звука) и ползунок Graphite.
 private struct VolumeControl: View {
-    @ObservedObject var model: PlayerModel
-    let large: Bool
+    @ObservedObject package var model: PlayerModel
+    package let large: Bool
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 6) {
             Button {
                 model.isMuted.toggle()
@@ -498,14 +496,14 @@ private struct VolumeControl: View {
 }
 
 /// Ползунок Graphite: дорожка `off`, заливка лаймом, белая ручка.
-struct PlayerSlider: View {
-    @Binding var value: Double
-    var range: ClosedRange<Double> = 0...1
-    let label: String
+package struct PlayerSlider: View {
+    @Binding package var value: Double
+    package var range: ClosedRange<Double> = 0...1
+    package let label: String
 
     @State private var dragging = false
 
-    var body: some View {
+    package var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
             let fraction = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
@@ -540,17 +538,17 @@ struct PlayerSlider: View {
 }
 
 /// Кнопка панели: без подложки, включённая — лайм.
-struct PlayerButton: View {
-    let symbol: String
-    let help: String
-    var active = false
-    var size: CGFloat = 30
-    let action: () -> Void
+package struct PlayerButton: View {
+    package let symbol: String
+    package let help: String
+    package var active = false
+    package var size: CGFloat = 30
+    package let action: () -> Void
 
     @Environment(\.isEnabled) private var enabled
     @State private var hovered = false
 
-    var body: some View {
+    package var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: size * 0.47, weight: .semibold))
                 .foregroundStyle(active ? Color.dsAccInk : Color.dsText)
@@ -569,12 +567,12 @@ struct PlayerButton: View {
 }
 
 /// Круглая лаймовая «Пауза» / «Играть».
-struct PlayButton: View {
-    let playing: Bool
-    var size: CGFloat = 36
-    let action: () -> Void
+package struct PlayButton: View {
+    package let playing: Bool
+    package var size: CGFloat = 36
+    package let action: () -> Void
 
-    var body: some View {
+    package var body: some View {
         Button(action: action) {
             Image(systemName: playing ? "pause.fill" : "play.fill").font(.system(size: size * 0.42, weight: .bold))
                 .foregroundStyle(.dsAccInk)
@@ -589,11 +587,11 @@ struct PlayButton: View {
 
 /// «1×» — открывает меню скорости.
 private struct SpeedChip: View {
-    let rate: Float
-    let open: Bool
-    let action: () -> Void
+    package let rate: Float
+    package let open: Bool
+    package let action: () -> Void
 
-    var body: some View {
+    package var body: some View {
         Button(action: action) {
             Text(PlaybackRate.title(rate)).font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(open ? Color.dsAccInk : Color.dsText)
                 .padding(.horizontal, 8).frame(height: 24)
@@ -608,12 +606,12 @@ private struct SpeedChip: View {
 
 /// Имя файла в одну строку: номер серии («s01e03») не сокращается никогда, сокращается то, что перед ним;
 /// короткий хвост после номера («_demo.mp4») тоже виден. Без номера — сокращение посередине.
-struct EpisodeTitle: View {
-    let name: String
-    let font: Font
-    var color: Color = .dsText
+package struct EpisodeTitle: View {
+    package let name: String
+    package let font: Font
+    package var color: Color = .dsText
 
-    var body: some View {
+    package var body: some View {
         if let parts = EpisodeName.split(name) {
             HStack(spacing: 0) {
                 if !parts.before.isEmpty {

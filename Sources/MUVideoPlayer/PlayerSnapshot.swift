@@ -2,24 +2,22 @@ import AppKit
 import AVFoundation
 import CoreImage
 import MUCore
-import MUAudio
-import MUScreenshot
 
 /// Снимок кадра (⇧S): ровно показанный кадр, HDR сводится в SDR, сохраняется в «Мои снимки» (папка дня, как у
 /// снимков экрана) и копируется в буфер. Отдельного диалога нет — тост v08c.
 @MainActor
-enum PlayerSnapshot {
-    struct Result: Equatable {
-        let url: URL
-        let size: CGSize
-        let time: Double
-        let thumbnail: NSImage
+package enum PlayerSnapshot {
+    package struct Result: Equatable {
+        package let url: URL
+        package let size: CGSize
+        package let time: Double
+        package let thumbnail: NSImage
     }
 
-    static let app = "Видеоплеер"
+    package static let app = "Видеоплеер"
     private static let context = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!])
 
-    static func take(from controller: PlayerWindowController) {
+    package static func take(from controller: PlayerWindowController) {
         let model = controller.model
         guard model.info.hasVideo else { return }
         Task { @MainActor in
@@ -42,7 +40,7 @@ enum PlayerSnapshot {
 
     /// Показанный кадр: из `AVPlayerItemVideoOutput`, если буфер именно этого времени уже готов (сразу после шага
     /// под нагрузкой там может быть ещё прежний кадр); иначе — точный кадр из файла на том же времени.
-    static func frame(of model: PlayerModel) async -> CGImage? {
+    package static func frame(of model: PlayerModel) async -> CGImage? {
         guard let item = model.player.currentItem else { return nil }
         let time = item.currentTime()
         var display = CMTime.invalid
@@ -61,7 +59,7 @@ enum PlayerSnapshot {
     }
 
     /// Пиксели кадра → картинка sRGB 8 бит; HDR (HLG, PQ) — с тональной компрессией, а не обрезкой.
-    static func render(_ buffer: CVPixelBuffer, transform: CGAffineTransform = .identity) -> CGImage? {
+    package static func render(_ buffer: CVPixelBuffer, transform: CGAffineTransform = .identity) -> CGImage? {
         var image = CIImage(cvPixelBuffer: buffer, options: [.toneMapHDRtoSDR: true])
         if transform != .identity {
             image = image.transformed(by: transform)
@@ -71,7 +69,7 @@ enum PlayerSnapshot {
     }
 
     /// «night_city_demo — кадр 0.23.10.png».
-    static func fileName(video: String, time: Double) -> String {
+    package static func fileName(video: String, time: Double) -> String {
         let base = (video as NSString).deletingPathExtension
         let stamp = PlayerFormat.time(time).replacingOccurrences(of: ":", with: ".")
         return "\(base.isEmpty ? "Кадр" : base) — кадр \(stamp).png"
@@ -100,7 +98,7 @@ enum PlayerSnapshot {
     }
 
     /// «Показать»: в «Моих снимках», а если они выключены — в Finder.
-    static func reveal(_ url: URL) {
+    package static func reveal(_ url: URL) {
         if ShotLibraryRules.libraryEnabled {
             AppRouter.shared.showShotsLibrary()
         } else {

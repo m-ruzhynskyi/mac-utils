@@ -3,22 +3,21 @@ import Combine
 import Foundation
 import MUCore
 import MUDesign
-import MUScreenshot
 
 /// Время воспроизведения отдельно от модели: часто меняется (≈ 30 раз в секунду во время игры),
 /// и перерисовываются только шкала, время и субтитры, а не всё окно.
 @MainActor
-final class PlayerClock: ObservableObject {
-    @Published var time: Double = 0
-    @Published var buffered: Double = 0
+package final class PlayerClock: ObservableObject {
+    @Published package var time: Double = 0
+    @Published package var buffered: Double = 0
 }
 
 /// Модель одного окна плеера: очередь, текущий файл и его состояние, скорость, громкость, позиции.
 /// Наблюдатели за `AVPlayer` (время, статус, конец файла) живут только пока открыт файл; `shutdown()` — окно
 /// закрыли — снимает все и отпускает файл. Без окна модель ничего не делает.
 @MainActor
-final class PlayerModel: ObservableObject {
-    enum Phase: Equatable {
+package final class PlayerModel: ObservableObject {
+    package enum Phase: Equatable {
         /// Пустое окно (v07).
         case empty
         case loading
@@ -29,65 +28,65 @@ final class PlayerModel: ObservableObject {
         case failed(String)
     }
 
-    struct AudioOption: Identifiable, Equatable {
-        let id: Int
-        let title: String
-        let detail: String
-        let language: String?
+    package struct AudioOption: Identifiable, Equatable {
+        package let id: Int
+        package let title: String
+        package let detail: String
+        package let language: String?
     }
 
-    struct MediaInfo: Equatable {
-        var title = ""
-        var codecs = ""
-        var hasVideo = false
-        var size = CGSize.zero
-        var fps: Double = 0
+    package struct MediaInfo: Equatable {
+        package var title = ""
+        package var codecs = ""
+        package var hasVideo = false
+        package var size = CGSize.zero
+        package var fps: Double = 0
         /// Поворот кадра (видео с телефона) — для снимка.
-        var transform = CGAffineTransform.identity
+        package var transform = CGAffineTransform.identity
         /// HLG или PQ: снимок кадра сводится в SDR с тональной компрессией.
-        var isHDR = false
+        package var isHDR = false
     }
 
-    let player = AVPlayer()
-    let clock = PlayerClock()
-    private(set) lazy var subtitles = SubtitleController(model: self)
-    private(set) lazy var skip = SkipController(model: self)
+    package let player = AVPlayer()
+    package let clock = PlayerClock()
+    package private(set) lazy var subtitles = SubtitleController(model: self)
+    package private(set) lazy var skip = SkipController(model: self)
 
-    @Published private(set) var playlist = Playlist()
-    @Published private(set) var phase: Phase = .empty
-    @Published private(set) var info = MediaInfo()
-    @Published private(set) var duration: Double = 0
+    @Published package private(set) var playlist = Playlist()
+    @Published package private(set) var phase: Phase = .empty
+    @Published package private(set) var info = MediaInfo()
+    @Published package private(set) var duration: Double = 0
     /// Идёт воспроизведение (по `timeControlStatus`, ожидание буфера тоже считается).
-    @Published private(set) var isPlaying = false
+    @Published package private(set) var isPlaying = false
     /// Выбранная скорость (без временных 2× при удержании →).
-    @Published private(set) var rate: Float = 1
+    @Published package private(set) var rate: Float = 1
     /// Временная скорость поверх выбранной (удержание →); nil — нет.
-    @Published private(set) var boostRate: Float?
-    @Published var volume: Float = PlayerPrefs.volume {
+    @Published package private(set) var boostRate: Float?
+    @Published package var volume: Float = PlayerPrefs.volume {
         didSet {
             player.volume = volume
             PlayerPrefs.volume = volume
         }
     }
-    @Published var isMuted = false { didSet { player.isMuted = isMuted || silent } }
-    @Published var keepsPitch = PlayerPrefs.keepPitch {
+    @Published package var isMuted = false { didSet { player.isMuted = isMuted || silent } }
+    @Published package var keepsPitch = PlayerPrefs.keepPitch {
         didSet {
             UserDefaults.standard.set(keepsPitch, forKey: Pref.playerKeepPitch)
             player.currentItem?.audioTimePitchAlgorithm = pitchAlgorithm
         }
     }
     /// Продолжили с запомненного места: тост «Продолжаем с 23:10» (v08a).
-    @Published var resumedFrom: Double?
+    @Published package var resumedFrom: Double?
     /// Файл доиграл до конца и следующего нет: пробел начнёт сначала.
-    @Published private(set) var reachedEnd = false
-    @Published private(set) var audioOptions: [AudioOption] = []
-    @Published private(set) var selectedAudio: Int?
+    @Published package private(set) var reachedEnd = false
+    @Published package private(set) var audioOptions: [AudioOption] = []
+    @Published package private(set) var selectedAudio: Int?
     private var audibleGroup: AVMediaSelectionGroup?
 
     /// Для снимка кадра и проверки шага: ровно показанный кадр.
-    private(set) var videoOutput: AVPlayerItemVideoOutput?
+    package private(set) var videoOutput: AVPlayerItemVideoOutput?
     /// Текущий файл (ключ позиции считается при открытии, до того как файл могли перезаписать).
-    private(set) var currentURL: URL?
+    package private(set) var currentURL: URL?
     private var positionKey: String?
 
     /// Без звука навсегда (тесты: на Mac пользователя не должно ничего звучать).
@@ -100,17 +99,17 @@ final class PlayerModel: ObservableObject {
     private var wantsToPlay = false
 
     /// Колбэки окна: смена файла, начало и конец воспроизведения, конец файла.
-    var onItemChange: (() -> Void)?
-    var onPlayingChange: ((Bool) -> Void)?
+    package var onItemChange: (() -> Void)?
+    package var onPlayingChange: ((Bool) -> Void)?
     /// Файл доиграл сам; `true` — модель уже перешла к следующему.
-    var onFinish: ((Bool) -> Void)?
+    package var onFinish: ((Bool) -> Void)?
     /// Перемотка или смена скорости: «Сейчас играет» пересчитывает позицию и скорость.
-    var onTimingChange: (() -> Void)?
+    package var onTimingChange: (() -> Void)?
 
     /// Сколько наблюдателей сейчас стоит (для `IdleCPUTests`).
-    var activeObserverCount: Int { (timeObserver == nil ? 0 : 1) + observations.count + (endObserver == nil ? 0 : 1) }
+    package var activeObserverCount: Int { (timeObserver == nil ? 0 : 1) + observations.count + (endObserver == nil ? 0 : 1) }
 
-    init(silent: Bool = false, positions: PositionStore? = nil) {
+    package init(silent: Bool = false, positions: PositionStore? = nil) {
         self.silent = silent
         self.positions = positions ?? PositionStore.shared
         player.volume = volume
@@ -124,37 +123,37 @@ final class PlayerModel: ObservableObject {
 
     private var pitchAlgorithm: AVAudioTimePitchAlgorithm { keepsPitch ? .spectral : .varispeed }
 
-    var currentTime: Double {
+    package var currentTime: Double {
         let time = player.currentTime().seconds
         return time.isFinite ? time : 0
     }
 
-    var effectiveRate: Float { boostRate ?? rate }
+    package var effectiveRate: Float { boostRate ?? rate }
 
     // MARK: - Очередь
 
     /// Открыть файлы: встают после текущего, первый начинает играть (уже открытый — переход к нему).
-    func open(_ urls: [URL]) {
+    package func open(_ urls: [URL]) {
         let media = PlayerMedia.expand(urls)
         guard !media.isEmpty, let first = playlist.insertAfterCurrent(media) else { return }
         play(first)
     }
 
     /// Добавить в конец, не прерывая текущий («+» в плейлисте). Если ничего не играло — начать с первого.
-    func append(_ urls: [URL]) {
+    package func append(_ urls: [URL]) {
         let media = PlayerMedia.expand(urls)
         let wasEmpty = playlist.current == nil
         playlist.append(media)
         if wasEmpty, let first = media.first.flatMap(playlist.item(for:)) { play(first) }
     }
 
-    func play(_ item: Playlist.Item, autoplay: Bool = true) {
+    package func play(_ item: Playlist.Item, autoplay: Bool = true) {
         savePosition()
         playlist.select(item.id)
         load(item.url, autoplay: autoplay)
     }
 
-    func remove(_ item: Playlist.Item) {
+    package func remove(_ item: Playlist.Item) {
         let wasCurrent = item.id == playlist.current?.id
         if wasCurrent { savePosition() }
         playlist.remove(item.id)
@@ -162,24 +161,24 @@ final class PlayerModel: ObservableObject {
         if let next = playlist.current { load(next.url, autoplay: wantsToPlay) } else { clear() }
     }
 
-    func movePlaylist(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+    package func movePlaylist(fromOffsets offsets: IndexSet, toOffset destination: Int) {
         playlist.move(fromOffsets: offsets, toOffset: destination)
     }
 
-    func cycleRepeat() { playlist.repeatMode = playlist.repeatMode.next }
+    package func cycleRepeat() { playlist.repeatMode = playlist.repeatMode.next }
 
-    func toggleShuffle() {
+    package func toggleShuffle() {
         if playlist.isShuffled { playlist.unshuffle() } else { playlist.shuffle() }
     }
 
     /// «Дальше» (кнопка, ⏭, «Следующая серия»).
-    func next() {
+    package func next() {
         guard let item = playlist.next(automatic: false), item.id != playlist.current?.id else { return }
         play(item)
     }
 
     /// ⏮: в начале файла — предыдущий, иначе — к началу текущего (как в музыкальных плеерах).
-    func previous() {
+    package func previous() {
         if currentTime > 3 || playlist.previous() == nil {
             seek(to: 0)
             return
@@ -366,7 +365,7 @@ final class PlayerModel: ObservableObject {
     }
 
     /// Окно закрыли: место запомнено, звук сразу стих, наблюдателей нет, очередь пуста.
-    func shutdown() {
+    package func shutdown() {
         savePosition()
         wantsToPlay = false
         clear()
@@ -375,7 +374,7 @@ final class PlayerModel: ObservableObject {
 
     // MARK: - Управление
 
-    func play() {
+    package func play() {
         guard phase == .ready else { return }
         if reachedEnd || currentTime >= duration - 0.05 {
             reachedEnd = false
@@ -387,25 +386,25 @@ final class PlayerModel: ObservableObject {
         player.rate = effectiveRate
     }
 
-    func pause() {
+    package func pause() {
         wantsToPlay = false
         player.pause()
     }
 
-    func togglePlay() {
+    package func togglePlay() {
         if isPlaying || player.rate != 0 { pause() } else { play() }
     }
 
     /// Выбранная скорость 0,25–4×.
-    func setRate(_ value: Float) {
+    package func setRate(_ value: Float) {
         rate = PlaybackRate.clamp(value)
         applyRate()
     }
 
-    func stepRate(_ direction: Int) { setRate(PlaybackRate.stepped(rate, by: direction)) }
+    package func stepRate(_ direction: Int) { setRate(PlaybackRate.stepped(rate, by: direction)) }
 
     /// Временная скорость (удержание →); nil — вернуть выбранную.
-    func setBoost(_ value: Float?) {
+    package func setBoost(_ value: Float?) {
         boostRate = value
         applyRate()
     }
@@ -417,7 +416,7 @@ final class PlayerModel: ObservableObject {
     }
 
     /// Перемотка на `seconds` (в пределах файла). `exact` — до кадра (шаг, пропуск отрезка); иначе — быстро, ±0,1 с.
-    func seek(to seconds: Double, exact: Bool = false, toleranceBefore: Double? = nil) {
+    package func seek(to seconds: Double, exact: Bool = false, toleranceBefore: Double? = nil) {
         guard phase == .ready || phase == .loading else { return }
         let target = min(max(0, seconds), max(0, duration - (exact ? 0 : 0.05)))
         reachedEnd = false
@@ -431,10 +430,10 @@ final class PlayerModel: ObservableObject {
         }
     }
 
-    func seek(by delta: Double) { seek(to: currentTime + delta) }
+    package func seek(by delta: Double) { seek(to: currentTime + delta) }
 
     /// Кадр вперёд или назад на паузе (`,` и `.`). Где шаг назад не поддерживается — точная перемотка на кадр раньше.
-    func stepFrame(forward: Bool) {
+    package func stepFrame(forward: Bool) {
         guard phase == .ready, let item = player.currentItem else { return }
         pause()
         let fps = info.fps > 0 ? info.fps : 25
@@ -446,7 +445,7 @@ final class PlayerModel: ObservableObject {
     }
 
     /// Номер текущего кадра (для подсказки «Кадр N»).
-    var frameNumber: Int {
+    package var frameNumber: Int {
         let fps = info.fps > 0 ? info.fps : 25
         return Int((currentTime * fps + 0.001).rounded(.down))
     }
@@ -488,7 +487,7 @@ final class PlayerModel: ObservableObject {
     }
 
     /// Переключить дорожку без паузы; язык запоминается.
-    func selectAudio(_ id: Int) {
+    package func selectAudio(_ id: Int) {
         guard let group = audibleGroup, id < group.options.count, let item = player.currentItem else { return }
         item.select(group.options[id], in: group)
         selectedAudio = id
@@ -500,7 +499,7 @@ final class PlayerModel: ObservableObject {
     // MARK: - Позиции
 
     /// Запомнить место (пауза, смена файла, закрытие). Без настройки «Запоминать место» файл позиций не пишется.
-    func savePosition(finished: Bool = false) {
+    package func savePosition(finished: Bool = false) {
         guard let url = currentURL, phase == .ready, duration > 0 else { return }
         let position = finished ? duration : currentTime
         if PlayerPrefs.rememberPosition, let key = positionKey {
@@ -510,7 +509,7 @@ final class PlayerModel: ObservableObject {
     }
 
     /// «С начала ⌥←» в тосте продолжения.
-    func restartFromBeginning() {
+    package func restartFromBeginning() {
         resumedFrom = nil
         seek(to: 0, exact: true)
     }
@@ -552,7 +551,7 @@ final class PlayerModel: ObservableObject {
     }
 
     /// Понятный текст ошибки без системных подробностей.
-    static func message(for error: Error) -> String {
+    package static func message(for error: Error) -> String {
         let code = (error as NSError).code
         switch code {
         case AVError.fileFormatNotRecognized.rawValue, AVError.unknown.rawValue, -12848, -11829:

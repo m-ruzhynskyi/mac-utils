@@ -2,17 +2,15 @@ import AppKit
 import AVFoundation
 import SwiftUI
 import MUDesign
-import MUAudio
 import MUCore
-import MUScreenshot
 
 /// Всё, что поверх видео: подсказки (v08b, v14b), тосты (v08a, v08c, v14c), кнопка «Пропустить…» (v14),
 /// карточка следующей серии (v15), меню субтитров, дорожек и скорости (v04, v05).
-struct PlayerOverlays: View {
-    @ObservedObject var model: PlayerModel
-    @ObservedObject var skip: SkipController
-    @ObservedObject var ui: PlayerUIState
-    let controller: PlayerWindowController
+package struct PlayerOverlays: View {
+    @ObservedObject package var model: PlayerModel
+    @ObservedObject package var skip: SkipController
+    @ObservedObject package var ui: PlayerUIState
+    package let controller: PlayerWindowController
 
     /// Над плавающей панелью — выше.
     private var bottomInset: CGFloat {
@@ -20,7 +18,7 @@ struct PlayerOverlays: View {
         return ui.fullScreen ? 150 : 128
     }
 
-    var body: some View {
+    package var body: some View {
         ZStack {
             // Подсказки сверху по центру.
             VStack {
@@ -101,9 +99,9 @@ struct PlayerOverlays: View {
 // MARK: - Подсказки
 
 private struct HUDView: View {
-    let hud: PlayerUIState.HUD
+    package let hud: PlayerUIState.HUD
 
-    var body: some View {
+    package var body: some View {
         Group {
             switch hud {
             case .frame(let number, let timecode):
@@ -144,10 +142,10 @@ private struct HUDView: View {
 
 /// Двойной клик у края (v14b): «волна» и «‹‹ 20 с».
 private struct SeekHintView: View {
-    let zone: ClickZone
-    let seconds: Int
+    package let zone: ClickZone
+    package let seconds: Int
 
-    var body: some View {
+    package var body: some View {
         GeometryReader { geometry in
             let left = zone == .left
             ZStack {
@@ -178,10 +176,10 @@ private struct SeekHintView: View {
 // MARK: - Тосты
 
 private struct ToastTile: View {
-    let symbol: String
-    let tone: DS.Tone
+    package let symbol: String
+    package let tone: DS.Tone
 
-    var body: some View {
+    package var body: some View {
         Image(systemName: symbol).font(.system(size: 20, weight: .semibold)).foregroundStyle(tone.ink)
             .frame(width: 44, height: 44)
             .background(tone.fill, in: RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
@@ -190,11 +188,11 @@ private struct ToastTile: View {
 
 /// «Продолжаем с 23:10» с «С начала ⌥←» (v08a), 5 с.
 private struct ResumeToast: View {
-    let position: Double
-    let restart: () -> Void
-    let dismiss: () -> Void
+    package let position: Double
+    package let restart: () -> Void
+    package let dismiss: () -> Void
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: DS.Space.m) {
             ToastTile(symbol: "clock.arrow.circlepath", tone: .success)
             VStack(alignment: .leading, spacing: 2) {
@@ -216,10 +214,10 @@ private struct ResumeToast: View {
 
 /// «Интро пропущено · 1:05–2:35 · по главе „Opening“» с «Вернуть ⌘Z» (v14c).
 private struct SkippedToast: View {
-    let segment: SkipSegment
-    let undo: () -> Void
+    package let segment: SkipSegment
+    package let undo: () -> Void
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: DS.Space.m) {
             ToastTile(symbol: "forward.end.fill", tone: .info)
             VStack(alignment: .leading, spacing: 2) {
@@ -242,9 +240,9 @@ private struct SkippedToast: View {
 
 /// «Кадр сохранён» (v08c): миниатюра, размер, время, «Показать».
 private struct SnapshotToast: View {
-    let result: PlayerSnapshot.Result
+    package let result: PlayerSnapshot.Result
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: DS.Space.m) {
             Image(nsImage: result.thumbnail).resizable().aspectRatio(contentMode: .fit).frame(width: 96)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -269,12 +267,12 @@ private struct SnapshotToast: View {
 
 /// Капсула «⏭ Пропустить интро  S» (v14); правый клик — «Не показывать в этой папке».
 private struct SkipButton: View {
-    let title: String
-    let source: String
-    let action: () -> Void
-    let hide: () -> Void
+    package let title: String
+    package let source: String
+    package let action: () -> Void
+    package let hide: () -> Void
 
-    var body: some View {
+    package var body: some View {
         Button(action: action) {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "forward.end.fill").font(.system(size: 12, weight: .bold))
@@ -296,15 +294,15 @@ private struct SkipButton: View {
 
 /// «Следующая серия через 5» (v15): миниатюра с кольцом отсчёта, имя, «Смотреть титры esc», «Дальше ↩».
 private struct NextEpisodeCard: View {
-    let next: Playlist.Item
-    let position: String
-    let remaining: Double
-    let watchCredits: () -> Void
-    let play: () -> Void
+    package let next: Playlist.Item
+    package let position: String
+    package let remaining: Double
+    package let watchCredits: () -> Void
+    package let play: () -> Void
 
     @ObservedObject private var info = PlayerMediaInfoCache.shared
 
-    var body: some View {
+    package var body: some View {
         let seconds = Int(remaining.rounded(.up))
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(spacing: DS.Space.m) {
@@ -348,13 +346,13 @@ private struct NextEpisodeCard: View {
 // MARK: - Пустое окно, ошибки
 
 /// Пустое окно (v07): зона «Перетащите видео», «Открыть… ⌘O», «Продолжить просмотр».
-struct EmptyPlayerView: View {
-    let controller: PlayerWindowController
+package struct EmptyPlayerView: View {
+    package let controller: PlayerWindowController
 
     @State private var recent = PlayerRecent.urls
     @ObservedObject private var info = PlayerMediaInfoCache.shared
 
-    var body: some View {
+    package var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.Space.l) {
                 VStack(spacing: DS.Space.s) {
@@ -421,12 +419,12 @@ struct EmptyPlayerView: View {
 }
 
 /// Формат не поддерживается (v09, вариант MVP): объяснение, без установки чего-либо.
-struct UnsupportedCard: View {
-    let url: URL
-    @ObservedObject var model: PlayerModel
-    let controller: PlayerWindowController
+package struct UnsupportedCard: View {
+    package let url: URL
+    @ObservedObject package var model: PlayerModel
+    package let controller: PlayerWindowController
 
-    var body: some View {
+    package var body: some View {
         let format = PlayerMedia.formatName(url)
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(alignment: .top, spacing: DS.Space.m) {
@@ -454,11 +452,11 @@ struct UnsupportedCard: View {
 }
 
 /// Битый или недописанный файл: понятная ошибка, приложение живо.
-struct FailedCard: View {
-    let message: String
-    @ObservedObject var model: PlayerModel
+package struct FailedCard: View {
+    package let message: String
+    @ObservedObject package var model: PlayerModel
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(alignment: .top, spacing: DS.Space.m) {
                 ToastTile(symbol: "exclamationmark.triangle.fill", tone: .danger)
@@ -486,9 +484,9 @@ struct FailedCard: View {
 
 /// Миниатюры и длительности файлов плейлиста и недавних: считаются по запросу, хранятся, пока открыт плеер.
 @MainActor
-final class PlayerMediaInfoCache: ObservableObject {
-    static let shared = PlayerMediaInfoCache()
-    static let limit = 200
+package final class PlayerMediaInfoCache: ObservableObject {
+    package static let shared = PlayerMediaInfoCache()
+    package static let limit = 200
 
     @Published private var thumbnails: [URL: NSImage] = [:]
     @Published private var durations: [URL: Double] = [:]
@@ -496,10 +494,10 @@ final class PlayerMediaInfoCache: ObservableObject {
     /// Растёт при `clear()`: запросы, начатые до очистки, свои результаты уже не записывают.
     private var generation = 0
 
-    func thumbnail(of url: URL) -> NSImage? { thumbnails[url] }
-    func duration(of url: URL) -> Double? { durations[url] }
+    package func thumbnail(of url: URL) -> NSImage? { thumbnails[url] }
+    package func duration(of url: URL) -> Double? { durations[url] }
 
-    func request(_ url: URL) {
+    package func request(_ url: URL) {
         guard !requested.contains(url), !PlayerMedia.isUnsupported(url), FileManager.default.fileExists(atPath: url.path) else { return }
         if requested.count >= Self.limit { clear() }
         requested.insert(url)
@@ -521,7 +519,7 @@ final class PlayerMediaInfoCache: ObservableObject {
     }
 
     /// Последнее окно плеера закрыли — память не держим.
-    func clear() {
+    package func clear() {
         generation += 1
         thumbnails = [:]
         durations = [:]
@@ -529,14 +527,14 @@ final class PlayerMediaInfoCache: ObservableObject {
     }
 }
 
-struct PlayerThumbnail: View {
-    let url: URL
-    let width: CGFloat
-    let height: CGFloat
+package struct PlayerThumbnail: View {
+    package let url: URL
+    package let width: CGFloat
+    package let height: CGFloat
 
     @ObservedObject private var cache = PlayerMediaInfoCache.shared
 
-    var body: some View {
+    package var body: some View {
         ZStack {
             Color.dsField
             if let image = cache.thumbnail(of: url) {

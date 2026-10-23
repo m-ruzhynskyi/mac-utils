@@ -5,9 +5,9 @@ import SwiftUI
 
 /// Видео: `AVPlayerLayer` на чёрном, кадр вписан. Клик — пауза сразу (на отпускание, чтобы можно было тащить окно
 /// за видео), двойной — ±10 с по краям и полный экран посередине; движение мыши показывает плавающую панель.
-final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
-    let playerLayer = AVPlayerLayer()
-    weak var controller: PlayerWindowController?
+package final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
+    package let playerLayer = AVPlayerLayer()
+    package weak var controller: PlayerWindowController?
     private var pip: AVPictureInPictureController?
     private var pipObservation: NSKeyValueObservation?
     private var mouseDownEvent: NSEvent?
@@ -15,9 +15,9 @@ final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
     private var tracking: NSTrackingArea?
 
     /// PiP включён — кнопка лаймом.
-    var onPictureInPictureChange: ((Bool) -> Void)?
+    package var onPictureInPictureChange: ((Bool) -> Void)?
 
-    init(player: AVPlayer) {
+    package init(player: AVPlayer) {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
@@ -28,12 +28,12 @@ final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) не используется") }
+    package required init?(coder: NSCoder) { fatalError("init(coder:) не используется") }
 
-    override var acceptsFirstResponder: Bool { true }
-    override var mouseDownCanMoveWindow: Bool { false }
+    package override var acceptsFirstResponder: Bool { true }
+    package override var mouseDownCanMoveWindow: Bool { false }
 
-    override func layout() {
+    package override func layout() {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -41,7 +41,7 @@ final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
         CATransaction.commit()
     }
 
-    override func viewDidMoveToWindow() {
+    package override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window = window as? PlayerWindow else {
             // Окно закрыли: PiP и наблюдение за ним больше не нужны.
@@ -54,7 +54,7 @@ final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
         if pip == nil { setUpPictureInPicture() }
     }
 
-    override func updateTrackingAreas() {
+    package override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking { removeTrackingArea(tracking) }
         let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
@@ -63,16 +63,16 @@ final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
         tracking = area
     }
 
-    override func mouseMoved(with event: NSEvent) { MainActor.assumeIsolated { controller?.mouseMoved() } }
-    override func mouseEntered(with event: NSEvent) { MainActor.assumeIsolated { controller?.mouseMoved() } }
+    package override func mouseMoved(with event: NSEvent) { MainActor.assumeIsolated { controller?.mouseMoved() } }
+    package override func mouseEntered(with event: NSEvent) { MainActor.assumeIsolated { controller?.mouseMoved() } }
 
-    override func mouseDown(with event: NSEvent) {
+    package override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         mouseDownEvent = event
         dragged = false
     }
 
-    override func mouseDragged(with event: NSEvent) {
+    package override func mouseDragged(with event: NSEvent) {
         guard let down = mouseDownEvent, !dragged, let window, !window.styleMask.contains(.fullScreen) else { return }
         let a = down.locationInWindow, b = event.locationInWindow
         if hypot(a.x - b.x, a.y - b.y) > 4 {
@@ -81,7 +81,7 @@ final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
         }
     }
 
-    override func mouseUp(with event: NSEvent) {
+    package override func mouseUp(with event: NSEvent) {
         defer { mouseDownEvent = nil }
         guard !dragged else { return }
         let x = convert(event.locationInWindow, from: nil).x
@@ -102,16 +102,16 @@ final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
         }
     }
 
-    var isPictureInPictureActive: Bool { pip?.isPictureInPictureActive ?? false }
+    package var isPictureInPictureActive: Bool { pip?.isPictureInPictureActive ?? false }
 
-    func togglePictureInPicture() {
+    package func togglePictureInPicture() {
         guard let pip else { return }
         if pip.isPictureInPictureActive { pip.stopPictureInPicture() } else if pip.isPictureInPicturePossible { pip.startPictureInPicture() }
     }
 
-    func stopPictureInPicture() { pip?.stopPictureInPicture() }
+    package func stopPictureInPicture() { pip?.stopPictureInPicture() }
 
-    func pictureInPictureController(_ controller: AVPictureInPictureController,
+    package func pictureInPictureController(_ controller: AVPictureInPictureController,
                                     restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completion: @escaping (Bool) -> Void) {
         // Возврат из PiP — к окну плеера, если оно ещё открыто.
         DispatchQueue.main.async {
@@ -124,19 +124,19 @@ final class PlayerVideoView: NSView, AVPictureInPictureControllerDelegate {
 }
 
 /// Видео в SwiftUI.
-struct PlayerVideoRepresentable: NSViewRepresentable {
-    let model: PlayerModel
-    let controller: PlayerWindowController
-    @Binding var pictureInPicture: Bool
+package struct PlayerVideoRepresentable: NSViewRepresentable {
+    package let model: PlayerModel
+    package let controller: PlayerWindowController
+    @Binding package var pictureInPicture: Bool
 
-    func makeNSView(context: Context) -> PlayerVideoView {
+    package func makeNSView(context: Context) -> PlayerVideoView {
         let view = PlayerVideoView(player: model.player)
         view.controller = controller
         view.onPictureInPictureChange = { active in pictureInPicture = active }
         return view
     }
 
-    func updateNSView(_ view: PlayerVideoView, context: Context) {
+    package func updateNSView(_ view: PlayerVideoView, context: Context) {
         view.controller = controller
     }
 }

@@ -7,6 +7,7 @@ import XCTest
 @testable import MUAudio
 @testable import MUWindowSnap
 @testable import MUScreenshot
+@testable import MUVideoPlayer
 
 /// Этап 3 плеера: клавиши (§ 8.1), удержание →, клики по третям, точки входа.
 final class PlayerShortcutsTests: XCTestCase {

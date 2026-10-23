@@ -1,20 +1,19 @@
 import Foundation
 import MUCore
-import MUAudio
 
 // MARK: - Модель
 
 /// Цвет реплики (ASS `\c`, SRT `<font color>`).
-struct SubtitleColor: Equatable, Codable {
-    var red: UInt8
-    var green: UInt8
-    var blue: UInt8
-    var alpha: UInt8 = 255
+package struct SubtitleColor: Equatable, Codable {
+    package var red: UInt8
+    package var green: UInt8
+    package var blue: UInt8
+    package var alpha: UInt8 = 255
 
-    static let white = SubtitleColor(red: 255, green: 255, blue: 255)
+    package static let white = SubtitleColor(red: 255, green: 255, blue: 255)
 
     /// ASS: `&HAABBGGRR` или `&HBBGGRR&` (альфа 00 — непрозрачный), в SSA бывает десятичное число.
-    init?(ass value: String) {
+    package init?(ass value: String) {
         var text = value.trimmingCharacters(in: .whitespaces).uppercased()
         let hex = text.hasPrefix("&H")
         if hex { text.removeFirst(2) }
@@ -27,7 +26,7 @@ struct SubtitleColor: Equatable, Codable {
     }
 
     /// HTML: `#RRGGBB`, `RRGGBB` или имя из короткого списка.
-    init?(html value: String) {
+    package init?(html value: String) {
         let names: [String: UInt32] = ["white": 0xFFFFFF, "black": 0x000000, "red": 0xFF0000, "green": 0x00FF00, "blue": 0x0000FF,
                                        "yellow": 0xFFFF00, "cyan": 0x00FFFF, "magenta": 0xFF00FF, "gray": 0x808080, "grey": 0x808080]
         let text = value.trimmingCharacters(in: CharacterSet(charactersIn: "\"' #")).lowercased()
@@ -37,7 +36,7 @@ struct SubtitleColor: Equatable, Codable {
         blue = UInt8(number & 0xFF)
     }
 
-    init(red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8 = 255) {
+    package init(red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8 = 255) {
         self.red = red
         self.green = green
         self.blue = blue
@@ -46,35 +45,35 @@ struct SubtitleColor: Equatable, Codable {
 }
 
 /// Кусок текста с одним оформлением. Перевод строки — `\n` внутри текста.
-struct SubtitleRun: Equatable {
-    var text: String
-    var bold = false
-    var italic = false
-    var underline = false
-    var strike = false
-    var color: SubtitleColor?
+package struct SubtitleRun: Equatable {
+    package var text: String
+    package var bold = false
+    package var italic = false
+    package var underline = false
+    package var strike = false
+    package var color: SubtitleColor?
 }
 
-struct SubtitleCue: Equatable {
-    var start: Double
-    var end: Double
-    var runs: [SubtitleRun]
+package struct SubtitleCue: Equatable {
+    package var start: Double
+    package var end: Double
+    package var runs: [SubtitleRun]
     /// Выравнивание по цифровой клавиатуре (ASS `\an`): 1–3 снизу, 4–6 посередине, 7–9 сверху; 2 — снизу по центру.
-    var alignment = 2
+    package var alignment = 2
     /// ASS `\pos(x, y)` в координатах `PlayResX × PlayResY`.
-    var position: CGPoint?
+    package var position: CGPoint?
 
-    var text: String { runs.map(\.text).joined() }
+    package var text: String { runs.map(\.text).joined() }
 }
 
-struct SubtitleTrack: Equatable {
-    enum Format: String { case srt, ass, vtt }
+package struct SubtitleTrack: Equatable {
+    package enum Format: String { case srt, ass, vtt }
 
-    var format: Format
+    package var format: Format
     /// По началу; пустые реплики отброшены.
-    private(set) var cues: [SubtitleCue]
+    package private(set) var cues: [SubtitleCue]
     /// Размер «холста» ASS для `\pos`.
-    var playResolution = CGSize(width: 384, height: 288)
+    package var playResolution = CGSize(width: 384, height: 288)
     /// Обычные реплики (по началу) и самая длинная из них: поиск отступает назад только на неё.
     private let short: [SubtitleCue]
     private let longestShort: Double
@@ -83,9 +82,9 @@ struct SubtitleTrack: Equatable {
     private let long: [SubtitleCue]
 
     /// Реплика дольше этого — «долгая».
-    static let longCue: Double = 30
+    package static let longCue: Double = 30
 
-    init(format: Format, cues: [SubtitleCue], playResolution: CGSize? = nil) {
+    package init(format: Format, cues: [SubtitleCue], playResolution: CGSize? = nil) {
         self.format = format
         self.cues = cues.filter { $0.end > $0.start && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .sorted { $0.start < $1.start }
@@ -97,7 +96,7 @@ struct SubtitleTrack: Equatable {
 
     /// Реплики на экране в момент `time`: бинарный поиск последней начавшейся и шаг назад на длину самой длинной
     /// обычной реплики; долгие — перебором. По началу, как в файле.
-    func cues(at time: Double) -> [SubtitleCue] {
+    package func cues(at time: Double) -> [SubtitleCue] {
         guard !cues.isEmpty else { return [] }
         var low = 0, high = short.count
         while low < high {
@@ -119,16 +118,16 @@ struct SubtitleTrack: Equatable {
 
 // MARK: - Разбор
 
-enum SubtitleParser {
+package enum SubtitleParser {
     /// Файлы больше этого не читаем: субтитры фильма — сотни килобайт.
-    static let maxBytes = 20 * 1024 * 1024
-    static let extensions: Set<String> = ["srt", "ass", "ssa", "vtt"]
+    package static let maxBytes = 20 * 1024 * 1024
+    package static let extensions: Set<String> = ["srt", "ass", "ssa", "vtt"]
 
-    enum LoadError: LocalizedError {
+    package enum LoadError: LocalizedError {
         case tooLarge
         case empty
 
-        var errorDescription: String? {
+        package var errorDescription: String? {
             switch self {
             case .tooLarge: return "Файл субтитров больше 20 МБ"
             case .empty: return "В файле не нашлось ни одной реплики"
@@ -137,7 +136,7 @@ enum SubtitleParser {
     }
 
     /// Прочитать файл: кодировка — своя (`encoding`) или определённая автоматически.
-    static func load(_ url: URL, encoding: TextEncoding? = nil) throws -> (track: SubtitleTrack, encoding: TextEncoding) {
+    package static func load(_ url: URL, encoding: TextEncoding? = nil) throws -> (track: SubtitleTrack, encoding: TextEncoding) {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         guard size <= maxBytes else { throw LoadError.tooLarge }
         let data = try Data(contentsOf: url)
@@ -147,7 +146,7 @@ enum SubtitleParser {
         return (track, decoded.encoding)
     }
 
-    static func parse(_ text: String, fileExtension: String = "") -> SubtitleTrack {
+    package static func parse(_ text: String, fileExtension: String = "") -> SubtitleTrack {
         let normalized = normalize(text)
         let head = normalized.prefix(4096)
         if head.hasPrefix("WEBVTT") || fileExtension.lowercased() == "vtt" { return parseVTT(normalized) }
@@ -158,7 +157,7 @@ enum SubtitleParser {
     }
 
     /// Без BOM, переводы строк — `\n`.
-    static func normalize(_ text: String) -> String {
+    package static func normalize(_ text: String) -> String {
         var result = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         if result.hasPrefix("\u{FEFF}") { result.removeFirst() }
         return result
@@ -170,7 +169,7 @@ enum SubtitleParser {
     private static let timing = try! NSRegularExpression(
         pattern: #"^\s*((?:\d{1,5}:)?\d{1,2}:\d{1,2}[,.]\d{1,3})\s*-->\s*((?:\d{1,5}:)?\d{1,2}:\d{1,2}[,.]\d{1,3})"#)
 
-    static func timingLine(_ line: String) -> (start: Double, end: Double)? {
+    package static func timingLine(_ line: String) -> (start: Double, end: Double)? {
         let range = NSRange(line.startIndex..., in: line)
         guard let match = timing.firstMatch(in: line, range: range),
               let a = Range(match.range(at: 1), in: line), let b = Range(match.range(at: 2), in: line),
@@ -179,11 +178,11 @@ enum SubtitleParser {
     }
 
     /// Время дальше этого (≈ 115 суток) — мусор, а не реплика.
-    static let maxSeconds: Double = 10_000_000
+    package static let maxSeconds: Double = 10_000_000
 
     /// «1:02:03,5» → 3723,5. Дробная часть — по числу цифр (`,5` — полсекунды, `,500` — тоже).
     /// Часы — до 5 цифр, минуты и секунды — до 2, дробь — до 3: длинная строка цифр в файле не переполнит счёт.
-    static func seconds(_ text: String) -> Double? {
+    package static func seconds(_ text: String) -> Double? {
         let parts = text.split(whereSeparator: { $0 == ":" || $0 == "," || $0 == "." }).map(String.init)
         guard parts.count >= 3, parts.count <= 4,
               parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { return nil }
@@ -194,7 +193,7 @@ enum SubtitleParser {
         return total <= maxSeconds ? total : nil
     }
 
-    static func parseSRT(_ text: String) -> SubtitleTrack {
+    package static func parseSRT(_ text: String) -> SubtitleTrack {
         let lines = text.components(separatedBy: "\n")
         var cues: [SubtitleCue] = []
         var index = 0
@@ -221,7 +220,7 @@ enum SubtitleParser {
     }
 
     /// Разметка SRT/VTT: `<b> <i> <u> <s> <font color>`, прочие теги убираются; `{\an8}` и другие вставки ASS — как в ASS.
-    static func markup(_ text: String) -> SubtitleCue {
+    package static func markup(_ text: String) -> SubtitleCue {
         var cue = SubtitleCue(start: 0, end: 0, runs: [])
         var state = SubtitleRun(text: "")
         var colors: [SubtitleColor?] = []
@@ -286,7 +285,7 @@ enum SubtitleParser {
         return String(rest.prefix(while: { !$0.isWhitespace }))
     }
 
-    static func decodeEntities(_ text: String) -> String {
+    package static func decodeEntities(_ text: String) -> String {
         guard text.contains("&") else { return text }
         return text.replacingOccurrences(of: "&lt;", with: "<").replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&nbsp;", with: "\u{00A0}").replacingOccurrences(of: "&quot;", with: "\"")
@@ -307,7 +306,7 @@ enum SubtitleParser {
 
     // MARK: WebVTT
 
-    static func parseVTT(_ text: String) -> SubtitleTrack {
+    package static func parseVTT(_ text: String) -> SubtitleTrack {
         let blocks = text.components(separatedBy: "\n\n")
         var cues: [SubtitleCue] = []
         for block in blocks where !Task.isCancelled {
@@ -335,16 +334,16 @@ enum SubtitleParser {
 
     // MARK: ASS / SSA
 
-    struct ASSStyle: Equatable {
-        var bold = false
-        var italic = false
-        var underline = false
-        var strike = false
-        var color: SubtitleColor?
-        var alignment = 2
+    package struct ASSStyle: Equatable {
+        package var bold = false
+        package var italic = false
+        package var underline = false
+        package var strike = false
+        package var color: SubtitleColor?
+        package var alignment = 2
     }
 
-    static func parseASS(_ text: String) -> SubtitleTrack {
+    package static func parseASS(_ text: String) -> SubtitleTrack {
         var section = ""
         var styleFormat: [String] = []
         var eventFormat: [String] = []
@@ -415,7 +414,7 @@ enum SubtitleParser {
     }
 
     /// SSA (v4): 1–3 снизу, +4 — сверху, +8 — посередине.
-    static func numpad(legacy value: Int) -> Int {
+    package static func numpad(legacy value: Int) -> Int {
         let base = max(1, min(3, value & 3))
         if value & 4 != 0 { return base + 6 }
         if value & 8 != 0 { return base + 3 }
@@ -423,7 +422,7 @@ enum SubtitleParser {
     }
 
     /// Текст события ASS: `\N` — перевод строки, `{…}` — вставки оформления, остальное — текст без эффектов.
-    static func assText(_ text: String, style: ASSStyle) -> SubtitleCue {
+    package static func assText(_ text: String, style: ASSStyle) -> SubtitleCue {
         var cue = SubtitleCue(start: 0, end: 0, runs: [], alignment: style.alignment)
         var state = SubtitleRun(text: "", bold: style.bold, italic: style.italic, underline: style.underline,
                                 strike: style.strike, color: style.color)
@@ -544,8 +543,8 @@ enum SubtitleParser {
 
 /// Кодировка файла субтитров: ядро текстового редактора (`TextEncoding.detect`), а если это не UTF-8 —
 /// выбор между кириллическими однобайтовыми по частоте строчных букв (SRT в cp1251 встречается часто).
-enum SubtitleText {
-    static func decode(_ data: Data, encoding forced: TextEncoding? = nil) -> (text: String, encoding: TextEncoding) {
+package enum SubtitleText {
+    package static func decode(_ data: Data, encoding forced: TextEncoding? = nil) -> (text: String, encoding: TextEncoding) {
         if let forced, let text = forced.decode(data) { return (text, forced) }
         let detected = TextEncoding.detect(data)
         if detected.reason == .bom || detected.reason == .validUTF8 {
@@ -557,7 +556,7 @@ enum SubtitleText {
 
     /// Западный текст — байтов выше 0x7F мало; русский — почти все буквы. Среди кириллических побеждает та,
     /// где больше строчных букв: в обычном тексте их намного больше, чем заглавных, а чужая кодировка меняет регистр.
-    static func guessSingleByte(_ data: Data) -> TextEncoding {
+    package static func guessSingleByte(_ data: Data) -> TextEncoding {
         let sample = data.prefix(256 * 1024)
         var high = 0, letters = 0
         for byte in sample {
@@ -589,15 +588,15 @@ enum SubtitleText {
 // MARK: - Поиск рядом с видео
 
 /// Внешние субтитры рядом с видео: `имя.srt`, `имя.ru.srt`, `имя.English.ass`…
-enum SubtitleFinder {
-    struct Candidate: Equatable {
-        let url: URL
+package enum SubtitleFinder {
+    package struct Candidate: Equatable {
+        package let url: URL
         /// «ru», «eng», «English» или nil — без пометки языка.
-        let language: String?
+        package let language: String?
     }
 
     /// Файлы субтитров с тем же именем, что у видео (без учёта регистра). Сначала язык системы, потом без языка.
-    static func candidates(for video: URL, names: [String], preferredLanguages: [String] = Locale.preferredLanguages) -> [Candidate] {
+    package static func candidates(for video: URL, names: [String], preferredLanguages: [String] = Locale.preferredLanguages) -> [Candidate] {
         let base = video.deletingPathExtension().lastPathComponent.lowercased()
         let folder = video.deletingLastPathComponent()
         var found: [Candidate] = []
@@ -624,7 +623,7 @@ enum SubtitleFinder {
     }
 
     /// «rus», «Russian», «ru-RU» → «ru».
-    static func languageCode(_ tag: String) -> String {
+    package static func languageCode(_ tag: String) -> String {
         let lower = tag.lowercased()
         let known: [String: String] = ["rus": "ru", "russian": "ru", "русский": "ru", "eng": "en", "english": "en",
                                        "ukr": "uk", "ukrainian": "uk", "ger": "de", "deu": "de", "german": "de",
