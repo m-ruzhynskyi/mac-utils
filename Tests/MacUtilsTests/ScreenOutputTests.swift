@@ -32,12 +32,12 @@ final class ScreenOutputTests: XCTestCase {
     /// иначе тест (и прилипание окон, редактор, тосты) снова вспыхивает и пищит на экране пользователя.
     func testNoDirectScreenOrSoundCallsInSources() throws {
         let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Sources/MacUtils")
+            .deletingLastPathComponent().appendingPathComponent("Sources")
         let forbidden = [".orderFrontRegardless()", ".makeKeyAndOrderFront(", ".orderFront(", "NSSound.beep()", "NSBeep()",
                          "NSApp.activate(", ".show(relativeTo:", "NSSound(named:"]
         var found: [String] = []
         let files = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
-        for case let url as URL in files where url.pathExtension == "swift" && url.lastPathComponent != "ScreenOutput.swift" {
+        for case let url as URL in files where url.pathExtension == "swift" && url.lastPathComponent != "ScreenOutput.swift" && !url.path.contains("/ToolsLauncher/") {
             let lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: .newlines)
             for (index, line) in lines.enumerated() {
                 let code = line.components(separatedBy: "//").first ?? line

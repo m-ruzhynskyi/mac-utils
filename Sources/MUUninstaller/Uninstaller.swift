@@ -6,24 +6,24 @@ import MUDesign
 
 /// «Удаление программ»: приложение и все его файлы — в Корзину.
 @MainActor
-final class UninstallerModel: ObservableObject {
-    static let shared = UninstallerModel()
+package final class UninstallerModel: ObservableObject {
+    package static let shared = UninstallerModel()
 
-    @Published private(set) var apps: [InstalledApp] = []
-    @Published private(set) var appSizes: [URL: Int64] = [:]
-    @Published var search = ""
-    @Published private(set) var selected: InstalledApp?
-    @Published private(set) var refusal: String?
-    @Published private(set) var leftovers: [Leftover] = []
-    @Published var checked: Set<URL> = []
-    @Published private(set) var sizes: [URL: Int64] = [:]
-    @Published private(set) var scanning = false
-    @Published private(set) var working = false
+    @Published package private(set) var apps: [InstalledApp] = []
+    @Published package private(set) var appSizes: [URL: Int64] = [:]
+    @Published package var search = ""
+    @Published package private(set) var selected: InstalledApp?
+    @Published package private(set) var refusal: String?
+    @Published package private(set) var leftovers: [Leftover] = []
+    @Published package var checked: Set<URL> = []
+    @Published package private(set) var sizes: [URL: Int64] = [:]
+    @Published package private(set) var scanning = false
+    @Published package private(set) var working = false
     /// Не удалось убрать часть файлов из-за защиты macOS — подсказка про «Полный доступ к диску».
-    @Published private(set) var needsFullDiskAccess = false
+    @Published package private(set) var needsFullDiskAccess = false
 
     /// Для снимков интерфейса: демонстрационные данные, система не читается.
-    static func demo(apps: [InstalledApp], appSizes: [URL: Int64], selected: InstalledApp?,
+    package static func demo(apps: [InstalledApp], appSizes: [URL: Int64], selected: InstalledApp?,
                      leftovers: [Leftover], sizes: [URL: Int64]) -> UninstallerModel {
         let model = UninstallerModel()
         model.apps = apps
@@ -35,17 +35,17 @@ final class UninstallerModel: ObservableObject {
         return model
     }
 
-    var filtered: [InstalledApp] {
+    package var filtered: [InstalledApp] {
         let query = search.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return apps }
         return apps.filter { $0.name.localizedCaseInsensitiveContains(query) || $0.bundleID.localizedCaseInsensitiveContains(query) }
     }
 
-    var totalChecked: Int64 {
+    package var totalChecked: Int64 {
         leftovers.filter { checked.contains($0.url) }.reduce(0) { $0 + (sizes[$1.url] ?? 0) }
     }
 
-    func reload() {
+    package func reload() {
         Task.detached(priority: .utility) {
             let installed = InstalledApp.all()
             let urls = installed.map(\.url)
@@ -59,7 +59,7 @@ final class UninstallerModel: ObservableObject {
 
     // MARK: - Выбор и поиск хвостов
 
-    func select(url: URL) {
+    package func select(url: URL) {
         guard let app = InstalledApp(url: url) else {
             refusal = "Это не приложение"
             selected = nil
@@ -69,14 +69,14 @@ final class UninstallerModel: ObservableObject {
         select(app)
     }
 
-    func clearSelection() {
+    package func clearSelection() {
         selected = nil
         leftovers = []
         checked = []
         refusal = nil
     }
 
-    func select(_ app: InstalledApp) {
+    package func select(_ app: InstalledApp) {
         selected = app
         leftovers = []
         checked = []
@@ -113,7 +113,7 @@ final class UninstallerModel: ObservableObject {
 
     // MARK: - Удаление
 
-    func moveToTrash() {
+    package func moveToTrash() {
         guard let app = selected, app.refusal == nil, !working else { return }
         let items = leftovers.filter { checked.contains($0.url) && $0.kind != .receipt }
         guard !items.isEmpty else { return }
@@ -179,7 +179,7 @@ final class UninstallerModel: ObservableObject {
     }
 
     /// Результат удаления относится к выбранной сейчас программе, а не к той, что выбрали позже.
-    nonisolated static func isStillSelected(_ selected: URL?, app: URL) -> Bool { selected == app }
+    package nonisolated static func isStillSelected(_ selected: URL?, app: URL) -> Bool { selected == app }
 
     private func trashNow(_ items: [Leftover], app: InstalledApp) {
         var failed: [Leftover] = []
@@ -243,7 +243,7 @@ final class UninstallerModel: ObservableObject {
     /// перенести файлы и отдать каталог пользователю ВСЕГДА, даже если часть переносов не удалась
     /// (иначе уже перенесённые файлы останутся запертыми в каталоге root). Любой сбой — ненулевой код выхода.
     /// Содержимое каталогов уже отдано пользователю в `adminTrashCommands`, здесь — только сам staging.
-    static func adminStagingScript(_ urls: [URL], staging: String, owner: String = NSUserName(),
+    package static func adminStagingScript(_ urls: [URL], staging: String, owner: String = NSUserName(),
                                    identity: (URL) -> AdminSourceIdentity? = AdminSourceIdentity.read) -> String {
         let moves = urls.isEmpty ? ":" : adminTrashCommands(urls, trash: staging, stamp: nil, owner: owner, identity: identity)
         // Системные демоны останавливаются до переноса; сбой остановки (демон не загружен) перенос не отменяет.
@@ -254,7 +254,7 @@ final class UninstallerModel: ObservableObject {
 
     /// Без root: содержимое staging — в Корзину, затем сам каталог удаляется. false при любой ошибке
     /// (нельзя прочитать каталог, не перенеслось, не удалился): тогда файлы остаются в staging, путь — в журнале.
-    static func finishStaging(_ staging: URL) -> Bool {
+    package static func finishStaging(_ staging: URL) -> Bool {
         let manager = FileManager.default
         guard manager.fileExists(atPath: staging.path) else { return true }
         let items: [URL]
@@ -295,7 +295,7 @@ final class UninstallerModel: ObservableObject {
     ///   только последнее имя в уже открытом каталоге. С полными путями (`-exec`) содержимое перенесённой папки,
     ///   которое пользователь меняет через заранее открытый дескриптор, могло бы подменить промежуточный каталог
     ///   symlink'ом, и chown ушёл бы в системный каталог.
-    static func adminTrashCommands(_ urls: [URL], trash: String, stamp: Int?, owner: String = NSUserName(),
+    package static func adminTrashCommands(_ urls: [URL], trash: String, stamp: Int?, owner: String = NSUserName(),
                                    identity: (URL) -> AdminSourceIdentity? = AdminSourceIdentity.read) -> String {
         var used: [String: Int] = [:]
         return urls.map { url -> String in
@@ -319,22 +319,22 @@ final class UninstallerModel: ObservableObject {
         }.joined(separator: " && ")
     }
 
-    static func shellQuote(_ s: String) -> String {
+    package static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    static func appleScriptQuote(_ s: String) -> String {
+    package static func appleScriptQuote(_ s: String) -> String {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 }
 
 /// Что root должен застать на месте перед переносом: родительский каталог (как его откроет `cd -P`, по `stat`)
 /// и сам элемент (по `lstat`, ссылка — это сама ссылка), в виде `устройство:inode`, как печатает `stat -f %d:%i`.
-struct AdminSourceIdentity: Equatable {
-    let parent: String
-    let item: String
+package struct AdminSourceIdentity: Equatable {
+    package let parent: String
+    package let item: String
 
-    static func read(_ url: URL) -> AdminSourceIdentity? {
+    package static func read(_ url: URL) -> AdminSourceIdentity? {
         var info = stat()
         guard stat(url.deletingLastPathComponent().path, &info) == 0 else { return nil }
         let parent = "\(info.st_dev):\(info.st_ino)"
@@ -345,7 +345,7 @@ struct AdminSourceIdentity: Equatable {
 
 extension InstalledApp {
     /// Демонстрационная программа для снимков интерфейса: файлов на диске нет.
-    init(demoName: String, bundleID: String) {
+    package init(demoName: String, bundleID: String) {
         url = URL(fileURLWithPath: "/demo/Applications/\(demoName).app")
         name = demoName
         self.bundleID = bundleID
@@ -355,14 +355,19 @@ extension InstalledApp {
 
 // MARK: - Вид (страница настроек «Удаление программ»)
 
-struct UninstallerView: View {
-    @ObservedObject var model: UninstallerModel
+package struct UninstallerView: View {
+    package init(model: UninstallerModel, compact: Bool = false) {
+        self.model = model
+        self.compact = compact
+    }
+
+    @ObservedObject package var model: UninstallerModel
     @State private var dropTargeted = false
 
     /// Компактно (панель из строки меню): список и подробности на одном месте, с «Назад».
-    var compact = false
+    package var compact = false
 
-    var body: some View {
+    package var body: some View {
         Group {
             if compact {
                 if model.selected != nil {

@@ -3,6 +3,7 @@ import Foundation
 import Security
 import MUCore
 import MUDesign
+import MUAppSwitcher
 
 /// Автообновление из GitHub Releases: раз в несколько часов смотрит последний
 /// релиз репозитория, скачивает MacUtils.zip, подменяет приложение и перезапускает его.

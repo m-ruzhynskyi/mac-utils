@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 import ScreenCaptureKit
 import MUCore
 import MUDesign
+import MUAppSwitcher
 
 /// «Поверх всех» для любого окна (⌃⌥P): macOS не даёт поднять чужое окно над остальными,
 /// поэтому поверх показывается живая копия окна (ScreenCaptureKit) — с настраиваемой прозрачностью.

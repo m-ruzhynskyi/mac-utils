@@ -3,6 +3,7 @@ import ScreenCaptureKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUSmoothScroll
 
 /// Длинный снимок с прокруткой: выделенная область снимается несколько раз
 /// в секунду, пока пользователь прокручивает содержимое вниз, а новые строки

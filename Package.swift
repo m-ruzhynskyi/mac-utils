@@ -16,6 +16,31 @@ let package = Package(
             dependencies: ["MUCore"],
             path: "Sources/MUDesign"
         ),
+        .target(
+            name: "MUCutPaste",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUCutPaste"
+        ),
+        .target(
+            name: "MUFocus",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUFocus"
+        ),
+        .target(
+            name: "MUSmoothScroll",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUSmoothScroll"
+        ),
+        .target(
+            name: "MUAppSwitcher",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUAppSwitcher"
+        ),
+        .target(
+            name: "MUUninstaller",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUUninstaller"
+        ),
         // Удалённые подключения: вся логика без зависимости от приложения и других модулей
         // (см. .audit/task-remote-connections.md).
         .target(
@@ -24,7 +49,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MURemoteConnections"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MURemoteConnections"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -38,7 +63,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MURemoteConnections"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MURemoteConnections"],
             path: "Tests/MacUtilsTests"
         ),
     ]

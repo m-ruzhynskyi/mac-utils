@@ -83,7 +83,7 @@ final class ShortcutsTests: XCTestCase {
     /// Регистрация каждой горячей клавиши зовёт `AppAction(hotKey:)` (функции — через `AppRouter`) — то же, что ссылка и «Команды».
     func testEveryHotKeyRunsTheSameAction() throws {
         let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Sources/MacUtils")
+            .deletingLastPathComponent().appendingPathComponent("Sources")
         var text = ""
         for case let url as URL in try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
             where url.pathExtension == "swift" { text += try String(contentsOf: url, encoding: .utf8) }

@@ -4,19 +4,19 @@ import MUCore
 import MUDesign
 
 /// Правила вырезания без системных вызовов (для тестов).
-enum CutRules {
+package enum CutRules {
     /// Что осталось из вырезанного: файлы могли переименовать или удалить между ⌘X и ⌘V. `exists` видит и «висячие» ссылки.
-    static func alive(_ urls: [URL], exists: (URL) -> Bool) -> (alive: [URL], gone: [URL]) {
+    package static func alive(_ urls: [URL], exists: (URL) -> Bool) -> (alive: [URL], gone: [URL]) {
         var alive: [URL] = [], gone: [URL] = []
         for url in urls { if exists(url) { alive.append(url) } else { gone.append(url) } }
         return (alive, gone)
     }
 
-    static func exists(_ url: URL) -> Bool {
+    package static func exists(_ url: URL) -> Bool {
         FileManager.default.fileExists(atPath: url.path) || (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
     }
 
-    enum PasteAction: Equatable {
+    package enum PasteAction: Equatable {
         /// Вырезанного нет — обычная вставка.
         case passThrough
         /// В буфер обмена после ⌘X что-то скопировали: вырезание отменяется, ⌘V работает как обычно.
@@ -27,7 +27,7 @@ enum CutRules {
         case move(alive: [URL], goneCount: Int)
     }
 
-    static func pasteAction(items: [URL], changeCount: Int, cutChangeCount: Int, exists: (URL) -> Bool) -> PasteAction {
+    package static func pasteAction(items: [URL], changeCount: Int, cutChangeCount: Int, exists: (URL) -> Bool) -> PasteAction {
         guard !items.isEmpty else { return .passThrough }
         guard changeCount == cutChangeCount else { return .cancelledByClipboard }
         let split = alive(items, exists: exists)
@@ -35,23 +35,23 @@ enum CutRules {
         return .move(alive: split.alive, goneCount: split.gone.count)
     }
 
-    static func goneMessage(_ count: Int) -> String {
+    package static func goneMessage(_ count: Int) -> String {
         "Не найдено при вставке: \(count) \(plural(count, "объект", "объекта", "объектов")) (переименованы или удалены)"
     }
 
-    static let clipboardCancelMessage = "Вырезание отменено: буфер обмена изменился. ⌘V вставит скопированное"
+    package static let clipboardCancelMessage = "Вырезание отменено: буфер обмена изменился. ⌘V вставит скопированное"
 }
 
 /// ⌘X / ⌘V для файлов в Finder: ⌘X запоминает выделенные объекты,
 /// ⌘V перемещает их в открытую папку. В текстовых полях (переименование,
 /// поиск) сочетания работают как обычно.
 @MainActor
-final class FinderCutPaste: NSObject, ObservableObject {
-    static let shared = FinderCutPaste()
+package final class FinderCutPaste: NSObject, ObservableObject {
+    package static let shared = FinderCutPaste()
 
-    @Published private(set) var items: [URL] = []
-    @Published private(set) var isRunning = false
-    @Published private(set) var isBusy = false
+    @Published package private(set) var items: [URL] = []
+    @Published package private(set) var isRunning = false
+    @Published package private(set) var isBusy = false
 
     private static let finderID = "com.apple.finder"
     private static let keyX: Int64 = 7
@@ -69,7 +69,7 @@ final class FinderCutPaste: NSObject, ObservableObject {
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
     }
 
-    func sync() {
+    package func sync() {
         let wanted = UserDefaults.standard.bool(forKey: Pref.cutPaste) && Permissions.accessibility
         if wanted {
             if tap == nil {
@@ -87,7 +87,7 @@ final class FinderCutPaste: NSObject, ObservableObject {
         refreshPanel()
     }
 
-    func cancelCut() {
+    package func cancelCut() {
         items = []
         refreshPanel()
     }
@@ -246,8 +246,8 @@ final class FinderCutPaste: NSObject, ObservableObject {
 
 // MARK: - Finder через AppleScript
 
-enum FinderScript {
-    enum Result<T> {
+package enum FinderScript {
+    package enum Result<T> {
         case success(T)
         case failure(String)
     }
@@ -266,7 +266,7 @@ enum FinderScript {
         return .success(output.stringValue ?? "")
     }
 
-    static func selection() -> Result<[URL]> {
+    package static func selection() -> Result<[URL]> {
         let source = """
         tell application "Finder"
             set out to ""
@@ -284,7 +284,7 @@ enum FinderScript {
         }
     }
 
-    static func insertionFolder() -> Result<URL> {
+    package static func insertionFolder() -> Result<URL> {
         let source = """
         tell application "Finder" to return POSIX path of (insertion location as alias)
         """
@@ -299,14 +299,14 @@ enum FinderScript {
 
 // MARK: - Перемещение файлов
 
-struct MoveOutcome {
-    var moved = 0
-    var failed: [URL] = []
-    var error: String?
+package struct MoveOutcome {
+    package var moved = 0
+    package var failed: [URL] = []
+    package var error: String?
 }
 
-enum FileMover {
-    static func move(_ urls: [URL], into folder: URL) -> MoveOutcome {
+package enum FileMover {
+    package static func move(_ urls: [URL], into folder: URL) -> MoveOutcome {
         let fm = FileManager()
         var outcome = MoveOutcome()
         // Папка назначения со снятыми ссылками и «.»/«..»: «та же папка» и «внутри себя» определяются по настоящему пути.

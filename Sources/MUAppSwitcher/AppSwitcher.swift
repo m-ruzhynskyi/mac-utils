@@ -9,23 +9,23 @@ import MUCore
 /// последнему использованию. Пока панель открыта:
 /// Tab / ⇧Tab / ← → — выбор, Q — завершить, H — скрыть, Esc — отмена.
 @MainActor
-final class AppSwitcher: NSObject, ObservableObject {
-    static let shared = AppSwitcher()
+package final class AppSwitcher: NSObject, ObservableObject {
+    package static let shared = AppSwitcher()
 
-    @Published private(set) var items: [SwitcherItem] = []
-    @Published var selected = 0
-    @Published private(set) var isRunning = false
+    @Published package private(set) var items: [SwitcherItem] = []
+    @Published package var selected = 0
+    @Published package private(set) var isRunning = false
     /// Последние снимки окон (CGWindowID → превью).
-    @Published private(set) var previews: [CGWindowID: NSImage] = [:]
+    @Published package private(set) var previews: [CGWindowID: NSImage] = [:]
 
     private enum Key {
-        static let tab: Int64 = 48
-        static let escape: Int64 = 53
-        static let returnKey: Int64 = 36
-        static let left: Int64 = 123
-        static let right: Int64 = 124
-        static let q: Int64 = 12
-        static let h: Int64 = 4
+        package static let tab: Int64 = 48
+        package static let escape: Int64 = 53
+        package static let returnKey: Int64 = 36
+        package static let left: Int64 = 123
+        package static let right: Int64 = 124
+        package static let q: Int64 = 12
+        package static let h: Int64 = 4
     }
 
     private var tap: EventTap?
@@ -65,7 +65,7 @@ final class AppSwitcher: NSObject, ObservableObject {
         }
     }
 
-    func sync() {
+    package func sync() {
         let defaults = UserDefaults.standard
         let wanted = defaults.bool(forKey: Pref.switcher) && Permissions.accessibility
         let useCommand = defaults.string(forKey: Pref.switcherModifier) == "command"
@@ -100,7 +100,7 @@ final class AppSwitcher: NSObject, ObservableObject {
     /// Системный ⌘Tab выключен, только пока наш переключатель его заменяет. В исключённой программе (виртуальная машина,
     /// удалённый стол) наш перехват пропускает ⌘Tab, поэтому там системный переключатель должен работать: иначе из неё
     /// нельзя уйти с клавиатуры.
-    static func shouldDisableSystemSwitcher(running: Bool, commandMode: Bool, frontExcluded: Bool) -> Bool {
+    package static func shouldDisableSystemSwitcher(running: Bool, commandMode: Bool, frontExcluded: Bool) -> Bool {
         running && commandMode && !frontExcluded
     }
 
@@ -116,7 +116,7 @@ final class AppSwitcher: NSObject, ObservableObject {
     }
 
     /// Возвращает системный ⌘Tab при выходе.
-    func shutdown() {
+    package func shutdown() {
         setSystemSwitcher(disabled: false)
     }
 
@@ -135,7 +135,7 @@ final class AppSwitcher: NSObject, ObservableObject {
     }
 
     /// Mac Utils получил или потерял значок в Dock: в кэше появляются или пропадают его окна.
-    func activationPolicyChanged() {
+    package func activationPolicyChanged() {
         refreshItems()
     }
 
@@ -150,7 +150,7 @@ final class AppSwitcher: NSObject, ObservableObject {
     /// Список окон обновляется в фоне, чтобы ⌥Tab не ждал Accessibility: по событиям программ (активация, запуск,
     /// завершение, скрытие) и при открытии панели. Порядок окон панель всё равно берёт свежим из CG, а таймер — запасной,
     /// для заголовков и свёрнутых окон внутри одной программы: раз в минуту (было раз в 5 с — перебор окон через AX).
-    static let cacheRefreshInterval: TimeInterval = 60
+    package static let cacheRefreshInterval: TimeInterval = 60
 
     private func startCacheRefresh() {
         refreshItems()
@@ -318,7 +318,7 @@ final class AppSwitcher: NSObject, ObservableObject {
         if active { panel.show() }
     }
 
-    func choose(_ index: Int) {
+    package func choose(_ index: Int) {
         guard items.indices.contains(index) else { return }
         selected = index
         commit()
@@ -365,7 +365,7 @@ final class AppSwitcher: NSObject, ObservableObject {
         panel.show()
     }
 
-    static func withoutOwnIfAccessory(_ items: [SwitcherItem], policy: NSApplication.ActivationPolicy) -> [SwitcherItem] {
+    package static func withoutOwnIfAccessory(_ items: [SwitcherItem], policy: NSApplication.ActivationPolicy) -> [SwitcherItem] {
         policy == .regular ? items : items.filter { $0.pid != WindowList.ownPID }
     }
 
@@ -387,9 +387,9 @@ final class AppSwitcher: NSObject, ObservableObject {
 }
 
 /// Выбор в списке после его обновления.
-enum SwitcherSelection {
+package enum SwitcherSelection {
     /// Индекс прежнего выбранного окна в новом списке; нет такого — прежний индекс, зажатый в границы.
-    static func index(keeping id: String?, in ids: [String], fallback: Int) -> Int {
+    package static func index(keeping id: String?, in ids: [String], fallback: Int) -> Int {
         guard !ids.isEmpty else { return 0 }
         if let id, let found = ids.firstIndex(of: id) { return found }
         return min(max(fallback, 0), ids.count - 1)
@@ -397,7 +397,7 @@ enum SwitcherSelection {
 }
 
 /// Склейка свежего списка CG (правильный порядок окон) с кэшем (заголовки, AX-окна, свёрнутые).
-enum SwitcherMerge {
+package enum SwitcherMerge {
     /// - `draft` — окна, которые CG видит сейчас, спереди назад (без Accessibility);
     /// - `cached` — прошлый полный список;
     /// - `seen` — ключи окон, которые CG показывал при последнем полном сборе. Окно из `draft` без записи в кэше:
@@ -405,7 +405,7 @@ enum SwitcherMerge {
     ///   (панель, вспомогательное окно) — не добавляется;
     /// - окно из кэша, которого нет в `draft`, остаётся только если оно свёрнуто или программа скрыта (`isBackground`);
     ///   иначе оно закрыто или ушло с этого рабочего стола.
-    static func merge<T>(draft: [T], cached: [T], seen: Set<String>, id: (T) -> String, isBackground: (T) -> Bool) -> [T] {
+    package static func merge<T>(draft: [T], cached: [T], seen: Set<String>, id: (T) -> String, isBackground: (T) -> Bool) -> [T] {
         let cachedByID = Dictionary(cached.map { (id($0), $0) }, uniquingKeysWith: { first, _ in first })
         var result: [T] = []
         var used = Set<String>()

@@ -2,12 +2,12 @@ import Foundation
 
 /// Остановка служб (LaunchAgents/LaunchDaemons) перед переносом их plist в Корзину:
 /// иначе служба работает до перезагрузки, хотя «удалена».
-enum LaunchUnload {
-    enum Domain: Equatable {
+package enum LaunchUnload {
+    package enum Domain: Equatable {
         case gui(uid_t)
         case system
 
-        var name: String {
+        package var name: String {
             switch self {
             case .gui(let uid): return "gui/\(uid)"
             case .system: return "system"
@@ -17,7 +17,7 @@ enum LaunchUnload {
 
     /// Домен службы по расположению plist; nil — это не plist службы. Расположение сверяется по родительской папке
     /// целиком (после `standardized`), а не по префиксу пути.
-    static func domain(for url: URL, uid: uid_t = getuid(), home: String = NSHomeDirectory()) -> Domain? {
+    package static func domain(for url: URL, uid: uid_t = getuid(), home: String = NSHomeDirectory()) -> Domain? {
         guard url.pathExtension == "plist" else { return nil }
         let parent = url.standardizedFileURL.deletingLastPathComponent()
         switch parent.path {
@@ -34,23 +34,23 @@ enum LaunchUnload {
 
     /// plist агентов в бандле программы: программа регистрирует их сама (SMAppService), и после удаления бандла
     /// они работают до перезагрузки. Демоны из бандла сюда не входят: их остановка требует root.
-    static func bundledAgents(in app: URL) -> [URL] {
+    package static func bundledAgents(in app: URL) -> [URL] {
         let folder = app.appendingPathComponent("Contents/Library/LaunchAgents", isDirectory: true)
         let items = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         return items.filter { $0.pathExtension == "plist" }.sorted { $0.path < $1.path }
     }
 
     /// Аргументы `launchctl` для остановки; nil — останавливать нечего.
-    static func bootoutArguments(for url: URL, uid: uid_t = getuid(), home: String = NSHomeDirectory()) -> [String]? {
+    package static func bootoutArguments(for url: URL, uid: uid_t = getuid(), home: String = NSHomeDirectory()) -> [String]? {
         domain(for: url, uid: uid, home: home).map { ["bootout", $0.name, url.standardizedFileURL.path] }
     }
 
     /// Код результата, если `launchctl` не уложился в срок.
-    static let timedOut: Int32 = -2
+    package static let timedOut: Int32 = -2
 
     /// Остановка пользовательских служб (без root). Ошибка («не загружена») не мешает удалению. Возвращает код выхода по plist.
     @discardableResult
-    static func bootoutUserServices(_ urls: [URL], uid: uid_t = getuid(), home: String = NSHomeDirectory(),
+    package static func bootoutUserServices(_ urls: [URL], uid: uid_t = getuid(), home: String = NSHomeDirectory(),
                                     launchctl: String = "/bin/launchctl", timeout: TimeInterval = 12) -> [URL: Int32] {
         var codes: [URL: Int32] = [:]
         for url in urls {
@@ -79,7 +79,7 @@ enum LaunchUnload {
     }
 
     /// Команды для скрипта root: остановка системных демонов. Каждая команда сама по себе не ломает цепочку.
-    static func rootCommands(for urls: [URL], quote: (String) -> String) -> String {
+    package static func rootCommands(for urls: [URL], quote: (String) -> String) -> String {
         urls.compactMap { url -> String? in
             guard domain(for: url) == .system else { return nil }
             return "/bin/launchctl bootout system \(quote(url.standardizedFileURL.path)) >/dev/null 2>&1 || :; "
@@ -87,7 +87,7 @@ enum LaunchUnload {
     }
 
     /// Ждёт выхода процесса, но не дольше `attempts` проверок. `sleep` и `isTerminated` подменяются в тестах.
-    static func waitForExit(attempts: Int, isTerminated: () -> Bool, sleep: () async -> Void) async -> Bool {
+    package static func waitForExit(attempts: Int, isTerminated: () -> Bool, sleep: () async -> Void) async -> Bool {
         for _ in 0..<attempts {
             if isTerminated() { return true }
             await sleep()
