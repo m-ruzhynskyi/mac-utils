@@ -7,13 +7,13 @@ import MUDesign
 
 /// Рисование поверх экрана (⌃⌥A): стрелки, рамки, маркер и перо — во время созвона или записи.
 @MainActor
-final class ScreenAnnotator: ObservableObject {
-    static let shared = ScreenAnnotator()
+package final class ScreenAnnotator: ObservableObject {
+    package static let shared = ScreenAnnotator()
 
-    enum Tool: String, CaseIterable, Identifiable {
+    package enum Tool: String, CaseIterable, Identifiable {
         case pen, arrow, rectangle, highlighter
-        var id: String { rawValue }
-        var symbol: String {
+        package var id: String { rawValue }
+        package var symbol: String {
             switch self {
             case .pen: return "pencil.tip"
             case .arrow: return "arrow.up.right"
@@ -21,7 +21,7 @@ final class ScreenAnnotator: ObservableObject {
             case .highlighter: return "highlighter"
             }
         }
-        var title: String {
+        package var title: String {
             switch self {
             case .pen: return "Перо (1)"
             case .arrow: return "Стрелка (2)"
@@ -31,24 +31,24 @@ final class ScreenAnnotator: ObservableObject {
         }
     }
 
-    static let colors: [NSColor] = [.systemRed, .systemYellow, .systemGreen, .systemBlue, .white]
+    package static let colors: [NSColor] = [.systemRed, .systemYellow, .systemGreen, .systemBlue, .white]
 
-    @Published var tool: Tool = .arrow
-    @Published var color: NSColor = .systemRed
+    @Published package var tool: Tool = .arrow
+    @Published package var color: NSColor = .systemRed
     /// Штрихи сами исчезают через несколько секунд — удобно на демонстрации.
-    @Published var fading = false
-    @Published private(set) var isActive = false
+    @Published package var fading = false
+    @Published package private(set) var isActive = false
 
     /// Рисовать «сквозь клики»: рисунок остаётся, мышь работает с программами. Удержание ⌥ на время переворачивает режим.
-    @Published var clickThrough = false {
+    @Published package var clickThrough = false {
         didSet { applyMouseMode() }
     }
-    @Published private(set) var snapshotBusy = false
+    @Published package private(set) var snapshotBusy = false
 
-    private(set) var store = AnnotationStore()
+    package private(set) var store = AnnotationStore()
     private struct Overlay {
-        let panel: NSPanel
-        let canvas: AnnotationCanvas
+        package let panel: NSPanel
+        package let canvas: AnnotationCanvas
     }
     private var overlays: [CGDirectDisplayID: Overlay] = [:]
     private var toolbarPanel: NSPanel?
@@ -57,7 +57,7 @@ final class ScreenAnnotator: ObservableObject {
     private var screenObserver: Any?
     private var fadeTimer: Timer?
 
-    func sync() {
+    package func sync() {
         let center = HotKeyCenter.shared
         guard UserDefaults.standard.bool(forKey: Pref.annotate) else {
             center.unregister(id: HotKeyID.annotate)
@@ -69,7 +69,7 @@ final class ScreenAnnotator: ObservableObject {
         }
     }
 
-    func toggle() {
+    package func toggle() {
         isActive ? stop() : start()
     }
 
@@ -78,7 +78,7 @@ final class ScreenAnnotator: ObservableObject {
                    uniquingKeysWith: { first, _ in first })
     }
 
-    func start() {
+    package func start() {
         guard !isActive, let mouseScreen = NSScreen.withMouse ?? NSScreen.main else { return }
         isActive = true
         optionHeld = false
@@ -106,10 +106,10 @@ final class ScreenAnnotator: ObservableObject {
             MainActor.assumeIsolated { ScreenAnnotator.shared.screensChanged() }
         }
         installOptionMonitors()
-        ScreenRecorder.current?.refreshFilter()
+        AppRouter.shared.refreshRecordingFilter()
     }
 
-    func stop() {
+    package func stop() {
         guard isActive else { return }
         isActive = false
         for overlay in overlays.values { overlay.panel.orderOut(nil) }
@@ -123,7 +123,7 @@ final class ScreenAnnotator: ObservableObject {
         screenObserver = nil
         for monitor in flagMonitors { NSEvent.removeMonitor(monitor) }
         flagMonitors = []
-        ScreenRecorder.current?.refreshFilter()
+        AppRouter.shared.refreshRecordingFilter()
     }
 
     // MARK: Экраны
@@ -168,7 +168,7 @@ final class ScreenAnnotator: ObservableObject {
             }
         }
         redrawAll()
-        ScreenRecorder.current?.refreshFilter()
+        AppRouter.shared.refreshRecordingFilter()
     }
 
     private func makeOverlay(display: CGDirectDisplayID, frame: CGRect) -> Overlay {
@@ -177,7 +177,7 @@ final class ScreenAnnotator: ObservableObject {
         canvas.display = display
         let panel = HUDPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
                               backing: .buffered, defer: false)
-        panel.title = ScreenRecorder.recordedWindowTitle
+        panel.title = RecordingWindow.title
         panel.isOpaque = false
         panel.backgroundColor = NSColor.black.withAlphaComponent(0.001)
         panel.level = .screenSaver
@@ -222,22 +222,22 @@ final class ScreenAnnotator: ObservableObject {
 
     // MARK: Штрихи
 
-    func commit(_ stroke: AnnotationStroke) {
+    package func commit(_ stroke: AnnotationStroke) {
         store.add(stroke)
         redrawAll()
         scheduleFade()
     }
 
-    func redrawAll() {
+    package func redrawAll() {
         for overlay in overlays.values { overlay.canvas.needsDisplay = true }
     }
 
-    func undo() {
+    package func undo() {
         store.undo()
         redrawAll()
     }
 
-    func clear() {
+    package func clear() {
         store.clear()
         redrawAll()
     }
@@ -263,7 +263,7 @@ final class ScreenAnnotator: ObservableObject {
 
     /// Снимает экран, на котором панель инструментов (без окон Mac Utils), накладывает штрихи этого экрана и отдаёт по
     /// настройке «Куда сохранять»: в буфер, в папку или туда и туда.
-    func snapshot() {
+    package func snapshot() {
         guard !snapshotBusy, isActive else { return }
         guard Permissions.screenRecording else {
             Permissions.requestScreenRecording()
@@ -333,25 +333,25 @@ final class ScreenAnnotator: ObservableObject {
 
 // MARK: - Холст
 
-final class AnnotationCanvas: NSView {
-    weak var annotator: ScreenAnnotator?
-    var display: CGDirectDisplayID = 0
+package final class AnnotationCanvas: NSView {
+    package weak var annotator: ScreenAnnotator?
+    package var display: CGDirectDisplayID = 0
     private var current: AnnotationStroke?
 
-    override var acceptsFirstResponder: Bool { true }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    package override var acceptsFirstResponder: Bool { true }
+    package override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func resetCursorRects() {
+    package override func resetCursorRects() {
         addCursorRect(bounds, cursor: .crosshair)
     }
 
-    override func mouseDown(with event: NSEvent) {
+    package override func mouseDown(with event: NSEvent) {
         guard let annotator else { return }
         let point = convert(event.locationInWindow, from: nil)
         current = AnnotationStroke(display: display, tool: annotator.tool, color: annotator.color, points: [point])
     }
 
-    override func mouseDragged(with event: NSEvent) {
+    package override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         guard var stroke = current else { return }
         if stroke.tool == .pen || stroke.tool == .highlighter {
@@ -363,7 +363,7 @@ final class AnnotationCanvas: NSView {
         needsDisplay = true
     }
 
-    override func mouseUp(with event: NSEvent) {
+    package override func mouseUp(with event: NSEvent) {
         guard var stroke = current else { return }
         current = nil
         if stroke.points.count == 1 { stroke.points.append(stroke.points[0]) }
@@ -371,7 +371,7 @@ final class AnnotationCanvas: NSView {
         annotator?.commit(stroke)
     }
 
-    override func keyDown(with event: NSEvent) {
+    package override func keyDown(with event: NSEvent) {
         let annotator = self.annotator
         switch Int(event.keyCode) {
         case kVK_Escape: annotator?.stop()
@@ -385,7 +385,7 @@ final class AnnotationCanvas: NSView {
         }
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    package override func draw(_ dirtyRect: NSRect) {
         guard let annotator else { return }
         let fading = annotator.fading
         let now = Date()
@@ -399,9 +399,9 @@ final class AnnotationCanvas: NSView {
 // MARK: - Панель инструментов
 
 private struct AnnotationToolbar: View {
-    @ObservedObject var annotator: ScreenAnnotator
+    @ObservedObject package var annotator: ScreenAnnotator
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 6) {
             ForEach(ScreenAnnotator.Tool.allCases) { tool in
                 Button { annotator.tool = tool } label: {
