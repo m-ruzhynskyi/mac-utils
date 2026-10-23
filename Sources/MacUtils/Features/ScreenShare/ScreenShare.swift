@@ -2810,6 +2810,10 @@ final class SharePlayer: @unchecked Sendable {
     private(set) var dropped = 0
     private(set) var restarts = 0
     private var observer: NSObjectProtocol?
+    private let center: NotificationCenter
+    /// Перезапуск — на своей очереди: обработчик уведомления не ждёт замок на внутренней очереди AVAudioEngine
+    /// (иначе взаимная блокировка с play(), который держит замок и запускает движок).
+    private let restartQueue = DispatchQueue(label: "macutils.share.player.restart")
 
     /// ≈ 1 с звука трансляции.
     static let defaultLimit = Int(ShareProtocol.sampleRate)
@@ -2819,20 +2823,24 @@ final class SharePlayer: @unchecked Sendable {
     /// `center` — откуда приходит `.AVAudioEngineConfigurationChange` (в тестах свой центр уведомлений).
     init(silent: Bool = false, limit: Int = SharePlayer.defaultLimit, center: NotificationCenter = .default) {
         self.limit = limit
+        self.center = center
         if silent {
             try? engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 4096)
         }
         observer = center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
-            self?.outputChanged()
+            self?.restartQueue.async { self?.outputChanged() }
         }
     }
 
     deinit {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
+        if let observer { center.removeObserver(observer) }
     }
 
     /// Сменилось устройство вывода (наушники, AirPods, HDMI): система останавливает движок, и без перезапуска звук
     /// пропадает. Старую очередь бросаем — в ней звук на секунду позади — и продолжаем со свежих пакетов.
+    /// Для тестов: дождаться перезапуска, поставленного уведомлением.
+    func waitForRestart() { restartQueue.sync {} }
+
     func outputChanged() {
         engineLock.lock(); defer { engineLock.unlock() }
         guard started else { return }
