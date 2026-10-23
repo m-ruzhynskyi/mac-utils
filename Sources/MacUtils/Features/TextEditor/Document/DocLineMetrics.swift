@@ -37,11 +37,48 @@ enum DocLineMetrics {
         return result
     }
 
+    /// Защита от бесконечной перекладки: typesetter снова и снова кладёт уже уложенные строки (абзац в `NSTextBlock`
+    /// на краю последнего контейнера), а раскладка контейнера не завершается. После `loopLimit` возвратов без
+    /// завершения такие строки — нулевой высоты: блок помещается, раскладка идёт дальше (вид этого места хуже, но
+    /// приложение не висит). Сброс — по завершении раскладки контейнера (`completed`).
+    private struct Loop {
+        var furthest = -1
+        var previous = -1
+        var returns = 0
+    }
+
+    static let loopLimit = 1_000
+    @MainActor private static var loops: [ObjectIdentifier: Loop] = [:]
+
+    @MainActor static func completed(_ layoutManager: NSLayoutManager) {
+        loops[ObjectIdentifier(layoutManager)] = nil
+    }
+
+    /// `true` — строку `glyphs` кладут по кругу.
+    @MainActor private static func looping(_ layoutManager: NSLayoutManager, glyphs: NSRange) -> Bool {
+        let key = ObjectIdentifier(layoutManager)
+        var loop = loops[key] ?? Loop()
+        defer { loops[key] = loop }
+        if glyphs.location <= loop.previous { loop.returns += 1 }
+        loop.previous = glyphs.location
+        if glyphs.location > loop.furthest {
+            loop.furthest = glyphs.location
+            return false
+        }
+        return loop.returns > loopLimit
+    }
+
     /// Поправить строку, которую разложил TextKit: высота, базовая линия, интервалы абзаца. `false` — оставить как есть
     /// (строка с рисунком или заглушкой: её высоту задаёт вложение).
     @MainActor static func adjust(_ layoutManager: NSLayoutManager, rect: inout NSRect, used: inout NSRect, baseline: inout CGFloat,
                                   container: NSTextContainer, glyphs: NSRange) -> Bool {
         guard let storage = layoutManager.textStorage, glyphs.length > 0 else { return false }
+        if looping(layoutManager, glyphs: glyphs) {
+            rect.size.height = 0
+            used.size.height = 0
+            baseline = 0
+            return true
+        }
         let characters = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
         guard characters.length > 0, NSMaxRange(characters) <= storage.length else { return false }
         // Строка разрыва («\f» перед абзацем, служебный абзац перед таблицей) — нулевой высоты.
@@ -114,5 +151,9 @@ final class DocLineMetricsDelegate: NSObject, NSLayoutManagerDelegate {
             DocLineMetrics.adjust(layoutManager, rect: &lineFragmentRect.pointee, used: &lineFragmentUsedRect.pointee,
                                   baseline: &baselineOffset.pointee, container: textContainer, glyphs: glyphRange)
         }
+    }
+
+    func layoutManager(_ layoutManager: NSLayoutManager, didCompleteLayoutFor container: NSTextContainer?, atEnd: Bool) {
+        MainActor.assumeIsolated { DocLineMetrics.completed(layoutManager) }
     }
 }
