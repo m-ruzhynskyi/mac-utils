@@ -107,9 +107,15 @@ let package = Package(
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUDropShelf"
         ),
+        // Удалённые подключения: вся логика без зависимости от приложения и других модулей
+        // (см. .audit/task-remote-connections.md).
+        .target(
+            name: "MURemoteConnections",
+            path: "Sources/MURemoteConnections"
+        ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -117,8 +123,13 @@ let package = Package(
             path: "Sources/ToolsLauncher"
         ),
         .testTarget(
+            name: "MURemoteConnectionsTests",
+            dependencies: ["MURemoteConnections"],
+            path: "Tests/MURemoteConnectionsTests"
+        ),
+        .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections"],
             path: "Tests/MacUtilsTests"
         ),
     ]

@@ -88,6 +88,7 @@ enum AppAction: Equatable {
     case watch(code: String)
     case viewerMonitor(Int)
     case player, playerOpen(path: String), playerTogglePlay, playerContinue
+    case remoteConnections
     case dollarsRemove(path: String, skipFirst: Int?)
     case dollarsFind(path: String)
     case convertEncoding(path: String, TextEncoding, from: TextEncoding?)
@@ -114,6 +115,7 @@ enum AppAction: Equatable {
         case .layoutFix: self = .layoutFix
         case .textEditor: self = .editor(path: nil)
         case .videoPlayer: self = .player
+        case .remoteConnections: self = .remoteConnections
         }
     }
 
@@ -171,6 +173,7 @@ enum AppAction: Equatable {
         case .watch(let code): ShareViewer.shared.watch(code: code)
         case .viewerMonitor(let n): ShareViewer.shared.requestDisplay(n)
         case .player: PlayerWindowController.show()
+        case .remoteConnections: RemotePaletteController.shared.toggle()
         case .playerOpen(let path): PlayerWindowController.open([Self.fileURL(path)])
         case .playerTogglePlay:
             if let controller = PlayerWindowController.current { controller.model.togglePlay() } else { PlayerWindowController.show() }

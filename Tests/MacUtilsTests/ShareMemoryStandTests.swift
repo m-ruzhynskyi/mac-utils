@@ -91,7 +91,7 @@ final class ShareMemoryStandTests: XCTestCase {
     /// Зритель: 10 минут звука, а проигрыватель не тратит буферы (движок остановлен системой).
     func testStandViewerAudioNotConsumed() async throws {
         for bounded in [false, true] {
-            let player = SharePlayer(silent: true, limit: bounded ? SharePlayer.defaultLimit : .max)
+            let player = SharePlayer(silent: true, limit: bounded ? SharePlayer.defaultLimit : .max, catchUp: bounded ? SharePlayer.defaultCatchUp : .max)
             var payloads: [Data]? = (0..<6_000).map { Data(audioPacket($0).dropFirst()) }
             try await settle()
             let before = MemoryProbe.footprint()

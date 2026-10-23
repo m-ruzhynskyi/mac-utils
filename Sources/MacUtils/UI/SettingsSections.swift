@@ -41,6 +41,7 @@ extension SettingsSection {
         case .shots: return "мои снимки история поиск умная папка копии снимков"
         case .textEditor: return "текстовый редактор блокнот notepad frm rtf txt log json xml csv кодировка вкладки знаки $ доллар открыть с помощью"
         case .videoPlayer: return "видеоплеер видео плеер фильм сериал mp4 mov m4v mp3 субтитры srt ass дорожка скорость плейлист пропустить интро титры следующая серия кадр картинка в картинке pip"
+        case .remote: return "удалённые подключения anydesk teamviewer удалённый доступ компьютеры id пароль таблица xlsx xml excel ⌃⌥⌘a"
         }
     }
 

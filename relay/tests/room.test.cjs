@@ -1152,9 +1152,9 @@ test('switch-request тратит токены зрителя: больше вс
 
 test('медленный зритель: долг больше предела — дельта-кадры пропускаются до ключевого, ведущему уходит запрос ключевого, остальные не страдают', () => {
   const f = fixture(), host = hostLive(f);
-  const slow = f.socket('viewer', { id: '1', approved: true, lastSeen: 1_000_000 });
-  const fast = f.socket('viewer', { id: '2', approved: true, lastSeen: 1_000_000 });
-  const old = f.socket('viewer', { id: '3', approved: true, lastSeen: 1_000_000 });
+  const slow = f.socket('viewer', { id: '1', approved: true, h264: true, lastSeen: 1_000_000 });
+  const fast = f.socket('viewer', { id: '2', approved: true, h264: true, lastSeen: 1_000_000 });
+  const old = f.socket('viewer', { id: '3', approved: true, h264: true, lastSeen: 1_000_000 });
   const got = new Map();
   for (const v of [slow, fast, old]) { got.set(v, 0); v.send = (m) => { if (typeof m === 'string') v.messages.push(JSON.parse(m)); else got.set(v, got.get(v) + 1); }; }
   const frame = (key) => new Uint8Array([3, key ? 1 : 0, 0, 0, 1]).buffer;
@@ -1198,4 +1198,22 @@ test('медленный H.264-зритель возобновляется на 
   assert.equal(got, stuck, 'дельта не возобновляет');
   f.room.webSocketMessage(host, h264(true));
   assert.equal(got, stuck + 1, 'ключевой H.264 возобновляет');
+});
+
+test('вид кадров: JPEG — зрителю без H.264, H.264 — зрителю с H.264; JPEG зрителю с H.264 только пока H.264 нет (мост)', () => {
+  const f = fixture(), host = hostLive(f);
+  const modern = f.socket('viewer', { id: '1', approved: true, h264: true, lastSeen: 1_000_000 });
+  const legacy = f.socket('viewer', { id: '2', approved: true, lastSeen: 1_000_000 });
+  const got = { modern: [], legacy: [] };
+  modern.send = (m) => { if (typeof m !== 'string') got.modern.push(new Uint8Array(m)[0]); };
+  legacy.send = (m) => { if (typeof m !== 'string') got.legacy.push(new Uint8Array(m)[0]); };
+  const h264 = new Uint8Array([3, 1, 0, 0, 1]).buffer, jpeg = new Uint8Array([1, 0xff, 0xd8]).buffer, audio = new Uint8Array([2, 0, 0]).buffer;
+  f.room.webSocketMessage(host, h264);
+  f.room.webSocketMessage(host, jpeg);     // параллельная картинка Mac-ведущего
+  f.room.webSocketMessage(host, audio);
+  assert.deepEqual(got.modern, [3, 2]);
+  assert.deepEqual(got.legacy, [1, 2]);
+  f.advance(2000);                         // H.264 нет дольше 0,7 с — картинка мостом
+  f.room.webSocketMessage(host, jpeg);
+  assert.deepEqual(got.modern, [3, 2, 1]);
 });
