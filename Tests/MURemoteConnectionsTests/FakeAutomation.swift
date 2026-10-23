@@ -6,6 +6,8 @@ final class FakeNode: AXNode {
     var role: String?
     var subrole: String?
     var label: String?
+    var placeholder: String?
+    var detail: String?
     var kids: [FakeNode]
     var processID: Int32?
     var value: [UInt16] = []
@@ -39,6 +41,12 @@ final class FakeNode: AXNode {
         guard acceptsAXValue else { return false }
         if swallowsAXValue { return true }
         value = secret.withBytes { Array(String(decoding: $0, as: UTF8.self).utf16) }
+        return true
+    }
+
+    func setText(_ text: String) -> Bool {
+        guard acceptsAXValue else { return false }
+        value = Array(text.utf16)
         return true
     }
 

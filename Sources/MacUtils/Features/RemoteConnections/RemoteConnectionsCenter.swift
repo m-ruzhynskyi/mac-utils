@@ -306,6 +306,11 @@ final class RemoteConnectionsCenter: ObservableObject {
                 self.recents = self.prefs.recentIDs
             }
             if outcome == .failed(.entryGone) { self.store.reload() }
+            // Запасной путь — вставить ID вручную. Только ID: пароль в буфер обмена не попадает никогда.
+            if outcome == .unconfirmed(copyID: true) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(record.id, forType: .string)
+            }
         }
     }
 
