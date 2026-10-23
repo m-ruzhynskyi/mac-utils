@@ -259,7 +259,6 @@
   <section class="me">
     <div class="lbl">Мой ID</div>
     <span id="myId" title="Скопировать"></span>
-    <input id="myNameInput" maxlength="40" placeholder="Имя для зрителей" aria-label="Имя, которое видят зрители и ведущие" autocomplete="off">
   </section>
   <section class="watchbox">
     <div class="lbl">Смотреть</div>
@@ -356,14 +355,8 @@ const mainId = window.mu && (typeof window.mu.myId === "function" ? window.mu.my
 const idFromApp = typeof mainId === "string" && /^\d{10}$/.test(mainId);
 let myId = idFromApp ? mainId : store.get("mu-id", null);
 if (!myId) { myId = generateId(); store.set("mu-id", myId); }
-// Имя, которое видят ведущий и зрители: то, что задал пользователь; по умолчанию «Windows» — имя компьютера не отдаём.
-const cleanName = (value) => String(value || "").replace(/[\u0000-\u001f<>"\\]/g, "").trim().slice(0, 40);
-const getMyName = () => cleanName(store.get("mu-display-name", "")) || "Windows";
-{
-  const input = $("myNameInput");
-  input.value = cleanName(store.get("mu-display-name", ""));
-  input.onchange = input.oninput = () => store.set("mu-display-name", cleanName(input.value));
-}
+// Имя для ведущего и зрителей — всегда «Windows» (решение пользователя): имя компьютера на сервер не отправляется.
+const getMyName = () => "Windows";
 $("myId").textContent = display(myId);
 $("myId").onclick = () => navigator.clipboard?.writeText(myId);
 
