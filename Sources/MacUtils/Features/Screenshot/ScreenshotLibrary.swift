@@ -5,6 +5,7 @@ import Vision
 import MUCore
 import MUDesign
 import MUAudio
+import MUDownloadsSorter
 
 /// Запись в индексе: путь, день, программа и распознанный текст.
 struct ShotRecord: Codable, Hashable, Identifiable {

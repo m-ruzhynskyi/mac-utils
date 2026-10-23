@@ -15,6 +15,9 @@ import MUAudio
 import MULayoutFix
 import MUAppVolume
 import MUWindowSnap
+import MUAI
+import MUDownloadsSorter
+import MUDropShelf
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения

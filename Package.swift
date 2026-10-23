@@ -92,9 +92,24 @@ let package = Package(
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUWindowSnap"
         ),
+        .target(
+            name: "MUAI",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUAI"
+        ),
+        .target(
+            name: "MUDownloadsSorter",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUDownloadsSorter"
+        ),
+        .target(
+            name: "MUDropShelf",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUDropShelf"
+        ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -103,7 +118,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf"],
             path: "Tests/MacUtilsTests"
         ),
     ]

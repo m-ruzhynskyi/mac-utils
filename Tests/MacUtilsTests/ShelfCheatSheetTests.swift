@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUDropShelf
 
 final class ShakeDetectorTests: XCTestCase {
     /// Точки «маха» влево-вправо с шагом 10 pt.

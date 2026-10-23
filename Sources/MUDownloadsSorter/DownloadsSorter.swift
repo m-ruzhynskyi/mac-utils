@@ -2,11 +2,10 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
-import MUAudio
 
 /// Правила раскладки (без UI — для тестов).
-enum DownloadsRules {
-    enum Category: String, CaseIterable {
+package enum DownloadsRules {
+    package enum Category: String, CaseIterable {
         case images = "Images"
         case documents = "Documents"
         case archives = "Archives"
@@ -16,7 +15,7 @@ enum DownloadsRules {
         case code = "Code"
 
         /// Старые русские названия папок (до 1.2.88) — их содержимое переносится.
-        var legacyName: String {
+        package var legacyName: String {
             switch self {
             case .images: return "Изображения"
             case .documents: return "Документы"
@@ -30,13 +29,13 @@ enum DownloadsRules {
     }
 
     /// Расширение без точки, в нижнем регистре: «.Sketch» → «sketch».
-    static func normalizedExtension(_ ext: String) -> String {
+    package static func normalizedExtension(_ ext: String) -> String {
         ext.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
     }
 
     /// Папка из правила в безопасном виде: имя внутри «Загрузок» или полный путь. nil — значение недопустимо
     /// (пусто, «.», «..», «~» без пути, корень, «..» внутри пути): иначе файлы ушли бы за пределы «Загрузок» (в домашнюю папку).
-    static func validatedFolder(_ value: String, downloads: URL? = nil) -> String? {
+    package static func validatedFolder(_ value: String, downloads: URL? = nil) -> String? {
         var folder = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !folder.isEmpty, !folder.contains("\0") else { return nil }
         if folder == "~" || folder.hasPrefix("~/") {
@@ -62,7 +61,7 @@ enum DownloadsRules {
     }
 
     /// Папка для файла: своё правило важнее встроенной категории. Недопустимое правило игнорируется.
-    static func folderName(for url: URL, custom: [String: String]) -> String? {
+    package static func folderName(for url: URL, custom: [String: String]) -> String? {
         let ext = url.pathExtension.lowercased()
         if !ext.isEmpty, let rule = custom[ext], let folder = validatedFolder(rule) {
             // Полный путь — любая папка на диске; иначе — папка внутри «Загрузок».
@@ -83,14 +82,14 @@ enum DownloadsRules {
                 "php", "sql", "yml", "yaml", "xml", "ipynb"],
     ]
 
-    static func category(for url: URL) -> Category? {
+    package static func category(for url: URL) -> Category? {
         let ext = url.pathExtension.lowercased()
         guard !ext.isEmpty else { return nil }
         return Category.allCases.first { extensions[$0]?.contains(ext) == true }
     }
 
     /// Недокачанные файлы браузеров и служебные — не трогаем.
-    static func isPartial(_ url: URL) -> Bool {
+    package static func isPartial(_ url: URL) -> Bool {
         let name = url.lastPathComponent
         if name.hasPrefix(".") || name.hasPrefix("~$") { return true }
         let partial: Set<String> = ["crdownload", "download", "part", "partial", "opdownload", "tmp"]
@@ -98,7 +97,7 @@ enum DownloadsRules {
     }
 
     /// Свободное имя в папке: «файл.pdf», «файл (2).pdf», «файл (3).pdf»…
-    static func uniqueName(_ name: String, existing: Set<String>) -> String {
+    package static func uniqueName(_ name: String, existing: Set<String>) -> String {
         guard existing.contains(name) else { return name }
         let base = (name as NSString).deletingPathExtension
         let ext = (name as NSString).pathExtension
@@ -113,19 +112,19 @@ enum DownloadsRules {
     // MARK: - Корзина: согласие и кандидаты
 
     /// Согласие на отправку в Корзину запоминается вместе со сроком: другой срок — новое подтверждение.
-    static let trashConfirmedKey = "downloadsTrashConfirmedDays"
+    package static let trashConfirmedKey = "downloadsTrashConfirmedDays"
 
-    static func isTrashConfirmed(days: Int, defaults: UserDefaults = .standard) -> Bool {
+    package static func isTrashConfirmed(days: Int, defaults: UserDefaults = .standard) -> Bool {
         days > 0 && defaults.integer(forKey: trashConfirmedKey) == days
     }
 
-    static func confirmTrash(days: Int, defaults: UserDefaults = .standard) {
+    package static func confirmTrash(days: Int, defaults: UserDefaults = .standard) {
         defaults.set(days, forKey: trashConfirmedKey)
     }
 
     /// Что уйдёт в Корзину: просроченные файлы во встроенных папках категорий, кроме `excluding`
     /// (разложенное в этом же проходе). Папки по своим правилам не чистятся: это ваши папки.
-    static func trashCandidates(in folder: URL, days: Int, excluding: Set<URL> = [], now: Date = Date()) -> [URL] {
+    package static func trashCandidates(in folder: URL, days: Int, excluding: Set<URL> = [], now: Date = Date()) -> [URL] {
         guard days > 0 else { return [] }
         let keys: [URLResourceKey] = [.contentModificationDateKey, .contentAccessDateKey, .addedToDirectoryDateKey]
         var result: [URL] = []
@@ -147,7 +146,7 @@ enum DownloadsRules {
     /// Пора ли в Корзину: не менялся и не открывался дольше `days` дней.
     /// `added` — когда файл попал в эту папку: файлы из архивов и AirDrop приходят со старыми датами изменения и открытия,
     /// но только что разложенный файл не должен сразу уходить в Корзину.
-    static func isExpired(modified: Date?, accessed: Date?, added: Date? = nil, days: Int, now: Date = Date()) -> Bool {
+    package static func isExpired(modified: Date?, accessed: Date?, added: Date? = nil, days: Int, now: Date = Date()) -> Bool {
         guard days > 0 else { return false }
         let last = [modified, accessed, added].compactMap { $0 }.max() ?? now
         return now.timeIntervalSince(last) > Double(days) * 86_400
@@ -157,23 +156,23 @@ enum DownloadsRules {
 /// «Загрузки»: новые файлы раскладываются по папкам по типу, старые
 /// (через N дней) уходят в Корзину. Безвозвратно ничего не удаляется.
 @MainActor
-final class DownloadsSorter: ObservableObject {
-    static let shared = DownloadsSorter()
+package final class DownloadsSorter: ObservableObject {
+    package static let shared = DownloadsSorter()
 
-    @Published private(set) var isRunning = false
-    @Published private(set) var lastResult: String?
+    @Published package private(set) var isRunning = false
+    @Published package private(set) var lastResult: String?
     /// Что ушло бы в Корзину, но ждёт вашего согласия (срок выбран, подтверждения ещё не было).
-    @Published private(set) var trashPreview: [URL] = []
-    @Published private(set) var customRules: [String: String] = DownloadsSorter.customRules
+    @Published package private(set) var trashPreview: [URL] = []
+    @Published package private(set) var customRules: [String: String] = DownloadsSorter.customRules
 
     /// Свои правила: расширение → папка.
-    nonisolated static var customRules: [String: String] {
+    package nonisolated static var customRules: [String: String] {
         UserDefaults.standard.dictionary(forKey: Pref.downloadsCustomRules) as? [String: String] ?? [:]
     }
 
     /// false — папка недопустима (`..`, `.`, `~`, корень) и правило не сохранено.
     @discardableResult
-    func setRule(extension ext: String, folder: String?) -> Bool {
+    package func setRule(extension ext: String, folder: String?) -> Bool {
         var rules = Self.customRules
         let key = DownloadsRules.normalizedExtension(ext)
         guard !key.isEmpty else { return false }
@@ -189,7 +188,7 @@ final class DownloadsSorter: ObservableObject {
     }
 
     /// Типы файлов в «Загрузках», для которых нет ни категории, ни своего правила.
-    func unknownExtensions() -> [(ext: String, count: Int)] {
+    package func unknownExtensions() -> [(ext: String, count: Int)] {
         let custom = Self.customRules
         var counts: [String: Int] = [:]
         for url in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil,
@@ -228,12 +227,12 @@ final class DownloadsSorter: ObservableObject {
     private var timer: Timer?
     private var pending: DispatchWorkItem?
 
-    var folder: URL {
+    package var folder: URL {
         FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
     }
 
-    func sync() {
+    package func sync() {
         let enabled = UserDefaults.standard.bool(forKey: Pref.downloadsSort)
         source?.cancel()
         source = nil
@@ -275,7 +274,7 @@ final class DownloadsSorter: ObservableObject {
     /// и в Корзину идёт только после подтверждения этого срока (`DownloadsRules.confirmTrash`).
     @discardableResult
     /// `only` — в Корзину можно только эти файлы (то, что пользователь видел в предпросмотре при подтверждении).
-    func run(in root: URL? = nil, trashDays: Int? = nil, only: Set<URL>? = nil,
+    package func run(in root: URL? = nil, trashDays: Int? = nil, only: Set<URL>? = nil,
              trash: ((URL) -> Bool)? = nil) -> (moved: Int, trashed: Int) {
         let folder = root ?? self.folder
         let manager = FileManager.default
@@ -347,7 +346,7 @@ final class DownloadsSorter: ObservableObject {
     }
 
     /// Пользователь увидел список и согласился: запоминаем срок и убираем старое.
-    func confirmTrash(days: Int) {
+    package func confirmTrash(days: Int) {
         DownloadsRules.confirmTrash(days: days)
         // Ровно то, что показывали: файлы, разложенные после предпросмотра, в этот раз не уходят.
         let shown = Set(trashPreview.map(\.standardizedFileURL))
@@ -356,14 +355,17 @@ final class DownloadsSorter: ObservableObject {
     }
 
     /// Пересчитать предпросмотр (срок изменили в настройках).
-    func refreshTrashPreview() {
+    package func refreshTrashPreview() {
         let days = UserDefaults.standard.integer(forKey: Pref.downloadsTrashDays)
         trashPreview = days > 0 && !DownloadsRules.isTrashConfirmed(days: days)
             ? DownloadsRules.trashCandidates(in: folder, days: days) : []
     }
 }
 
-struct DownloadsPage: View {
+package struct DownloadsPage: View {
+    package init() {
+    }
+
     @AppStorage(Pref.downloadsSort) private var enabled = false
     @AppStorage(Pref.downloadsTrashDays) private var days = 0
     @ObservedObject private var sorter = DownloadsSorter.shared
@@ -397,12 +399,12 @@ struct DownloadsPage: View {
     }
 
     /// «Lab» — папка в «Загрузках»; полный путь показываем как «~/Projects/Lab».
-    static func folderTitle(_ value: String) -> String {
+    package static func folderTitle(_ value: String) -> String {
         guard value.hasPrefix("/") else { return "Загрузки/\(value)" }
         return (value as NSString).abbreviatingWithTildeInPath
     }
 
-    static func askFolderName() -> String? {
+    package static func askFolderName() -> String? {
         let alert = NSAlert()
         alert.messageText = "Новая папка в «Загрузках»"
         alert.informativeText = "Как назвать папку?"
@@ -417,7 +419,7 @@ struct DownloadsPage: View {
         return name.isEmpty ? nil : name
     }
 
-    static func chooseFolder(start: URL) -> String? {
+    package static func chooseFolder(start: URL) -> String? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -427,7 +429,7 @@ struct DownloadsPage: View {
         return panel.runModal() == .OK ? panel.url?.path : nil
     }
 
-    var body: some View {
+    package var body: some View {
         SettingsPage(.downloads, isOn: $enabled, toggleLabel: "Раскладывать «Загрузки» по папкам") {
             VStack(alignment: .leading, spacing: DS.Space.section) {
                 rulesGroup
@@ -614,11 +616,11 @@ struct DownloadsPage: View {
 
 /// Поле ввода Graphite: `field`, обводка `line`, радиус 10.
 private struct DownloadsField: View {
-    let prompt: String
-    @Binding var text: String
+    package let prompt: String
+    @Binding package var text: String
     @FocusState private var focused: Bool
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
         TextField("", text: $text, prompt: Text(prompt).foregroundStyle(Color.dsMute))
             .textFieldStyle(.plain)
@@ -635,10 +637,10 @@ private struct DownloadsField: View {
 
 /// Вид выпадающего списка: плашка `field` с обводкой и стрелками.
 private struct DownloadsMenuLabel: View {
-    let text: String
-    let symbol: String?
+    package let text: String
+    package let symbol: String?
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
         HStack(spacing: DS.Space.s) {
             if let symbol { Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(.dsMute) }

@@ -9,6 +9,9 @@ import MUAudio
 import MULayoutFix
 import MUAppVolume
 import MUWindowSnap
+import MUAI
+import MUDownloadsSorter
+import MUDropShelf
 
 /// Где прилипает окно (действие «Команд», ссылка `macutils://snap?…`, сочетания ⌃⌥ + стрелки).
 enum WindowPlacement: String, CaseIterable, Sendable {
