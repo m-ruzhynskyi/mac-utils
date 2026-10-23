@@ -334,10 +334,13 @@ final class RemoteConnectionsCenter: ObservableObject {
     // MARK: RDP, учётка, «Доступ»
 
     /// Windows App (или прежний Microsoft Remote Desktop); нет — адрес в буфер и нейтральный тост.
-    func openRDP(_ record: ConnectionRecord) {
+    func openRDP(_ record: ConnectionRecord) { openRDP(record, host: record.id, account: record.account) }
+
+    /// `host`/`account` — из записи или из разобранного «Доступа» (запись AnyDesk с RDP в «Доступе»).
+    func openRDP(_ record: ConnectionRecord, host: String, account: String) {
         let hud = RemoteHUDController.shared
-        guard let contents = RDPLink.file(host: record.id, account: record.account) else { detailsRecord = record; return }
-        let who = "\(record.name) · \(record.id)"
+        guard let contents = RDPLink.file(host: host, account: account) else { detailsRecord = record; return }
+        let who = "\(record.name) · \(host)"
         if let app = RDPLink.bundleIDs.lazy.compactMap({ NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }).first,
            let file = Self.writeRDPFile(contents, name: record.name) {
             NSWorkspace.shared.open([file], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
@@ -345,7 +348,7 @@ final class RemoteConnectionsCenter: ObservableObject {
             recents = prefs.recentIDs
             if notifySuccess { hud.show(RemoteHUDContent(tone: .success, title: RL("Открываю %@…", "Windows App"), detail: who)) }
         } else {
-            copyText(record.id)
+            copyText(host)
             hud.show(RemoteHUDContent(tone: .neutral, title: RL("Windows App не установлен — адрес скопирован"),
                                       detail: RL("Вставьте адрес в программу удалённого рабочего стола."), actions: [.close]))
         }
@@ -365,9 +368,12 @@ final class RemoteConnectionsCenter: ObservableObject {
         }
     }
 
-    func copyAddress(_ record: ConnectionRecord) {
-        copyText(record.id)
-        RemoteHUDController.shared.show(RemoteHUDContent(tone: .success, title: RL("Адрес скопирован"), detail: record.name))
+    func copyAddress(_ record: ConnectionRecord) { copyPlain(record.id, title: RL("Адрес скопирован")) }
+
+    /// Не секрет (адрес, телефон) — обычной строкой.
+    func copyPlain(_ text: String, title: String) {
+        copyText(text)
+        RemoteHUDController.shared.show(RemoteHUDContent(tone: .success, title: title, detail: nil))
     }
 
     /// Секретное поле (пароль учётки, «Доступ») — из файла сейчас. Вызывающий затирает.
@@ -384,21 +390,25 @@ final class RemoteConnectionsCenter: ObservableObject {
                 return
             }
             defer { secret.wipe() }
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            let item = NSPasteboardItem()
-            secret.withBytes { item.setString(String(decoding: $0, as: UTF8.self), forType: .string) }
-            item.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
-            item.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
-            pasteboard.writeObjects([item])
-            let stamp = pasteboard.changeCount
-            RemoteHUDController.shared.show(RemoteHUDContent(
-                tone: .success, title: field == .access ? RL("«Доступ» скопирован") : RL("Пароль учётки скопирован"),
-                detail: RL("Буфер очистится через 30 с.")))
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
-                if NSPasteboard.general.changeCount == stamp { NSPasteboard.general.clearContents() }
-            }
+            self.copyConcealed(secret.withBytes { String(decoding: $0, as: UTF8.self) },
+                               title: field == .access ? RL("«Доступ» скопирован") : RL("Пароль учётки скопирован"))
+        }
+    }
+
+    /// Секрет в буфер: скрыт от истории буфера, через 30 с очищается, если в буфере всё ещё он.
+    func copyConcealed(_ text: String, title: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        item.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        item.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+        pasteboard.writeObjects([item])
+        let stamp = pasteboard.changeCount
+        RemoteHUDController.shared.show(RemoteHUDContent(tone: .success, title: title, detail: RL("Буфер очистится через 30 с.")))
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            if NSPasteboard.general.changeCount == stamp { NSPasteboard.general.clearContents() }
         }
     }
 

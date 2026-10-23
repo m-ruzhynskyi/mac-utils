@@ -239,6 +239,9 @@ struct RemoteDetailsView: View {
 
     @State private var access: String?
     @State private var accessError: String?
+    /// Разобранные строки «Доступа» про VPN/RDP — только пока открыта карточка.
+    @State private var info: AccessInfo?
+    @State private var contacts: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -254,8 +257,9 @@ struct RemoteDetailsView: View {
                         }
                     }
                     if record.needsVPN { vpnBanner }
-                    if record.usesRDP { rdpCard }
+                    if record.needsVPN || record.usesRDP || info?.vpn != nil || info?.rdp != nil { howToConnect }
                     if !record.account.isEmpty || record.hasAccountPassword { accountCard }
+                    if let contacts, !contacts.isEmpty { contactsCard(contacts) }
                     if !record.note.isEmpty {
                         card {
                             label(RL("ЗАМЕТКА"))
@@ -269,12 +273,31 @@ struct RemoteDetailsView: View {
             }
         }
         .onExitCommand(perform: back)
-        .onDisappear { access = nil }
+        .task(id: record.identity) { await loadDetails() }
+        .onDisappear(perform: forget)
     }
 
     private func back() {
-        access = nil
+        forget()
         onBack()
+    }
+
+    private func forget() {
+        access = nil
+        info = nil
+        contacts = nil
+    }
+
+    /// «Как подключиться» и «Контакты» — из файла при открытии карточки; текст «Доступа» тут же отпускается.
+    private func loadDetails() async {
+        if record.accessLines > 0, let secret = await center.readSecret(.access, of: record) {
+            info = secret.withBytes { AccessParser.parse(String(decoding: $0, as: UTF8.self)) }
+            secret.wipe()
+        }
+        if record.hasContacts, let secret = await center.readSecret(.contacts, of: record) {
+            contacts = secret.withBytes { String(decoding: $0, as: UTF8.self) }
+            secret.wipe()
+        }
     }
 
     private var header: some View {
@@ -321,28 +344,104 @@ struct RemoteDetailsView: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(RemoteTint.banner.line, lineWidth: 1))
     }
 
-    private var rdpCard: some View {
+    /// «Как подключиться»: VPN (тип, сервер, логин, скрытый пароль или ключ) и RDP (адрес, логин, открыть).
+    /// Не разобралось — соответствующие строки «Доступа» как есть.
+    private var howToConnect: some View {
         card {
-            HStack(spacing: 8) {
-                Image(systemName: "display").font(.system(size: 13, weight: .bold)).foregroundStyle(RemoteTint.rdp.fg)
-                label(RL("ПОДКЛЮЧЕНИЕ ЧЕРЕЗ RDP"), color: RemoteTint.rdp.fg)
-            }
-            if record.method == .rdp, !record.id.isEmpty {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(record.id).font(DS.Font.mono(16, relativeTo: .body).weight(.bold)).foregroundStyle(.dsText)
-                        .textSelection(.enabled)
-                    Text(RL("удалённый рабочий стол")).font(DS.Font.rowSub).foregroundStyle(.dsMute)
-                }
-                HStack(spacing: 8) {
-                    Button(RL("Открыть в Windows App ⏎")) { center.openRDP(record) }
-                        .buttonStyle(.graphite(.primary, size: .compact)).keyboardShortcut(.defaultAction)
-                    Button(RL("Скопировать адрес")) { center.copyAddress(record) }
+            label(RL("КАК ПОДКЛЮЧИТЬСЯ"))
+            if record.needsVPN || info?.vpn != nil { vpnSection }
+            if record.usesRDP || info?.rdp != nil { rdpSection }
+        }
+    }
+
+    @ViewBuilder private var vpnSection: some View {
+        let vpn = info?.vpn
+        HStack(spacing: 8) {
+            Image(systemName: "shield").font(.system(size: 12, weight: .bold)).foregroundStyle(RemoteTint.vpn.fg)
+            label("VPN", color: RemoteTint.vpn.fg)
+            if let kind = vpn?.kind { Text(kind).font(DS.Font.manrope(13, .semibold, relativeTo: .body)).foregroundStyle(.dsText) }
+        }
+        if let vpn, vpn.server != nil || vpn.login != nil || vpn.secret != nil {
+            if let server = vpn.server { fact(RL("Сервер"), server, mono: true) }
+            if let login = vpn.login { fact(RL("Логин"), login) }
+            if let secret = vpn.secret {
+                HStack(spacing: 10) {
+                    Text(RL("Пароль или ключ")).font(DS.Font.rowSub).foregroundStyle(.dsMute).frame(width: 110, alignment: .leading)
+                    Text("••••••••").font(.system(size: 15)).tracking(3).foregroundStyle(.dsMute).accessibilityHidden(true)
+                    Spacer(minLength: 4)
+                    Button(RL("Скопировать")) { center.copyConcealed(secret, title: RL("Пароль VPN скопирован")) }
                         .buttonStyle(.graphite(.secondary, size: .compact))
+                        .accessibilityLabel(RL("Скопировать пароль VPN"))
                 }
-            } else {
-                Text(RL("Адрес — в разделе «Доступ».")).font(DS.Font.rowSub).foregroundStyle(.dsMute)
+            }
+        } else if let lines = vpn?.lines, !lines.isEmpty {
+            rawLines(lines)
+        } else {
+            Text(record.accessLines > 0 ? RL("Профиль и ключ — в разделе «Доступ» ниже.") : RL("Подробностей о VPN в файле нет."))
+                .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+        }
+    }
+
+    @ViewBuilder private var rdpSection: some View {
+        let rdp = info?.rdp
+        let address = record.method == .rdp && !record.id.isEmpty ? record.id : rdp?.address
+        let login = record.account.isEmpty ? rdp?.login : record.account
+        HStack(spacing: 8) {
+            Image(systemName: "display").font(.system(size: 12, weight: .bold)).foregroundStyle(RemoteTint.rdp.fg)
+            label(RL("ПОДКЛЮЧЕНИЕ ЧЕРЕЗ RDP"), color: RemoteTint.rdp.fg)
+        }
+        if let address {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(address).font(DS.Font.mono(16, relativeTo: .body).weight(.bold)).foregroundStyle(.dsText).textSelection(.enabled)
+                Text(RL("удалённый рабочий стол")).font(DS.Font.rowSub).foregroundStyle(.dsMute)
+            }
+            if let login { fact(RL("Логин"), login) }
+            HStack(spacing: 8) {
+                if RDPLink.isValidHost(address) {
+                    Button(RL("Открыть в Windows App ⏎")) { center.openRDP(record, host: address, account: login ?? "") }
+                        .buttonStyle(.graphite(.primary, size: .compact)).keyboardShortcut(.defaultAction)
+                }
+                Button(RL("Скопировать адрес")) { center.copyPlain(address, title: RL("Адрес скопирован")) }
+                    .buttonStyle(.graphite(.secondary, size: .compact))
+            }
+        } else if let lines = rdp?.lines, !lines.isEmpty {
+            rawLines(lines)
+        } else {
+            Text(RL("Адрес — в разделе «Доступ».")).font(DS.Font.rowSub).foregroundStyle(.dsMute)
+        }
+    }
+
+    private func contactsCard(_ text: String) -> some View {
+        card {
+            label(RL("КОНТАКТЫ"))
+            Text(text).font(DS.Font.manrope(13.5, .regular, relativeTo: .body)).foregroundStyle(.dsText)
+                .lineSpacing(3).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(Array(ContactPhones.find(in: text).enumerated()), id: \.offset) { _, phone in
+                HStack(spacing: 10) {
+                    Image(systemName: "phone").font(.system(size: 12, weight: .semibold)).foregroundStyle(.dsMute)
+                    Text(phone).font(DS.Font.mono(13, relativeTo: .body)).foregroundStyle(.dsText)
+                    Spacer(minLength: 4)
+                    Button(RL("Скопировать")) { center.copyPlain(phone, title: RL("Телефон скопирован")) }
+                        .buttonStyle(.graphite(.secondary, size: .compact))
+                        .accessibilityLabel(RL("Скопировать телефон %@", phone))
+                }
             }
         }
+    }
+
+    private func fact(_ title: String, _ value: String, mono: Bool = false) -> some View {
+        HStack(spacing: 10) {
+            Text(title).font(DS.Font.rowSub).foregroundStyle(.dsMute).frame(width: 110, alignment: .leading)
+            Text(value).font(mono ? DS.Font.mono(13, relativeTo: .body) : DS.Font.manrope(13.5, .semibold, relativeTo: .body))
+                .foregroundStyle(.dsText).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+        }
+    }
+
+    private func rawLines(_ lines: [String]) -> some View {
+        Text(lines.joined(separator: "\n")).font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText)
+            .lineSpacing(5).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color.dsBg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var accountCard: some View {

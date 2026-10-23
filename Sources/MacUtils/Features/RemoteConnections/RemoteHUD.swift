@@ -34,6 +34,19 @@ struct RemoteHUDContent: Equatable {
     /// Роли окна программы для «Диагностики» (поле пароля не найдено).
     var structure: [String] = []
 
+    /// Явный инициализатор: из-за `private var finalOverride` поэлементный — `private`, а сообщения собирает и Center
+    /// (RDP, копирование). Старые компиляторы (CI, macos-15) иначе не собирают.
+    init(tone: DS.Tone, title: String, detail: String? = nil, spinner: Bool = false, progress: Double? = nil,
+         actions: [RemoteHUDAction] = [], structure: [String] = []) {
+        self.tone = tone
+        self.title = title
+        self.detail = detail
+        self.spinner = spinner
+        self.progress = progress
+        self.actions = actions
+        self.structure = structure
+    }
+
     /// Висит, пока идёт подключение; итог гаснет сам (успех — 2,5 с, ошибка — 12 с).
     var isFinal: Bool { !spinner && tone != .info }
     var lifetime: TimeInterval { tone == .success ? 2.5 : 12 }

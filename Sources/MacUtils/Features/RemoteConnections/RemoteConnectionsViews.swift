@@ -546,18 +546,16 @@ struct RemoteConnectionsPanel: View {
     @StateObject private var model: RemoteListModel
     @ObservedObject private var center: RemoteConnectionsCenter
     @FocusState private var searchFocused: Bool
-    @State private var diagnosticsExpanded: Bool
     @State private var installed: Set<RemoteProgram> = Set(RemoteProgram.allCases)
     @State private var editing: RemoteEditTarget?
 
-    /// `center`, `query`, `diagnosticsExpanded` — для снимков интерфейса; в приложении — общий центр и пустой поиск.
-    init(center: RemoteConnectionsCenter? = nil, query: String = "", diagnosticsExpanded: Bool = false) {
+    /// `center`, `query` — для снимков интерфейса; в приложении — общий центр и пустой поиск.
+    init(center: RemoteConnectionsCenter? = nil, query: String = "") {
         let center = center ?? .shared
         let model = RemoteListModel(center: center)
         model.query = query
         _center = ObservedObject(wrappedValue: center)
         _model = StateObject(wrappedValue: model)
-        _diagnosticsExpanded = State(initialValue: diagnosticsExpanded)
     }
 
     var body: some View {
@@ -593,12 +591,7 @@ if center.detailsRecord == nil {
                     .padding(.horizontal, DS.Space.l)
                 missingProgramBanner(listing).padding(.horizontal, DS.Space.l)
                 Group {
-                    if diagnosticsExpanded {
-                        ScrollView {
-                            RemoteDiagnosticsList(diagnostics: center.snapshot.diagnostics, defaultProgram: center.defaultProgram,
-                                                  records: center.snapshot.records)
-                        }
-                    } else if listing.isEmpty {
+                    if listing.isEmpty {
                         emptyList
                     } else {
                         RemoteSectionsList(model: model, center: center, listing: listing,
@@ -619,7 +612,6 @@ if center.detailsRecord == nil {
             installed = Set(RemoteProgram.allCases.filter(center.isInstalled))
             searchFocused = true
         }
-        .onChange(of: center.snapshot.diagnostics.isClean) { _, clean in if clean { diagnosticsExpanded = false } }
         .sheet(item: $editing) { RemoteEditSheet(center: center, record: $0.record) }
     }
 
@@ -647,26 +639,14 @@ if center.detailsRecord == nil {
         }
     }
 
+    /// В трее внизу — только «Обновить»: файл, Excel, добавление и проверка файла — в разделе настроек.
     private var bottomBar: some View {
         VStack(spacing: DS.Space.s) {
             Divider().overlay(Color.dsLine)
-            HStack(spacing: 6) {
-                Button { center.openFile() } label: { Label("Excel", systemImage: "tablecells") }
-                    .buttonStyle(.graphite(.secondary, size: .compact))
-                    .help(RL("Открыть файл подключений"))
+            HStack {
+                IconButton(RL("Обновить"), systemImage: "arrow.clockwise", compact: true) { center.reload() }
                     .disabled(center.fileURL == nil)
-                IconButton(RL("Перечитать"), systemImage: "arrow.clockwise", compact: true) { center.reload() }
-                    .disabled(center.fileURL == nil)
-                IconButton(RL("Выбрать файл"), systemImage: "folder", compact: true) { center.chooseFile() }
-                if center.canEdit, center.state == .ready {
-                    IconButton(RL("Добавить запись"), systemImage: "plus", compact: true) { editing = RemoteEditTarget(record: nil) }
-                }
                 Spacer()
-                if center.state == .ready {
-                    RemoteDiagnosticsSummary(diagnostics: center.snapshot.diagnostics, expanded: $diagnosticsExpanded,
-                                             vpn: center.snapshot.records.filter(\.needsVPN).count,
-                                             rdp: center.snapshot.records.filter(\.usesRDP).count)
-                }
             }
             .padding(.horizontal, DS.Space.l)
         }

@@ -7,13 +7,13 @@ public enum ConnectionField: String, CaseIterable, Sendable {
     case account, accountPassword
     /// «Доступ»: всё прочее с вкладки (VPN, RDP, IP, логины и пароли). Как секрет: не в поиске, не в журнале.
     case access
-    /// «Контакты» (люди, телефоны): колонка известна, но в приложении не показывается, не ищется и не читается.
+    /// «Контакты» (люди, телефоны): только в карточке подробностей, по запросу; не в строке, не в поиске, не в журнале.
     case contacts
 
     public var isRequired: Bool { self == .name || self == .id }
 
     /// Значение не держится в памяти списка: читается из файла по запросу и затирается.
-    public var isSecret: Bool { self == .password || self == .accountPassword || self == .access }
+    public var isSecret: Bool { self == .password || self == .accountPassword || self == .access || self == .contacts }
 }
 
 /// Названия колонок на русском, украинском и английском. Регистр, пробелы и знаки не важны.

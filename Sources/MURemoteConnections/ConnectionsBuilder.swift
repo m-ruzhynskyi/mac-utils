@@ -42,7 +42,7 @@ enum ConnectionsBuilder {
                 sourceRow: e.row, name: name, id: idValue,
                 group: trim(e.group), tags: splitTags(e.tags), note: trim(e.note),
                 program: program, hasPassword: e.hasPassword, method: method, account: trim(e.account),
-                hasAccountPassword: e.hasAccountPassword, accessLines: e.accessLines))
+                hasAccountPassword: e.hasAccountPassword, accessLines: e.accessLines, hasContacts: e.hasContacts))
         }
 
         // Без программы и не алиас — возьмётся программа по умолчанию. Если в файле есть обе программы, это стоит показать.

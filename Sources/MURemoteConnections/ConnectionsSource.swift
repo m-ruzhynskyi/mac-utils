@@ -17,6 +17,8 @@ struct RawEntry {
     var hasAccountPassword = false
     var access = ""
     var accessLines = 0
+    var contacts = ""
+    var hasContacts = false
 
     init(row: Int) { self.row = row }
 
@@ -40,7 +42,9 @@ struct RawEntry {
             accessLines = text.isEmpty ? 0 : text.split(whereSeparator: \.isNewline).filter { !$0.allSatisfy(\.isWhitespace) }.count
             if mode == .passwords { access = text }
         case .contacts:
-            break   // известна, но не нужна: значение не сохраняется
+            let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            hasContacts = !text.isEmpty
+            if mode == .passwords { contacts = text }
         }
     }
 
@@ -49,6 +53,7 @@ struct RawEntry {
         switch field {
         case .accountPassword: return accountPassword
         case .access: return access
+        case .contacts: return contacts
         default: return password
         }
     }

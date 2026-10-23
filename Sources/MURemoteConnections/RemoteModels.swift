@@ -109,10 +109,13 @@ public struct ConnectionRecord: Equatable, Identifiable, Sendable {
     public let hasAccountPassword: Bool
     /// Сколько строк в «Доступе» — самого текста в памяти нет.
     public let accessLines: Int
+    /// В «Контактах» что-то есть (сам текст — только в карточке, по запросу).
+    public let hasContacts: Bool
 
     public init(sourceRow: Int, name: String, id: String, group: String = "", tags: [String] = [],
                 note: String = "", program: RemoteProgram? = nil, hasPassword: Bool = false,
-                method: ConnectionMethod? = nil, account: String = "", hasAccountPassword: Bool = false, accessLines: Int = 0) {
+                method: ConnectionMethod? = nil, account: String = "", hasAccountPassword: Bool = false, accessLines: Int = 0,
+                hasContacts: Bool = false) {
         self.sourceRow = sourceRow
         self.name = name
         self.id = id
@@ -125,6 +128,7 @@ public struct ConnectionRecord: Equatable, Identifiable, Sendable {
         self.account = account
         self.hasAccountPassword = hasAccountPassword
         self.accessLines = accessLines
+        self.hasContacts = hasContacts
     }
 
     /// Нужен VPN: программа «VPN» или метка VPN.

@@ -12,6 +12,8 @@ struct RemoteSettingsPage: View {
     @ObservedObject private var permissions = PermissionsModel.shared
     @State private var sheets: [String] = []
     @State private var shared = false
+    @State private var diagnosticsExpanded = false
+    @State private var adding: RemoteEditTarget?
 
     init(center: RemoteConnectionsCenter? = nil) {
         _center = ObservedObject(wrappedValue: center ?? .shared)
@@ -34,6 +36,7 @@ struct RemoteSettingsPage: View {
                 }
             }
             fileGroup
+            if center.state == .ready { fileStateGroup }
             connectionGroup
             programsGroup
             GroupLabel(RL("Разрешения"))
@@ -49,8 +52,8 @@ struct RemoteSettingsPage: View {
                     }
                 }
             }
-            Footnote(RL("Диагностику (сколько записей загружено, что пропущено и почему) можно открыть из нижней строки вкладки «Удалённые»."))
         }
+        .sheet(item: $adding) { RemoteEditSheet(center: center, record: $0.record) }
         .onAppear(perform: refresh)
         .onChange(of: center.fileURL) { _, _ in refresh() }
         .onChange(of: center.state) { _, _ in refresh() }
@@ -80,6 +83,9 @@ struct RemoteSettingsPage: View {
                     }
                     Button(RL("Выбрать…")) { center.chooseFile() }.buttonStyle(.graphite(.secondary, size: .compact))
                     if let url = center.fileURL {
+                        Button { center.openFile() } label: { Label("Excel", systemImage: "tablecells") }
+                            .buttonStyle(.graphite(.secondary, size: .compact))
+                            .help(RL("Открыть файл подключений"))
                         IconButton(RL("Показать в Finder"), systemImage: "folder", compact: true) {
                             NSWorkspace.shared.activateFileViewerSelecting([url])
                         }
@@ -102,6 +108,31 @@ struct RemoteSettingsPage: View {
                 }
             }
         }
+    }
+
+    // MARK: Проверка файла (перенесено из нижней строки вкладки)
+
+    @ViewBuilder private var fileStateGroup: some View {
+        GroupLabel(RL("Проверка файла"))
+        ListCard {
+            Row(RL("Записи"), subtitle: nil, systemImage: "checklist") {
+                HStack(spacing: DS.Space.s) {
+                    RemoteDiagnosticsSummary(diagnostics: center.snapshot.diagnostics, expanded: $diagnosticsExpanded,
+                                             vpn: center.snapshot.records.filter(\.needsVPN).count,
+                                             rdp: center.snapshot.records.filter(\.usesRDP).count)
+                    IconButton(RL("Перечитать"), systemImage: "arrow.clockwise", compact: true) { center.reload() }
+                    if center.canEdit {
+                        IconButton(RL("Добавить запись"), systemImage: "plus", compact: true) { adding = RemoteEditTarget(record: nil) }
+                    }
+                }
+            }
+            if diagnosticsExpanded {
+                RemoteDiagnosticsList(diagnostics: center.snapshot.diagnostics, defaultProgram: center.defaultProgram,
+                                      records: center.snapshot.records)
+                    .padding(DS.Space.m)
+            }
+        }
+        .onChange(of: center.snapshot.diagnostics.isClean) { _, clean in if clean { diagnosticsExpanded = false } }
     }
 
     // MARK: Подключение

@@ -338,6 +338,31 @@ final class IntermediateWindowTests: XCTestCase {
         XCTAssertTrue(keyboard.typed.isEmpty)
     }
 
+    /// Ревью #157, H1: пароля программы в файле нет, пароль учётки есть, окно — обычное окно пароля программы
+    /// (AnyDesk или TeamViewer). Пароль учётки туда не вводится и даже не читается.
+    func testAccountPasswordNeverGoesIntoProgramPasswordWindow() async {
+        let noProgramPassword = ConnectionRecord(sourceRow: 5, name: "Філія 3", id: "123456789", hasPassword: false,
+                                                 account: "lims.admin", hasAccountPassword: true)
+        for (program, provider, pid) in [(RemoteProgram.anyDesk, AnyDeskAutomator(texts: adTexts) as RemoteProvider, adPID),
+                                         (.teamViewer, TeamViewerAutomator(texts: tvTexts), tvPID)] {
+            ax = FakeAX(); launcher = FakeLauncher(); keyboard = FakeKeyboard(ax: ax); clock = FakeClock(); secrets = []
+            let pw = FakePasswordWindow(title: program == .anyDesk ? "Authorization" : "Аутентификация")
+            launcher.onOpen = { [unowned self] _ in
+                launcher.launch(program, pid: pid)
+                ax.show(pw.window, pid: pid)
+            }
+            var accountReads = 0
+            let outcome = await connector().connect(ConnectRequest(record: noProgramPassword, program: program), provider: provider,
+                                                    password: { .noPassword },
+                                                    accountPassword: { accountReads += 1; return .found(SecretBuffer("Win-9".utf8)) },
+                                                    progress: { _ in })
+            XCTAssertEqual(outcome, .openedWithoutPassword(.notInFile), "\(program)")
+            XCTAssertEqual(pw.field.text, "", "\(program): в окно программы — ничего")
+            XCTAssertEqual(accountReads, 0, "\(program): пароль учётки не читался")
+            XCTAssertTrue(keyboard.typed.isEmpty)
+        }
+    }
+
     /// Без логина учётки — как раньше: Console и «Connect»; поле логина не трогаем.
     func testTerminalSessionWithoutAccountKeepsConsole() async {
         let window = sessionWindow()

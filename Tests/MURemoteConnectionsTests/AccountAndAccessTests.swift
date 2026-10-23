@@ -170,6 +170,57 @@ final class AccountAndAccessTests: XCTestCase {
         XCTAssertEqual(RDPLink.fileName(for: "../.."), "connection.rdp")
     }
 
+    // MARK: «Как подключиться» и «Контакты» (последние правки пользователя)
+
+    func testAccessParserFindsVPNAndRDP() {
+        let info = AccessParser.parse("""
+            VPN (WireGuard) | сервер: vpn.example.lan · логин: lab-7 · ключ: Demo-Key-77
+
+            RDP — IP: 10.20.0.15 · порт 3390
+            Server — логин: lims.admin · пароль: Demo-77-выдумка
+
+            Login: operator
+            """)
+        XCTAssertEqual(info.vpn?.kind, "WireGuard")
+        XCTAssertEqual(info.vpn?.server, "vpn.example.lan")
+        XCTAssertEqual(info.vpn?.login, "lab-7")
+        XCTAssertEqual(info.vpn?.secret, "Demo-Key-77")
+        XCTAssertEqual(info.rdp?.address, "10.20.0.15:3390")
+        XCTAssertEqual(info.rdp?.lines, ["RDP — IP: 10.20.0.15 · порт 3390"])
+
+        let other = AccessParser.parse("FortiClient: 203.0.113.40, user ivan, password Demo-1\nRDP 192.0.2.7:3389")
+        XCTAssertEqual(other.vpn?.kind, "FortiClient")
+        XCTAssertEqual(other.vpn?.server, "203.0.113.40")
+        XCTAssertEqual(other.vpn?.login, "ivan")
+        XCTAssertEqual(other.vpn?.secret, "Demo-1")
+        XCTAssertEqual(other.rdp?.address, "192.0.2.7:3389")
+
+        let raw = AccessParser.parse("VPN — профиль у заведующего")
+        XCTAssertNotNil(raw.vpn)
+        XCTAssertNil(raw.vpn?.server)
+        XCTAssertNil(raw.vpn?.secret)
+        XCTAssertEqual(raw.vpn?.lines, ["VPN — профиль у заведующего"], "не разобралось — строки как есть")
+        XCTAssertNil(raw.rdp)
+        XCTAssertNil(AccessParser.parse("Телефон 050 000 00 00").vpn, "без VPN-строк — нет блока VPN")
+    }
+
+    func testPhonesInContacts() {
+        XCTAssertEqual(ContactPhones.find(in: "Іван Петрович, +380 (50) 000-00-00; Оля 067 000 00 01"),
+                       ["+380 (50) 000-00-00", "067 000 00 01"])
+        XCTAssertEqual(ContactPhones.find(in: "каб. 12, 2 этаж"), [], "короткие числа — не телефоны")
+    }
+
+    /// «Контакты» — только по запросу (карточка), в записи — лишь признак.
+    func testContactsReadOnDemand() throws {
+        let source = XMLSource()
+        let north = try source.load(file).records[0]
+        XCTAssertTrue(north.hasContacts)
+        XCTAssertFalse("\(north)".contains("050 000"))
+        let c = try XCTUnwrap(source.lookupSecret(.contacts, for: north, in: file).secret)
+        XCTAssertTrue(c.withBytes { $0.elementsEqual("Иван, 050 000 00 00".utf8) })
+        c.wipe()
+    }
+
     // MARK: Правка XML
 
     func testXMLEditorWritesAccountAndKeepsContactsAndAccess() throws {

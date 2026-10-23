@@ -87,7 +87,7 @@ final class RemoteConnectionsSnapshotTests: XCTestCase {
         full.toggleFavorite(full.snapshot.records[1])
         render(RemoteConnectionsPanel(center: full), size: panel, name: "rc01-panel")
         render(RemoteConnectionsPanel(center: full, query: "ctdth"), size: panel, name: "rc02-search-layout")
-        render(RemoteConnectionsPanel(center: full, diagnosticsExpanded: true), size: panel, name: "rc03-diagnostics")
+        render(RemoteSettingsPage(center: full), size: NSSize(width: 820, height: 1600), name: "rc03-diagnostics")
         render(RemoteConnectionsPanel(center: full, query: "пекарня"), size: panel, name: "rc04-nothing-found")
         let palette = RemoteListModel(center: full)
         palette.query = "север"
@@ -136,12 +136,12 @@ final class RemoteConnectionsSnapshotTests: XCTestCase {
             <connections>
             <connection><name>Північна лабораторія</name><id>123456789</id><password>x</password><group>Північ</group><tags>Рег</tags><note>Звонить перед подключением, работают до 17:00</note><account>Администратор</account><accountPassword>y</accountPassword><app>AnyDesk</app></connection>
             <connection><name>Східна · AnyDesk</name><id>987654321</id><password>x</password><group>Схід</group><tags>Рег, Фито, VPN</tags><note>Сначала WireGuard — профиль в «Доступ»</note><access>VPN (WireGuard) | профиль Схід-1</access><app>AnyDesk</app></connection>
-            <connection><name>Приморська · сервер</name><id>10.20.0.15</id><group>Південь</group><tags>Фито, Сервер, VPN, RDP</tags><note>RDP только после VPN. Если не пускает — звонить заведующему, работают до 17:00.</note><account>lims.admin</account><accountPassword>y</accountPassword><access>VPN (WireGuard) | профиль Приморська-1
+            <connection><name>Приморська · сервер</name><id>10.20.0.15</id><group>Південь</group><tags>Фито, Сервер, VPN, RDP</tags><note>RDP только после VPN. Если не пускает — звонить заведующему, работают до 17:00.</note><account>lims.admin</account><accountPassword>y</accountPassword><access>VPN (WireGuard) | сервер: vpn.example.lan · логин: lab-7 · ключ: demo-key
 
             RDP — IP: 10.20.0.15
             Server — логин: lims.admin · пароль: demo
 
-            Login: operator</access><contacts>заведующий</contacts><app>RDP</app></connection>
+            Login: operator</access><contacts>Заведующая Ольга, +380 (50) 000-00-00</contacts><app>RDP</app></connection>
             <connection><name>Лісова</name><id>1234567890</id><password>x</password><group>Південь</group><tags>Рег, Фито, Сервер, ЛІМС</tags><note>Два компьютера: бухгалтерия и лаборатория — второй ID в «Доступ»</note><account>Администратор</account><app>TeamViewer</app></connection>
             <connection><name>Озерна</name><id></id><group>Південь</group><tags>Рег</tags><note>Только по телефону, контакты в «Доступ»</note><app>Другое</app></connection>
             </connections>
@@ -154,7 +154,7 @@ final class RemoteConnectionsSnapshotTests: XCTestCase {
         defer { RemoteL10n.language = .ru }
         for language in [RemoteLanguage.uk, .en] {
             RemoteL10n.language = language
-            render(RemoteConnectionsPanel(center: full, diagnosticsExpanded: true), size: panel, name: "rc16-panel-\(language.rawValue)")
+            render(RemoteConnectionsPanel(center: full), size: panel, name: "rc16-panel-\(language.rawValue)")
             render(cards(failures.map { .finished(.failed($0)) }, .anyDesk, north), size: NSSize(width: 460, height: 900),
                    name: "rc17-hud-\(language.rawValue)")
             render(RemoteSettingsPage(center: full), size: NSSize(width: 820, height: 1500), name: "rc18-settings-\(language.rawValue)")
