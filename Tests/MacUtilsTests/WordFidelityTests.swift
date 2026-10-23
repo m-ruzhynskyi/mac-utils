@@ -165,6 +165,7 @@ final class WordFidelityTests: XCTestCase {
         let manager = FileManager.default
         var names = try manager.contentsOfDirectory(atPath: base.appendingPathComponent("rtf").path)
             .filter { $0.hasSuffix(".rtf") && !$0.hasPrefix("~") }.map { ($0 as NSString).deletingPathExtension }.sorted()
+        XCTAssertFalse(names.isEmpty, "нет fNNN.rtf")
         if let only = environment["MU_WORD_REF_ONLY"], !only.isEmpty {
             let wanted = Set(only.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) })
             names = names.filter(wanted.contains)
@@ -174,7 +175,9 @@ final class WordFidelityTests: XCTestCase {
             guard parts.count == 2, parts[1] > 0, (0..<parts[1]).contains(parts[0]) else { throw XCTSkip("MU_WORD_REF_SHARD=i/n") }
             names = names.enumerated().filter { $0.offset % parts[1] == parts[0] }.map(\.element)
         }
-        XCTAssertFalse(names.isEmpty, "нет fNNN.rtf")
+        // Уже сделанные и зависшие формы (сторож scripts/word-gate.sh перезапускает долю без них).
+        let skipped = Set((environment["MU_WORD_REF_SKIP"] ?? "").split(separator: ",").map(String.init))
+        names = names.filter { !skipped.contains($0) }
         var report = FidelityReport()
         var rows: [WordGate.Row] = []
         if let subset = environment["MU_WORD_REF_SUBSET_DIR"], !subset.isEmpty {
@@ -191,9 +194,12 @@ final class WordFidelityTests: XCTestCase {
             guard let data = try? Data(contentsOf: rtf), let wordPDF = PDFDocument(url: wordURL) else {
                 report.failed.append(name)
                 rows.append(WordGate.Row(name: name, failed: true))
+                Self.append(rows[rows.count - 1])
                 continue
             }
             let started = Date()
+            // Сторож скрипта смотрит на эти строки: нет новой дольше таймаута — форма зависла (раскладка не кончается).
+            Self.progress("word-fidelity start \(name)")
             autoreleasepool {
                 do {
                     let document = try open(data, name: "\(name).rtf")
@@ -212,10 +218,11 @@ final class WordFidelityTests: XCTestCase {
                     report.failed.append(name)
                     rows.append(WordGate.Row(name: name, failed: true))
                 }
+                if let row = rows.last, row.name == name { Self.append(row) }
                 for window in windows { window.contentView = nil; window.close() }
                 windows = []
             }
-            print("word-fidelity \(name): \(String(format: "%.1f", Date().timeIntervalSince(started))) с")
+            Self.progress("word-fidelity \(name): \(String(format: "%.1f", Date().timeIntervalSince(started))) с")
         }
         let text = report.markdown()
         print(text)
@@ -225,15 +232,31 @@ final class WordFidelityTests: XCTestCase {
         if environment["MU_WORD_FIDELITY_STRICT"] == "1" {
             XCTAssertEqual(report.identical, report.files.count, "идентично Word: \(report.identical) из \(report.files.count)")
         }
-        if let out = environment["MU_WORD_FIDELITY_TSV"], !out.isEmpty {
-            try WordGate.tsv(rows).write(toFile: (out as NSString).expandingTildeInPath, atomically: true, encoding: .utf8)
-        }
         let baseline = Self.baselinePath(base)
         if environment["MU_WORD_FIDELITY_GATE"] == "1" { try gate(rows, baseline: baseline) }
         if environment["MU_WORD_FIDELITY_WRITE_BASELINE"] == "1" {
             try WordGate.tsv(rows).write(toFile: baseline, atomically: true, encoding: .utf8)
             print("word-gate: база записана, форм \(rows.count)")
         }
+    }
+
+    /// Строка прогресса сразу в вывод (без буфера: по ней сторож ловит зависание).
+    private static func progress(_ line: String) {
+        print(line)
+        fflush(stdout)
+    }
+
+    /// Числа формы — сразу в MU_WORD_FIDELITY_TSV (дописываем): если процесс снимут, готовое не теряется.
+    private static func append(_ row: WordGate.Row) {
+        guard let out = ProcessInfo.processInfo.environment["MU_WORD_FIDELITY_TSV"], !out.isEmpty else { return }
+        let path = (out as NSString).expandingTildeInPath
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: Data((WordGate.Row.header.joined(separator: "\t") + "\n").utf8))
+        }
+        guard let handle = FileHandle(forWritingAtPath: path) else { return }
+        handle.seekToEndOfFile()
+        handle.write(Data((row.fields.joined(separator: "\t") + "\n").utf8))
+        handle.closeFile()
     }
 
     /// Гейт по готовым числам прогона (склейка TSV шардов из `scripts/word-gate.sh`): раскладки здесь нет.

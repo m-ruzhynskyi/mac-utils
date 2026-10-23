@@ -6,8 +6,9 @@ import Foundation
 enum WordGate {
     struct Row: Equatable {
         var name: String
-        /// Наша раскладка не открылась.
+        /// Наша раскладка не открылась; `hung` — не закончилась за таймаут (сторож снял процесс).
         var failed = false
+        var hung = false
         var pagesWord = 0
         var pagesOurs = 0
         var breaks: Double = 0
@@ -50,7 +51,7 @@ enum WordGate {
                              "cell_wraps", "other_page", "missing_words", "extra_words", "suspect_pairs", "suspect_max", "identical"]
 
         var fields: [String] {
-            [name, failed ? "1" : "0", "\(pagesWord)", "\(pagesOurs)", String(format: "%.4f", breaks),
+            [name, hung ? "2" : failed ? "1" : "0", "\(pagesWord)", "\(pagesOurs)", String(format: "%.4f", breaks),
              String(format: "%.2f", shiftMedian), String(format: "%.2f", shiftP95), String(format: "%.2f", shiftMax),
              "\(cellWraps)", "\(otherPage)", "\(missingWords)", "\(extraWords)", "\(suspectPairs)",
              String(format: "%.2f", suspectMax), identical ? "1" : "0"]
@@ -61,7 +62,8 @@ enum WordGate {
                   fields[0].dropFirst().allSatisfy(\.isNumber) else { return nil }
             func int(_ i: Int) -> Int { Int(fields[i]) ?? 0 }
             func double(_ i: Int) -> Double { Double(fields[i]) ?? 0 }
-            self.init(name: fields[0], failed: fields[1] == "1")
+            self.init(name: fields[0], failed: fields[1] != "0")
+            hung = fields[1] == "2"
             pagesWord = int(2); pagesOurs = int(3); breaks = double(4)
             shiftMedian = double(5); shiftP95 = double(6); shiftMax = double(7)
             cellWraps = int(8); otherPage = int(9); missingWords = int(10); extraWords = int(11)
@@ -80,7 +82,7 @@ enum WordGate {
 
     /// Чем форма стала хуже базы (пусто — не хуже). Допуски: доля разрывов −0,05 п. п., p95 сдвига +0,5 pt.
     static func worse(_ now: Row, than base: Row) -> [String] {
-        if now.failed { return base.failed ? [] : ["не открылась"] }
+        if now.failed { return base.failed ? [] : [now.hung ? "зависла (раскладка не закончилась за таймаут)" : "не открылась"] }
         if base.failed { return [] }
         var found: [String] = []
         if now.pageDifference > base.pageDifference { found.append("страницы \(base.pagesWord)/\(base.pagesOurs) → \(now.pagesWord)/\(now.pagesOurs)") }
@@ -152,7 +154,7 @@ enum WordGate {
         row("Строк на другой странице") { "\(ok($0).map(\.otherPage).reduce(0, +))" }
         row("Слов нет / лишние") { "\(ok($0).map(\.missingWords).reduce(0, +)) / \(ok($0).map(\.extraWords).reduce(0, +))" }
         row("Ложные пары (исключены), max отклонение") { "\(ok($0).map(\.suspectPairs).reduce(0, +)), \(pt(ok($0).map(\.suspectMax).max() ?? 0)) pt" }
-        row("Не открылись") { "\($0.filter(\.failed).count)" }
+        row("Не открылись / зависли") { "\($0.filter { $0.failed && !$0.hung }.count) / \($0.filter(\.hung).count)" }
         lines.append("")
         lines.append("## Хуже базы (\(comparison.worse.count))")
         lines.append("Допуски: доля разрывов −0,05 п. п., p95 сдвига +0,5 pt; страницы, переносы в ячейках и слова — без допуска.")
