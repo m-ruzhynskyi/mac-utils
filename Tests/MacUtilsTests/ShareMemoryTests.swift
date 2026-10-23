@@ -67,6 +67,8 @@ final class SharePlayerOutputChangeTests: XCTestCase {
         let player = SharePlayer(silent: true)
         player.outputChanged()
         XCTAssertEqual(player.restarts, 0)
+    }
+}
 
 final class ShareVideoAckTests: XCTestCase {
     func testAckEveryTenPacketsAndResetsOnNewSocket() {
