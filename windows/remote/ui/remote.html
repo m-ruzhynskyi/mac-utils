@@ -9,11 +9,12 @@
   <div class="top">
     <div class="field" id="searchBox">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="query" type="text" autocomplete="off" spellcheck="false" placeholder="Название, ID, группа, тег…" aria-label="Поиск">
+      <input id="query" type="text" autocomplete="off" spellcheck="false" placeholder="Название, ID, группа, метка…" aria-label="Поиск">
       <span class="hint" id="layoutHint" hidden></span>
       <span class="key" id="hotkeyHint"></span>
     </div>
     <div class="chips" id="chips" role="group" aria-label="Программа"></div>
+    <div class="tagrow" id="tagRow" role="group" aria-label="Метки" hidden></div>
   </div>
   <div id="banner"></div>
   <div class="scroller" id="list" role="listbox" aria-label="Подключения"></div>
@@ -28,7 +29,7 @@
   </div>
   <div class="hints" id="hints" hidden>
     <span><span class="key">↑↓</span> выбор</span><span><span class="key">↵</span> подключиться</span><span><span class="key">Ctrl ↵</span> без пароля</span>
-    <span><span class="key">Tab</span> программа</span><span><span class="key">Ctrl F</span> избранное</span>
+    <span><span class="key">Tab</span> программа</span><span><span class="key">Ctrl F</span> избранное</span><span><span class="key">Ctrl I</span> подробности</span>
   </div>
 </div>
 <script src="remote.js"></script>

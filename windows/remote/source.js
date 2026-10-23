@@ -4,8 +4,9 @@
 const path = require("node:path");
 const xlsx = require("./xlsx");
 const xmlSource = require("./xmlsource");
-const { build } = require("./builder");
-const { normalize } = require("./id");
+const { build, idKey } = require("./builder");
+const { secretOf } = require("./rawentry");
+const { isSecret } = require("./headers");
 const { SecretBuffer } = require("./secret");
 const { ConnectionsError } = require("./models");
 
@@ -31,12 +32,21 @@ function load(data, kind, sheet = null) {
 // строка с тем же ID и именем, затем единственная строка с этим ID. null — записи или пароля нет. Угадывать среди нескольких
 // строк с одним ID не будем. Строки разбора (string) затереть нельзя — они живут только до конца вызова.
 function passwordFor(record, data, kind, sheet = null) {
-  const sameID = parseData(data, kind, "passwords", sheet).entries.filter((e) => normalize(e.id)?.value === record.id);
-  let match = sameID.find((e) => e.row === record.sourceRow);
-  if (!match) match = sameID.find((e) => e.name.trim() === record.name);
-  if (!match && sameID.length === 1) match = sameID[0];
-  if (!match || !match.password) return null;
-  return new SecretBuffer(match.password);
+  return secretFor("password", record, data, kind, sheet);
 }
 
-module.exports = { MAX_FILE_SIZE, kindOf, load, passwordFor };
+// Секретное поле записи (пароль, пароль учётки, «Доступ») — так же, как пароль. Записи без ID (RDP/VPN/«Другое») ищутся по номеру
+// строки и названию. SecretBuffer или null.
+function secretFor(field, record, data, kind, sheet = null) {
+  if (!isSecret(field)) throw new Error("not a secret field");
+  const sameID = parseData(data, kind, "passwords", sheet).entries.filter((e) => idKey(e.id) === record.id);
+  const named = (e) => e.name.trim() === record.name;
+  let match = sameID.find((e) => e.row === record.sourceRow && (record.id !== "" || named(e)));
+  if (!match) match = sameID.find(named);
+  if (!match && sameID.length === 1 && record.id !== "") match = sameID[0];
+  const value = match ? secretOf(match, field) : "";
+  if (!value) return null;
+  return new SecretBuffer(value);
+}
+
+module.exports = { MAX_FILE_SIZE, kindOf, load, passwordFor, secretFor };

@@ -71,6 +71,8 @@ code { font-family:"Cascadia Mono",Consolas,monospace; font-size:12px; backgroun
   --acc:#C8F05A; --acc-ink:#10140A; --acc-text:#C8F05A; --acc-line:#C8F05A; --blue:#6EA8FF; --blue-ink:#08111F; --rec:#FF7A6B; --rec-ink:#240C08; --warn:#F5B83D; --warn-ink:#241800; --mica:#1A1D22; } }
 
 /* окна приложения (не макет) */
+/* атрибут hidden сильнее правил display (.page, .hints, .tagrow): иначе скрытый список оставался под настройками и подробностями */
+[hidden] { display:none !important; }
 html,body { height:100%; overflow:hidden; }
 body { display:flex; flex-direction:column; }
 .page { display:flex; flex-direction:column; height:100%; }
@@ -88,6 +90,94 @@ button { font-family:inherit; cursor:pointer; }
 .hint { margin-left:auto; font-size:12px; color:var(--mute); } .hint b { color:var(--text); }
 body.palette { background:transparent; } body.palette .page { background:var(--panel); border:1px solid var(--line); border-radius:20px; padding:14px; }
 body.palette .scroller { padding:0; } body.palette .top { padding:0 0 8px; }
-.settings { padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; } .settings label { display:flex; flex-direction:column; gap:4px; font-weight:600; font-size:13px; } .settings input[type=text], .settings select, .settings input[type=number] { height:34px; border-radius:10px; border:1px solid var(--line); background:var(--field); color:var(--text); padding:0 10px; font:inherit; }
+.settings { padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; } .settings label { display:flex; flex-direction:column; gap:4px; font-weight:600; font-size:13px; } .settings input[type=text], .settings input[type=password], .settings select, .settings input[type=number] { height:34px; border-radius:10px; border:1px solid var(--line); background:var(--field); color:var(--text); padding:0 10px; font:inherit; }
 .settings .inline { flex-direction:row; align-items:center; gap:8px; }
 .hud-box { padding:8px; } .hud-box .hud { width:auto; }
+
+/* ---- метки, значки VPN/RDP, строка и подробности — по макету rc-tags-design (тёмная — как в макете, светлая — те же оттенки) ---- */
+:root { --reg-bg:#E3EEFB; --reg-fg:#1F5FA8; --reg-dot:#2F7DE1; --phy-bg:#E2F4E8; --phy-fg:#1E7A44; --phy-dot:#2FA65E; --oth-bg:#EEF0EA; --oth-fg:#3D444D; --oth-dot:#7A828C;
+  --vpn-bg:#FFF0DA; --vpn-fg:#A35F00; --vpn-dot:#D98200; --rdp-bg:#EEE9FF; --rdp-fg:#5B44C7; --rdp-dot:#7A63E0;
+  --ban-bg:#FFF6E8; --ban-line:#F0D2A0; --ban-title:#7A4A00; --ban-text:#8A5A10; --pill-fg:#14171A; --ad-dot:#F0524F; --tv-dot:#4F8CF7; }
+:root[data-theme=dark] { --reg-bg:#1D2B3D; --reg-fg:#8EC3FF; --reg-dot:#5AA5FF; --phy-bg:#1B3024; --phy-fg:#8BE0A8; --phy-dot:#4CC97A; --oth-bg:#26292E; --oth-fg:#C9CED6; --oth-dot:#8A9099;
+  --vpn-bg:#33270F; --vpn-fg:#FFB65C; --vpn-dot:#FFB65C; --rdp-bg:#251F3D; --rdp-fg:#B9A6FF; --rdp-dot:#B9A6FF;
+  --ban-bg:#2A2110; --ban-line:#5A4318; --ban-title:#FFD8A3; --ban-text:#D9B98C; --pill-fg:#E6E8EB; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme=light]) { --reg-bg:#1D2B3D; --reg-fg:#8EC3FF; --reg-dot:#5AA5FF; --phy-bg:#1B3024; --phy-fg:#8BE0A8; --phy-dot:#4CC97A; --oth-bg:#26292E; --oth-fg:#C9CED6; --oth-dot:#8A9099;
+  --vpn-bg:#33270F; --vpn-fg:#FFB65C; --vpn-dot:#FFB65C; --rdp-bg:#251F3D; --rdp-fg:#B9A6FF; --rdp-dot:#B9A6FF;
+  --ban-bg:#2A2110; --ban-line:#5A4318; --ban-title:#FFD8A3; --ban-text:#D9B98C; --pill-fg:#E6E8EB; } }
+
+.chip { gap:6px; } .chip svg.ci { width:13px; height:13px; stroke-width:2.2; } .chip svg.ci.rdp { color:var(--rdp-fg); } .chip svg.ci.vpn { color:var(--vpn-fg); }
+.tagrow { display:flex; align-items:center; gap:6px; flex-wrap:wrap; } .tagrow[hidden] { display:none; }
+.tagrow .cap { font-size:11px; font-weight:700; letter-spacing:.1em; color:var(--mute); margin-right:2px; }
+
+.lab { display:inline-flex; align-items:center; gap:5px; height:20px; padding:0 8px; border-radius:10px; font-size:11px; font-weight:600; white-space:nowrap; flex:none; border:0; font-family:inherit; }
+.lab i { width:6px; height:6px; border-radius:3px; flex:none; }
+.lab.lg { height:24px; padding:0 10px; border-radius:12px; font-size:12px; }
+.lab.reg { background:var(--reg-bg); color:var(--reg-fg); } .lab.reg i { background:var(--reg-dot); }
+.lab.phyto { background:var(--phy-bg); color:var(--phy-fg); } .lab.phyto i { background:var(--phy-dot); }
+.lab.other { background:var(--oth-bg); color:var(--oth-fg); } .lab.other i { background:var(--oth-dot); }
+.lab.on { outline:1.5px solid currentColor; outline-offset:-1.5px; }
+.lab.more { background:var(--oth-bg); color:var(--mute); }
+.tagrow .lab.more { background:transparent; border:1px dashed var(--line); padding:0 8px; }
+button.lab { cursor:pointer; }
+
+.bdg { display:inline-flex; align-items:center; gap:4px; height:20px; padding:0 7px; border-radius:6px; border:0; font:700 10.5px/1 "Segoe UI Variable","Segoe UI",system-ui,sans-serif; letter-spacing:.04em; white-space:nowrap; flex:none; }
+.bdg svg { width:11px; height:11px; stroke-width:2.6; } button.bdg { cursor:pointer; }
+.bdg.lg { height:24px; padding:0 10px; border-radius:12px; font-size:12px; }
+.bdg.vpn { background:var(--vpn-bg); color:var(--vpn-fg); } .bdg.rdp { background:var(--rdp-bg); color:var(--rdp-fg); }
+
+/* строка списка — карточка */
+.scroller .card { background:transparent; padding:0; border-radius:0; display:flex; flex-direction:column; gap:8px; }
+.scroller .row { align-items:flex-start; gap:12px; padding:12px; border-radius:14px; background:var(--panel); border:1px solid var(--line); }
+.scroller .row.sel { border-color:var(--acc-line); box-shadow:inset 0 0 0 1px var(--acc-line); }
+.row .tile { width:40px; height:40px; border-radius:10px; background:var(--field); color:var(--oth-fg); font-size:20px; }
+.row.sel .tile { background:var(--acc); color:var(--acc-ink); }
+.row .t { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.row .l1 { display:flex; align-items:center; gap:6px; min-width:0; }
+.row .nm { font-size:15px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.row .l2 { display:flex; align-items:center; gap:8px; min-width:0; }
+.row .rid { font-size:13.5px; font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:.04em; white-space:nowrap; flex:none; color:var(--text); }
+.row .rid.none { color:var(--mute); font-weight:500; letter-spacing:0; }
+.row .login, .row .grp { font-size:12px; color:var(--mute); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.row .login { display:inline-flex; align-items:center; gap:4px; } .row .login svg { width:11px; height:11px; stroke-width:2.4; }
+.row .login .tx, .row .note .tx { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.row .labels { display:flex; align-items:center; gap:5px; min-width:0; flex-wrap:nowrap; overflow:hidden; }
+.row .note { display:flex; align-items:center; gap:5px; min-width:0; font-size:12.5px; color:var(--mute); }
+.row .note svg { width:12px; height:12px; stroke-width:2.2; }
+.row .side { display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex:none; }
+.row .btns { display:flex; gap:6px; }
+.row .ib { width:34px; height:34px; border-radius:17px; display:grid; place-items:center; background:transparent; border:1px solid var(--line); color:var(--mute); padding:0; flex:none; }
+.row .ib svg { width:15px; height:15px; stroke-width:2.2; } .row .ib.pw.on { border-color:var(--acc-line); color:var(--acc-text); }
+.prov { height:22px; padding:0 8px; border-radius:6px; background:var(--oth-bg); border:0; color:var(--pill-fg); font:700 11px "Segoe UI Variable","Segoe UI",system-ui,sans-serif; gap:5px; }
+.prov.ad i { background:var(--ad-dot); } .prov.tv i { background:var(--tv-dot); } .prov.rdp i { background:var(--rdp-dot); } .prov.vpn i { background:var(--vpn-dot); } .prov.oth i { background:var(--oth-dot); }
+
+/* подробности записи */
+.details { display:flex; flex-direction:column; gap:12px; padding:16px; height:100%; min-height:0; }
+body.palette .details { background:var(--panel); border:1px solid var(--line); border-radius:20px; }
+.dhead { display:flex; align-items:center; gap:10px; }
+.btn.round { width:32px; height:32px; padding:0; border-radius:16px; justify-content:center; flex:none; } .btn.round svg { width:14px; height:14px; stroke-width:2.4; }
+.dtitles { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.dtitles h2 { margin:0; font-size:17px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dtitles span { font-size:12.5px; color:var(--mute); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dscroll { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:12px; padding-bottom:8px; }
+.dtags { display:flex; gap:6px; flex-wrap:wrap; }
+.vpnbanner { display:flex; gap:10px; align-items:flex-start; padding:12px 14px; border-radius:14px; background:var(--ban-bg); border:1px solid var(--ban-line); }
+.vpnbanner svg { width:18px; height:18px; stroke-width:2.2; color:var(--vpn-fg); margin-top:1px; }
+.vpnbanner b { display:block; font-size:13.5px; font-weight:700; color:var(--ban-title); } .vpnbanner span { display:block; margin-top:3px; font-size:12.5px; line-height:1.4; color:var(--ban-text); }
+.dcard { display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:14px; background:var(--panel); border:1px solid var(--line); flex:none; }
+.dlbl { font-size:11px; font-weight:700; letter-spacing:.12em; color:var(--mute); }
+.dlbl.rdp { display:flex; align-items:center; gap:8px; color:var(--rdp-fg); } .dlbl.rdp svg { width:16px; height:16px; stroke-width:2.2; }
+.dlbl.row2 { display:flex; align-items:center; gap:8px; } .dlbl.row2 > span { flex:1; }
+.addr { display:flex; align-items:baseline; gap:8px; min-width:0; } .addr b { font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:.03em; white-space:nowrap; } .addr span { font-size:12.5px; color:var(--mute); }
+.dacts { display:flex; gap:8px; flex-wrap:wrap; }
+.acct { display:flex; align-items:center; gap:10px; min-width:0; } .acct b { flex:1; min-width:0; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; user-select:text; }
+.acct .dots { font-size:15px; letter-spacing:.2em; color:var(--mute); }
+.dnote { font-size:13.5px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
+.dcard small.muted { font-size:11.5px; }
+.btn.sm { height:28px; padding:0 10px; gap:6px; } .btn.sm svg { width:13px; height:13px; stroke-width:2.2; }
+.apane { position:relative; min-height:90px; border-radius:10px; background:var(--bg); border:1px solid var(--line); overflow:hidden; }
+.apane .bars { display:flex; flex-direction:column; gap:9px; padding:14px; filter:blur(3px); }
+.apane .bars i { display:block; height:8px; border-radius:4px; background:var(--mute); opacity:.45; max-width:100%; }
+.apane .veil { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:12.5px; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 10px; white-space:nowrap; }
+.apane .atext { margin:0; padding:12px; font:12px/1.7 "Cascadia Mono",Consolas,ui-monospace,monospace; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
+.settings textarea { border-radius:10px; border:1px solid var(--line); background:var(--field); color:var(--text); padding:8px 10px; font:inherit; resize:vertical; }
+.settings input:disabled, .settings textarea:disabled, .settings select:disabled { opacity:.75; }

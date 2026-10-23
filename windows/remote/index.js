@@ -15,6 +15,8 @@ const { createConcealedWriter } = require("./concealed");
 const { createHud } = require("./hud");
 const editor = require("./editor");
 const templates = require("./templates");
+const lists = require("./lists");
+const { createSecretClipboard } = require("./clipboard");
 
 const UI = path.join(__dirname, "ui");
 const PRELOAD = path.join(UI, "preload.js");
@@ -40,8 +42,10 @@ function sanitizePatch(patch) {
 }
 
 // electron: { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, dialog, nativeImage, screen };
-// options: { icon, userData, connector?, editor?, templates?, hud?, log?, copyText?, writeConcealed? } — writeConcealed(secret) → Promise<boolean> кладёт секрет в буфер мимо журнала Win+V и облака; copyText(text) кладёт в буфер обмена ID
-// TeamViewer, когда подключение не подтвердилось (передаётся из main.js; пароль через него не идёт). Возвращает управляющий объект (тесты и main.js).
+// options: { icon, userData, connector?, editor?, templates?, hud?, log?, copyText?, clipboard?, writeConcealed? } — copyText(text) кладёт в
+// буфер обмена ID TeamViewer или адрес RDP (передаётся из main.js; пароль через него не идёт); clipboard — буфер для секретов
+// («Скопировать пароль учётки», «Доступ»: очищается через 30 с), по умолчанию — electron.clipboard; writeConcealed(secret) →
+// Promise<boolean> кладёт секрет в буфер мимо журнала Win+V и облака. Возвращает управляющий объект (тесты и main.js).
 function init(electron, options = {}) {
   const { app, BrowserWindow, Tray, Menu, MenuItem, globalShortcut, ipcMain, shell, dialog, nativeImage, screen } = electron;
   const userData = options.userData || app.getPath("userData");
@@ -58,6 +62,13 @@ function init(electron, options = {}) {
   // такого помощника нет (null): секрет тогда в буфер не кладётся.
   const writeConcealed = options.writeConcealed || (process.platform === "win32" ? createConcealedWriter(spawn) : null);
   const service = new RemoteService({ settings, store, connector });
+  const secretClipboard = createSecretClipboard({ clipboard: options.clipboard || electron.clipboard });
+  const copyPlain = (text) => {
+    if (typeof options.copyText === "function") { try { return options.copyText(String(text)) !== false; } catch (_) { return false; } }
+    try { electron.clipboard.writeText(String(text)); return true; } catch (_) { return false; }
+  };
+  // Подробности, которые надо открыть в окне (из трея или меню): окно забирает ключ, когда готово.
+  let pendingDetails = null;
   let windowRef = null, paletteRef = null, tray = null, hotkeyOk = true, registered = "";
 
   const alive = (w) => w && !w.isDestroyed();
@@ -135,7 +146,7 @@ function init(electron, options = {}) {
     const flat = view.sections.filter((s) => s.kind === "favorites" || s.kind === "recents");
     for (const s of flat) {
       items.push({ label: s.kind === "favorites" ? "Избранное" : "Недавние", enabled: false });
-      for (const r of s.records) items.push({ label: `${r.name} · ${r.id}${r.dim ? "" : ""}`, click: () => connect(r.key, false) });
+      for (const r of s.records) items.push({ label: r.id ? `${r.name} · ${r.id}` : r.name, click: () => connect(r.key, false, true) });
     }
     if (flat.length) items.push({ type: "separator" });
     items.push({ label: "Открыть файл в Excel", click: () => openFile() }, { label: "Перечитать файл", click: () => store.reload() });
@@ -151,13 +162,91 @@ function init(electron, options = {}) {
     if (tray) { try { tray.setContextMenu(Menu.buildFromTemplate(trayTemplate())); } catch (_) {} }
   };
 
-  async function connect(key, noPassword) {
+  // fromTray — из меню в трее: запись VPN/«Другое» (или RDP без адреса) открывается подробностями в окне списка.
+  async function connect(key, noPassword, fromTray = false) {
     lastRequest = { key, noPassword };
     const record = service.recordByKey(key);
     if (!record) { hud.show(connector.MESSAGES.gone()); store.reload(); return { ok: false, error: "gone" }; }
     const result = await connector.connectRecord(record, { noPassword, settings: settings.data, store, service });
     if (result && result.ok) service.noteConnected(record);
+    if (result && result.error === "details" && fromTray) showDetails(key);
     return result;
+  }
+
+  function showDetails(key) {
+    pendingDetails = key;
+    const win = openWindow();
+    try { win.webContents.send("rc:details"); } catch (_) {}
+  }
+
+  // RDP — «Подключение к удалённому рабочему столу» (mstsc); не тот адрес — подробности.
+  async function openRDP(key) {
+    const record = service.recordByKey(key);
+    if (!record) return { ok: false, error: "gone" };
+    const result = connector.openRDP ? await connector.openRDP(record) : { ok: false, error: "details" };
+    if (result && result.ok) service.noteConnected(record);
+    return result;
+  }
+
+  // Пароль учётки или «Доступ» — из файла сейчас, в буфер на 30 с. В журнал — только код поля и итог.
+  async function copySecret(key, field) {
+    if (!["accountPassword", "access"].includes(field)) return { ok: false, error: "field" };
+    let secret = null;
+    try { secret = await service.secret(key, field); } catch (_) { secret = null; }
+    try {
+      if (!secret) {
+        hud.show({ kind: "warning", title: "Не удалось прочитать файл", detail: "Проверьте, что файл на месте, и повторите.", actions: [{ id: "close", label: "Закрыть" }] });
+        log(`copy fail field=${field}`);
+        return { ok: false, error: "unavailable" };
+      }
+      const ok = secretClipboard.copy(secret);
+      hud.show(ok ? { kind: "success", title: field === "access" ? "«Доступ» скопирован" : "Пароль учётки скопирован", detail: "Буфер очистится через 30 с.", autoHideMs: 2500 }
+                  : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен.", actions: [{ id: "close", label: "Закрыть" }] });
+      log(`copy ${ok ? "ok" : "fail"} field=${field}`);
+      return { ok };
+    } finally { secret?.wipe(); }
+  }
+
+  // «Показать» в «Доступе»: текст уходит только в окно подробностей и живёт там, пока они открыты.
+  async function revealAccess(key) {
+    let secret = null;
+    try { secret = await service.secret(key, "access"); } catch (_) { secret = null; }
+    if (!secret) return { ok: false };
+    try { return { ok: true, text: secret.bytes.toString("utf8") }; } finally { secret.wipe(); }
+  }
+
+  function copyAddress(key) {
+    const record = service.recordByKey(key);
+    if (!record || !record.id) return { ok: false };
+    const ok = copyPlain(record.id);
+    hud.show(ok ? { kind: "success", title: "Адрес скопирован", detail: record.name, autoHideMs: 2000 } : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен.", actions: [{ id: "close", label: "Закрыть" }] });
+    return { ok };
+  }
+
+  // Меню строки (правая кнопка): действия над записью. Окну уходят только «подробности» и «изменить» (их показывает окно).
+  function rowMenuTemplate(key, sender) {
+    const record = service.recordByKey(key);
+    if (!record) return [];
+    const p = service.present(record);
+    const tell = (action) => () => { try { sender?.send?.("rc:menu", { action, key }); } catch (_) {} };
+    const items = [];
+    if (!p.method) items.push({ label: "Подключиться", click: () => connect(key, false) }, { label: "Открыть без пароля", click: () => connect(key, true) });
+    else if (p.rdpHost) items.push({ label: "Открыть удалённый рабочий стол", click: () => openRDP(key) });
+    items.push({ label: p.favorite ? "Убрать из избранного" : "В избранное", click: () => service.toggleFavorite(key) });
+    items.push({ label: "Подробности", click: tell("details") });
+    if (p.hasAccountPassword) items.push({ label: "Скопировать пароль учётки", click: () => copySecret(key, "accountPassword") });
+    if (p.method === "rdp" && record.id) items.push({ label: "Скопировать адрес", click: () => copyAddress(key) });
+    if (/\.(xml|xlsx|xlsm)$/i.test(settings.data.file)) items.push({ type: "separator" }, { label: "Изменить…", click: tell("edit") });
+    return items;
+  }
+  function popupRowMenu(event, key) {
+    const template = rowMenuTemplate(key, event.sender);
+    if (!template.length) return false;
+    try {
+      const menu = Menu.buildFromTemplate(template);
+      menu.popup?.({ window: BrowserWindow.fromWebContents?.(event.sender) || undefined });
+    } catch (_) { return false; }
+    return true;
   }
 
   // Кнопки тоста: повторить, открыть файл, скачать программу, отмена, закрыть.
@@ -204,7 +293,15 @@ function init(electron, options = {}) {
 
   // Вызовы принимаются только от окон модуля.
   const guarded = (fn, denied = null) => (event, ...args) => (trusted(event) ? fn(event, ...args) : denied);
-  ipcMain.handle("rc:view", guarded((_e, q) => service.view({ query: String(q?.query ?? ""), filter: ["anyDesk", "teamViewer"].includes(q?.filter) ? q.filter : "all" })));
+  ipcMain.handle("rc:view", guarded((_e, q) => service.view({ query: String(q?.query ?? ""), filter: lists.FILTERS.includes(q?.filter) ? q.filter : "all",
+    tags: Array.isArray(q?.tags) ? q.tags.map(String) : [] })));
+  ipcMain.handle("rc:details", guarded((_e, key) => service.details(String(key))));
+  ipcMain.handle("rc:pendingDetails", guarded(() => { const key = pendingDetails; pendingDetails = null; return key; }));
+  ipcMain.handle("rc:revealAccess", guarded((_e, key) => revealAccess(String(key)), { ok: false }));
+  ipcMain.handle("rc:copySecret", guarded((_e, q) => copySecret(String(q?.key), String(q?.field)), { ok: false }));
+  ipcMain.handle("rc:copyAddress", guarded((_e, key) => copyAddress(String(key)), { ok: false }));
+  ipcMain.handle("rc:openRDP", guarded((_e, key) => openRDP(String(key)), { ok: false, error: "denied" }));
+  ipcMain.handle("rc:rowMenu", guarded((event, key) => popupRowMenu(event, String(key)), false));
   ipcMain.handle("rc:toggleFavorite", guarded((_e, key) => service.toggleFavorite(String(key)), false));
   ipcMain.handle("rc:connect", guarded((_e, q) => connect(String(q?.key), !!q?.noPassword), { ok: false, error: "denied" }));
   ipcMain.handle("rc:openFile", guarded(() => openFile()));
@@ -255,9 +352,9 @@ function init(electron, options = {}) {
   } catch (_) {}
 
   return {
-    service, settings, store, entryMenu, openWindow, openPalette, registerHotkey, trayTemplate, connect, hudAction, writeConcealed, titles: TITLES,
+    service, settings, store, entryMenu, openWindow, openPalette, registerHotkey, trayTemplate, rowMenuTemplate, connect, openRDP, copySecret, copyAddress, revealAccess, hudAction, writeConcealed, titles: TITLES,
     get hotkeyOk() { return hotkeyOk; },
-    dispose() { try { globalShortcut.unregisterAll?.(); } catch (_) {} store.stop(); tray?.destroy?.(); },
+    dispose() { try { globalShortcut.unregisterAll?.(); } catch (_) {} secretClipboard.flush(); store.stop(); tray?.destroy?.(); },
   };
 }
 

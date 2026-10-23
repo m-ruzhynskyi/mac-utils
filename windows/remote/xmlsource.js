@@ -28,7 +28,7 @@ function parse(data, mode) {
         const entry = newEntry(line);
         for (const key of Object.keys(attrs).sort()) {
           const f = recognize(key);
-          if (f) setField(entry, f, f === "password" ? attrs[key] : attrs[key].trim(), mode);
+          if (f) setField(entry, f, f === "password" || f === "accountPassword" ? attrs[key] : attrs[key].trim(), mode);
         }
         current = entry;
       } else if (depth === 3 && current) { text = ""; field = recognize(name); }
@@ -36,8 +36,8 @@ function parse(data, mode) {
     text(t) { if (field) text += t; },
     cdata(t) { if (field) text += t; },
     end() {
-      // Пароль — как записан: пробелы по краям бывают частью пароля (Mac так же).
-      if (depth === 3 && field) { setField(current, field, field === "password" ? text : text.trim(), mode); field = null; text = ""; }
+      // Пароль и пароль учётки — как записаны: пробелы по краям бывают частью пароля.
+      if (depth === 3 && field) { setField(current, field, field === "password" || field === "accountPassword" ? text : text.trim(), mode); field = null; text = ""; }
       if (depth === 2 && current) { entries.push(current); current = null; }
       depth--;
     },

@@ -1,6 +1,7 @@
 // Правка списка в .xml: добавить, изменить, удалить запись. Байты вне записи не меняются (правится только нужный фрагмент
 // текста), перед записью — `<имя>.bak` с теми же правами, запись во временный файл рядом и атомарная подмена, после записи файл
-// перечитывается — не прочитался, возвращается копия. .xlsx не пишется никогда.
+// перечитывается — не прочитался, возвращается копия. .xlsx не пишется никогда. «Доступ» и «Контакты» правкой не трогаются —
+// их байты остаются как есть.
 "use strict";
 
 const fs = require("node:fs");
@@ -8,11 +9,16 @@ const path = require("node:path");
 const xml = require("./xmlparse");
 const { fieldFor } = require("./headers");
 const { normalize } = require("./id");
-const { parseProgram, supportsAliases, ConnectionsError } = require("./models");
+const { parseProgram, parseMethod, METHOD_TITLES, supportsAliases, ConnectionsError } = require("./models");
+const { idKey } = require("./builder");
 const { load } = require("./source");
 
-const FIELD_TAG = { name: "name", id: "id", password: "password", group: "group", tags: "tags", note: "note", program: "app" };
-const ORDER = ["name", "id", "password", "group", "tags", "note", "program"];
+const FIELD_TAG = { name: "name", id: "id", password: "password", group: "group", tags: "tags", note: "note", program: "app",
+  account: "account", accountPassword: "accountPassword", access: "access", contacts: "contacts" };
+// Поля, которые пишет правка. access и contacts здесь нет: их байты не меняются.
+const ORDER = ["name", "id", "password", "group", "tags", "note", "program", "account", "accountPassword"];
+// Пароли — как записаны (пробелы по краям бывают частью пароля), остальное — с обрезкой.
+const RAW = new Set(["password", "accountPassword"]);
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // Элементы <connection>: {row, start, end, children: [{field|null, name, start, end}], text}
@@ -42,18 +48,25 @@ const eolOf = (text) => (text.includes("\r\n") ? "\r\n" : "\n");
 function validate(fields, { forAdd = false } = {}) {
   const name = String(fields.name ?? "").trim(), rawID = String(fields.id ?? "").trim();
   if (!name) return { error: "missingName" };
-  if (!rawID) return { error: "missingID" };
-  const id = normalize(rawID);
-  if (!id) return { error: "invalidID" };
   const programText = String(fields.program ?? "").trim();
-  let program = "";
+  let p = null, method = null;
   if (programText) {
-    const p = parseProgram(programText);
-    if (!p) return { error: "unknownProgram" };
-    if (id.isAlias && !supportsAliases(p)) return { error: "aliasNotSupported" };
-    program = p === "anyDesk" ? "AnyDesk" : "TeamViewer";
+    p = parseProgram(programText);
+    if (!p) method = parseMethod(programText);
+    if (!p && !method) return { error: "unknownProgram" };
   }
-  return { value: { name, id: id.value, password: String(fields.password ?? ""), group: String(fields.group ?? "").trim(), tags: String(fields.tags ?? "").trim(), note: String(fields.note ?? "").trim(), program } };
+  let id;
+  if (method) id = idKey(rawID);   // RDP/VPN/«Другое»: ID не обязателен, адрес — как есть
+  else {
+    if (!rawID) return { error: "missingID" };
+    const n = normalize(rawID);
+    if (!n) return { error: "invalidID" };
+    if (p && n.isAlias && !supportsAliases(p)) return { error: "aliasNotSupported" };
+    id = n.value;
+  }
+  const program = method ? METHOD_TITLES[method] : p ? (p === "anyDesk" ? "AnyDesk" : "TeamViewer") : "";
+  return { value: { name, id, password: String(fields.password ?? ""), group: String(fields.group ?? "").trim(), tags: String(fields.tags ?? "").trim(), note: String(fields.note ?? "").trim(), program,
+    account: String(fields.account ?? "").trim(), accountPassword: String(fields.accountPassword ?? "") } };
 }
 
 // Текст записи; extra — неизвестные дочерние элементы, сохраняются как есть.
@@ -86,7 +99,7 @@ function locate(text, record, items) {
 }
 // Значение поля записи (тег или атрибут). Пароль — без обрезки пробелов по краям.
 function childText(text, it, field) {
-  const trim = (v) => (field === "password" ? v : v.trim());
+  const trim = (v) => (RAW.has(field) ? v : v.trim());
   const child = it.children.find((c) => c.field === field);
   if (child) {
     const inner = text.slice(child.start, child.end).replace(/^<[^>]*>/, "").replace(/<\/[^>]*>$/, "");
@@ -96,7 +109,7 @@ function childText(text, it, field) {
   for (const [k, v] of Object.entries(it.attrs || {})) if (fieldFor(k) === field) return trim(String(v));
   return "";
 }
-const recordID = (text, it) => normalize(childText(text, it, "id"))?.value ?? "";
+const recordID = (text, it) => idKey(childText(text, it, "id"));
 const nameOf = (text, it) => childText(text, it, "name");
 
 // Windows: права POSIX сводятся к атрибуту «только для чтения» (stat даёт 0o666/0o444), а подмена файла и удаление
@@ -155,9 +168,10 @@ function read(file) {
 // неизвестные теги и отступы остаются. value — проверенные значения формы.
 const attrEsc = (s) => esc(s).replace(/"/g, "&quot;");
 function sameValue(field, current, wanted) {
-  if (field === "id") return normalize(current)?.value === wanted;
+  if (field === "id") return idKey(current) === wanted;
   if (field === "tags") return require("./builder").splitTags(current).join("\u0001") === require("./builder").splitTags(wanted).join("\u0001");
-  if (field === "program") return (parseProgram(current) || "") === (parseProgram(wanted) || "");
+  if (field === "program") return (parseProgram(current) || "") === (parseProgram(wanted) || "") && (parseMethod(current) || "") === (parseMethod(wanted) || "")
+    && !current.trim() === !wanted;
   return current === wanted;
 }
 function patchRecord(text, target, value, eol, indent) {
@@ -256,7 +270,10 @@ function apply(file, action, { record = null, fields = {} } = {}) {
       if (text.startsWith("\r\n", to)) to += 2; else if (text[to] === "\n") to += 1;
       next = text.slice(0, from) + text.slice(to);
     } else if (action === "update") {
-      const checked = validate({ password: childText(text, target, "password"), ...fields });
+      // Пароли, которых нет в форме, не меняются: берутся из файла ("" — убрать, строка — новый).
+      const given = { ...fields };
+      for (const f of RAW) if (typeof given[f] !== "string") delete given[f];
+      const checked = validate({ password: childText(text, target, "password"), accountPassword: childText(text, target, "accountPassword"), ...given });
       if (checked.error) return { ok: false, error: checked.error };
       next = patchRecord(text, target, checked.value, eol, indent);
       if (next === text) return { ok: true };   // ничего не изменилось — файл и .bak не трогаем

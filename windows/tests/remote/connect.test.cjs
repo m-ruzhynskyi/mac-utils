@@ -223,8 +223,9 @@ test("пароль нигде: исходники модуля не трогаю
   const files = [];
   (function walk(d) { for (const f of fs.readdirSync(d, { withFileTypes: true })) f.isDirectory() ? walk(path.join(d, f.name)) : files.push(path.join(d, f.name)); })(dir);
   const bad = /clipboard|localStorage|sessionStorage|keytar|safeStorage|CredWrite|cmdkey|reg\s+add|HKEY_|console\.(log|info|warn|error)|child_process.*password/i;
-  // Буфер обмена — только помощник для секретов мимо журнала Win+V и облака (concealed.js + clip-conceal.ps1, W2-5).
-  const clipboardOK = new Set(["concealed.js", "clip-conceal.ps1"]);
+  // Буфер обмена — только clipboard.js (секрет на 30 с, затем очистка), index.js (подключение его и копия ID/адреса) и помощник для
+  // секретов мимо журнала Win+V и облака (concealed.js + clip-conceal.ps1, W2-5).
+  const clipboardOK = new Set(["clipboard.js", "index.js", "concealed.js", "clip-conceal.ps1"]);
   for (const file of files.filter((f) => /\.(js|ps1|html)$/.test(f))) {
     const code = fs.readFileSync(file, "utf8").split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("#")).join("\n");
     const rule = clipboardOK.has(path.basename(file)) ? new RegExp(bad.source.replace("clipboard|", ""), "i") : bad;

@@ -11,10 +11,19 @@
 // AnyDesk через CLI ничего не подтверждает (процесс лишь принял команду): тост нейтральный «Пароль передан» / «Открыт AnyDesk».
 // Окно AnyDesk «Terminal Session» на Windows модуль не нажимает: доступа UI Automation к AnyDesk у модуля нет (его окно рисуется
 // своим движком, без стандартных элементов) — выбор остаётся за AnyDesk/пользователем, ложного «подключено» при этом не бывает.
+//
+// Учётка Windows (логин и пароль учётной записи из файла): по той же причине модуль не выбирает в «Terminal Session» пункт «User
+// account», не вписывает логин и не вводит пароль учётки в окно AnyDesk — это делает пользователь, а пароль учётки берёт из меню
+// строки («Скопировать пароль учётки», буфер очищается через 30 с). Пароль программы в поле учётки не попадает никогда: AnyDesk
+// получает через stdin только пароль из колонки «Пароль», TeamViewer — только его же; пароль учётки при подключении не читается.
+//
+// Записи RDP/VPN/«Другое» — не AnyDesk/TeamViewer: RDP с годным адресом открывается в «Подключении к удалённому рабочему столу»
+// (`mstsc.exe /v:<адрес>`, без логина и пароля), остальное — подробности записи в окне ({error: "details"}).
 "use strict";
 
 const path = require("node:path");
 const { programOf, TITLES, downloadURL } = require("./models");
+const { mstscArgs, mstscPath } = require("./rdp");
 
 // Где ищем программы (если путь не задан в настройках).
 function defaultPaths(env = process.env) {
@@ -45,6 +54,9 @@ const MESSAGES = {
   sessionClosed: (p) => ({ kind: "warning", title: `${TITLES[p]} закрыл сеанс`, detail: `Пароль введён, но сеанс не открылся. Причина — в окне ${TITLES[p]}.`, actions: [{ id: "retry", label: "Повторить" }, { id: "close", label: "Закрыть" }] }),
   // Окно пароля показывает ID другого компьютера: пароль этой записи туда не вводится.
   idMismatch: (p) => ({ kind: "warning", title: "Окно пароля — от другого компьютера", detail: `${TITLES[p]} показал другой ID. Пароль не вводился.`, actions: [{ id: "close", label: "Закрыть" }] }),
+  rdpMissing: (copied) => ({ kind: "info", title: copied ? "Удалённый рабочий стол не найден — адрес скопирован" : "Удалённый рабочий стол не найден",
+    detail: "Вставьте адрес в программу удалённого рабочего стола.", actions: [{ id: "close", label: "Закрыть" }] }),
+  rdpFailed: () => ({ kind: "danger", title: "Не удалось открыть удалённый рабочий стол", detail: "mstsc не принял команду.", actions: [{ id: "close", label: "Закрыть" }] }),
   passwordNeeded: (p) => ({ kind: "info", title: `Введите пароль в окне ${TITLES[p]}`, detail: `${TITLES[p]} спрашивает пароль, а в файле его нет.`, actions: [{ id: "close", label: "Закрыть" }] }),
 };
 
@@ -99,9 +111,39 @@ function createConnector(deps) {
     });
   }
 
+  // RDP: mstsc.exe /v:<адрес> — без логина и пароля (их Windows спросит сама). Подключилось ли — не знаем: тост нейтральный.
+  // mstsc нет — адрес (только адрес) в буфер. Адрес не годится — {error: "details"}: открыть подробности.
+  function openRDP(record) {
+    const args = record.method === "rdp" ? mstscArgs(record.id) : null;
+    if (!args) return Promise.resolve({ ok: false, error: "details" });
+    const exe = mstscPath(env);
+    if (!exists(exe)) {
+      const copied = copyID(record.id.trim());
+      hud.show(MESSAGES.rdpMissing(copied)); log(`rdp fail code=notInstalled copied=${copied ? 1 : 0}`);
+      return Promise.resolve({ ok: false, error: "notInstalled" });
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (ok) => {
+        if (settled) return;
+        settled = true;
+        if (ok) { hud.show({ kind: "info", title: "Открываю удалённый рабочий стол…", detail: record.name, autoHideMs: 3000 }); log("rdp ok"); resolve({ ok: true }); }
+        else { hud.show(MESSAGES.rdpFailed()); log("rdp fail code=launch"); resolve({ ok: false, error: "launch" }); }
+      };
+      let child;
+      try { child = spawn(exe, args, { stdio: "ignore", windowsHide: false, detached: true }); }
+      catch (_) { return done(false); }
+      child.on?.("error", () => done(false));
+      setTimeout(() => done(true), 400);
+      child.unref?.();
+    });
+  }
+
   // record — запись; opts: { noPassword, settings, store }. Возвращает {ok, state}.
   async function connectRecord(record, opts) {
     const { noPassword = false, settings, store } = opts;
+    // RDP/VPN/«Другое»: AnyDesk и TeamViewer здесь ни при чём.
+    if (record.method) return openRDP(record);
     const program = programOf(record, settings.defaultProgram);
     const title = TITLES[program];
     const exe = find(program, settings.programPaths?.[program]);
@@ -201,7 +243,7 @@ function createConnector(deps) {
     return id;
   }
 
-  return { installed, find, connectRecord, hudAction, MESSAGES };
+  return { installed, find, connectRecord, openRDP, hudAction, MESSAGES };
 }
 
 module.exports = { createConnector, defaultPaths, MESSAGES };

@@ -298,13 +298,17 @@ test("§7 пароль нигде: записи, поиск, вид окна, н
   store.stop();
 });
 
+const CLIPBOARD_OK = new Set(["clipboard.js", "index.js"]);
 test("§7 модуль не пишет пароли в журнал/кэш: в исходниках нет console/clipboard/safeStorage/localStorage", () => {
   const dir = path.join(__dirname, "..", "..", "remote");
   const files = fs.readdirSync(dir, { recursive: true }).filter((n) => n.endsWith(".js"));
   assert.ok(files.length > 10);
   for (const n of files) {
     const text = fs.readFileSync(path.join(dir, n), "utf8");
-    for (const bad of ["console.", "clipboard", "safeStorage", "localStorage", "sessionStorage", "document.cookie", "keytar"]) assert.ok(!text.includes(bad), `${n}: ${bad}`);
+    // Буфер обмена — только в clipboard.js (секрет на 30 с, затем очистка) и в index.js (подключение его и копия ID/адреса).
+    const banned = CLIPBOARD_OK.has(path.basename(n)) ? ["console.", "safeStorage", "localStorage", "sessionStorage", "document.cookie", "keytar"]
+      : ["console.", "clipboard", "safeStorage", "localStorage", "sessionStorage", "document.cookie", "keytar"];
+    for (const bad of banned) assert.ok(!text.includes(bad), `${n}: ${bad}`);
   }
 });
 

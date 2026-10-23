@@ -5,18 +5,19 @@
 const fs = require("node:fs");
 const { writeXlsx } = require("./xlsxwriter");
 
-const HEADER = ["Название", "ID", "Пароль", "Группа", "Теги", "Заметка", "Программа"];
+// Программа: AnyDesk | TeamViewer | RDP | VPN | Другое. Учётка Windows, «Доступ» (многострочный) и «Контакты» — необязательны.
+const HEADER = ["Название", "ID", "Пароль", "Группа", "Теги", "Заметка", "Программа", "Учётная запись", "Пароль учётной записи", "Доступ", "Контакты"];
 const EXAMPLES = [
-  ["Пример: касса 1", "123456789", "", "Магазин", "касса", "Замените примеры своими данными", "AnyDesk"],
-  ["Пример: сервер", "987654321", "", "Офис", "сервер", "", "TeamViewer"],
+  ["Пример: касса 1", "123456789", "", "Магазин", "касса", "Замените примеры своими данными", "AnyDesk", "", "", "", ""],
+  ["Пример: сервер", "987654321", "", "Офис", "сервер", "", "TeamViewer", "", "", "", ""],
 ];
-const TAGS = ["name", "id", "password", "group", "tags", "note", "app"];
+const TAGS = ["name", "id", "password", "group", "tags", "note", "app", "account", "accountPassword", "access", "contacts"];
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 function templateBuffer(kind) {
   if (kind === "xlsx") return writeXlsx([HEADER, ...EXAMPLES]);
   const items = EXAMPLES.map((row) => `  <connection>\n${row.map((v, i) => (v === "" ? "" : `    <${TAGS[i]}>${esc(v)}</${TAGS[i]}>\n`)).join("")}  </connection>\n`).join("");
-  return Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>\n<connections>\n${items}</connections>\n`, "utf8");
+  return Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>\n<!-- name, id, password, group, tags (a, b), note, app (AnyDesk | TeamViewer | RDP | VPN | Другое),\n     account, accountPassword (учётка Windows), access (VPN/RDP и прочее, многострочный), contacts -->\n<connections>\n${items}</connections>\n`, "utf8");
 }
 
 // Спрашивает, куда сохранить; возвращает путь или "" (отмена). setSettings — подключает новый файл.

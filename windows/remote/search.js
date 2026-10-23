@@ -1,8 +1,9 @@
-// Поиск по названию, ID, группе, тегам и заметке: без регистра и диакритики, по частям слов, ID — с пробелами и без. Ничего нет —
+// Поиск по названию, ID, группе, тегам, заметке и логину учётки («Доступ», пароли и контакты — никогда): без регистра и диакритики, по частям слов, ID — с пробелами и без. Ничего нет —
 // запрос пробуется в другой раскладке («ctdth» → «север»). 1:1 с Mac (`ConnectionSearch.swift`).
 "use strict";
 
 const { alternatives } = require("./layouts");
+const { displayTag } = require("./tags");
 
 const MARKS = /\p{M}/gu;
 // Регистр, диакритика («ё» = «е», «й» = «и»), ширина знаков; апострофы к одному виду.
@@ -12,7 +13,7 @@ function fold(s) {
 
 class ConnectionSearch {
   constructor(records) {
-    this.entries = records.map((record) => ({ record, name: fold(record.name), id: record.id, rest: fold([record.group, ...record.tags, record.note].join("\u001F")) }));
+    this.entries = records.map((record) => ({ record, name: fold(record.name), id: record.id, rest: fold([record.group, ...record.tags, ...record.tags.map(displayTag), record.note, record.account || ""].join("\u001F")) }));
   }
 
   get records() { return this.entries.map((e) => e.record); }

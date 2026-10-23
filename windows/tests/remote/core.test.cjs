@@ -53,7 +53,8 @@ test("заголовки на русском, украинском и англи
     const values = { name: "Лаборатория Север", id: "123 456 789", password: "x", group: "Клиенты", tags: "касса, ночь, Касса", note: "звонить заранее", program: "teamviewer" };
     const row = header.map((h) => { const f = fieldFor(h); assert.ok(f, `не распознан заголовок ${h}`); return values[f]; });
     const snap = build([header, row]);
-    assert.deepEqual(snap.records, [{ sourceRow: 2, name: "Лаборатория Север", id: "123456789", group: "Клиенты", tags: ["касса", "ночь"], note: "звонить заранее", program: "teamViewer", hasPassword: true }], header.join());
+    assert.deepEqual(snap.records, [{ sourceRow: 2, name: "Лаборатория Север", id: "123456789", group: "Клиенты", tags: ["касса", "ночь"], note: "звонить заранее", program: "teamViewer", hasPassword: true,
+      method: null, account: "", hasAccountPassword: false, accessLines: 0 }], header.join());
     assert.ok(isClean(snap.diagnostics));
     assert.equal(snap.diagnostics.columns.length, 7);
   }

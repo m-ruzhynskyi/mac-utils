@@ -133,7 +133,7 @@ test("шаблон .xlsx и .xml читаются тем же модулем, с
     assert.equal(snap.records.length, 2);
     assert.deepEqual(snap.records.map((r) => r.program), ["anyDesk", "teamViewer"]);
     assert.ok(snap.diagnostics.columns.some((c) => c.field === "program"));
-    assert.equal(snap.diagnostics.columns.length, kind === "xlsx" ? 7 : 6, "в XML пустой пароль не пишется");
+    assert.equal(snap.diagnostics.columns.length, kind === "xlsx" ? 11 : 6, "в XML пустые поля не пишутся; в .xlsx — и учётка, «Доступ», «Контакты»");
   }
   const cancelled = await templates.create({ kind: "xlsx", dialog: { showSaveDialog: async () => ({ canceled: true }) }, parent: null, setSettings() { assert.fail("не должно вызываться"); } });
   assert.equal(cancelled, "");

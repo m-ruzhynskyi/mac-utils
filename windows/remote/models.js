@@ -2,6 +2,7 @@
 "use strict";
 
 const { key } = require("./headers");
+const { tagKey, isBadgeTag, VPN, RDP } = require("./tags");
 
 const PROGRAMS = ["anyDesk", "teamViewer"];
 const TITLES = { anyDesk: "AnyDesk", teamViewer: "TeamViewer" };
@@ -16,10 +17,31 @@ function parseProgram(raw) {
   return NAMES.get(key(raw)) || null;
 }
 
+// Записи не через AnyDesk/TeamViewer: удалённый рабочий стол, только VPN, другое (телефон и т. п.). Это не программа, а способ
+// (record.method): ID может быть пустым, для RDP в ID — адрес компьютера (IP или имя), он не нормализуется.
+const METHODS = ["rdp", "vpn", "other"];
+const METHOD_TITLES = { rdp: "RDP", vpn: "VPN", other: "Другое" };
+const METHOD_NAMES = new Map(Object.entries({
+  rdp: "rdp", рдп: "rdp", remotedesktop: "rdp", mstsc: "rdp", windowsapp: "rdp",
+  vpn: "vpn", впн: "vpn",
+  другое: "other", другие: "other", інше: "other", other: "other", прочее: "other", иное: "other", телефон: "other", phone: "other",
+}));
+function parseMethod(raw) {
+  return METHOD_NAMES.get(key(raw)) || null;
+}
+
+// Нужен VPN: способ «VPN» или метка VPN. Через удалённый рабочий стол: способ «RDP» или метка RDP.
+const needsVPN = (record) => record.method === "vpn" || (record.tags || []).some((t) => tagKey(t) === VPN);
+const usesRDP = (record) => record.method === "rdp" || (record.tags || []).some((t) => tagKey(t) === RDP);
+// Метки для показа: без VPN и RDP — они значками.
+const labelsOf = (record) => (record.tags || []).filter((t) => !isBadgeTag(t));
+// Ключ избранного и недавних — нормализованный ID (номер строки меняется при правке файла); без ID — название.
+const favoriteKey = (record) => (record.id ? record.id : `name:${record.name}`);
+
 const supportsAliases = (program) => program === "anyDesk";
 const downloadURL = (program) => (program === "anyDesk" ? "https://anydesk.com/download" : "https://www.teamviewer.com/download/");
 
-// Программа записи: из файла, иначе алиас — AnyDesk, иначе программа по умолчанию.
+// Программа записи: из файла, иначе алиас — AnyDesk, иначе программа по умолчанию. У записей RDP/VPN/«Другое» не используется.
 function programOf(record, fallback) {
   return record.program || (isAlias(record) ? "anyDesk" : fallback);
 }
@@ -27,9 +49,9 @@ const isAlias = (record) => record.id.includes("@");
 // Уникален в списке: один и тот же ID может встретиться дважды.
 const identity = (record) => `${record.sourceRow}:${record.id}`;
 
-// ID для показа: цифры группами по три с конца («123 456 789»); алиас — как есть.
+// ID для показа: цифры группами по три с конца («123 456 789»); алиас и адрес RDP (IP, имя) — как есть.
 function displayID(record) {
-  if (isAlias(record)) return record.id;
+  if (isAlias(record) || !/^\d+$/.test(record.id)) return record.id;
   let out = "";
   for (let i = 0; i < record.id.length; i++) {
     if (i > 0 && (record.id.length - i) % 3 === 0) out += " ";
@@ -63,5 +85,5 @@ class ConnectionsError extends Error {
 }
 const CODES = ["noFile", "unavailable", "locked", "type", "tooLarge", "noSheet", "missingColumns", "corrupt"];
 
-module.exports = { PROGRAMS, TITLES, parseProgram, supportsAliases, downloadURL, programOf, isAlias, identity, displayID, columnLetter,
+module.exports = { METHODS, METHOD_TITLES, parseMethod, needsVPN, usesRDP, labelsOf, favoriteKey, PROGRAMS, TITLES, parseProgram, supportsAliases, downloadURL, programOf, isAlias, identity, displayID, columnLetter,
   emptyDiagnostics, duplicateCount, isClean, ConnectionsError, CODES };

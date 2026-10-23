@@ -2,7 +2,10 @@
 // 1:1 с Mac (`ConnectionHeaders.swift`).
 "use strict";
 
-const FIELDS = ["name", "id", "password", "group", "tags", "note", "program"];
+const FIELDS = ["name", "id", "password", "group", "tags", "note", "program", "account", "accountPassword", "access", "contacts"];
+// Значение не держится в памяти списка: читается из файла по запросу и затирается (пароль, пароль учётки, «Доступ»).
+const SECRET_FIELDS = new Set(["password", "accountPassword", "access"]);
+const isSecret = (field) => SECRET_FIELDS.has(field);
 
 const ALIASES = {
   name: ["name", "название", "назва", "имя", "імя", "computer", "компьютер", "компютер"],
@@ -14,6 +17,13 @@ const ALIASES = {
   tags: ["tags", "tag", "теги", "тэги", "тег"],
   note: ["note", "notes", "заметка", "заметки", "примітка", "примітки", "комментарий", "коментар"],
   program: ["program", "app", "application", "программа", "програма", "приложение", "додаток"],
+  // Учётка Windows. «Пароль» сам по себе — пароль AnyDesk/TeamViewer; пароль учётки — только с уточнением.
+  account: ["account", "login", "user", "username", "учетнаязапись", "учетка", "логин", "логін", "користувач", "обліковийзапис", "windowsuser"],
+  accountPassword: ["accountpassword", "windowspassword", "парольучетнойзаписи", "парольучетки", "парольwindows", "парольобліковогозапису"],
+  // «Доступ»: всё прочее с вкладки (VPN, RDP, IP, логины и пароли) — как секрет: не в поиске, не в журнале.
+  access: ["доступ", "access", "подробности", "деталі", "details", "vpnrdp", "подключение", "підключення"],
+  // «Контакты»: колонка известна (не «лишняя»), но не читается, не показывается и не ищется.
+  contacts: ["контакты", "контакт", "контакти", "contacts", "contact", "контактнаособа", "контактноелицо"],
 };
 
 const LOOKUP = new Map();
@@ -29,4 +39,4 @@ function fieldFor(header) {
   return LOOKUP.get(key(header)) || null;
 }
 
-module.exports = { FIELDS, key, fieldFor };
+module.exports = { FIELDS, key, fieldFor, isSecret };
