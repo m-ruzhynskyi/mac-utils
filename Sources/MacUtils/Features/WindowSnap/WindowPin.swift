@@ -21,7 +21,7 @@ final class WindowPin: ObservableObject {
             return
         }
         center.register(id: HotKeyID.windowPin, keyCode: kVK_ANSI_P, modifiers: controlKey | optionKey) {
-            AppAction(hotKey: .windowPin).run()
+            AppRouter.shared.runHotKey(HotKeyID.windowPin)
         }
     }
 

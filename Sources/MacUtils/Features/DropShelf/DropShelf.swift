@@ -154,7 +154,7 @@ final class DropShelf: ObservableObject {
             return
         }
         center.register(id: HotKeyID.dropShelf, keyCode: kVK_ANSI_D, modifiers: controlKey | optionKey) {
-            AppAction(hotKey: .dropShelf).run()
+            AppRouter.shared.runHotKey(HotKeyID.dropShelf)
         }
         // Перетаскивание файлов в чужих приложениях видно только глобальному монитору.
         dragMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDragged) { event in
