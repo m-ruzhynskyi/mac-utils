@@ -480,7 +480,9 @@ struct RemoteConnectionsPanel: View {
                 .opacity(center.state == .ready ? 1 : DS.State.disabledOpacity)
                 .onKeyPress(.downArrow) { model.move(1); return .handled }
                 .onKeyPress(.upArrow) { model.move(-1); return .handled }
-                .onKeyPress(.return) { model.connectSelected() ? .handled : .ignored }
+                .onKeyPress(.return, phases: .down) { press in
+                    model.connectSelected(withPassword: !press.modifiers.contains(.command)) ? .handled : .ignored
+                }
                 .padding(.horizontal, DS.Space.l)
             if center.state == .ready {
                 HStack(spacing: 6) {

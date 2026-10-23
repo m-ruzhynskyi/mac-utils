@@ -60,7 +60,7 @@ final class RemoteConnectionsAppTests: XCTestCase {
         while center.state != .ready, Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
         XCTAssertEqual(center.state, .ready)
         XCTAssertEqual(center.snapshot.records.map(\.name), ["Касса 2", "Склад"])
-        center.defaultProgram = .teamViewer
+        center.defaultProgramSetting = .teamViewer
         let listing = center.listing(query: "", filter: .program(.teamViewer))
         XCTAssertEqual(listing.rows.count, 2, "без программы — по умолчанию TeamViewer")
         XCTAssertEqual(center.listing(query: "crkfl", filter: .all).hint?.converted, "склад")
@@ -76,5 +76,61 @@ final class RemoteConnectionsAppTests: XCTestCase {
         XCTAssertEqual(HotKeyAction.allCases.filter { $0.defaultCombo == combo }, [.remoteConnections])
         XCTAssertFalse(WindowTiler.bindings.contains { $0.keyCode == combo.keyCode }, "раскладка окон с ⌥⌘ не занимает A")
         XCTAssertEqual(AppAction(hotKey: .remoteConnections), .remoteConnections)
+    }
+    func testConnectionSettingsDefaults() {
+        let center = RemoteConnectionsCenter(defaults: defaults)
+        XCTAssertNil(center.defaultProgramSetting, "по умолчанию: AnyDesk, а если в файле обе программы — спросить")
+        XCTAssertEqual(center.defaultProgram, .anyDesk)
+        XCTAssertFalse(center.autologin)
+        XCTAssertEqual(center.timeoutSeconds, 20)
+        center.timeoutSeconds = 500
+        XCTAssertEqual(center.timeoutSeconds, 60)
+        center.timeoutSeconds = 1
+        XCTAssertEqual(center.timeoutSeconds, 5)
+        center.defaultProgramSetting = .teamViewer
+        center.defaultProgramSetting = nil
+        XCTAssertNil(defaults.object(forKey: RemotePref.defaultProgram))
+    }
+
+    /// HUD (m06/m07): каждая фаза и ошибка — свой текст и кнопки, имя и ID записи, пароля нет и взяться неоткуда.
+    func testHUDTextsFollowDesign() {
+        let record = ConnectionRecord(sourceRow: 2, name: "Лаборатория Север", id: "123456789", hasPassword: true)
+        func hud(_ phase: ConnectionPhase, _ program: RemoteProgram = .anyDesk) -> RemoteHUDContent {
+            RemoteHUDContent.make(phase, program: program, record: record)
+        }
+        XCTAssertEqual(hud(.opening).title, "Открываю AnyDesk…")
+        XCTAssertEqual(hud(.opening).detail, "Лаборатория Север · 123 456 789")
+        let waiting = hud(.waiting(elapsed: 7, timeout: 20))
+        XCTAssertEqual(waiting.title, "Жду окно пароля… 7 с")
+        XCTAssertEqual(waiting.progress, 0.35)
+        XCTAssertEqual(waiting.actions, [.cancel])
+        XCTAssertFalse(waiting.fadesOut)
+        XCTAssertEqual(hud(.waiting(elapsed: 7, timeout: 20), .teamViewer).title, "Жду окно аутентификации… 7 с")
+        XCTAssertFalse(hud(.entered).fadesOut, "«Пароль введён» висит до ответа программы")
+        XCTAssertTrue(hud(.finished(.connected)).fadesOut)
+        XCTAssertEqual(hud(.finished(.connected)).lifetime, 2.5)
+        XCTAssertEqual(hud(.finished(.connectedWithoutPassword)).title, "Подключено без пароля")
+
+        let errors: [(ConnectionFailure, String, [RemoteHUDAction])] = [
+            (.noAccessibility, "AnyDesk открыт, пароль не введён", [.openAccessibility, .close]),
+            (.notInstalled, "AnyDesk не найден", [.download, .close]),
+            (.fieldNotFound(structure: ["AXWindow"]), "Введите пароль вручную", [.diagnostics, .close]),
+            (.wrongPassword, "Проверьте пароль в файле", [.openFile, .close]),
+            (.focusLost, "Ввод прерван", [.retry, .close]),
+            (.entryGone, "Записи больше нет в файле", [.close]),
+            (.programNotSpecified, "Программа не указана", [.choose(.anyDesk), .choose(.teamViewer)]),
+            (.launchFailed, "AnyDesk не запустился", [.retry, .close]),
+            (.aliasNotSupported, "AnyDesk не открывает алиасы", [.openFile, .close]),
+            (.fileUnavailable(.locked), "Файл подключений не прочитан", [.retry, .close]),
+        ]
+        for (failure, title, actions) in errors {
+            let c = hud(.finished(.failed(failure)))
+            XCTAssertEqual(c.title, title)
+            XCTAssertEqual(c.actions, actions, title)
+            XCTAssertEqual(c.lifetime, 12, title)
+            XCTAssertNotEqual(c.tone, .success, title)
+        }
+        XCTAssertEqual(hud(.finished(.failed(.wrongPassword)), .teamViewer).detail, "TeamViewer отклонил пароль для «Лаборатория Север».")
+        XCTAssertEqual(RemoteHUDAction.download.title(.teamViewer), "Скачать TeamViewer")
     }
 }

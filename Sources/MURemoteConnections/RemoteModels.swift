@@ -20,7 +20,9 @@ public enum RemoteProgram: String, Codable, CaseIterable, Sendable {
     }
 
     /// Ссылка, которая открывает подключение без пароля. AnyDesk: `anydesk:<ID или алиас>` (документирована с 6.3.1).
-    /// TeamViewer: `teamviewer10://control?device=<ID>` — схема из сообщества, поведение в TeamViewer 15 проверяется в A-3.
+    /// TeamViewer: `teamviewer10://control?device=<ID>` — официально не документирована; схема `teamviewer10`
+    /// зарегистрирована в Info.plist TeamViewer 15, обработчик `control` с параметром `device` есть в самой программе.
+    /// Пароль в ссылке не передаём никогда (у TeamViewer есть параметр `password` — он попал бы в журналы системы).
     /// ID уже нормализован (цифры или алиас из латиницы, цифр и `._-@`), экранировать нечего.
     public func connectURL(id: String) -> URL? {
         switch self {

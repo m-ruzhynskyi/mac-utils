@@ -7,6 +7,8 @@ public enum RemoteLogEvent: Equatable, Sendable {
     case loaded(records: Int, skipped: Int, duplicates: Int, unrecognizedColumns: Int, milliseconds: Int)
     case loadFailed(ConnectionsError.Code)
     case retrying(ConnectionsError.Code, attempt: Int)
+    /// Исход подключения: код (`ConnectionOutcome.code`), дошло ли до ввода, длительность.
+    case connection(result: String, typed: Bool, milliseconds: Int)
 
     /// Строка для журнала приложения.
     public var message: String {
@@ -17,6 +19,8 @@ public enum RemoteLogEvent: Equatable, Sendable {
             return "connections failed=\(code.rawValue)"
         case let .retrying(code, attempt):
             return "connections retry=\(code.rawValue) attempt=\(attempt)"
+        case let .connection(result, typed, ms):
+            return "connect result=\(result) typed=\(typed ? 1 : 0) ms=\(ms)"
         }
     }
 }

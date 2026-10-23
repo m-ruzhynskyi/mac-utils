@@ -213,18 +213,26 @@ public final class ConnectionsFileStore {
     // MARK: Пароль
 
     /// Пароль для подключения — из файла сейчас. Вызывающий вводит его и затирает (`SecretBuffer.wipe()`).
-    public nonisolated static func password(for record: ConnectionRecord, url: URL, sheet: String?) throws -> SecretBuffer? {
-        try ConnectionsSources.source(for: url, sheet: sheet).password(for: record, in: try readData(url))
+    public nonisolated static func lookupPassword(for record: ConnectionRecord, url: URL, sheet: String?) throws -> PasswordLookup {
+        try ConnectionsSources.source(for: url, sheet: sheet).lookupPassword(for: record, in: try readData(url))
     }
 
-    public func password(for record: ConnectionRecord) async throws -> SecretBuffer? {
+    public nonisolated static func password(for record: ConnectionRecord, url: URL, sheet: String?) throws -> SecretBuffer? {
+        try lookupPassword(for: record, url: url, sheet: sheet).secret
+    }
+
+    public func lookupPassword(for record: ConnectionRecord) async throws -> PasswordLookup {
         guard let url = fileURL else { throw ConnectionsError.noFile }
         let sheet = settings.sheetName
         return try await withCheckedThrowingContinuation { cont in
             queue.async {
-                cont.resume(with: Result { try Self.password(for: record, url: url, sheet: sheet) })
+                cont.resume(with: Result { try Self.lookupPassword(for: record, url: url, sheet: sheet) })
             }
         }
+    }
+
+    public func password(for record: ConnectionRecord) async throws -> SecretBuffer? {
+        try await lookupPassword(for: record).secret
     }
 
     // MARK: Наблюдение

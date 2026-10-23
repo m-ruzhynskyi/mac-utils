@@ -36,11 +36,11 @@ final class RemoteListModel: ObservableObject {
         filter = order[((order.firstIndex(of: filter) ?? 0) + 1) % order.count]
     }
 
-    /// Подключиться к выбранной строке. false — выбрать нечего.
+    /// Подключиться к выбранной строке; `withPassword: false` — ⌘↩, без ввода пароля. false — выбрать нечего.
     @discardableResult
-    func connectSelected() -> Bool {
+    func connectSelected(withPassword: Bool = true) -> Bool {
         guard let row = selectedRow(in: listing) else { return false }
-        center.connect(row.record)
+        center.connect(row.record, withPassword: withPassword)
         return true
     }
 
