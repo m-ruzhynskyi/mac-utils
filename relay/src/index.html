@@ -1903,10 +1903,16 @@ if (window.mu && typeof window.mu.onDisplays === "function") window.mu.onDisplay
 // Захват остановился сам (сон, выдернули монитор): в приложении для Windows пробуем взять тот же или основной монитор и
 // продолжить эфир; закрыли транслируемое окно или не вышло — эфир заканчивается с понятной причиной.
 let videoRecovering = false;
+const videoRecoveries = [];   // моменты попыток: не больше 3 за минуту, иначе дорожка кончается снова и снова — эфир заканчивается
 async function onVideoEnded() {
   if (videoRecovering) return;
-  if (canSwitchMonitors() && capture?.replaceVideo && hostMonitors.current > 0) {
+  const now = Date.now();
+  while (videoRecoveries.length && now - videoRecoveries[0] > 60_000) videoRecoveries.shift();
+  if (canSwitchMonitors() && capture?.replaceVideo && hostMonitors.current > 0 && videoRecoveries.length < 3) {
+    videoRecoveries.push(now);
     videoRecovering = true;
+    await new Promise((r) => setTimeout(r, 1000));   // пауза: монитор/система должны успокоиться
+    if (!capture) { videoRecovering = false; return; }
     try {
       const info = await window.mu.displays();
       const list = Array.isArray(info?.list) ? info.list : [];

@@ -749,7 +749,17 @@ final class ScreenShare: NSObject, ObservableObject {
         // После сна захват часто молча замирает: пересоздаём его (зрители видят последний кадр, потом картинка идёт).
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
                                                                          object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { ScreenShare.shared.recoverCapture(afterSleep: true) }
+            MainActor.assumeIsolated { ScreenShare.shared.checkCaptureAfterWake() }
+        }
+    }
+
+    /// После пробуждения поток обычно жив: пересоздаём, только если экран молчит (даже «пустых» кадров нет) дольше 3 с.
+    func checkCaptureAfterWake() {
+        guard isLive, let sender else { return }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, self.isLive, self.sender === sender else { return }
+            if sender.secondsSinceScreenSample > 3 { self.recoverCapture(afterSleep: true) }
         }
     }
 
@@ -770,8 +780,14 @@ final class ScreenShare: NSObject, ObservableObject {
         let old = stream
         stream = nil
         Log.capture.info("Трансляция: захват пересоздаётся (сон \(afterSleep ? 1 : 0))")
+        let oldAudio = audioStream
         Task { [weak self] in
             try? await old?.stopCapture()
+            // Запасной звук ScreenCaptureKit (без tap) живёт на том же делегате: после сна пересоздаём и его.
+            if let oldAudio {
+                try? await oldAudio.stopCapture()
+                if let self, self.isLive, self.sender === sender { self.audioStream = nil; try? await self.startAudio(sender: sender) }
+            }
             for delay in [1.0, 2, 4, 8, 15] {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard let self, self.isLive, self.sender === sender else { return }
@@ -786,6 +802,12 @@ final class ScreenShare: NSObject, ObservableObject {
                 } catch {
                     Log.capture.error("Трансляция: захват не пересоздан, код \((error as NSError).code)")
                     continue
+                }
+                // Эфир могли остановить (или начать новый) за время запуска — тогда новый поток никому не нужен.
+                guard self.isLive, self.sender === sender else {
+                    try? await fresh.stopCapture()
+                    self.recoveringCapture = false
+                    return
                 }
                 self.stream = fresh
                 self.videoFilter = filter
@@ -1366,6 +1388,11 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         return currentSocket
     }
 
+    private var lastSampleAt = ProcessInfo.processInfo.systemUptime
+    private func noteScreenSample() { lock.lock(); lastSampleAt = ProcessInfo.processInfo.systemUptime; lock.unlock() }
+    /// Сколько секунд от экрана не было ни одного кадра (в том числе «без изменений»).
+    var secondsSinceScreenSample: Double { lock.lock(); defer { lock.unlock() }; return ProcessInfo.processInfo.systemUptime - lastSampleAt }
+
     /// Захват пересоздан: ключевой кадр сразу, чтобы зрители не ждали следующего.
     func requestKeyFrame() { queue.async { self.encoder.requestKeyFrame() } }
 
@@ -1499,6 +1526,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
             }
             return
         }
+        if type == .screen { noteScreenSample() }
         guard type == .screen, sampleBuffer.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
                 as? [[SCStreamFrameInfo: Any]],
