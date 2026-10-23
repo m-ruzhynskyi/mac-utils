@@ -146,7 +146,46 @@ private final class ColorScanner {
 
     private static func this(_ info: UnsafeMutableRawPointer?) -> ColorScanner { Unmanaged<ColorScanner>.fromOpaque(info!).takeUnretainedValue() }
 
+    /// Число компонент пространств цветов из ресурсов страницы (`/Cs1` → `[/ICCBased …]` с `/N`): Quartz называет их
+    /// так у обеих сторон. Неверное число — и `sc` заберёт со стека чужие числа (их оставляют неразобранные операторы).
+    private var spaces: [String: Int] = [:]
+
+    static func components(of name: String) -> Int {
+        switch name {
+        case "DeviceGray", "CalGray", "G", "Indexed", "I", "Separation": return 1
+        case "DeviceCMYK", "CMYK": return 4
+        default: return 3
+        }
+    }
+
+    private func readSpaces(_ page: CGPDFPage) {
+        guard let pageDictionary = page.dictionary else { return }
+        var resources: CGPDFDictionaryRef?, colorSpaces: CGPDFDictionaryRef?
+        guard CGPDFDictionaryGetDictionary(pageDictionary, "Resources", &resources), let resources,
+              CGPDFDictionaryGetDictionary(resources, "ColorSpace", &colorSpaces), let colorSpaces else { return }
+        CGPDFDictionaryApplyBlock(colorSpaces, { key, object, info in
+            let scanner = Unmanaged<ColorScanner>.fromOpaque(info!).takeUnretainedValue()
+            let name = String(cString: key)
+            var spaceName: UnsafePointer<CChar>?
+            var array: CGPDFArrayRef?
+            if CGPDFObjectGetValue(object, .name, &spaceName), let spaceName {
+                scanner.spaces[name] = components(of: String(cString: spaceName))
+            } else if CGPDFObjectGetValue(object, .array, &array), let array, CGPDFArrayGetName(array, 0, &spaceName), let spaceName {
+                var stream: CGPDFStreamRef?
+                var count: CGPDFInteger = 0
+                if String(cString: spaceName) == "ICCBased", CGPDFArrayGetStream(array, 1, &stream), let stream,
+                   let dictionary = CGPDFStreamGetDictionary(stream), CGPDFDictionaryGetInteger(dictionary, "N", &count) {
+                    scanner.spaces[name] = count
+                } else {
+                    scanner.spaces[name] = components(of: String(cString: spaceName))
+                }
+            }
+            return true
+        }, Unmanaged.passUnretained(self).toOpaque())
+    }
+
     func scan(_ page: CGPDFPage) {
+        readSpaces(page)
         guard let table = CGPDFOperatorTableCreate() else { return }
         func register(_ name: String, _ callback: @escaping CGPDFOperatorCallback) { CGPDFOperatorTableSetCallback(table, name, callback) }
         register("q") { _, info in let s = ColorScanner.this(info); s.stack.append((s.ctm, s.fill, s.components)) }
@@ -167,11 +206,7 @@ private final class ColorScanner {
             let s = ColorScanner.this(info)
             var name: UnsafePointer<CChar>?
             guard CGPDFScannerPopName(scanner, &name), let name else { return }
-            switch String(cString: name) {
-            case "DeviceGray", "CalGray", "G": s.components = 1
-            case "DeviceCMYK", "CMYK": s.components = 4
-            default: s.components = 3
-            }
+            s.components = s.spaces[String(cString: name)] ?? ColorScanner.components(of: String(cString: name))
         }
         for name in ["sc", "scn"] {
             register(name) { scanner, info in

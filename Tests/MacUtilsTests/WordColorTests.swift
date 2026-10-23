@@ -143,6 +143,7 @@ final class WordColorTests: XCTestCase {
                     return
                 }
                 checked += 1
+                if let dump = environment["MU_WORD_COLORS_DUMP"], !dump.isEmpty { ours.write(toFile: dump + "/\(name).pdf") }
                 let found = WordColors.compare(word: WordColors.pages(wordPDF), ours: WordColors.pages(ours))
                 // Заглушки объектов (WMF/EMF, фигуры с обтеканием — этап P-4) рисуются своими цветами: такие формы отдельно.
                 var placeholders = 0
