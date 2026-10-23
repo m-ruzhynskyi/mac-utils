@@ -24,6 +24,7 @@ final class ConnectionsBuilderTests: XCTestCase {
                 case .tags?: row[i] = "касса, ночь, Касса"
                 case .note?: row[i] = "звонить заранее"
                 case .program?: row[i] = "teamviewer"
+                case .account?, .accountPassword?, .access?, .contacts?: XCTFail("заголовок \(h) — не то поле")
                 case nil: XCTFail("не распознан заголовок \(h)")
                 }
             }

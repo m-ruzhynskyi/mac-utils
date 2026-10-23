@@ -37,10 +37,31 @@ public enum ConnectionLists {
     }
 }
 
-/// Фильтр-чипы «Все · AnyDesk · TeamViewer».
+/// Фильтр-чипы «Все · AnyDesk · TeamViewer · RDP · VPN».
 public enum ProgramFilter: Hashable, Sendable {
     case all
     case program(RemoteProgram)
+    /// Через удалённый рабочий стол (программа RDP или метка RDP).
+    case rdp
+    /// Нужен VPN (программа VPN или метка VPN).
+    case vpn
+
+    func matches(_ r: ConnectionRecord, _ defaultProgram: RemoteProgram) -> Bool {
+        switch self {
+        case .all: return true
+        case .program(let p): return r.method == nil && r.program(default: defaultProgram) == p
+        case .rdp: return r.usesRDP
+        case .vpn: return r.needsVPN
+        }
+    }
+}
+
+/// Метка в строке «МЕТКИ»: ключ сравнения, как показывать, сколько записей.
+public struct TagCount: Equatable, Hashable, Sendable {
+    public let key: String
+    public let title: String
+    public let kind: ConnectionTag.Kind
+    public let count: Int
 }
 
 public struct ConnectionSection: Identifiable, Equatable, Sendable {
@@ -75,6 +96,8 @@ public struct ConnectionListing: Equatable, Sendable {
     public var counts: [ProgramFilter: Int]
     public var hint: ConnectionSearch.LayoutHint?
     public var effectiveQuery: String
+    /// Метки найденных записей: «Рег», «Фито», затем по частоте. VPN и RDP — не метки, а фильтры программ.
+    public var tags: [TagCount] = []
 
     /// Плоский порядок для стрелок: запись может стоять и в «Избранном», и в группе — это разные строки.
     public var rows: [ConnectionRow] {
@@ -99,17 +122,24 @@ public enum ConnectionListBuilder {
     /// Без запроса: «Избранное», «Недавние» (до 5), затем группы в порядке файла и «Без группы».
     /// С запросом: один список по релевантности. Фильтр по программе применяется ко всему.
     /// Исчезнувшие из файла ID в избранном и недавних не показываются.
+    /// Метки (`tags`, ключи `ConnectionTag.key`) — все выбранные сразу; вместе с фильтром программы.
     public static func build(search: ConnectionSearch, query: String, filter: ProgramFilter,
-                             defaultProgram: RemoteProgram, favorites: [String], recents: [String]) -> ConnectionListing {
+                             defaultProgram: RemoteProgram, favorites: [String], recents: [String],
+                             tags selectedTags: Set<String> = []) -> ConnectionListing {
         let result = search.search(query)
         var counts: [ProgramFilter: Int] = [.all: result.records.count]
         for p in RemoteProgram.allCases { counts[.program(p)] = 0 }
-        for r in result.records { counts[.program(r.program(default: defaultProgram)), default: 0] += 1 }
+        counts[.rdp] = 0
+        counts[.vpn] = 0
+        for r in result.records {
+            if r.method == nil { counts[.program(r.program(default: defaultProgram)), default: 0] += 1 }
+            if r.usesRDP { counts[.rdp, default: 0] += 1 }
+            if r.needsVPN { counts[.vpn, default: 0] += 1 }
+        }
 
-        let visible: [ConnectionRecord]
-        switch filter {
-        case .all: visible = result.records
-        case .program(let p): visible = result.records.filter { $0.program(default: defaultProgram) == p }
+        let byProgram = result.records.filter { filter.matches($0, defaultProgram) }
+        let visible = byProgram.filter { r in
+            selectedTags.isEmpty || selectedTags.isSubset(of: Set(r.labels.map(ConnectionTag.key)))
         }
 
         var sections: [ConnectionSection] = []
@@ -135,6 +165,33 @@ public enum ConnectionListBuilder {
             sections += order.map { ConnectionSection(kind: .group($0), records: groups[$0]!) }
             if !ungrouped.isEmpty { sections.append(ConnectionSection(kind: .ungrouped, records: ungrouped)) }
         }
-        return ConnectionListing(sections: sections, counts: counts, hint: result.hint, effectiveQuery: result.effectiveQuery)
+        return ConnectionListing(sections: sections, counts: counts, hint: result.hint, effectiveQuery: result.effectiveQuery,
+                                 tags: tagCounts(byProgram, keeping: selectedTags))
+    }
+
+    /// Метки по записям после поиска и фильтра программы. Выбранные остаются в строке, даже если их стало 0.
+    static func tagCounts(_ records: [ConnectionRecord], keeping selected: Set<String>) -> [TagCount] {
+        var count: [String: Int] = [:]
+        var title: [String: String] = [:]
+        var order: [String] = []
+        for r in records {
+            for tag in r.labels {
+                let key = ConnectionTag.key(tag)
+                if count[key] == nil { order.append(key); title[key] = ConnectionTag.display(tag) }
+                count[key, default: 0] += 1
+            }
+        }
+        for key in selected where count[key] == nil {
+            order.append(key)
+            count[key] = 0
+            title[key] = key == "рег" ? "Рег" : key == "фито" ? "Фито" : key
+        }
+        let rank = { (k: String) -> Int in k == "рег" ? 0 : k == "фито" ? 1 : 2 }
+        let position = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+        return order.sorted {
+            if rank($0) != rank($1) { return rank($0) < rank($1) }
+            if count[$0]! != count[$1]! { return count[$0]! > count[$1]! }
+            return position[$0]! < position[$1]!
+        }.map { TagCount(key: $0, title: title[$0]!, kind: ConnectionTag.kind(title[$0]!), count: count[$0]!) }
     }
 }
