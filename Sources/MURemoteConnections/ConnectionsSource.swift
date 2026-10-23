@@ -62,15 +62,35 @@ extension ConnectionsSource {
 
     /// Пароль записи — прямо из файла, в момент подключения. Сначала строка с тем же номером и ID;
     /// если файл успели поправить — строка с тем же ID и именем, затем единственная строка с этим ID.
-    /// nil — записи или пароля нет. Угадывать среди нескольких строк с одним ID не будем.
-    /// Строки разбора (`String`) затереть нельзя — они живут только до конца этого вызова.
-    func password(for record: ConnectionRecord, in data: Data) throws -> SecretBuffer? {
+    /// Угадывать среди нескольких строк с одним ID не будем. Строки разбора (`String`) затереть нельзя —
+    /// они живут только до конца этого вызова.
+    func lookupPassword(for record: ConnectionRecord, in data: Data) throws -> PasswordLookup {
         let sameID = try parse(data, mode: .passwords).entries.filter { ConnectionID.normalize($0.id)?.value == record.id }
         var match = sameID.first { $0.row == record.sourceRow }
         if match == nil { match = sameID.first { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == record.name } }
         if match == nil, sameID.count == 1 { match = sameID[0] }
-        guard let pw = match?.password, !pw.isEmpty else { return nil }
-        return SecretBuffer(pw.utf8)
+        guard let match else { return .entryGone }
+        guard !match.password.isEmpty else { return .noPassword }
+        return .found(SecretBuffer(match.password.utf8))
+    }
+
+    /// nil — записи или пароля нет.
+    func password(for record: ConnectionRecord, in data: Data) throws -> SecretBuffer? {
+        try lookupPassword(for: record, in: data).secret
+    }
+}
+
+/// Что нашлось в файле для записи в момент подключения.
+public enum PasswordLookup: Sendable {
+    case found(SecretBuffer)
+    /// Запись есть, ячейка пароля пустая.
+    case noPassword
+    /// Записи больше нет: файл поправили после чтения списка.
+    case entryGone
+
+    public var secret: SecretBuffer? {
+        if case .found(let s) = self { return s }
+        return nil
     }
 }
 
