@@ -169,7 +169,7 @@ private final class ColorScanner {
             var spaceName: UnsafePointer<CChar>?
             var array: CGPDFArrayRef?
             if CGPDFObjectGetValue(object, .name, &spaceName), let spaceName {
-                scanner.spaces[name] = components(of: String(cString: spaceName))
+                scanner.spaces[name] = ColorScanner.components(of: String(cString: spaceName))
             } else if CGPDFObjectGetValue(object, .array, &array), let array, CGPDFArrayGetName(array, 0, &spaceName), let spaceName {
                 var stream: CGPDFStreamRef?
                 var count: CGPDFInteger = 0
@@ -177,7 +177,7 @@ private final class ColorScanner {
                    let dictionary = CGPDFStreamGetDictionary(stream), CGPDFDictionaryGetInteger(dictionary, "N", &count) {
                     scanner.spaces[name] = count
                 } else {
-                    scanner.spaces[name] = components(of: String(cString: spaceName))
+                    scanner.spaces[name] = ColorScanner.components(of: String(cString: spaceName))
                 }
             }
             return true
