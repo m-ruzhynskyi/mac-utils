@@ -37,6 +37,15 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
     let layoutManager = DocLayoutManager()
     let renderer = DocRenderer()
     let pagesView = DocPagesView()
+    /// Запасной контейнер — всегда за последней страницей, не показывается. Абзац с рамкой или заливкой (`NSTextBlock`),
+    /// не уместившийся в последний контейнер, typesetter без следующего перекладывает бесконечно; с запасным — переносит
+    /// туда, и по завершении страницы добавляется новая.
+    private let spare: NSTextContainer = {
+        let container = NSTextContainer(size: .zero)
+        container.widthTracksTextView = false
+        container.lineFragmentPadding = 0
+        return container
+    }()
     let scrollView = NSScrollView()
     private(set) var model = RTFDocumentModel()
     private(set) var rendering = DocRendering()
@@ -217,7 +226,13 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         page.firstInSection = pagesView.pages.last.map { $0.section != section } ?? true
         pagesView.append(page)
         if pageCount != pagesView.pages.count { pageCount = pagesView.pages.count }
-        layoutManager.addTextContainer(page.container)
+        if let index = layoutManager.textContainers.firstIndex(where: { $0 === spare }) {
+            layoutManager.insertTextContainer(page.container, at: index)
+        } else {
+            layoutManager.addTextContainer(page.container)
+            layoutManager.addTextContainer(spare)
+        }
+        spare.size = page.container.size
         // Колонтитулы новой страницы — до отрисовки (номера уточнятся по завершении раскладки), иначе она мигает без них.
         // Не внутри обратного вызова раскладки: там смена рамки сбивает перенос по «\f».
         DispatchQueue.main.async { [weak self, weak page] in
@@ -240,17 +255,20 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
     }
 
     nonisolated func layoutManager(_ layoutManager: NSLayoutManager, didCompleteLayoutFor container: NSTextContainer?, atEnd: Bool) {
-        MainActor.assumeIsolated { completedLayout(container, atEnd: atEnd) }
+        MainActor.assumeIsolated {
+            DocLineMetrics.completed(layoutManager)
+            completedLayout(container, atEnd: atEnd)
+        }
     }
 
     private func completedLayout(_ container: NSTextContainer?, atEnd: Bool) {
         let containers = layoutManager.textContainers
-        guard let container, let index = containers.firstIndex(where: { $0 === container }) else {
+        guard let container, container !== spare, let index = containers.firstIndex(where: { $0 === container }) else {
             if containers.isEmpty { addPage(section: 0) }
             return
         }
         if index < pagesView.pages.count { pagesView.pages[index].refreshFloating() }
-        if !atEnd, index == containers.count - 1 {
+        if !atEnd, index == pagesView.pages.count - 1 {
             // Текст не поместился — следующая страница: её раздел — у следующего символа.
             let glyphs = layoutManager.glyphRange(for: container)
             let next = NSMaxRange(layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil))
@@ -269,7 +287,14 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         // Раскладка могла продвинуться дальше — убираем только то, что так и осталось пустым.
         if count < pagesView.pages.count {
             let lastUsed = pagesView.pages.lastIndex { layoutManager.glyphRange(for: $0.container).length > 0 } ?? 0
-            if lastUsed + 1 < pagesView.pages.count { pagesView.removePages(from: max(count, lastUsed + 1)) }
+            let from = max(count, lastUsed + 1)
+            if from < pagesView.pages.count {
+                // Контейнеры убранных страниц — тоже: следующим за последней страницей остаётся запасной.
+                for page in pagesView.pages[from...] {
+                    if let index = layoutManager.textContainers.firstIndex(where: { $0 === page.container }) { layoutManager.removeTextContainer(at: index) }
+                }
+                pagesView.removePages(from: from)
+            }
         }
         if pageCount != pagesView.pages.count { pageCount = pagesView.pages.count }
         updatePageSections()
@@ -295,6 +320,7 @@ final class DocumentController: NSObject, ObservableObject, NSLayoutManagerDeleg
         }
         pagesView.layoutPages()
         if pageCount != pagesView.pages.count { pageCount = pagesView.pages.count }
+        if let last = pagesView.pages.last, spare.size != last.container.size { spare.size = last.container.size }
     }
 
     // MARK: - Колонтитулы
