@@ -1,4 +1,5 @@
 import AppKit
+import MUCore
 
 /// Набор мониторов и положения окон для него (без UI — для тестов).
 enum WindowLayoutRules {

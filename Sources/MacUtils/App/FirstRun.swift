@@ -1,4 +1,5 @@
 import Foundation
+import MUCore
 
 /// Что показать при запуске (чистая логика): на чистой установке — одно окно вместо трёх.
 enum FirstRun {

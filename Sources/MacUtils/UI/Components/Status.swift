@@ -1,4 +1,5 @@
 import SwiftUI
+import MUCore
 
 enum PermissionKind: CaseIterable {
     case accessibility, screenRecording, microphone, fullDiskAccess, automation

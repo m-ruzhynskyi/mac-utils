@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MUCore
 
 // MARK: - Горячие клавиши (сводный список)
 

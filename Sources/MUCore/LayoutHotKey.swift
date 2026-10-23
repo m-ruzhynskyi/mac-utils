@@ -3,46 +3,46 @@ import AppKit
 
 /// Горячая клавиша «Раскладки»: код клавиши (не символ — работает в любой
 /// раскладке: ⌘] = ⌘Ъ, ⌘P = ⌘З) и модификаторы Carbon.
-struct LayoutHotKey: Equatable {
-    var keyCode: Int
-    var modifiers: Int
+package struct LayoutHotKey: Equatable {
+    package var keyCode: Int
+    package var modifiers: Int
 
-    static let commandBracket = LayoutHotKey(keyCode: kVK_ANSI_RightBracket, modifiers: cmdKey)
-    static let controlOptionV = LayoutHotKey(keyCode: kVK_ANSI_V, modifiers: controlKey | optionKey)
+    package static let commandBracket = LayoutHotKey(keyCode: kVK_ANSI_RightBracket, modifiers: cmdKey)
+    package static let controlOptionV = LayoutHotKey(keyCode: kVK_ANSI_V, modifiers: controlKey | optionKey)
 
     /// Сочетание из настроек по паре ключей (код клавиши и модификаторы).
-    static func load(codeKey: String, modifiersKey: String, default value: LayoutHotKey) -> LayoutHotKey {
+    package static func load(codeKey: String, modifiersKey: String, default value: LayoutHotKey) -> LayoutHotKey {
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: codeKey) != nil else { return value }
         return LayoutHotKey(keyCode: defaults.integer(forKey: codeKey), modifiers: defaults.integer(forKey: modifiersKey))
     }
 
-    func save(codeKey: String, modifiersKey: String) {
+    package func save(codeKey: String, modifiersKey: String) {
         UserDefaults.standard.set(keyCode, forKey: codeKey)
         UserDefaults.standard.set(modifiers, forKey: modifiersKey)
     }
-    static let commandP = LayoutHotKey(keyCode: kVK_ANSI_P, modifiers: cmdKey)
-    static let presets: [LayoutHotKey] = [
+    package static let commandP = LayoutHotKey(keyCode: kVK_ANSI_P, modifiers: cmdKey)
+    package static let presets: [LayoutHotKey] = [
         .commandBracket,
         .commandP,
         LayoutHotKey(keyCode: kVK_Space, modifiers: optionKey | shiftKey),
         LayoutHotKey(keyCode: kVK_Space, modifiers: controlKey | optionKey),
     ]
 
-    static var current: LayoutHotKey {
+    package static var current: LayoutHotKey {
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: Pref.layoutFixKeyCode) != nil else { return .commandBracket }
         return LayoutHotKey(keyCode: defaults.integer(forKey: Pref.layoutFixKeyCode),
                             modifiers: defaults.integer(forKey: Pref.layoutFixModifiers))
     }
 
-    func save() {
+    package func save() {
         UserDefaults.standard.set(keyCode, forKey: Pref.layoutFixKeyCode)
         UserDefaults.standard.set(modifiers, forKey: Pref.layoutFixModifiers)
     }
 
     /// Из нажатия в окне настроек; нужен хотя бы один из ⌘ ⌥ ⌃.
-    init?(event: NSEvent) {
+    package init?(event: NSEvent) {
         let flags = event.modifierFlags
         var modifiers = 0
         if flags.contains(.command) { modifiers |= cmdKey }
@@ -53,12 +53,12 @@ struct LayoutHotKey: Equatable {
         self.init(keyCode: Int(event.keyCode), modifiers: modifiers)
     }
 
-    init(keyCode: Int, modifiers: Int) {
+    package init(keyCode: Int, modifiers: Int) {
         self.keyCode = keyCode
         self.modifiers = modifiers
     }
 
-    var cgFlags: CGEventFlags {
+    package var cgFlags: CGEventFlags {
         var flags: CGEventFlags = []
         if modifiers & cmdKey != 0 { flags.insert(.maskCommand) }
         if modifiers & optionKey != 0 { flags.insert(.maskAlternate) }
@@ -68,7 +68,7 @@ struct LayoutHotKey: Equatable {
     }
 
     /// Символы для показа: ⌃⌥⇧⌘ + клавиша.
-    var keys: [String] {
+    package var keys: [String] {
         var result: [String] = []
         if modifiers & controlKey != 0 { result.append("⌃") }
         if modifiers & optionKey != 0 { result.append("⌥") }
@@ -78,10 +78,10 @@ struct LayoutHotKey: Equatable {
         return result
     }
 
-    var title: String { keys.joined() }
+    package var title: String { keys.joined() }
 
     /// Чьё стандартное сочетание перекрывается.
-    var conflictNote: String? {
+    package var conflictNote: String? {
         switch self {
         case .commandBracket: return "⌘] (⌘Ъ) — это «Вперёд» в Safari и Finder и «сдвинуть вправо» в редакторах кода: пока исправление включено, они работать не будут."
         case .commandP: return "⌘P (⌘З) заменяет «Печать» во всех приложениях, пока исправление раскладки включено."

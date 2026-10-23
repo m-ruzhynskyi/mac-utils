@@ -1,5 +1,6 @@
 import AppKit
 import IOKit.pwr_mgt
+import MUCore
 
 /// Запрет сна системы (подменяется в тестах).
 protocol SleepAssertionProviding {

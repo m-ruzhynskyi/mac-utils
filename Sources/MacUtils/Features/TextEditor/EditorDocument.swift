@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import MUCore
 
 /// Язык подсветки вкладки (меню «Синтаксис»).
 enum EditorLanguage: String, CaseIterable, Codable {

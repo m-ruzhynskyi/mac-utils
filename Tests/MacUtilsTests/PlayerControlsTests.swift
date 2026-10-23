@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// Этап 3 плеера: клавиши (§ 8.1), удержание →, клики по третям, точки входа.
 final class PlayerShortcutsTests: XCTestCase {

@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import MUCore
 
 /// Позиция курсора для строки состояния.
 struct EditorCaret: Equatable {

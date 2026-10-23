@@ -4,17 +4,17 @@ import CoreMedia
 /// Микрофон с системным подавлением эха (как в FaceTime): звук из динамиков, который микрофон
 /// слышит в комнате, вычитается. Без этого в записи со звуком системы и микрофоном звук двоится.
 /// Время буферов — по часам хоста, как у ScreenCaptureKit, поэтому дорожки совпадают.
-final class EchoFreeMicrophone: @unchecked Sendable {
-    typealias Handler = @Sendable (AVAudioPCMBuffer, CMTime) -> Void
+package final class EchoFreeMicrophone: @unchecked Sendable {
+    package typealias Handler = @Sendable (AVAudioPCMBuffer, CMTime) -> Void
 
     private let engine = AVAudioEngine()
     private let handler: Handler
 
-    init(handler: @escaping Handler) {
+    package init(handler: @escaping Handler) {
         self.handler = handler
     }
 
-    func start() throws {
+    package func start() throws {
         let input = engine.inputNode
         try input.setVoiceProcessingEnabled(true)
         // Не приглушать остальной звук системы, пока пишем.
@@ -42,14 +42,14 @@ final class EchoFreeMicrophone: @unchecked Sendable {
         try engine.start()
     }
 
-    func stop() {
+    package func stop() {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         try? engine.inputNode.setVoiceProcessingEnabled(false)
     }
 
     /// PCM-буфер → CMSampleBuffer для AVAssetWriter.
-    static func sampleBuffer(_ buffer: AVAudioPCMBuffer, at pts: CMTime) -> CMSampleBuffer? {
+    package static func sampleBuffer(_ buffer: AVAudioPCMBuffer, at pts: CMTime) -> CMSampleBuffer? {
         var format: CMAudioFormatDescription?
         guard CMAudioFormatDescriptionCreate(allocator: nil, asbd: buffer.format.streamDescription, layoutSize: 0,
                                              layout: nil, magicCookieSize: 0, magicCookie: nil, extensions: nil,

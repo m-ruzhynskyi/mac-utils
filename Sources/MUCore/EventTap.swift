@@ -5,8 +5,8 @@ import Foundation
 /// Обработчик возвращает `true`, чтобы пропустить событие дальше,
 /// и `false`, чтобы его поглотить.
 @MainActor
-final class EventTap {
-    typealias Handler = @MainActor (CGEventType, CGEvent) -> Bool
+package final class EventTap {
+    package typealias Handler = @MainActor (CGEventType, CGEvent) -> Bool
 
     private var port: CFMachPort?
     private var source: CFRunLoopSource?
@@ -17,18 +17,18 @@ final class EventTap {
     /// Вызывается, когда macOS отключила tap (обработчик не уложился во время или пользователь/система его выключили).
     /// За это время события могли пропасть (например, отпускание модификатора), поэтому владелец сбрасывает своё состояние
     /// («идёт перетаскивание», «панель открыта»), иначе оно остаётся навсегда.
-    var onDisabled: (@MainActor () -> Void)?
+    package var onDisabled: (@MainActor () -> Void)?
 
     /// `listenOnly` — события только наблюдаются: обработчик ничего не может поглотить, система не ждёт его ответа и
     /// не задерживает ввод. Для обработчиков, которые всегда возвращают `true` (мышь для раскладки окон, подсказки).
-    init(types: [CGEventType], listenOnly: Bool = false, handler: @escaping Handler) {
+    package init(types: [CGEventType], listenOnly: Bool = false, handler: @escaping Handler) {
         mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << CGEventMask($1.rawValue)) }
         self.listenOnly = listenOnly
         self.handler = handler
     }
 
     /// Служебное событие об отключении tap (а не настоящий ввод).
-    static func isDisableEvent(_ type: CGEventType) -> Bool {
+    package static func isDisableEvent(_ type: CGEventType) -> Bool {
         type == .tapDisabledByTimeout || type == .tapDisabledByUserInput
     }
 
@@ -41,10 +41,10 @@ final class EventTap {
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
     }
 
-    var isRunning: Bool { port != nil }
+    package var isRunning: Bool { port != nil }
 
     @discardableResult
-    func start() -> Bool {
+    package func start() -> Bool {
         if let port {
             CGEvent.tapEnable(tap: port, enable: true)
             return true
@@ -74,7 +74,7 @@ final class EventTap {
         return true
     }
 
-    func stop() {
+    package func stop() {
         if let port {
             CGEvent.tapEnable(tap: port, enable: false)
             CFMachPortInvalidate(port)

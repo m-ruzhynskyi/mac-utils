@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import PDFKit
+import MUCore
 
 // MARK: - Очередь фоновых задач ИИ
 

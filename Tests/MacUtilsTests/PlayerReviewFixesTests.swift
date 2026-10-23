@@ -1,6 +1,7 @@
 import AVFoundation
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// Исправления по ревью плеера (`.audit/review-video.md`): мусор в файлах не роняет приложение,
 /// закрытое окно освобождается, перетаскивание видео с субтитрами, долгие реплики.

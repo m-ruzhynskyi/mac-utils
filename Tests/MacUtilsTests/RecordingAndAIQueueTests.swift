@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 final class RecordingAndAIQueueTests: XCTestCase {
     // R2: предупреждение и предел длительности GIF

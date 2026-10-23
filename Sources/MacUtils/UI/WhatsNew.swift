@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MUCore
 
 /// История версий: что появилось. Новая версия — сверху.
 enum Changelog {

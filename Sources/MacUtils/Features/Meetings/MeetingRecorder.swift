@@ -4,6 +4,7 @@ import Carbon.HIToolbox
 import ScreenCaptureKit
 import Speech
 import SwiftUI
+import MUCore
 
 /// Реплика расшифровки: кто и когда.
 struct TranscriptLine: Equatable {

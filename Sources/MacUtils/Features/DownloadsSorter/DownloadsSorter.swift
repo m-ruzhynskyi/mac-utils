@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MUCore
 
 /// Правила раскладки (без UI — для тестов).
 enum DownloadsRules {

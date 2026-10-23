@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 func isOnMainThread() -> Bool { pthread_main_np() != 0 }
 

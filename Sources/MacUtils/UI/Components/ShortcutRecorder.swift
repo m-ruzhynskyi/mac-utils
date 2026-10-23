@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MUCore
 
 /// Запись сочетания: нажмите кнопку, затем нужные клавиши (нужен ⌘, ⌥ или ⌃). Esc — отмена.
 struct ShortcutRecorder: View {

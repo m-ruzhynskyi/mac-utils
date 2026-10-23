@@ -1,6 +1,7 @@
 import AudioToolbox
 import CoreAudio
 import Foundation
+import MUCore
 
 /// Общий интерфейс перехвата (сам перехват есть только с macOS 14.2).
 protocol VolumeTapping: AnyObject {

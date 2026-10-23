@@ -6,12 +6,12 @@ import Foundation
 /// регистрируется выбранное (`resolver`, в приложении — `HotKeyRegistry.resolve`). Для каждого сочетания помнится, что просили
 /// и удалось ли зарегистрировать — это показывают настройки и шпаргалка.
 @MainActor
-final class HotKeyCenter: ObservableObject {
-    static let shared = HotKeyCenter()
+package final class HotKeyCenter: ObservableObject {
+    package static let shared = HotKeyCenter()
 
     private struct Request {
-        var combo: LayoutHotKey
-        var handler: () -> Void
+        package var combo: LayoutHotKey
+        package var handler: () -> Void
     }
 
     private var requests: [UInt32: Request] = [:]
@@ -22,11 +22,11 @@ final class HotKeyCenter: ObservableObject {
 
     /// Зарегистрированные сейчас сочетания (фактические, после замены из настроек).
     /// Что на самом деле регистрировать под идентификатором (замены из настроек); подставляет приложение при запуске.
-    var resolver: (UInt32, LayoutHotKey) -> LayoutHotKey = { $1 }
+    package var resolver: (UInt32, LayoutHotKey) -> LayoutHotKey = { $1 }
 
-    @Published private(set) var active: [UInt32: LayoutHotKey] = [:]
+    @Published package private(set) var active: [UInt32: LayoutHotKey] = [:]
     /// Не удалось зарегистрировать: сочетание занято системой или другой программой (код Carbon).
-    @Published private(set) var failures: [UInt32: OSStatus] = [:]
+    @Published package private(set) var failures: [UInt32: OSStatus] = [:]
 
     private func installIfNeeded() {
         guard !installed else { return }
@@ -52,7 +52,7 @@ final class HotKeyCenter: ObservableObject {
     }
 
     @discardableResult
-    func register(id: UInt32, keyCode: Int, modifiers: Int, handler: @escaping () -> Void) -> Bool {
+    package func register(id: UInt32, keyCode: Int, modifiers: Int, handler: @escaping () -> Void) -> Bool {
         let combo = LayoutHotKey(keyCode: keyCode, modifiers: modifiers)
         // Те же клавиши и уже зарегистрировано: только обновляем обработчик, Carbon не трогаем
         // (функции вызывают sync на каждую запись в UserDefaults).
@@ -62,37 +62,37 @@ final class HotKeyCenter: ObservableObject {
     }
 
     /// Перерегистрировать не нужно: просили то же сочетание, и оно уже стоит.
-    nonisolated static func isUnchanged(old: LayoutHotKey?, new: LayoutHotKey, registered: Bool) -> Bool {
+    package nonisolated static func isUnchanged(old: LayoutHotKey?, new: LayoutHotKey, registered: Bool) -> Bool {
         registered && old == new
     }
 
     /// Пометка «приостановлено» (идёт запись в настройках) сохраняется: её снимает только `resume`.
-    func unregister(id: UInt32) {
+    package func unregister(id: UInt32) {
         removeCarbon(id)
         requests[id] = nil
         setActive(id, nil)
         setFailure(id, nil)
     }
 
-    func isRegistered(id: UInt32) -> Bool { refs[id] != nil }
+    package func isRegistered(id: UInt32) -> Bool { refs[id] != nil }
 
     /// Функция просила это сочетание (включена), даже если зарегистрировать его не удалось.
-    func isRequested(id: UInt32) -> Bool { requests[id] != nil }
+    package func isRequested(id: UInt32) -> Bool { requests[id] != nil }
 
     /// Временно снять сочетание (запись нового в настройках), не забывая, что функция его просила.
-    func suspend(id: UInt32) {
+    package func suspend(id: UInt32) {
         suspended.insert(id)
         removeCarbon(id)
         setActive(id, nil)
     }
 
-    func resume(id: UInt32) {
+    package func resume(id: UInt32) {
         suspended.remove(id)
         apply(id)
     }
 
     /// Сочетание в настройках изменилось: перерегистрировать с новым значением, если функция включена.
-    func reapply(id: UInt32) {
+    package func reapply(id: UInt32) {
         if requests[id] != nil { apply(id) }
     }
 

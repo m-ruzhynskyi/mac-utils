@@ -1,5 +1,6 @@
 @testable import MacUtils
 import XCTest
+@testable import MUCore
 
 final class AIAndExtrasTests: XCTestCase {
     func testJSONInsideChatter() {

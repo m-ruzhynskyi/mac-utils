@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import ScreenCaptureKit
 import SwiftUI
+import MUCore
 
 /// Рисование поверх экрана (⌃⌥A): стрелки, рамки, маркер и перо — во время созвона или записи.
 @MainActor

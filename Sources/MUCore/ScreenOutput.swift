@@ -1,9 +1,9 @@
 import AppKit
 
 /// Где запущен код: в приложении или в тестах (`swift test`, Xcode).
-enum AppEnvironment {
+package enum AppEnvironment {
     /// Тестовый процесс: XCTest загружен (у приложения его нет) или Xcode передал конфигурацию тестов.
-    static let isRunningTests: Bool = {
+    package static let isRunningTests: Bool = {
         let environment = ProcessInfo.processInfo.environment
         return environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil
             || NSClassFromString("XCTestCase") != nil
@@ -15,13 +15,13 @@ enum AppEnvironment {
 /// но не выводятся поверх экрана пользователя, звука нет; в журнал — «скрыто тестом». Прямые `orderFront…`,
 /// `makeKeyAndOrderFront`, `NSApp.activate`, `NSSound.beep` и `NSSound(named:)` в коде не используются (проверяет ScreenOutputTests).
 @MainActor
-enum ScreenOutput {
+package enum ScreenOutput {
     /// Сколько показов окон, активаций и звуков не состоялось под тестами (для тестов-сторожей).
-    private(set) static var suppressedWindows = 0
-    private(set) static var suppressedSounds = 0
+    package private(set) static var suppressedWindows = 0
+    package private(set) static var suppressedSounds = 0
 
     /// Можно ли показать `what` на экране; под тестами — нет (и строка в журнал).
-    static func mayShow(_ what: String) -> Bool {
+    package static func mayShow(_ what: String) -> Bool {
         guard AppEnvironment.isRunningTests else { return true }
         suppressedWindows += 1
         Log.window.info("\(what, privacy: .public): скрыто тестом")
@@ -29,13 +29,13 @@ enum ScreenOutput {
     }
 
     /// Вывести приложение на передний план (окно настроек, вопрос, окно редактора).
-    static func activateApp(ignoringOtherApps: Bool = false, _ file: StaticString = #fileID) {
+    package static func activateApp(ignoringOtherApps: Bool = false, _ file: StaticString = #fileID) {
         guard mayShow("Активация (\(file))") else { return }
         if ignoringOtherApps { NSApp.activate(ignoringOtherApps: true) } else { NSApp.activate() }
     }
 
     /// Звуковой сигнал «нельзя» / «не найдено».
-    static func beep() {
+    package static func beep() {
         guard !AppEnvironment.isRunningTests else {
             suppressedSounds += 1
             return
@@ -44,7 +44,7 @@ enum ScreenOutput {
     }
 
     /// Системный звук по имени («Ping», «Glass»).
-    static func play(_ name: String) {
+    package static func play(_ name: String) {
         guard !AppEnvironment.isRunningTests else {
             suppressedSounds += 1
             return
@@ -55,26 +55,26 @@ enum ScreenOutput {
 
 /// Короткий звуковой сигнал (как `NSSound.beep()`), под тестами — тишина.
 @MainActor
-enum Feedback {
-    static func beep() { ScreenOutput.beep() }
-    static func play(_ name: String) { ScreenOutput.play(name) }
+package enum Feedback {
+    package static func beep() { ScreenOutput.beep() }
+    package static func play(_ name: String) { ScreenOutput.play(name) }
 }
 
 extension NSWindow {
     /// `orderFrontRegardless()`, кроме тестов.
-    func orderFrontRegardlessOnScreen(_ what: String? = nil, _ file: StaticString = #fileID) {
+    package func orderFrontRegardlessOnScreen(_ what: String? = nil, _ file: StaticString = #fileID) {
         guard ScreenOutput.mayShow(what ?? "Окно (\(file))") else { return }
         orderFrontRegardless()
     }
 
     /// `makeKeyAndOrderFront(nil)`, кроме тестов.
-    func makeKeyAndOrderFrontOnScreen(_ what: String? = nil, _ file: StaticString = #fileID) {
+    package func makeKeyAndOrderFrontOnScreen(_ what: String? = nil, _ file: StaticString = #fileID) {
         guard ScreenOutput.mayShow(what ?? "Окно (\(file))") else { return }
         makeKeyAndOrderFront(nil)
     }
 
     /// `orderFront(nil)`, кроме тестов.
-    func orderFrontOnScreen(_ what: String? = nil, _ file: StaticString = #fileID) {
+    package func orderFrontOnScreen(_ what: String? = nil, _ file: StaticString = #fileID) {
         guard ScreenOutput.mayShow(what ?? "Окно (\(file))") else { return }
         orderFront(nil)
     }

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MUCore
 
 /// Поиск и замена в текущей вкладке: запрос, опции, совпадения и переходы по ним.
 @MainActor

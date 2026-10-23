@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import MUCore
 
 /// Вкладки окна редактора и действия над ними без окон и диалогов (их показывает `EditorWindowController`).
 @MainActor

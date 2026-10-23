@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// Панель форматирования и колонтитулы в окне (офскрин): команды меняют только свои байты, отмена возвращает файл
 /// байт в байт, колонтитул правится по двойному клику.

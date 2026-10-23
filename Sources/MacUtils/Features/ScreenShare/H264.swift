@@ -2,6 +2,7 @@ import AVFoundation
 import AppKit
 import SwiftUI
 import VideoToolbox
+import MUCore
 
 /// Трансляция видео H.264 (аппаратный кодек, как в Discord): передаются только изменения,
 /// поэтому процессор и сеть нагружены в разы меньше, чем кадрами JPEG.

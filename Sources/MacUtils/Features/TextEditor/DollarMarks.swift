@@ -1,4 +1,5 @@
 import Foundation
+import MUCore
 
 /// Знак `$` и его значение. Смещения — в UTF-16, как у `NSString` и `NSTextView`.
 struct DollarMark: Equatable {

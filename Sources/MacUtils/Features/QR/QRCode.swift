@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 import CoreImage
 import SwiftUI
 import Vision
+import MUCore
 
 /// Создание и распознавание QR-кодов (без UI — для тестов).
 enum QRTools {
