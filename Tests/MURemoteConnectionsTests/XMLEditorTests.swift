@@ -214,6 +214,61 @@ final class XMLEditorTests: XCTestCase {
         XCTAssertThrowsError(try XMLConnectionsEditor.write(Data(), to: dir.appendingPathComponent("нет.xml")))
     }
 
+    /// Символическая ссылка остаётся ссылкой, правится её цель; `.bak` — рядом с целью.
+    func testWriteThroughSymlinkEditsTarget() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mu-rc-link-\(UUID().uuidString)")
+        let real = root.appendingPathComponent("cloud"), links = root.appendingPathComponent("links")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = real.appendingPathComponent("connections.xml")
+        try Data(file.utf8).write(to: target)
+        let link = links.appendingPathComponent("c.xml")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+
+        let out = try XMLConnectionsEditor.delete(try records(Data(file.utf8))[2], in: Data(file.utf8))
+        try XMLConnectionsEditor.write(out, to: link)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), target.path, "ссылка цела")
+        XCTAssertEqual(try Data(contentsOf: target), out)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: real.appendingPathComponent("connections.xml.bak").path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: links.path), ["c.xml"])
+    }
+
+    /// Права нового файла — ровно как у оригинала, при любом umask.
+    func testWriteKeepsExactPermissionsWhateverUmask() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mu-rc-umask-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("c.xml")
+        for (mask, perms) in [(mode_t(0o000), 0o600), (mode_t(0o077), 0o644), (mode_t(0o022), 0o664)] {
+            try Data(file.utf8).write(to: url)
+            try FileManager.default.setAttributes([.posixPermissions: perms], ofItemAtPath: url.path)
+            let old = umask(mask)
+            defer { umask(old) }
+            try XMLConnectionsEditor.write(Data(file.utf8), to: url)
+            umask(old)
+            XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue, perms)
+        }
+    }
+
+    /// Сохранённая запись читается обратно ровно как в черновике — и при «неудобных» символах.
+    func testWrittenEntryReadsBackLikeDraft() throws {
+        let data = Data(file.utf8)
+        let draft = ConnectionDraft(name: "  Склад <№1> & \"двор\" ", id: "1 234 567 890", group: "A&B", tags: "x; y, x",
+                                    note: "]]> <![CDATA[ ok", program: .teamViewer, password: "пароль <&> ]]>")
+        let out = try XMLConnectionsEditor.add(draft, to: data)
+        let added = try records(out).last!
+        XCTAssertEqual(added.name, "Склад <№1> & \"двор\"")
+        XCTAssertEqual(added.tags, ["x", "y"])
+        XCTAssertEqual(added.note, "]]> <![CDATA[ ok")
+        XCTAssertEqual(try XMLSource().password(for: added, in: out)?.withBytes { Array($0) }, Array("пароль <&> ]]>".utf8))
+        var edit = ConnectionDraft(added)
+        edit.password = "новый & другой"
+        edit.note = "<note>"
+        let out2 = try XMLConnectionsEditor.update(added, with: edit, in: out)
+        XCTAssertEqual(try records(out2).last?.note, "<note>")
+    }
+
     // MARK: Шаблон и права
 
     func testTemplatesReadBackInEveryLanguage() throws {

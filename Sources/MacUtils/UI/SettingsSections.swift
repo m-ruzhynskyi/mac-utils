@@ -229,7 +229,7 @@ extension SettingsSection {
         case .ai: return "Всё работает на локальной модели через Ollama — тексты, снимки и файлы не уходят в интернет."
         case .textEditor: return "Вкладки, кодировки и знаки $ для .frm и других текстов"
         case .videoPlayer: return "Плейлист, субтитры, дорожки и запоминание места"
-        case .remote: return RL("AnyDesk и TeamViewer из своей таблицы: ⌥⌘A, набрали имя — Enter")
+        case .remote: return RL("AnyDesk и TeamViewer из своей таблицы: ⌃⌥⌘A, набрали имя — Enter")
         case .music, .share, .switcher, .wellbeing, .uninstaller, .monitor, .tasks, .cleanup, .shots: return ""
         }
     }

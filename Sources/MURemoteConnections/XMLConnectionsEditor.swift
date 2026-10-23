@@ -95,6 +95,7 @@ public enum XMLConnectionsEditor {
         var out = data
         out.replaceSubrange(insertAt..<insertAt, with: Data(text.utf8))
         try verify(out, expectedDelta: 1, data)
+        try verifyWritten(draft, in: out)
         return out
     }
 
@@ -134,6 +135,7 @@ public enum XMLConnectionsEditor {
             out.replaceSubrange(range, with: Data(text.utf8))
         }
         try verify(out, expectedDelta: 0, data)
+        try verifyWritten(draft, in: out)
         return out
     }
 
@@ -155,27 +157,48 @@ public enum XMLConnectionsEditor {
 
     // MARK: Запись на диск
 
-    /// Атомарная запись: сначала `имя.xml.bak` с теми же правами, затем временный файл рядом с теми же правами
-    /// и `rename` поверх. При ошибке исходный файл не меняется.
-    public static func write(_ data: Data, to url: URL) throws {
+    /// Атомарная запись: сначала `имя.xml.bak` с теми же правами, затем временный файл рядом — сразу с теми же
+    /// правами (`O_EXCL`, `fchmod` до записи данных: ни мгновения с правами по umask), с расширенными атрибутами и ACL
+    /// оригинала — и `rename` поверх. Символическая ссылка не заменяется файлом: правится её цель.
+    /// При ошибке исходный файл не меняется.
+    public static func write(_ data: Data, to link: URL) throws {
         let fm = FileManager.default
+        let url = link.resolvingSymlinksInPath()
         guard let attrs = try? fm.attributesOfItem(atPath: url.path),
-              let perms = (attrs[.posixPermissions] as? NSNumber)?.int16Value else { throw XMLEditError.writeFailed }
+              let perms = (attrs[.posixPermissions] as? NSNumber)?.uint16Value else { throw XMLEditError.writeFailed }
         let bak = url.appendingPathExtension("bak")
         let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
         do {
             if fm.fileExists(atPath: bak.path) { try fm.removeItem(at: bak) }
             try fm.copyItem(at: url, to: bak)
             try fm.setAttributes([.posixPermissions: perms], ofItemAtPath: bak.path)
-            guard fm.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: perms]) else {
-                throw XMLEditError.writeFailed
-            }
-            try fm.setAttributes([.posixPermissions: perms], ofItemAtPath: tmp.path)
+            try create(tmp, data, perms: mode_t(perms))
+            // Расширенные атрибуты и ACL — как у оригинала; не перенеслись — не страшно, данные и права уже верны.
+            _ = copyfile(url.path, tmp.path, nil, copyfile_flags_t(COPYFILE_XATTR | COPYFILE_ACL))
+            _ = chmod(tmp.path, mode_t(perms))
             guard rename(tmp.path, url.path) == 0 else { throw XMLEditError.writeFailed }
         } catch {
             try? fm.removeItem(at: tmp)
             throw XMLEditError.writeFailed
         }
+    }
+
+    private static func create(_ url: URL, _ data: Data, perms: mode_t) throws {
+        let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, perms)
+        guard fd >= 0 else { throw XMLEditError.writeFailed }
+        defer { close(fd) }
+        // umask мог только убрать биты; ставим ровно права оригинала до записи данных.
+        guard fchmod(fd, perms) == 0 else { throw XMLEditError.writeFailed }
+        let ok = data.withUnsafeBytes { raw -> Bool in
+            var offset = 0
+            while offset < raw.count {
+                let n = Darwin.write(fd, raw.baseAddress! + offset, raw.count - offset)
+                if n < 0 { if errno == EINTR { continue }; return false }
+                offset += n
+            }
+            return true
+        }
+        guard ok, fsync(fd) == 0 else { throw XMLEditError.writeFailed }
     }
 
     // MARK: Внутреннее
@@ -235,6 +258,30 @@ public enum XMLConnectionsEditor {
             }
         }
         return out
+    }
+
+    /// Запись из черновика читается обратно ровно такой, как в окне правки (и пароль, если его меняли).
+    private static func verifyWritten(_ draft: ConnectionDraft, in out: Data) throws {
+        let source = XMLSource()
+        guard let records = try? source.load(out).records else { throw XMLEditError.corrupt }
+        let trimmed = { (s: String) in s.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let matches = records.filter {
+            $0.id == draft.normalizedID && $0.name == trimmed(draft.name) && $0.group == trimmed(draft.group)
+                && $0.tags == ConnectionsBuilder.splitTags(draft.tags) && $0.note == trimmed(draft.note)
+                && $0.program == draft.program
+        }
+        guard !matches.isEmpty else { throw XMLEditError.corrupt }
+        guard let password = draft.password else { return }
+        let ok = matches.contains { record in
+            switch try? source.lookupPassword(for: record, in: out) {
+            case .found(let secret)?:
+                defer { secret.wipe() }
+                return secret.withBytes { $0.elementsEqual(password.utf8) }
+            case .noPassword?: return password.isEmpty
+            default: return false
+            }
+        }
+        guard ok else { throw XMLEditError.corrupt }
     }
 
     /// После правки файл должен читаться, а записей — стать на `expectedDelta` больше.

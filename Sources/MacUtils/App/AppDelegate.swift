@@ -55,13 +55,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) {
             AppAction(hotKey: .videoPlayer).run()
         }
-        HotKeyCenter.shared.register(
-            id: HotKeyID.remoteConnections,
-            keyCode: kVK_ANSI_A,
-            modifiers: cmdKey | optionKey
-        ) {
-            AppAction(hotKey: .remoteConnections).run()
-        }
 
         // Чистая установка: «Что нового» не нужно (оно только после обновления). Делаем до `Updater.start()`.
         let launchDefaults = UserDefaults.standard
@@ -302,6 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MeetingRecorder.shared.sync()
         FocusBlur.shared.sync()
         AppStatusItem.shared.sync()
+        RemoteConnectionsCenter.syncHotKey()
         syncDock()
     }
 

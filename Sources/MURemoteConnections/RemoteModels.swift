@@ -12,6 +12,15 @@ public enum RemoteProgram: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// Team ID подписи разработчика: ввод пароля только в программу, подписанную им (сверено с AnyDesk 9.8
+    /// и TeamViewer 15.82: `codesign -dv`).
+    public var teamID: String {
+        switch self {
+        case .anyDesk: return "KHRWM533LU"
+        case .teamViewer: return "H7UGFBUGV6"
+        }
+    }
+
     public var title: String {
         switch self {
         case .anyDesk: return "AnyDesk"

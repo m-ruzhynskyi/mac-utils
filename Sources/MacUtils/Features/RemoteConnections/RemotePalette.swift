@@ -2,7 +2,7 @@ import AppKit
 import MURemoteConnections
 import SwiftUI
 
-/// Палитра ⌥⌘A: как Spotlight — набрал, Enter. Плавающая панель по центру экрана с курсором,
+/// Палитра (⌃⌥⌘A): как Spotlight — набрал, Enter. Плавающая панель по центру экрана с курсором,
 /// не активирует Mac Utils (фокус возвращается в прежнюю программу), закрывается по Esc и при потере фокуса.
 @MainActor
 final class RemotePaletteController: NSObject, NSWindowDelegate {
@@ -31,7 +31,7 @@ final class RemotePaletteController: NSObject, NSWindowDelegate {
             panel.setFrame(NSRect(x: frame.midX - Self.width / 2 - 20, y: frame.maxY - height - frame.height * 0.16,
                                   width: Self.width + 40, height: height), display: false)
         }
-        panel.makeKeyAndOrderFront(nil)
+        panel.makeKeyAndOrderFrontOnScreen("Палитра подключений")
         installMonitor()
         NotificationCenter.default.post(name: Self.didShow, object: nil)
     }

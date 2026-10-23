@@ -91,8 +91,9 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .textEditor: return LayoutHotKey(keyCode: kVK_ANSI_E, modifiers: cmdKey | optionKey | controlKey)
         // ⌃⌥⌘P свободна: ⌃⌥P — «Окно поверх всех», это другое сочетание.
         case .videoPlayer: return LayoutHotKey(keyCode: kVK_ANSI_P, modifiers: cmdKey | optionKey | controlKey)
-        // ⌥⌘A свободна: рисование — ⌃⌥A, у раскладки окон с модификатором ⌥⌘ буквы A нет, системного ⌥⌘A в macOS нет.
-        case .remoteConnections: return LayoutHotKey(keyCode: kVK_ANSI_A, modifiers: cmdKey | optionKey)
+        // ⌃⌥⌘A: ⌥⌘A занята в Finder («Снять выделение»); ⌃⌥A — рисование, раскладка окон берёт два модификатора.
+        // Регистрируется, только когда выбран файл подключений (`RemoteConnectionsCenter.syncHotKey`).
+        case .remoteConnections: return LayoutHotKey(keyCode: kVK_ANSI_A, modifiers: cmdKey | optionKey | controlKey)
         }
     }
 

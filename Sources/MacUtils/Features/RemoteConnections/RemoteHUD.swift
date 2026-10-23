@@ -111,6 +111,10 @@ struct RemoteHUDContent: Equatable {
         case .focusLost:
             return RemoteHUDContent(tone: .warning, title: RL("Ввод прерван"), detail: RL("Фокус ушёл из %@, пароль не отправлен.", p),
                                     actions: [.retry, .close])
+        case .untrustedProgram:
+            return RemoteHUDContent(tone: .danger, title: RL("Подпись %@ не подтверждена", p),
+                                    detail: RL("Пароль не введён: запущенная программа подписана не разработчиком %@.", p),
+                                    actions: [.download, .close])
         case .entryGone:
             return RemoteHUDContent(tone: .warning, title: RL("Записи больше нет в файле"),
                                     detail: RL("Файл изменился — запись не найдена. Список обновлён."), actions: [.close])

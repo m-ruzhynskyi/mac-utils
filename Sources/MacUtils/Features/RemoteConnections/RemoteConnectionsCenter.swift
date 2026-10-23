@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import MURemoteConnections
 import OSLog
 import UniformTypeIdentifiers
@@ -60,7 +61,7 @@ final class RemoteConnectionsLog: RemoteLogger {
     func log(_ event: RemoteLogEvent) { logger.info("\(event.message, privacy: .public)") }
 }
 
-/// Состояние «Удалённых подключений» для вкладки панели и палитры ⌥⌘A. Вся логика — в модуле MURemoteConnections.
+/// Состояние «Удалённых подключений» для вкладки панели и палитры (⌃⌥⌘A). Вся логика — в модуле MURemoteConnections.
 @MainActor
 final class RemoteConnectionsCenter: ObservableObject {
     static let shared = RemoteConnectionsCenter()
@@ -168,7 +169,7 @@ final class RemoteConnectionsCenter: ObservableObject {
         panel.title = RL("Шаблон файла подключений")
         panel.nameFieldStringValue = xlsx ? "connections.xlsx" : "connections.xml"
         panel.allowedContentTypes = [xlsx ? UTType(filenameExtension: "xlsx") : .xml].compactMap { $0 }
-        NSApp.activate(ignoringOtherApps: true)
+        ScreenOutput.activateApp(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let data = xlsx ? ConnectionsTemplate.xlsx() : ConnectionsTemplate.xml()
         guard FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
@@ -218,7 +219,7 @@ final class RemoteConnectionsCenter: ObservableObject {
         panel.allowedContentTypes = [UTType(filenameExtension: "xlsx"), UTType(filenameExtension: "xlsm"), .xml].compactMap { $0 }
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        NSApp.activate(ignoringOtherApps: true)
+        ScreenOutput.activateApp(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         setFile(url)
     }
@@ -340,6 +341,21 @@ final class RemoteConnectionsCenter: ObservableObject {
             guard let last else { return hud.dismiss() }
             connect(last.record, withPassword: last.withPassword, program: program)
         }
+    }
+
+    /// Глобальная клавиша палитры — только когда выбран файл подключений: без него функция не нужна,
+    /// а зарегистрированная клавиша отнимала бы сочетание у всех программ. Вызывается на каждую смену настроек.
+    static func syncHotKey(defaults: UserDefaults = .standard) {
+        let hotKeys = HotKeyCenter.shared
+        guard hasFile(defaults: defaults) else { return hotKeys.unregister(id: HotKeyID.remoteConnections) }
+        let combo = HotKeyAction.remoteConnections.defaultCombo
+        hotKeys.register(id: HotKeyID.remoteConnections, keyCode: combo.keyCode, modifiers: combo.modifiers) {
+            AppAction(hotKey: .remoteConnections).run()
+        }
+    }
+
+    static func hasFile(defaults: UserDefaults = .standard) -> Bool {
+        !(defaults.string(forKey: RemotePref.filePath) ?? "").isEmpty
     }
 
     /// Новая вкладка «Удалённые» — один раз, сразу после «Редактора» (или в конец).

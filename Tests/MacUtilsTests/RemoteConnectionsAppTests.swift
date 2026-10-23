@@ -1,4 +1,5 @@
 @testable import MacUtils
+import Carbon.HIToolbox
 import MURemoteConnections
 import XCTest
 
@@ -70,12 +71,28 @@ final class RemoteConnectionsAppTests: XCTestCase {
         center.setFile(nil)
     }
 
+    /// ⌃⌥⌘A: ⌥⌘A занята в Finder («Снять выделение»). Сочетание не занято другими действиями Mac Utils,
+    /// раскладкой окон (у неё всегда два модификатора) и системой.
     func testDefaultHotKeyIsFree() {
         let combo = HotKeyAction.remoteConnections.defaultCombo
+        XCTAssertEqual(combo, LayoutHotKey(keyCode: kVK_ANSI_A, modifiers: cmdKey | optionKey | controlKey))
         XCTAssertNil(HotKeyConflicts.system(combo))
         XCTAssertEqual(HotKeyAction.allCases.filter { $0.defaultCombo == combo }, [.remoteConnections])
-        XCTAssertFalse(WindowTiler.bindings.contains { $0.keyCode == combo.keyCode }, "раскладка окон с ⌥⌘ не занимает A")
+        for modifier in WindowSnapModifier.allCases {
+            XCTAssertNotEqual(modifier.carbon, combo.modifiers, "раскладка окон: \(modifier)")
+        }
         XCTAssertEqual(AppAction(hotKey: .remoteConnections), .remoteConnections)
+    }
+
+    /// Клавиша регистрируется, только когда выбран файл подключений.
+    func testHotKeyOnlyWithFile() {
+        XCTAssertFalse(RemoteConnectionsCenter.hasFile(defaults: defaults))
+        defaults.set("", forKey: RemotePref.filePath)
+        XCTAssertFalse(RemoteConnectionsCenter.hasFile(defaults: defaults))
+        DefaultsRemoteStore(defaults: defaults).filePath = "/tmp/c.xlsx"
+        XCTAssertTrue(RemoteConnectionsCenter.hasFile(defaults: defaults))
+        DefaultsRemoteStore(defaults: defaults).filePath = nil
+        XCTAssertFalse(RemoteConnectionsCenter.hasFile(defaults: defaults))
     }
     func testConnectionSettingsDefaults() {
         let center = RemoteConnectionsCenter(defaults: defaults)
@@ -122,6 +139,7 @@ final class RemoteConnectionsAppTests: XCTestCase {
             (.launchFailed, "AnyDesk не запустился", [.retry, .close]),
             (.aliasNotSupported, "AnyDesk не открывает алиасы", [.openFile, .close]),
             (.fileUnavailable(.locked), "Файл подключений не прочитан", [.retry, .close]),
+            (.untrustedProgram, "Подпись AnyDesk не подтверждена", [.download, .close]),
         ]
         for (failure, title, actions) in errors {
             let c = hud(.finished(.failed(failure)))

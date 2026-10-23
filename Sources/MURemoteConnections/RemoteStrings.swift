@@ -169,6 +169,8 @@ enum RemoteStrings {
         "%@ отклонил пароль для «%@».": ("%@ відхилив пароль для «%@».", "%@ rejected the password for “%@”."),
         "Ввод прерван": ("Введення перервано", "Input stopped"),
         "Фокус ушёл из %@, пароль не отправлен.": ("Фокус пішов з %@, пароль не надіслано.", "Focus left %@, the password was not sent."),
+        "Подпись %@ не подтверждена": ("Підпис %@ не підтверджено", "%@ signature not verified"),
+        "Пароль не введён: запущенная программа подписана не разработчиком %@.": ("Пароль не введено: запущену програму підписав не розробник %@.", "Password not entered: the running app isn’t signed by the %@ developer."),
         "Записи больше нет в файле": ("Запису більше немає у файлі", "The entry is no longer in the file"),
         "Файл изменился — запись не найдена. Список обновлён.": ("Файл змінився — запис не знайдено. Список оновлено.", "The file changed — the entry wasn’t found. The list is updated."),
         "Файл подключений не прочитан": ("Файл підключень не прочитано", "Connections file not read"),
@@ -208,7 +210,7 @@ enum RemoteStrings {
         "Если в колонке «Программа» пусто. «Спрашивать» — выбор при подключении, когда в файле есть обе программы": ("Якщо у стовпці «Програма» порожньо. «Питати» — вибір під час підключення, коли у файлі є обидві програми", "When the “Program” column is empty. “Ask” lets you choose at connect time when the file has both programs"),
         "Спрашивать": ("Питати", "Ask"),
         "Горячая клавиша": ("Гаряча клавіша", "Hotkey"),
-        "Открывает окно поиска из любого приложения": ("Відкриває вікно пошуку з будь-якої програми", "Opens the search window from any app"),
+        "Открывает окно поиска из любого приложения. Работает, когда выбран файл подключений": ("Відкриває вікно пошуку з будь-якої програми. Працює, коли вибрано файл підключень", "Opens the search window from any app. Works once a connections file is chosen"),
         "Ждать окно пароля": ("Чекати вікно пароля", "Wait for password window"),
         "Если окно не появилось — считаем автологином": ("Якщо вікно не з’явилося — вважаємо автологіном", "If no window appears, it’s treated as auto-login"),
         "%@ с": ("%@ с", "%@ s"),
@@ -229,6 +231,6 @@ enum RemoteStrings {
         "ввод пароля через Универсальный доступ": ("введення пароля через Універсальний доступ", "password entry via Accessibility"),
         "Удалённые": ("Віддалені", "Remote"),
         "Удалённые подключения": ("Віддалені підключення", "Remote connections"),
-        "AnyDesk и TeamViewer из своей таблицы: ⌥⌘A, набрали имя — Enter": ("AnyDesk і TeamViewer зі своєї таблиці: ⌥⌘A, набрали назву — Enter", "AnyDesk and TeamViewer from your own table: ⌥⌘A, type a name, Enter"),
+        "AnyDesk и TeamViewer из своей таблицы: ⌃⌥⌘A, набрали имя — Enter": ("AnyDesk і TeamViewer зі своєї таблиці: ⌃⌥⌘A, набрали назву — Enter", "AnyDesk and TeamViewer from your own table: ⌃⌥⌘A, type a name, Enter"),
     ]
 }

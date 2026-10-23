@@ -84,6 +84,8 @@ final class FakeLauncher: AppLauncher {
     var running: [String: Int32] = [:]
     /// pid → bundle id (можно подменить, чтобы проверить проверку bundle id).
     var bundles: [Int32: String] = [:]
+    /// pid → Team ID подписи (по умолчанию — настоящий у запущенной программы).
+    var teams: [Int32: String] = [:]
     var frontmostProcess: Int32? = 1
     var opened: [URL] = []
     var openSucceeds = true
@@ -102,12 +104,14 @@ final class FakeLauncher: AppLauncher {
 
     func runningProcess(bundleID: String) -> Int32? { running[bundleID] }
     func bundleID(ofProcess pid: Int32) -> String? { bundles[pid] }
+    func teamID(ofProcess pid: Int32) -> String? { teams[pid] }
 
     func activate(process pid: Int32) { if activationWorks { frontmostProcess = pid } }
 
     func launch(_ program: RemoteProgram, pid: Int32) {
         running[program.bundleID] = pid
         bundles[pid] = program.bundleID
+        teams[pid] = program.teamID
     }
 }
 

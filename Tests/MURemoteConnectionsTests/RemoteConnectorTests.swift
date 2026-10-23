@@ -136,14 +136,74 @@ final class RemoteConnectorTests: XCTestCase {
         XCTAssertEqual(old.field.text, "")
     }
 
-    func testRetryReusesOpenWindow() async {
-        launcher.launch(.anyDesk, pid: anyDeskPID)
-        let w = FakePasswordWindow()
-        ax.show(w.window, pid: anyDeskPID)
-        w.ok.onPress = { [unowned self] in ax.close(w.window, pid: anyDeskPID) }
-        let outcome = await connect(ConnectRequest(record: record, program: .anyDesk, reuseOpenWindow: true))
-        XCTAssertEqual(outcome, .connected)
+    /// «Повторить» после «Ввод прерван»: вводит в окно, которое открыло прерванное подключение.
+    func testRetryReusesWindowOfInterruptedConnection() async {
+        let connector = connector()
+        let w = anyDeskShowsPassword()
+        launcher.activationWorks = false
+        let first = await connector.connect(ConnectRequest(record: record, program: .anyDesk), provider: AnyDeskAutomator(texts: texts),
+                                            password: { .found(SecretBuffer(self.password.utf8)) }, progress: { _ in })
+        XCTAssertEqual(first, .failed(.focusLost))
+        XCTAssertEqual(w.field.text, "")
+        launcher.activationWorks = true
+        launcher.onOpen = nil // окно уже открыто, новое не появится
+        let retry = await connector.connect(ConnectRequest(record: record, program: .anyDesk, reuseOpenWindow: true),
+                                            provider: AnyDeskAutomator(texts: texts),
+                                            password: { .found(SecretBuffer(self.password.utf8)) }, progress: { _ in })
+        XCTAssertEqual(retry, .connected)
         XCTAssertEqual(w.field.text, password)
+    }
+
+    /// «Повторить» не вводит в окно пароля другого подключения, открытое в той же программе.
+    func testRetryDoesNotTypeIntoForeignWindow() async {
+        launcher.launch(.anyDesk, pid: anyDeskPID)
+        let foreign = FakePasswordWindow()
+        ax.show(foreign.window, pid: anyDeskPID)
+        let outcome = await connect(ConnectRequest(record: record, program: .anyDesk, timeoutSeconds: 2, reuseOpenWindow: true))
+        XCTAssertEqual(outcome, .connectedWithoutPassword, "своего окна не появилось")
+        XCTAssertEqual(foreign.field.text, "", "в чужое окно ничего не введено")
+        XCTAssertTrue(keyboard.typed.isEmpty)
+    }
+
+    /// Окно прерванного подключения к другой записи «Повторить» тоже не берёт.
+    func testRetryForAnotherRecordIgnoresInterruptedWindow() async {
+        let connector = connector()
+        let w = anyDeskShowsPassword()
+        launcher.activationWorks = false
+        _ = await connector.connect(ConnectRequest(record: record, program: .anyDesk), provider: AnyDeskAutomator(texts: texts),
+                                    password: { .found(SecretBuffer(self.password.utf8)) }, progress: { _ in })
+        launcher.activationWorks = true
+        launcher.onOpen = nil
+        let other = ConnectionRecord(sourceRow: 9, name: "Склад", id: "223456789", hasPassword: true)
+        let outcome = await connector.connect(ConnectRequest(record: other, program: .anyDesk, timeoutSeconds: 2, reuseOpenWindow: true),
+                                              provider: AnyDeskAutomator(texts: texts),
+                                              password: { .found(SecretBuffer("другой".utf8)) }, progress: { _ in })
+        XCTAssertEqual(outcome, .connectedWithoutPassword)
+        XCTAssertEqual(w.field.text, "")
+    }
+
+    /// Bundle id правильный, а подпись — не того разработчика: пароль не вводится.
+    func testWrongTeamIDIsNeverTyped() async {
+        let w = anyDeskShowsPassword()
+        let original = launcher.onOpen
+        var team: String? = "XXXXXXXXXX"
+        launcher.onOpen = { [unowned self] url in
+            original?(url)
+            launcher.teams[anyDeskPID] = team
+        }
+        let outcome = await connect()
+        XCTAssertEqual(outcome, .failed(.untrustedProgram))
+        XCTAssertEqual(w.field.text, "")
+        XCTAssertTrue(keyboard.typed.isEmpty)
+        XCTAssertEqual(lastSecret?.isEmpty, true)
+        team = nil
+        let unsigned = await connect()
+        XCTAssertEqual(unsigned, .failed(.untrustedProgram), "подпись не проверилась — тоже нет")
+    }
+
+    func testTeamIDsMatchInstalledApps() {
+        XCTAssertEqual(RemoteProgram.anyDesk.teamID, "KHRWM533LU")
+        XCTAssertEqual(RemoteProgram.teamViewer.teamID, "H7UGFBUGV6")
     }
 
     func testSubmittedWhenWindowStaysOpen() async {

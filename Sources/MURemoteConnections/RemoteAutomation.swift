@@ -42,6 +42,8 @@ public protocol AppLauncher: AnyObject {
     func open(_ url: URL) -> Bool
     func runningProcess(bundleID: String) -> Int32?
     func bundleID(ofProcess pid: Int32) -> String?
+    /// Team ID действительной подписи процесса; nil — подпись не проверилась.
+    func teamID(ofProcess pid: Int32) -> String?
     var frontmostProcess: Int32? { get }
     func activate(process pid: Int32)
 }

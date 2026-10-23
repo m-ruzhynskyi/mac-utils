@@ -114,7 +114,7 @@ struct RemoteSettingsPage: View {
                                              set: { center.defaultProgramSetting = RemoteProgram(rawValue: $0) }),
                           options: RemoteProgram.allCases.map { ($0.rawValue, $0.title) } + [("", RL("Спрашивать"))])
             }
-            Row(RL("Горячая клавиша"), subtitle: RL("Открывает окно поиска из любого приложения"), systemImage: "keyboard") {
+            Row(RL("Горячая клавиша"), subtitle: RL("Открывает окно поиска из любого приложения. Работает, когда выбран файл подключений"), systemImage: "keyboard") {
                 Keycap(action: .remoteConnections)
             }
             Row(RL("Ждать окно пароля"), subtitle: RL("Если окно не появилось — считаем автологином"), systemImage: "timer") {

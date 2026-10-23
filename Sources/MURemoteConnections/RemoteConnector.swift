@@ -10,7 +10,8 @@ public struct ConnectRequest: Sendable {
     public var autologin: Bool
     /// Сколько ждать окно пароля; не появилось — программа пустила без пароля.
     public var timeoutSeconds: Int
-    /// Повтор после «Ввод прерван»: окно пароля уже открыто — вводить и в него.
+    /// Повтор после «Ввод прерван»: вводить можно и в окно пароля, которое открыло прерванное подключение
+    /// к этой же записи. Другие открытые окна пароля по-прежнему не наши.
     public var reuseOpenWindow: Bool
 
     public init(record: ConnectionRecord, program: RemoteProgram, withPassword: Bool = true, autologin: Bool = false,
@@ -88,6 +89,8 @@ public enum ConnectionFailure: Equatable, Sendable {
     case wrongPassword
     /// Впереди оказалась другая программа или фокус ушёл из поля — ввод прерван, пароль не отправлен.
     case focusLost
+    /// Процесс с нужным bundle id подписан не тем разработчиком (или подпись не проверилась) — пароль не вводится.
+    case untrustedProgram
     /// Записи больше нет в файле.
     case entryGone
     /// Файл не прочитался в момент подключения.
@@ -103,6 +106,7 @@ public enum ConnectionFailure: Equatable, Sendable {
         case .fieldNotFound: return "nofield"
         case .wrongPassword: return "wrongpassword"
         case .focusLost: return "focus"
+        case .untrustedProgram: return "untrusted"
         case .entryGone: return "entrygone"
         case .fileUnavailable(let c): return "file_\(c.rawValue)"
         }
@@ -137,6 +141,8 @@ public final class RemoteConnector {
     private let clock: RemoteClock
     private let logger: RemoteLogger?
     public var timing = Timing()
+    /// Окно пароля, ввод в которое прервался («Ввод прерван»): «Повторить» для той же записи может вводить только в него.
+    private var interrupted: (recordID: String, program: RemoteProgram, pid: Int32, field: AXNode)?
 
     public init(ax: AXAccess, launcher: AppLauncher, keyboard: KeyboardSender, clock: RemoteClock = SystemClock(),
                 logger: RemoteLogger? = nil) {
@@ -187,8 +193,12 @@ public final class RemoteConnector {
         if Task.isCancelled { return .cancelled }
 
         progress(.opening)
-        // Поля пароля, открытые до нас, — не наши (например, окно другого подключения).
-        let known = typing && !request.reuseOpenWindow ? secureFields(bundleID) : []
+        // Поля пароля, открытые до нас, — не наши (например, окно другого подключения). Исключение — «Повторить»:
+        // окно, которое открыло прерванное подключение к этой же записи.
+        let retry = request.reuseOpenWindow
+            ? interrupted.flatMap { $0.recordID == request.record.id && $0.program == provider.program ? $0 : nil } : nil
+        interrupted = nil
+        let known = typing ? secureFields(bundleID).filter { f in !(retry.map { $0.field.isSame(as: f) } ?? false) } : []
         guard launcher.open(url) else { return .failed(.launchFailed) }
         guard request.withPassword else { return .openedWithoutPassword(.userChoice) }
         guard ax.isTrusted else { return .failed(.noAccessibility) }
@@ -199,15 +209,29 @@ public final class RemoteConnector {
         case .found(let t): target = t
         case .timeout: return .connectedWithoutPassword
         case .neverStarted: return .failed(.launchFailed)
+        case .untrusted: return .failed(.untrustedProgram)
         case .noField(let structure): return .failed(.fieldNotFound(structure: structure))
         case .cancelled: return .cancelled
         }
 
         opened = true
-        if let failure = await enter(secret, into: target, request, provider) { return .failed(failure) }
-        secret.wipe()
-        progress(.entered)
-        return await confirm(target, provider, known: known)
+        let outcome: ConnectionOutcome
+        if let failure = await enter(secret, into: target, request, provider) {
+            outcome = .failed(failure)
+        } else {
+            secret.wipe()
+            progress(.entered)
+            outcome = await confirm(target, provider, known: known)
+        }
+        if outcome == .failed(.focusLost) {
+            interrupted = (request.record.id, provider.program, target.pid, target.field)
+        }
+        return outcome
+    }
+
+    /// Процесс — та программа: bundle id и Team ID действительной подписи.
+    private func isGenuine(_ pid: Int32, _ program: RemoteProgram) -> Bool {
+        launcher.bundleID(ofProcess: pid) == program.bundleID && launcher.teamID(ofProcess: pid) == program.teamID
     }
 
     private struct Target {
@@ -221,6 +245,7 @@ public final class RemoteConnector {
         case timeout
         case neverStarted
         case noField([String])
+        case untrusted
         case cancelled
     }
 
@@ -240,6 +265,7 @@ public final class RemoteConnector {
         while true {
             let elapsed = clock.milliseconds - start
             if let pid = launcher.runningProcess(bundleID: bundleID), launcher.bundleID(ofProcess: pid) == bundleID {
+                guard launcher.teamID(ofProcess: pid) == provider.program.teamID else { return .untrusted }
                 sawProcess = true
                 var bare: AXNode?
                 for window in ax.windows(ofProcess: pid) {
@@ -271,9 +297,8 @@ public final class RemoteConnector {
     private func enter(_ secret: SecretBuffer, into target: Target, _ request: ConnectRequest,
                        _ provider: RemoteProvider) async -> ConnectionFailure? {
         let bundleID = provider.program.bundleID
-        guard target.field.processID == target.pid, launcher.bundleID(ofProcess: target.pid) == bundleID else {
-            return .focusLost
-        }
+        guard target.field.processID == target.pid else { return .focusLost }
+        guard isGenuine(target.pid, provider.program) else { return .untrustedProgram }
         launcher.activate(process: target.pid)
         guard await waitFrontmost(target.pid) else { return .focusLost }
 

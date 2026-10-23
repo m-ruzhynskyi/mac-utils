@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 import MURemoteConnections
+import Security
 
 /// Элемент интерфейса AnyDesk/TeamViewer через AXUIElement. Значение защищённого поля не читается — только
 /// `AXNumberOfCharacters`.
@@ -122,6 +123,22 @@ final class WorkspaceLauncher: AppLauncher {
     func bundleID(ofProcess pid: Int32) -> String? { NSRunningApplication(processIdentifier: pid)?.bundleIdentifier }
 
     var frontmostProcess: Int32? { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+
+    /// Team ID работающего процесса — только если его подпись действительна и выдана Apple разработчику.
+    func teamID(ofProcess pid: Int32) -> String? {
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid: pid] as CFDictionary, [], &code) == errSecSuccess,
+              let code else { return nil }
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString("anchor apple generic" as CFString, [], &requirement) == errSecSuccess,
+              SecCodeCheckValidity(code, [], requirement) == errSecSuccess else { return nil }
+        var staticCode: SecStaticCode?
+        var info: CFDictionary?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let info = info as? [String: Any] else { return nil }
+        return info[kSecCodeInfoTeamIdentifier as String] as? String
+    }
 
     func activate(process pid: Int32) { NSRunningApplication(processIdentifier: pid)?.activate() }
 }
