@@ -240,7 +240,7 @@ final class DocPageView: NSView {
         self.section = section
         self.outdent = outdent
         let body = Self.textRect(Self.bodyRect(props), outdent)
-        container = NSTextContainer(size: body.size)
+        container = DocPageContainer(size: body.size)
         container.widthTracksTextView = false
         container.heightTracksTextView = false
         container.lineFragmentPadding = 0
@@ -500,6 +500,26 @@ final class DocCenteringClipView: NSClipView {
         if let document = documentView, document.frame.width < rect.width {
             rect.origin.x = (document.frame.width - rect.width) / 2
         }
+        return rect
+    }
+}
+
+/// Контейнер страницы: помещается ли строка, решается по высоте строки Word (`DocLineMetrics.excess`), а не TextKit —
+/// TextKit выше (TNR 12: 14,5 pt против 13,8), и строка, которая у Word ещё на странице, уходила на следующую.
+final class DocPageContainer: NSTextContainer {
+    override var isSimpleRectangularTextContainer: Bool { false }
+
+    override func lineFragmentRect(forProposedRect proposedRect: NSRect, at characterIndex: Int, writingDirection baseWritingDirection: NSWritingDirection,
+                                   remaining remainingRect: UnsafeMutablePointer<NSRect>?) -> NSRect {
+        let excess = layoutManager.map { manager in MainActor.assumeIsolated { DocLineMetrics.excess(manager, at: characterIndex) } } ?? 0
+        guard excess != 0, proposedRect.height - excess > 0 else {
+            return super.lineFragmentRect(forProposedRect: proposedRect, at: characterIndex, writingDirection: baseWritingDirection, remaining: remainingRect)
+        }
+        var proposed = proposedRect
+        proposed.size.height -= excess
+        var rect = super.lineFragmentRect(forProposedRect: proposed, at: characterIndex, writingDirection: baseWritingDirection, remaining: remainingRect)
+        // Высоту строки дальше поправит `DocLineMetrics.adjust`; typesetter ждёт свою.
+        if !rect.isEmpty { rect.size.height = proposedRect.height }
         return rect
     }
 }

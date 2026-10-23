@@ -68,6 +68,46 @@ enum DocLineMetrics {
         return loop.returns > loopLimit
     }
 
+    /// Высота строки Word по одинарной: `\sl` — «точно» (< 0), множитель (`\slmult1`) или «минимум».
+    private static func lineHeight(single: CGFloat, props: RTFParaProps?) -> CGFloat {
+        guard let props, props.lineSpacing != 0 else { return single }
+        let value = CGFloat(abs(props.lineSpacing)) / 20
+        if props.lineSpacing < 0 { return value }
+        if props.lineMultiple { return single * CGFloat(props.lineSpacing) / 240 }
+        return max(single, value)
+    }
+
+    /// Насколько строка TextKit, начинающаяся с `index`, выше строки Word (бывает и ниже — тогда < 0). Нужно странице:
+    /// помещается ли строка, typesetter решает по своей высоте, до `adjust` — и строку, которая у Word ещё на
+    /// странице, уносит на следующую (`DocPageContainer`). Шрифты — с `index` до конца абзаца (не дальше 300 знаков).
+    @MainActor static func excess(_ layoutManager: NSLayoutManager, at index: Int) -> CGFloat {
+        guard let storage = layoutManager.textStorage, index < storage.length else { return 0 }
+        let paragraph = (storage.string as NSString).paragraphRange(for: NSRange(location: index, length: 0))
+        let range = NSRange(location: index, length: min(300, NSMaxRange(paragraph) - index))
+        var above: CGFloat = 0, below: CGFloat = 0, natural: CGFloat = 0
+        var plain = true
+        storage.enumerateAttributes(in: range) { attributes, _, stop in
+            if attributes[.attachment] != nil || attributes[.docBreakLine] != nil {
+                plain = false
+                stop.pointee = true
+                return
+            }
+            guard let font = attributes[.font] as? NSFont else { return }
+            let metrics = metrics(font)
+            above = max(above, metrics.above)
+            below = max(below, metrics.below)
+            natural = max(natural, layoutManager.defaultLineHeight(for: font))
+        }
+        guard plain, above + below > 0 else { return 0 }
+        let style = storage.attribute(.paragraphStyle, at: index, effectiveRange: nil) as? NSParagraphStyle ?? .default
+        var textKit = natural
+        if style.lineHeightMultiple > 0 { textKit *= style.lineHeightMultiple }
+        if style.minimumLineHeight > 0 { textKit = max(textKit, style.minimumLineHeight) }
+        if style.maximumLineHeight > 0 { textKit = min(textKit, style.maximumLineHeight) }
+        let props = (storage.attribute(.docPara, at: index, effectiveRange: nil) as? DocParaInfo)?.props
+        return textKit - lineHeight(single: above + below, props: props)
+    }
+
     /// Поправить строку, которую разложил TextKit: высота, базовая линия, интервалы абзаца. `false` — оставить как есть
     /// (строка с рисунком или заглушкой: её высоту задаёт вложение).
     @MainActor static func adjust(_ layoutManager: NSLayoutManager, rect: inout NSRect, used: inout NSRect, baseline: inout CGFloat,
@@ -114,18 +154,7 @@ enum DocLineMetrics {
         let paragraph = text.paragraphRange(for: NSRange(location: characters.location, length: 0))
         let style = storage.attribute(.paragraphStyle, at: characters.location, effectiveRange: nil) as? NSParagraphStyle ?? .default
         let props = (storage.attribute(.docPara, at: characters.location, effectiveRange: nil) as? DocParaInfo)?.props
-        let single = above + below
-        var height = single
-        if let props, props.lineSpacing != 0 {
-            let value = CGFloat(abs(props.lineSpacing)) / 20
-            if props.lineSpacing < 0 {
-                height = value
-            } else if props.lineMultiple {
-                height = single * CGFloat(props.lineSpacing) / 240
-            } else {
-                height = max(single, value)
-            }
-        }
+        let height = lineHeight(single: above + below, props: props)
         // Первая строка абзаца — и та, что идёт после его «\f».
         let first = characters.location == paragraph.location
             || (characters.location == paragraph.location + 1 && storage.attribute(.docBreakLine, at: paragraph.location, effectiveRange: nil) != nil)
@@ -136,6 +165,12 @@ enum DocLineMetrics {
         used.origin.y = rect.minY + before
         used.size.height = height
         baseline = before + height - below
+        // Рамка рядом со следующим текстом (`RTFFrame.besideNext`): рисуется на его месте, места не занимает.
+        if props?.frame.besideNext == true {
+            rect.size.height = 0
+            used.size.height = 0
+            baseline = height - below
+        }
         return true
     }
 }

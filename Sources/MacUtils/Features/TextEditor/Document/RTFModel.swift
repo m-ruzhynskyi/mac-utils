@@ -107,7 +107,24 @@ struct RTFParaProps: Hashable {
     var list = 0
     var listLevel = 0
 
+    /// Рамка позиционирования (`\posx…`, `\posy…`, `\pv…`, `\ph…`, `\absw`/`\absh`).
+    var frame = RTFFrame()
+
     var hasBorders: Bool { borderTop.isVisible || borderBottom.isVisible || borderLeft.isVisible || borderRight.isVisible }
+}
+
+/// Рамка позиционирования абзаца. Рамка у абзаца (`\pvpara`) без сдвига по вертикали стоит рядом со следующим
+/// текстом (обтекание): места в потоке у Word не занимает — так в колонтитулах рамка номера страницы.
+struct RTFFrame: Hashable {
+    var isSet = false
+    /// По вертикали — от абзаца (`\pvpara`), иначе от поля или листа.
+    var fromParagraph = false
+    /// `\posyN` (твипы); `\posyt`/`\posyc`/… — не 0.
+    var y = 0
+    /// `\posxl`/`\posxc`/`\posxr` (`\posxi`/`\posxo` — как слева/справа), `\posxN` — слева.
+    var x: RTFAlignment?
+
+    var besideNext: Bool { isSet && fromParagraph && y == 0 }
 }
 
 /// Свойства раздела (страница, поля, колонтитулы).

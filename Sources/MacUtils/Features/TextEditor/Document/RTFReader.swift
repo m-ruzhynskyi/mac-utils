@@ -651,6 +651,14 @@ private final class RTFParser {
         case .keep: top.para.keepTogether = true
         case .widctlpar: top.para.widowControl = true
         case .nowidctlpar: top.para.widowControl = false
+        case .posx, .posxl, .posxi: top.para.frame.isSet = true; top.para.frame.x = .left
+        case .posxc: top.para.frame.isSet = true; top.para.frame.x = .center
+        case .posxr, .posxo: top.para.frame.isSet = true; top.para.frame.x = .right
+        case .posy: top.para.frame.isSet = true; top.para.frame.y = number ?? 0
+        case .posyt, .posyc, .posyb, .posyil, .posyin, .posyout: top.para.frame.isSet = true; top.para.frame.y = 1
+        case .pvpara: top.para.frame.isSet = true; top.para.frame.fromParagraph = true
+        case .pvmrg, .pvpg: top.para.frame.isSet = true; top.para.frame.fromParagraph = false
+        case .phmrg, .phpg, .phcol, .absw, .absh: top.para.frame.isSet = true
         case .pagebb:
             top.para.pageBreakBefore = true
             token("pagebb", range)
