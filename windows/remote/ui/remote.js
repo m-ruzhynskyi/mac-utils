@@ -22,6 +22,7 @@ const SVG = {
   back: '<path d="M15 5l-7 7 7 7"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   eyeOff: '<path d="M2 12s3.5-7 10-7c2 0 3.8.7 5.2 1.6M22 12s-3.5 7-10 7c-2 0-3.8-.7-5.2-1.6M4 4l16 16"/>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
 };
 function icon(name, cls) {
   const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg");
@@ -190,7 +191,7 @@ function render() {
     fitAllLabels();
   }
   renderSummary();
-  $("addBtn").hidden = !(v.status === "ready" && v.canEdit);
+  $("addBtn").hidden = palette || !(v.status === "ready" && v.canEdit);
 }
 
 const KIND = { anyDesk: ["ad", "AD"], teamViewer: ["tv", "TV"], rdp: ["rdp", "RDP"], vpn: ["vpn", "VPN"], other: ["oth", "Другое"] };
@@ -269,9 +270,11 @@ function highlight() {
   document.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
 }
 
+// Строка «Загружено N · пропущено …» с диагностикой — только в окне списка; в палитре внизу лишь «Обновить».
 function renderSummary() {
   const v = view, s = $("summary"), box = $("diagBox");
   box.textContent = "";
+  if (palette) { s.textContent = ""; return; }
   if (v.status !== "ready" || !v.diagnostics) { s.textContent = ""; return; }
   const d = v.diagnostics;
   const extra = (d.vpn ? ` · VPN ${d.vpn}` : "") + (d.rdp ? ` · RDP ${d.rdp}` : "");
@@ -310,8 +313,8 @@ document.addEventListener("keydown", (e) => {
   if (mode === "details") {
     if (e.key === "Escape") { e.preventDefault(); closeDetails(); }
     else if (e.key === "Enter" && !e.target.closest?.("button")) {
-      const r = currentDetails;
-      if (r && r.rdpHost) { e.preventDefault(); openRDPFromDetails(r); }
+      const r = currentDetails, rdp = currentCard && currentCard.howto && currentCard.howto.rdp;
+      if (r && rdp && rdp.canOpen) { e.preventDefault(); openRDPFromDetails(r, rdp.fromAccess); }
     }
     return;
   }
@@ -330,13 +333,16 @@ document.addEventListener("keydown", (e) => {
 $("addBtn").hidden = true;
 $("addBtn").onclick = () => openEditor(null);
 $("openFile").onclick = () => window.rc.openFile();
+$("folderBtn").append(icon("folder"));
+$("folderBtn").onclick = () => window.rc.showFolder();
 $("reload").onclick = () => window.rc.reload();
 $("settingsBtn").onclick = () => openSettings();
 
 // ---- подробности записи (макет Details): экран вместо списка ----
-// Пароль учётки на экран не выводится никогда; «Доступ» — только по «Показать» и только пока открыт этот экран: при уходе с
+// Пароль учётки и пароль/ключ VPN на экран не выводятся никогда (в окно они и не приходят); «Доступ» — только по «Показать»;
+// «Как подключиться» и «Контакты» — из файла при открытии экрана. Всё это живёт, только пока открыт этот экран: при уходе с
 // экрана (и при перечитывании файла) текст из окна убирается.
-let currentDetails = null;
+let currentDetails = null, currentCard = null;
 
 async function openDetails(key) {
   detailsKey = key;
@@ -346,24 +352,25 @@ async function openDetails(key) {
 }
 
 function closeDetails() {
-  detailsKey = null; currentDetails = null;
+  detailsKey = null; currentDetails = null; currentCard = null;
   $("detailsBox")?.remove();   // вместе с ним — показанный «Доступ»
   $("page").hidden = false;
   mode = "list";
   refresh().then(() => $("query").focus());
 }
 
-function openRDPFromDetails(r) {
+function openRDPFromDetails(r, fromAccess = false) {
   if (palette) window.rc.closePalette();
-  window.rc.openRDP(r.key);
+  window.rc.openRDP(r.key, fromAccess);
 }
 
 async function renderDetails() {
   const key = detailsKey;
-  const r = key && await window.rc.details(key);
+  const [r, card] = key ? await Promise.all([window.rc.details(key), window.rc.cardInfo(key)]) : [null, null];
   if (mode !== "details" || key !== detailsKey) return;
   if (!r) return closeDetails();   // записи больше нет в файле
-  currentDetails = r;
+  currentDetails = r; currentCard = card && card.ok ? card : null;
+  const howto = currentCard ? currentCard.howto : { vpn: null, rdp: null };
   $("detailsBox")?.remove();
   const box = el("div", "details"); box.id = "detailsBox"; box.setAttribute("role", "region"); box.setAttribute("aria-label", `Подробности: ${r.name}`);
   document.body.append(box);
@@ -393,19 +400,7 @@ async function renderDetails() {
       el("span", null, r.accessLines > 0 ? "Компьютер виден только через VPN. Профиль и ключ — в разделе «Доступ» ниже." : "Компьютер виден только через VPN."));
     b.append(t); scroll.append(b);
   }
-  if (r.usesRDP) {
-    const card = el("div", "dcard");
-    const h = el("div", "dlbl rdp"); h.append(icon("monitor"), "ПОДКЛЮЧЕНИЕ ЧЕРЕЗ RDP"); card.append(h);
-    if (r.method === "rdp" && r.rawID) {
-      const addr = el("div", "addr"); addr.append(el("b", null, r.rawID), el("span", null, "удалённый рабочий стол")); card.append(addr);
-      const acts = el("div", "dacts");
-      if (r.rdpHost) { const open = button("btn c pri", "Открыть в mstsc ⏎", () => openRDPFromDetails(r)); open.title = "Подключение к удалённому рабочему столу (mstsc)"; acts.append(open); }
-      acts.append(button("btn c", "Скопировать адрес", () => window.rc.copyAddress(r.key)));
-      card.append(acts);
-      if (!r.rdpHost) card.append(el("small", "muted", "Адрес не похож на имя или IP — откройте его вручную."));
-    } else card.append(el("small", "muted", "Адрес — в разделе «Доступ»."));
-    scroll.append(card);
-  }
+  if (r.needsVPN || r.usesRDP || howto.vpn || howto.rdp) scroll.append(howToCard(r, howto));
   if (r.account || r.hasAccountPassword) {
     const card = el("div", "dcard");
     card.append(el("div", "dlbl", "УЧЁТКА WINDOWS"));
@@ -419,10 +414,69 @@ async function renderDetails() {
     if (r.hasAccountPassword) card.append(el("small", "muted", "Буфер очистится через 30 с. Пароль на экране не показывается."));
     scroll.append(card);
   }
+  if (currentCard && currentCard.contacts && currentCard.contacts.text) scroll.append(contactsCard(currentCard.contacts));
   if (r.note) {
     const card = el("div", "dcard"); card.append(el("div", "dlbl", "ЗАМЕТКА"), el("div", "dnote", r.note)); scroll.append(card);
   }
   if (r.accessLines > 0) scroll.append(accessCard(r));
+}
+
+// Строка «название — значение» в карточке.
+function fact(title, value, mono = false) {
+  const line = el("div", "fact"); line.append(el("span", "fk", title), el("b", mono ? "fv mono" : "fv", value)); return line;
+}
+// Строки «Доступа» как есть — когда разобрать их не удалось (моноширинно, с переносами).
+function rawLines(lines) { return el("pre", "rawlines", lines.join("\n")); }
+
+// «Как подключиться»: VPN (тип, сервер, логин, пароль или ключ — скрыт, «Скопировать») и RDP (адрес, логин, «Открыть», «Скопировать
+// адрес»). Не разобралось — соответствующие строки «Доступа» как есть. Разбирает основной процесс; пароль или ключ сюда не приходит.
+function howToCard(r, howto) {
+  const card = el("div", "dcard howto");
+  card.append(el("div", "dlbl", "КАК ПОДКЛЮЧИТЬСЯ"));
+  if (r.needsVPN || howto.vpn) {
+    const vpn = howto.vpn || { kind: null, server: null, login: null, hasSecret: false, lines: [] };
+    const h = el("div", "dlbl vpn"); h.append(icon("shield"), "VPN");
+    if (vpn.kind) h.append(el("span", "kind", vpn.kind));
+    card.append(h);
+    if (vpn.server || vpn.login || vpn.hasSecret) {
+      if (vpn.server) card.append(fact("Сервер", vpn.server, true));
+      if (vpn.login) card.append(fact("Логин", vpn.login));
+      if (vpn.hasSecret) {
+        const line = el("div", "fact"); line.append(el("span", "fk", "Пароль или ключ"));
+        const dots = el("span", "dots", "••••••••"); dots.setAttribute("aria-hidden", "true");
+        line.append(dots, el("span", "sp"), button("btn c sm", "Скопировать", () => window.rc.copySecret(r.key, "vpnSecret"), "Скопировать пароль VPN"));
+        card.append(line);
+      }
+    } else if (vpn.lines.length) card.append(rawLines(vpn.lines));
+    else card.append(el("small", "muted", r.accessLines > 0 ? "Профиль и ключ — в разделе «Доступ» ниже." : "Подробностей о VPN в файле нет."));
+  }
+  if (r.usesRDP || howto.rdp) {
+    const rdp = howto.rdp || { address: null, login: null, canOpen: false, fromAccess: false, lines: [] };
+    const h = el("div", "dlbl rdp"); h.append(icon("monitor"), "ПОДКЛЮЧЕНИЕ ЧЕРЕЗ RDP"); card.append(h);
+    if (rdp.address) {
+      const addr = el("div", "addr"); addr.append(el("b", null, rdp.address), el("span", null, "удалённый рабочий стол")); card.append(addr);
+      if (rdp.login) card.append(fact("Логин", rdp.login));
+      const acts = el("div", "dacts");
+      if (rdp.canOpen) { const open = button("btn c pri", "Открыть в mstsc ⏎", () => openRDPFromDetails(r, rdp.fromAccess)); open.title = "Подключение к удалённому рабочему столу (mstsc)"; acts.append(open); }
+      acts.append(button("btn c", "Скопировать адрес", () => window.rc.copyAddress(r.key, rdp.fromAccess)));
+      card.append(acts);
+      if (!rdp.canOpen) card.append(el("small", "muted", "Адрес не похож на имя или IP — откройте его вручную."));
+    } else if (rdp.lines.length) card.append(rawLines(rdp.lines));
+    else card.append(el("small", "muted", "Адрес — в разделе «Доступ»."));
+  }
+  return card;
+}
+
+// «Контакты»: люди и телефоны как в файле; у каждого телефона — «Скопировать». Только здесь: не в строке, не в поиске, не в журнале.
+function contactsCard(contacts) {
+  const card = el("div", "dcard");
+  card.append(el("div", "dlbl", "КОНТАКТЫ"), el("div", "dnote", contacts.text));
+  for (const phone of contacts.phones || []) {
+    const line = el("div", "phone"); line.append(icon("phone"), el("span", "pn", phone), el("span", "sp"),
+      button("btn c sm", "Скопировать", () => window.rc.copyPhone(phone), `Скопировать телефон ${phone}`));
+    card.append(line);
+  }
+  return card;
 }
 
 // «Доступ · из файла»: вместо текста — размытые полосы (самого текста в окне нет), «Показать» читает его из файла.
@@ -566,7 +620,7 @@ window.rc.onChanged(refresh);
 // Палитра показана снова — с чистого листа (подробности закрыты, поиск и фильтры сброшены).
 window.rc.onShow(() => {
   if (mode === "settings" || mode === "edit") return;
-  if (mode === "details") { $("detailsBox")?.remove(); detailsKey = null; currentDetails = null; $("page").hidden = false; mode = "list"; }
+  if (mode === "details") { $("detailsBox")?.remove(); detailsKey = null; currentDetails = null; currentCard = null; $("page").hidden = false; mode = "list"; }
   $("query").value = ""; filter = "all"; selectedTags.clear(); tagsExpanded = false; selected = 0; refresh(); $("query").focus();
 });
 // Окно скрыто или свёрнуто — показанный «Доступ» убирается (подробности перерисовываются без текста).
@@ -580,5 +634,6 @@ window.rc.onMenu((m) => {
 // Подробности из трея (VPN, «Другое»): окно забирает ключ, когда готово.
 const takePending = async () => { const key = await window.rc.pendingDetails(); if (key && mode !== "settings" && mode !== "edit") openDetails(key); };
 window.rc.onDetails(takePending);
-if (palette) { $("hints").hidden = false; $("bar").hidden = true; }
+// Палитра: внизу только «Обновить» (↻). Excel, папка, «Добавить», настройки и строка «Загружено …» — в окне списка.
+if (palette) { $("hints").hidden = false; for (const id of ["openFile", "folderBtn", "addBtn", "settingsBtn", "summary"]) $(id).hidden = true; }
 refresh().then(() => { $("query").focus(); if (!palette) takePending(); });

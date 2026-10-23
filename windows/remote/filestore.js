@@ -134,7 +134,7 @@ class ConnectionsFileStore extends EventEmitter {
   // Пароль записи — файл читается заново в момент подключения. SecretBuffer или null (нет записи или пароля).
   async password(record) { return this.secret(record, "password"); }
 
-  // Пароль учётки или «Доступ» — так же, из файла сейчас. field — "password" | "accountPassword" | "access".
+  // Пароль учётки или «Доступ» — так же, из файла сейчас. field — "password" | "accountPassword" | "access" | "contacts".
   async secret(record, field) {
     if (!this.file) return null;
     const data = await fs.promises.readFile(this.file);

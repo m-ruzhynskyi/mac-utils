@@ -88,14 +88,18 @@ test("окно: безопасные настройки; повторный вы
   rc.dispose();
 });
 
-test("трей: открыть список, поиск, избранное и недавние, Excel, перечитать, сводка диагностики", async () => {
+test("трей: открыть список, поиск, избранное и недавние; внизу только «Обновить» (Excel и сводка — в окне списка)", async () => {
   const { fake, rc } = await setup();
   const key = rc.service.view().sections.flatMap((s) => s.records)[0].key;
   await fake.handles.get("rc:toggleFavorite")(fake.trust(), key);
   const labels = () => fake.trays[0].menu.map((i) => i.label || "—");
   const l = labels();
-  assert.ok(l.includes("Открыть список…") && l.includes("Поиск (Win+Shift+A)") && l.includes("Избранное") && l.includes("Открыть файл в Excel") && l.includes("Перечитать файл"));
-  assert.ok(l.some((x) => /^Загружено 12/.test(x)));
+  assert.ok(l.includes("Открыть список…") && l.includes("Поиск (Win+Shift+A)") && l.includes("Избранное"));
+  assert.equal(l.at(-1), "↻ Обновить", "внизу — только «Обновить»");
+  assert.ok(!l.some((x) => /Excel|Загружено|пропущено|папк/i.test(x)), l.join("|"));
+  let reloaded = 0; const real = rc.store.reload.bind(rc.store); rc.store.reload = () => { reloaded++; return real(); };
+  fake.trays[0].menu.at(-1).click();
+  assert.equal(reloaded, 1);
   rc.dispose();
 });
 

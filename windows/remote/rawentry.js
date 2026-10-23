@@ -1,11 +1,11 @@
-// Строка файла до проверки: все значения как есть, строками. Секреты (пароль, пароль учётки, «Доступ») сохраняются только при
-// поиске секрета (mode "passwords"), при обычной загрузке — лишь признак и число строк «Доступа». «Контакты» не сохраняются
-// никогда: колонка известна, но не нужна. 1:1 с Mac (`ConnectionsSource.swift`).
+// Строка файла до проверки: все значения как есть, строками. Секреты (пароль, пароль учётки, «Доступ», «Контакты») сохраняются
+// только при поиске секрета (mode "passwords"), при обычной загрузке — лишь признаки и число строк «Доступа». «Контакты»
+// показываются только в карточке подробностей: читаются из файла по запросу, как «Доступ». 1:1 с Mac (`ConnectionsSource.swift`).
 "use strict";
 
 function newEntry(row) {
   return { row, name: "", id: "", password: "", hasPassword: false, group: "", tags: "", note: "", program: "",
-    account: "", accountPassword: "", hasAccountPassword: false, access: "", accessLines: 0 };
+    account: "", accountPassword: "", hasAccountPassword: false, access: "", accessLines: 0, contacts: "", hasContacts: false };
 }
 
 // Непустые строки многострочного текста (пустые строки между блоками не считаются).
@@ -26,13 +26,16 @@ function setField(entry, field, value, mode) {
     entry.accessLines = countLines(text);
     if (mode === "passwords") entry.access = text;
   } else if (field === "contacts") {
-    // известна, но не нужна: значение не сохраняется
+    // Люди и телефоны: в памяти списка — только признак; текст (с переносами) — только при поиске секрета.
+    const text = String(value).trim();
+    entry.hasContacts = text !== "";
+    if (mode === "passwords") entry.contacts = text;
   } else entry[field] = value;
 }
 
 // Секретное поле (только в режиме "passwords").
 function secretOf(entry, field) {
-  return field === "accountPassword" ? entry.accountPassword : field === "access" ? entry.access : entry.password;
+  return field === "accountPassword" ? entry.accountPassword : field === "access" ? entry.access : field === "contacts" ? entry.contacts : entry.password;
 }
 
 const isBlank = (text) => !String(text).trim();

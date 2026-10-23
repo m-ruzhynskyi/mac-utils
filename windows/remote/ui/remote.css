@@ -181,3 +181,16 @@ body.palette .details { background:var(--panel); border:1px solid var(--line); b
 .apane .atext { margin:0; padding:12px; font:12px/1.7 "Cascadia Mono",Consolas,ui-monospace,monospace; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
 .settings textarea { border-radius:10px; border:1px solid var(--line); background:var(--field); color:var(--text); padding:8px 10px; font:inherit; resize:vertical; }
 .settings input:disabled, .settings textarea:disabled, .settings select:disabled { opacity:.75; }
+/* «Как подключиться», «Контакты»; палитра — внизу только «Обновить» */
+.dlbl.vpn { display:flex; align-items:center; gap:8px; color:var(--vpn-fg); } .dlbl.vpn svg { width:16px; height:16px; stroke-width:2.2; }
+.dlbl.vpn .kind { color:var(--text); font-size:13px; font-weight:600; letter-spacing:0; }
+.howto .dlbl.rdp, .howto .dlbl.vpn { margin-top:4px; }
+.fact { display:flex; align-items:center; gap:10px; min-width:0; } .fact .fk { flex:none; width:118px; font-size:12.5px; color:var(--mute); }
+.fact .fv { min-width:0; font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; user-select:text; }
+.fact .fv.mono, .phone .pn { font:13px "Cascadia Mono",Consolas,ui-monospace,monospace; }
+.fact .dots { font-size:15px; letter-spacing:.2em; color:var(--mute); } .fact .sp, .phone .sp { flex:1; }
+.rawlines { margin:0; padding:10px; border-radius:10px; background:var(--bg); font:12px/1.7 "Cascadia Mono",Consolas,ui-monospace,monospace; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
+.phone { display:flex; align-items:center; gap:10px; min-width:0; } .phone svg { width:15px; height:15px; flex:none; stroke:var(--mute); fill:none; stroke-width:2; }
+.phone .pn { color:var(--text); white-space:nowrap; user-select:text; }
+#folderBtn svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; }
+body.palette .bar { border-top:none; padding:6px 2px 0; justify-content:flex-end; }

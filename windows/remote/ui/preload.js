@@ -1,5 +1,6 @@
-// Мост окна «Удалённые подключения» и палитры: только вызовы к основному процессу. Пароли сюда не приходят; «Доступ» — только по
-// «Показать» в подробностях (revealAccess) и живёт в окне, пока они открыты.
+// Мост окна «Удалённые подключения» и палитры: только вызовы к основному процессу. Пароли сюда не приходят (пароль или ключ VPN —
+// тоже: только признак «есть», копирует основной процесс); «Доступ» — только по «Показать» в подробностях (revealAccess); «Как
+// подключиться» и «Контакты» — при открытии подробностей (cardInfo). Всё это живёт в окне, пока подробности открыты.
 "use strict";
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -9,8 +10,11 @@ contextBridge.exposeInMainWorld("rc", {
   pendingDetails: () => ipcRenderer.invoke("rc:pendingDetails"),
   revealAccess: (key) => ipcRenderer.invoke("rc:revealAccess", key),
   copySecret: (key, field) => ipcRenderer.invoke("rc:copySecret", { key, field }),
-  copyAddress: (key) => ipcRenderer.invoke("rc:copyAddress", key),
-  openRDP: (key) => ipcRenderer.invoke("rc:openRDP", key),
+  copyAddress: (key, fromAccess) => ipcRenderer.invoke("rc:copyAddress", { key, fromAccess: !!fromAccess }),
+  copyPhone: (text) => ipcRenderer.invoke("rc:copyPhone", String(text)),
+  cardInfo: (key) => ipcRenderer.invoke("rc:cardInfo", key),
+  openRDP: (key, fromAccess) => ipcRenderer.invoke("rc:openRDP", { key, fromAccess: !!fromAccess }),
+  showFolder: () => ipcRenderer.invoke("rc:showFolder"),
   rowMenu: (key) => ipcRenderer.invoke("rc:rowMenu", key),
   onMenu: (fn) => { ipcRenderer.removeAllListeners("rc:menu"); ipcRenderer.on("rc:menu", (_e, m) => fn(m && { action: String(m.action), key: String(m.key) })); },
   onDetails: (fn) => { ipcRenderer.removeAllListeners("rc:details"); ipcRenderer.on("rc:details", () => fn()); },

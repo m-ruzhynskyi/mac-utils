@@ -72,7 +72,7 @@ class RemoteService {
       method, methodTitle: method ? METHOD_TITLES[method] : "", program, programTitle: program ? TITLES[program] : METHOD_TITLES[method],
       programFile: record.program || "", programChoice: PROGRAM_CHOICE[method || record.program] || "",
       needsVPN: needsVPN(record), usesRDP: usesRDP(record), rdpHost: rdpHost(record),
-      account: record.account || "", hasAccountPassword: !!record.hasAccountPassword, accessLines: record.accessLines || 0,
+      account: record.account || "", hasAccountPassword: !!record.hasAccountPassword, accessLines: record.accessLines || 0, hasContacts: !!record.hasContacts,
       hasPassword: record.hasPassword, favorite: lists.isFavorite(record, s), favoriteKey: favoriteKey(record), dim: program ? !installed[program] : false,
       nameMarks: mark(record.name), idMarks: effective && shownID ? highlightsInID(shownID, effective) : [], accountMarks: mark(record.account), noteMarks: mark(noteLine),
     };
@@ -84,10 +84,10 @@ class RemoteService {
     return record ? this.present(record, "details") : null;
   }
 
-  // Секрет записи из файла сейчас (пароль учётки, «Доступ»). SecretBuffer или null; вызывающий затирает.
+  // Секрет записи из файла сейчас (пароль учётки, «Доступ», «Контакты»). SecretBuffer или null; вызывающий затирает.
   async secret(key, field) {
     const record = this.recordByKey(key);
-    if (!record || !["accountPassword", "access"].includes(field)) return null;
+    if (!record || !["accountPassword", "access", "contacts"].includes(field)) return null;
     return this.store.secret(record, field);
   }
 

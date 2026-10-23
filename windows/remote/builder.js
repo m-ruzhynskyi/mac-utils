@@ -48,7 +48,7 @@ function build(file) {
       idValue = id.value;
     }
     records.push({ sourceRow: e.row, name, id: idValue, group: e.group.trim(), tags: splitTags(e.tags), note: e.note.trim(), program, hasPassword: e.hasPassword,
-      method, account: e.account.trim(), hasAccountPassword: e.hasAccountPassword, accessLines: e.accessLines });
+      method, account: e.account.trim(), hasAccountPassword: e.hasAccountPassword, accessLines: e.accessLines, hasContacts: !!e.hasContacts });
   }
   // Без программы и не алиас — возьмётся программа по умолчанию. Если в файле есть обе программы, это стоит показать.
   const named = new Set(records.map((r) => r.program).filter(Boolean));

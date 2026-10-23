@@ -3,8 +3,8 @@
 "use strict";
 
 const FIELDS = ["name", "id", "password", "group", "tags", "note", "program", "account", "accountPassword", "access", "contacts"];
-// Значение не держится в памяти списка: читается из файла по запросу и затирается (пароль, пароль учётки, «Доступ»).
-const SECRET_FIELDS = new Set(["password", "accountPassword", "access"]);
+// Значение не держится в памяти списка: читается из файла по запросу и затирается (пароль, пароль учётки, «Доступ», «Контакты»).
+const SECRET_FIELDS = new Set(["password", "accountPassword", "access", "contacts"]);
 const isSecret = (field) => SECRET_FIELDS.has(field);
 
 const ALIASES = {
@@ -22,7 +22,7 @@ const ALIASES = {
   accountPassword: ["accountpassword", "windowspassword", "парольучетнойзаписи", "парольучетки", "парольwindows", "парольобліковогозапису"],
   // «Доступ»: всё прочее с вкладки (VPN, RDP, IP, логины и пароли) — как секрет: не в поиске, не в журнале.
   access: ["доступ", "access", "подробности", "деталі", "details", "vpnrdp", "подключение", "підключення"],
-  // «Контакты»: колонка известна (не «лишняя»), но не читается, не показывается и не ищется.
+  // «Контакты» (люди, телефоны): только в карточке подробностей, из файла по запросу; не в строке, не в поиске, не в журнале.
   contacts: ["контакты", "контакт", "контакти", "contacts", "contact", "контактнаособа", "контактноелицо"],
 };
 

@@ -57,7 +57,8 @@ test("колонки: учётка, пароль учётки, «Доступ»,
     ["Контакты", "contacts"], ["Контакти", "contacts"], ["Контакт", "contacts"], ["Contacts", "contacts"], ["Контактное лицо", "contacts"], ["Контактна особа", "contacts"],
   ];
   for (const [header, field] of cases) assert.equal(fieldFor(header), field, header);
-  assert.deepEqual(["password", "accountPassword", "access", "account", "contacts", "note"].map(isSecret), [true, true, true, false, false, false]);
+  // «Контакты» — тоже из файла по запросу (только в карточке подробностей), в памяти списка их нет.
+  assert.deepEqual(["password", "accountPassword", "access", "account", "contacts", "note"].map(isSecret), [true, true, true, false, true, false]);
 });
 
 test("«Контакты» — известная колонка: не «лишняя», файл чистый; в записи нет ни контактов, ни пароля учётки, ни «Доступа»", () => {
@@ -74,6 +75,7 @@ test("«Контакты» — известная колонка: не «лиш�
   assert.equal(r.hasAccountPassword, true);
   assert.equal(r.accessLines, 2, "пустая строка между блоками не считается");
   assert.ok(!("contacts" in r));
+  assert.equal(r.hasContacts, true, "в записи — только признак");
 });
 
 // ---------- RDP, VPN, «Другое» ----------
@@ -287,30 +289,30 @@ function fakeTimers() {
   return { timers, setTimer: (fn, ms) => { const t = { fn, ms }; timers.push(t); return t; }, clearTimer: (t) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); }, fire() { for (const t of timers.splice(0)) t.fn(); } };
 }
 
-test("секрет в буфер: через 30 с очищается, если там всё ещё он; скопированное после — не трогается; секрет затирает вызывающий", () => {
+test("секрет в буфер: через 30 с очищается, если там всё ещё он; скопированное после — не трогается; секрет затирает вызывающий", async () => {
   const cb = fakeClipboard(), t = fakeTimers();
   const sc = createSecretClipboard({ clipboard: cb, setTimer: t.setTimer, clearTimer: t.clearTimer });
   const s = new SecretBuffer("Win-pass-1");
-  assert.equal(sc.copy(s), true);
+  assert.equal(await sc.copy(s), true);
   assert.equal(cb.text, "Win-pass-1");
   assert.equal(t.timers[0].ms, 30_000);
   t.fire();
   assert.equal(cb.text, "");
   assert.equal(cb.clears, 1);
 
-  sc.copy(new SecretBuffer("Win-pass-2"));
+  await sc.copy(new SecretBuffer("Win-pass-2"));
   cb.text = "пользователь скопировал своё";
   t.fire();
   assert.equal(cb.text, "пользователь скопировал своё", "чужое не стирается");
 
-  sc.copy(new SecretBuffer("Win-pass-3"));
+  await sc.copy(new SecretBuffer("Win-pass-3"));
   assert.equal(sc.pending, 1);
   sc.flush();   // выход из приложения
   assert.equal(cb.text, "");
   assert.equal(sc.pending, 0);
   assert.equal(t.timers.length, 0);
-  assert.equal(sc.copy(new SecretBuffer("")), false, "пустое не копируется");
-  assert.equal(createSecretClipboard({}).copy(new SecretBuffer("x")), false, "без буфера — false");
+  assert.equal(await sc.copy(new SecretBuffer("")), false, "пустое не копируется");
+  assert.equal(await createSecretClipboard({}).copy(new SecretBuffer("x")), false, "без буфера — false");
 });
 
 // ---------- окно: сервис и IPC ----------
@@ -333,22 +335,22 @@ function fakeElectron() {
       shell: { openPath() {}, openExternal() {} }, dialog: {}, nativeImage: { createFromPath: () => ({ resize: () => ({}) }), createEmpty: () => ({}) },
       screen: { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }) } } };
 }
-async function app({ file = FILE, ext = "xml" } = {}) {
+async function app({ file = FILE, ext = "xml", extra = {} } = {}) {
   const dir = tmp(), list = path.join(dir, `list.${ext}`);
   fs.writeFileSync(list, file);
   fs.writeFileSync(path.join(dir, "remote-connections.json"), JSON.stringify({ file: list }));
-  const fake = fakeElectron(), huds = [], log = [], cb = fakeClipboard(), copied = [];
+  const fake = fakeElectron(), huds = [], log = [], cb = fakeClipboard(), copied = [], rdpOpened = [];
   const connector = { MESSAGES: { gone: () => ({ title: "gone" }) }, installed: () => true, hudAction() {},
     connectRecord: async (rec) => (rec.method && !(rec.method === "rdp" && rdp.isValidHost(rec.id)) ? { ok: false, error: "details" } : { ok: true }),
-    openRDP: async () => ({ ok: true }) };
+    openRDP: async (rec) => { rdpOpened.push({ method: rec.method, id: rec.id }); return { ok: true }; } };
   const rc = init(fake.electron, { userData: dir, timing: { debounceMs: 20, retryMs: 20, pollMs: 30 }, connector, hud: { show: (s) => huds.push(s) }, log: (l) => log.push(l),
-    clipboard: cb, copyText: (t) => { copied.push(t); return true; } });
+    clipboard: cb, copyText: (t) => { copied.push(t); return true; }, ...extra });
   for (let i = 0; i < 200 && rc.store.state.status !== "ready"; i++) await new Promise((r) => setTimeout(r, 10));
   const trust = () => { rc.openWindow(); return { sender: fake.windows.find((w) => w.file === "remote.html" && !w.hash).webContents }; };
   const call = (name, ...args) => fake.handles.get(name)(trust(), ...args);
   const keyOf = (name) => rc.service.records().find((r) => r.name === name);
   const key = (name) => { const r = keyOf(name); return `${r.sourceRow}:${r.id}`; };
-  return { fake, rc, dir, list, huds, log, cb, copied, call, key };
+  return { fake, rc, dir, list, huds, log, cb, copied, rdpOpened, call, key };
 }
 
 test("вид окна: строка с метками, значками, логином, числом строк «Доступа»; фильтры и метки через IPC; секретов и контактов в ответах нет", async () => {
@@ -398,9 +400,10 @@ test("подробности: запись по ключу; «Показать»
   // Нет пароля учётки — честно «не удалось прочитать».
   assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Озерна"), field: "accountPassword" }), { ok: false, error: "unavailable" });
   assert.deepEqual(a.log, ["copy ok field=accountPassword", "copy ok field=access", "copy fail field=accountPassword"]);
+  a.log.length = 0;
   noSecrets([a.huds, a.log], "тосты и журнал");
   // Адрес RDP — обычной копией (не секрет).
-  assert.deepEqual(await a.call("rc:copyAddress", a.key("Вінницька · Філія 2")), { ok: true });
+  assert.deepEqual(await a.call("rc:copyAddress", { key: a.key("Вінницька · Філія 2") }), { ok: true });
   assert.deepEqual(a.copied, ["10.20.0.15"]);
   // Выход из приложения: секрет не остаётся в буфере.
   a.rc.dispose();
@@ -444,11 +447,12 @@ test("трей: запись VPN — подробности в окне спис
   assert.ok(win.sent.some(([c]) => c === "rc:details"));
   assert.equal(await a.call("rc:pendingDetails"), a.key("Лісова"));
   assert.equal(await a.call("rc:pendingDetails"), null, "ключ забирается один раз");
-  assert.deepEqual(await a.call("rc:openRDP", a.key("Вінницька · Філія 2")), { ok: true });
+  assert.deepEqual(await a.call("rc:openRDP", { key: a.key("Вінницька · Філія 2") }), { ok: true });
   assert.deepEqual(a.rc.settings.recentIDs, ["10.20.0.15"], "открытый RDP — в «Недавних»");
   const stranger = { sender: { id: 99 } };
   for (const [name, arg] of [["rc:details", a.key("Лісова")], ["rc:revealAccess", a.key("Лісова")], ["rc:copySecret", { key: a.key("Лісова"), field: "access" }],
-    ["rc:copyAddress", a.key("Вінницька · Філія 2")], ["rc:openRDP", a.key("Вінницька · Філія 2")], ["rc:rowMenu", a.key("Лісова")], ["rc:pendingDetails"]]) {
+    ["rc:copyAddress", { key: a.key("Вінницька · Філія 2") }], ["rc:openRDP", { key: a.key("Вінницька · Філія 2") }], ["rc:rowMenu", a.key("Лісова")], ["rc:pendingDetails"],
+    ["rc:cardInfo", a.key("Північна лабораторія")], ["rc:copyPhone", "050 000 00 00"], ["rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: "vpnSecret" }], ["rc:showFolder"]]) {
     const r = await a.fake.handles.get(name)(stranger, arg);
     assert.ok(r == null || r === false || r.ok === false, `${name}: ${JSON.stringify(r)}`);
   }
@@ -508,4 +512,133 @@ test("окно: метки и «Доступ» только через textConte
   assert.match(js, /visibilitychange/, "окно скрыто — «Доступ» убирается");
   assert.match(js, /"без ID"/);
   assert.match(js, /могут быть пароли/);
+});
+
+// ---------- последние правки: «Как подключиться», «Контакты», палитра; секреты — мимо журнала буфера (W2-5) ----------
+const access = require("../../remote/access");
+const DEMO_KEY = "QUJDREVGR0g=";
+const DEMO_ACCESS = `VPN WireGuard — сервер: vpn.demo.invalid:51820 · логин: demo-user · ключ: ${DEMO_KEY}\nRDP — IP: 192.0.2.10 · порт: 3390 · Login: demo-admin`;
+const DEMO_CONTACTS = "Ольга (бухгалтерия) +38 (044) 000-00-00\nДежурный: 067 000 11 22, каб. 12";
+const DEMO_FILE = xml([...ROWS,
+  `<connection><name>Демо-лаборатория</name><id>111222333</id><tags>Рег, VPN</tags><access>${esc(DEMO_ACCESS)}</access><contacts>${esc(DEMO_CONTACTS)}</contacts><app>AnyDesk</app></connection>`]);
+const DEMO_SECRETS = [DEMO_KEY, "Ольга", "000-00-00", "067 000", "Дежурный"];
+
+test("«Как подключиться»: тип VPN по тексту, сервер, логин, ключ (с «=» в конце); RDP — адрес с портом и логин; не разобралось — строки как есть", () => {
+  const kinds = { "VPN WireGuard 1.2.3.4": "WireGuard", "pptp-vpn: 1.2.3.4": "PPTP", "L2TP/IPsec 1.2.3.4": "L2TP", "FortiClient · сервер forti.demo.invalid": "FortiClient", "OpenVPN профиль demo.ovpn": "OpenVPN", "VPN: 1.2.3.4": null };
+  for (const [line, kind] of Object.entries(kinds)) assert.equal(access.parseAccess(line).vpn.kind, kind, line);
+  const info = access.parseAccess(DEMO_ACCESS);
+  assert.deepEqual({ ...info.vpn, lines: undefined }, { kind: "WireGuard", server: "vpn.demo.invalid:51820", login: "demo-user", secret: DEMO_KEY, lines: undefined });
+  assert.deepEqual({ ...info.rdp, lines: undefined }, { address: "192.0.2.10:3390", login: "demo-admin", lines: undefined });
+  assert.deepEqual(access.parseAccess("PPTP 192.0.2.7 логин demo пароль p@ss").vpn.secret, "p@ss");
+  // Окну — без секрета; адрес RDP из «Доступа» помечен fromAccess (окно его не передаёт обратно — файл читается заново).
+  const howto = access.howToConnect({ method: null, id: "111222333", account: "" }, info, { needsVPN: true });
+  assert.deepEqual(howto.vpn, { kind: "WireGuard", server: "vpn.demo.invalid:51820", login: "demo-user", hasSecret: true, lines: [] });
+  assert.deepEqual(howto.rdp, { address: "192.0.2.10:3390", login: "demo-admin", canOpen: true, fromAccess: true, lines: [] });
+  assert.ok(!JSON.stringify(howto).includes(DEMO_KEY));
+  // Запись RDP: адрес — её ID, логин — учётка записи.
+  const own = access.howToConnect({ method: "rdp", id: "10.20.0.15", account: "lims.admin" }, access.parseAccess(ACCESS), { needsVPN: true, usesRDP: true });
+  assert.deepEqual(own.rdp, { address: "10.20.0.15", login: "lims.admin", canOpen: true, fromAccess: false, lines: [] });
+  assert.deepEqual(own.vpn, { kind: "WireGuard", server: null, login: null, hasSecret: false, lines: ["VPN (WireGuard) | профиль Выдуманный-1"] }, "не разобралось — строка как есть");
+  const raw = access.howToConnect({ method: null, id: "1", account: "" }, access.parseAccess("Подключение через VPN — спросить у админа\nRDP — по запросу"), {});
+  assert.deepEqual([raw.vpn.lines, raw.rdp.lines, raw.rdp.address], [["Подключение через VPN — спросить у админа"], ["RDP — по запросу"], null]);
+  assert.deepEqual(access.howToConnect({ method: "vpn", id: "", account: "" }, null, { needsVPN: true }).vpn, { kind: null, server: null, login: null, hasSecret: false, lines: [] });
+  assert.equal(access.howToConnect({ method: null, id: "1", account: "" }, null, {}).rdp, null, "нет ни метки, ни строк RDP — блока RDP нет");
+});
+
+test("телефоны в «Контактах»: цифры с + ( ) - и пробелами, не меньше 7 цифр; перенос строки телефон не продолжает", () => {
+  assert.deepEqual(access.findPhones(DEMO_CONTACTS), ["+38 (044) 000-00-00", "067 000 11 22"]);
+  assert.deepEqual(access.findPhones("Иван, 050 000 00 00"), ["050 000 00 00"]);
+  assert.deepEqual(access.findPhones("каб. 12, тел. 12-34, 23.10.2026"), [], "короткие номера и даты — не телефоны");
+  assert.deepEqual(access.findPhones("123\n4567"), []);
+  for (const ok of ["+38 (044) 000-00-00", "0670001122"]) assert.ok(access.isPhone(ok), ok);
+  for (const bad of ["12-34", "067 000 11 22; calc", "+38 (044) <b>", "1".repeat(25)]) assert.ok(!access.isPhone(bad), bad);
+});
+
+test("карточка: «Как подключиться» и «Контакты» — из файла по запросу; ключа VPN в ответе нет; контактов нет в строке, поиске, подробностях и журнале", async () => {
+  const a = await app({ file: DEMO_FILE });
+  const key = a.key("Демо-лаборатория");
+  const card = await a.call("rc:cardInfo", key);
+  assert.equal(card.ok, true);
+  assert.deepEqual(card.howto.vpn, { kind: "WireGuard", server: "vpn.demo.invalid:51820", login: "demo-user", hasSecret: true, lines: [] });
+  assert.deepEqual(card.howto.rdp, { address: "192.0.2.10:3390", login: "demo-admin", canOpen: true, fromAccess: true, lines: [] });
+  assert.deepEqual(card.contacts, { text: DEMO_CONTACTS, phones: ["+38 (044) 000-00-00", "067 000 11 22"] });
+  assert.ok(!JSON.stringify(card).includes(DEMO_KEY), "пароль или ключ VPN окну не уходит");
+  // Без «Доступа» и «Контактов» — пусто; запись RDP — адрес из ID.
+  const plain = await a.call("rc:cardInfo", a.key("Східна"));
+  assert.deepEqual([plain.contacts, plain.howto.rdp], [null, null]);
+  assert.equal(plain.howto.vpn.hasSecret, false);
+  assert.equal((await a.call("rc:cardInfo", a.key("Вінницька · Філія 2"))).howto.rdp.address, "10.20.0.15");
+  assert.equal((await a.call("rc:cardInfo", a.key("Північна лабораторія"))).contacts.text, CONTACT);
+  assert.deepEqual(await a.call("rc:cardInfo", "999:x"), { ok: false });
+  // Строка, подробности (rc:details) и поиск контактов не знают.
+  const all = await a.call("rc:view", { query: "" });
+  const row = all.sections.flatMap((s) => s.records).find((r) => r.name === "Демо-лаборатория");
+  assert.equal(row.hasContacts, true);
+  for (const value of [all, await a.call("rc:details", key)]) for (const x of DEMO_SECRETS) assert.ok(!JSON.stringify(value).includes(x), x);
+  for (const q of ["Ольга", "067", "бухгалтерия", "Дежурный", "demo-user", "vpn.demo"]) {
+    const v = await a.call("rc:view", { query: q });
+    assert.ok(!v.sections.flatMap((s) => s.records).some((r) => r.name === "Демо-лаборатория"), `поиск «${q}» не по «Контактам»/«Доступу»`);
+  }
+  assert.deepEqual(a.log, [], "чтение карточки в журнал не пишется");
+  a.rc.dispose();
+});
+
+test("W2-5: пароль/ключ VPN, пароль учётки и «Доступ» — в буфер через помощник мимо журнала Win+V и облака; не вышло — ничего не скопировано", async () => {
+  const concealed = [];
+  let works = true;
+  const writeConcealed = async (secret) => { concealed.push(Buffer.from(secret.bytes).toString("utf8")); return works; };
+  const a = await app({ file: DEMO_FILE, extra: { writeConcealed } });
+  const key = a.key("Демо-лаборатория");
+  assert.deepEqual(await a.call("rc:copySecret", { key, field: "vpnSecret" }), { ok: true });
+  assert.deepEqual(concealed, [DEMO_KEY], "ключ целиком, с «=» в конце");
+  assert.equal(a.cb.writes, 0, "обычным writeText секрет не пишется");
+  assert.equal(a.huds.at(-1).title, "Пароль VPN скопирован");
+  assert.match(a.huds.at(-1).detail, /30 с/);
+  assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: "accountPassword" }), { ok: true });
+  assert.equal(concealed.at(-1), "Win-pass-2");
+  // У записи без ключа VPN — честно «не удалось».
+  assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: "vpnSecret" }), { ok: false, error: "unavailable" });
+  works = false;
+  assert.deepEqual(await a.call("rc:copySecret", { key, field: "access" }), { ok: false });
+  assert.equal(a.cb.writes, 0, "помощник не справился — секрет не уходит в буфер обычным текстом");
+  assert.equal(a.huds.at(-1).kind, "warning");
+  assert.deepEqual(a.log, ["copy ok field=vpnSecret", "copy ok field=accountPassword", "copy fail field=vpnSecret", "copy fail field=access"]);
+  for (const x of [...DEMO_SECRETS, "Win-pass-2"]) assert.ok(!JSON.stringify([a.huds, a.log]).includes(x), x);
+  a.rc.dispose();
+});
+
+test("телефон — «Скопировать» (только строка вида телефона); RDP из «Доступа» — адрес берётся из файла, не из окна", async () => {
+  const a = await app({ file: DEMO_FILE });
+  const key = a.key("Демо-лаборатория");
+  assert.deepEqual(await a.call("rc:copyPhone", "+38 (044) 000-00-00"), { ok: true });
+  assert.deepEqual(await a.call("rc:copyPhone", "calc.exe & 0670001122"), { ok: false, error: "phone" });
+  assert.deepEqual(a.copied, ["+38 (044) 000-00-00"]);
+  assert.equal(a.huds.at(-1).title, "Телефон скопирован");
+  assert.deepEqual(await a.call("rc:openRDP", { key, fromAccess: true }), { ok: true });
+  assert.deepEqual(a.rdpOpened, [{ method: "rdp", id: "192.0.2.10:3390" }]);
+  assert.deepEqual(await a.call("rc:copyAddress", { key, fromAccess: true }), { ok: true });
+  assert.equal(a.copied.at(-1), "192.0.2.10:3390");
+  // Без строки RDP в «Доступе» — подробности, ничего не открыто.
+  assert.deepEqual(await a.call("rc:openRDP", { key: a.key("Лісова"), fromAccess: true }), { ok: false, error: "details" });
+  assert.equal(a.rdpOpened.length, 1);
+  assert.deepEqual(a.log, ["copy ok field=phone", "copy ok field=address"], "в журнале только коды");
+  a.rc.dispose();
+});
+
+test("палитра: внизу только «Обновить» (↻); Excel, папка, «Добавить», настройки и «Загружено N · …» — в окне списка; контакты — только в карточке", () => {
+  const ui = path.join(__dirname, "..", "..", "remote", "ui");
+  const js = fs.readFileSync(path.join(ui, "remote.js"), "utf8"), html = fs.readFileSync(path.join(ui, "remote.html"), "utf8");
+  for (const id of ["openFile", "folderBtn", "reload", "addBtn", "settingsBtn", "summary"]) assert.match(html, new RegExp(`id="${id}"`), id);
+  assert.match(html, /id="reload"[^>]*aria-label="Обновить">↻</);
+  assert.match(js, /if \(palette\) \{ \$\("hints"\)\.hidden = false; for \(const id of \["openFile", "folderBtn", "addBtn", "settingsBtn", "summary"\]\) \$\(id\)\.hidden = true; \}/);
+  assert.ok(!/\$\("bar"\)\.hidden = true/.test(js), "панель палитры не прячется целиком — на ней «Обновить»");
+  assert.match(js, /function renderSummary\(\) \{[^}]*if \(palette\) \{ s\.textContent = ""; return; \}/);
+  assert.match(js, /\$\("addBtn"\)\.hidden = palette \|\|/);
+  assert.match(js, /\$\("folderBtn"\)\.onclick = \(\) => window\.rc\.showFolder\(\)/);
+  const row = js.slice(js.indexOf("function rowElement"), js.indexOf("function fitAllLabels"));
+  assert.ok(!/contacts|phone/i.test(row), "в строке списка контактов нет");
+  assert.ok(js.indexOf("contactsCard(currentCard.contacts)") > js.indexOf("async function renderDetails"));
+  // Пароль/ключ VPN — только точки и «Скопировать» (vpnSecret копирует основной процесс).
+  assert.match(js, /window\.rc\.copySecret\(r\.key, "vpnSecret"\)/);
+  assert.ok(!/howto\.vpn\.secret|vpn\.secret/.test(js));
 });
