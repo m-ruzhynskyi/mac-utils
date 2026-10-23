@@ -124,7 +124,8 @@ public struct ConnectionSearch: Sendable {
 extension ConnectionRecord {
     /// ID для показа: цифры группами по три с конца («123 456 789», «1 234 567 890»); алиас — как есть.
     public var displayID: String {
-        guard !isAlias else { return id }
+        // Алиас и адрес RDP (IP, имя) — как есть; по три цифры — только ID AnyDesk/TeamViewer.
+        guard !isAlias, !id.isEmpty, id.allSatisfy(\.isNumber) else { return id }
         var out = ""
         for (i, ch) in id.enumerated() {
             if i > 0, (id.count - i) % 3 == 0 { out.append(" ") }
