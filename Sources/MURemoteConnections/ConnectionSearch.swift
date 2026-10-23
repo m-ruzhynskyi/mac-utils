@@ -1,6 +1,6 @@
 import Foundation
 
-/// Поиск по названию, ID, группе, тегам и заметке: без регистра и диакритики, по частям слов,
+/// Поиск по названию, ID, группе, тегам, заметке и логину учётки («Доступ» — никогда: там бывают пароли): без регистра и диакритики, по частям слов,
 /// ID — с пробелами и без. Если по запросу ничего нет, пробует его в другой раскладке («ctdth» → «север»).
 public struct ConnectionSearch: Sendable {
     /// Запрос, набранный не в той раскладке, и во что он превратился — для плашки «ctdth → север».
@@ -28,7 +28,8 @@ public struct ConnectionSearch: Sendable {
     public init(_ records: [ConnectionRecord]) {
         entries = records.map { r in
             Entry(record: r, name: Self.fold(r.name), id: r.id,
-                  rest: Self.fold(([r.group] + r.tags + [r.note]).joined(separator: "\u{1F}")))
+                  rest: Self.fold(([r.group] + r.tags + r.tags.map(ConnectionTag.display) + [r.note, r.account])
+                      .joined(separator: "\u{1F}")))
         }
     }
 
@@ -123,7 +124,8 @@ public struct ConnectionSearch: Sendable {
 extension ConnectionRecord {
     /// ID для показа: цифры группами по три с конца («123 456 789», «1 234 567 890»); алиас — как есть.
     public var displayID: String {
-        guard !isAlias else { return id }
+        // Алиас и адрес RDP (IP, имя) — как есть; по три цифры — только ID AnyDesk/TeamViewer.
+        guard !isAlias, !id.isEmpty, id.allSatisfy(\.isNumber) else { return id }
         var out = ""
         for (i, ch) in id.enumerated() {
             if i > 0, (id.count - i) % 3 == 0 { out.append(" ") }

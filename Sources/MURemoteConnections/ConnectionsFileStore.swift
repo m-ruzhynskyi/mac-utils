@@ -235,6 +235,23 @@ public final class ConnectionsFileStore {
         try await lookupPassword(for: record).secret
     }
 
+    /// Пароль учётки или «Доступ» — из файла сейчас, как пароль. `field` — секретное поле.
+    public nonisolated static func lookupSecret(_ field: ConnectionField, for record: ConnectionRecord, url: URL,
+                                                sheet: String?) throws -> PasswordLookup {
+        precondition(field.isSecret)
+        return try ConnectionsSources.source(for: url, sheet: sheet).lookupSecret(field, for: record, in: try readData(url))
+    }
+
+    public func lookupSecret(_ field: ConnectionField, for record: ConnectionRecord) async throws -> PasswordLookup {
+        guard let url = fileURL else { throw ConnectionsError.noFile }
+        let sheet = settings.sheetName
+        return try await withCheckedThrowingContinuation { cont in
+            queue.async {
+                cont.resume(with: Result { try Self.lookupSecret(field, for: record, url: url, sheet: sheet) })
+            }
+        }
+    }
+
     // MARK: Наблюдение
 
     /// Следим за файлом; если его нет — за папкой, чтобы заметить, когда он появится.

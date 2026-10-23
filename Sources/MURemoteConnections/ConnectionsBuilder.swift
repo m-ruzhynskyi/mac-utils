@@ -15,26 +15,40 @@ enum ConnectionsBuilder {
                 diag.skipped.append(SkippedRow(row: e.row, reason: reason, value: value))
             }
             if name.isEmpty { skip(.missingName, ""); continue }
-            if rawID.isEmpty { skip(.missingID, ""); continue }
-            guard let id = ConnectionID.normalize(rawID) else { skip(.invalidID, rawID); continue }
             let programText = trim(e.program)
             var program: RemoteProgram?
+            var method: ConnectionMethod?
             if !programText.isEmpty {
-                guard let p = RemoteProgram.parse(programText) else { skip(.unknownProgram, programText); continue }
-                program = p
+                if let p = RemoteProgram.parse(programText) {
+                    program = p
+                } else if let m = ConnectionMethod.parse(programText) {
+                    method = m
+                } else {
+                    skip(.unknownProgram, programText); continue
+                }
             }
-            if let program, id.isAlias, !program.supportsAliases { skip(.aliasNotSupported, rawID); continue }
-            if id.lossy { diag.lossyIDRows.append(e.row) }
+            let idValue: String
+            if method != nil {
+                // RDP/VPN/«Другое»: ID не обязателен; для RDP это адрес (IP или имя), его не нормализуем как ID AnyDesk.
+                idValue = idKey(rawID)
+            } else {
+                if rawID.isEmpty { skip(.missingID, ""); continue }
+                guard let id = ConnectionID.normalize(rawID) else { skip(.invalidID, rawID); continue }
+                if let program, id.isAlias, !program.supportsAliases { skip(.aliasNotSupported, rawID); continue }
+                if id.lossy { diag.lossyIDRows.append(e.row) }
+                idValue = id.value
+            }
             records.append(ConnectionRecord(
-                sourceRow: e.row, name: name, id: id.value,
+                sourceRow: e.row, name: name, id: idValue,
                 group: trim(e.group), tags: splitTags(e.tags), note: trim(e.note),
-                program: program, hasPassword: e.hasPassword))
+                program: program, hasPassword: e.hasPassword, method: method, account: trim(e.account),
+                hasAccountPassword: e.hasAccountPassword, accessLines: e.accessLines))
         }
 
         // Без программы и не алиас — возьмётся программа по умолчанию. Если в файле есть обе программы, это стоит показать.
         let named = Set(records.compactMap(\.program))
         if named.count > 1 {
-            diag.ambiguousProgramRows = records.filter { $0.program == nil && !$0.isAlias }.map(\.sourceRow)
+            diag.ambiguousProgramRows = records.filter { $0.program == nil && $0.method == nil && !$0.isAlias }.map(\.sourceRow)
         }
         diag.duplicates = duplicates(records)
         diag.loaded = records.count
@@ -46,7 +60,7 @@ enum ConnectionsBuilder {
     private static func duplicates(_ records: [ConnectionRecord]) -> [DuplicateGroup] {
         var byID: [String: [ConnectionRecord]] = [:]
         var order: [String] = []
-        for r in records {
+        for r in records where !r.id.isEmpty {
             if byID[r.id] == nil { order.append(r.id) }
             byID[r.id, default: []].append(r)
         }
@@ -62,7 +76,13 @@ enum ConnectionsBuilder {
         var seen = Set<String>()
         return raw.split(whereSeparator: { $0 == "," || $0 == ";" })
             .map { trim(String($0)) }
-            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+            .filter { !$0.isEmpty && seen.insert(ConnectionTag.key($0)).inserted }
+    }
+
+    /// Ключ ID для сопоставления строк файла: ID AnyDesk/TeamViewer — нормализованный, иначе (адрес RDP) — как есть.
+    static func idKey(_ raw: String) -> String {
+        let t = trim(raw)
+        return ConnectionID.normalize(t)?.value ?? t
     }
 
     private static func trim(_ s: String) -> String {

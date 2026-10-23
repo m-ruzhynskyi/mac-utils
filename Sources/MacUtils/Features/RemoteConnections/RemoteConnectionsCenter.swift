@@ -128,13 +128,20 @@ final class RemoteConnectionsCenter: ObservableObject {
         set { defaults.set(newValue, forKey: RemotePref.timeout); objectWillChange.send() }
     }
 
-    func listing(query: String, filter: ProgramFilter) -> ConnectionListing {
+    func listing(query: String, filter: ProgramFilter, tags: Set<String> = []) -> ConnectionListing {
         ConnectionListBuilder.build(search: search, query: query, filter: filter, defaultProgram: defaultProgram,
-                                    favorites: favorites, recents: recents)
+                                    favorites: favorites, recents: recents, tags: tags)
     }
+
+    /// Подробности записи, открытые по ↩ (VPN, «Другое», RDP без адреса) — вкладка показывает их вместо списка.
+    @Published var detailsRecord: ConnectionRecord?
 
     private func sync() {
         state = store.state
+        // Подробности — той же записи из перечитанного файла; её больше нет — назад к списку.
+        if let open = detailsRecord {
+            detailsRecord = store.snapshot.records.first { $0.identity == open.identity && $0.name == open.name }
+        }
         if snapshot != store.snapshot {
             snapshot = store.snapshot
             search = ConnectionSearch(snapshot.records)
@@ -187,6 +194,9 @@ final class RemoteConnectionsCenter: ObservableObject {
 
     /// Записи можно добавлять и править только в .xml; .xlsx правится в Excel.
     var canEdit: Bool { fileURL?.pathExtension.lowercased() == "xml" }
+
+    /// Запись можно открыть в карточке: в .xml — править, в .xlsx/.xlsm — только смотреть (правка — в Excel).
+    var canView: Bool { ["xml", "xlsx", "xlsm"].contains(fileURL?.pathExtension.lowercased() ?? "") }
 
     /// Добавить (`record == nil`) или изменить запись. Файл читается заново, меняются только байты этой записи,
     /// перед записью — `.bak` с теми же правами.
@@ -275,6 +285,11 @@ final class RemoteConnectionsCenter: ObservableObject {
     /// `withPassword: false` — ⌘↩, только открыть программу на этом ID.
     func connect(_ record: ConnectionRecord, withPassword: Bool = true, program chosen: RemoteProgram? = nil,
                  retry: Bool = false) {
+        // RDP — в Windows App; VPN и «Другое» — подробности: AnyDesk/TeamViewer здесь ни при чём.
+        if let method = record.method {
+            if method == .rdp, RDPLink.isValidHost(record.id) { openRDP(record) } else { detailsRecord = record }
+            return
+        }
         connection?.cancel()
         let hud = RemoteHUDController.shared
         hud.onAction = { [weak self] action in self?.handle(action) }
@@ -294,6 +309,8 @@ final class RemoteConnectionsCenter: ObservableObject {
             var opened = false
             let outcome = await self?.connector.connect(request, provider: provider, password: {
                 try await store.lookupPassword(for: record)
+            }, accountPassword: {
+                try await store.lookupSecret(.accountPassword, for: record)
             }, progress: { [weak self] phase in
                 if phase == .opening { opened = true }
                 if case .finished(let outcome) = phase, outcome.isSuccess, self?.notifySuccess == false { return hud.dismiss() }
@@ -307,14 +324,87 @@ final class RemoteConnectionsCenter: ObservableObject {
             }
             if outcome == .failed(.entryGone) { self.store.reload() }
             // Запасной путь — вставить ID вручную. Только ID: пароль в буфер обмена не попадает никогда.
-            if outcome == .unconfirmed(copyID: true) {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(record.id, forType: .string)
-            }
+            if outcome == .unconfirmed(copyID: true) { self.copyText(record.id) }
         }
     }
 
     func appURL(_ program: RemoteProgram) -> URL? { launcher.appURL(bundleID: program.bundleID) }
+
+    // MARK: RDP, учётка, «Доступ»
+
+    /// Windows App (или прежний Microsoft Remote Desktop); нет — адрес в буфер и нейтральный тост.
+    func openRDP(_ record: ConnectionRecord) {
+        let hud = RemoteHUDController.shared
+        guard let contents = RDPLink.file(host: record.id, account: record.account) else { detailsRecord = record; return }
+        let who = "\(record.name) · \(record.id)"
+        if let app = RDPLink.bundleIDs.lazy.compactMap({ NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }).first,
+           let file = Self.writeRDPFile(contents, name: record.name) {
+            NSWorkspace.shared.open([file], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+            ConnectionLists.noteConnected(record, in: prefs)
+            recents = prefs.recentIDs
+            if notifySuccess { hud.show(RemoteHUDContent(tone: .success, title: RL("Открываю %@…", "Windows App"), detail: who)) }
+        } else {
+            copyText(record.id)
+            hud.show(RemoteHUDContent(tone: .neutral, title: RL("Windows App не установлен — адрес скопирован"),
+                                      detail: RL("Вставьте адрес в программу удалённого рабочего стола."), actions: [.close]))
+        }
+    }
+
+    /// `.rdp` во временной папке только для владельца; через минуту удаляется (Windows App его уже прочитал).
+    private static func writeRDPFile(_ contents: Data, name: String) -> URL? {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mu-rdp-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let url = dir.appendingPathComponent(RDPLink.fileName(for: name))
+            guard FileManager.default.createFile(atPath: url.path, contents: contents, attributes: [.posixPermissions: 0o600]) else { return nil }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { try? FileManager.default.removeItem(at: dir) }
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    func copyAddress(_ record: ConnectionRecord) {
+        copyText(record.id)
+        RemoteHUDController.shared.show(RemoteHUDContent(tone: .success, title: RL("Адрес скопирован"), detail: record.name))
+    }
+
+    /// Секретное поле (пароль учётки, «Доступ») — из файла сейчас. Вызывающий затирает.
+    func readSecret(_ field: ConnectionField, of record: ConnectionRecord) async -> SecretBuffer? {
+        try? await store.lookupSecret(field, for: record).secret
+    }
+
+    /// Скопировать секрет: скрыто от истории буфера, через 30 с буфер очищается, если в нём всё ещё он.
+    func copySecret(_ field: ConnectionField, of record: ConnectionRecord) {
+        Task { @MainActor [weak self] in
+            guard let self, let secret = await self.readSecret(field, of: record) else {
+                RemoteHUDController.shared.show(RemoteHUDContent(tone: .warning, title: RL("Не удалось прочитать файл"),
+                                                                 detail: RL("Проверьте, что файл на месте, и повторите."), actions: [.close]))
+                return
+            }
+            defer { secret.wipe() }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            let item = NSPasteboardItem()
+            secret.withBytes { item.setString(String(decoding: $0, as: UTF8.self), forType: .string) }
+            item.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+            item.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+            pasteboard.writeObjects([item])
+            let stamp = pasteboard.changeCount
+            RemoteHUDController.shared.show(RemoteHUDContent(
+                tone: .success, title: field == .access ? RL("«Доступ» скопирован") : RL("Пароль учётки скопирован"),
+                detail: RL("Буфер очистится через 30 с.")))
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if NSPasteboard.general.changeCount == stamp { NSPasteboard.general.clearContents() }
+            }
+        }
+    }
+
+    private func copyText(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
 
     /// Надписи окна пароля — из установленной программы, на всех её языках.
     private func texts(for program: RemoteProgram) -> ProviderTexts {

@@ -14,6 +14,10 @@ public struct ProviderTexts: Equatable, Sendable {
     public var promptContinueTitles: Set<String>
     /// Выбор по умолчанию, который оставляем («Console»).
     public var promptDefaultTitles: Set<String>
+    /// Выбор «учётная запись» в том же окне («User account») — когда у записи есть логин учётки.
+    public var promptAccountTitles: Set<String>
+    /// Окно пароля просит пароль учётной записи Windows, а не программы («User account password required»).
+    public var accountPasswordTexts: Set<String>
     /// Программа соединяется или ждёт, пока та сторона примет запрос.
     public var progressTexts: Set<String>
     /// Сеанс установлен (AnyDesk «Waiting for image»).
@@ -29,7 +33,8 @@ public struct ProviderTexts: Equatable, Sendable {
                 autologinTitles: Set<String> = [], confirmTitles: Set<String> = ["OK", "ОК", "Connect", "Log In"],
                 promptTexts: Set<String> = [], promptContinueTitles: Set<String> = [], promptDefaultTitles: Set<String> = [],
                 progressTexts: Set<String> = [], sessionTexts: Set<String> = [], closedTexts: Set<String> = [],
-                connectFieldTexts: Set<String> = [], connectButtonTitles: Set<String> = []) {
+                connectFieldTexts: Set<String> = [], connectButtonTitles: Set<String> = [],
+                promptAccountTitles: Set<String> = [], accountPasswordTexts: Set<String> = []) {
         self.passwordWindowTitles = Set(passwordWindowTitles.map(Self.key))
         self.rejectionTexts = Set(rejectionTexts.map(Self.key))
         self.autologinTitles = Set(autologinTitles.map(Self.key))
@@ -42,6 +47,8 @@ public struct ProviderTexts: Equatable, Sendable {
         self.closedTexts = Set(closedTexts.map(Self.key))
         self.connectFieldTexts = Set(connectFieldTexts.map(Self.key))
         self.connectButtonTitles = Set(connectButtonTitles.map(Self.key))
+        self.promptAccountTitles = Set(promptAccountTitles.map(Self.key))
+        self.accountPasswordTexts = Set(accountPasswordTexts.map(Self.key))
     }
 
     /// Ключи строк в `Localizable.strings` программы и в переводах её веб-интерфейса.
@@ -53,6 +60,8 @@ public struct ProviderTexts: Equatable, Sendable {
         public var prompt: [String] = []
         public var promptContinue: [String] = []
         public var promptDefault: [String] = []
+        public var promptAccount: [String] = []
+        public var accountPassword: [String] = []
         public var progress: [String] = []
         public var session: [String] = []
         /// Все заголовки и сообщения с этим префиксом (`ad.dlg.closed.…title/message`).
@@ -96,6 +105,8 @@ public struct ProviderTexts: Equatable, Sendable {
             add(keys.prompt, &texts.promptTexts)
             add(keys.promptContinue, &texts.promptContinueTitles)
             add(keys.promptDefault, &texts.promptDefaultTitles)
+            add(keys.promptAccount, &texts.promptAccountTitles)
+            add(keys.accountPassword, &texts.accountPasswordTexts)
             add(keys.progress, &texts.progressTexts)
             add(keys.session, &texts.sessionTexts)
             add(keys.connectField, &texts.connectFieldTexts)
@@ -175,6 +186,10 @@ public struct AnyDeskAutomator: RemoteProvider {
                                                 prompt: ["ad.dlg.terminal.title", "ad.dlg.terminal.users_logged_on"],
                                                 promptContinue: ["ad.dlg.connect"],
                                                 promptDefault: ["ad.dlg.terminal.console"],
+                                                promptAccount: ["ad.dlg.terminal.user"],
+                                                accountPassword: ["ad.dlg.passwd.msg.pwd_required.user",
+                                                                  "ad.dlg.passwd.msg.pwd_or_confirm.user",
+                                                                  "ad.dlg.passwd.msg.pwd_required.admin"],
                                                 progress: ["ad.dlg.connect.msg", "ad.dlg.connect.title",
                                                            "ad.dlg.wait_for_accept.msg", "ad.dlg.wait_for_accept.title",
                                                            "ad.dlg.connecting_to_ios_extension.msg"],

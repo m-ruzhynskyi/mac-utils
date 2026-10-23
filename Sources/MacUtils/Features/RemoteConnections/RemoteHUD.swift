@@ -255,9 +255,13 @@ final class RemoteHUDController {
     private(set) var current: RemoteHUDContent?
 
     func show(_ phase: ConnectionPhase, program: RemoteProgram, record: ConnectionRecord) {
-        let content = RemoteHUDContent.make(phase, program: program, record: record)
         if case .finished(.cancelled) = phase { return dismiss() }
-        let announce = current?.title != content.title && !(current?.spinner == true && content.spinner && phase.isWaiting)
+        show(RemoteHUDContent.make(phase, program: program, record: record), program: program, waiting: phase.isWaiting)
+    }
+
+    /// Готовое сообщение (RDP, копирование) — тот же HUD.
+    func show(_ content: RemoteHUDContent, program: RemoteProgram = .anyDesk, waiting: Bool = false) {
+        let announce = current?.title != content.title && !(current?.spinner == true && content.spinner && waiting)
         current = content
         generation += 1
         let token = generation
