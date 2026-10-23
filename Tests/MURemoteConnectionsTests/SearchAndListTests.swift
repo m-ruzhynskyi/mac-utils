@@ -1,6 +1,5 @@
 @testable import MURemoteConnections
 import XCTest
-@testable import MUCore
 
 final class SearchAndListTests: XCTestCase {
     private let records: [ConnectionRecord] = [

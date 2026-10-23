@@ -1,6 +1,5 @@
 @testable import MURemoteConnections
 import XCTest
-@testable import MUCore
 
 /// Приёмка модуля по ТЗ § 7 (`.audit/tz-anydesk.md`): файлы на диске, как у пользователя, и путь
 /// «файл → хранилище → список → поиск». Данные выдуманные, собираются здесь же (бинарников нет).
