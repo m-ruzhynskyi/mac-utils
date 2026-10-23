@@ -245,19 +245,27 @@ public enum XMLConnectionsEditor {
         }
     }
 
+    /// Экранирование для текста элемента или значения атрибута. По скалярам, а не символам: «\r\n» — один `Character`.
+    /// CR пишется ссылкой везде (иначе читатель XML превратит CRLF в LF). В атрибуте ещё и перевод строки
+    /// и табуляция — ссылками: литералом они читались бы пробелом (нормализация значения атрибута), и многострочная
+    /// заметка у записи `<connection … />` потерялась бы.
     static func escape(_ s: String, attribute: Bool = false) -> String {
-        var out = ""
-        for ch in s {
-            switch ch {
-            case "&": out += "&amp;"
-            case "<": out += "&lt;"
-            case ">": out += "&gt;"
-            case "\"" where attribute: out += "&quot;"
-            case "'" where attribute: out += "&apos;"
-            default: out.append(ch)
+        var out = String.UnicodeScalarView()
+        func put(_ t: String) { out.append(contentsOf: t.unicodeScalars) }
+        for u in s.unicodeScalars {
+            switch u {
+            case "&": put("&amp;")
+            case "<": put("&lt;")
+            case ">": put("&gt;")
+            case "\r": put("&#13;")
+            case "\"" where attribute: put("&quot;")
+            case "'" where attribute: put("&apos;")
+            case "\n" where attribute: put("&#10;")
+            case "\t" where attribute: put("&#9;")
+            default: out.append(u)
             }
         }
-        return out
+        return String(out)
     }
 
     /// Запись из черновика читается обратно ровно такой, как в окне правки (и пароль, если его меняли).

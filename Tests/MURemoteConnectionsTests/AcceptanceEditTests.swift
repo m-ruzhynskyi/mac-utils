@@ -98,8 +98,8 @@ final class AcceptanceEditTests: XCTestCase {
                     case "id": draft.id = "999 888 777"
                     case "group": draft.group = "Новая группа"
                     case "tags": draft.tags = "а, б; в"
-                    // Запись-атрибут: перевод строки в атрибуте читается пробелом, редактор отказывает (corrupt) — см. тест ниже.
-                    case "note": draft.note = i == 1 ? "строка ]]> & '\"" : "строка 1\nстрока 2 ]]> & '\""
+                    // У записи-атрибута перевод строки пишется ссылкой `&#10;` — заметка та же, что у остальных (см. тест ниже).
+                    case "note": draft.note = "строка 1\nстрока 2 ]]> & '\""
                     case "program": draft.program = record.program == .teamViewer ? .anyDesk : .teamViewer
                     default: draft.password = "Новый ]]> пароль & \"x\" 🔐"
                     }
@@ -446,13 +446,27 @@ final class AcceptanceEditTests: XCTestCase {
         }
     }
 
-    func testMultilineNoteInAttributeRecordIsRefusedAndFileUntouched() throws {
-        let data = lf
-        let record = try records(data)[1]
-        var d = ConnectionDraft(record); d.note = "строка 1\nстрока 2"
-        XCTAssertThrowsError(try XMLConnectionsEditor.update(record, with: d, in: data)) {
-            XCTAssertEqual($0 as? XMLEditError, .corrupt)
+    /// Многострочная заметка у записи `<connection … />`: перевод строки, CR и табуляция — ссылками в атрибуте,
+    /// читаются обратно без потерь; остальные байты файла не меняются.
+    func testMultilineNoteInAttributeRecordIsKept() throws {
+        for (label, data) in variants() {
+            let record = try records(data)[1]
+            var d = ConnectionDraft(record); d.note = "строка 1\nстрока 2\r\nстрока\t3"
+            guard let out = attempt(label, { try XMLConnectionsEditor.update(record, with: d, in: data) }) else { continue }
+            XCTAssertTrue(String(decoding: out, as: UTF8.self).contains(#"note="строка 1&#10;строка 2&#13;&#10;строка&#9;3""#), label)
+            XCTAssertEqual(try records(out)[1].note, "строка 1\nстрока 2\r\nстрока\t3", label)
+            var other = try rows(out); other.remove(at: 1)
+            var was = try rows(data); was.remove(at: 1)
+            XCTAssertEqual(other, was, label)
         }
+    }
+
+    /// Многострочная заметка у записи-элемента: CR пишется ссылкой, CRLF не превращается в LF.
+    func testMultilineNoteInElementRecordKeepsLineEndings() throws {
+        let record = try records(lf)[0]
+        var d = ConnectionDraft(record); d.note = "а\r\nб\nв"
+        let out = try XMLConnectionsEditor.update(record, with: d, in: lf)
+        XCTAssertEqual(try records(out)[0].note, "а\r\nб\nв")
     }
 
     // MARK: Шаблоны
