@@ -49,6 +49,7 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
               "ad.dlg.wait_for_accept.msg": "Please wait for the remote side to accept your session request.",
               "ad.dlg.wait_for_accept.title": "Connecting...",
               "ad.dlg.wait_for_image.msg": "Waiting for image.", "ad.dlg.wait_for_image.title": "Connected",
+              "ad.dlg.passwd.msg.pwd_required.user": "User account password required.",
               "ad.dlg.passwd.title": "Authorization", "ad.dlg.passwd.remember": "Log in automatically from now on",
               "ad.dlg.closed.auth_failed.title": "Password Rejected"],
         .ru: ["ad.dlg.terminal.title": "Терминальный сеанс",
@@ -56,6 +57,7 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
               "ad.dlg.terminal.console": "Консоль", "ad.dlg.terminal.user": "Учётная запись",
               "ad.dlg.connect": "Подключиться", "ad.dlg.cancel": "Отмена", "ad.dlg.ok": "ОК",
               "ad.dlg.wait_for_image.msg": "Ожидание изображения.", "ad.dlg.wait_for_image.title": "Подключено",
+              "ad.dlg.passwd.msg.pwd_required.user": "Требуется пароль учётной записи пользователя.",
               "ad.dlg.passwd.title": "Авторизация", "ad.dlg.passwd.remember": "Входить автоматически",
               "ad.dlg.closed.auth_failed.title": "Пароль отклонён"],
         .uk: ["ad.dlg.terminal.title": "Термінальний сеанс",
@@ -63,6 +65,7 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
               "ad.dlg.terminal.console": "Консоль", "ad.dlg.terminal.user": "Обліковий запис користувача",
               "ad.dlg.connect": "Підключитися", "ad.dlg.cancel": "Скасувати", "ad.dlg.ok": "OK",
               "ad.dlg.wait_for_image.msg": "З'єднання встановлено.  Очікую зображення.", "ad.dlg.wait_for_image.title": "Підключено",
+              "ad.dlg.passwd.msg.pwd_required.user": "Потрібен пароль облікового запису користувача.",
               "ad.dlg.passwd.title": "Необхідно вказати пароль", "ad.dlg.passwd.remember": "Входити автоматично",
               "ad.dlg.closed.auth_failed.title": "Пароль відхилено"],
     ]
@@ -106,14 +109,15 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
     }
 
     @discardableResult
-    private func run(_ request: ConnectRequest, provider: RemoteProvider, password: String? = "Pw-секрет-1", checkForbidden: Bool = true,
+    private func run(_ request: ConnectRequest, provider: RemoteProvider, password: String? = "Pw-секрет-1", accountPassword: String? = nil, checkForbidden: Bool = true,
                      file: StaticString = #filePath, line: UInt = #line) async -> ConnectionOutcome {
         let outcome = await connector().connect(request, provider: provider, password: {
             guard let password else { return .noPassword }
             return .found(SecretBuffer(password.utf8))
-        }, progress: { self.phases.append(($0, self.clock.milliseconds)) })
+        }, accountPassword: accountPassword.map { value in { .found(SecretBuffer(value.utf8)) } },
+           progress: { self.phases.append(($0, self.clock.milliseconds)) })
         if checkForbidden { assertNoForbiddenPresses(file: file, line: line) }
-        assertNoSecretsInLogs([password, "Pw-секрет-1"].compactMap { $0 }, file: file, line: line)
+        assertNoSecretsInLogs([password, accountPassword, "Pw-секрет-1"].compactMap { $0 }, file: file, line: line)
         return outcome
     }
 
@@ -149,8 +153,8 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
 
     private func terminal(_ lang: Lang = .en, cancelIsDefault: Bool = false, order: [Int] = [0, 1], nested: Bool = false) -> Terminal {
         let s = Self.adStrings[lang]!
-        let console = TSNode("AXRadioButton", label: s["ad.dlg.terminal.console"]); console.selected = true
-        let user = TSNode("AXRadioButton", label: s["ad.dlg.terminal.user"])
+        let console = TSNode("AXRadioButton", label: s["ad.dlg.terminal.console"]); console.isChecked = true
+        let user = TSNode("AXRadioButton", label: s["ad.dlg.terminal.user"]); user.isChecked = false
         let userField = TSNode("AXTextField")
         let cancel = TSNode("AXButton", label: s["ad.dlg.cancel"])
         let connect = TSNode("AXButton", label: s["ad.dlg.connect"])
@@ -209,7 +213,7 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
             XCTAssertEqual(t.cancel.pressCount, 0, "\(lang): Cancel не нажимается")
             XCTAssertEqual(t.console.pressCount, 0, "\(lang): выбор по умолчанию (Console) не трогаем")
             XCTAssertEqual(t.user.pressCount, 0, "\(lang)")
-            XCTAssertTrue(t.console.selected && !t.user.selected, "\(lang)")
+            XCTAssertTrue(t.console.isChecked == true && t.user.isChecked == false, "\(lang)")
             XCTAssertEqual(t.userField.text, "", "\(lang): в поле учётной записи ничего не вписано")
             XCTAssertEqual(pw.field.text, "Pw-секрет-1", "\(lang): пароль введён в окно пароля")
             XCTAssertTrue(["", "Pw-секрет-1"].contains(keyboard.typedText), "\(lang): напечатан только пароль (или ничего: он ушёл через AX)")
@@ -527,20 +531,23 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
 
     // MARK: Задача 4: учётная запись Windows (ожидает API: ConnectionRecord.account, accountPassword, ConnectRequest)
 
-    /// Единственное место, где нужно подключить новое API: запрос на подключение с логином и паролем учётной записи.
-    /// Пока полей нет — nil, и тесты ниже пропускаются.
-    private func accountRequest(login: String, password: String) -> (request: ConnectRequest, accountPassword: String)? { nil }
+    /// Запрос на подключение с записью, у которой есть логин и пароль учётки Windows (пароль отдаётся через `accountPassword:`).
+    private func accountRequest(login: String, password: String) -> (request: ConnectRequest, accountPassword: String)? {
+        let record = ConnectionRecord(sourceRow: 2, name: "Лаборатория Север", id: "123456789", hasPassword: true,
+                                      account: login, hasAccountPassword: true)
+        return (ConnectRequest(record: record, program: .anyDesk, withPassword: true, autologin: false, timeoutSeconds: 20), password)
+    }
 
     /// Terminal Session и у записи есть account: «User account» выбран, логин вписан, «Connect» нажат; Console не нужен.
     func testTerminalSessionWithAccountSelectsUserAccountTypesLoginAndConnects() async throws {
         try requireNewAPI()
-        guard let (req, _) = accountRequest(login: "Администратор", password: "Win-пароль-9") else {
+        guard let (req, winPassword) = accountRequest(login: "Администратор", password: "Win-пароль-9") else {
             throw XCTSkip("ожидает API задачи 4: account/accountPassword в записи и запросе")
         }
         let app = try makeAnyDeskApp()
         let t = terminal(), pw = passwordWindow()
         launches(.anyDesk, windows: [(500, t.window)])
-        t.user.onPress = { t.user.selected = true; t.console.selected = false }
+        t.user.onPress = { t.user.isChecked = true; t.console.isChecked = false }
         t.connect.onPress = { [unowned self] in
             ax.close(t.window, pid: pid)
             clock.at(clock.milliseconds + 500) { [unowned self] in ax.show(pw.window, pid: pid) }
@@ -549,7 +556,7 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
             ax.close(pw.window, pid: pid)
             clock.at(clock.milliseconds + 500) { [unowned self] in ax.show(sessionWindow(), pid: pid) }
         }
-        let outcome = await run(req, provider: provider(.anyDesk, app: app))
+        let outcome = await run(req, provider: provider(.anyDesk, app: app), accountPassword: winPassword)
         XCTAssertEqual(outcome.code, "connected")
         XCTAssertEqual(t.user.pressCount, 1, "выбран «User account»")
         XCTAssertEqual(t.console.pressCount, 0)
@@ -571,41 +578,45 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
         let pw = passwordWindow()
         launches(.anyDesk, windows: [(500, pw.window)])
         pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: pid) }
-        _ = await run(req, provider: provider(.anyDesk, app: app))
+        _ = await run(req, provider: provider(.anyDesk, app: app), accountPassword: accountPassword)
         XCTAssertEqual(pw.field.text, "Pw-секрет-1")
         XCTAssertFalse(keyboard.typedText.contains(accountPassword))
         XCTAssertFalse(keyboard.typedText.contains("Администратор"))
     }
 
-    /// Окно входа Windows после подключения: пароль учётки — в защищённое поле, логин — только если поле пустое; пароль не в журнале.
-    func testWindowsLoginPromptGetsAccountPasswordAndLoginOnlyIfEmpty() async throws {
+    /// AnyDesk просит пароль учётной записи («User account password required»): в защищённое поле — пароль учётки (не пароль AnyDesk),
+    /// логин — только если поле логина пустое; Cancel не нажимается; пароли не в журнале. Для каждого языка интерфейса.
+    func testAccountPasswordRequestGetsAccountPasswordAndLoginOnlyIfEmpty() async throws {
         try requireNewAPI()
         guard let (req, accountPassword) = accountRequest(login: "Администратор", password: "Win-пароль-9") else {
-            throw XCTSkip("ожидает API задачи 4: account/accountPassword в записи и запросе")
+            throw XCTSkip("ожидает API задачи 4")
         }
-        for prefilledLogin in [false, true] {
-            setUpFresh()
-            let app = try makeAnyDeskApp()
-            let pw = passwordWindow(), session = sessionWindow()
-            let login = TSNode("AXTextField"); login.detail = "User name"
-            if prefilledLogin { _ = login.setText("Администратор") }
-            let secret = TSNode("AXTextField", subrole: "AXSecureTextField")
-            let submit = TSNode("AXButton", label: "OK"), cancel = TSNode("AXButton", label: "Cancel")
-            let prompt = TSNode("AXWindow", subrole: "AXDialog", label: "Windows Security",
-                                children: [TSNode("AXStaticText", label: "Enter your credentials"), login, secret, cancel, submit])
-            prompt.defaultButtonNode = submit
-            launches(.anyDesk, windows: [(500, pw.window)])
-            pw.ok.onPress = { [unowned self] in
-                ax.close(pw.window, pid: pid)
-                clock.at(clock.milliseconds + 400) { [unowned self] in ax.show(session, pid: pid) }
-                clock.at(clock.milliseconds + 900) { [unowned self] in ax.show(prompt, pid: pid) }
+        for lang in Lang.allCases {
+            for prefilledLogin in [false, true] {
+                setUpFresh()
+                let app = try makeAnyDeskApp()
+                let s = Self.adStrings[lang]!
+                let login = TSNode("AXTextField"); login.detail = "User name"
+                if prefilledLogin { _ = login.setText("Администратор") }
+                let secret = TSNode("AXTextField", subrole: "AXSecureTextField")
+                let ok = TSNode("AXButton", label: s["ad.dlg.ok"]), cancel = TSNode("AXButton", label: s["ad.dlg.cancel"])
+                let window = TSNode("AXWindow", subrole: "AXDialog", label: s["ad.dlg.passwd.title"],
+                                    children: [TSNode("AXStaticText", label: s["ad.dlg.passwd.msg.pwd_required.user"]), login, secret, cancel, ok])
+                window.defaultButtonNode = ok
+                launches(.anyDesk, windows: [(500, window)])
+                ok.onPress = { [unowned self] in
+                    ax.close(window, pid: pid)
+                    clock.at(clock.milliseconds + 400) { [unowned self] in ax.show(sessionWindow(lang), pid: pid) }
+                }
+                let outcome = await run(req, provider: provider(.anyDesk, app: app), accountPassword: accountPassword)
+                let tag = "\(lang) prefilled=\(prefilledLogin)"
+                XCTAssertEqual(secret.text, accountPassword, tag)
+                XCTAssertFalse(secret.text.contains("Pw-секрет-1"), "\(tag): пароль AnyDesk в поле пароля учётки не вводится никогда")
+                XCTAssertEqual(login.text, "Администратор", "\(tag): логин вписан ровно один раз")
+                XCTAssertEqual(cancel.pressCount, 0, tag)
+                XCTAssertTrue(outcome.isSuccess, "\(tag): \(outcome)")
+                assertNoSecretsInLogs([accountPassword, "Администратор"])
             }
-            submit.onPress = { [unowned self] in ax.close(prompt, pid: pid) }
-            _ = await run(req, provider: provider(.anyDesk, app: app))
-            XCTAssertEqual(secret.text, accountPassword, "prefilled=\(prefilledLogin)")
-            XCTAssertEqual(login.text, "Администратор", "логин вписан ровно один раз (prefilled=\(prefilledLogin))")
-            XCTAssertEqual(cancel.pressCount, 0)
-            assertNoSecretsInLogs([accountPassword, "Администратор"])
         }
     }
 
