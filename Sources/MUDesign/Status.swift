@@ -1,10 +1,10 @@
 import SwiftUI
 import MUCore
 
-enum PermissionKind: CaseIterable {
+package enum PermissionKind: CaseIterable {
     case accessibility, screenRecording, microphone, fullDiskAccess, automation
 
-    var title: String {
+    package var title: String {
         switch self {
         case .accessibility: return "Универсальный доступ"
         case .screenRecording: return "Запись экрана"
@@ -14,7 +14,7 @@ enum PermissionKind: CaseIterable {
         }
     }
 
-    var symbol: String {
+    package var symbol: String {
         switch self {
         case .accessibility: return "hand.raised"
         case .screenRecording: return "rectangle.dashed.badge.record"
@@ -25,10 +25,10 @@ enum PermissionKind: CaseIterable {
     }
 }
 
-enum PermissionState: Equatable {
+package enum PermissionState: Equatable {
     case granted, needed, denied
 
-    var tone: DS.Tone {
+    package var tone: DS.Tone {
         switch self {
         case .granted: return .success
         case .needed: return .warning
@@ -36,7 +36,7 @@ enum PermissionState: Equatable {
         }
     }
 
-    var label: String {
+    package var label: String {
         switch self {
         case .granted: return "Выдано"
         case .needed: return "Нужно"
@@ -46,18 +46,18 @@ enum PermissionState: Equatable {
 }
 
 /// Разрешение строкой карточки: плитка, название, зачем нужно, справа — «Выдано» или кнопки.
-struct PermissionRow: View {
-    let kind: PermissionKind
-    let state: PermissionState
-    let purpose: String
-    var actionTitle = "Открыть настройки"
-    var action: (() -> Void)?
+package struct PermissionRow: View {
+    package let kind: PermissionKind
+    package let state: PermissionState
+    package let purpose: String
+    package var actionTitle = "Открыть настройки"
+    package var action: (() -> Void)?
     /// «Запись экрана» и «Полный доступ к диску» действуют только после перезапуска — рядом «Перезапустить».
-    var relaunchHint = false
+    package var relaunchHint = false
     /// Прежняя фраза статуса («Универсальный доступ выдан») — для VoiceOver.
-    var statusText: String?
+    package var statusText: String?
 
-    init(_ kind: PermissionKind, state: PermissionState, purpose: String, actionTitle: String = "Открыть настройки",
+    package init(_ kind: PermissionKind, state: PermissionState, purpose: String, actionTitle: String = "Открыть настройки",
          action: (() -> Void)? = nil, relaunchHint: Bool = false, statusText: String? = nil) {
         self.kind = kind
         self.state = state
@@ -68,7 +68,7 @@ struct PermissionRow: View {
         self.statusText = statusText
     }
 
-    var body: some View {
+    package var body: some View {
         Row(kind.title, subtitle: purpose, systemImage: kind.symbol) {
             HStack(spacing: DS.Space.s) {
                 if state == .granted {
@@ -89,15 +89,25 @@ struct PermissionRow: View {
 }
 
 /// Разрешение отдельной карточкой (первый запуск): нужное — рамка 2 pt `accLine`, выданное — «Выдано», необязательное — «Позже».
-struct PermissionCard: View {
-    let title: String
-    let purpose: String
-    let state: PermissionState
-    var optional = false
-    var actionTitle = "Открыть настройки"
-    var action: (() -> Void)?
+package struct PermissionCard: View {
+    package init(title: String, purpose: String, state: PermissionState, optional: Bool = false,
+                 actionTitle: String = "Открыть настройки", action: (() -> Void)? = nil) {
+        self.title = title
+        self.purpose = purpose
+        self.state = state
+        self.optional = optional
+        self.actionTitle = actionTitle
+        self.action = action
+    }
 
-    var body: some View {
+    package let title: String
+    package let purpose: String
+    package let state: PermissionState
+    package var optional = false
+    package var actionTitle = "Открыть настройки"
+    package var action: (() -> Void)?
+
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
         let highlighted = state != .granted && !optional
         HStack(spacing: 14) {
@@ -125,30 +135,36 @@ struct PermissionCard: View {
 }
 
 /// Кнопка в строке статуса.
-struct StatusAction: Identifiable {
-    let title: String
-    var help: String?
-    let action: () -> Void
-    var id: String { title }
+package struct StatusAction: Identifiable {
+    package init(title: String, help: String? = nil, action: @escaping () -> Void) {
+        self.title = title
+        self.help = help
+        self.action = action
+    }
+
+    package let title: String
+    package var help: String?
+    package let action: () -> Void
+    package var id: String { title }
 }
 
 /// Статус готовности функции: таблетка тона, пояснение обычным текстом, кнопки.
-struct FeatureStatusRow: View {
-    let tone: DS.Tone
-    let label: String
-    var detail: String?
-    var actions: [StatusAction] = []
+package struct FeatureStatusRow: View {
+    package let tone: DS.Tone
+    package let label: String
+    package var detail: String?
+    package var actions: [StatusAction] = []
 
     @Environment(\.dsCardStyle) private var style
 
-    init(tone: DS.Tone, label: String, detail: String? = nil, actions: [StatusAction] = []) {
+    package init(tone: DS.Tone, label: String, detail: String? = nil, actions: [StatusAction] = []) {
         self.tone = tone
         self.label = label
         self.detail = detail
         self.actions = actions
     }
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: DS.Space.m) {
             Pill(tone, label)
             if let detail {
@@ -172,22 +188,22 @@ struct FeatureStatusRow: View {
 
 /// Предупреждение или подсказка: карточка `panel` с рамкой 2 pt цвета тона и плиткой значка (по образцу выделенной
 /// карточки первого запуска). Единственный вид предупреждений.
-struct Banner<Actions: View>: View {
-    let tone: DS.Tone
-    let title: String
-    var message: String?
-    let actions: Actions
+package struct Banner<Actions: View>: View {
+    package let tone: DS.Tone
+    package let title: String
+    package var message: String?
+    package let actions: Actions
 
     @Environment(\.colorScheme) private var scheme
 
-    init(_ tone: DS.Tone, title: String, message: String? = nil, @ViewBuilder actions: () -> Actions) {
+    package init(_ tone: DS.Tone, title: String, message: String? = nil, @ViewBuilder actions: () -> Actions) {
         self.tone = tone
         self.title = title
         self.message = message
         self.actions = actions()
     }
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: tone.symbol)
@@ -224,21 +240,21 @@ struct Banner<Actions: View>: View {
 }
 
 extension Banner where Actions == EmptyView {
-    init(_ tone: DS.Tone, title: String, message: String? = nil) {
+    package init(_ tone: DS.Tone, title: String, message: String? = nil) {
         self.init(tone, title: title, message: message) { EmptyView() }
     }
 }
 
 /// Пустое состояние: плитка 46 со значком, заголовок, пояснение, главная кнопка. `compact` — внутри карточки.
-struct EmptyState: View {
-    let title: String
-    let systemImage: String
-    var message: String?
-    var actionTitle: String?
-    var action: (() -> Void)?
-    var compact = false
+package struct EmptyState: View {
+    package let title: String
+    package let systemImage: String
+    package var message: String?
+    package var actionTitle: String?
+    package var action: (() -> Void)?
+    package var compact = false
 
-    init(_ title: String, systemImage: String, message: String? = nil, actionTitle: String? = nil,
+    package init(_ title: String, systemImage: String, message: String? = nil, actionTitle: String? = nil,
          action: (() -> Void)? = nil, compact: Bool = false) {
         self.title = title
         self.systemImage = systemImage
@@ -249,12 +265,12 @@ struct EmptyState: View {
     }
 
     /// Функция выключена — вместо живого списка.
-    static func featureOff(_ section: SettingsSection, compact: Bool = true, turnOn: @escaping () -> Void) -> EmptyState {
+    package static func featureOff(_ section: SettingsSection, compact: Bool = true, turnOn: @escaping () -> Void) -> EmptyState {
         EmptyState("Функция выключена", systemImage: section.symbol, actionTitle: "Включить", action: turnOn, compact: compact)
     }
 
     /// Идёт загрузка.
-    static func loading(_ title: String) -> some View {
+    package static func loading(_ title: String) -> some View {
         VStack(spacing: DS.Space.m) {
             ProgressView().controlSize(.small)
             Text(title).font(DS.Font.body).foregroundStyle(.dsMute)
@@ -264,7 +280,7 @@ struct EmptyState: View {
         .accessibilityElement(children: .combine)
     }
 
-    var body: some View {
+    package var body: some View {
         VStack(spacing: DS.Space.m) {
             Image(systemName: systemImage)
                 .font(.system(size: compact ? 18 : 22, weight: .medium))
@@ -292,17 +308,17 @@ struct EmptyState: View {
 
 /// Состояние функции, которой нужен «Универсальный доступ»: работает / утилита выключена / нужен доступ (с кнопкой).
 /// Замена прежнего `accessibilityStatus` для страниц Graphite; ставится строкой в `ListCard`.
-struct AccessibilityStatusRow: View {
-    let running: Bool
-    let readyText: String
+package struct AccessibilityStatusRow: View {
+    package let running: Bool
+    package let readyText: String
     @ObservedObject private var model = PermissionsModel.shared
 
-    init(running: Bool, readyText: String) {
+    package init(running: Bool, readyText: String) {
         self.running = running
         self.readyText = readyText
     }
 
-    var body: some View {
+    package var body: some View {
         if model.accessibility && running {
             FeatureStatusRow(tone: .success, label: "Работает", detail: readyText)
         } else if model.accessibility {

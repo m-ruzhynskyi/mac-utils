@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Перерисовать виды, когда меняются настройки (UserDefaults): например, после переназначения сочетания.
 @MainActor
-final class DefaultsChanges: ObservableObject {
-    static let shared = DefaultsChanges()
+package final class DefaultsChanges: ObservableObject {
+    package static let shared = DefaultsChanges()
     private var observer: NSObjectProtocol?
 
     private init() {

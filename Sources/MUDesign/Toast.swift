@@ -4,14 +4,14 @@ import MUCore
 
 /// Короткое всплывающее уведомление вверху экрана.
 @MainActor
-enum Toast {
+package enum Toast {
     private static var panel: NSPanel?
     private static var generation = 0
     private static var model: ToastModel?
 
     /// Убрать уведомление. Без `token` — какое висит сейчас (как раньше); с `token` (его вернул `show`) — только своё:
     /// если его уже заменили другим, чужое уведомление остаётся.
-    static func dismiss(token: Int? = nil) {
+    package static func dismiss(token: Int? = nil) {
         if let token, token != generation { return }
         generation += 1
         panel?.orderOut(nil)
@@ -21,7 +21,7 @@ enum Toast {
 
     /// Сменить текст висящего уведомления (прогресс «Создаю GIF… 40 %»), не пересоздавая панель.
     /// Действует только на уведомление с этим `token`: если его заменили другим или убрали — ничего не делает.
-    static func updateText(_ text: String, token: Int) {
+    package static func updateText(_ text: String, token: Int) {
         guard token == generation, let model else { return }
         model.text = text
         // SwiftUI пересчитывает вид на следующем проходе цикла: размер подгоняем после него, иначе панель отстаёт на шаг.
@@ -38,20 +38,25 @@ enum Toast {
     }
 
     /// Для тестов: текст и ширина панели уведомления с этим номером (nil — его уже нет).
-    static func text(of token: Int) -> String? { token == generation ? model?.text : nil }
-    static func panelWidth(of token: Int) -> CGFloat? { token == generation ? panel?.frame.width : nil }
-    static func fittingWidth(of token: Int) -> CGFloat? { token == generation ? panel?.contentView?.fittingSize.width : nil }
+    package static func text(of token: Int) -> String? { token == generation ? model?.text : nil }
+    package static func panelWidth(of token: Int) -> CGFloat? { token == generation ? panel?.frame.width : nil }
+    package static func fittingWidth(of token: Int) -> CGFloat? { token == generation ? panel?.contentView?.fittingSize.width : nil }
 
     /// Кнопка в уведомлении, например «Показать в Finder».
-    struct Action {
-        let title: String
-        let handler: @MainActor () -> Void
+    package struct Action {
+        package let title: String
+        package let handler: @MainActor () -> Void
+
+        package init(title: String, handler: @escaping @MainActor () -> Void) {
+            self.title = title
+            self.handler = handler
+        }
     }
 
     /// `sticky` — уведомление висит, пока его не заменят или не вызовут `dismiss()` (долгая операция с кнопкой «Отмена»).
     /// Возвращает номер уведомления: по нему можно обновить или убрать именно его.
     @discardableResult
-    static func show(_ text: String, symbol: String = "checkmark.circle.fill", tint: Color = .green,
+    package static func show(_ text: String, symbol: String = "checkmark.circle.fill", tint: Color = .green,
                      action: Action? = nil, sticky: Bool = false) -> Int {
         generation += 1
         let token = generation
@@ -109,34 +114,34 @@ enum Toast {
 
 @MainActor
 private final class ToastModel: ObservableObject {
-    @Published var text: String
-    init(text: String) { self.text = text }
+    @Published package var text: String
+    package init(text: String) { self.text = text }
 }
 
 private struct ToastView: View {
-    @ObservedObject var model: ToastModel
-    let symbol: String
-    let tint: Color
-    let action: Toast.Action?
+    @ObservedObject package var model: ToastModel
+    package let symbol: String
+    package let tint: Color
+    package let action: Toast.Action?
 
-    var body: some View {
+    package var body: some View {
         ToastCard(text: model.text, symbol: symbol, tint: tint, actionTitle: action?.title, action: action?.handler)
     }
 }
 
 /// Карточка уведомления Graphite (как «Скопировано» в `Capture.dc.html`): плитка со значком тона, текст 13/700,
 /// при наличии — кнопка. Внутренняя, без модели: так её можно снять для проверки вида.
-struct ToastCard: View {
-    let text: String
-    let symbol: String
-    let tint: Color
-    var actionTitle: String?
-    var action: (@MainActor () -> Void)?
+package struct ToastCard: View {
+    package let text: String
+    package let symbol: String
+    package let tint: Color
+    package var actionTitle: String?
+    package var action: (@MainActor () -> Void)?
 
     /// Лайм для ИИ-уведомлений (фиолетовый в Graphite не используется), остальное — по цвету вызова.
     private var tone: DS.Tone { tint == .purple ? .success : DS.Tone.from(tint: tint) }
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
         HStack(spacing: DS.Space.m) {
             Image(systemName: symbol)
@@ -169,12 +174,12 @@ struct ToastCard: View {
 @MainActor
 extension NSScreen {
     /// Экран, на котором сейчас курсор.
-    static var withMouse: NSScreen? {
+    package static var withMouse: NSScreen? {
         let point = NSEvent.mouseLocation
         return NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) }
     }
 
-    var displayID: CGDirectDisplayID? {
+    package var displayID: CGDirectDisplayID? {
         (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
     }
 }

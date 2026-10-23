@@ -4,6 +4,7 @@ import SwiftUI
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUDesign
 
 /// Точность раскладки как в Word: если текст по RTF помещается в ячейку (`\cellx` минус поля ячейки и отступы абзаца)
 /// или в строку с табуляциями, у нас нет переноса. Демо — колонтитул-таблица первой страницы, выходящая в поля

@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import MUCore
+import MUDesign
 
 /// Что показать о сочетании: работает, выключено, занято, совпадает с другим.
 struct HotKeyStatus: Equatable {

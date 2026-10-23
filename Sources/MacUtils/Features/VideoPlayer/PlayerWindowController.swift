@@ -4,6 +4,7 @@ import AVFoundation
 import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
+import MUDesign
 
 /// Состояние интерфейса одного окна: режимы, меню, подсказки поверх видео, тосты.
 @MainActor

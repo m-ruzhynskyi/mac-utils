@@ -1,14 +1,14 @@
 import SwiftUI
 
 /// Форма плавающей панели: `panel` — радиус 20 (панель с содержимым), `pill` — капсула (статусы).
-enum FloatingShape {
+package enum FloatingShape {
     case panel, pill
 }
 
 private struct FloatingModifier: ViewModifier {
-    let shape: FloatingShape
+    package let shape: FloatingShape
 
-    func body(content: Content) -> some View {
+    package func body(content: Content) -> some View {
         switch shape {
         case .panel:
             let outline = RoundedRectangle(cornerRadius: DS.Radius.floating, style: .continuous)
@@ -27,17 +27,17 @@ private struct FloatingModifier: ViewModifier {
 
 extension View {
     /// Фон `panel`, обводка `line` и поля плавающей панели. Тень даёт окно (`hasShadow`).
-    func floating(_ shape: FloatingShape = .panel) -> some View {
+    package func floating(_ shape: FloatingShape = .panel) -> some View {
         modifier(FloatingModifier(shape: shape))
     }
 }
 
 /// Индикатор «идёт…» (запись экрана, встреча, эфир): таблетка капсом с пульсирующей точкой, время, пояснение, кнопки.
-struct LiveIndicator<Actions: View>: View {
-    enum Kind {
+package struct LiveIndicator<Actions: View>: View {
+    package enum Kind {
         case recording, meeting, broadcast
 
-        var label: String {
+        package var label: String {
             switch self {
             case .recording: return "Запись"
             case .meeting: return "Встреча"
@@ -46,13 +46,13 @@ struct LiveIndicator<Actions: View>: View {
         }
     }
 
-    let kind: Kind
-    var since: Date?
-    var detail: String?
-    var warning: String?
-    let actions: Actions
+    package let kind: Kind
+    package var since: Date?
+    package var detail: String?
+    package var warning: String?
+    package let actions: Actions
 
-    init(_ kind: Kind, since: Date? = nil, detail: String? = nil, warning: String? = nil, @ViewBuilder actions: () -> Actions) {
+    package init(_ kind: Kind, since: Date? = nil, detail: String? = nil, warning: String? = nil, @ViewBuilder actions: () -> Actions) {
         self.kind = kind
         self.since = since
         self.detail = detail
@@ -60,7 +60,7 @@ struct LiveIndicator<Actions: View>: View {
         self.actions = actions()
     }
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 10) {
             HStack(spacing: 6) {
                 PulsingDot(color: .dsRecInk)
@@ -88,18 +88,22 @@ struct LiveIndicator<Actions: View>: View {
 }
 
 extension LiveIndicator where Actions == EmptyView {
-    init(_ kind: Kind, since: Date? = nil, detail: String? = nil, warning: String? = nil) {
+    package init(_ kind: Kind, since: Date? = nil, detail: String? = nil, warning: String? = nil) {
         self.init(kind, since: since, detail: detail, warning: warning) { EmptyView() }
     }
 }
 
 /// Точка «идёт запись»: мигает раз в секунду (без «Уменьшить движение»). Плавная repeatForever-анимация пересчитывалась
 /// на каждом кадре и держала ~4,5 % ядра всю запись; шаг раз в секунду совпадает с таймером рядом и почти ничего не стоит.
-struct PulsingDot: View {
-    var color: Color = .dsRec
+package struct PulsingDot: View {
+    package init(color: Color = .dsRec) {
+        self.color = color
+    }
+
+    package var color: Color = .dsRec
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
+    package var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             Circle()
                 .fill(color)
@@ -111,11 +115,16 @@ struct PulsingDot: View {
 }
 
 /// Знак Mac Utils — ⌘ из иконки приложения: квадрат между четырьмя петлями, в петлях тёмные точки (поле 64×64).
-struct AppMark: View {
-    var size: CGFloat = 22
-    var color: Color = .dsAccText
+package struct AppMark: View {
+    package init(size: CGFloat = 22, color: Color = .dsAccText) {
+        self.size = size
+        self.color = color
+    }
 
-    var body: some View {
+    package var size: CGFloat = 22
+    package var color: Color = .dsAccText
+
+    package var body: some View {
         Canvas { context, canvas in
             let scale = canvas.width / 64
             let center = CGPoint(x: 32 * scale, y: 32 * scale)

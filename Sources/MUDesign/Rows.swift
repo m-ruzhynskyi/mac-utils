@@ -3,17 +3,22 @@ import SwiftUI
 
 /// Плитка значка строки: 34×34, радиус 10. Обычная — `field` (в карточке `panel`) или `panel` с обводкой (в карточке `field`);
 /// `accent` — лайм, `record` — красная (запись).
-struct RowTile: View {
-    enum Kind { case neutral, accent, record }
+package struct RowTile: View {
+    package init(systemImage: String, kind: Kind = .neutral) {
+        self.systemImage = systemImage
+        self.kind = kind
+    }
 
-    let systemImage: String
-    var kind: Kind = .neutral
+    package enum Kind { case neutral, accent, record }
+
+    package let systemImage: String
+    package var kind: Kind = .neutral
 
     @Environment(\.dsCardStyle) private var style
     @Environment(\.colorScheme) private var scheme
     @ScaledMetric(relativeTo: .body) private var side = DS.Size.rowTile
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
         Image(systemName: systemImage)
             .font(.system(size: side * 0.48, weight: .medium))
@@ -51,15 +56,15 @@ struct RowTile: View {
 
 /// Каркас строки карточки: слева — плитка или значок, заголовок, подпись, справа — контрол. Отступы и разделитель —
 /// по виду карточки (`CardStyle`). Вся строка — один элемент VoiceOver.
-struct RowContainer<Leading: View, Trailing: View>: View {
-    let title: String
-    var subtitle: String?
-    let leading: Leading
-    let trailing: Trailing
+package struct RowContainer<Leading: View, Trailing: View>: View {
+    package let title: String
+    package var subtitle: String?
+    package let leading: Leading
+    package let trailing: Trailing
 
     @Environment(\.dsCardStyle) private var style
 
-    init(_ title: String, subtitle: String? = nil, @ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
+    package init(_ title: String, subtitle: String? = nil, @ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
         self.title = title
         self.subtitle = subtitle
         self.leading = leading()
@@ -69,7 +74,7 @@ struct RowContainer<Leading: View, Trailing: View>: View {
     /// Меньше этой ширины тексту не оставляем: контрол уходит под текст (иначе узкая панель рвёт слова по буквам).
     private static var minTextWidth: CGFloat { 140 }
 
-    var body: some View {
+    package var body: some View {
         let spacing: CGFloat = style == .panel ? 14 : DS.Space.m
         ViewThatFits(in: .horizontal) {
             // Обычно — в одну строку; текст переносится по словам в оставшейся ширине (не меньше minTextWidth).
@@ -115,14 +120,14 @@ struct RowContainer<Leading: View, Trailing: View>: View {
 }
 
 /// Строка карточки: плитка со значком, заголовок, подпись, контрол справа.
-struct Row<Trailing: View>: View {
-    var systemImage: String?
-    let title: String
-    var subtitle: String?
-    var tile: RowTile.Kind = .neutral
-    let trailing: Trailing
+package struct Row<Trailing: View>: View {
+    package var systemImage: String?
+    package let title: String
+    package var subtitle: String?
+    package var tile: RowTile.Kind = .neutral
+    package let trailing: Trailing
 
-    init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, tile: RowTile.Kind = .neutral,
+    package init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, tile: RowTile.Kind = .neutral,
          @ViewBuilder trailing: () -> Trailing) {
         self.title = title
         self.subtitle = subtitle
@@ -131,7 +136,7 @@ struct Row<Trailing: View>: View {
         self.trailing = trailing()
     }
 
-    var body: some View {
+    package var body: some View {
         RowContainer(title, subtitle: subtitle) {
             if let systemImage { RowTile(systemImage: systemImage, kind: tile) }
         } trailing: {
@@ -141,17 +146,17 @@ struct Row<Trailing: View>: View {
 }
 
 /// Строка программы: настоящий значок программы (по bundle id или пути), если она найдена, иначе — плитка с `fallbackSymbol`.
-struct AppRow<Trailing: View>: View {
-    let title: String
-    var subtitle: String?
-    var bundleID: String?
-    var url: URL?
-    var fallbackSymbol = "app.dashed"
-    let trailing: Trailing
+package struct AppRow<Trailing: View>: View {
+    package let title: String
+    package var subtitle: String?
+    package var bundleID: String?
+    package var url: URL?
+    package var fallbackSymbol = "app.dashed"
+    package let trailing: Trailing
 
     @ScaledMetric(relativeTo: .body) private var side = DS.Size.rowTile
 
-    init(_ title: String, subtitle: String? = nil, bundleID: String? = nil, url: URL? = nil, fallbackSymbol: String = "app.dashed",
+    package init(_ title: String, subtitle: String? = nil, bundleID: String? = nil, url: URL? = nil, fallbackSymbol: String = "app.dashed",
          @ViewBuilder trailing: () -> Trailing) {
         self.title = title
         self.subtitle = subtitle
@@ -165,7 +170,7 @@ struct AppRow<Trailing: View>: View {
         url ?? bundleID.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
     }
 
-    var body: some View {
+    package var body: some View {
         RowContainer(title, subtitle: subtitle) {
             if let appURL {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: appURL.path))
@@ -182,29 +187,29 @@ struct AppRow<Trailing: View>: View {
 }
 
 extension Row where Trailing == EmptyView {
-    init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, tile: RowTile.Kind = .neutral) {
+    package init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, tile: RowTile.Kind = .neutral) {
         self.init(title, subtitle: subtitle, systemImage: systemImage, tile: tile) { EmptyView() }
     }
 }
 
 /// Строка с переключателем Graphite: клик по всей строке переключает.
-struct ToggleRow: View {
-    let title: String
-    var subtitle: String?
-    var systemImage: String?
-    @Binding var isOn: Bool
+package struct ToggleRow: View {
+    package let title: String
+    package var subtitle: String?
+    package var systemImage: String?
+    @Binding package var isOn: Bool
 
     @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, isOn: Binding<Bool>) {
+    package init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, isOn: Binding<Bool>) {
         self.title = title
         self.subtitle = subtitle
         self.systemImage = systemImage
         _isOn = isOn
     }
 
-    var body: some View {
+    package var body: some View {
         Row(title, subtitle: subtitle, systemImage: systemImage) {
             Toggle(title, isOn: $isOn).toggleStyle(.graphite)
         }
@@ -218,39 +223,39 @@ struct ToggleRow: View {
 }
 
 /// Строка «действие — сочетание»: заголовок слева, кейкап справа (сочетание из реестра).
-struct KeyRow: View {
-    let title: String
+package struct KeyRow: View {
+    package let title: String
     private let keycap: Keycap
 
     @Environment(\.dsCardStyle) private var style
 
-    init(_ title: String, keys: [String]) {
+    package init(_ title: String, keys: [String]) {
         self.title = title
         keycap = Keycap(keys)
     }
 
-    init(_ title: String, keycap: Keycap) {
+    package init(_ title: String, keycap: Keycap) {
         self.title = title
         self.keycap = keycap
     }
 
-    var body: some View {
+    package var body: some View {
         Row(title) { keycap }
     }
 }
 
 /// Ползунок со значением справа фиксированной ширины.
-struct SliderRow: View {
-    let title: String
-    var subtitle: String?
-    var systemImage: String?
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-    let format: (Double) -> String
+package struct SliderRow: View {
+    package let title: String
+    package var subtitle: String?
+    package var systemImage: String?
+    @Binding package var value: Double
+    package let range: ClosedRange<Double>
+    package let format: (Double) -> String
 
     @ScaledMetric(relativeTo: .body) private var valueWidth: CGFloat = 52
 
-    init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, value: Binding<Double>,
+    package init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, value: Binding<Double>,
          in range: ClosedRange<Double>, format: @escaping (Double) -> String) {
         self.title = title
         self.subtitle = subtitle
@@ -260,7 +265,7 @@ struct SliderRow: View {
         self.format = format
     }
 
-    var body: some View {
+    package var body: some View {
         Row(title, subtitle: subtitle, systemImage: systemImage) {
             HStack(spacing: DS.Space.m) {
                 Slider(value: $value, in: range)
@@ -279,9 +284,9 @@ struct SliderRow: View {
 }
 
 /// Плашка пути: `field`, обводка, радиус 10; середина обрезается, полный путь — в подсказке.
-struct PathChip: View {
-    let url: URL
-    var display: String?
+package struct PathChip: View {
+    package let url: URL
+    package var display: String?
 
     private var text: String {
         if let display { return display }
@@ -289,7 +294,7 @@ struct PathChip: View {
         return url.path.hasPrefix(home) ? "~" + url.path.dropFirst(home.count) : url.path
     }
 
-    var body: some View {
+    package var body: some View {
         Text(text)
             .font(DS.Font.manrope(13, .regular, relativeTo: .callout))
             .foregroundStyle(.dsText)
@@ -304,18 +309,18 @@ struct PathChip: View {
 }
 
 /// Папка: плашка пути, «Выбрать…», «Показать в Finder», «Сбросить» (если выбрана своя).
-struct PathRow: View {
-    let title: String
-    var subtitle: String?
-    var systemImage: String?
-    let url: URL
-    var display: String?
-    let isCustom: Bool
-    let choose: () -> Void
-    let reset: () -> Void
-    let resetHelp: String
+package struct PathRow: View {
+    package let title: String
+    package var subtitle: String?
+    package var systemImage: String?
+    package let url: URL
+    package var display: String?
+    package let isCustom: Bool
+    package let choose: () -> Void
+    package let reset: () -> Void
+    package let resetHelp: String
 
-    init(_ title: String, subtitle: String? = nil, systemImage: String? = "folder", url: URL, display: String? = nil,
+    package init(_ title: String, subtitle: String? = nil, systemImage: String? = "folder", url: URL, display: String? = nil,
          isCustom: Bool, choose: @escaping () -> Void, reset: @escaping () -> Void, resetHelp: String) {
         self.title = title
         self.subtitle = subtitle
@@ -328,7 +333,7 @@ struct PathRow: View {
         self.resetHelp = resetHelp
     }
 
-    var body: some View {
+    package var body: some View {
         Row(title, subtitle: subtitle, systemImage: systemImage) {
             HStack(spacing: DS.Space.s) {
                 PathChip(url: url, display: display).frame(maxWidth: 220)

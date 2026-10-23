@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import MUCore
+import MUDesign
 
 // MARK: - Вырезать и вставить
 

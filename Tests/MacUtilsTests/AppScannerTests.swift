@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUDesign
 
 @MainActor
 final class AppScannerTests: XCTestCase {

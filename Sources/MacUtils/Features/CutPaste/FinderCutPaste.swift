@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import MUCore
+import MUDesign
 
 /// Правила вырезания без системных вызовов (для тестов).
 enum CutRules {

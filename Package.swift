@@ -10,9 +10,15 @@ let package = Package(
             name: "MUCore",
             path: "Sources/MUCore"
         ),
+        // Оформление: токены, компоненты, окна-панели. Функций не знает.
+        .target(
+            name: "MUDesign",
+            dependencies: ["MUCore"],
+            path: "Sources/MUDesign"
+        ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore"],
+            dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -21,7 +27,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign"],
             path: "Tests/MacUtilsTests"
         ),
     ]

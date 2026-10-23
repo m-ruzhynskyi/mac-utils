@@ -4,6 +4,7 @@ import CoreImage
 import SwiftUI
 import Vision
 import MUCore
+import MUDesign
 
 /// Создание и распознавание QR-кодов (без UI — для тестов).
 enum QRTools {

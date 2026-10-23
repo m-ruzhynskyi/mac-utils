@@ -3,6 +3,7 @@ import SwiftUI
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUDesign
 
 /// Демо-документы режима «Документ» (выдуманное содержимое, как на макетах `d01`–`d11`).
 enum DocDemo {

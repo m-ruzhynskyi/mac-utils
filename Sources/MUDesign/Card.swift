@@ -2,33 +2,33 @@ import SwiftUI
 
 /// Вид карточки-списка: `panel` — карточка страницы настроек (обводка, разделители, строки 13×18);
 /// `field` — карточка поповера (фон `field`, отступ 4, строки 8×10 со скруглением, без разделителей).
-enum CardStyle {
+package enum CardStyle {
     case panel, field
 }
 
 private struct CardStyleKey: EnvironmentKey {
-    static let defaultValue = CardStyle.panel
+    package static let defaultValue = CardStyle.panel
 }
 
 extension EnvironmentValues {
     /// В какой карточке стоит строка (`Row` подстраивает отступы, плитку и разделитель).
-    var dsCardStyle: CardStyle {
+    package var dsCardStyle: CardStyle {
         get { self[CardStyleKey.self] }
         set { self[CardStyleKey.self] = newValue }
     }
 }
 
 /// Карточка-список: строки `Row` одна под другой. Разделители строки рисуют сами; первый скрыт под обводкой карточки.
-struct ListCard<Content: View>: View {
-    var style: CardStyle = .panel
-    let content: Content
+package struct ListCard<Content: View>: View {
+    package var style: CardStyle = .panel
+    package let content: Content
 
-    init(style: CardStyle = .panel, @ViewBuilder content: () -> Content) {
+    package init(style: CardStyle = .panel, @ViewBuilder content: () -> Content) {
         self.style = style
         self.content = content()
     }
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
         VStack(spacing: 0) { content }
             .padding(style == .field ? DS.Space.xs : 0)
@@ -41,16 +41,16 @@ struct ListCard<Content: View>: View {
 }
 
 /// Карточка со свободным содержимым: `panel`, обводка `line`, радиус 16, поля 16×18.
-struct Card<Content: View>: View {
-    var style: CardStyle = .panel
-    let content: Content
+package struct Card<Content: View>: View {
+    package var style: CardStyle = .panel
+    package let content: Content
 
-    init(style: CardStyle = .panel, @ViewBuilder content: () -> Content) {
+    package init(style: CardStyle = .panel, @ViewBuilder content: () -> Content) {
         self.style = style
         self.content = content()
     }
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
         VStack(alignment: .leading, spacing: 10) { content }
             .padding(.vertical, DS.Space.l)
@@ -64,20 +64,20 @@ struct Card<Content: View>: View {
 }
 
 /// Сворачиваемая карточка-список (сочетания и подсказки): заголовок группы со стрелкой; содержимое — строки `Row`.
-struct CollapsibleCard<Content: View>: View {
-    let title: String
-    let content: Content
+package struct CollapsibleCard<Content: View>: View {
+    package let title: String
+    package let content: Content
 
     @State private var expanded: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(_ title: String, expanded: Bool = true, @ViewBuilder content: () -> Content) {
+    package init(_ title: String, expanded: Bool = true, @ViewBuilder content: () -> Content) {
         self.title = title
         self.content = content()
         _expanded = State(initialValue: expanded)
     }
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.section) {
             Button {
                 withAnimation(DS.Motion.animation(DS.Motion.standard, reduceMotion: reduceMotion)) { expanded.toggle() }
@@ -104,18 +104,23 @@ struct CollapsibleCard<Content: View>: View {
 }
 
 /// Перенос элементов по строкам (чипы вкладок и т. п.).
-struct FlowLayout: Layout {
-    var spacing: CGFloat = DS.Space.s
-    var lineSpacing: CGFloat = DS.Space.s
+package struct FlowLayout: Layout {
+    package init(spacing: CGFloat = DS.Space.s, lineSpacing: CGFloat = DS.Space.s) {
+        self.spacing = spacing
+        self.lineSpacing = lineSpacing
+    }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    package var spacing: CGFloat = DS.Space.s
+    package var lineSpacing: CGFloat = DS.Space.s
+
+    package func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
         let width = rows.map { $0.width }.max() ?? 0
         let height = rows.map { $0.height }.reduce(0, +) + lineSpacing * CGFloat(max(rows.count - 1, 0))
         return CGSize(width: proposal.width ?? width, height: height)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    package func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         var y = bounds.minY
         for row in arrange(width: bounds.width, subviews: subviews) {
             var x = bounds.minX
@@ -129,9 +134,9 @@ struct FlowLayout: Layout {
     }
 
     private struct Line {
-        var indices: [Int] = []
-        var width: CGFloat = 0
-        var height: CGFloat = 0
+        package var indices: [Int] = []
+        package var width: CGFloat = 0
+        package var height: CGFloat = 0
     }
 
     private func arrange(width: CGFloat, subviews: Subviews) -> [Line] {

@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 import MUCore
+import MUDesign
 
 /// Немодальная панель с очередью запросов на подключение: вместо NSAlert.runModal на каждый запрос.
 /// Показывает первый запрос и «Ещё N»; панель не забирает фокус и не попадает в трансляцию.

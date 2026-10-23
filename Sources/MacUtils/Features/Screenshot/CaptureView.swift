@@ -3,6 +3,7 @@ import SwiftUI
 import Carbon.HIToolbox
 import CoreImage
 import MUCore
+import MUDesign
 
 /// Полноэкранное окно с «замороженным» снимком одного монитора.
 @MainActor

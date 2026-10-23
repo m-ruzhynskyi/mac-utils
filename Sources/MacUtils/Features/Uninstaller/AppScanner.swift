@@ -1,5 +1,6 @@
 import AppKit
 import Security
+import MUDesign
 
 /// Установленное приложение.
 struct InstalledApp: Identifiable, Hashable {

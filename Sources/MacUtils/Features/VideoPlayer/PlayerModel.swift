@@ -2,6 +2,7 @@ import AVFoundation
 import Combine
 import Foundation
 import MUCore
+import MUDesign
 
 /// Время воспроизведения отдельно от модели: часто меняется (≈ 30 раз в секунду во время игры),
 /// и перерисовываются только шкала, время и субтитры, а не всё окно.

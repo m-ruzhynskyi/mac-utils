@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import MUCore
+import MUDesign
 
 /// Что сейчас играет в системе (любая программа: браузер, Музыка, Spotify, Telegram…)
 /// и управление: пауза, следующий и предыдущий трек, перемотка.
