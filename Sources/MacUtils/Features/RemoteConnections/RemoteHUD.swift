@@ -9,13 +9,13 @@ enum RemoteHUDAction: Hashable {
 
     func title(_ program: RemoteProgram) -> String {
         switch self {
-        case .cancel: return "Отмена"
-        case .close: return "Закрыть"
-        case .openAccessibility: return "Открыть настройки"
-        case .download: return "Скачать \(program.title)"
-        case .diagnostics: return "Диагностика"
-        case .openFile: return "Открыть файл"
-        case .retry: return "Повторить"
+        case .cancel: return RL("Отмена")
+        case .close: return RL("Закрыть")
+        case .openAccessibility: return RL("Открыть настройки")
+        case .download: return RL("Скачать %@", program.title)
+        case .diagnostics: return RL("Диагностика")
+        case .openFile: return RL("Открыть файл")
+        case .retry: return RL("Повторить")
         case .choose(let p): return p.title
         }
     }
@@ -42,13 +42,13 @@ struct RemoteHUDContent: Equatable {
         let isAnyDesk = program == .anyDesk
         switch phase {
         case .opening:
-            return RemoteHUDContent(tone: .info, title: "Открываю \(p)…", detail: who, spinner: true)
+            return RemoteHUDContent(tone: .info, title: RL("Открываю %@…", p), detail: who, spinner: true)
         case let .waiting(elapsed, timeout):
-            return RemoteHUDContent(tone: .info, title: isAnyDesk ? "Жду окно пароля… \(elapsed) с" : "Жду окно аутентификации… \(elapsed) с",
-                                    detail: "Таймаут \(timeout) с · «Отмена» оставит окно \(p) как есть", spinner: true,
+            return RemoteHUDContent(tone: .info, title: isAnyDesk ? RL("Жду окно пароля… %@ с", elapsed) : RL("Жду окно аутентификации… %@ с", elapsed),
+                                    detail: RL("Таймаут %@ с · «Отмена» оставит окно %@ как есть", timeout, p), spinner: true,
                                     progress: Double(elapsed) / Double(max(timeout, 1)), actions: [.cancel])
         case .entered:
-            return RemoteHUDContent(tone: .success, title: "Пароль введён", detail: "Подтверждаю вход…", spinner: false)
+            return RemoteHUDContent(tone: .success, title: RL("Пароль введён"), detail: RL("Подтверждаю вход…"), spinner: false)
                 .with(final: false)
         case .finished(let outcome):
             return make(outcome, program: program, record: record, who: who)
@@ -61,21 +61,21 @@ struct RemoteHUDContent: Equatable {
         let isAnyDesk = program == .anyDesk
         switch outcome {
         case .connected:
-            return RemoteHUDContent(tone: .success, title: "Подключено", detail: who)
+            return RemoteHUDContent(tone: .success, title: RL("Подключено"), detail: who)
         case .submitted:
-            return RemoteHUDContent(tone: .success, title: "Пароль введён",
-                                    detail: "Окно \(p) ещё открыто — подключение ждёт ответа той стороны.")
+            return RemoteHUDContent(tone: .success, title: RL("Пароль введён"),
+                                    detail: RL("Окно %@ ещё открыто — подключение ждёт ответа той стороны.", p))
         case .connectedWithoutPassword:
-            return RemoteHUDContent(tone: .success, title: "Подключено без пароля",
-                                    detail: isAnyDesk ? "Окно пароля не появилось — AnyDesk уже помнит этот компьютер"
-                                                      : "Окно аутентификации не появилось — TeamViewer пустил без пароля")
+            return RemoteHUDContent(tone: .success, title: RL("Подключено без пароля"),
+                                    detail: isAnyDesk ? RL("Окно пароля не появилось — AnyDesk уже помнит этот компьютер")
+                                                      : RL("Окно аутентификации не появилось — TeamViewer пустил без пароля"))
         case .openedWithoutPassword(.userChoice):
-            return RemoteHUDContent(tone: .success, title: "\(p) открыт", detail: "\(who). Пароль введите в окне \(p).")
+            return RemoteHUDContent(tone: .success, title: RL("%@ открыт", p), detail: RL("%@. Пароль введите в окне %@.", who, p))
         case .openedWithoutPassword(.notInFile):
-            return RemoteHUDContent(tone: .success, title: "\(p) открыт",
-                                    detail: "В файле нет пароля для «\(record.name)» — введите его в окне \(p).")
+            return RemoteHUDContent(tone: .success, title: RL("%@ открыт", p),
+                                    detail: RL("В файле нет пароля для «%@» — введите его в окне %@.", record.name, p))
         case .cancelled:
-            return RemoteHUDContent(tone: .neutral, title: "Отменено", detail: nil)
+            return RemoteHUDContent(tone: .neutral, title: RL("Отменено"), detail: nil)
         case .failed(let failure):
             return make(failure, program: program, record: record)
         }
@@ -85,39 +85,39 @@ struct RemoteHUDContent: Equatable {
         let p = program.title
         switch failure {
         case .noAccessibility:
-            return RemoteHUDContent(tone: .warning, title: "\(p) открыт, пароль не введён",
-                                    detail: "Нет доступа «Универсальный доступ». Введите пароль вручную.",
+            return RemoteHUDContent(tone: .warning, title: RL("%@ открыт, пароль не введён", p),
+                                    detail: RL("Нет доступа «Универсальный доступ». Введите пароль вручную."),
                                     actions: [.openAccessibility, .close])
         case .notInstalled:
-            return RemoteHUDContent(tone: .danger, title: "\(p) не найден", detail: "Нет /Applications/\(p).app.",
+            return RemoteHUDContent(tone: .danger, title: RL("%@ не найден", p), detail: RL("Нет /Applications/%@.app.", p),
                                     actions: [.download, .close])
         case .launchFailed:
-            return RemoteHUDContent(tone: .danger, title: "\(p) не запустился", detail: "Ссылка подключения не открылась.",
+            return RemoteHUDContent(tone: .danger, title: RL("%@ не запустился", p), detail: RL("Ссылка подключения не открылась."),
                                     actions: [.retry, .close])
         case .aliasNotSupported:
-            return RemoteHUDContent(tone: .warning, title: "\(p) не открывает алиасы",
-                                    detail: "Укажите в файле числовой ID для «\(record.name)».", actions: [.openFile, .close])
+            return RemoteHUDContent(tone: .warning, title: RL("%@ не открывает алиасы", p),
+                                    detail: RL("Укажите в файле числовой ID для «%@».", record.name), actions: [.openFile, .close])
         case .programNotSpecified:
-            return RemoteHUDContent(tone: .warning, title: "Программа не указана",
-                                    detail: "В строке нет колонки «Программа», а ID подходит и AnyDesk, и TeamViewer. Выберите программу.",
+            return RemoteHUDContent(tone: .warning, title: RL("Программа не указана"),
+                                    detail: RL("В строке нет колонки «Программа», а ID подходит и AnyDesk, и TeamViewer. Выберите программу."),
                                     actions: RemoteProgram.allCases.map { .choose($0) })
         case .fieldNotFound(let structure):
-            return RemoteHUDContent(tone: .warning, title: "Введите пароль вручную",
-                                    detail: "Поле пароля не найдено (интерфейс \(p) мог измениться). Пароль не скопирован.",
+            return RemoteHUDContent(tone: .warning, title: RL("Введите пароль вручную"),
+                                    detail: RL("Поле пароля не найдено (интерфейс %@ мог измениться). Пароль не скопирован.", p),
                                     actions: [.diagnostics, .close], structure: structure)
         case .wrongPassword:
-            return RemoteHUDContent(tone: .danger, title: "Проверьте пароль в файле",
-                                    detail: "\(p) отклонил пароль для «\(record.name)».", actions: [.openFile, .close])
+            return RemoteHUDContent(tone: .danger, title: RL("Проверьте пароль в файле"),
+                                    detail: RL("%@ отклонил пароль для «%@».", p, record.name), actions: [.openFile, .close])
         case .focusLost:
-            return RemoteHUDContent(tone: .warning, title: "Ввод прерван", detail: "Фокус ушёл из \(p), пароль не отправлен.",
+            return RemoteHUDContent(tone: .warning, title: RL("Ввод прерван"), detail: RL("Фокус ушёл из %@, пароль не отправлен.", p),
                                     actions: [.retry, .close])
         case .entryGone:
-            return RemoteHUDContent(tone: .warning, title: "Записи больше нет в файле",
-                                    detail: "Файл изменился — запись не найдена. Список обновлён.", actions: [.close])
+            return RemoteHUDContent(tone: .warning, title: RL("Записи больше нет в файле"),
+                                    detail: RL("Файл изменился — запись не найдена. Список обновлён."), actions: [.close])
         case .fileUnavailable(let code):
-            return RemoteHUDContent(tone: .danger, title: "Файл подключений не прочитан",
-                                    detail: code == .locked ? "Файл занят другой программой — попробуйте ещё раз."
-                                                            : "Проверьте, что файл на месте, и повторите.",
+            return RemoteHUDContent(tone: .danger, title: RL("Файл подключений не прочитан"),
+                                    detail: code == .locked ? RL("Файл занят другой программой — попробуйте ещё раз.")
+                                                            : RL("Проверьте, что файл на месте, и повторите."),
                                     actions: [.retry, .close])
         }
     }
@@ -177,7 +177,7 @@ struct RemoteHUDCard: View {
                 .padding(8)
                 .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
                 .padding(.leading, 44)
-                .accessibilityLabel("Структура окна \(program.title): только роли элементов")
+                .accessibilityLabel(RL("Структура окна %@: только роли элементов", program.title))
             }
             if !c.actions.isEmpty {
                 HStack(spacing: DS.Space.s) {

@@ -12,9 +12,9 @@ struct XMLSource: ConnectionsSource {
         d.parser = p
         guard p.parse() else {
             if let e = d.failure { throw e }
-            throw ConnectionsError.corrupt("Некорректный XML (строка \(p.lineNumber))")
+            throw ConnectionsError.corrupt(RL("Некорректный XML (строка %@)", p.lineNumber))
         }
-        guard d.sawRoot else { throw ConnectionsError.corrupt("Ожидался корневой элемент connections") }
+        guard d.sawRoot else { throw ConnectionsError.corrupt(RL("Ожидался корневой элемент connections")) }
         return ParsedFile(entries: d.entries, columns: d.columns, unrecognizedColumns: d.unrecognized)
     }
 
@@ -36,7 +36,7 @@ struct XMLSource: ConnectionsSource {
         func parser(_ parser: XMLParser, didStartElement element: String, namespaceURI: String?, qualifiedName: String?, attributes: [String: String]) {
             depth += 1
             if depth == 1 {
-                guard element.lowercased() == "connections" else { return fail("Ожидался корневой элемент connections") }
+                guard element.lowercased() == "connections" else { return fail(RL("Ожидался корневой элемент connections")) }
                 sawRoot = true
             } else if depth == 2 {
                 guard element.lowercased() == "connection" else { return }

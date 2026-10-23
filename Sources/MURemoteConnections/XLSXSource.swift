@@ -25,7 +25,7 @@ struct XLSXSource: ConnectionsSource {
         } else {
             target = wb.sheets[0]
         }
-        guard let sheetXML = try zip.contents(of: target.path) else { throw ConnectionsError.corrupt("Нет данных листа") }
+        guard let sheetXML = try zip.contents(of: target.path) else { throw ConnectionsError.corrupt(RL("Нет данных листа")) }
         let shared = try zip.contents(of: "xl/sharedStrings.xml").map { try SharedStringsParser.parse($0) } ?? []
         let rows = try SheetParser.parse(sheetXML, shared: shared)
         return try Self.entries(from: rows, mode: mode)
@@ -37,7 +37,7 @@ struct XLSXSource: ConnectionsSource {
     private struct Workbook { let sheets: [Sheet] }
 
     private static func workbook(_ zip: ZipArchive) throws -> Workbook {
-        guard let wbData = try zip.contents(of: "xl/workbook.xml") else { throw ConnectionsError.corrupt("Это не книга Excel") }
+        guard let wbData = try zip.contents(of: "xl/workbook.xml") else { throw ConnectionsError.corrupt(RL("Это не книга Excel")) }
         let refs = try WorkbookParser.parse(wbData)
         var targets: [String: String] = [:]
         if let rels = try zip.contents(of: "xl/_rels/workbook.xml.rels") {
@@ -48,7 +48,7 @@ struct XLSXSource: ConnectionsSource {
             let path = t.hasPrefix("/") ? String(t.dropFirst()) : "xl/" + t
             return Sheet(name: ref.name, path: path)
         }
-        guard !sheets.isEmpty else { throw ConnectionsError.corrupt("В книге нет листов") }
+        guard !sheets.isEmpty else { throw ConnectionsError.corrupt(RL("В книге нет листов")) }
         return Workbook(sheets: sheets)
     }
 
@@ -112,7 +112,7 @@ private final class WorkbookParser: NSObject, XMLParserDelegate {
     static func parse(_ data: Data) throws -> [(name: String, rid: String)] {
         let d = WorkbookParser()
         let p = makeParser(data, d)
-        guard p.parse() else { throw ConnectionsError.corrupt("Повреждён workbook.xml") }
+        guard p.parse() else { throw ConnectionsError.corrupt(RL("Повреждён workbook.xml")) }
         return d.refs
     }
 
@@ -128,7 +128,7 @@ private final class RelsParser: NSObject, XMLParserDelegate {
 
     static func parse(_ data: Data) throws -> [String: String] {
         let d = RelsParser()
-        guard makeParser(data, d).parse() else { throw ConnectionsError.corrupt("Повреждён workbook.xml.rels") }
+        guard makeParser(data, d).parse() else { throw ConnectionsError.corrupt(RL("Повреждён workbook.xml.rels")) }
         return d.targets
     }
 
@@ -146,7 +146,7 @@ private final class SharedStringsParser: NSObject, XMLParserDelegate {
 
     static func parse(_ data: Data) throws -> [String] {
         let d = SharedStringsParser()
-        guard makeParser(data, d).parse() else { throw ConnectionsError.corrupt("Повреждён sharedStrings.xml") }
+        guard makeParser(data, d).parse() else { throw ConnectionsError.corrupt(RL("Повреждён sharedStrings.xml")) }
         return d.strings
     }
 
@@ -190,7 +190,7 @@ private final class SheetParser: NSObject, XMLParserDelegate {
     static func parse(_ data: Data, shared: [String]) throws -> [(number: Int, cells: [String])] {
         let d = SheetParser(shared: shared)
         let p = makeParser(data, d)
-        guard p.parse() || d.overflow else { throw ConnectionsError.corrupt("Повреждены данные листа") }
+        guard p.parse() || d.overflow else { throw ConnectionsError.corrupt(RL("Повреждены данные листа")) }
         return d.rows
     }
 

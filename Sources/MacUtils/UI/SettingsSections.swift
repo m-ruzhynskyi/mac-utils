@@ -1,4 +1,5 @@
 import AppKit
+import MURemoteConnections
 import SwiftUI
 
 // MARK: - Разделы
@@ -20,7 +21,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "Снимки"
         case .textEditor: return "Редактор"
         case .videoPlayer: return "Плеер"
-        case .remote: return "Удалённые"
+        case .remote: return RL("Удалённые")
         case .cutPaste: return "Вырезать"
         case .smoothScroll: return "Прокрутка"
         case .switcher: return "Переключатель"
@@ -79,7 +80,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "Мои снимки"
         case .textEditor: return "Текстовый редактор"
         case .videoPlayer: return "Видеоплеер"
-        case .remote: return "Удалённые подключения"
+        case .remote: return RL("Удалённые подключения")
         }
     }
 
@@ -228,7 +229,7 @@ extension SettingsSection {
         case .ai: return "Всё работает на локальной модели через Ollama — тексты, снимки и файлы не уходят в интернет."
         case .textEditor: return "Вкладки, кодировки и знаки $ для .frm и других текстов"
         case .videoPlayer: return "Плейлист, субтитры, дорожки и запоминание места"
-        case .remote: return "AnyDesk и TeamViewer из своей таблицы: ⌥⌘A, набрали имя — Enter"
+        case .remote: return RL("AnyDesk и TeamViewer из своей таблицы: ⌥⌘A, набрали имя — Enter")
         case .music, .share, .switcher, .wellbeing, .uninstaller, .monitor, .tasks, .cleanup, .shots: return ""
         }
     }

@@ -52,7 +52,7 @@ final class RemoteListModel: ObservableObject {
     func chipTitle(_ filter: ProgramFilter, counts: [ProgramFilter: Int]) -> String {
         let n = counts[filter] ?? 0
         switch filter {
-        case .all: return "Все \(n)"
+        case .all: return RL("Все %@", n)
         case .program(let p): return "\(p.title) \(n)"
         }
     }
