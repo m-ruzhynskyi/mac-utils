@@ -14,5 +14,8 @@ package final class AppRouter {
     /// Программа лежит в «Программах» (иначе самообновление объясняет, куда её перенести).
     package var isInApplications: () -> Bool = { true }
 
+    /// Подготовка к перезапуску приложения (например, перед установкой обновления): остановить перехваты и фоновые службы.
+    package var prepareForRelaunch: () -> Void = {}
+
     private init() {}
 }

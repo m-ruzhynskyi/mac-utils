@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Pref.register()
         SettingsSection.installAppSubtitles()
         AppRouter.shared.showWhatsNewIfUpdated = { WhatsNewWindowController.shared.showIfUpdated() }
+        AppRouter.shared.prepareForRelaunch = { AppSwitcher.shared.shutdown() }
         AppRouter.shared.isInApplications = { MoveToApplications.isInApplications }
         AppRouter.shared.runHotKey = { id in HotKeyAction.action(forHotKeyID: id).map { AppAction(hotKey: $0).run() } }
         KeepAwake.shared.observeWake()
