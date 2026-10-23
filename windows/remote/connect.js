@@ -1,7 +1,13 @@
 // Подключение: AnyDesk — CLI (`AnyDesk.exe <ID> --with-password`, пароль через stdin, не в аргументах); TeamViewer — запуск с ID и
 // ввод пароля в окно «Аутентификация» через UI Automation (не аргументом), с проверкой процесса и фокуса. Пароль читается из файла
 // в момент подключения (SecretBuffer) и затирается в любом исходе; в журнал — только числа и коды. Всё внешнее (запуск процессов,
-// UI Automation, окна, часы) — внедряется: тесты идут на двойниках, реальные программы не запускаются.
+// UI Automation, окна, часы, буфер обмена для ID) — внедряется: тесты идут на двойниках, реальные программы не запускаются.
+//
+// Зелёный «успех» — только то, что подтверждено: пароль введён и окно пароля закрылось, либо UI Automation нашёл окно сеанса
+// TeamViewer. Иначе — нейтральный тост «Не удалось подтвердить подключение» (у TeamViewer ID копируется в буфер — только ID).
+// AnyDesk через CLI ничего не подтверждает (процесс лишь принял команду): тост нейтральный «Пароль передан» / «Открыт AnyDesk».
+// Окно AnyDesk «Terminal Session» на Windows модуль не нажимает: доступа UI Automation к AnyDesk у модуля нет (его окно рисуется
+// своим движком, без стандартных элементов) — выбор остаётся за AnyDesk/пользователем, ложного «подключено» при этом не бывает.
 "use strict";
 
 const path = require("node:path");
@@ -26,11 +32,19 @@ const MESSAGES = {
   launchFailed: (p) => ({ kind: "danger", title: `Не удалось запустить ${TITLES[p]}`, detail: "Программа не приняла команду.", actions: [{ id: "retry", label: "Повторить" }, { id: "close", label: "Закрыть" }] }),
   noTeamViewerWindow: (p) => ({ kind: "warning", title: "Введите пароль вручную", detail: `${TITLES[p]} не показал окон за отведённое время. Пароль не вводился.`, actions: [{ id: "retry", label: "Повторить" }, { id: "close", label: "Закрыть" }] }),
   noPasswordInFile: () => ({ kind: "info", title: "Пароля в файле нет", detail: "Введите пароль вручную.", actions: [{ id: "close", label: "Закрыть" }] }),
+  // Окно сеанса не найдено и окна пароля не было: подключение не подтверждено. Тост нейтральный, без галочки.
+  unconfirmed: (p, copied) => copied
+    ? { kind: "info", title: "Не удалось подключиться — ID скопирован", detail: `Окно пароля и окно сеанса ${TITLES[p]} не появились. Вставьте ID в ${TITLES[p]} вручную.`, actions: [{ id: "close", label: "Закрыть" }] }
+    : { kind: "info", title: "Не удалось подтвердить подключение", detail: `Окно пароля и окно сеанса ${TITLES[p]} не появились.`, actions: [{ id: "close", label: "Закрыть" }] },
+  passwordNeeded: (p) => ({ kind: "info", title: `Введите пароль в окне ${TITLES[p]}`, detail: `${TITLES[p]} спрашивает пароль, а в файле его нет.`, actions: [{ id: "close", label: "Закрыть" }] }),
 };
 
-// deps: { exists(path), env, spawn(file, args, opts), uia: { enter(opts, secret, onEvent) → Promise<result> }, hud: { show(state) }, openExternal(url), log(line) }
+// deps: { exists(path), env, spawn(file, args, opts), uia: { enter(opts, secret, onEvent) → Promise<result> }, hud: { show(state) }, openExternal(url),
+//         log(line), copyText(text) — запасной путь TeamViewer: кладёт в буфер обмена ID (никогда не пароль) }
 function createConnector(deps) {
-  const { exists = () => false, customPaths = () => ({}), env = process.env, spawn, uia = null, hud = { show() {} }, openExternal = () => {}, log = () => {}, clock = Date } = deps;
+  const { exists = () => false, customPaths = () => ({}), env = process.env, spawn, uia = null, hud = { show() {} }, openExternal = () => {}, log = () => {}, clock = Date, copyText = null } = deps;
+  // ID в буфер: только ID записи, только строкой. Нет функции или она упала — честно говорим, что не скопирован.
+  const copyID = (id) => { if (typeof copyText !== "function") return false; try { return copyText(String(id)) !== false; } catch (_) { return false; } };
   const defaults = defaultPaths(env);
 
   function find(program, custom) {
@@ -100,31 +114,49 @@ function createConnector(deps) {
       if (program === "anyDesk") {
         const launched = await launchAnyDesk(exe, record.id, secret);
         if (!launched.ok) { hud.show(MESSAGES.launchFailed(program)); log(`connect fail code=launch program=${program}`); return { ok: false, error: "launch" }; }
-        hud.show(secret ? { kind: "success", title: "Пароль передан", detail: `${title} подключается к ${record.name}`, autoHideMs: 2500 }
-                        : { kind: "success", title: `Открыт ${title}`, detail: `${record.name}`, autoHideMs: 2500 });
+        // CLI подтверждает только запуск: подключилось ли (и не ждёт ли AnyDesk выбора «Terminal Session») — не знаем. Не «успех».
+        hud.show(secret ? { kind: "info", title: "Пароль передан", detail: `${title} подключается к ${record.name} — дальше в окне ${title}`, autoHideMs: 4000 }
+                        : { kind: "info", title: `Открыт ${title}`, detail: `${record.name} — дальше в окне ${title}`, autoHideMs: 4000 });
         log(`connect ok program=${program} password=${secret ? 1 : 0}`);
         return { ok: true };
       }
       // TeamViewer
       if (record.id.includes("@")) { hud.show(MESSAGES.launchFailed(program)); return { ok: false, error: "alias" }; }
-      if (!secret || !uia) {
+      if (!uia) {
+        // Без UI Automation подключение не проверить: ID — в буфер на случай, если TeamViewer открылся без него.
         if (!(await launchTeamViewer(exe, record.id))) { hud.show(MESSAGES.launchFailed(program)); log(`connect fail code=launch program=${program}`); return { ok: false, error: "launch" }; }
-        if (!secret) { hud.show({ kind: "success", title: `Открыт ${title}`, detail: record.name, autoHideMs: 2500 }); log(`connect ok program=${program} password=0`); return { ok: true }; }
+        if (!secret) {
+          const copied = copyID(record.id);
+          hud.show({ kind: "info", title: `Открыт ${title}`, detail: copied ? `${record.name} · ID скопирован — если подключение не началось, вставьте его` : record.name, autoHideMs: 4000 });
+          log(`connect ok program=${program} password=0 confirmed=0 copied=${copied ? 1 : 0}`); return { ok: true };
+        }
         hud.show(MESSAGES.fieldNotFound(program)); return { ok: false, error: "fieldNotFound" };
       }
       const timeoutMs = Math.max(5, settings.timeoutSeconds || 20) * 1000;
       const started = clock.now();
-      // TeamViewer запускается, когда скрипт запомнил уже открытые окна пароля: пароль не уйдёт в окно прежнего подключения.
-      let launched = null;
-      const result = await uia.enter({ timeoutMs, afterReady: async () => { launched = await launchTeamViewer(exe, record.id); } }, secret, (event) => {
-        if (event.state === "waiting") hud.show({ kind: "info", title: "Жду окно пароля…", detail: `${Math.round((clock.now() - started) / 1000)} с`, progress: Math.min(1, (clock.now() - started) / timeoutMs), actions: [{ id: "cancel", label: "Отмена" }] });
+      // TeamViewer запускается, когда скрипт запомнил уже открытые окна: пароль не уйдёт в окно прежнего подключения, а окно
+      // прежнего сеанса не сойдёт за подтверждение нового. ID нужен скрипту для запасного пути (ввести в поле главного окна и нажать
+      // «Connect») и чтобы узнать окно сеанса; пароля в параметрах нет.
+      let launched = null, typed = false;
+      const waiting = (title) => hud.show({ kind: "info", title, detail: `${Math.round((clock.now() - started) / 1000)} с`, progress: Math.min(1, (clock.now() - started) / timeoutMs), actions: [{ id: "cancel", label: "Отмена" }] });
+      const result = await uia.enter({ timeoutMs, id: record.id, ...(secret ? {} : { noPassword: true }), afterReady: async () => { launched = await launchTeamViewer(exe, record.id); } }, secret, (event) => {
+        if (event.state === "idSubmitted") { typed = true; waiting(`Ввёл ID в ${title}, жду подключение…`); }
+        else if (event.state === "intermediate") waiting(`${title} подключается…`);
+        else if (event.state === "waiting") waiting(typed ? `Ввёл ID в ${title}, жду подключение…` : (secret ? "Жду окно пароля…" : "Жду подключение…"));
       });
       if (launched === false) { hud.show(MESSAGES.launchFailed(program)); log(`connect fail code=launch program=${program}`); return { ok: false, error: "launch" }; }
+      const t = typed ? 1 : 0;
       switch (result.state) {
         case "entered":
-          hud.show({ kind: "success", title: "Пароль введён", detail: `${title} подключается к ${record.name}`, autoHideMs: 2500 }); log(`connect ok program=${program} password=1`); return { ok: true };
-        case "noPrompt":     // TeamViewer запущен, окна пароля нет — вероятно, вход по сохранённому доступу; о подключении не заявляем
-          hud.show({ kind: "info", title: `Открыт ${title}`, detail: `${record.name} · окно пароля не появилось, пароль не вводился`, autoHideMs: 4000 }); log(`connect ok program=${program} password=0 prompt=0`); return { ok: true };
+          hud.show({ kind: "success", title: "Пароль введён", detail: `${title} подключается к ${record.name}`, autoHideMs: 2500 }); log(`connect ok program=${program} password=1 typed=${t}`); return { ok: true };
+        case "session":      // окно сеанса найдено и устоялось, окна пароля не было — вход без пароля подтверждён
+          hud.show({ kind: "success", title: "Подключено без пароля", detail: `${record.name} · окно сеанса ${title} открыто`, autoHideMs: 2500 }); log(`connect ok program=${program} password=0 confirmed=1 typed=${t}`); return { ok: true };
+        case "passwordNeeded":   // пароля нет в файле, а TeamViewer его спрашивает: окно пароля открыто, вводит пользователь
+          hud.show(MESSAGES.passwordNeeded(program)); log(`connect ok program=${program} password=0 prompt=1 typed=${t}`); return { ok: true };
+        case "noPrompt": {   // TeamViewer запущен, но ни окна пароля, ни окна сеанса к сроку — не «подключено»: нейтрально, ID в буфер
+          const copied = copyID(record.id);
+          hud.show(MESSAGES.unconfirmed(program, copied)); log(`connect fail code=unconfirmed program=${program} typed=${t} copied=${copied ? 1 : 0}`); return { ok: false, error: "unconfirmed" };
+        }
         case "noWindow":     // процесса TeamViewer не видно вовсе — ввода не было, пользователь вводит вручную
           hud.show(MESSAGES.noTeamViewerWindow(program)); log(`connect fail code=noWindow`); return { ok: false, error: "noWindow" };
         case "wrongPassword": hud.show(MESSAGES.wrongPassword()); log(`connect fail code=wrongPassword`); return { ok: false, error: "wrongPassword" };

@@ -8,15 +8,21 @@ const path = require("node:path");
 const SCRIPT = path.join(__dirname, "tv-uia.ps1").replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
 // powershell.exe — по полному пути из системной папки, а не по PATH и текущей папке.
 const POWERSHELL = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-const STATES = new Set(["ready", "waiting", "entered", "noWindow", "noPrompt", "elevated", "focusLost", "fieldNotFound", "wrongPassword"]);
+const STATES = new Set(["ready", "waiting", "idSubmitted", "intermediate", "entered", "session", "passwordNeeded", "noPrompt", "noWindow", "elevated", "focusLost", "fieldNotFound", "wrongPassword"]);
+// Промежуточные события: скрипт продолжает работу. Остальные состояния — итог.
+const EVENTS = new Set(["waiting", "idSubmitted", "intermediate"]);
+// Скрипт продлевает ожидание, пока открыто известное промежуточное окно или после ввода ID, но не дольше двух сроков.
+const MAX_EXTENSION = 2;
 
 // spawn — child_process.spawn (в тестах двойник). Возвращает { enter(options, secret, onEvent), cancel() }.
-// options: { timeoutMs, afterReady? } — afterReady вызывается, когда скрипт запомнил уже открытые окна пароля и готов
-// ждать новое: запускать TeamViewer нужно только после этого, иначе пароль уйдёт в окно прежнего подключения.
+// options: { timeoutMs, id?, noPassword?, afterReady? } — afterReady вызывается, когда скрипт запомнил уже открытые окна и готов
+// ждать новое: запускать TeamViewer нужно только после этого, иначе пароль уйдёт в окно прежнего подключения. id — ID партнёра
+// (запасной ввод в главное окно и опознание окна сеанса); noPassword — пароля нет: окно пароля только обнаруживается.
+// secret — SecretBuffer или null (при noPassword).
 function createUia(spawn, { script = SCRIPT, powershell = POWERSHELL } = {}) {
   const active = new Set();   // идущие вызовы: у каждого свой процесс и свой признак отмены
   return {
-    enter({ timeoutMs, afterReady }, secret, onEvent = () => {}) {
+    enter({ timeoutMs, id, noPassword, afterReady }, secret, onEvent = () => {}) {
       return new Promise((resolve) => {
         const run = { child: null, cancelled: false };
         let settled = false, last = "fieldNotFound", payload = null;
@@ -41,18 +47,18 @@ function createUia(spawn, { script = SCRIPT, powershell = POWERSHELL } = {}) {
             let state; try { state = JSON.parse(line).state; } catch (_) { continue; }
             if (!STATES.has(state)) continue;
             if (state === "ready") { try { Promise.resolve(afterReady?.()).catch(() => {}); } catch (_) {} }
-            else if (state === "waiting") onEvent({ state });
+            else if (EVENTS.has(state)) onEvent({ state });
             else { last = state; done(state); }
           }
         });
         child.on("exit", () => done(run.cancelled ? "cancelled" : last));
         // Параметры и пароль — только через stdin; пароль байтами из буфера (UTF-8), копия затирается после записи.
         try {
-          child.stdin.write(JSON.stringify({ timeoutMs }) + "\n");
-          payload = Buffer.concat([secret.bytes, Buffer.from("\n")]);
+          child.stdin.write(JSON.stringify({ timeoutMs, id: id == null ? undefined : String(id), noPassword: noPassword || !secret ? true : undefined }) + "\n");
+          payload = Buffer.concat([secret ? secret.bytes : Buffer.alloc(0), Buffer.from("\n")]);
           child.stdin.write(payload, () => { wipePayload(); try { child.stdin.end(); } catch (_) {} });
         } catch (_) { return done("fieldNotFound"); }
-        guard = setTimeout(() => { try { child.kill(); } catch (_) {} done("fieldNotFound"); }, timeoutMs + 10_000);
+        guard = setTimeout(() => { try { child.kill(); } catch (_) {} done("fieldNotFound"); }, timeoutMs * MAX_EXTENSION + 10_000);
         guard.unref?.();
       });
     },
@@ -60,4 +66,4 @@ function createUia(spawn, { script = SCRIPT, powershell = POWERSHELL } = {}) {
   };
 }
 
-module.exports = { createUia, SCRIPT, POWERSHELL };
+module.exports = { createUia, SCRIPT, POWERSHELL, MAX_EXTENSION };

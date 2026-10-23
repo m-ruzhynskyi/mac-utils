@@ -39,7 +39,8 @@ function sanitizePatch(patch) {
 }
 
 // electron: { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, dialog, nativeImage, screen };
-// options: { icon, userData, connector?, editor?, templates?, hud?, log? }. Возвращает управляющий объект (тесты и main.js).
+// options: { icon, userData, connector?, editor?, templates?, hud?, log?, copyText? } — copyText(text) кладёт в буфер обмена ID
+// TeamViewer, когда подключение не подтвердилось (передаётся из main.js; пароль через него не идёт). Возвращает управляющий объект (тесты и main.js).
 function init(electron, options = {}) {
   const { app, BrowserWindow, Tray, Menu, MenuItem, globalShortcut, ipcMain, shell, dialog, nativeImage, screen } = electron;
   const userData = options.userData || app.getPath("userData");
@@ -51,7 +52,7 @@ function init(electron, options = {}) {
   const realHud = options.hud || createHud({ BrowserWindow, screen, ipcMain }, (id) => hudAction(id));
   const hud = { show(state) { if (state.kind === "success" && !settings.data.notify) return; realHud.show(state); } };
   const connector = options.connector || createConnector({ exists: fs.existsSync, customPaths: () => settings.data.programPaths, spawn,
-    uia: createUia(spawn), hud, openExternal: (url) => shell.openExternal(url), log });
+    uia: createUia(spawn), hud, openExternal: (url) => shell.openExternal(url), log, copyText: options.copyText });
   const service = new RemoteService({ settings, store, connector });
   let windowRef = null, paletteRef = null, tray = null, hotkeyOk = true, registered = "";
 

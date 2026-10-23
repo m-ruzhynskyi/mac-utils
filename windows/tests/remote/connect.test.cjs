@@ -30,7 +30,7 @@ function rig({ installed = [AD, TV], secret = PASSWORD, uiaResult = { state: "en
   let secretRef = null;
   const store = { password: async () => { if (passwordThrows) throw new Error("gone"); if (secret == null) return null; secretRef = new SecretBuffer(secret); return secretRef; } };
   const uiaCalls = [];
-  const uia = { enter: async (opts, s, onEvent) => { await opts.afterReady?.(); uiaCalls.push({ opts, bytes: Buffer.from(s.bytes) }); onEvent({ state: "waiting" }); return uiaResult; }, cancel() { uiaCalls.cancelled = true; } };
+  const uia = { enter: async (opts, s, onEvent) => { await opts.afterReady?.(); uiaCalls.push({ opts, bytes: s ? Buffer.from(s.bytes) : null }); onEvent({ state: "waiting" }); return uiaResult; }, cancel() { uiaCalls.cancelled = true; } };
   const connector = createConnector({ exists: (p) => installed.includes(p), spawn: fakeSpawn, uia, hud: { show: (s) => states.push(s) }, openExternal: (u) => opened.push(u), log: (l) => log.push(l) });
   return { connector, states, spawned, log, opened, store, uiaCalls, get secret() { return secretRef; } };
 }
@@ -48,7 +48,10 @@ test("AnyDesk: ID и --with-password в аргументах, пароль — �
   assert.ok(!everything(r).includes(PASSWORD), "пароль в аргументах, тостах или журнале");
   assert.ok(r.secret.isWiped, "пароль затёрт");
   assert.ok(r.states.some((s) => /Открываю AnyDesk/.test(s.title)));
-  assert.equal(r.states.at(-1).kind, "success");
+  // CLI подключение не подтверждает: тост нейтральный, не «успех».
+  assert.equal(r.states.at(-1).kind, "info");
+  assert.match(r.states.at(-1).title, /Пароль передан/);
+  assert.ok(!r.states.some((s) => s.kind === "success"));
   assert.ok(r.log.every((l) => /^connect (ok|fail) [A-Za-z0-9=_ ]+$/.test(l)), r.log.join("|"));
 });
 
@@ -108,7 +111,8 @@ test("TeamViewer: запуск с -i ID без пароля в аргумент�
 
 test("TeamViewer: исходы UI Automation → тосты по дизайну; пароль затёрт в каждом", async () => {
   const cases = [
-    ["noPrompt", true, /Открыт TeamViewer/], ["noWindow", false, /Введите пароль вручную/], ["wrongPassword", false, /Проверьте пароль в файле/], ["focusLost", false, /Ввод прерван/],
+    ["session", true, /Подключено без пароля/], ["noPrompt", false, /Не удалось подтвердить подключение/], ["noWindow", false, /Введите пароль вручную/], ["passwordNeeded", true, /Введите пароль в окне TeamViewer/],
+    ["wrongPassword", false, /Проверьте пароль в файле/], ["focusLost", false, /Ввод прерван/],
     ["elevated", false, /запущен от администратора/], ["fieldNotFound", false, /Введите пароль вручную/], ["cancelled", false, /Отменено/],
   ];
   for (const [state, ok, title] of cases) {
@@ -121,10 +125,13 @@ test("TeamViewer: исходы UI Automation → тосты по дизайну;
   }
 });
 
-test("TeamViewer без пароля — просто запуск; алиас у TeamViewer не принимается", async () => {
-  const r = rig();
+test("TeamViewer без пароля — UI Automation без пароля (ID и подтверждение сеанса); алиас у TeamViewer не принимается", async () => {
+  const r = rig({ uiaResult: { state: "session" } });
   assert.deepEqual(await run(r, record({ program: "teamViewer", hasPassword: false })), { ok: true });
-  assert.equal(r.uiaCalls.length, 0);
+  assert.equal(r.uiaCalls.length, 1);
+  assert.equal(r.uiaCalls[0].bytes, null, "пароля нет — в UI Automation ничего не передаётся");
+  assert.equal(r.uiaCalls[0].opts.noPassword, true);
+  assert.equal(r.uiaCalls[0].opts.id, "123456789");
   assert.deepEqual(await run(rig(), record({ program: "teamViewer", id: "x@ad" })), { ok: false, error: "alias" });
 });
 

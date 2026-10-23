@@ -35,7 +35,7 @@ function rig({ installed = [AD, TV], secret = PW, uiaResult = { state: "entered"
     return child;
   };
   const store = { password: async () => { r.passwordCalls++; if (passwordThrows) throw new Error("gone"); if (secret == null) return null; const s = new SecretBuffer(secret); r.secrets.push(s); return s; } };
-  const uia = { enter: async (opts, s, onEvent) => { await opts.afterReady?.(); r.uiaCalls.push({ opts, bytes: Buffer.from(s.bytes) }); onEvent({ state: "waiting" }); if (uiaThrows) throw new Error("uia crashed"); return uiaResult; }, cancel() { r.cancelled = true; } };
+  const uia = { enter: async (opts, s, onEvent) => { await opts.afterReady?.(); r.uiaCalls.push({ opts, bytes: s ? Buffer.from(s.bytes) : null }); onEvent({ state: "waiting" }); if (uiaThrows) throw new Error("uia crashed"); return uiaResult; }, cancel() { r.cancelled = true; } };
   r.connector = createConnector({ exists: (p) => installed.includes(p), spawn, uia, hud: { show: (s) => r.states.push(s) }, openExternal: (u) => r.opened.push(u), log: (l) => r.log.push(l) });
   r.store = store;
   r.run = (rec = record(), opts = {}) => r.connector.connectRecord(rec, { settings, store, noPassword: false, ...opts });
@@ -148,7 +148,8 @@ test("TeamViewer: алиас не поддерживается; пароль н�
 
 test("TeamViewer: все исходы окна → правильные сообщения, пароль затёрт, в журнале только коды", async () => {
   const cases = [
-    [{ state: "entered" }, true, null, "success"], [{ state: "noPrompt" }, true, null, "info"], [{ state: "noWindow" }, false, "noWindow", "warning"],
+    [{ state: "entered" }, true, null, "success"], [{ state: "session" }, true, null, "success"],
+    [{ state: "noPrompt" }, false, "unconfirmed", "info"], [{ state: "noWindow" }, false, "noWindow", "warning"], [{ state: "passwordNeeded" }, true, null, "info"],
     [{ state: "wrongPassword" }, false, "wrongPassword", "danger"], [{ state: "focusLost" }, false, "focusLost", "warning"],
     [{ state: "elevated" }, false, "elevated", "warning"], [{ state: "fieldNotFound" }, false, "fieldNotFound", "warning"],
     [{ state: "cancelled" }, false, "cancelled", "info"], [{ state: "что-то-новое" }, false, "fieldNotFound", "warning"],
@@ -242,10 +243,12 @@ test("PowerShell: отмена убивает процесс и даёт cancell
 test("скрипт tv-uia.ps1: проверка процесса и фокуса до ввода, пароль не выводится и не пишется на диск, буфер обмена не используется", () => {
   const ps = fs.readFileSync(SCRIPT, "utf8");
   const at = (needle) => { const i = ps.indexOf(needle); assert.ok(i >= 0, needle); return i; };
-  assert.ok(at("TeamViewer*") < at("SetValue"), "процесс проверяется до ввода");
-  assert.ok(at("GetForegroundWindow") < at("SetValue") && at("focusLost") < at("SetValue"), "фокус проверяется до ввода");
-  assert.ok(at("Elevated") < at("SetValue"), "повышенные права — до ввода");
-  assert.ok(at("IsPassword") < at("SetValue"), "вводим только в поле пароля");
+  // Ввод пароля (не ID партнёра, который тоже ставится через SetValue в запасном пути) — после проверок.
+  const enter = "SetValue($password)";
+  assert.ok(at("TeamViewer*") < at(enter), "процесс проверяется до ввода");
+  assert.ok(at("[MuNative]::GetForegroundWindow()") < at(enter) && at("Emit 'focusLost'") < at(enter), "фокус проверяется до ввода");
+  assert.ok(at("[MuNative]::Elevated(") < at(enter), "повышенные права — до ввода");
+  assert.ok(at("$found.Edit.TryGetCurrentPattern") < at(enter) && at("IsPassword") < at(enter), "вводим только в поле пароля");
   for (const bad of ["Set-Clipboard", "Clipboard]::SetText", "Out-File", "Set-Content", "Add-Content", "Write-Host", "Write-Output $password", "Start-Transcript", "$args", "param("]) {
     assert.ok(!ps.includes(bad), `в скрипте: ${bad}`);
   }
@@ -280,7 +283,8 @@ test("перебор 200 сценариев: пароль только в stdin 
       if (s.chunks.length) assert.equal(s.file, AD, `сценарий ${i}: stdin кроме AnyDesk`), assert.ok(s.args.includes("--with-password"));
     }
     if (program === "anyDesk") assert.equal(r.uiaCalls.length, 0);
-    if (r.uiaCalls.length) assert.equal(r.spawned[0].file, TV);
+    // UI Automation — только для TeamViewer (теперь и без пароля: ID и подтверждение сеанса); запуск мог и не удаться.
+    if (r.uiaCalls.length) assert.ok(r.spawned.every((s) => s.file === TV), `сценарий ${i}`);
     assert.ok(r.log.every((l) => /^connect (ok|fail) [A-Za-z0-9=_ ]+$/.test(l)), `сценарий ${i}: ${r.log}`);
   }
   assert.ok(seen.size > 4, [...seen].join());

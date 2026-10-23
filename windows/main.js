@@ -681,7 +681,8 @@ app.whenReady().then(() => {
 
   createWindow();
   // «Удалённые подключения» — отдельный модуль (remote/): окно, палитра Ctrl+Alt+A, меню в трее. Его сбой не мешает трансляции.
-  try { remoteConnections = require("./remote").init(require("electron"), { icon: path.join(__dirname, "assets", "icon.png") }); } catch (_) {}
+  // copyText — только для ID TeamViewer, когда подключение не подтвердилось; пароли через буфер не идут.
+  try { remoteConnections = require("./remote").init(require("electron"), { icon: path.join(__dirname, "assets", "icon.png"), copyText: (text) => { require("electron").clipboard.writeText(String(text)); return true; } }); } catch (_) {}
   checkForUpdates();
   setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
 });
