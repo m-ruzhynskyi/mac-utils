@@ -131,6 +131,26 @@ final class RemoteConnectionsSnapshotTests: XCTestCase {
         let book = try await center(nil)
         book.setFile(work.appendingPathComponent("connections.xlsx"))
         render(RemoteEditSheet(center: book, record: eastEntry), size: NSSize(width: 480, height: 640), name: "rc19-view-xlsx")
+        // Задачи 3–5: метки, VPN/RDP, учётка, подробности (макет .audit/rc-tags-design).
+        let labs = try await center("""
+            <connections>
+            <connection><name>Північна лабораторія</name><id>123456789</id><password>x</password><group>Північ</group><tags>Рег</tags><note>Звонить перед подключением, работают до 17:00</note><account>Администратор</account><accountPassword>y</accountPassword><app>AnyDesk</app></connection>
+            <connection><name>Східна · AnyDesk</name><id>987654321</id><password>x</password><group>Схід</group><tags>Рег, Фито, VPN</tags><note>Сначала WireGuard — профиль в «Доступ»</note><access>VPN (WireGuard) | профиль Схід-1</access><app>AnyDesk</app></connection>
+            <connection><name>Приморська · сервер</name><id>10.20.0.15</id><group>Південь</group><tags>Фито, Сервер, VPN, RDP</tags><note>RDP только после VPN. Если не пускает — звонить заведующему, работают до 17:00.</note><account>lims.admin</account><accountPassword>y</accountPassword><access>VPN (WireGuard) | профиль Приморська-1
+
+            RDP — IP: 10.20.0.15
+            Server — логин: lims.admin · пароль: demo
+
+            Login: operator</access><contacts>заведующий</contacts><app>RDP</app></connection>
+            <connection><name>Лісова</name><id>1234567890</id><password>x</password><group>Південь</group><tags>Рег, Фито, Сервер, ЛІМС</tags><note>Два компьютера: бухгалтерия и лаборатория — второй ID в «Доступ»</note><account>Администратор</account><app>TeamViewer</app></connection>
+            <connection><name>Озерна</name><id></id><group>Південь</group><tags>Рег</tags><note>Только по телефону, контакты в «Доступ»</note><app>Другое</app></connection>
+            </connections>
+            """, name: "labs.xml")
+        render(RemoteConnectionsPanel(center: labs), size: panel, name: "rc20-panel-labels")
+        labs.detailsRecord = labs.snapshot.records.first { $0.name == "Приморська · сервер" }
+        render(RemoteConnectionsPanel(center: labs), size: panel, name: "rc21-details")
+        labs.detailsRecord = nil
+
         defer { RemoteL10n.language = .ru }
         for language in [RemoteLanguage.uk, .en] {
             RemoteL10n.language = language
