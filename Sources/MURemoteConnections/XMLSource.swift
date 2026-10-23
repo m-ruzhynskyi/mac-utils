@@ -70,7 +70,7 @@ struct XMLSource: ConnectionsSource {
                 if !unrecognized.contains(name) { unrecognized.append(name) }
                 return nil
             }
-            if !columns.contains(where: { $0.field == f }) { columns.append(MatchedColumn(title: name, field: f)) }
+            if !columns.contains(where: { $0.field == f }) { columns.append(MatchedColumn(title: name, field: f, column: nil)) }
             return f
         }
 

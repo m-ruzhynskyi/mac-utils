@@ -6,7 +6,7 @@ import SwiftUI
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general, hotKeys, exclusions, panel, music, share, focus, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
-         uninstaller, monitor, tasks, cleanup, shots, textEditor, videoPlayer
+         uninstaller, monitor, tasks, cleanup, shots, textEditor, videoPlayer, remote
 
     var id: String { rawValue }
 
@@ -20,6 +20,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "Снимки"
         case .textEditor: return "Редактор"
         case .videoPlayer: return "Плеер"
+        case .remote: return "Удалённые"
         case .cutPaste: return "Вырезать"
         case .smoothScroll: return "Прокрутка"
         case .switcher: return "Переключатель"
@@ -78,6 +79,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "Мои снимки"
         case .textEditor: return "Текстовый редактор"
         case .videoPlayer: return "Видеоплеер"
+        case .remote: return "Удалённые подключения"
         }
     }
 
@@ -113,6 +115,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "photo.on.rectangle.angled"
         case .textEditor: return "doc.plaintext"
         case .videoPlayer: return "play.rectangle"
+        case .remote: return "display.2"
         }
     }
 }
@@ -153,6 +156,7 @@ extension SettingsSection {
         case .shots: return "мои снимки история поиск умная папка копии снимков"
         case .textEditor: return "текстовый редактор блокнот notepad frm rtf txt log json xml csv кодировка вкладки знаки $ доллар открыть с помощью"
         case .videoPlayer: return "видеоплеер видео плеер фильм сериал mp4 mov m4v mp3 субтитры srt ass дорожка скорость плейлист пропустить интро титры следующая серия кадр картинка в картинке pip"
+        case .remote: return "удалённые подключения anydesk teamviewer удалённый доступ компьютеры id пароль таблица xlsx xml excel ⌥⌘a"
         }
     }
 
@@ -189,7 +193,7 @@ enum SettingsGroup: String, CaseIterable, Identifiable {
         case .capture: return [.screenshot, .shots, .annotate, .qr, .meetings]
         case .windowsInput: return [.switcher, .windows, .volume, .layout, .smoothScroll, .cutPaste, .textInput]
         case .filesSystem: return [.shelf, .downloads, .textEditor, .videoPlayer, .cheatSheet, .uninstaller, .cleanup, .monitor, .tasks]
-        case .more: return [.wellbeing, .focus, .music, .share, .ai]
+        case .more: return [.wellbeing, .focus, .music, .share, .remote, .ai]
         }
     }
 }
@@ -224,6 +228,7 @@ extension SettingsSection {
         case .ai: return "Всё работает на локальной модели через Ollama — тексты, снимки и файлы не уходят в интернет."
         case .textEditor: return "Вкладки, кодировки и знаки $ для .frm и других текстов"
         case .videoPlayer: return "Плейлист, субтитры, дорожки и запоминание места"
+        case .remote: return "AnyDesk и TeamViewer из своей таблицы: ⌥⌘A, набрали имя — Enter"
         case .music, .share, .switcher, .wellbeing, .uninstaller, .monitor, .tasks, .cleanup, .shots: return ""
         }
     }
