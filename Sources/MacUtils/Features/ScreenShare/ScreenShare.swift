@@ -2791,7 +2791,7 @@ enum ShareProtocol {
 
 /// Проигрывание звука трансляции у зрителя.
 final class SharePlayer: @unchecked Sendable {
-    private let engine = AVAudioEngine()
+    let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
     private let format = AVAudioFormat(standardFormatWithSampleRate: ShareProtocol.sampleRate, channels: 1)!
     private var started = false
@@ -2800,19 +2800,51 @@ final class SharePlayer: @unchecked Sendable {
     /// не растёт, пока не кончится память (≈ 345 МБ в час без предела), и задержка звука не копится.
     private let lock = NSLock()
     private var queuedFrames = 0
+    /// Поколение очереди: пакеты, запланированные до смены выхода, не должны вычитаться из новой очереди.
+    private var generation = 0
+    /// Движок и узел трогает один поток за раз: play() с сокета и перезапуск по уведомлению системы.
+    private let engineLock = NSLock()
     private let limit: Int
     private(set) var dropped = 0
+    private(set) var restarts = 0
+    private var observer: NSObjectProtocol?
 
     /// ≈ 1 с звука трансляции.
     static let defaultLimit = Int(ShareProtocol.sampleRate)
 
     /// `silent` — для тестов и стендов: движок рендерит вручную, в динамики ничего не идёт и ничего не потребляется
     /// (как остановленный системой движок).
-    init(silent: Bool = false, limit: Int = SharePlayer.defaultLimit) {
+    /// `center` — откуда приходит `.AVAudioEngineConfigurationChange` (в тестах свой центр уведомлений).
+    init(silent: Bool = false, limit: Int = SharePlayer.defaultLimit, center: NotificationCenter = .default) {
         self.limit = limit
         if silent {
             try? engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 4096)
         }
+        observer = center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+            self?.outputChanged()
+        }
+    }
+
+    deinit {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    /// Сменилось устройство вывода (наушники, AirPods, HDMI): система останавливает движок, и без перезапуска звук
+    /// пропадает. Старую очередь бросаем — в ней звук на секунду позади — и продолжаем со свежих пакетов.
+    func outputChanged() {
+        engineLock.lock(); defer { engineLock.unlock() }
+        guard started else { return }
+        node.stop()
+        lock.lock()
+        queuedFrames = 0
+        generation += 1
+        lock.unlock()
+        engine.disconnectNodeOutput(node)
+        engine.connect(node, to: engine.mainMixerNode, format: format)
+        restarts += 1
+        let running = (try? engine.start()) != nil
+        if running { node.play() }
+        Log.capture.info("звук зрителя: смена выхода, перезапуск \(self.restarts) (запущен \(running ? 1 : 0))")
     }
 
     /// Сколько секунд звука ждёт проигрывания.
@@ -2833,6 +2865,7 @@ final class SharePlayer: @unchecked Sendable {
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else { return }
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count) }
+        engineLock.lock(); defer { engineLock.unlock() }
         if !started {
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: format)
@@ -2840,22 +2873,24 @@ final class SharePlayer: @unchecked Sendable {
             node.play()
             started = true
         } else if !engine.isRunning {
-            // Система остановила движок (наушники, AirPods, другое устройство вывода) — запускаем снова.
+            // Запасной путь, если уведомление не дошло: запускаем движок снова.
             guard (try? engine.start()) != nil else { return }
             node.play()
         }
         lock.lock()
         queuedFrames += count
+        let scheduled = generation
         lock.unlock()
         node.scheduleBuffer(buffer) { [weak self] in
             guard let self else { return }
             self.lock.lock()
-            self.queuedFrames = max(0, self.queuedFrames - count)
+            if self.generation == scheduled { self.queuedFrames = max(0, self.queuedFrames - count) }
             self.lock.unlock()
         }
     }
 
     func stop() {
+        engineLock.lock(); defer { engineLock.unlock() }
         guard started else { return }
         node.stop()
         engine.stop()
@@ -2863,6 +2898,7 @@ final class SharePlayer: @unchecked Sendable {
         started = false
         lock.lock()
         queuedFrames = 0
+        generation += 1
         lock.unlock()
     }
 }
