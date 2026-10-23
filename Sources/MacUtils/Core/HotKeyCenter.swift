@@ -3,7 +3,7 @@ import Foundation
 
 /// Глобальные горячие клавиши через Carbon (не требуют «Универсального доступа»).
 /// Функции просят своё сочетание по умолчанию; если пользователь переназначил его в настройках,
-/// регистрируется выбранное (`HotKeyRegistry.resolve`). Для каждого сочетания помнится, что просили
+/// регистрируется выбранное (`resolver`, в приложении — `HotKeyRegistry.resolve`). Для каждого сочетания помнится, что просили
 /// и удалось ли зарегистрировать — это показывают настройки и шпаргалка.
 @MainActor
 final class HotKeyCenter: ObservableObject {
@@ -21,6 +21,9 @@ final class HotKeyCenter: ObservableObject {
     private var installed = false
 
     /// Зарегистрированные сейчас сочетания (фактические, после замены из настроек).
+    /// Что на самом деле регистрировать под идентификатором (замены из настроек); подставляет приложение при запуске.
+    var resolver: (UInt32, LayoutHotKey) -> LayoutHotKey = { $1 }
+
     @Published private(set) var active: [UInt32: LayoutHotKey] = [:]
     /// Не удалось зарегистрировать: сочетание занято системой или другой программой (код Carbon).
     @Published private(set) var failures: [UInt32: OSStatus] = [:]
@@ -99,7 +102,7 @@ final class HotKeyCenter: ObservableObject {
         removeCarbon(id)
         guard !suspended.contains(id) else { return false }
         installIfNeeded()
-        let combo = HotKeyRegistry.resolve(id: id, requested: request.combo)
+        let combo = resolver(id, request.combo)
         var ref: EventHotKeyRef?
         let hotKeyID = EventHotKeyID(signature: OSType(0x4D555449), id: id) // 'MUTI'
         let status = RegisterEventHotKey(UInt32(combo.keyCode), UInt32(combo.modifiers), hotKeyID,
