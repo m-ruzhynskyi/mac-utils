@@ -603,8 +603,11 @@ final class DocRenderer {
             .foregroundColor: color(props.color, model: model) ?? NSColor.black,
             .docChar: DocCharInfo(props: props, fontName: name, displayFont: family),
         ]
-        let highlight = props.highlight > 0 ? props.highlight : props.background
-        if highlight > 0, let fill = color(highlight, model: model) { attributes[.backgroundColor] = fill }
+        if props.highlight > 0, let fill = color(props.highlight, model: model) {
+            attributes[.backgroundColor] = fill
+        } else if let fill = shade(props.background, pattern: props.backgroundPattern, percent: props.backgroundPercent, model: model) {
+            attributes[.backgroundColor] = fill
+        }
         switch props.underline {
         case .none: break
         case .single, .words: attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue | (props.underline == .words ? NSUnderlineStyle.byWord.rawValue : 0)
@@ -627,6 +630,19 @@ final class DocRenderer {
             attributes[.underlineColor] = NSColor(srgbRed: 0.27, green: 0.45, blue: 0.85, alpha: 1)
         }
         return attributes
+    }
+
+    /// Заливка Word: фон (`\clcbpat`, `\chcbpat`; «авто» — белый) и поверх него узор (`\clcfpat`, `\chcfpat`; «авто» —
+    /// чёрный) долей `percent` сотых процента: `\clshdng3500` с чёрным узором — серый #a6a6a6. Ни фона, ни узора — `nil`.
+    func shade(_ background: Int, pattern: Int, percent: Int, model: RTFDocumentModel) -> NSColor? {
+        guard background > 0 || percent > 0 else { return nil }
+        let back = (color(background, model: model) ?? .white).usingColorSpace(.sRGB) ?? .white
+        guard percent > 0 else { return back }
+        let fore = (color(pattern, model: model) ?? .black).usingColorSpace(.sRGB) ?? .black
+        let share = CGFloat(percent) / 10_000
+        func mix(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a * share + b * (1 - share) }
+        return NSColor(srgbRed: mix(fore.redComponent, back.redComponent), green: mix(fore.greenComponent, back.greenComponent),
+                       blue: mix(fore.blueComponent, back.blueComponent), alpha: 1)
     }
 
     func color(_ index: Int, model: RTFDocumentModel) -> NSColor? {
@@ -894,7 +910,7 @@ final class DocRenderer {
             block.lines.append(DocCellBlock.Line(edge: edge, width: max(0.5, CGFloat(border.width) / 20),
                                                  color: color(border.color, model: model) ?? .black))
         }
-        if cell.shading > 0 { block.backgroundColor = color(cell.shading, model: model) }
+        if let fill = shade(cell.shading, pattern: cell.shadingPattern, percent: cell.shadingPercent, model: model) { block.backgroundColor = fill }
         block.setContentWidth(max(4, width - padLeft - padRight), type: .absoluteValueType)
         if place.height != 0 {
             block.setValue(CGFloat(abs(place.height)) / 20, type: .absoluteValueType, for: .minimumHeight)

@@ -44,19 +44,22 @@ final class DocFloatingCell: NSTextAttachmentCell {
             path = NSBezierPath(rect: rect)
         }
         if shape.filled, !isLine {
-            Self.color(shape.fillColor).setFill()
+            Self.color(shape.fillColor, system: .white).setFill()
             path.fill()
         }
         if shape.line {
             path.lineWidth = max(0.25, CGFloat(shape.lineWidth) / 12_700)
-            Self.color(shape.lineColor).setStroke()
+            Self.color(shape.lineColor, system: .black).setStroke()
             path.stroke()
         }
     }
 
     /// Цвет Word: R + G·256 + B·65536.
-    static func color(_ value: Int) -> NSColor {
-        NSColor(srgbRed: CGFloat(value & 0xFF) / 255, green: CGFloat((value >> 8) & 0xFF) / 255,
+    /// Цвет Office в `\sp` (BGR). Со старшим байтом-флагом (0x10000000 — системный цвет, 0x08000000 — цвет схемы) это
+    /// не RGB: Word рисует такую заливку цветом окна (белым), линию — цветом текста (`system`).
+    static func color(_ value: Int, system: NSColor) -> NSColor {
+        guard value & ~0xFFFFFF == 0 else { return system }
+        return NSColor(srgbRed: CGFloat(value & 0xFF) / 255, green: CGFloat((value >> 8) & 0xFF) / 255,
                 blue: CGFloat((value >> 16) & 0xFF) / 255, alpha: 1)
     }
 }

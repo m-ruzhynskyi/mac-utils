@@ -19,11 +19,12 @@ enum RTFWord: String, CaseIterable {
     // Символ.
     case plain, f, fs, b, i, ul, uld, uldb, ulw, ulth, uldash, uldashd, uldashdd, ulwave, ulhwave, ululdbwave, ulthd, ulthdash
     case ulnone, strike, striked, cf, cb, highlight, chcbpat, v, super_ = "super", sub, nosupersub, up, dn, caps, scaps
+    case chshdng, chcfpat
     // Особые символы.
     case tab, line, page, cell, row, nestcell, nestrow, uc, u, bin
     case emdash, endash, lquote, rquote, ldblquote, rdblquote, bullet, emspace, enspace, qmspace, zwj, zwnj, ltrmark, rtlmark, chpgn
     // Таблица.
-    case trowd, cellx, clvmgf, clvmrg, clmgf, clmrg, clbrdrt, clbrdrb, clbrdrl, clbrdrr, clcbpat, clvertalt, clvertalc, clvertalb
+    case trowd, cellx, clvmgf, clvmrg, clmgf, clmrg, clbrdrt, clbrdrb, clbrdrl, clbrdrr, clcbpat, clshdng, clcfpat, clvertalt, clvertalc, clvertalb
     case trgaph, trleft, trrh, trhdr, trpaddt, trpaddb, trbrdrt, trbrdrb, trbrdrl, trbrdrr, trbrdrh, trbrdrv
     case trql, trqc, trqr, trpaddl, trpaddr, trpaddfl, trpaddfr, clpadt, clpadr, clpadft, clpadfr
     // Рисунок.

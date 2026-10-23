@@ -97,6 +97,26 @@ final class WordColorTests: XCTestCase {
         XCTAssertEqual(colors.filter { !$0.near(WordColors.RGB(1, 0, 0), tolerance: 16) }, [], "других цветов текста нет")
     }
 
+    /// Затенение ячейки и знаков долей узора (`\clshdng`, `\chshdng`): 35 % чёрного по белому — #a6a6a6, как в PDF Word;
+    /// узор поверх цветного фона смешивается с ним.
+    func testShadingPercentMixesPatternOverBackground() throws {
+        let rtf = Self.header + #"\trowd\trgaph108\clcfpat1\clshdng3500\cellx3000\clcbpat3\clcfpat1\clshdng2000\cellx6000"#
+            + #"\pard\intbl a\cell\pard\intbl b\cell\row\pard{\chcbpat6\chcfpat1\chshdng2000 shaded}\par}"#
+        let fills = WordColors.pages(try rendered(rtf)).flatMap(\.fills).map(\.key)
+        XCTAssertTrue(fills.contains { $0.near(WordColors.RGB(0.65, 0.65, 0.65), tolerance: 3) }, "35 % чёрного: \(fills)")
+        XCTAssertTrue(fills.contains { $0.near(WordColors.RGB(0, 0.8, 0.8), tolerance: 3) }, "20 % чёрного по бирюзовому: \(fills)")
+        XCTAssertTrue(fills.contains { $0.near(WordColors.RGB(0.8, 0, 0), tolerance: 3) }, "знаки: 20 % чёрного по красному: \(fills)")
+    }
+
+    /// Цвет фигуры с флагом в старшем байте (системный цвет Office) — не RGB: заливка белая, линия чёрная.
+    func testSystemColorOfShapeIsNotRGB() {
+        XCTAssertEqual(DocFloatingCell.color(0x1000_0011, system: .white), .white)
+        XCTAssertEqual(DocFloatingCell.color(0x1000_0001, system: .black), .black)
+        let red = DocFloatingCell.color(0x0000FF, system: .white).usingColorSpace(.sRGB)!
+        XCTAssertEqual(red.redComponent, 1)
+        XCTAssertEqual(red.blueComponent, 0, "BGR: 0x0000FF — красный")
+    }
+
     // MARK: - Прогон по эталону Word
 
     func testColorsAgainstWordReference() throws {
@@ -112,19 +132,27 @@ final class WordColorTests: XCTestCase {
             names = names.filter(wanted.contains)
         }
         var lines: [String] = []
-        var checked = 0, clean = 0, total = 0
+        var checked = 0, clean = 0, total = 0, withPlaceholders = 0
         var byKind: [String: Int] = [:]
         for name in names {
             let wordURL = base.appendingPathComponent("pdf/\(name).pdf")
             guard let data = try? Data(contentsOf: base.appendingPathComponent("rtf/\(name).rtf")), let wordPDF = PDFDocument(url: wordURL) else { continue }
             autoreleasepool {
-                guard let ours = try? render(open(data, name: "\(name).rtf")) else {
+                guard let document = try? open(data, name: "\(name).rtf"), let ours = try? render(document) else {
                     lines.append("- \(name): не открылся")
                     return
                 }
                 checked += 1
                 let found = WordColors.compare(word: WordColors.pages(wordPDF), ours: WordColors.pages(ours))
-                if found.isEmpty { clean += 1 } else {
+                // Заглушки объектов (WMF/EMF, фигуры с обтеканием — этап P-4) рисуются своими цветами: такие формы отдельно.
+                var placeholders = 0
+                document.storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: document.storage.length)) { value, _, _ in
+                    if (value as? NSTextAttachment)?.attachmentCell is DocPlaceholderCell { placeholders += 1 }
+                }
+                if !found.isEmpty, placeholders > 0 {
+                    withPlaceholders += 1
+                    lines.append("- \(name) (заглушек объектов: \(placeholders)): " + found.map(\.description).joined(separator: "; "))
+                } else if found.isEmpty { clean += 1 } else {
                     total += found.count
                     for mismatch in found { byKind[mismatch.kind.rawValue + (mismatch.word == 0 ? " лишний" : mismatch.ours == 0 ? " нет" : " другой объём"), default: 0] += 1 }
                     lines.append("- \(name): " + found.map(\.description).joined(separator: "; "))
@@ -133,7 +161,8 @@ final class WordColorTests: XCTestCase {
                 windows = []
             }
         }
-        var report = "# Цвета «Документа» против PDF Word\n\nФорм: \(checked); без расхождений: \(clean); расхождений: \(total).\n"
+        var report = "# Цвета «Документа» против PDF Word\n\nФорм: \(checked); без расхождений: \(clean); "
+            + "с расхождениями: \(checked - clean - withPlaceholders) (расхождений \(total)); с заглушками объектов (P-4, не считаются): \(withPlaceholders).\n"
         if !byKind.isEmpty { report += "По видам: " + byKind.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ") + ".\n" }
         if !lines.isEmpty { report += "\n" + lines.joined(separator: "\n") + "\n" }
         print(report)

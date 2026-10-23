@@ -686,6 +686,8 @@ private final class RTFParser {
         case .strike, .striked: updateChar { $0.strike = (number ?? 1) != 0 }
         case .cf: updateChar { $0.color = max(0, number ?? 0) }
         case .cb, .chcbpat: updateChar { $0.background = max(0, number ?? 0) }
+        case .chshdng: updateChar { $0.backgroundPercent = min(10_000, max(0, number ?? 0)) }
+        case .chcfpat: updateChar { $0.backgroundPattern = max(0, number ?? 0) }
         case .highlight: updateChar { $0.highlight = max(0, number ?? 0) }
         case .v: updateChar { $0.hidden = (number ?? 1) != 0 }
         case .super_: updateChar { $0.vertical = .superscript }
@@ -745,6 +747,8 @@ private final class RTFParser {
         case .clmgf: cellInProgress.horizontalMergeFirst = true
         case .clmrg: cellInProgress.horizontalMerged = true
         case .clcbpat: cellInProgress.shading = number ?? 0
+        case .clshdng: cellInProgress.shadingPercent = min(10_000, max(0, number ?? 0))
+        case .clcfpat: cellInProgress.shadingPattern = number ?? 0
         case .clvertalt: cellInProgress.verticalAlign = .top
         case .clvertalc: cellInProgress.verticalAlign = .center
         case .clvertalb: cellInProgress.verticalAlign = .bottom

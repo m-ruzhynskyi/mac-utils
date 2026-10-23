@@ -44,6 +44,9 @@ struct RTFCharProps: Hashable {
     var highlight = 0
     /// `\cbN` / `\chcbpatN` — заливка символов; 0 — нет.
     var background = 0
+    /// `\chshdngN` (сотые доли процента) и `\chcfpatN` — узор заливки знаков: доля цвета узора поверх фона.
+    var backgroundPercent = 0
+    var backgroundPattern = 0
     /// `\v` — скрытый текст.
     var hidden = false
     var vertical = RTFVertical.normal
@@ -428,7 +431,10 @@ struct RTFCellDef: Hashable {
     var borderBottom = RTFBorder()
     var borderLeft = RTFBorder()
     var borderRight = RTFBorder()
+    /// `\clcbpatN` — фон ячейки; `\clshdngN` (сотые доли процента) и `\clcfpatN` — узор: доля его цвета поверх фона.
     var shading = 0
+    var shadingPercent = 0
+    var shadingPattern = 0
     /// `\clvmgf` — первая из объединённых по вертикали, `\clvmrg` — продолжение.
     var verticalMergeFirst = false
     var verticalMerged = false
