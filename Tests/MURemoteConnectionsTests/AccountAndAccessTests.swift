@@ -195,6 +195,10 @@ final class AccountAndAccessTests: XCTestCase {
         XCTAssertEqual(other.vpn?.secret, "Demo-1")
         XCTAssertEqual(other.rdp?.address, "192.0.2.7:3389")
 
+        let wg = AccessParser.parse("VPN WireGuard · server: 198.51.100.7 · key: QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=")
+        XCTAssertEqual(wg.vpn?.secret, "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=", "«=» в конце ключа base64 сохраняется")
+        XCTAssertEqual(AccessParser.parse("VPN · login = ivan").vpn?.login, "ivan", "разделитель «=» в начале срезается")
+
         let raw = AccessParser.parse("VPN — профиль у заведующего")
         XCTAssertNotNil(raw.vpn)
         XCTAssertNil(raw.vpn?.server)

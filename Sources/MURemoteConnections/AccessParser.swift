@@ -68,8 +68,9 @@ public enum AccessParser {
                     if r.lowerBound > lower.startIndex, lower[lower.index(before: r.lowerBound)].isLetter { continue }
                     if r.upperBound < lower.endIndex, lower[r.upperBound].isLetter { continue }
                     let offset = lower.distance(from: lower.startIndex, to: r.upperBound)
-                    let rest = String(p[p.index(p.startIndex, offsetBy: offset)...])
-                        .trimmingCharacters(in: CharacterSet(charactersIn: " :=—–-\t"))
+                    // Разделитель «:», «=», «—» срезается только в начале: в конце `=` — часть значения (ключ WireGuard в base64).
+                    let rest = String(String(p[p.index(p.startIndex, offsetBy: offset)...])
+                        .drop(while: { " :=—–-\t".contains($0) }))
                     let word = rest.split(whereSeparator: { $0 == " " || $0 == "," }).first.map(String.init) ?? ""
                     if !word.isEmpty { return word }
                 }
