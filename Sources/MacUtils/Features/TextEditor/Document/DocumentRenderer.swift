@@ -1035,8 +1035,8 @@ final class DocCellBlock: NSTextTableBlock {
     }
 
     /// Привязка по горизонтали к сетке 0,24 pt в пространстве устройства (в PDF — от угла листа): начало прямоугольника —
-    /// к ближайшему узлу, размер — как есть (толщины уже кратны шагу). По вертикали — как есть: высоты строк у нас и у Word
-    /// отличаются, и привязка к сетке на форме f005 ухудшала пиксели.
+    /// к ближайшему узлу, размер — как есть (толщины уже кратны шагу). По вертикали — вниз к узлу сетки (ближайший узел ухудшал f005 и f118 на 0,1–0,2 п. п.; высоты строк у нас и у Word
+    /// отличаются).
     private struct Snapper {
         let toDevice: CGAffineTransform
 
@@ -1046,7 +1046,7 @@ final class DocCellBlock: NSTextTableBlock {
             let device = rect.applying(toDevice)
             let scale = max(abs(toDevice.a), abs(toDevice.b), 0.0001)
             let step = DocCellBlock.grid * scale
-            let snapped = CGRect(x: (device.minX / step).rounded() * step, y: device.minY,
+            let snapped = CGRect(x: (device.minX / step).rounded() * step, y: (device.minY / step).rounded(.down) * step,
                                  width: device.width, height: device.height)
             return snapped.applying(toDevice.inverted())
         }
