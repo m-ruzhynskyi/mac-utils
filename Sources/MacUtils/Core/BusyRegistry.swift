@@ -106,14 +106,6 @@ final class BusyRegistry {
         now.timeIntervalSince(lastActivity) < limit
     }
 
-    /// Просмотр занят только пока есть подключение: окно с надписью «Трансляция завершена» ничего не держит.
-    static func viewerIsConnected(_ state: ShareViewer.State) -> Bool {
-        switch state {
-        case .connecting, .waiting, .watching, .reconnecting: return true
-        case .idle, .ended: return false
-        }
-    }
-
     /// Выход подтверждён заранее (например, пользователь согласился на перезапуск ради обновления): окно не показываем.
     var terminationConfirmed = false
 
@@ -141,23 +133,6 @@ final class BusyRegistry {
 
     /// Автоматические действия (установка обновления) откладываются, пока что-то идёт.
     static func shouldDefer(_ reasons: [Reason]) -> Bool { !reasons.isEmpty }
-
-    /// Подключает существующее состояние приложения. Вызывается один раз при запуске.
-    func installDefaultProviders() {
-        setProvider(.screenRecording) { ScreenRecorder.current != nil }
-        setProvider(.meetingRecording) { if case .recording = MeetingRecorder.shared.state { return true } else { return false } }
-        setProvider(.meetingProcessing) { if case .processing = MeetingRecorder.shared.state { return true } else { return false } }
-        setProvider(.broadcast) {
-            switch ScreenShare.shared.state {
-            case .connecting, .live: return true
-            default: return false
-            }
-        }
-        setProvider(.viewing) { BusyRegistry.viewerIsConnected(ShareViewer.shared.state) }
-        setProvider(.scrollCapture) { ScrollCapture.current != nil }
-        setProvider(.steps) { StepsSession.current.map { BusyRegistry.isFresh($0.lastActivity) } ?? false }
-        setProvider(.uninstalling) { UninstallerModel.shared.working }
-    }
 }
 
 
