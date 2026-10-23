@@ -1594,14 +1594,14 @@ final class ShareViewer: ObservableObject {
     /// Своя метка: показываем сразу и отправляем ведущему и остальным зрителям.
     func sendPing(_ point: CGPoint) {
         guard let mark = ShareMark.parse(ShareMark.message(ping: point, color: color)) else { return }
-        marks.add(mark)
+        marks.add(mark, local: true)
         socket?.send(.string(ShareMark.message(ping: point, color: color))) { _ in }
     }
 
     func sendStroke(_ points: [CGPoint]) {
         let message = ShareMark.message(stroke: points, color: color)
         guard let mark = ShareMark.parse(message) else { return }
-        marks.add(mark)
+        marks.add(mark, local: true)
         socket?.send(.string(message)) { _ in }
     }
 
@@ -1622,6 +1622,7 @@ final class ShareViewer: ObservableObject {
         jpegFrames = 0
         pictures = nil
         hostVideo = nil
+        marks.inVideo = false
         lastVideoAt = nil
         video.reset()
         resetMonitors()
@@ -1941,6 +1942,7 @@ final class ShareViewer: ObservableObject {
 
     fileprivate func received(displays json: [String: Any]) {
         if hostVideo != ShareVideoMode.host(from: json) { hostVideo = ShareVideoMode.host(from: json) }
+        marks.inVideo = ShareVideoMode.marksInVideo(from: json)
         guard let parsed = ShareDisplays.parse(json) else { return }
         let change = monitors.apply(parsed)
         if change.done { monitorWaitTask?.cancel() }

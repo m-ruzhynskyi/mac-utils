@@ -12,9 +12,13 @@ struct ShareMark: Identifiable {
     let points: [CGPoint]
     let color: Color
     let born = Date()
+    /// Метки уже в видео ведущего: своя копия — только короткий отклик в точке нажатия.
+    var echo = false
+
+    static let echoLifetime: TimeInterval = 0.3
 
     /// Пинг живёт 1.6 с, рисунок — 5 с (последняя секунда — плавное исчезновение).
-    var lifetime: TimeInterval { kind == .ping ? 1.6 : 5 }
+    var lifetime: TimeInterval { echo ? Self.echoLifetime : kind == .ping ? 1.6 : 5 }
 
     static let palette: [(name: String, color: Color)] = [
         ("red", .red), ("yellow", .yellow), ("green", .green), ("blue", .blue), ("white", .white),
@@ -60,7 +64,16 @@ final class ShareMarkStore: ObservableObject {
     @Published private(set) var marks: [ShareMark] = []
     private var timer: Timer?
 
-    func add(_ mark: ShareMark) {
+    /// Ведущий сообщил (`marks: "video"` в displays), что метки поверх его экрана попадают в видео: чужие метки не рисуем,
+    /// своя — короткий отклик, иначе рамка была бы двойной.
+    var inVideo = false
+
+    func add(_ mark: ShareMark, local: Bool = false) {
+        var mark = mark
+        if inVideo {
+            guard local else { return }
+            mark.echo = true
+        }
         marks.append(mark)
         if marks.count > 200 { marks.removeFirst(marks.count - 200) }
         guard timer == nil else { return }
