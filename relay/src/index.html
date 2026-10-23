@@ -259,6 +259,7 @@
   <section class="me">
     <div class="lbl">Мой ID</div>
     <span id="myId" title="Скопировать"></span>
+    <input id="myNameInput" maxlength="40" placeholder="Имя для зрителей" aria-label="Имя, которое видят зрители и ведущие" autocomplete="off">
   </section>
   <section class="watchbox">
     <div class="lbl">Смотреть</div>
@@ -355,7 +356,14 @@ const mainId = window.mu && (typeof window.mu.myId === "function" ? window.mu.my
 const idFromApp = typeof mainId === "string" && /^\d{10}$/.test(mainId);
 let myId = idFromApp ? mainId : store.get("mu-id", null);
 if (!myId) { myId = generateId(); store.set("mu-id", myId); }
-const myName = (window.mu && window.mu.hostname) || "Windows";
+// Имя, которое видят ведущий и зрители: то, что задал пользователь; по умолчанию «Windows» — имя компьютера не отдаём.
+const cleanName = (value) => String(value || "").replace(/[\u0000-\u001f<>"\\]/g, "").trim().slice(0, 40);
+const getMyName = () => cleanName(store.get("mu-display-name", "")) || "Windows";
+{
+  const input = $("myNameInput");
+  input.value = cleanName(store.get("mu-display-name", ""));
+  input.onchange = input.oninput = () => store.set("mu-display-name", cleanName(input.value));
+}
 $("myId").textContent = display(myId);
 $("myId").onclick = () => navigator.clipboard?.writeText(myId);
 
@@ -941,7 +949,7 @@ function openView(id) {
   $("leave").style.display = "";
   const h264 = typeof VideoDecoder !== "undefined" ? "&h264=1" : "";
   const auth = authParam("signViewer") ? `&${authParam("signViewer")}` : "";
-  const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}${h264}${auth}`);
+  const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(getMyName())}${h264}${auth}`);
   viewSocket.binaryType = "arraybuffer";
   // Подтверждаем приём видео каждые ACK_EVERY пакетов: relay по этому видит, не отстал ли зритель, и ему не копит очередь.
   let videoSeen = 0;
@@ -1126,7 +1134,7 @@ const gEsc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&
 function gSend(fields) { if (game.send) game.send({ type: "game", ...fields }); }
 function viewGameSend(fields) { if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify(fields)); }
 function hostGameSend(to) {
-  return (fields) => { if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify({ ...fields, to, name: myName })); };
+  return (fields) => { if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify({ ...fields, to, name: getMyName() })); };
 }
 function gBegin(peer, name, send, inviter) {
   if (game.peer !== peer) { game.me = 0; game.them = 0; }
@@ -1464,7 +1472,7 @@ function showRequest() {
   if (window.mu && window.mu.attention) window.mu.attention();
 }
 function answer(viewer, accept, rid) {
-  const reply = { type: accept ? "accept" : "decline", viewer, name: myName };
+  const reply = { type: accept ? "accept" : "decline", viewer, name: getMyName() };
   if (typeof rid === "string") reply.rid = rid;
   if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify(reply));
 }
