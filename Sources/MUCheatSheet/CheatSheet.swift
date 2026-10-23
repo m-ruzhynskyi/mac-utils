@@ -4,74 +4,24 @@ import Carbon.HIToolbox
 import SwiftUI
 import MUCore
 import MUDesign
-import MUAudio
-import MUWindowSnap
-
-/// Сочетание пункта меню в виде «⌃⌥⇧⌘K» (без UI — для тестов).
-enum ShortcutFormat {
-    /// kAXMenuItemCmdModifiers: 1 — ⇧, 2 — ⌥, 4 — ⌃, 8 — без ⌘.
-    static func modifiers(_ mask: Int) -> String {
-        var result = ""
-        if mask & 4 != 0 { result += "⌃" }
-        if mask & 2 != 0 { result += "⌥" }
-        if mask & 1 != 0 { result += "⇧" }
-        if mask & 8 == 0 { result += "⌘" }
-        return result
-    }
-
-    /// Клавиша: символ из меню или значок для служебных (kAXMenuItemCmdGlyph).
-    static func key(char: String?, glyph: Int?) -> String? {
-        if let char, !char.isEmpty, char != "\u{0}" {
-            switch char {
-            case " ": return "Пробел"
-            case "\u{1B}": return "Esc"
-            case "\r": return "↩"
-            case "\t": return "⇥"
-            case "\u{7F}", "\u{8}": return "⌫"
-            default: return char.uppercased()
-            }
-        }
-        guard let glyph else { return nil }
-        let glyphs: [Int: String] = [
-            0x02: "⇥", 0x04: "⌅", 0x0B: "↩", 0x17: "⌫", 0x1B: "Esc", 0x09: "Пробел",
-            0x64: "←", 0x65: "→", 0x68: "↑", 0x6A: "↓", 0x0A: "⌦",
-            0x6F: "F1", 0x70: "F2", 0x71: "F3", 0x72: "F4", 0x73: "F5", 0x74: "F6",
-            0x75: "F7", 0x76: "F8", 0x77: "F9", 0x78: "F10", 0x79: "F11", 0x7A: "F12",
-            0x62: "⇞", 0x6B: "⇟", 0x66: "↖", 0x67: "↘",
-        ]
-        return glyphs[glyph]
-    }
-}
-
-struct CheatItem: Identifiable, Hashable {
-    let id = UUID()
-    let title: String
-    let shortcut: String
-}
-
-struct CheatGroup: Identifiable {
-    let id = UUID()
-    let title: String
-    let items: [CheatItem]
-}
 
 /// «Шпаргалка»: удерживайте ⌘ — появятся все сочетания клавиш активного
 /// приложения (из его меню) и Mac Utils. Отпустите ⌘ — исчезнет.
 @MainActor
-final class CheatSheet: ObservableObject {
-    static let shared = CheatSheet()
+package final class CheatSheet: ObservableObject {
+    package static let shared = CheatSheet()
 
-    @Published private(set) var appName = ""
-    @Published private(set) var appIcon: NSImage?
-    @Published private(set) var groups: [CheatGroup] = []
-    @Published private(set) var loading = false
-    @Published private(set) var isRunning = false
+    @Published package private(set) var appName = ""
+    @Published package private(set) var appIcon: NSImage?
+    @Published package private(set) var groups: [CheatGroup] = []
+    @Published package private(set) var loading = false
+    @Published package private(set) var isRunning = false
 
     private var tap: EventTap?
     private var holdTimer: Timer?
     private var panel: NSPanel?
 
-    func sync() {
+    package func sync() {
         let enabled = UserDefaults.standard.bool(forKey: Pref.cheatSheet) && Permissions.accessibility
         if enabled {
             if tap == nil {
@@ -165,7 +115,7 @@ final class CheatSheet: ObservableObject {
 
     // MARK: - Показ
 
-    func show() {
+    package func show() {
         holdTimer = nil
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
         appName = app.localizedName ?? ""
@@ -181,8 +131,8 @@ final class CheatSheet: ObservableObject {
                 MainActor.assumeIsolated {
                     let sheet = CheatSheet.shared
                     // Окно плеера впереди — его клавиши (их нет в меню: они без ⌘).
-                    let player = own && PlayerWindowController.isKey ? [PlayerShortcuts.cheatGroup] : []
-                    sheet.groups = player + menus + [Self.macUtilsGroup()]
+                    let router = AppRouter.shared
+                    sheet.groups = (own ? router.cheatFrontGroups() : []) + menus + [router.cheatMacUtilsGroup()]
                     sheet.loading = false
                     sheet.resizePanel()
                 }
@@ -263,29 +213,14 @@ final class CheatSheet: ObservableObject {
         guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
         return value as? T
     }
-
-    /// Сочетания Mac Utils, которые действительно работают сейчас (из реестра `HotKeyCenter`):
-    /// выключенные функции и занятые другими программами не показываются, переназначенные — с новым сочетанием.
-    private static func macUtilsGroup() -> CheatGroup {
-        let active = HotKeyCenter.shared.active
-        var items = HotKeyAction.allCases.compactMap { action in
-            active[action.hotKeyID].map { CheatItem(title: action.title, shortcut: $0.title) }
-        }
-        if UserDefaults.standard.bool(forKey: Pref.windowSnap) {
-            let symbols = WindowSnapModifier.current.symbols
-            items.append(CheatItem(title: "Окно влево / вправо", shortcut: "\(symbols)← / →"))
-            items.append(CheatItem(title: "На весь экран", shortcut: "\(symbols)↩"))
-        }
-        return CheatGroup(title: "Mac Utils", items: items)
-    }
 }
 
 // MARK: - Вид
 
-struct CheatSheetView: View {
-    @ObservedObject var sheet: CheatSheet
+package struct CheatSheetView: View {
+    @ObservedObject package var sheet: CheatSheet
 
-    var body: some View {
+    package var body: some View {
         CheatSheetContent(appName: sheet.appName, appIcon: sheet.appIcon, loading: sheet.loading, groups: sheet.groups,
                           sticky: UserDefaults.standard.bool(forKey: Pref.cheatSheetSticky))
     }
@@ -293,16 +228,16 @@ struct CheatSheetView: View {
 
 /// Шпаргалка-оверлей (Graphite: `panel`, обводка `line`, радиус 20; заголовки групп — `GroupLabel`, сочетания — кейкапы).
 /// Без модели — для снимков интерфейса.
-struct CheatSheetContent: View {
-    let appName: String
-    var appIcon: NSImage?
-    var loading = false
-    let groups: [CheatGroup]
-    var sticky = false
+package struct CheatSheetContent: View {
+    package let appName: String
+    package var appIcon: NSImage?
+    package var loading = false
+    package let groups: [CheatGroup]
+    package var sticky = false
 
     private let columns = [GridItem(.adaptive(minimum: 250, maximum: 340), spacing: 22, alignment: .top)]
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(spacing: 10) {
                 if let appIcon {
