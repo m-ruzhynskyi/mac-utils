@@ -218,6 +218,7 @@ test("§7 файл занят: повтор, без ошибки; недопис
   store.reload();
   await until(store, (s) => s.status === "ready" && s.snapshot.records.length === 40);
 
+  store.stop();   // первый store следит за тем же файлом и читал бы его во время подмены readFile (гонка счётчика)
   // «Занят»: чтение падает с EBUSY два раза, потом проходит; ошибки пользователю не показывается.
   const fsp = fs.promises, orig = fsp.readFile;
   let calls = 0;
