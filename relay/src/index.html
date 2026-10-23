@@ -355,7 +355,8 @@ const mainId = window.mu && (typeof window.mu.myId === "function" ? window.mu.my
 const idFromApp = typeof mainId === "string" && /^\d{10}$/.test(mainId);
 let myId = idFromApp ? mainId : store.get("mu-id", null);
 if (!myId) { myId = generateId(); store.set("mu-id", myId); }
-const myName = (window.mu && window.mu.hostname) || "Windows";
+// Имя для ведущего и зрителей — всегда «Windows» (решение пользователя): имя компьютера на сервер не отправляется.
+const getMyName = () => "Windows";
 $("myId").textContent = display(myId);
 $("myId").onclick = () => navigator.clipboard?.writeText(myId);
 
@@ -941,7 +942,7 @@ function openView(id) {
   $("leave").style.display = "";
   const h264 = typeof VideoDecoder !== "undefined" ? "&h264=1" : "";
   const auth = authParam("signViewer") ? `&${authParam("signViewer")}` : "";
-  const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}${h264}${auth}`);
+  const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(getMyName())}${h264}${auth}`);
   viewSocket.binaryType = "arraybuffer";
   // Подтверждаем приём видео каждые ACK_EVERY пакетов: relay по этому видит, не отстал ли зритель, и ему не копит очередь.
   let videoSeen = 0;
@@ -1126,7 +1127,7 @@ const gEsc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&
 function gSend(fields) { if (game.send) game.send({ type: "game", ...fields }); }
 function viewGameSend(fields) { if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify(fields)); }
 function hostGameSend(to) {
-  return (fields) => { if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify({ ...fields, to, name: myName })); };
+  return (fields) => { if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify({ ...fields, to, name: getMyName() })); };
 }
 function gBegin(peer, name, send, inviter) {
   if (game.peer !== peer) { game.me = 0; game.them = 0; }
@@ -1464,7 +1465,7 @@ function showRequest() {
   if (window.mu && window.mu.attention) window.mu.attention();
 }
 function answer(viewer, accept, rid) {
-  const reply = { type: accept ? "accept" : "decline", viewer, name: myName };
+  const reply = { type: accept ? "accept" : "decline", viewer, name: getMyName() };
   if (typeof rid === "string") reply.rid = rid;
   if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify(reply));
 }
@@ -1514,6 +1515,28 @@ function probeEncoders(done) {
       encoderLog(`probe ${results.map((r) => `${r.name}=${r.ok ? "yes" : `no(${r.code})`}`).join(" ")}`);
       done(results[0].ok || results[1].ok, results[3].ok);
     });
+}
+// Пробный кодер: настоящий VideoEncoder выбранного ускорения, несколько кадров 1280×720; удалась — он отдал кадр. Отдельно от
+// эфира, поэтому неработающий аппаратный кодер не останавливает картинку у зрителей на время пробы.
+const TRIAL_FRAME_US = 33_333;
+function trialEncode(acceleration, done) {
+  let finished = false, encoder = null;
+  const finish = (ok, code) => { if (finished) return; finished = true; clearTimeout(timer); try { encoder?.close(); } catch (_) {} done(ok, code); };
+  const timer = setTimeout(() => finish(false, "timeout"), 3000);
+  try {
+    encoder = new VideoEncoder({ output: () => finish(true, ""), error: (e) => finish(false, encoderErrorCode(e)) });
+    encoder.configure({ codec: ENCODER_CODEC, width: 1280, height: 720, bitrate: 2_000_000, framerate: 30, latencyMode: "realtime",
+                        avc: { format: "annexb" }, hardwareAcceleration: acceleration });
+    const canvas = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1280, 720) : Object.assign(document.createElement("canvas"), { width: 1280, height: 720 });
+    const ctx = canvas.getContext("2d");
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = `rgb(${40 * i}, 90, ${200 - 40 * i})`; ctx.fillRect(0, 0, 1280, 720);
+      ctx.fillStyle = "#fff"; ctx.fillRect(100 + 150 * i, 200, 300, 200);
+      const frame = new VideoFrame(canvas, { timestamp: i * 33_333, duration: TRIAL_FRAME_US });
+      encoder.encode(frame, { keyFrame: i === 0 }); frame.close();
+    }
+    encoder.flush().catch(() => {});
+  } catch (e) { finish(false, encoderErrorCode(e)); }
 }
 function nalUnits(data) {
   const units = []; let start = -1;
@@ -1576,6 +1599,22 @@ function encoderLadder(now = 0) {
     retry(now) {
       if (this.noH264) return false;
       for (let i = 0; i < this.mode; i++) if (now >= this.retryAt[i]) return this.enter(i, now, "retry");
+      return false;
+    },
+    // Пора ли пробовать режим лучше текущего: индекс режима или -1. Пробует отдельный пробный кодер (`trialEncode`), текущий
+    // поток при этом не останавливается; режим меняется, только если проба удалась (`probeResult`).
+    retryTarget(now) {
+      if (this.noH264) return -1;
+      for (let i = 0; i < this.mode; i++) if (now >= this.retryAt[i]) return i;
+      return -1;
+    },
+    // Итог пробы режима i. Удалась — переходим на него (true). Нет — следующая проба позже, вдвое дольше (до предела), поток
+    // не трогаем.
+    probeResult(i, ok, now) {
+      if (ok) return this.enter(i, now, "retry");
+      const retry = ENCODER_RETRY[i];
+      this.backoff[i] = this.backoff[i] ? Math.min(retry.max, this.backoff[i] * 2) : retry.base;
+      this.retryAt[i] = now + this.backoff[i];
       return false;
     },
     // Итог VideoEncoder.isConfigSupported. Нет ни одного H.264 — JPEG без повторов; нет только аппаратного — сразу
@@ -1665,7 +1704,7 @@ function startCapture(stream, code) {
   const audioRoom = () => hostSocket.bufferedAmount <= Math.max(400_000, bitrate / 8) + 256_000;
   // JPEG кодируется асинхронно и держит снимок холста (1920×1080 — 8 МБ). Пока прежний не готов, новый не начинаем:
   // на медленном компьютере очередь снимков росла на гигабайты за минуты.
-  let jpegBusy = false;
+  let jpegBusy = false, probing = false;
   const encoderConfig = (width, height) => ({ codec: ENCODER_CODEC, width, height, bitrate: Math.round(bitrate), framerate: fps,
                                               latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: ladder.acceleration });
   // Кодер упал (ошибка, исключение, тишина): следующий кадр создаёт новый. Не отдал ни одного кадра — неудача,
@@ -1685,7 +1724,19 @@ function startCapture(stream, code) {
     const now = performance.now(), queued = hostSocket.bufferedAmount;
     sourceSize = `${sourceWidth}x${sourceHeight}`;
     hostSourceAspect = sourceWidth / sourceHeight;
-    if (ladder.retry(now)) applyMode();
+    // Лучший режим пробуем отдельным кодером, не останавливая эфир: неработающий аппаратный кодер раньше замораживал картинку
+    // на ~3 с при каждой повторной попытке.
+    if (!probing && typeof VideoEncoder !== "undefined") {
+      const target = ladder.retryTarget(now);
+      if (target >= 0) {
+        probing = true;
+        trialEncode(ENCODER_MODES[target], (ok, code) => {
+          probing = false;
+          logEncoder(`trial mode=${ENCODER_NAMES[target]} ok=${ok ? 1 : 0}${ok ? "" : ` code=${code}`}`);
+          if (capture && ladder.probeResult(target, ok, performance.now())) applyMode();
+        });
+      }
+    }
     if (now - lastStatsAt >= 60_000) { logEncoder("stats"); lastStatsAt = now; counts.statsOutputs = counts.outputs; }
     if (queued > 250_000 && now - lastAdapt > 500) { bitrate = Math.max(700_000, bitrate * 0.7); lastAdapt = now; }
     else if (queued < 60_000 && now - lastAdapt > 2000 && bitrate < 12_000_000) { bitrate = Math.min(12_000_000, bitrate * 1.15); lastAdapt = now; }
@@ -1840,13 +1891,13 @@ function startCapture(stream, code) {
     source.connect(processor);
     processor.connect(audioContext.destination);
   }
-  stream.getVideoTracks()[0].onended = () => stopHost("Трансляция остановлена");
+  stream.getVideoTracks()[0].onended = onVideoEnded;
   // Другой монитор (зритель переключил): новая дорожка видео в тот же эфир — без переподключения, звук остаётся.
   // Кодер пересоздаётся сам по размеру кадра, первым идёт ключевой.
   const replaceVideo = (next) => {
     const track = swapVideoTrack(stream, next, () => timer.cancel());
     if (!track) return false;
-    track.onended = () => stopHost("Трансляция остановлена");
+    track.onended = onVideoEnded;
     video.srcObject = new MediaStream([track]);
     video.play();
     forceKey = true;
@@ -1899,6 +1950,30 @@ function setAllowSwitch(allowed) {
 $("switchButton").onclick = () => setAllowSwitch(!allowSwitch());
 $("allowSwitch").onchange = () => setAllowSwitch($("allowSwitch").checked);
 if (window.mu && typeof window.mu.onDisplays === "function") window.mu.onDisplays(() => announceDisplays());
+
+// Захват остановился сам (сон, выдернули монитор): в приложении для Windows пробуем взять тот же или основной монитор и
+// продолжить эфир; закрыли транслируемое окно или не вышло — эфир заканчивается с понятной причиной.
+let videoRecovering = false;
+const videoRecoveries = [];   // моменты попыток: не больше 3 за минуту, иначе дорожка кончается снова и снова — эфир заканчивается
+async function onVideoEnded() {
+  if (videoRecovering) return;
+  const now = Date.now();
+  while (videoRecoveries.length && now - videoRecoveries[0] > 60_000) videoRecoveries.shift();
+  if (canSwitchMonitors() && capture?.replaceVideo && hostMonitors.current > 0 && videoRecoveries.length < 3) {
+    videoRecoveries.push(now);
+    videoRecovering = true;
+    await new Promise((r) => setTimeout(r, 1000));   // пауза: монитор/система должны успокоиться
+    if (!capture) { videoRecovering = false; return; }
+    try {
+      const info = await window.mu.displays();
+      const list = Array.isArray(info?.list) ? info.list : [];
+      const target = list.find((d) => d.n === hostMonitors.current) || list.find((d) => d.primary) || list[0];
+      if (target && await switchCapture(target.n)) { videoRecovering = false; announceDisplays(); return; }
+    } catch (_) {}
+    videoRecovering = false;
+  }
+  stopHost("Захват остановлен (монитор отключён или окно закрыто) — трансляция завершена");
+}
 
 // Новый монитор в тот же эфир: приложение выбирает источник, страница берёт его новым getDisplayMedia (только видео).
 async function switchCapture(n) {
@@ -2052,9 +2127,12 @@ async function reconnectHost(code) {
   if (!capture) return;
   hostSocket = null;
   $("liveText").textContent = "Переподключаюсь…";
-  for (const delay of [1, 2, 3, 5, 8, 10, 15]) {
+  // 44 с частых попыток (relay ждёт ведущего 45 с), затем раз в 30 с ещё 10 минут: захват идёт, эфир вернётся под тем же ID.
+  const delays = [1, 2, 3, 5, 8, 10, 15, ...Array(20).fill(30)];
+  for (const [i, delay] of delays.entries()) {
     await new Promise((r) => setTimeout(r, delay * 1000));
     if (!capture) return;
+    if (i >= 7) $("liveText").textContent = `Нет связи с сервером, пробую снова… (${i - 6} из 20)`;
     if (await openHost(code)) {
       hostSocket.onclose = (event) => hostClosed(code, event);
       $("liveText").textContent = "В эфире";
