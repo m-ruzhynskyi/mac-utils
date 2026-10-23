@@ -12,6 +12,7 @@ const monitorsList = require("./displays");
 const RELAY = "https://mac-utils-relay.mako-62d.workers.dev/";
 let window = null;
 let chosen = null; // { source, audio }
+let remoteConnections = null; // модуль «Удалённые подключения» (remote/index.js)
 let broadcasting = false; // идёт эфир: захват начат и страница не сообщила `stopped`
 let pendingUpdate = null; // обновление скачано во время эфира: окно — после его конца
 let nextSource = null; // монитор, выбранный зрителем (switchTo): его отдаст следующий getDisplayMedia страницы
@@ -679,6 +680,8 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  // «Удалённые подключения» — отдельный модуль (remote/): окно, палитра Ctrl+Alt+A, меню в трее. Его сбой не мешает трансляции.
+  try { remoteConnections = require("./remote").init(require("electron"), { icon: path.join(__dirname, "assets", "icon.png") }); } catch (_) {}
   checkForUpdates();
   setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
 });
@@ -691,7 +694,7 @@ app.on("second-instance", () => {
 });
 
 app.on("window-all-closed", () => app.quit());
-app.on("will-quit", () => { stopAudio(); hideOverlay(); });
+app.on("will-quit", () => { stopAudio(); hideOverlay(); try { remoteConnections?.dispose(); } catch (_) {} });
 
 // Автообновление: новые версии публикуются в релизе «windows-latest» репозитория.
 function checkForUpdates() {
