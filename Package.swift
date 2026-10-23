@@ -16,9 +16,15 @@ let package = Package(
             dependencies: ["MUCore"],
             path: "Sources/MUDesign"
         ),
+        // Удалённые подключения: вся логика без зависимости от приложения и других модулей
+        // (см. .audit/task-remote-connections.md).
+        .target(
+            name: "MURemoteConnections",
+            path: "Sources/MURemoteConnections"
+        ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign"],
+            dependencies: ["MUCore", "MUDesign", "MURemoteConnections"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -26,8 +32,13 @@ let package = Package(
             path: "Sources/ToolsLauncher"
         ),
         .testTarget(
+            name: "MURemoteConnectionsTests",
+            dependencies: ["MURemoteConnections"],
+            path: "Tests/MURemoteConnectionsTests"
+        ),
+        .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MURemoteConnections"],
             path: "Tests/MacUtilsTests"
         ),
     ]

@@ -8,7 +8,7 @@ import MUDesign
 /// а `HotKeyCenter` подставляет то, что пользователь выбрал в настройках (`HotKeyRegistry.resolve`).
 enum HotKeyAction: String, CaseIterable, Identifiable {
     case settings, tools, screenshot, screenshotOCR, dropShelf, annotate, windowPin, fixText, meeting, focus, qr,
-         appVolume, layoutFix, textEditor, videoPlayer
+         appVolume, layoutFix, textEditor, videoPlayer, remoteConnections
 
     var id: String { rawValue }
 
@@ -29,6 +29,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .layoutFix: return HotKeyID.layoutFix
         case .textEditor: return HotKeyID.textEditor
         case .videoPlayer: return HotKeyID.videoPlayer
+        case .remoteConnections: return HotKeyID.remoteConnections
         }
     }
 
@@ -49,6 +50,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .layoutFix: return "Исправить раскладку"
         case .textEditor: return "Текстовый редактор"
         case .videoPlayer: return "Видеоплеер"
+        case .remoteConnections: return "Удалённые подключения"
         }
     }
 
@@ -68,6 +70,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .layoutFix: return .layout
         case .textEditor: return .textEditor
         case .videoPlayer: return .videoPlayer
+        case .remoteConnections: return .remote
         }
     }
 
@@ -90,6 +93,9 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .textEditor: return LayoutHotKey(keyCode: kVK_ANSI_E, modifiers: cmdKey | optionKey | controlKey)
         // ⌃⌥⌘P свободна: ⌃⌥P — «Окно поверх всех», это другое сочетание.
         case .videoPlayer: return LayoutHotKey(keyCode: kVK_ANSI_P, modifiers: cmdKey | optionKey | controlKey)
+        // ⌃⌥⌘A: ⌥⌘A занята в Finder («Снять выделение»); ⌃⌥A — рисование, раскладка окон берёт два модификатора.
+        // Регистрируется, только когда выбран файл подключений (`RemoteConnectionsCenter.syncHotKey`).
+        case .remoteConnections: return LayoutHotKey(keyCode: kVK_ANSI_A, modifiers: cmdKey | optionKey | controlKey)
         }
     }
 
