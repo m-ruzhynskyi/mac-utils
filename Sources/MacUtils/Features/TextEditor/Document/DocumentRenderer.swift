@@ -984,7 +984,7 @@ final class DocRenderer {
 /// Ячейка таблицы с линиями и заливкой как у Word: рамки — по краю ячейки (по линии сетки), а не внутри: рамка
 /// `NSTextBlock` заняла бы место в ширине столбца, и текст ячейки стал бы уже, чем в Word. Вертикальные линии — по точным
 /// краям `\cellx` (рамка `NSTextTable` — в целых пунктах), серединой на краю; толщина и края — на сетке Word
-/// 1/300 дюйма (0,24 pt) от угла листа, как в его PDF.
+/// 1/300 дюйма (0,24 pt) от левого края листа, как в его PDF.
 final class DocCellBlock: NSTextTableBlock {
     struct Line {
         var edge: NSRectEdge
@@ -1034,8 +1034,9 @@ final class DocCellBlock: NSTextTableBlock {
         }
     }
 
-    /// Привязка к сетке 0,24 pt в пространстве устройства (в PDF — от угла листа): начало прямоугольника — к ближайшему
-    /// узлу, размер — как есть (толщины уже кратны шагу).
+    /// Привязка по горизонтали к сетке 0,24 pt в пространстве устройства (в PDF — от угла листа): начало прямоугольника —
+    /// к ближайшему узлу, размер — как есть (толщины уже кратны шагу). По вертикали — как есть: высоты строк у нас и у Word
+    /// отличаются, и привязка к сетке на форме f005 ухудшала пиксели.
     private struct Snapper {
         let toDevice: CGAffineTransform
 
@@ -1045,7 +1046,7 @@ final class DocCellBlock: NSTextTableBlock {
             let device = rect.applying(toDevice)
             let scale = max(abs(toDevice.a), abs(toDevice.b), 0.0001)
             let step = DocCellBlock.grid * scale
-            let snapped = CGRect(x: (device.minX / step).rounded() * step, y: (device.minY / step).rounded() * step,
+            let snapped = CGRect(x: (device.minX / step).rounded() * step, y: device.minY,
                                  width: device.width, height: device.height)
             return snapped.applying(toDevice.inverted())
         }
