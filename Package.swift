@@ -125,7 +125,7 @@ let package = Package(
         ),
         .target(
             name: "MUScreenShare",
-            dependencies: ["MUCore", "MUDesign"],
+            dependencies: ["MUCore", "MUDesign", "MUAudio"],
             path: "Sources/MUScreenShare"
         ),
         .executableTarget(

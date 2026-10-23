@@ -1,6 +1,5 @@
 import AppKit
 import MUDesign
-import MUAudio
 
 /// Штрих на холсте одного экрана. Координаты — в точках холста этого экрана (начало внизу слева).
 package struct AnnotationStroke: Equatable {
