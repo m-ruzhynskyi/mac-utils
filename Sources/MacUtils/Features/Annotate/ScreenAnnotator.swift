@@ -65,7 +65,7 @@ final class ScreenAnnotator: ObservableObject {
             return
         }
         center.register(id: HotKeyID.annotate, keyCode: kVK_ANSI_A, modifiers: controlKey | optionKey) {
-            AppAction(hotKey: .annotate).run()
+            AppRouter.shared.runHotKey(HotKeyID.annotate)
         }
     }
 

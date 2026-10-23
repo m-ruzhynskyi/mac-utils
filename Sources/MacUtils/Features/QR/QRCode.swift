@@ -127,7 +127,7 @@ final class QRCodeService: ObservableObject {
             return
         }
         center.register(id: HotKeyID.qr, keyCode: kVK_ANSI_Q, modifiers: controlKey | optionKey) {
-            AppAction(hotKey: .qr).run()
+            AppRouter.shared.runHotKey(HotKeyID.qr)
         }
     }
 

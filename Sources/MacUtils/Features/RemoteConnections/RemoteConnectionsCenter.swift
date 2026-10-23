@@ -352,7 +352,7 @@ final class RemoteConnectionsCenter: ObservableObject {
         guard hasFile(defaults: defaults) else { return hotKeys.unregister(id: HotKeyID.remoteConnections) }
         let combo = HotKeyAction.remoteConnections.defaultCombo
         hotKeys.register(id: HotKeyID.remoteConnections, keyCode: combo.keyCode, modifiers: combo.modifiers) {
-            AppAction(hotKey: .remoteConnections).run()
+            AppRouter.shared.runHotKey(HotKeyID.remoteConnections)
         }
     }
 
