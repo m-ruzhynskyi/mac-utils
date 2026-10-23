@@ -37,7 +37,7 @@ final class DesignSystemTests: XCTestCase {
         XCTAssertEqual(SettingsGroup.filesSystem.sections.map(\.title),
                        ["Полка", "Загрузки", "Текстовый редактор", "Видеоплеер", "Шпаргалка", "Удаление программ", "Очистка диска", "Монитор системы", "Диспетчер задач"])
         XCTAssertEqual(SettingsGroup.more.sections.map(\.title),
-                       ["Перерывы и тёплый экран", "Фокус", "Музыка", "Трансляция экрана", "ИИ (Ollama)"])
+                       ["Перерывы и тёплый экран", "Фокус", "Музыка", "Трансляция экрана", "Удалённые подключения", "ИИ (Ollama)"])
     }
 
     func testSymbolsExist() {

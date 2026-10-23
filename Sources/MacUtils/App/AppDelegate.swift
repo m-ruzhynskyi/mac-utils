@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeSystemShutdown()
         PanelTabs.migrate()
         HotKeyCenter.shared.resolver = { HotKeyRegistry.resolve(id: $0, requested: $1) }
+        RemoteConnectionsCenter.addPanelTabOnce()
         MainMenu.install()
         lastTrusted = Permissions.accessibility
 
@@ -302,6 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MeetingRecorder.shared.sync()
         FocusBlur.shared.sync()
         AppStatusItem.shared.sync()
+        RemoteConnectionsCenter.syncHotKey()
         syncDock()
     }
 

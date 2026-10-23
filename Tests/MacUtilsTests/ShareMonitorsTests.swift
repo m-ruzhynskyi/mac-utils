@@ -270,3 +270,12 @@ final class ShareMarksInVideoTests: XCTestCase {
         XCTAssertLessThan(ShareMark.echoLifetime, 0.5)
     }
 }
+
+final class ShareHostReconnectTests: XCTestCase {
+    func testQuickThenSlowAboutTenMinutes() {
+        XCTAssertEqual(ShareHostReconnect.quick.reduce(0, +), 44)
+        let total = ShareHostReconnect.delays.reduce(0, +)
+        XCTAssertGreaterThan(total, 600)
+        XCTAssertLessThan(total, 700)
+    }
+}
