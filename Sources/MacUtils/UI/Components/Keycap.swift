@@ -4,14 +4,14 @@ import SwiftUI
 /// VoiceOver читает словами («Control Option M»). `onPanel` — фон `panel` (для строк поповера на `field`).
 struct Keycap: View {
     private let fixedKeys: [String]?
-    private let action: HotKeyAction?
+    private let resolveKeys: (() -> [String])?
     var compact = false
     var onPanel = false
-    @ObservedObject private var prefs = HotKeyPrefs.shared
+    @ObservedObject private var changes = DefaultsChanges.shared
 
     init(_ keys: [String], compact: Bool = false, onPanel: Bool = false) {
         fixedKeys = keys
-        action = nil
+        resolveKeys = nil
         self.compact = compact
         self.onPanel = onPanel
     }
@@ -20,15 +20,15 @@ struct Keycap: View {
         self.init(hotKey.keys, compact: compact, onPanel: onPanel)
     }
 
-    /// Сочетание действия из реестра: после переназначения показывается новое.
-    init(action: HotKeyAction, compact: Bool = false, onPanel: Bool = false) {
+    /// Клавиши, которые спрашиваются при каждой отрисовке (сочетание из реестра: после переназначения показывается новое).
+    init(resolving keys: @escaping () -> [String], compact: Bool = false, onPanel: Bool = false) {
         fixedKeys = nil
-        self.action = action
+        resolveKeys = keys
         self.compact = compact
         self.onPanel = onPanel
     }
 
-    private var keys: [String] { fixedKeys ?? action.map { HotKeyRegistry.combo(for: $0).keys } ?? [] }
+    private var keys: [String] { fixedKeys ?? resolveKeys?() ?? [] }
 
     /// Символы клавиш-модификаторов: в JetBrains Mono они мелкие — рисуем их системным моноширинным шрифтом.
     static let modifierSymbols: Set<Character> = ["⌃", "⌥", "⇧", "⌘", "↩", "⌫", "⎋", "⇥", "←", "→", "↑", "↓"]
@@ -98,8 +98,8 @@ struct ShortcutHintRow: View {
         self.text = text
     }
 
-    init(action: HotKeyAction, text: String) {
-        keycap = Keycap(action: action, compact: true)
+    init(keycap: Keycap, text: String) {
+        self.keycap = keycap
         self.text = text
     }
 
@@ -126,8 +126,8 @@ struct HintRow: View {
         self.text = text
     }
 
-    init(action: HotKeyAction, text: String) {
-        keycap = Keycap(action: action, compact: true)
+    init(keycap: Keycap, text: String) {
+        self.keycap = keycap
         self.text = text
     }
 

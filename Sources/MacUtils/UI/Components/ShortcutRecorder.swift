@@ -5,7 +5,7 @@ import SwiftUI
 struct ShortcutRecorder: View {
     let hotKey: LayoutHotKey
     /// Пока идёт запись, старое сочетание нужно отключить, чтобы оно не сработало.
-    var suspend: (Bool) -> Void = { LayoutFix.shared.suspendHotKey($0) }
+    var suspend: (Bool) -> Void = { _ in }
     /// Почему сочетание нельзя сохранить (например, оно уже занято другой функцией Mac Utils); nil — можно.
     var validate: (LayoutHotKey) -> String? = { _ in nil }
     let onChange: (LayoutHotKey) -> Void

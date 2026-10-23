@@ -229,9 +229,9 @@ struct KeyRow: View {
         keycap = Keycap(keys)
     }
 
-    init(_ title: String, action: HotKeyAction) {
+    init(_ title: String, keycap: Keycap) {
         self.title = title
-        keycap = Keycap(action: action)
+        self.keycap = keycap
     }
 
     var body: some View {
