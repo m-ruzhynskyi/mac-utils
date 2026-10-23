@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         BusyRegistry.shared.installDefaultProviders()
         observeSystemShutdown()
         PanelTabs.migrate()
+        HotKeyCenter.shared.resolver = { HotKeyRegistry.resolve(id: $0, requested: $1) }
         MainMenu.install()
         lastTrusted = Permissions.accessibility
 
