@@ -147,9 +147,9 @@ final class DocViewTests: XCTestCase {
         XCTAssertEqual(block.table.numberOfColumns, 4)
         XCTAssertEqual(block.startingColumn, 1)
         XCTAssertNotNil(block.backgroundColor)
-        // Рамка — по краю ячейки, места у текста не занимает (как в Word).
+        // Рамка — по краю ячейки, места у текста не занимает; толщина — как в PDF Word (`\brdrw10` — 0,48 pt).
         XCTAssertEqual(block.width(for: .border, edge: .minX), 0)
-        XCTAssertEqual((block as? DocCellBlock)?.lines.first { $0.edge == .minX }?.width, 0.5)
+        XCTAssertEqual((block as? DocCellBlock)?.lines.first { $0.edge == .minX }?.width ?? 0, 0.48, accuracy: 0.0001)
     }
 
     func testDollarHighlightsVisiblePartOfLineValue() throws {

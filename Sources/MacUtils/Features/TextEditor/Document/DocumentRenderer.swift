@@ -735,7 +735,7 @@ final class DocRenderer {
         // страницами, зацикливает typesetter (зависание 1.9.6), а на место строк такие слои и не влияли.
         for (edge, border) in [(NSRectEdge.minY, props.borderTop), (.maxY, props.borderBottom)] {
             guard border.isVisible else { continue }
-            block.setWidth(max(0.5, CGFloat(border.width) / 20), type: .absoluteValueType, for: .border, edge: edge)
+            block.setWidth(DocCellBlock.wordWidth(border.width), type: .absoluteValueType, for: .border, edge: edge)
             block.setBorderColor(color(border.color, model: model) ?? .black, for: edge)
             block.setWidth(1, type: .absoluteValueType, for: .padding, edge: edge)
         }
@@ -907,9 +907,10 @@ final class DocRenderer {
         let cell = place.def
         for (edge, border) in [(NSRectEdge.minY, cell.borderTop), (.maxY, cell.borderBottom), (.minX, cell.borderLeft), (.maxX, cell.borderRight)] {
             guard border.isVisible else { continue }
-            block.lines.append(DocCellBlock.Line(edge: edge, width: max(0.5, CGFloat(border.width) / 20),
+            block.lines.append(DocCellBlock.Line(edge: edge, width: DocCellBlock.wordWidth(border.width),
                                                  color: color(border.color, model: model) ?? .black))
         }
+        block.edges = (CGFloat(place.table.offset + place.start) / 20, CGFloat(place.table.offset + place.start + place.width) / 20)
         if let fill = shade(cell.shading, pattern: cell.shadingPattern, percent: cell.shadingPercent, model: model) { block.backgroundColor = fill }
         block.setContentWidth(max(4, width - padLeft - padRight), type: .absoluteValueType)
         if place.height != 0 {
@@ -980,8 +981,10 @@ final class DocRenderer {
     }
 }
 
-/// Ячейка таблицы, чьи рамки рисуются по её краю (как в Word — по линии сетки), а не внутри: рамка `NSTextBlock`
-/// занимает место в ширине столбца, и текст ячейки становится уже, чем в Word.
+/// Ячейка таблицы с линиями и заливкой как у Word: рамки — по краю ячейки (по линии сетки), а не внутри: рамка
+/// `NSTextBlock` заняла бы место в ширине столбца, и текст ячейки стал бы уже, чем в Word. Вертикальные линии — по точным
+/// краям `\cellx` (рамка `NSTextTable` — в целых пунктах), серединой на краю; толщина и края — на сетке Word
+/// 1/300 дюйма (0,24 pt) от угла листа, как в его PDF.
 final class DocCellBlock: NSTextTableBlock {
     struct Line {
         var edge: NSRectEdge
@@ -990,28 +993,61 @@ final class DocCellBlock: NSTextTableBlock {
     }
 
     var lines: [Line] = []
+    /// Края ячейки по `\cellx`, пункты от начала контейнера текста.
+    var edges: (left: CGFloat, right: CGFloat)?
+
+    /// Шаг Word: 1/300 дюйма.
+    static let grid: CGFloat = 0.24
+
+    /// Толщина линии `\brdrwN` (твипы), как у Word: вниз до шага 0,24 pt, не тоньше шага (`\brdrw10` — 0,48 pt).
+    static func wordWidth(_ twips: Int) -> CGFloat { CGFloat(max(1, twips * 5 / 24)) * grid }
 
     override func drawBackground(withFrame frameRect: NSRect, in controlView: NSView?, characterRange charRange: NSRange,
                                  layoutManager: NSLayoutManager) {
-        // До SDK macOS 27 `controlView` у `NSTextBlock` не опциональный (CI собирает старым Xcode): туда — развёрнутый.
-        if let controlView {
-            super.drawBackground(withFrame: frameRect, in: controlView, characterRange: charRange, layoutManager: layoutManager)
-        } else {
-            #if compiler(>=6.4)
-            super.drawBackground(withFrame: frameRect, in: nil, characterRange: charRange, layoutManager: layoutManager)
-            #endif
+        // Края по `\cellx` — от начала контейнера: в координатах рисования начало контейнера — край рамки минус её место
+        // в контейнере. Рамку текста страницы `NSTextView` выравнивает по пикселям (сдвиг до 0,45 pt) — линии же от
+        // поля листа, как у Word.
+        let glyphs = layoutManager.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+        var origin = frameRect.minX - layoutManager.boundsRect(for: self, glyphRange: glyphs).minX
+        if let view = controlView as? DocTextView, let page = view.page { origin += page.textRect.minX - view.frame.minX }
+        let left = edges.map { origin + $0.left } ?? frameRect.minX, right = edges.map { origin + $0.right } ?? frameRect.maxX
+        let top = frameRect.minY, bottom = frameRect.maxY
+        let snap = Snapper()
+        func width(_ edge: NSRectEdge) -> CGFloat { lines.first { $0.edge == edge }?.width ?? 0 }
+        // Заливка — между вертикальными линиями, как у Word.
+        if let backgroundColor {
+            backgroundColor.setFill()
+            snap.rect(NSRect(x: left + width(.minX) / 2, y: top, width: right - left - (width(.minX) + width(.maxX)) / 2,
+                             height: bottom - top)).fill()
         }
         for line in lines {
-            let half = line.width / 2
+            let w = line.width, half = w / 2
             let rect: NSRect
             switch line.edge {
-            case .minX: rect = NSRect(x: frameRect.minX - half, y: frameRect.minY - half, width: line.width, height: frameRect.height + line.width)
-            case .maxX: rect = NSRect(x: frameRect.maxX - half, y: frameRect.minY - half, width: line.width, height: frameRect.height + line.width)
-            case .minY: rect = NSRect(x: frameRect.minX - half, y: frameRect.minY - half, width: frameRect.width + line.width, height: line.width)
-            default: rect = NSRect(x: frameRect.minX - half, y: frameRect.maxY - half, width: frameRect.width + line.width, height: line.width)
+            case .minX: rect = NSRect(x: left - half, y: top - half, width: w, height: bottom - top + w)
+            case .maxX: rect = NSRect(x: right - half, y: top - half, width: w, height: bottom - top + w)
+            case .minY: rect = NSRect(x: left - half, y: top - half, width: right - left + w, height: w)
+            default: rect = NSRect(x: left - half, y: bottom - half, width: right - left + w, height: w)
             }
             line.color.setFill()
-            rect.fill()
+            snap.rect(rect).fill()
+        }
+    }
+
+    /// Привязка к сетке 0,24 pt в пространстве устройства (в PDF — от угла листа): начало прямоугольника — к ближайшему
+    /// узлу, размер — как есть (толщины уже кратны шагу).
+    private struct Snapper {
+        let toDevice: CGAffineTransform
+
+        init() { toDevice = NSGraphicsContext.current?.cgContext.ctm ?? .identity }
+
+        func rect(_ rect: NSRect) -> NSRect {
+            let device = rect.applying(toDevice)
+            let scale = max(abs(toDevice.a), abs(toDevice.b), 0.0001)
+            let step = DocCellBlock.grid * scale
+            let snapped = CGRect(x: (device.minX / step).rounded() * step, y: (device.minY / step).rounded() * step,
+                                 width: device.width, height: device.height)
+            return snapped.applying(toDevice.inverted())
         }
     }
 }
