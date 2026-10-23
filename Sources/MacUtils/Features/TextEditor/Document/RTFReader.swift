@@ -648,6 +648,9 @@ private final class RTFParser {
             noteContent(range.location)
             top.para.inTable = true
         case .keepn: top.para.keepNext = true
+        case .keep: top.para.keepTogether = true
+        case .widctlpar: top.para.widowControl = true
+        case .nowidctlpar: top.para.widowControl = false
         case .pagebb:
             top.para.pageBreakBefore = true
             token("pagebb", range)

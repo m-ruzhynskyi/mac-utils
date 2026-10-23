@@ -347,7 +347,14 @@ final class DocPageView: NSView {
     private func applyBody() {
         let body = textRect
         if textView.frame != body { textView.frame = body }
-        if container.size != body.size { container.size = body.size }
+        let size = NSSize(width: body.width, height: min(body.height, breakLimit ?? body.height))
+        if container.size != size { container.size = size }
+    }
+
+    /// Разрыв страницы выше низа текста (правила Word: `\keepn`, `\keep`, висячие строки — `DocPagination`):
+    /// высота контейнера до этого места, остальное уходит на следующую страницу.
+    var breakLimit: CGFloat? {
+        didSet { if oldValue != breakLimit { applyBody() } }
     }
 
     func update(props: RTFSectionProps, section: Int, outdent: DocOutdent) {
