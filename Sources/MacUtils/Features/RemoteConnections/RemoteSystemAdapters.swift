@@ -51,8 +51,11 @@ final class SystemAXNode: AXNode {
 
     var valueLength: Int? { (attribute(kAXNumberOfCharactersAttribute) as? NSNumber)?.intValue }
 
+    var placeholder: String? { attribute(kAXPlaceholderValueAttribute) as? String }
+    var detail: String? { attribute(kAXDescriptionAttribute) as? String }
+
     var isChecked: Bool? {
-        guard role == kAXCheckBoxRole else { return nil }
+        guard role == kAXCheckBoxRole || role == kAXRadioButtonRole else { return nil }
         return (attribute(kAXValueAttribute) as? NSNumber).map { $0.intValue == 1 }
     }
 
@@ -72,6 +75,11 @@ final class SystemAXNode: AXNode {
             else { return false }
             return AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, string) == .success
         }
+    }
+
+    /// Только не секретный текст (ID компьютера).
+    func setText(_ text: String) -> Bool {
+        AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, text as CFString) == .success
     }
 
     func clearValue() -> Bool {

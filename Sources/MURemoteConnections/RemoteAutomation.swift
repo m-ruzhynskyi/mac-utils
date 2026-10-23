@@ -24,6 +24,19 @@ public protocol AXNode: AnyObject {
     func clearValue() -> Bool
     func focus() -> Bool
     func press() -> Bool
+
+    /// Подсказка пустого поля (`AXPlaceholderValue`): у полей веб-интерфейса TeamViewer подписи часто только в ней.
+    var placeholder: String? { get }
+    /// `AXDescription`: подпись кнопок и полей веб-интерфейса, у которых нет заголовка.
+    var detail: String? { get }
+    /// Записать в обычное поле не секретный текст (ID компьютера).
+    func setText(_ text: String) -> Bool
+}
+
+extension AXNode {
+    public var placeholder: String? { nil }
+    public var detail: String? { nil }
+    public func setText(_ text: String) -> Bool { false }
 }
 
 /// Доступ к дереву интерфейса («Универсальный доступ»).
@@ -83,6 +96,37 @@ enum AXTree {
 
     static func isSecureField(_ node: AXNode) -> Bool {
         node.subrole == "AXSecureTextField" || node.role == "AXSecureTextField"
+    }
+
+    static func isTextInput(_ node: AXNode) -> Bool {
+        !isSecureField(node) && ["AXTextField", "AXComboBox", "AXSearchField"].contains(node.role ?? "")
+    }
+
+    /// Все подписи элемента: заголовок, описание, подсказка.
+    static func names(of node: AXNode) -> [String] {
+        [node.label, node.detail, node.placeholder].compactMap { $0 }
+    }
+
+    /// Предки `target` от корня до него самого; nil — его нет в дереве.
+    static func path(to target: AXNode, in root: AXNode) -> [AXNode]? {
+        var stack: [AXNode] = []
+        var found: [AXNode]?
+        visit(root) { node, depth in
+            stack.removeSubrange(min(depth, stack.count)...)
+            stack.append(node)
+            if node.isSame(as: target) { found = stack; return false }
+            return true
+        }
+        return found
+    }
+
+    /// Подходящий элемент, ближайший к `target`: в самом тесном общем контейнере.
+    static func nearest(to target: AXNode, in root: AXNode, where match: (AXNode) -> Bool) -> AXNode? {
+        guard let path = path(to: target, in: root) else { return nil }
+        for ancestor in path.reversed() {
+            if let hit = first(in: ancestor, where: match) { return hit }
+        }
+        return nil
     }
 
     /// Обход в глубину с пределами: у чужой программы дерево может быть огромным или зацикленным.

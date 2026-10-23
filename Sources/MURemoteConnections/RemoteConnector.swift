@@ -8,7 +8,7 @@ public struct ConnectRequest: Sendable {
     public var withPassword: Bool
     /// Поставить в окне пароля галочку «входить автоматически» (если она есть).
     public var autologin: Bool
-    /// Сколько ждать окно пароля; не появилось — программа пустила без пароля.
+    /// Сколько ждать окно пароля или открытый сеанс. Пока открыто промежуточное окно программы, время не идёт.
     public var timeoutSeconds: Int
     /// Повтор после «Ввод прерван»: вводить можно и в окно пароля, которое открыло прерванное подключение
     /// к этой же записи. Другие открытые окна пароля по-прежнему не наши.
@@ -30,9 +30,22 @@ public enum ConnectionPhase: Equatable, Sendable {
     case opening
     /// Жду окно пароля: прошло `elapsed` из `timeout` секунд.
     case waiting(elapsed: Int, timeout: Int)
+    /// Программа показала промежуточное окно; таймаут стоит, пока оно открыто.
+    case intermediate(IntermediateWindow)
+    /// Ссылка не подставила ID — вписываю его в поле программы и нажимаю «Connect».
+    case typingID
     /// Пароль введён и отправлен, жду ответа программы.
     case entered
     case finished(ConnectionOutcome)
+}
+
+public enum IntermediateWindow: Equatable, Sendable {
+    /// «Terminal Session»: выбор по умолчанию оставлен, «Connect» нажат.
+    case sessionChoice
+    /// Программа соединяется или ждёт, пока та сторона примет запрос.
+    case remoteSide
+    /// Незнакомое окно — ничего не нажимаем, ждём.
+    case unknown
 }
 
 public enum ConnectionOutcome: Equatable, Sendable {
@@ -40,8 +53,10 @@ public enum ConnectionOutcome: Equatable, Sendable {
     case connected
     /// Пароль отправлен, окно программы ещё открыто (ждёт подтверждения на той стороне).
     case submitted
-    /// Окно пароля не появилось: программа помнит этот компьютер.
+    /// Окна пароля не было, сеанс открыт: программа помнит этот компьютер.
     case connectedWithoutPassword
+    /// К таймауту нет ни окна пароля, ни открытого сеанса. `copyID` — посоветовать вставить ID вручную.
+    case unconfirmed(copyID: Bool)
     /// Программа открыта на этом ID, пароль не вводился.
     case openedWithoutPassword(NoPasswordReason)
     case cancelled
@@ -60,6 +75,7 @@ public enum ConnectionOutcome: Equatable, Sendable {
         case .connected: return "connected"
         case .submitted: return "submitted"
         case .connectedWithoutPassword: return "auto"
+        case .unconfirmed: return "unconfirmed"
         case .openedWithoutPassword(let r): return "opened_\(r == .userChoice ? "user" : "nopassword")"
         case .cancelled: return "cancelled"
         case .failed(let f): return "failed_\(f.code)"
@@ -69,7 +85,7 @@ public enum ConnectionOutcome: Equatable, Sendable {
     public var isSuccess: Bool {
         switch self {
         case .connected, .submitted, .connectedWithoutPassword, .openedWithoutPassword: return true
-        case .cancelled, .failed: return false
+        case .unconfirmed, .cancelled, .failed: return false
         }
     }
 }
@@ -115,7 +131,9 @@ public enum ConnectionFailure: Equatable, Sendable {
 
 /// Подключение с вводом пароля в окно программы. Порядок:
 /// 1) программа установлена, ссылка есть; 2) пароль — из файла сейчас, в `SecretBuffer`; 3) открыть ссылку;
-/// 4) ждать окно с защищённым полем у процесса с нужным bundle id; не появилось за таймаут — вход без пароля;
+/// 4) ждать окно с защищённым полем у процесса с нужным bundle id. Промежуточные окна проходятся сами («Terminal
+/// Session» — «Connect» с выбором по умолчанию; отмену не нажимаем никогда), пока они открыты, таймаут стоит.
+/// Без пароля подключено, только когда виден открытый сеанс; к таймауту его нет — «не подтверждено»;
 /// 5) программа впереди, поле её — `AXValue`, не взялось — посимвольно, с проверкой фокуса перед каждым символом;
 /// 6) галочка автологина, «ОК»; 7) поле закрылось — подключено, отказ или новое окно пароля — неверный пароль.
 /// Пароль затирается при любом исходе.
@@ -131,6 +149,14 @@ public final class RemoteConnector {
         public var confirm = 8000
         /// Поле закрылось — столько ещё смотрим, не придёт ли отказ.
         public var settle = 1500
+        /// Окно этого подключения без диалогов столько времени — сеанс открыт. С запасом: ложный успех хуже, чем «не подтверждено».
+        public var sessionSettle = 5000
+        /// Программа запущена, а ссылка за это время ничего не открыла — вписать ID в поле самим.
+        public var formGrace = 3000
+        /// Нажатое нами «Connect» не закрыло промежуточное окно за это время — дальше ждём, ничего не нажимая.
+        public var promptGrace = 3000
+        /// Дольше этого не ждём даже с промежуточными окнами: пароль не держится в памяти без конца.
+        public var limit = 180_000
 
         public init() {}
     }
@@ -174,7 +200,10 @@ public final class RemoteConnector {
         guard launcher.isInstalled(bundleID: bundleID) else { return .failed(.notInstalled) }
         guard let url = provider.connectURL(id: request.record.id) else { return .failed(.aliasNotSupported) }
 
-        let typing = request.withPassword && ax.isTrusted
+        let trusted = ax.isTrusted
+        let typing = request.withPassword && trusted
+        // Ссылка может не подставить ID (TeamViewer на главном экране) — тогда смотрим и без ввода пароля.
+        let watching = trusted && (typing || provider.fillsConnectForm)
         var secret: SecretBuffer?
         defer { secret?.wipe() }
         if typing {
@@ -198,16 +227,24 @@ public final class RemoteConnector {
         let retry = request.reuseOpenWindow
             ? interrupted.flatMap { $0.recordID == request.record.id && $0.program == provider.program ? $0 : nil } : nil
         interrupted = nil
-        let known = typing ? secureFields(bundleID).filter { f in !(retry.map { $0.field.isSame(as: f) } ?? false) } : []
+        let known = watching ? secureFields(bundleID).filter { f in !(retry.map { $0.field.isSame(as: f) } ?? false) } : []
+        let before = watching ? launcher.runningProcess(bundleID: bundleID).map(ax.windows(ofProcess:)) ?? [] : []
         guard launcher.open(url) else { return .failed(.launchFailed) }
-        guard request.withPassword else { return .openedWithoutPassword(.userChoice) }
-        guard ax.isTrusted else { return .failed(.noAccessibility) }
-        guard let secret, !secret.isEmpty else { return .openedWithoutPassword(.notInFile) }
+        let unconfirmed = ConnectionOutcome.unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
+        guard request.withPassword else {
+            return watching ? await openOnly(.userChoice, request, provider, known, before, progress) : .openedWithoutPassword(.userChoice)
+        }
+        guard trusted else { return .failed(.noAccessibility) }
+        guard let secret, !secret.isEmpty else {
+            return provider.fillsConnectForm ? await openOnly(.notInFile, request, provider, known, before, progress)
+                                             : .openedWithoutPassword(.notInFile)
+        }
 
         let target: Target
-        switch await waitForField(request, provider, known: known, progress) {
+        switch await waitForField(request, provider, known: known, before: before, progress) {
         case .found(let t): target = t
-        case .timeout: return .connectedWithoutPassword
+        case .session: return .connectedWithoutPassword
+        case .timeout: return unconfirmed
         case .neverStarted: return .failed(.launchFailed)
         case .untrusted: return .failed(.untrustedProgram)
         case .noField(let structure): return .failed(.fieldNotFound(structure: structure))
@@ -229,6 +266,18 @@ public final class RemoteConnector {
         return outcome
     }
 
+    /// Без ввода пароля, но с проверкой, что программа открылась на этом ID (иначе — вписать его самим).
+    private func openOnly(_ reason: ConnectionOutcome.NoPasswordReason, _ request: ConnectRequest, _ provider: RemoteProvider,
+                          _ known: [AXNode], _ before: [AXNode], _ progress: (ConnectionPhase) -> Void) async -> ConnectionOutcome {
+        switch await waitForField(request, provider, known: known, before: before, progress) {
+        case .found, .noField: return .openedWithoutPassword(reason)
+        case .session: return .connectedWithoutPassword
+        case .timeout, .neverStarted: return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
+        case .untrusted: return .failed(.untrustedProgram)
+        case .cancelled: return .cancelled
+        }
+    }
+
     /// Процесс — та программа: bundle id и Team ID действительной подписи.
     private func isGenuine(_ pid: Int32, _ program: RemoteProgram) -> Bool {
         launcher.bundleID(ofProcess: pid) == program.bundleID && launcher.teamID(ofProcess: pid) == program.teamID
@@ -242,6 +291,8 @@ public final class RemoteConnector {
 
     private enum Wait {
         case found(Target)
+        /// Сеанс открыт без окна пароля.
+        case session
         case timeout
         case neverStarted
         case noField([String])
@@ -254,43 +305,225 @@ public final class RemoteConnector {
         return ax.windows(ofProcess: pid).flatMap { AXTree.all(in: $0, where: AXTree.isSecureField) }
     }
 
-    private func waitForField(_ request: ConnectRequest, _ provider: RemoteProvider, known: [AXNode],
+    /// Ждём окно пароля. Пока открыто промежуточное окно программы, время ожидания не идёт (но не дольше `limit`).
+    private func waitForField(_ request: ConnectRequest, _ provider: RemoteProvider, known: [AXNode], before: [AXNode],
                               _ progress: (ConnectionPhase) -> Void) async -> Wait {
         let bundleID = provider.program.bundleID
+        let texts = provider.texts
         let timeout = max(request.timeoutSeconds, 1) * 1000
         let start = clock.milliseconds
+        var last = start
+        var counted = 0
+        var paused = false
         var shownSecond = -1
+        var shownWindow: IntermediateWindow?
         var sawProcess = false
+        var processSince: Int?
         var passwordWindowSince: Int?
+        var calmSince: Int?
+        var formFilled = false
+        var watch = SessionWatch()
         while true {
-            let elapsed = clock.milliseconds - start
+            let now = clock.milliseconds
+            if !paused { counted += now - last }
+            last = now
+            var intermediate: IntermediateWindow?
             if let pid = launcher.runningProcess(bundleID: bundleID), launcher.bundleID(ofProcess: pid) == bundleID {
                 guard launcher.teamID(ofProcess: pid) == provider.program.teamID else { return .untrusted }
                 sawProcess = true
+                let firstSeen = processSince ?? now
+                processSince = firstSeen
+                let windows = ax.windows(ofProcess: pid)
                 var bare: AXNode?
-                for window in ax.windows(ofProcess: pid) {
+                var blocked = false
+                for window in windows {
+                    // Промежуточное окно — раньше поля: в «Terminal Session» может быть своё поле, не для нашего пароля.
+                    if let marker = texts.shows(texts.promptTexts, in: window) {
+                        watch.track(window)
+                        blocked = true
+                        let pressed = continuePrompt(marker, in: window, texts, &watch, now: now)
+                        intermediate = pressed ? .sessionChoice : .unknown
+                        continue
+                    }
                     let fields = AXTree.all(in: window, where: AXTree.isSecureField)
                     if let field = fields.first(where: { f in !known.contains { $0.isSame(as: f) } }) {
                         return .found(Target(pid: pid, window: window, field: field))
                     }
-                    if fields.isEmpty, provider.texts.isPasswordWindow(window) { bare = window }
+                    if !fields.isEmpty { continue }   // окно пароля другого подключения
+                    if texts.isPasswordWindow(window) {
+                        bare = window
+                        watch.track(window)
+                        continue
+                    }
+                    if texts.shows(texts.sessionTexts, in: window) != nil { return .session }
+                    if texts.shows(texts.progressTexts, in: window) != nil {
+                        watch.track(window)
+                        blocked = true
+                        intermediate = intermediate ?? .remoteSide
+                        continue
+                    }
+                    if texts.shows(texts.closedTexts, in: window) != nil || texts.isRejection(window) {
+                        blocked = true   // сеанс не открылся — ждём до таймаута, успехом не считаем
+                        continue
+                    }
+                    let isNew = !before.contains { $0.isSame(as: window) }
+                    if isNew, Self.isDialog(window) {
+                        blocked = true
+                        intermediate = intermediate ?? .unknown
+                        continue
+                    }
+                    if isNew, Self.title(of: window, matches: request.record) { watch.track(window) }
                 }
                 if let bare {
-                    let since = passwordWindowSince ?? elapsed
+                    let since = passwordWindowSince ?? now
                     passwordWindowSince = since
-                    if elapsed - since >= timing.fieldGrace { return .noField(AXTree.structure(of: bare)) }
+                    if now - since >= timing.fieldGrace { return .noField(AXTree.structure(of: bare)) }
                 } else {
                     passwordWindowSince = nil
                 }
+
+                // Окно этого подключения открыто и без диалогов — сеанс.
+                let calm = !blocked && bare == nil && windows.contains { w in watch.isTracked(w) }
+                if calm {
+                    let since = calmSince ?? now
+                    calmSince = since
+                    if now - since >= timing.sessionSettle { return .session }
+                } else {
+                    calmSince = nil
+                }
+
+                // Ссылка ничего не открыла — вписать ID в поле главного окна и нажать «Connect».
+                if provider.fillsConnectForm, !formFilled, !watch.any, !blocked, bare == nil,
+                   now - firstSeen >= timing.formGrace, let form = connectForm(in: windows, texts) {
+                    formFilled = true
+                    progress(.typingID)
+                    shownSecond = -1
+                    if await fill(form, id: request.record.id, pid: pid, provider) { counted = 0 }
+                    last = clock.milliseconds
+                    if Task.isCancelled { return .cancelled }
+                    continue
+                }
             }
-            if elapsed >= timeout { return sawProcess ? .timeout : .neverStarted }
-            if elapsed / 1000 != shownSecond {
-                shownSecond = elapsed / 1000
-                progress(.waiting(elapsed: shownSecond, timeout: max(request.timeoutSeconds, 1)))
+            paused = intermediate != nil
+            if clock.milliseconds - start >= timing.limit || counted >= timeout { return sawProcess ? .timeout : .neverStarted }
+            if let intermediate {
+                if intermediate != shownWindow { progress(.intermediate(intermediate)) }
+                shownWindow = intermediate
+            } else {
+                if shownWindow != nil { shownWindow = nil; shownSecond = -1 }
+                if counted / 1000 != shownSecond {
+                    shownSecond = counted / 1000
+                    progress(.waiting(elapsed: shownSecond, timeout: max(request.timeoutSeconds, 1)))
+                }
             }
             do { try await clock.sleep(milliseconds: timing.poll) } catch { return .cancelled }
             if Task.isCancelled { return .cancelled }
         }
+    }
+
+    /// Окна этого подключения и кнопки, которые мы уже нажали.
+    private struct SessionWatch {
+        private(set) var windows: [AXNode] = []
+        var pressed: [(button: AXNode, at: Int)] = []
+
+        var any: Bool { !windows.isEmpty }
+        mutating func track(_ window: AXNode) { if !isTracked(window) { windows.append(window) } }
+        func isTracked(_ window: AXNode) -> Bool { windows.contains { $0.isSame(as: window) } }
+    }
+
+    /// Диалог или лист, открытый после ссылки.
+    private static func isDialog(_ window: AXNode) -> Bool {
+        if ["AXDialog", "AXSystemDialog"].contains(window.subrole ?? "") { return true }
+        return window.children.contains { $0.role == "AXSheet" }
+    }
+
+    /// Заголовок окна называет этот компьютер: цифры ID (пробелы не в счёт) или алиас.
+    static func title(of window: AXNode, matches record: ConnectionRecord) -> Bool {
+        guard let title = window.label?.lowercased(), !title.isEmpty else { return false }
+        let id = record.id.lowercased()
+        if record.isAlias { return title.contains(id) }
+        let digits = id.filter(\.isNumber)
+        return digits.count >= 6 && title.filter(\.isNumber).contains(digits)
+    }
+
+    /// Промежуточное окно с кнопкой продолжения: выбор по умолчанию оставить (поставить, если программа запомнила
+    /// другой), нажать «Connect». Только кнопки из `promptContinueTitles` — отмену и закрытие не нажимаем никогда.
+    /// false — кнопки нет или нажатая не помогла: ждём, ничего не трогая.
+    private func continuePrompt(_ marker: AXNode, in window: AXNode, _ texts: ProviderTexts,
+                                _ watch: inout SessionWatch, now: Int) -> Bool {
+        let isContinue: (AXNode) -> Bool = { $0.role == "AXButton" && ProviderTexts.named($0, texts.promptContinueTitles) }
+        guard let button = AXTree.nearest(to: marker, in: window, where: isContinue) else { return false }
+        if let done = watch.pressed.first(where: { $0.button.isSame(as: button) }) {
+            return now - done.at < timing.promptGrace
+        }
+        let isDefault: (AXNode) -> Bool = { node in
+            node.role == "AXRadioButton" && AXTree.names(of: node).contains { name in
+                texts.promptDefaultTitles.contains { ProviderTexts.key(name).hasPrefix($0) }
+            }
+        }
+        if let choice = AXTree.nearest(to: marker, in: window, where: isDefault), choice.isChecked == false { _ = choice.press() }
+        guard button.press() else { return false }
+        watch.pressed.append((button, now))
+        return true
+    }
+
+    private struct ConnectForm {
+        let field: AXNode
+        let button: AXNode?
+    }
+
+    /// Поле ID на главном экране: по своей подписи или подсказке, иначе ближайшее к надписи над ним.
+    private func connectForm(in windows: [AXNode], _ texts: ProviderTexts) -> ConnectForm? {
+        guard !texts.connectFieldTexts.isEmpty else { return nil }
+        for window in windows {
+            var field = AXTree.first(in: window) { AXTree.isTextInput($0) && ProviderTexts.named($0, texts.connectFieldTexts) }
+            if field == nil, let caption = AXTree.first(in: window, where: {
+                $0.role == "AXStaticText" && ProviderTexts.named($0, texts.connectFieldTexts)
+            }) {
+                field = AXTree.nearest(to: caption, in: window, where: AXTree.isTextInput)
+            }
+            guard let field else { continue }
+            let button = AXTree.nearest(to: field, in: window) {
+                $0.role == "AXButton" && ProviderTexts.named($0, texts.connectButtonTitles)
+            }
+            return ConnectForm(field: field, button: button)
+        }
+        return nil
+    }
+
+    /// ID — не секрет: набрать в поле (веб-поля надёжнее берут нажатия), не вышло — `AXValue`; затем «Connect».
+    private func fill(_ form: ConnectForm, id: String, pid: Int32, _ provider: RemoteProvider) async -> Bool {
+        let bundleID = provider.program.bundleID
+        guard form.field.processID == pid, isGenuine(pid, provider.program) else { return false }
+        let expected: Set<Int> = [id.unicodeScalars.count, id.utf16.count]
+        launcher.activate(process: pid)
+        var entered = false
+        if await waitFrontmost(pid) {
+            _ = form.field.clearValue()
+            _ = form.field.focus()
+            if isFocused(form.field, pid) {
+                entered = typeText(id, into: form.field, pid, bundleID) && matches(form.field.valueLength, expected, unknownIs: true)
+            }
+        }
+        if !entered {
+            _ = form.field.clearValue()
+            entered = form.field.setText(id) && matches(form.field.valueLength, expected, unknownIs: true)
+        }
+        guard entered else { return false }
+        if let button = form.button, button.press() { return true }
+        guard isFront(pid, bundleID) else { return false }
+        keyboard.pressReturn(to: pid)
+        return true
+    }
+
+    /// Посимвольно, пока поле в фокусе у нужного процесса.
+    private func typeText(_ text: String, into field: AXNode, _ pid: Int32, _ bundleID: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            guard isFocused(field, pid), launcher.bundleID(ofProcess: pid) == bundleID else { return false }
+            let units = Array(String(scalar).utf16)
+            units.withUnsafeBufferPointer { keyboard.type($0, to: pid) }
+        }
+        return true
     }
 
     /// Ввод: только в процесс нужной программы, когда она впереди. nil — введено.
@@ -342,9 +575,10 @@ public final class RemoteConnector {
         return front == pid && launcher.bundleID(ofProcess: front) == bundleID
     }
 
-    private func isFocused(_ target: Target) -> Bool {
-        launcher.frontmostProcess == target.pid
-            && ax.focusedElement(ofProcess: target.pid).map { $0.isSame(as: target.field) } == true
+    private func isFocused(_ target: Target) -> Bool { isFocused(target.field, target.pid) }
+
+    private func isFocused(_ field: AXNode, _ pid: Int32) -> Bool {
+        launcher.frontmostProcess == pid && ax.focusedElement(ofProcess: pid).map { $0.isSame(as: field) } == true
     }
 
     /// Галочка «входить автоматически»: по надписи, иначе единственная галочка окна.
@@ -420,12 +654,27 @@ public final class RemoteConnector {
         }
         let start = clock.milliseconds
         var goneAt: Int?
+        var watch = SessionWatch()
         while clock.milliseconds - start < timing.confirm {
             do { try await clock.sleep(milliseconds: timing.poll) } catch { return .submitted }
+            let texts = provider.texts
             let windows = ax.windows(ofProcess: target.pid)
-            if windows.contains(where: provider.texts.isRejection) { return .failed(.wrongPassword) }
+            if windows.contains(where: texts.isRejection) { return .failed(.wrongPassword) }
+            if windows.contains(where: { texts.shows(texts.sessionTexts, in: $0) != nil }) { return .connected }
+            // После пароля бывает «Terminal Session» или ожидание той стороны — это ещё не подключено.
+            var busy = false
+            for window in windows {
+                if let marker = texts.shows(texts.promptTexts, in: window) {
+                    _ = continuePrompt(marker, in: window, texts, &watch, now: clock.milliseconds)
+                    busy = true
+                } else if texts.shows(texts.progressTexts, in: window) != nil {
+                    busy = true
+                }
+            }
             let fields = windows.flatMap { AXTree.all(in: $0, where: AXTree.isSecureField) }
-            if fields.contains(where: { $0.isSame(as: target.field) }) {
+            if busy {
+                goneAt = nil
+            } else if fields.contains(where: { $0.isSame(as: target.field) }) {
                 goneAt = nil
                 // Программа очистила поле — пароль не подошёл.
                 if target.field.valueLength == 0 { return .failed(.wrongPassword) }

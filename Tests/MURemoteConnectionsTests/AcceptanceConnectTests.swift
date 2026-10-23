@@ -159,16 +159,17 @@ final class AcceptanceConnectTests: XCTestCase {
 
     // MARK: Таймаут и опрос
 
-    func testDefaultTimeoutIsTwentySecondsAndMeansAutologin() async {
+    func testDefaultTimeoutIsTwentySecondsAndWithoutSessionIsNotSuccess() async {
         XCTAssertEqual(ConnectRequest(record: request().record, program: .anyDesk).timeoutSeconds, 20)
         let poll = RemoteConnector.Timing().poll
         XCTAssertTrue((200...300).contains(poll), "опрос каждые 200–300 мс, сейчас \(poll)")
         launcher.onOpen = { [unowned self] _ in launcher.launch(.anyDesk, pid: pid) }   // запущен, окна пароля нет
         let outcome = await connect(request(), lookup: found("Pw-1"))
-        XCTAssertEqual(outcome, .connectedWithoutPassword, "окно не появилось — автологин, без ошибки")
+        // Не «подключено без пароля»: окна пароля нет, но и сеанса не видно (task-rc-terminal-session, п. 1 и 4).
+        XCTAssertEqual(outcome, .unconfirmed(copyID: false), "ни окна пароля, ни сеанса — не подтверждено")
         XCTAssertTrue((20_000...20_400).contains(clock.milliseconds), "ждали \(clock.milliseconds) мс")
         XCTAssertTrue(keyboard.typed.isEmpty)
-        XCTAssertTrue(outcome.isSuccess)
+        XCTAssertFalse(outcome.isSuccess)
         assertAllSecretsWiped()
     }
 
@@ -178,7 +179,7 @@ final class AcceptanceConnectTests: XCTestCase {
             let w = programShowsPassword(after: delay)
             let outcome = await connect(request(), lookup: found("Pw-2"))
             XCTAssertEqual(w.field.text == "Pw-2", expectTyped, "окно через \(delay) мс")
-            XCTAssertEqual(outcome, expectTyped ? .connected : .connectedWithoutPassword)
+            XCTAssertEqual(outcome, expectTyped ? .connected : .unconfirmed(copyID: false))
         }
     }
 
@@ -326,7 +327,7 @@ final class AcceptanceConnectTests: XCTestCase {
             ax.show(other.window, pid: 555)
         }
         let outcome = await connect(request(timeout: 3), lookup: found("Pw"))
-        XCTAssertEqual(outcome, .connectedWithoutPassword)
+        XCTAssertEqual(outcome, .unconfirmed(copyID: false))
         XCTAssertEqual(other.field.text, "")
         XCTAssertTrue(keyboard.typed.isEmpty)
     }
