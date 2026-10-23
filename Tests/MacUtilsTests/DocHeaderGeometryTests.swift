@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// Геометрия колонтитулов как в Word: нижний — низом на `\footery` и внутри своей страницы (растёт вверх, текст
 /// страницы поднимается), верхний — от `\headery` вниз; абзацы с отрицательными отступами выходят в поля.

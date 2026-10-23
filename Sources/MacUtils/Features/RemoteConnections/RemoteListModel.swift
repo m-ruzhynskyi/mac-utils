@@ -1,5 +1,7 @@
 import MURemoteConnections
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Состояние списка для вкладки и палитры: запрос, фильтр по программе, выбранная строка.
 @MainActor

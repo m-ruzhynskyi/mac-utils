@@ -1,5 +1,7 @@
 import MURemoteConnections
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Что правим: новая запись или существующая.
 struct RemoteEditTarget: Identifiable {

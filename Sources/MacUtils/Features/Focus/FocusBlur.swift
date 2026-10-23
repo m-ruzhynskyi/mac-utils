@@ -1,6 +1,8 @@
 import AppKit
 import Carbon.HIToolbox
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Режим «Фокус» (⌃⌥F): выбранная программа остаётся чёткой, а всё позади её окон —
 /// другие окна и рабочий стол — размывается и чуть затемняется.

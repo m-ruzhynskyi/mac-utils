@@ -2,6 +2,8 @@
 import Carbon.HIToolbox
 import MURemoteConnections
 import XCTest
+import MUCore
+import MUDesign
 
 /// Тонкий слой приложения над MURemoteConnections: адаптер настроек и вкладка панели.
 /// Логика модуля проверяется в MURemoteConnectionsTests.

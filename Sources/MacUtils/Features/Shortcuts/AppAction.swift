@@ -1,4 +1,6 @@
 import AppKit
+import MUCore
+import MUDesign
 
 /// Где прилипает окно (действие «Команд», ссылка `macutils://snap?…`, сочетания ⌃⌥ + стрелки).
 enum WindowPlacement: String, CaseIterable, Sendable {

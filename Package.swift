@@ -5,14 +5,26 @@ let package = Package(
     name: "MacUtils",
     platforms: [.macOS(.v14)],
     targets: [
-        // Удалённые подключения: вся логика без зависимости от приложения (см. .audit/task-remote-connections.md).
+        // Общее для всех функций: настройки, журнал, горячие клавиши, разрешения. Функций не знает.
+        .target(
+            name: "MUCore",
+            path: "Sources/MUCore"
+        ),
+        // Оформление: токены, компоненты, окна-панели. Функций не знает.
+        .target(
+            name: "MUDesign",
+            dependencies: ["MUCore"],
+            path: "Sources/MUDesign"
+        ),
+        // Удалённые подключения: вся логика без зависимости от приложения и других модулей
+        // (см. .audit/task-remote-connections.md).
         .target(
             name: "MURemoteConnections",
             path: "Sources/MURemoteConnections"
         ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MURemoteConnections"],
+            dependencies: ["MUCore", "MUDesign", "MURemoteConnections"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -26,7 +38,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MURemoteConnections"],
             path: "Tests/MacUtilsTests"
         ),
     ]

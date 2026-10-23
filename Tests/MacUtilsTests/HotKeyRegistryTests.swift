@@ -1,6 +1,8 @@
 import Carbon.HIToolbox
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUDesign
 
 final class HotKeyRegistryTests: XCTestCase {
     private var defaults: UserDefaults!

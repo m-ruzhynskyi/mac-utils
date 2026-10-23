@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import SwiftUI
+import MUDesign
 
 /// Всё, что поверх видео: подсказки (v08b, v14b), тосты (v08a, v08c, v14c), кнопка «Пропустить…» (v14),
 /// карточка следующей серии (v15), меню субтитров, дорожек и скорости (v04, v05).

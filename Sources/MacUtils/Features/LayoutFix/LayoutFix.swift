@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
+import MUCore
 
 /// «Раскладка»: по горячей клавише переводит текст, набранный не в той
 /// раскладке (ghbdtn → привет и обратно). Выделенный текст — целиком,

@@ -1,5 +1,7 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
 
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {

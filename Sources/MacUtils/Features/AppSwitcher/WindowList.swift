@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import MUCore
 
 /// Одна карточка переключателя — одно окно, как в Mission Control.
 struct SwitcherItem: Identifiable {

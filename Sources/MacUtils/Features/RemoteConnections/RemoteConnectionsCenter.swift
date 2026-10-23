@@ -3,6 +3,8 @@ import Carbon.HIToolbox
 import MURemoteConnections
 import OSLog
 import UniformTypeIdentifiers
+import MUCore
+import MUDesign
 
 /// Ключи настроек «Удалённых подключений». Паролей среди них нет и быть не может: только путь, лист, программа
 /// по умолчанию и ID в избранном и недавних.

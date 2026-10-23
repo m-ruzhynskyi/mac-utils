@@ -1,6 +1,8 @@
 import AppKit
 import CoreAudio
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Сколько уже работаем без перерыва (без UI — для тестов).
 struct BreakSchedule {

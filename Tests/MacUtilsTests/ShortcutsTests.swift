@@ -2,6 +2,7 @@ import AppIntents
 import CryptoKit
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// Mac Utils в «Командах» и ссылках `macutils://`: каждое действие зовёт ту же функцию, что горячая клавиша и панель
 /// (`AppAction.run`); действия с файлами — без окна, с теми же гарантиями байтов, что «Убрать значения» в редакторе.

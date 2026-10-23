@@ -1,5 +1,7 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
 
 extension Notification.Name {
     /// Открыть в настройках нужный раздел (object — SettingsSection).

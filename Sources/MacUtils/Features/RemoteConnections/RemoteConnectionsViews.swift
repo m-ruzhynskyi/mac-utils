@@ -1,5 +1,7 @@
 import MURemoteConnections
 import SwiftUI
+import MUCore
+import MUDesign
 
 // MARK: - Части строки
 

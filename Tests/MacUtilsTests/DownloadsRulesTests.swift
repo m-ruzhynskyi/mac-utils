@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 final class DownloadsRulesTests: XCTestCase {
     func testCategories() {

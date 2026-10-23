@@ -2,6 +2,8 @@ import AppKit
 import Carbon.HIToolbox
 import ScreenCaptureKit
 import Vision
+import MUCore
+import MUDesign
 
 /// «Снимок»: собственная утилита скриншотов по мотивам macshot.
 ///   ⌘⇧X  — выделить область (или кликнуть по окну), разметить, скопировать / сохранить.

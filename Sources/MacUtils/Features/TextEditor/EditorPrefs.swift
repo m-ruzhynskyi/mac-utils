@@ -1,4 +1,5 @@
 import Foundation
+import MUCore
 
 /// Настройки редактора поверх `UserDefaults` (ключи — в `Pref`).
 enum EditorPrefs {

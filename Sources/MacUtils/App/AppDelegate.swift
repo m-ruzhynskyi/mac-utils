@@ -1,5 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
+import MUCore
+import MUDesign
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения
@@ -14,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Шрифты интерфейса (Graphite) — до первого окна; не вышло — системный шрифт.
         DSFonts.registerAll()
         Pref.register()
+        SettingsSection.installAppSubtitles()
         KeepAwake.shared.observeWake()
         BusyRegistry.shared.installDefaultProviders()
         observeSystemShutdown()

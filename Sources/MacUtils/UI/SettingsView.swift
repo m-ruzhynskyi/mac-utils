@@ -1,6 +1,7 @@
 import AppKit
 import ServiceManagement
 import SwiftUI
+import MUDesign
 
 // MARK: - Модель разрешений
 

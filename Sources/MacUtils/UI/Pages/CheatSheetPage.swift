@@ -1,5 +1,7 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
 
 struct CheatSheetPage: View {
     @AppStorage(Pref.cheatSheet) private var enabled = true

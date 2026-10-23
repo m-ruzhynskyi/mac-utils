@@ -4,6 +4,8 @@ import ImageIO
 @preconcurrency import ScreenCaptureKit
 import SwiftUI
 import UniformTypeIdentifiers
+import MUCore
+import MUDesign
 
 /// Код комнаты и адрес (без сети — для тестов).
 enum ShareCode {

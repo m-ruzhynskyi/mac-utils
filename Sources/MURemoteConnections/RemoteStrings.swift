@@ -196,7 +196,7 @@ enum RemoteStrings {
         "Нужен, чтобы ввести пароль в окно программы. Без него программа откроется, пароль вводите сами.": ("Потрібен, щоб ввести пароль у вікно програми. Без нього програма відкриється, пароль вводите самі.", "Needed to type the password into the app’s window. Without it the app opens and you type the password."),
         "Разрешено": ("Дозволено", "Allowed"),
         "Не разрешено": ("Не дозволено", "Not allowed"),
-        "Диагностику (сколько записей загружено, что пропущено и почему) можно открыть из нижней строки вкладки «Удалённые».": ("Діагностику (скільки записів завантажено, що пропущено й чому) можна відкрити з нижнього рядка вкладки «Віддалені».", "Diagnostics (how many entries loaded, what was skipped and why) open from the bottom line of the “Remote” tab."),
+        "Диагностику (сколько записей загружено, что пропущено и почему) можно открыть из нижней строки вкладки «Удалённые».": ("Діагностику (скільки записів завантажено, що пропущено й чому) можна відкрити з нижнього рядка вкладки «Удалённые».", "Diagnostics (how many entries loaded, what was skipped and why) open from the bottom line of the «Удалённые» tab."),
         "Только путь; пароли читаются в момент подключения": ("Лише шлях; паролі читаються в момент підключення", "Path only; passwords are read at connect time"),
         "Выбрать…": ("Вибрати…", "Choose…"),
         "Показать в Finder": ("Показати у Finder", "Show in Finder"),
@@ -229,8 +229,5 @@ enum RemoteStrings {
         "Скоро": ("Незабаром", "Soon"),
         "anydesk:ID + ввод пароля через Универсальный доступ": ("anydesk:ID + введення пароля через Універсальний доступ", "anydesk:ID + password entry via Accessibility"),
         "ввод пароля через Универсальный доступ": ("введення пароля через Універсальний доступ", "password entry via Accessibility"),
-        "Удалённые": ("Віддалені", "Remote"),
-        "Удалённые подключения": ("Віддалені підключення", "Remote connections"),
-        "AnyDesk и TeamViewer из своей таблицы: ⌃⌥⌘A, набрали имя — Enter": ("AnyDesk і TeamViewer зі своєї таблиці: ⌃⌥⌘A, набрали назву — Enter", "AnyDesk and TeamViewer from your own table: ⌃⌥⌘A, type a name, Enter"),
     ]
 }

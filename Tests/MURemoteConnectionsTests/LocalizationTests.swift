@@ -9,12 +9,10 @@ final class LocalizationTests: XCTestCase {
     private func keys() throws -> [String] {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let dirs = ["Sources/MURemoteConnections", "Sources/MacUtils/Features/RemoteConnections"]
-        var files = try dirs.flatMap { dir in
+        let files = try dirs.flatMap { dir in
             try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent(dir).path)
                 .filter { $0.hasSuffix(".swift") }.map { root.appendingPathComponent(dir).appendingPathComponent($0) }
         }
-        // Название раздела в общем списке разделов приложения.
-        files.append(root.appendingPathComponent("Sources/MacUtils/UI/SettingsSections.swift"))
         let pattern = try NSRegularExpression(pattern: #"RL\("((?:[^"\\]|\\.)*)""#)
         var out: [String] = []
         for file in files {
@@ -35,7 +33,9 @@ final class LocalizationTests: XCTestCase {
             let n = key.components(separatedBy: "%@").count
             XCTAssertEqual(value.uk.components(separatedBy: "%@").count, n, key)
             XCTAssertEqual(value.en.components(separatedBy: "%@").count, n, key)
-            XCTAssertNil(value.en.range(of: "[А-Яа-яЁёІіЇїЄє]", options: .regularExpression), "кириллица в английском: \(value.en)")
+            // Исключение — имя вкладки «Удалённые»: в боковом меню и панели оно русское, как всё приложение.
+            XCTAssertNil(value.en.replacingOccurrences(of: "«Удалённые»", with: "").range(of: "[А-Яа-яЁёІіЇїЄє]", options: .regularExpression),
+                         "кириллица в английском: \(value.en)")
         }
         XCTAssertEqual(Set(RemoteStrings.table.keys).subtracting(keys), [], "лишние переводы")
     }

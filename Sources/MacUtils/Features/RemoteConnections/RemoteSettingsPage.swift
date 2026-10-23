@@ -2,6 +2,8 @@ import AppKit
 import MURemoteConnections
 import SwiftUI
 import UniformTypeIdentifiers
+import MUCore
+import MUDesign
 
 /// Раздел «Удалённые подключения» в настройках (m15): файл, лист, шаблон, программа по умолчанию, клавиша, ожидание,
 /// автологин, уведомление, язык, программы и «Универсальный доступ». Список компьютеров — во вкладке «Удалённые».

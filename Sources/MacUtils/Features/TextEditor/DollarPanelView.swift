@@ -1,5 +1,7 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Панель «Знаки $» справа от текста (макеты a, d1, d2).
 struct DollarPanelView: View {

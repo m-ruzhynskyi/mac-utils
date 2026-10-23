@@ -1,4 +1,6 @@
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Строка «Не засыпать»: срок, переключатель и (пока включено) сколько осталось.
 struct KeepAwakeRow: View {

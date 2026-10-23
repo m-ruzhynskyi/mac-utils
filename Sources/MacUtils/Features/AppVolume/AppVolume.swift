@@ -1,6 +1,8 @@
 import AppKit
 import CoreAudio
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// «Громкость»: своя громкость для каждого приложения (0–150 %, выключение).
 /// Перехватываются только приложения, у которых громкость не 100 % —

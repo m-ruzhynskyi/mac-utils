@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// Перерыв не перекрывает запись, показ экрана и звонок.
 final class BreakGuardTests: XCTestCase {

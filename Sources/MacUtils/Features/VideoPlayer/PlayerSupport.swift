@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import UniformTypeIdentifiers
+import MUCore
 
 /// Настройки плеера поверх `UserDefaults` (ключи — в `Pref`).
 enum PlayerPrefs {

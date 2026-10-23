@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// B1: «Всегда разрешать» не должно делать доверенными свой ID, пустой и невалидные ID (иначе возвращается C1).
 ///
