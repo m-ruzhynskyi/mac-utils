@@ -36,6 +36,8 @@ const VIEWER_TIMEOUT_MS = 120_000;
 const DEBT_LIMIT = 60;
 const DEBT_RESUME = 15;
 const KEY_ASK_MS = 1000;
+// H.264 от ведущего шёл не дольше этого назад — картинки JPEG зрителям с H.264 не нужны (не мост).
+const H264_ACTIVE_MS = 700;
 const ID = /^\d{6}$|^\d{10}$/;
 const ID10 = /^\d{10}$/;
 const OWNER_TTL_MS = 180 * 86_400_000;
@@ -251,7 +253,7 @@ export default {
       if (!token) return new Response("Use the Mac Utils app", { status: 403 });
       if (request.method === "POST") {
         if (mode === "off") return new Response("Not found", { status: 404 });
-        if (mode === "required" && token !== CLIENT_V2) return new Response("Update Mac Utils", { status: 426 });
+        if (mode === "required" && !keyedClient(token, url)) return new Response("Update Mac Utils", { status: 426 });
         return statusPost(request, env, ip);
       }
       if (mode === "required") return new Response("Update Mac Utils", { status: 426 });
@@ -808,13 +810,21 @@ export class Room {
   }
 
   activeViewers() {
-    return this.state.getWebSockets("viewer").filter((s) =>
-      s.readyState === 1 && !s.deserializeAttachment()?.ended &&
-      Date.now() - (s.deserializeAttachment()?.lastSeen ?? Date.now()) < VIEWER_TIMEOUT_MS);
+    return this.viewersWhere(() => true);
+  }
+
+  // Один разбор вложения на сокет (кадры идут до 60 раз в секунду, а зрителей несколько).
+  viewersWhere(accept) {
+    const now = Date.now();
+    return this.state.getWebSockets("viewer").filter((s) => {
+      if (s.readyState !== 1) return false;
+      const info = s.deserializeAttachment();
+      return !info?.ended && now - (info?.lastSeen ?? now) < VIEWER_TIMEOUT_MS && accept(info);
+    });
   }
 
   approvedViewers() {
-    return this.activeViewers().filter((s) => s.deserializeAttachment()?.approved);
+    return this.viewersWhere((info) => !!info?.approved);
   }
 
   // Пускать ли кадр этому зрителю. Старые клиенты `ack` не шлют — для них всё как раньше. Подтверждающий зритель, у которого
@@ -825,14 +835,22 @@ export class Room {
     const type = bytes[0];
     if (type !== 1 && type !== 3) return true; // звук и прочее — как раньше
     let flow = this.flow.get(viewer);
-    if (!flow) { flow = { sent: 0, acked: 0, acking: false, skipping: false, skipped: 0, lastH264: 0 }; this.flow.set(viewer, flow); }
+    if (!flow) {
+      flow = { sent: 0, acked: 0, acking: false, skipping: false, skipped: 0, lastH264: 0, h264: !!viewer.deserializeAttachment()?.h264 };
+      this.flow.set(viewer, flow);
+    }
+    // Каждому — его вид кадров: старому зрителю без H.264 картинки JPEG, зрителю с H.264 — видео. Картинки зрителю с H.264
+    // нужны только мостом, пока ведущий не шлёт H.264 (кодер пересоздаётся): параллельные JPEG Mac-ведущего ему ни к чему.
+    const at = Date.now();
+    if (type === 3) { this.lastHostH264 = at; if (!flow.h264) return false; }
+    else if (flow.h264 && at - (this.lastHostH264 ?? 0) < H264_ACTIVE_MS) return false;
     if (!flow.acking) { flow.sent++; return true; }
     const debt = flow.sent - flow.acked;
     const now = Date.now();
     if (type === 3) flow.lastH264 = now;
     // H.264-зритель возобновляется только на ключевом H.264, пока ведущий его шлёт (JPEG при этом — параллельные картинки
     // для старых зрителей или мост); ведущий только с картинками (H.264 нет дольше секунды) — на любом JPEG.
-    const key = type === 3 ? bytes[1] === 1 : (!viewer.deserializeAttachment()?.h264 || now - flow.lastH264 > 1000);
+    const key = type === 3 ? bytes[1] === 1 : (!flow.h264 || now - flow.lastH264 > 1000);
     if (!flow.skipping && debt > DEBT_LIMIT) { flow.skipping = true; flow.skipped = 0; }
     if (flow.skipping) {
       if (key && debt <= DEBT_RESUME) flow.skipping = false;
