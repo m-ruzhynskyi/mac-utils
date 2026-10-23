@@ -3,6 +3,7 @@ import ServiceManagement
 import SwiftUI
 import MUDesign
 import MUFocus
+import MUMusic
 
 // MARK: - Модель разрешений
 

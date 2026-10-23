@@ -2,6 +2,9 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUWellbeing
+import MUMeetings
+import MUQR
 
 extension Notification.Name {
     /// Открыть в настройках нужный раздел (object — SettingsSection).

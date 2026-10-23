@@ -6,13 +6,13 @@ import MUCore
 ///
 /// M4A читается только после закрытия файла, поэтому одна длинная дорожка при ⌘Q, падении или зависании пропала бы целиком.
 /// Вместо этого каждые `MeetingChunking.seconds` секунд файл закрывается и начинается следующий: сбой стоит не больше одного куска.
-enum MeetingFiles {
-    static let systemTrack = "Собеседники"
-    static let micTrack = "Я"
-    static let markerName = "Идёт запись.json"
+package enum MeetingFiles {
+    package static let systemTrack = "Собеседники"
+    package static let micTrack = "Я"
+    package static let markerName = "Идёт запись.json"
 
     /// «Имя», «Имя (2)», «Имя (3)»… — первое, которое не занято.
-    static func uniqueName(_ base: String, taken: (String) -> Bool) -> String {
+    package static func uniqueName(_ base: String, taken: (String) -> Bool) -> String {
         guard taken(base) else { return base }
         var index = 2
         while taken("\(base) (\(index))") { index += 1 }
@@ -20,17 +20,17 @@ enum MeetingFiles {
     }
 
     /// Папка встречи, которой ещё нет: вторая запись в ту же минуту не должна затереть дорожки первой.
-    static func uniqueFolder(in root: URL, name: String, exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> URL {
+    package static func uniqueFolder(in root: URL, name: String, exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> URL {
         let unique = uniqueName(name) { exists(root.appendingPathComponent($0, isDirectory: true)) }
         return root.appendingPathComponent(unique, isDirectory: true)
     }
 
-    static func partURL(folder: URL, track: String, index: Int) -> URL {
+    package static func partURL(folder: URL, track: String, index: Int) -> URL {
         folder.appendingPathComponent(String(format: "%@.part-%03d.m4a", track, index))
     }
 
     /// Номер куска из имени «Собеседники.part-003.m4a»; nil — это не кусок этой дорожки.
-    static func partIndex(of fileName: String, track: String) -> Int? {
+    package static func partIndex(of fileName: String, track: String) -> Int? {
         let prefix = "\(track).part-", suffix = ".m4a"
         guard fileName.hasPrefix(prefix), fileName.hasSuffix(suffix) else { return nil }
         let number = fileName.dropFirst(prefix.count).dropLast(suffix.count)
@@ -38,14 +38,14 @@ enum MeetingFiles {
     }
 
     /// Куски дорожки по порядку.
-    static func parts(in folder: URL, track: String) -> [URL] {
+    package static func parts(in folder: URL, track: String) -> [URL] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
         return names.compactMap { name in partIndex(of: name, track: track).map { ($0, name) } }
             .sorted { $0.0 < $1.0 }
             .map { folder.appendingPathComponent($0.1) }
     }
 
-    static func nextPartIndex(in folder: URL, track: String) -> Int {
+    package static func nextPartIndex(in folder: URL, track: String) -> Int {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
         return (names.compactMap { partIndex(of: $0, track: track) }.max() ?? 0) + 1
     }
@@ -53,27 +53,27 @@ enum MeetingFiles {
     // MARK: Метка «запись идёт»
 
     /// Пока файла-метки нет, встреча закончена штатно; есть — запись оборвалась, и при запуске её восстановят.
-    static func writeMarker(in folder: URL, startedAt: Date, microphone: Bool) {
+    package static func writeMarker(in folder: URL, startedAt: Date, microphone: Bool) {
         let object: [String: Any] = ["startedAt": startedAt.timeIntervalSince1970, "microphone": microphone]
         if let data = try? JSONSerialization.data(withJSONObject: object) {
             try? data.write(to: folder.appendingPathComponent(markerName), options: .atomic)
         }
     }
 
-    static func hasMarker(in folder: URL) -> Bool {
+    package static func hasMarker(in folder: URL) -> Bool {
         FileManager.default.fileExists(atPath: folder.appendingPathComponent(markerName).path)
     }
 
-    static func removeMarker(in folder: URL) {
+    package static func removeMarker(in folder: URL) {
         try? FileManager.default.removeItem(at: folder.appendingPathComponent(markerName))
     }
 
     /// Папки с незаконченной записью.
-    static func unfinished(in root: URL) -> [URL] {
+    package static func unfinished(in root: URL) -> [URL] {
         folders(in: root).filter { hasMarker(in: $0) }
     }
 
-    static func folders(in root: URL) -> [URL] {
+    package static func folders(in root: URL) -> [URL] {
         let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil,
                                                                     options: [.skipsHiddenFiles])) ?? []
         return folders.filter(\.hasDirectoryPath).sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -81,21 +81,21 @@ enum MeetingFiles {
 
     // MARK: Метка «в очереди на расшифровку»
 
-    static let queueMarkerName = "В очереди.json"
+    package static let queueMarkerName = "В очереди.json"
 
     /// Задача очереди, пережившая перезапуск. `attempts` — сколько раз её начинали: если приложение падает
     /// на этой встрече, после второго раза она не запускается сама (только по кнопке) — без бесконечных повторов.
-    struct QueuedJob: Equatable {
-        let folder: URL
-        let reportOnly: Bool
-        let queuedAt: Date
-        let attempts: Int
+    package struct QueuedJob: Equatable {
+        package let folder: URL
+        package let reportOnly: Bool
+        package let queuedAt: Date
+        package let attempts: Int
 
-        static let maxAutoAttempts = 2
+        package static let maxAutoAttempts = 2
     }
 
     /// Встреча поставлена в очередь: метка лежит до конца обработки. Полная расшифровка важнее «только отчёта».
-    static func writeQueueMarker(in folder: URL, reportOnly: Bool, now: Date = Date()) {
+    package static func writeQueueMarker(in folder: URL, reportOnly: Bool, now: Date = Date()) {
         let previous = queueMarker(in: folder)
         let object: [String: Any] = [
             "reportOnly": reportOnly && (previous?.reportOnly ?? true),
@@ -106,13 +106,13 @@ enum MeetingFiles {
     }
 
     /// Обработка встречи началась: ещё одна попытка.
-    static func noteQueueAttempt(in folder: URL) {
+    package static func noteQueueAttempt(in folder: URL) {
         guard let marker = queueMarker(in: folder) else { return }
         writeQueueObject(["reportOnly": marker.reportOnly, "queuedAt": marker.queuedAt.timeIntervalSince1970,
                           "attempts": marker.attempts + 1], in: folder)
     }
 
-    static func queueMarker(in folder: URL) -> QueuedJob? {
+    package static func queueMarker(in folder: URL) -> QueuedJob? {
         guard let data = try? Data(contentsOf: folder.appendingPathComponent(queueMarkerName)),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return QueuedJob(folder: folder, reportOnly: object["reportOnly"] as? Bool ?? false,
@@ -120,12 +120,12 @@ enum MeetingFiles {
                          attempts: object["attempts"] as? Int ?? 0)
     }
 
-    static func removeQueueMarker(in folder: URL) {
+    package static func removeQueueMarker(in folder: URL) {
         try? FileManager.default.removeItem(at: folder.appendingPathComponent(queueMarkerName))
     }
 
     /// Встречи, которые стояли в очереди до выхода, — в прежнем порядке.
-    static func queued(in root: URL) -> [QueuedJob] {
+    package static func queued(in root: URL) -> [QueuedJob] {
         folders(in: root).compactMap { queueMarker(in: $0) }
             .sorted { ($0.queuedAt, $0.folder.lastPathComponent) < ($1.queuedAt, $1.folder.lastPathComponent) }
     }
@@ -138,17 +138,17 @@ enum MeetingFiles {
 }
 
 /// Что делать при запуске с оборванными записями и встречами, оставшимися в очереди (MAJOR-1).
-enum MeetingRecovery {
-    struct Plan: Equatable {
+package enum MeetingRecovery {
+    package struct Plan: Equatable {
         /// Снова в очередь сами: стояли в очереди до выхода.
-        var resume: [MeetingFiles.QueuedJob]
+        package var resume: [MeetingFiles.QueuedJob]
         /// Предложить кнопкой «Расшифровать»: восстановленные без расшифровки и те, на которых обработка уже дважды обрывалась.
-        var offer: [URL]
+        package var offer: [URL]
         /// Одно уведомление обо всём (nil — сообщать нечего).
-        var message: String?
+        package var message: String?
     }
 
-    static func plan(restored: [URL], queued: [MeetingFiles.QueuedJob], hasTranscript: (URL) -> Bool) -> Plan {
+    package static func plan(restored: [URL], queued: [MeetingFiles.QueuedJob], hasTranscript: (URL) -> Bool) -> Plan {
         let resume = queued.filter { $0.attempts < MeetingFiles.QueuedJob.maxAutoAttempts }
         let stuck = queued.filter { $0.attempts >= MeetingFiles.QueuedJob.maxAutoAttempts }.map(\.folder)
         let queuedFolders = Set(queued.map { $0.folder.standardizedFileURL })
@@ -167,30 +167,30 @@ enum MeetingRecovery {
 }
 
 /// Выравнивание дорожек одного писателя к концу записи (N1).
-enum MeetingAlignment {
+package enum MeetingAlignment {
     /// Сколько секунд тишины дописать дорожке, чтобы она сравнялась с самой длинной (меньше 50 мс — не нужно).
-    static func padding(written: Double, longest: Double) -> Double {
+    package static func padding(written: Double, longest: Double) -> Double {
         let gap = longest - written
         return gap > 0.05 ? gap : 0
     }
 }
 
-enum MeetingChunking {
+package enum MeetingChunking {
     /// Длина куска: столько звука максимум пропадёт при сбое.
-    static let seconds: Double = 300
+    package static let seconds: Double = 300
 
-    static func shouldRotate(frames: Int64, sampleRate: Double, seconds: Double = MeetingChunking.seconds) -> Bool {
+    package static func shouldRotate(frames: Int64, sampleRate: Double, seconds: Double = MeetingChunking.seconds) -> Bool {
         sampleRate > 0 && Double(frames) >= sampleRate * seconds
     }
 }
 
-enum MeetingMerge {
-    struct Failure: LocalizedError { let errorDescription: String? }
+package enum MeetingMerge {
+    package struct Failure: LocalizedError { package let errorDescription: String? }
 
     /// Склеивает куски в один M4A (в том порядке, в котором даны). Нечитаемые куски (оборванный последний) пропускаются.
     /// Возвращает, сколько кусков вошло в результат. Один кусок просто переименовывается.
     @discardableResult
-    static func merge(parts: [URL], to target: URL) async throws -> Int {
+    package static func merge(parts: [URL], to target: URL) async throws -> Int {
         var readable: [(url: URL, asset: AVURLAsset, duration: CMTime)] = []
         for url in parts {
             let asset = AVURLAsset(url: url)
@@ -249,7 +249,7 @@ enum MeetingMerge {
     }
 
     /// В файле есть звуковая дорожка ненулевой длины.
-    static func isReadable(_ url: URL) async -> Bool {
+    package static func isReadable(_ url: URL) async -> Bool {
         let asset = AVURLAsset(url: url)
         guard let duration = try? await asset.load(.duration), duration.seconds.isFinite, duration.seconds > 0.05,
               let tracks = try? await asset.loadTracks(withMediaType: .audio) else { return false }
@@ -261,7 +261,7 @@ enum MeetingMerge {
     /// Одну папку склеивает только один вызов: повторный (восстановление, «Расшифровать», остановка) ждёт первого
     /// и получает его результат, а не начинает вторую склейку тех же кусков.
     @discardableResult
-    static func finalize(folder: URL) async -> [String] {
+    package static func finalize(folder: URL) async -> [String] {
         await gate.run(folder.standardizedFileURL.path) { await finalizeNow(folder: folder) }
     }
 
@@ -299,10 +299,10 @@ enum MeetingMerge {
 }
 
 /// Последовательный исполнитель склеек: на одну папку — одна задача, остальные вызовы ждут её результата.
-actor MergeGate {
+package actor MergeGate {
     private var running: [String: Task<[String], Never>] = [:]
 
-    func run(_ key: String, _ operation: @escaping @Sendable () async -> [String]) async -> [String] {
+    package func run(_ key: String, _ operation: @escaping @Sendable () async -> [String]) async -> [String] {
         if let task = running[key] { return await task.value }
         let task = Task { await operation() }
         running[key] = task

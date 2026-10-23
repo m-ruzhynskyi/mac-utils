@@ -1229,31 +1229,6 @@ struct ShareHUDPill: View {
     }
 }
 
-/// Квадратная кнопка-значок индикатора: 26×26, радиус 8; «Стоп» — красная.
-struct HUDIconButton: View {
-    enum Kind { case plain, stop }
-    let symbol: String
-    let help: String
-    var kind: Kind = .plain
-    let action: () -> Void
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(kind == .stop ? Color.dsRecInk : Color.dsText)
-                .frame(width: 26, height: 26)
-                .background(kind == .stop ? Color.dsRec : Color.dsField, in: shape)
-                .overlay(shape.strokeBorder(kind == .stop ? .clear : Color.dsLine, lineWidth: 1))
-                .contentShape(shape)
-        }
-        .buttonStyle(PressScaleStyle())
-        .help(help)
-        .accessibilityLabel(help)
-    }
-}
-
 /// Отправка звука с пределом очереди: считает байты, отданные сокету и ещё не подтверждённые. Больше предела —
 /// новый пакет отбрасывается (короткий провал в звуке лучше, чем очередь, которая растёт, пока не кончится память).
 final class ShareAudioSender: @unchecked Sendable {

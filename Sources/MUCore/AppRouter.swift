@@ -9,5 +9,10 @@ package final class AppRouter {
     /// Выполнить то же, что нажатие горячей клавиши `HotKeyID.…` (из меню, панели, ссылки).
     package var runHotKey: (UInt32) -> Void = { _ in }
 
+    /// После запуска/обновления показать «Что нового», если линейка версий новая.
+    package var showWhatsNewIfUpdated: () -> Void = {}
+    /// Программа лежит в «Программах» (иначе самообновление объясняет, куда её перенести).
+    package var isInApplications: () -> Bool = { true }
+
     private init() {}
 }

@@ -2,6 +2,9 @@ import AppKit
 import MUCore
 import MUDesign
 import MUFocus
+import MUWellbeing
+import MUMeetings
+import MUQR
 
 /// Где прилипает окно (действие «Команд», ссылка `macutils://snap?…`, сочетания ⌃⌥ + стрелки).
 enum WindowPlacement: String, CaseIterable, Sendable {

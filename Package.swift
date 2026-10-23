@@ -41,9 +41,39 @@ let package = Package(
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUUninstaller"
         ),
+        .target(
+            name: "MUMusic",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUMusic"
+        ),
+        .target(
+            name: "MUWellbeing",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUWellbeing"
+        ),
+        .target(
+            name: "MUAppInputSource",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUAppInputSource"
+        ),
+        .target(
+            name: "MUMeetings",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUMeetings"
+        ),
+        .target(
+            name: "MUQR",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUQR"
+        ),
+        .target(
+            name: "MUUpdate",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUUpdate"
+        ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -52,7 +82,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate"],
             path: "Tests/MacUtilsTests"
         ),
     ]

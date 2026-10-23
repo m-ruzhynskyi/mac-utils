@@ -119,8 +119,8 @@ final class TextFixer {
         busy = true
         task = Task {
             defer { busy = false; task = nil }
-            var text = LayoutFix.selectedTextViaAX()
-            if text?.isEmpty ?? true { text = await LayoutFix.selectedTextViaCopy() }
+            var text = SelectedText.viaAX()
+            if text?.isEmpty ?? true { text = await SelectedText.viaCopy() }
             guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 Toast.show("Выделите текст, который нужно исправить", symbol: "text.cursor", tint: .orange)
                 return

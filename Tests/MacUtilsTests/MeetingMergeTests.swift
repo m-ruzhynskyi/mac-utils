@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import XCTest
 @testable import MacUtils
+@testable import MUMeetings
 
 /// Склейка кусков записи и восстановление после сбоя — на настоящих короткых M4A (без разрешений и сети).
 final class MeetingMergeTests: XCTestCase {

@@ -6,6 +6,11 @@ import MUCutPaste
 import MUFocus
 import MUSmoothScroll
 import MUAppSwitcher
+import MUWellbeing
+import MUAppInputSource
+import MUMeetings
+import MUQR
+import MUUpdate
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения
@@ -21,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DSFonts.registerAll()
         Pref.register()
         SettingsSection.installAppSubtitles()
+        AppRouter.shared.showWhatsNewIfUpdated = { WhatsNewWindowController.shared.showIfUpdated() }
+        AppRouter.shared.isInApplications = { MoveToApplications.isInApplications }
         AppRouter.shared.runHotKey = { id in HotKeyAction.action(forHotKeyID: id).map { AppAction(hotKey: $0).run() } }
         KeepAwake.shared.observeWake()
         BusyRegistry.shared.installDefaultProviders()

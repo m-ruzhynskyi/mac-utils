@@ -8,34 +8,34 @@ import MUDesign
 /// Данные MediaRemote с macOS 15.4 доступны только системным процессам, поэтому их читает
 /// помощник MUNowPlaying.dylib, загруженный в /usr/bin/perl.
 @MainActor
-final class NowPlaying: NSObject, ObservableObject {
-    static let shared = NowPlaying()
+package final class NowPlaying: NSObject, ObservableObject {
+    package static let shared = NowPlaying()
 
-    struct Track: Equatable {
-        var title = ""
-        var artist = ""
-        var album = ""
-        var app = ""
-        var bundle = ""
-        var duration: Double = 0
-        var elapsed: Double = 0
-        var playing = false
-        var receivedAt = Date()
+    package struct Track: Equatable {
+        package var title = ""
+        package var artist = ""
+        package var album = ""
+        package var app = ""
+        package var bundle = ""
+        package var duration: Double = 0
+        package var elapsed: Double = 0
+        package var playing = false
+        package var receivedAt = Date()
 
         /// Позиция «сейчас» — между обновлениями помощника время идёт само.
-        func position(at date: Date = Date()) -> Double {
+        package func position(at date: Date = Date()) -> Double {
             guard playing else { return elapsed }
             let value = elapsed + date.timeIntervalSince(receivedAt)
             return duration > 0 ? min(value, duration) : value
         }
     }
 
-    @Published private(set) var track: Track?
-    @Published private(set) var artwork: NSImage?
-    @Published private(set) var failed = false
+    @Published package private(set) var track: Track?
+    @Published package private(set) var artwork: NSImage?
+    @Published package private(set) var failed = false
     /// Что играло последним — показываем, когда сейчас тишина.
-    @Published private(set) var last: Track?
-    @Published private(set) var lastArtwork: NSImage?
+    @Published package private(set) var last: Track?
+    @Published package private(set) var lastArtwork: NSImage?
 
     private static var lastArtworkURL: URL {
         let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -44,7 +44,7 @@ final class NowPlaying: NSObject, ObservableObject {
         return folder.appendingPathComponent("last-artwork.png")
     }
 
-    override init() {
+    package override init() {
         super.init()
         if let saved = UserDefaults.standard.dictionary(forKey: Pref.musicLast) {
             var track = Track()
@@ -83,7 +83,7 @@ final class NowPlaying: NSObject, ObservableObject {
     }
 
     /// Продолжить то, что играло: команда «играть» системному плееру; если программы уже нет — открываем её.
-    func resumeLast() {
+    package func resumeLast() {
         guard let last else { return }
         if !last.bundle.isEmpty, NSRunningApplication.runningApplications(withBundleIdentifier: last.bundle).isEmpty,
            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: last.bundle) {
@@ -96,22 +96,22 @@ final class NowPlaying: NSObject, ObservableObject {
         }
     }
 
-    func openLastApp() {
+    package func openLastApp() {
         guard let bundle = last?.bundle, !bundle.isEmpty,
               let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: .init())
     }
 
     /// Плеер, выбранный в настройках: программа (bundle id) или сайт (https://…).
-    static var preferredPlayer: String { UserDefaults.standard.string(forKey: Pref.musicPlayer) ?? "com.apple.Music" }
+    package static var preferredPlayer: String { UserDefaults.standard.string(forKey: Pref.musicPlayer) ?? "com.apple.Music" }
 
-    static func playerTitle(_ value: String) -> String {
+    package static func playerTitle(_ value: String) -> String {
         if value.hasPrefix("http") { return URL(string: value)?.host ?? value }
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: value) else { return value }
         return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
     }
 
-    func openPreferredPlayer() {
+    package func openPreferredPlayer() {
         let value = Self.preferredPlayer
         if value.hasPrefix("http"), let url = URL(string: value) {
             NSWorkspace.shared.open(url)
@@ -130,13 +130,13 @@ final class NowPlaying: NSObject, ObservableObject {
     private var artworkHash: String?
 
     /// Вид с плеером появился / исчез: помощник работает, только пока плеер на экране (+ минута).
-    func attach() {
+    package func attach() {
         users += 1
         stopWork?.cancel()
         start()
     }
 
-    func detach() {
+    package func detach() {
         users = max(0, users - 1)
         guard users == 0 else { return }
         let work = DispatchWorkItem { [weak self] in
@@ -267,33 +267,33 @@ final class NowPlaying: NSObject, ObservableObject {
         try? input.write(contentsOf: Data((command + "\n").utf8))
     }
 
-    func toggle() {
+    package func toggle() {
         track?.playing.toggle()
         send("toggle")
     }
 
-    func next() { send("next") }
-    func previous() { send("prev") }
+    package func next() { send("next") }
+    package func previous() { send("prev") }
 
-    func seek(to seconds: Double) {
+    package func seek(to seconds: Double) {
         track?.elapsed = seconds
         track?.receivedAt = Date()
         send("seek \(max(0, seconds))")
     }
 
-    func skip(_ delta: Double) {
+    package func skip(_ delta: Double) {
         guard let track else { return }
         seek(to: track.position() + delta)
     }
 
     /// Открыть программу, которая играет.
-    func openPlayer() {
+    package func openPlayer() {
         guard let bundle = track?.bundle, !bundle.isEmpty,
               let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: .init())
     }
 
-    static func time(_ seconds: Double) -> String {
+    package static func time(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "0:00" }
         let total = Int(seconds)
         return total >= 3600 ? String(format: "%d:%02d:%02d", total / 3600, total / 60 % 60, total % 60)
@@ -303,14 +303,19 @@ final class NowPlaying: NSObject, ObservableObject {
 
 // MARK: - Вид
 
-struct NowPlayingView: View {
-    @ObservedObject var player = NowPlaying.shared
-    var compact = false
+package struct NowPlayingView: View {
+    package init(compact: Bool = false, demo: Bool = false) {
+        self.compact = compact
+        self.demo = demo
+    }
+
+    @ObservedObject package var player = NowPlaying.shared
+    package var compact = false
     /// Демо для снимков интерфейса: не подключается к системному плееру.
-    var demo = false
+    package var demo = false
     @State private var scrubbing: Double?
 
-    var body: some View {
+    package var body: some View {
         ToolsPageFrame(.music, compact: compact) {
             Group {
                 if let track = player.track {
@@ -461,7 +466,7 @@ private struct PlayerPicker: View {
         return list
     }
 
-    var body: some View {
+    package var body: some View {
         VStack(spacing: DS.Space.s) {
             HStack(spacing: DS.Space.m) {
                 Text("Плеер по умолчанию").font(DS.Font.bodyStrong).foregroundStyle(.dsText)

@@ -6,44 +6,6 @@ import MUUninstaller
 
 // MARK: - Общие части страниц-инструментов (Программы, Монитор, Задачи, Очистка)
 
-extension ToolsPageFrame where Accessory == EmptyView {
-    init(_ section: SettingsSection, compact: Bool, @ViewBuilder content: () -> Content) {
-        self.init(section, compact: compact, accessory: { EmptyView() }, content: content)
-    }
-}
-
-/// Сегментный выбор на всю доступную ширину (сегменты равной ширины): `panel` + `line`, радиус 12, выбранный — лайм.
-/// Свой, потому что `Segmented` из компонентов имеет фиксированную ширину.
-struct ToolsSegmented<Value: Hashable>: View {
-    @Binding var selection: Value
-    let options: [(value: Value, title: String)]
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: DS.Radius.iconButton, style: .continuous)
-        HStack(spacing: 2) {
-            ForEach(options, id: \.value) { option in
-                let on = option.value == selection
-                Button { selection = option.value } label: {
-                    Text(option.title)
-                        .font(on ? DS.Font.buttonPrimary : DS.Font.bodyStrong)
-                        .foregroundStyle(on ? Color.dsAccInk : Color.dsMute)
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                        .background(on ? Color.dsAcc : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(on ? .isSelected : [])
-            }
-        }
-        .padding(DS.Space.xs)
-        .frame(maxWidth: .infinity)
-        .background(Color.dsPanel, in: shape)
-        .overlay(shape.strokeBorder(Color.dsLine, lineWidth: 1))
-    }
-}
-
 /// Нижняя полоса действий: тот же фон, разделитель сверху.
 struct ToolsBar<Content: View>: View {
     var compact = false

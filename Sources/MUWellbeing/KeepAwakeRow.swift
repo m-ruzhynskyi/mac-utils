@@ -3,11 +3,11 @@ import MUCore
 import MUDesign
 
 /// Строка «Не засыпать»: срок, переключатель и (пока включено) сколько осталось.
-struct KeepAwakeRow: View {
-    static let note = "Экран может гаснуть, Mac продолжает работать. При закрытой крышке без внешнего монитора Mac всё равно уснёт."
+package struct KeepAwakeRow: View {
+    package static let note = "Экран может гаснуть, Mac продолжает работать. При закрытой крышке без внешнего монитора Mac всё равно уснёт."
 
     /// Демо для снимков: не трогает систему, показывает «включено, осталось…».
-    var demoRemaining: TimeInterval?
+    package var demoRemaining: TimeInterval?
 
     @ObservedObject private var keepAwake = KeepAwake.shared
     @AppStorage(Pref.keepAwakeDuration) private var durationRaw = KeepAwakeDuration.indefinite.rawValue
@@ -15,7 +15,7 @@ struct KeepAwakeRow: View {
     private var duration: KeepAwakeDuration { KeepAwakeDuration(rawValue: durationRaw) ?? .indefinite }
     private var active: Bool { demoRemaining != nil || keepAwake.isActive }
 
-    var body: some View {
+    package var body: some View {
         Row("Не засыпать", subtitle: subtitle, systemImage: active ? "cup.and.saucer.fill" : "cup.and.saucer",
             tile: active ? .accent : .neutral) {
             Picker("Срок", selection: Binding(get: { duration }, set: setDuration)) {
@@ -43,8 +43,11 @@ struct KeepAwakeRow: View {
 }
 
 /// Строка + пояснение под ней для панели 🔧 (карточка `QuickGroup`).
-struct KeepAwakeTicker: View {
-    var body: some View {
+package struct KeepAwakeTicker: View {
+    package init() {
+    }
+
+    package var body: some View {
         // Раз в 30 с перерисовываем подпись «Осталось…».
         TimelineView(.periodic(from: .now, by: 30)) { _ in KeepAwakeRow() }
     }

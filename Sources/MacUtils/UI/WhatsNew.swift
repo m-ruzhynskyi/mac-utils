@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUMeetings
+import MUUpdate
 
 /// История версий: что появилось. Новая версия — сверху.
 enum Changelog {

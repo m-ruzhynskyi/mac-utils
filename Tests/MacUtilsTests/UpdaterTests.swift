@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUUpdate
 
 @MainActor
 final class UpdaterTests: XCTestCase {
