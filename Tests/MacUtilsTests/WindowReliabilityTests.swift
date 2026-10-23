@@ -2,6 +2,8 @@ import AppKit
 import CoreGraphics
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUDesign
 
 /// Чистая логика пакета 6: переключатель окон, перетаскивание к краю, «Поверх всех», «Фокус», служебные события tap.
 @MainActor

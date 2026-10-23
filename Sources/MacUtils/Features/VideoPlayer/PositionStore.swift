@@ -1,4 +1,5 @@
 import Foundation
+import MUCore
 
 /// Где остановились: `Application Support/Mac Utils/Player/positions.json`. Ключ — путь + размер + время изменения:
 /// перезаписанный файл начинается сначала. Не запоминаем меньше 30 с и больше 95 % (досмотрели); старые записи

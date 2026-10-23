@@ -1,6 +1,8 @@
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
+import MUCore
+import MUDesign
 
 /// Где был фокус, когда запрос ушёл к модели: программа, поле (AX-элемент) и выделение. Нужен, чтобы не вставить текст
 /// «не туда» и не заменить выделение, которое пользователь успел сделать другим.
@@ -92,7 +94,7 @@ final class TextFixer {
             return
         }
         center.register(id: HotKeyID.fixText, keyCode: kVK_ANSI_E, modifiers: controlKey | optionKey) {
-            AppAction(hotKey: .fixText).run()
+            AppRouter.shared.runHotKey(HotKeyID.fixText)
         }
     }
 

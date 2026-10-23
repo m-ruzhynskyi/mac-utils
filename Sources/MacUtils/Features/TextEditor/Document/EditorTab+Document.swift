@@ -1,4 +1,6 @@
 import AppKit
+import MUCore
+import MUDesign
 
 /// Переключатель «Код ↔ Документ» вкладки: место (курсор, выделение, прокрутка) переносится через карту исходника.
 extension EditorTab {

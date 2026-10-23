@@ -1,5 +1,7 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Страницы документа вкладки (прокрутка контроллера) в окне редактора.
 struct DocumentHost: NSViewRepresentable {

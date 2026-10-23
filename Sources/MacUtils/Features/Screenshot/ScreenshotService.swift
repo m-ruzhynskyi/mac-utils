@@ -2,6 +2,8 @@ import AppKit
 import Carbon.HIToolbox
 import ScreenCaptureKit
 import Vision
+import MUCore
+import MUDesign
 
 /// «Снимок»: собственная утилита скриншотов по мотивам macshot.
 ///   ⌘⇧X  — выделить область (или кликнуть по окну), разметить, скопировать / сохранить.
@@ -28,13 +30,13 @@ final class ScreenshotService: ObservableObject {
             if !center.isRegistered(id: HotKeyID.screenshot) {
                 center.register(id: HotKeyID.screenshot, keyCode: kVK_ANSI_X,
                                 modifiers: cmdKey | shiftKey) {
-                    AppAction(hotKey: .screenshot).run()
+                    AppRouter.shared.runHotKey(HotKeyID.screenshot)
                 }
             }
             if !center.isRegistered(id: HotKeyID.screenshotOCR) {
                 center.register(id: HotKeyID.screenshotOCR, keyCode: kVK_ANSI_X,
                                 modifiers: cmdKey | shiftKey | optionKey) {
-                    AppAction(hotKey: .screenshotOCR).run()
+                    AppRouter.shared.runHotKey(HotKeyID.screenshotOCR)
                 }
             }
             isRunning = center.isRegistered(id: HotKeyID.screenshot)

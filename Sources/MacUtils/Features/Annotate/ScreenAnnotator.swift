@@ -2,6 +2,8 @@ import AppKit
 import Carbon.HIToolbox
 import ScreenCaptureKit
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Рисование поверх экрана (⌃⌥A): стрелки, рамки, маркер и перо — во время созвона или записи.
 @MainActor
@@ -63,7 +65,7 @@ final class ScreenAnnotator: ObservableObject {
             return
         }
         center.register(id: HotKeyID.annotate, keyCode: kVK_ANSI_A, modifiers: controlKey | optionKey) {
-            AppAction(hotKey: .annotate).run()
+            AppRouter.shared.runHotKey(HotKeyID.annotate)
         }
     }
 

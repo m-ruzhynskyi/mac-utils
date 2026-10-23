@@ -2,6 +2,8 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Сочетание пункта меню в виде «⌃⌥⇧⌘K» (без UI — для тестов).
 enum ShortcutFormat {

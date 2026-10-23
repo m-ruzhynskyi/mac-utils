@@ -1,6 +1,8 @@
 import AppKit
 import ScreenCaptureKit
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Длинный снимок с прокруткой: выделенная область снимается несколько раз
 /// в секунду, пока пользователь прокручивает содержимое вниз, а новые строки
@@ -400,32 +402,6 @@ final class ScrollCapture: NSObject, ObservableObject {
         hud.setFrameOrigin(origin)
         hud.orderFrontRegardlessOnScreen()
         hudPanel = hud
-    }
-}
-
-/// Кнопки HUD должны нажиматься с первого клика: панель не активирует приложение.
-/// Курсор над HUD — обычная стрелка, даже когда приложение неактивно.
-final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        for area in trackingAreas where area.owner === self && area.userInfo?["cursor"] != nil {
-            removeTrackingArea(area)
-        }
-        addTrackingArea(NSTrackingArea(rect: .zero,
-                                       options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
-                                       owner: self, userInfo: ["cursor": true]))
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        super.mouseEntered(with: event)
-        NSCursor.arrow.set()
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
-        NSCursor.arrow.set()
     }
 }
 

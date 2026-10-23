@@ -1,5 +1,7 @@
 import AppKit
 import CoreGraphics
+import MUCore
+import MUDesign
 
 /// Сила «тёплого» экрана по времени (без UI — для тестов).
 enum WarmSchedule {

@@ -1,5 +1,6 @@
 import AVFoundation
 import XCTest
+@testable import MUDesign
 
 /// Этап 1 плеера: демо-медиа создаётся во временной папке, в нём то, что нужно тестам плеера.
 final class DemoVideoTests: XCTestCase {

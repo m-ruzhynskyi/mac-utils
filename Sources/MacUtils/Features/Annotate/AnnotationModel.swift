@@ -1,4 +1,5 @@
 import AppKit
+import MUDesign
 
 /// Штрих на холсте одного экрана. Координаты — в точках холста этого экрана (начало внизу слева).
 struct AnnotationStroke: Equatable {

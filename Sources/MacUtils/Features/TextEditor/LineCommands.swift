@@ -1,4 +1,5 @@
 import AppKit
+import MUCore
 
 /// Правка для `EditorTextView.replace`: диапазоны в координатах исходного текста и новое выделение.
 struct LineEdit: Equatable {

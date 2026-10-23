@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUDesign
 
 /// Настоящее окно редактора офскрин: правка через `EditorTextView` (один шаг отмены), «Убрать значения» на фикстурах,
 /// строка состояния. С `MU_EDITOR_SNAPSHOTS=<папка>` — ещё и PNG 2x для сверки с макетами (`.audit/text-editor-design/`).

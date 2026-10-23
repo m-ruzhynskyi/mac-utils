@@ -1,4 +1,5 @@
 import AppKit
+import MUDesign
 
 enum Tool: CaseIterable {
     case select, arrow, rectangle, pen, marker, text, counter, pixelate

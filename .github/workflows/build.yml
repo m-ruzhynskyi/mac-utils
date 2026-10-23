@@ -2,7 +2,13 @@ name: CI
 
 # development и pull request'ы — сборка и тесты.
 # main (после слияния из development) — тесты (или результат тех же тестов из PR при том же дереве),
-# подписанная универсальная сборка и релиз. Тесты делятся на 3 шарда: scripts/test-shard.sh.
+# подписанная универсальная сборка и релиз. Тесты делятся на 4 шарда: scripts/test-shard.sh.
+# Кэш сборки (.build): сохраняет только задача app при push (development, main) и ручном запуске, после универсальной
+# сборки приложения; PR и релиз его только восстанавливают. Время файлов выставляется по содержимому
+# (scripts/ci-restore-mtime.py), иначе после checkout SwiftPM пересобирает всё. Кэш лишь ускоряет: при расхождении
+# файл пересобирается; «no_cache» в ручном запуске — чистая сборка. Ключ — тулчейн раннера и Package.swift.
+# Тесты PR, меняющего только модули (Sources/MU<Модуль>/, Tests/MU<Модуль>Tests/), гоняются только у затронутых целей
+# и их зависимых (scripts/ci-test-scope.py); всё остальное и PR в main — все тесты.
 # Версия: MAJOR.MINOR из Resources/Info.plist, PATCH = наибольший тег линии + 1 (scripts/version.sh, docs/VERSIONING.md).
 # Тег vX.Y.Z создаёт только задача release.
 on:
@@ -11,6 +17,11 @@ on:
   pull_request:
     branches: [development, main]
   workflow_dispatch:
+    inputs:
+      no_cache:
+        description: "Не восстанавливать и не сохранять кэш сборки (чистая сборка для проверки кэша)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -75,37 +86,34 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2]
+        shard: [0, 1, 2, 3]
     env:
-      SHARDS: 3
-      # Шард 0 ещё собирает приложение (≈ 2,5 мин) и гоняет тесты скриптов — тестов ему меньше.
-      SHARD_PRELOAD: 0=170
+      SHARDS: 4
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        if: matrix.shard == 0
+      - name: Toolchain
+        id: toolchain
+        run: echo "id=$( (swift --version; xcodebuild -version) 2>&1 | shasum | cut -c1-12 )" >> "$GITHUB_OUTPUT"
+      - name: Restore build cache
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.no_cache) }}
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
-          node-version: 22
-      - name: Script tests
-        if: matrix.shard == 0
-        run: ./scripts/test-version.sh && python3 scripts/test-shard.py --self-test
-      - name: Relay regression tests
-        if: matrix.shard == 0
-        run: npm test --prefix relay
+          path: .build
+          key: build-v1-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            build-v1-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+      - name: File times from content
+        run: python3 scripts/ci-restore-mtime.py
       - name: Build
         run: swift build --build-tests
       - name: Test
         env:
           SHARD_REPORT: ${{ runner.temp }}/shard-${{ matrix.shard }}.txt
+          # PR в development: только затронутые модули (если изменены только они); остальное — все тесты.
+          TEST_SCOPE_BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'development' && github.event.pull_request.base.sha || '' }}
         run: ./scripts/test-shard.sh "${{ matrix.shard }}" "$SHARDS"
-      # Ad-hoc сборка без секретов: ловит поломки build.sh и подписи в pull request'ах.
-      - name: Build app (ad-hoc)
-        if: matrix.shard == 0
-        run: |
-          env -u SIGN_IDENTITY ./build.sh
-          codesign --verify --deep --strict "build/Mac Utils.app"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: shard-${{ matrix.shard }}
@@ -113,22 +121,78 @@ jobs:
           retention-days: 3
           overwrite: true
 
+  # Тесты скриптов и relay, сборка приложения и кэш .build — рядом с шардами, не в одном из них:
+  # так все четыре шарда делят только тесты.
+  app:
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Script tests
+        run: ./scripts/test-version.sh && python3 scripts/test-shard.py --self-test && python3 scripts/ci-test-scope.py --self-test
+      - name: Relay regression tests
+        run: npm test --prefix relay
+      - name: Toolchain
+        id: toolchain
+        run: echo "id=$( (swift --version; xcodebuild -version) 2>&1 | shasum | cut -c1-12 )" >> "$GITHUB_OUTPUT"
+      # PR кэш не использует: его сборка приложения идёт под одну архитектуру и ничего в кэш не кладёт.
+      - name: Restore build cache
+        if: ${{ github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.no_cache) }}
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .build
+          key: build-v1-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            build-v1-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+      - name: File times from content
+        run: python3 scripts/ci-restore-mtime.py
+      # Debug-сборка тестов нужна только чтобы в кэш попало то, что восстанавливают шарды.
+      - name: Build tests (for the cache)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: swift build --build-tests
+      # Ad-hoc сборка без секретов: ловит поломки build.sh и подписи. В PR — под текущую архитектуру;
+      # при push и ручном запуске — универсальная, как в релизе: её результат кладётся в кэш и ускоряет релиз.
+      - name: Build app (ad-hoc)
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            env -u SIGN_IDENTITY ./build.sh
+          else
+            env -u SIGN_IDENTITY ./build.sh --universal
+          fi
+          codesign --verify --deep --strict "build/Mac Utils.app"
+      - name: Trim build cache
+        if: ${{ success() && github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.no_cache) }}
+        run: rm -rf .build/index-build .build/arm64-apple-macosx/release .build/x86_64-apple-macosx/release
+      - name: Save build cache
+        if: ${{ success() && github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.no_cache) }}
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .build
+          key: build-v1-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+
   # Обязательная проверка «test» в правилах main: зелёная, только если все шарды прошли и вместе
   # выполнили все тесты одного дерева, либо это дерево уже прошло тесты в PR (tested-tree).
   test:
-    needs: [tested-tree, test-shard]
+    needs: [tested-tree, test-shard, app]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Reused PR result
-        if: needs.tested-tree.outputs.tested == 'true' && needs.test-shard.result == 'skipped'
+        if: needs.tested-tree.outputs.tested == 'true' && needs.test-shard.result == 'skipped' && needs.app.result == 'skipped'
         run: echo "Тесты этого дерева прошли в прогоне PR — см. задачу tested-tree."
       - name: Shards
-        if: needs.tested-tree.outputs.tested != 'true' || needs.test-shard.result != 'skipped'
+        if: needs.tested-tree.outputs.tested != 'true' || needs.test-shard.result != 'skipped' || needs.app.result != 'skipped'
         run: |
-          if [[ "${{ needs.test-shard.result }}" != "success" ]]; then
-            echo "::error::Шарды тестов: ${{ needs.test-shard.result }}"; exit 1
+          if [[ "${{ needs.test-shard.result }}" != "success" || "${{ needs.app.result }}" != "success" ]]; then
+            echo "::error::Шарды тестов: ${{ needs.test-shard.result }}, сборка и скрипты: ${{ needs.app.result }}"; exit 1
           fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: needs.test-shard.result == 'success'
@@ -143,14 +207,19 @@ jobs:
           cat shards/shard-*.txt
           field() { sed -n "s/.*$1=\([^ ]*\).*/\1/p" shards/shard-*.txt; }
           REPORTS=(shards/shard-*.txt)
-          [[ ${#REPORTS[@]} -eq 3 ]] || { echo "::error::Нет отчёта одного из шардов"; exit 1; }
+          [[ ${#REPORTS[@]} -eq 4 ]] || { echo "::error::Нет отчёта одного из шардов"; exit 1; }
           [[ $(field listed | sort -u | wc -l) -eq 1 && $(field tree | sort -u | wc -l) -eq 1 ]] \
             || { echo "::error::Шарды видели разные списки тестов или разные деревья"; exit 1; }
           LISTED=$(field listed | head -1)
           EXECUTED=$(field executed | awk '{s += $1} END {print s}')
           [[ "$EXECUTED" == "$LISTED" ]] || { echo "::error::Выполнено $EXECUTED тестов из $LISTED"; exit 1; }
-          echo "Выполнено $EXECUTED из $LISTED тестов в 3 шардах." >> "$GITHUB_STEP_SUMMARY"
-          TREE=$(field tree | head -1)
+          echo "Выполнено $EXECUTED из $LISTED тестов в 4 шардах." >> "$GITHUB_STEP_SUMMARY"
+          [[ $(field scope | sort -u | wc -l) -eq 1 ]] || { echo "::error::Шарды выбрали разную область тестов"; exit 1; }
+          SCOPE=$(field scope | head -1)
+          echo "Область тестов: $SCOPE" >> "$GITHUB_STEP_SUMMARY"
+          # Метка «дерево прошло все тесты» — только если гонялись все тесты, не часть.
+          TREE=""
+          [[ "$SCOPE" == "all" ]] && TREE=$(field tree | head -1)
           echo "tree=$TREE" >> "$GITHUB_OUTPUT"
           echo "$TREE" > tested-tree.txt
       # Метка для push в main после merge: это дерево уже прошло все тесты (см. tested-tree).
@@ -218,6 +287,20 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           echo "SIGN_IDENTITY=Mac Utils Signing" >> "$GITHUB_ENV"
           echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Toolchain
+        id: toolchain
+        run: echo "id=$( (swift --version; xcodebuild -version) 2>&1 | shasum | cut -c1-12 )" >> "$GITHUB_OUTPUT"
+      # Кэш сохранён сборкой development при том же дереве: тогда универсальная сборка почти ничего не компилирует.
+      - name: Restore build cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .build
+          key: build-v1-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            build-v1-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+      - name: File times from content
+        run: python3 scripts/ci-restore-mtime.py
 
       - name: Build app
         env:

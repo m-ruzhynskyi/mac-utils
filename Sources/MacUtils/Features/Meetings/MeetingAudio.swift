@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import Foundation
+import MUCore
 
 /// Файлы записи встречи: дорожки пишутся кусками, склеиваются при остановке и восстанавливаются после сбоя.
 ///

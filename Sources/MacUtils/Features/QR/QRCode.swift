@@ -3,6 +3,8 @@ import Carbon.HIToolbox
 import CoreImage
 import SwiftUI
 import Vision
+import MUCore
+import MUDesign
 
 /// Создание и распознавание QR-кодов (без UI — для тестов).
 enum QRTools {
@@ -125,7 +127,7 @@ final class QRCodeService: ObservableObject {
             return
         }
         center.register(id: HotKeyID.qr, keyCode: kVK_ANSI_Q, modifiers: controlKey | optionKey) {
-            AppAction(hotKey: .qr).run()
+            AppRouter.shared.runHotKey(HotKeyID.qr)
         }
     }
 

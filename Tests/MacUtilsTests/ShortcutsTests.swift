@@ -2,6 +2,7 @@ import AppIntents
 import CryptoKit
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// Mac Utils в «Командах» и ссылках `macutils://`: каждое действие зовёт ту же функцию, что горячая клавиша и панель
 /// (`AppAction.run`); действия с файлами — без окна, с теми же гарантиями байтов, что «Убрать значения» в редакторе.
@@ -79,7 +80,7 @@ final class ShortcutsTests: XCTestCase {
 
     // MARK: - Та же функция, что горячая клавиша
 
-    /// Регистрация каждой горячей клавиши зовёт `AppAction(hotKey:)` — то же, что ссылка и «Команды».
+    /// Регистрация каждой горячей клавиши зовёт `AppAction(hotKey:)` (функции — через `AppRouter`) — то же, что ссылка и «Команды».
     func testEveryHotKeyRunsTheSameAction() throws {
         let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Sources/MacUtils")
@@ -87,7 +88,8 @@ final class ShortcutsTests: XCTestCase {
         for case let url as URL in try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
             where url.pathExtension == "swift" { text += try String(contentsOf: url, encoding: .utf8) }
         for action in HotKeyAction.allCases {
-            XCTAssertTrue(text.contains("AppAction(hotKey: .\(action.rawValue)).run()"), "горячая клавиша \(action.rawValue)")
+            XCTAssertTrue(text.contains("AppAction(hotKey: .\(action.rawValue)).run()")
+                          || text.contains("AppRouter.shared.runHotKey(HotKeyID.\(action.rawValue))"), "горячая клавиша \(action.rawValue)")
         }
         XCTAssertEqual(AppAction(hotKey: .screenshot), .screenshot)
         XCTAssertEqual(AppAction(hotKey: .meeting), .meeting(.toggle))

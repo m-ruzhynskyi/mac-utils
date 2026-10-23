@@ -1,0 +1,112 @@
+import Foundation
+
+/// Строка файла до проверки: все значения как есть, строками.
+/// Сам пароль сохраняется только при поиске пароля (`ParseMode.passwords`), при обычной загрузке — лишь признак.
+struct RawEntry {
+    var row: Int
+    var name = ""
+    var id = ""
+    var password = ""
+    var hasPassword = false
+    var group = ""
+    var tags = ""
+    var note = ""
+    var program = ""
+
+    init(row: Int) { self.row = row }
+
+    mutating func set(_ field: ConnectionField, _ value: String, mode: ParseMode) {
+        switch field {
+        case .name: name = value
+        case .id: id = value
+        case .password:
+            hasPassword = !value.isEmpty
+            if mode == .passwords { password = value }
+        case .group: group = value
+        case .tags: tags = value
+        case .note: note = value
+        case .program: program = value
+        }
+    }
+
+    var isEmpty: Bool {
+        !hasPassword && [name, id, group, tags, note, program].allSatisfy {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+}
+
+enum ParseMode {
+    /// Список: пароли не сохраняются, только признак «есть пароль».
+    case records
+    /// Поиск пароля в момент подключения.
+    case passwords
+}
+
+struct ParsedFile {
+    var entries: [RawEntry]
+    var columns: [MatchedColumn] = []
+    var unrecognizedColumns: [String] = []
+}
+
+/// Источник списка подключений: .xlsx или .xml. Файл только читается.
+protocol ConnectionsSource {
+    /// Разбор содержимого файла в сырые строки. Бросает `ConnectionsError`.
+    func parse(_ data: Data, mode: ParseMode) throws -> ParsedFile
+}
+
+extension ConnectionsSource {
+    func load(_ data: Data) throws -> ConnectionsSnapshot {
+        ConnectionsBuilder.build(try parse(data, mode: .records))
+    }
+
+    /// Пароль записи — прямо из файла, в момент подключения. Сначала строка с тем же номером и ID;
+    /// если файл успели поправить — строка с тем же ID и именем, затем единственная строка с этим ID.
+    /// Угадывать среди нескольких строк с одним ID не будем. Строки разбора (`String`) затереть нельзя —
+    /// они живут только до конца этого вызова.
+    func lookupPassword(for record: ConnectionRecord, in data: Data) throws -> PasswordLookup {
+        let sameID = try parse(data, mode: .passwords).entries.filter { ConnectionID.normalize($0.id)?.value == record.id }
+        var match = sameID.first { $0.row == record.sourceRow }
+        if match == nil { match = sameID.first { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == record.name } }
+        if match == nil, sameID.count == 1 { match = sameID[0] }
+        guard let match else { return .entryGone }
+        guard !match.password.isEmpty else { return .noPassword }
+        return .found(SecretBuffer(match.password.utf8))
+    }
+
+    /// nil — записи или пароля нет.
+    func password(for record: ConnectionRecord, in data: Data) throws -> SecretBuffer? {
+        try lookupPassword(for: record, in: data).secret
+    }
+}
+
+/// Что нашлось в файле для записи в момент подключения.
+public enum PasswordLookup: Sendable {
+    case found(SecretBuffer)
+    /// Запись есть, ячейка пароля пустая.
+    case noPassword
+    /// Записи больше нет: файл поправили после чтения списка.
+    case entryGone
+
+    public var secret: SecretBuffer? {
+        if case .found(let s) = self { return s }
+        return nil
+    }
+}
+
+enum ConnectionsSources {
+    static let maxFileSize = 64 << 20
+
+    static func source(forExtension ext: String, sheet: String? = nil) -> ConnectionsSource? {
+        switch ext.lowercased() {
+        case "xlsx", "xlsm": return XLSXSource(sheet: sheet)
+        case "xml": return XMLSource()
+        default: return nil
+        }
+    }
+
+    static func source(for url: URL, sheet: String? = nil) throws -> ConnectionsSource {
+        guard let s = source(forExtension: url.pathExtension, sheet: sheet) else { throw ConnectionsError.unsupportedType }
+        return s
+    }
+}

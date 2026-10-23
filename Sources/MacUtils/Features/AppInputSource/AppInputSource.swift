@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import SwiftUI
+import MUCore
 
 /// Какую раскладку включить для программы (без системных вызовов — для тестов).
 enum InputSourceRules {

@@ -1,6 +1,7 @@
 import Carbon.HIToolbox
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 @MainActor
 final class BusyRegistryTests: XCTestCase {

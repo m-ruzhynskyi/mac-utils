@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import ScreenCaptureKit
+import MUCore
 
 /// Переключатель окон: удерживайте ⌥ (или ⌘) и нажимайте Tab.
 /// Каждое окно — отдельная карточка, как в Mission Control; порядок — по

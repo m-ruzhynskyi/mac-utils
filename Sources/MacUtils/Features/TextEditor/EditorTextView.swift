@@ -1,4 +1,6 @@
 import AppKit
+import MUCore
+import MUDesign
 
 /// Цвета и шрифт редактора. Синтаксис приглушён, чтобы выделялись знаки `$` (макет a).
 enum EditorStyle {

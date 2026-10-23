@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
+import MUCore
 
 /// Журнал длинного снимка для разбора «плохо склеилось»: каждая съёмка — свой файл
 /// `~/Library/Logs/MacUtils/scroll-<дата-время>.log`, хранятся последние 10. Только числа и имена режимов: размеры,

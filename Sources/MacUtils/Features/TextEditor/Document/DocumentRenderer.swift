@@ -1,4 +1,5 @@
 import AppKit
+import MUDesign
 
 extension NSAttributedString.Key {
     /// Свойства символа документа для панели форматирования (`DocCharInfo`).

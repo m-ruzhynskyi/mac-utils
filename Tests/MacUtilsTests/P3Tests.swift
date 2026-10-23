@@ -1,6 +1,7 @@
 import XCTest
 import Carbon.HIToolbox
 @testable import MacUtils
+@testable import MUCore
 
 final class P3Tests: XCTestCase {
     // AI4

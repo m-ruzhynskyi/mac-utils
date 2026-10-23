@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUCore
 
 /// Мониторы ведущего (SHARE-PROTOCOL §4.1): список с этого Mac, правило ведущего, зритель — запрос, ответ, таймаут.
 /// Формат сообщений сверяется с relay и страницей в ShareCompatTests (displays.json).
@@ -267,5 +268,14 @@ final class ShareMarksInVideoTests: XCTestCase {
         XCTAssertEqual(store.marks.count, 1)
         XCTAssertEqual(store.marks[0].lifetime, ShareMark.echoLifetime)
         XCTAssertLessThan(ShareMark.echoLifetime, 0.5)
+    }
+}
+
+final class ShareHostReconnectTests: XCTestCase {
+    func testQuickThenSlowAboutTenMinutes() {
+        XCTAssertEqual(ShareHostReconnect.quick.reduce(0, +), 44)
+        let total = ShareHostReconnect.delays.reduce(0, +)
+        XCTAssertGreaterThan(total, 600)
+        XCTAssertLessThan(total, 700)
     }
 }

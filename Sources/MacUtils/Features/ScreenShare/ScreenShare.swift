@@ -4,6 +4,8 @@ import ImageIO
 @preconcurrency import ScreenCaptureKit
 import SwiftUI
 import UniformTypeIdentifiers
+import MUCore
+import MUDesign
 
 /// Код комнаты и адрес (без сети — для тестов).
 enum ShareCode {
@@ -719,6 +721,8 @@ final class ScreenShare: NSObject, ObservableObject {
     private var lastDisplaySwitch: Date?
     private var lastDisplaysAnnounce: Date?
     private var screensObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+    private var recoveringCapture = false
 
     /// Номер транслируемого монитора (nil — окно или программа).
     private var currentDisplayNumber: Int? {
@@ -744,11 +748,91 @@ final class ScreenShare: NSObject, ObservableObject {
                                                                  object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { ScreenShare.shared.announceDisplays() }
         }
+        // После сна захват часто молча замирает: пересоздаём его (зрители видят последний кадр, потом картинка идёт).
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
+                                                                         object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { ScreenShare.shared.checkCaptureAfterWake() }
+        }
+    }
+
+    /// После пробуждения поток обычно жив: пересоздаём, только если экран молчит (даже «пустых» кадров нет) дольше 3 с.
+    func checkCaptureAfterWake() {
+        guard isLive, let sender else { return }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, self.isLive, self.sender === sender else { return }
+            if sender.secondsSinceScreenSample > 3 { self.recoverCapture(afterSleep: true) }
+        }
+    }
+
+    /// Захват экрана остановился (сон, выдернули монитор): для экрана пробуем собрать поток заново, для окна и программы
+    /// такого экрана нет — эфир заканчивается с понятной причиной.
+    func captureStopped(_ stopped: SCStream) {
+        // Остановился не текущий поток (старый, уже заменённый) или пересборка уже идёт — ничего не делаем.
+        guard isLive, !recoveringCapture, stream == nil || stream === stopped else { return }
+        guard videoDisplayID != nil else { return stop(reason: "Захват остановлен: окно закрыто или недоступно") }
+        recoverCapture(afterSleep: false)
+    }
+
+    /// Пересоздать поток экрана: тот же монитор, если он есть, иначе основной. Попытки с паузой 1, 2, 4, 8, 15 с;
+    /// звук, сокет и кодер остаются, ключевой кадр уходит сразу после запуска.
+    func recoverCapture(afterSleep: Bool) {
+        guard isLive, let sender, videoDisplayID != nil, !recoveringCapture else { return }
+        recoveringCapture = true
+        let old = stream
+        stream = nil
+        Log.capture.info("Трансляция: захват пересоздаётся (сон \(afterSleep ? 1 : 0))")
+        let oldAudio = audioStream
+        Task { [weak self] in
+            try? await old?.stopCapture()
+            // Запасной звук ScreenCaptureKit (без tap) живёт на том же делегате: после сна пересоздаём и его.
+            if let oldAudio {
+                try? await oldAudio.stopCapture()
+                if let self, self.isLive, self.sender === sender { self.audioStream = nil; try? await self.startAudio(sender: sender) }
+            }
+            for delay in [1.0, 2, 4, 8, 15] {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard let self, self.isLive, self.sender === sender else { return }
+                guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
+                      let display = content.displays.first(where: { $0.displayID == self.videoDisplayID })
+                        ?? content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first else { continue }
+                let filter = Self.displayFilter(display, content: content)
+                let fresh = SCStream(filter: filter, configuration: Self.videoConfiguration(for: filter), delegate: sender)
+                do {
+                    try fresh.addStreamOutput(sender, type: .screen, sampleHandlerQueue: sender.queue)
+                    try await fresh.startCapture()
+                } catch {
+                    Log.capture.error("Трансляция: захват не пересоздан, код \((error as NSError).code)")
+                    continue
+                }
+                // Эфир могли остановить (или начать новый) за время запуска — тогда новый поток никому не нужен.
+                guard self.isLive, self.sender === sender else {
+                    try? await fresh.stopCapture()
+                    self.recoveringCapture = false
+                    return
+                }
+                self.stream = fresh
+                self.videoFilter = filter
+                self.streamSizeOverride = nil
+                self.videoDisplayID = display.displayID
+                ShareMarksOverlay.shared.attach(to: filter, display: display.displayID)
+                sender.requestKeyFrame()
+                self.recoveringCapture = false
+                self.announceDisplays()
+                return
+            }
+            guard let self else { return }
+            self.recoveringCapture = false
+            if self.isLive { self.stop(reason: "Захват экрана остановлен") }
+        }
     }
 
     private func stopWatchingDisplays() {
         if let screensObserver { NotificationCenter.default.removeObserver(screensObserver) }
         screensObserver = nil
+        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        wakeObserver = nil
+        recoveringCapture = false
         hostDisplays = []
         switchingDisplay = false
         lastDisplaySwitch = nil
@@ -1008,7 +1092,7 @@ final class ScreenShare: NSObject, ObservableObject {
         self.socket = nil
         Log.capture.info("Трансляция: переподключаюсь")
         Task {
-            for delay in [1, 2, 3, 5, 8, 10, 15] as [UInt64] {
+            for delay in ShareHostReconnect.delays {
                 try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 guard isLive, reconnecting else { return }
                 switch await openHostSocket() {
@@ -1306,6 +1390,14 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         return currentSocket
     }
 
+    private var lastSampleAt = ProcessInfo.processInfo.systemUptime
+    private func noteScreenSample() { lock.lock(); lastSampleAt = ProcessInfo.processInfo.systemUptime; lock.unlock() }
+    /// Сколько секунд от экрана не было ни одного кадра (в том числе «без изменений»).
+    var secondsSinceScreenSample: Double { lock.lock(); defer { lock.unlock() }; return ProcessInfo.processInfo.systemUptime - lastSampleAt }
+
+    /// Захват пересоздан: ключевой кадр сразу, чтобы зрители не ждали следующего.
+    func requestKeyFrame() { queue.async { self.encoder.requestKeyFrame() } }
+
     func replace(_ socket: URLSessionWebSocketTask) {
         lock.lock()
         currentSocket = socket
@@ -1436,6 +1528,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
             }
             return
         }
+        if type == .screen { noteScreenSample() }
         guard type == .screen, sampleBuffer.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
                 as? [[SCStreamFrameInfo: Any]],
@@ -1514,7 +1607,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         DispatchQueue.main.async {
-            MainActor.assumeIsolated { ScreenShare.shared.stop(reason: "Захват экрана остановлен") }
+            MainActor.assumeIsolated { ScreenShare.shared.captureStopped(stream) }
         }
     }
 }
@@ -1647,6 +1740,7 @@ final class ShareViewer: ObservableObject {
             let socket = URLSession.shared.webSocketTask(with: ShareCode.request(url, token: keyed ? ShareRelay.keyedToken : ShareRelay.legacyToken))
             socket.maximumMessageSize = 4 << 20
             self.socket = socket
+            player.attach(socket)
             socket.resume()
             lastMessage = Date()
             sawHeartbeat = false
@@ -1767,7 +1861,7 @@ final class ShareViewer: ObservableObject {
     }
 
     private func receive(_ socket: URLSessionWebSocketTask) {
-        Self.listen(socket, video: video, acks: acks)
+        Self.listen(socket, video: video, acks: acks, player: player)
     }
 
     /// Счёт видеопакетов для подтверждения relay (`ack`): по нему relay не копит очередь на медленном зрителе.
@@ -1775,12 +1869,12 @@ final class ShareViewer: ObservableObject {
 
     /// Чтение сокета. Видео H.264 уходит в проигрыватель прямо из колбэка, и следующее чтение взводится сразу:
     /// занятый главный поток не тормозит картинку. На главный — только учёт и остальные сообщения.
-    nonisolated private static func listen(_ socket: URLSessionWebSocketTask, video: H264Player, acks: ShareVideoAck) {
+    nonisolated private static func listen(_ socket: URLSessionWebSocketTask, video: H264Player, acks: ShareVideoAck, player: SharePlayer) {
         socket.receive { result in
             if case .success(.data(let data)) = result, data.first == H264Packet.type {
                 video.play(data.dropFirst(), from: socket)
                 if let n = acks.received(on: socket) { socket.send(.string(ShareVideoAck.message(n))) { _ in } }
-                listen(socket, video: video, acks: acks)
+                listen(socket, video: video, acks: acks, player: player)
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         let viewer = ShareViewer.shared
@@ -1794,29 +1888,50 @@ final class ShareViewer: ObservableObject {
                 }
                 return
             }
+            // Звук и картинки JPEG — тоже вне главного потока: занятый Mac не прерывает звук и не откладывает следующее чтение.
+            if case .success(.data(let data)) = result, data.first == ShareProtocol.audio {
+                player.play(data.dropFirst(), from: socket)
+                listen(socket, video: video, acks: acks, player: player)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        let viewer = ShareViewer.shared
+                        guard viewer.socket === socket else { return }
+                        viewer.lastMessage = Date()
+                        if viewer.state != .watching { viewer.state = .watching }
+                        viewer.reconnectsMade = 0
+                    }
+                }
+                return
+            }
+            if case .success(.data(let data)) = result, data.first == ShareProtocol.frame {
+                if let n = acks.received(on: socket) { socket.send(.string(ShareVideoAck.message(n))) { _ in } }
+                let image = ShareJPEG.decode(data.dropFirst())
+                listen(socket, video: video, acks: acks, player: player)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        let viewer = ShareViewer.shared
+                        guard viewer.socket === socket else { return }
+                        viewer.lastMessage = Date()
+                        if viewer.state != .watching { viewer.state = .watching }
+                        viewer.reconnectsMade = 0
+                        viewer.jpegFrames += 1
+                        if ShareVideoMode.jpegIsBridge(now: Date(), lastVideo: viewer.lastVideoAt), let image {
+                            viewer.frame = image
+                            if viewer.pictures != true { viewer.pictures = true }
+                        }
+                    }
+                }
+                return
+            }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     let viewer = ShareViewer.shared
                     guard viewer.socket === socket else { return }
                     if case .success = result { viewer.lastMessage = Date() }
                     switch result {
-                    case .success(.data(let data)):
+                    case .success(.data):
                         if viewer.state != .watching { viewer.state = .watching }
                         viewer.reconnectsMade = 0
-                        switch data.first {
-                        case ShareProtocol.frame:
-                            if let n = viewer.acks.received(on: socket) { socket.send(.string(ShareVideoAck.message(n))) { _ in } }
-                            viewer.jpegFrames += 1
-                            if ShareVideoMode.jpegIsBridge(now: Date(), lastVideo: viewer.lastVideoAt),
-                               let image = NSImage(data: data.dropFirst()) {
-                                viewer.frame = image
-                                if viewer.pictures != true { viewer.pictures = true }
-                            }
-                        case ShareProtocol.audio:
-                            viewer.player.play(data.dropFirst())
-                        default:
-                            break
-                        }
                         viewer.receive(socket)
                     case .success(.string(let text)):
                         let json = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
@@ -2816,6 +2931,24 @@ final class ShareVideoAck: @unchecked Sendable {
     static func message(_ n: Int) -> String { "{\"type\":\"ack\",\"n\":\(n)}" }
 }
 
+/// Картинка JPEG → NSImage сразу полностью (не отложенно при первой отрисовке), чтобы разбор шёл не на главном потоке.
+enum ShareJPEG {
+    static func decode(_ data: Data) -> NSImage? {
+        let options = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateImageAtIndex(source, 0, options) else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+    }
+}
+
+/// Паузы между попытками ведущего вернуться на сервер: 44 с частых попыток (relay ждёт ведущего 45 с, потом зрителей
+/// отключает), затем раз в 30 с ещё 10 минут — захват не останавливается, после возврата эфир идёт под тем же ID.
+enum ShareHostReconnect {
+    static let quick: [UInt64] = [1, 2, 3, 5, 8, 10, 15]
+    static let slow: [UInt64] = Array(repeating: 30, count: 20)
+    static var delays: [UInt64] { quick + slow }
+}
+
 /// Проигрывание звука трансляции у зрителя.
 final class SharePlayer: @unchecked Sendable {
     let engine = AVAudioEngine()
@@ -2832,9 +2965,14 @@ final class SharePlayer: @unchecked Sendable {
     /// Движок и узел трогает один поток за раз: play() с сокета и перезапуск по уведомлению системы.
     private let engineLock = NSLock()
     private let limit: Int
+    /// Очередь длиннее — сбрасываем (звук догоняет картинку).
+    private let catchUp: Int
     private(set) var dropped = 0
+    private(set) var catchUps = 0
     private(set) var restarts = 0
     private var observer: NSObjectProtocol?
+    /// Сокет, чей звук сейчас играет: после `stop()` (выход, переподключение) пакеты старого сокета ничего не запускают.
+    private var owner: ObjectIdentifier?
     private let center: NotificationCenter
     /// Перезапуск — на своей очереди: обработчик уведомления не ждёт замок на внутренней очереди AVAudioEngine
     /// (иначе взаимная блокировка с play(), который держит замок и запускает движок).
@@ -2842,12 +2980,15 @@ final class SharePlayer: @unchecked Sendable {
 
     /// ≈ 1 с звука трансляции.
     static let defaultLimit = Int(ShareProtocol.sampleRate)
+    /// ≈ 0,5 с: больше звук заметно отстаёт от картинки.
+    static let defaultCatchUp = Int(ShareProtocol.sampleRate / 2)
 
     /// `silent` — для тестов и стендов: движок рендерит вручную, в динамики ничего не идёт и ничего не потребляется
     /// (как остановленный системой движок).
     /// `center` — откуда приходит `.AVAudioEngineConfigurationChange` (в тестах свой центр уведомлений).
-    init(silent: Bool = false, limit: Int = SharePlayer.defaultLimit, center: NotificationCenter = .default) {
+    init(silent: Bool = false, limit: Int = SharePlayer.defaultLimit, catchUp: Int = SharePlayer.defaultCatchUp, center: NotificationCenter = .default) {
         self.limit = limit
+        self.catchUp = catchUp
         self.center = center
         if silent {
             try? engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 4096)
@@ -2888,19 +3029,23 @@ final class SharePlayer: @unchecked Sendable {
         return Double(queuedFrames) / ShareProtocol.sampleRate
     }
 
-    func play(_ payload: Data) {
+    /// Новый сокет просмотра — его звук разрешён, прежнего — нет.
+    func attach(_ socket: AnyObject) {
+        engineLock.lock(); defer { engineLock.unlock() }
+        owner = ObjectIdentifier(socket)
+    }
+
+    /// `socket` — откуда пакет (nil — без проверки, для тестов и стендов).
+    func play(_ payload: Data, from socket: AnyObject? = nil) {
         let count = payload.count / 2
         guard count > 0 else { return }
-        lock.lock()
-        let full = queuedFrames + count > limit
-        if full { dropped += 1 }
-        lock.unlock()
-        guard !full else { return }
         let samples = ShareProtocol.samples(payload)
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else { return }
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count) }
         engineLock.lock(); defer { engineLock.unlock() }
+        if let socket, owner != ObjectIdentifier(socket) { return }
+        // Движок — до проверки очереди: остановленный движок очередь не разбирает, и при полной очереди звук не вернулся бы.
         if !started {
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: format)
@@ -2913,6 +3058,19 @@ final class SharePlayer: @unchecked Sendable {
             node.play()
         }
         lock.lock()
+        if queuedFrames > catchUp {
+            // Рывок сети: звук пришёл пачкой и отстал от картинки. Очередь сбрасываем — дальше звук идёт со свежих пакетов,
+            // вместо того чтобы отставать до конца просмотра.
+            queuedFrames = 0
+            generation += 1
+            catchUps += 1
+            lock.unlock()
+            node.stop(); node.play()
+            lock.lock()
+        }
+        let full = queuedFrames + count > limit
+        if full { dropped += 1 }
+        guard !full else { lock.unlock(); return }
         queuedFrames += count
         let scheduled = generation
         lock.unlock()
@@ -2926,6 +3084,7 @@ final class SharePlayer: @unchecked Sendable {
 
     func stop() {
         engineLock.lock(); defer { engineLock.unlock() }
+        owner = nil
         guard started else { return }
         node.stop()
         engine.stop()

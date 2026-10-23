@@ -1,6 +1,8 @@
 import AppKit
 import Carbon.HIToolbox
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Режим «Фокус» (⌃⌥F): выбранная программа остаётся чёткой, а всё позади её окон —
 /// другие окна и рабочий стол — размывается и чуть затемняется.
@@ -34,7 +36,7 @@ final class FocusBlur: ObservableObject {
             return
         }
         center.register(id: HotKeyID.focus, keyCode: kVK_ANSI_F, modifiers: controlKey | optionKey) {
-            AppAction(hotKey: .focus).run()
+            AppRouter.shared.runHotKey(HotKeyID.focus)
         }
         if isOn { applyStyle() }
     }

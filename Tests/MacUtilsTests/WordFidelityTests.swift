@@ -3,6 +3,7 @@ import PDFKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUDesign
 
 /// «Документ» против эталона Word. Эталон — PDF, которые сделал сам Word из копий форм (`pdf/fNNN.pdf` к `rtf/fNNN.rtf`).
 /// Наша сторона раскладывается тем же путём, что в приложении (вкладка в «Документе», `DocPageView`, колонтитулы),

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MUDesign
 
 /// Компактный блок внизу «Горячих клавиш»: те же действия есть в «Командах» и по ссылкам `macutils://…`.
 struct ShortcutsLinksBlock: View {

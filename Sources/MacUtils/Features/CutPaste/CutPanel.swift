@@ -1,5 +1,7 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
 
 /// Плавающая панель с вырезанными файлами, видна только пока активен Finder.
 @MainActor

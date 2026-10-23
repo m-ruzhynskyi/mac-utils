@@ -1,6 +1,8 @@
 import AppKit
 import Carbon.HIToolbox
 import ScreenCaptureKit
+import MUCore
+import MUDesign
 
 /// «Поверх всех» для любого окна (⌃⌥P): macOS не даёт поднять чужое окно над остальными,
 /// поэтому поверх показывается живая копия окна (ScreenCaptureKit) — с настраиваемой прозрачностью.
@@ -19,7 +21,7 @@ final class WindowPin: ObservableObject {
             return
         }
         center.register(id: HotKeyID.windowPin, keyCode: kVK_ANSI_P, modifiers: controlKey | optionKey) {
-            AppAction(hotKey: .windowPin).run()
+            AppRouter.shared.runHotKey(HotKeyID.windowPin)
         }
     }
 
