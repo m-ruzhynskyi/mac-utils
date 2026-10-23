@@ -129,6 +129,8 @@ function sanitizeDisplays(command) {
   displays.list = list;
   // Как ведущий кодирует видео (необязательно): hw — видеокарта, sw — программно, jpeg — картинки. Прочее — без поля.
   if (["hw", "sw", "jpeg"].includes(command.video)) displays.video = command.video;
+  // Метки зрителей попадают в видео ведущего (окно меток не исключено из захвата): зрители свою копию не рисуют.
+  if (command.marks === "video") displays.marks = "video";
   return displays;
 }
 

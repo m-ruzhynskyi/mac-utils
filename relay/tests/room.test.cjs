@@ -1073,6 +1073,16 @@ test('displays: режим видео ведущего (video: hw | sw | jpeg) �
   f.room.webSocketMessage(host, '{"type":"displays","v":1,"rev":8,"list":[],"video":"sw"}');
   assert.deepEqual(viewer.messages.at(-1), { type: 'displays', v: 1, rev: 8, list: [], video: 'sw' }, 'и при пустом списке (окно, переключение выключено)');
 });
+test('displays: marks: "video" (метки ведущего идут в видео) доходит до зрителей, чужое значение вырезается', () => {
+  const f = fixture(), host = hostLive(f);
+  const viewer = f.socket('viewer', { id: '1111111111', approved: true });
+  f.room.webSocketMessage(host, KATE.message.replace('"rev":7', '"rev":7,"marks":"video"'));
+  assert.deepEqual(viewer.messages.at(-1), { ...KATE.expected, marks: 'video' });
+  for (const marks of ['"screen"', '1', 'true', '"VIDEO"', '"<b>"']) {
+    f.room.webSocketMessage(host, KATE.message.replace('"rev":7', `"rev":7,"marks":${marks}`));
+    assert.deepEqual(viewer.messages.at(-1), KATE.expected, `marks=${marks} — без поля, список доходит`);
+  }
+});
 test('displays от хоста, не прошедшего проверку ключа, и негодный список не доходят никому', () => {
   const f = fixture();
   const pending = f.socket('host', { auth: 'pending', nonce: 'n', connectedAt: 1_000_000, lastSeen: 1_000_000 });
