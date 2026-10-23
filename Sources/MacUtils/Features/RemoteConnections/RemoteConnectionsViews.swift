@@ -57,7 +57,25 @@ private func highlighted(_ text: String, _ ranges: [Range<String.Index>]) -> Att
     return out
 }
 
-/// Строка записи: значок, название, ID (и группа), программа, ключ, звезда; выбранная — с ↩.
+/// Тег записи в строке списка: маленький чип, длинный — с обрезкой.
+struct RemoteTagChip: View {
+    let text: AttributedString
+
+    var body: some View {
+        Text(text)
+            .font(DS.Font.manrope(11, .semibold, relativeTo: .caption2))
+            .foregroundStyle(.dsMute)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.vertical, 1)
+            .padding(.horizontal, 7)
+            .frame(maxWidth: 110, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .capsuleFill(Color.dsField, border: Color.dsLine)
+    }
+}
+
+/// Строка записи: значок, название, ID (и группа), теги и заметка, программа, ключ, звезда; выбранная — с ↩.
 struct RemoteRow: View {
     let record: ConnectionRecord
     let program: RemoteProgram
@@ -77,12 +95,16 @@ struct RemoteRow: View {
                 Text(highlighted(record.name, ConnectionSearch.highlights(in: record.name, query: query)))
                     .font(DS.Font.rowTitle).foregroundStyle(.dsText).lineLimit(1)
                 HStack(spacing: 6) {
+                    // ID не переносится никогда: ужимается группа.
                     Text(highlighted(record.displayID, ConnectionSearch.highlightsInID(record.displayID, query: query)))
                         .font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText)
+                        .lineLimit(1).fixedSize().layoutPriority(1)
                     if showGroup, !record.group.isEmpty {
-                        Text("· \(record.group)").font(DS.Font.rowSub).foregroundStyle(.dsMute).lineLimit(1)
+                        Text("· \(record.group)").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                            .lineLimit(1).truncationMode(.tail)
                     }
                 }
+                if !record.tags.isEmpty || !note.isEmpty { details }
             }
             Spacer(minLength: 8)
             RemoteProgramBadge(program: program, dimmed: dimmed)
@@ -108,6 +130,33 @@ struct RemoteRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
         .accessibilityAction(named: RL("Подключиться"), onConnect)
+    }
+
+    /// Заметка одной строкой: переводы строк — пробелы. Полная — в подсказке.
+    private var note: String {
+        record.note.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Теги чипами (2–3, остальные — «+N») и заметка серым, с обрезкой.
+    private var details: some View {
+        let limit = note.isEmpty ? 3 : 2
+        let shown = record.tags.prefix(limit)
+        return HStack(spacing: 4) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, tag in
+                RemoteTagChip(text: highlighted(tag, ConnectionSearch.highlights(in: tag, query: query)))
+            }
+            if record.tags.count > limit {
+                RemoteTagChip(text: AttributedString("+\(record.tags.count - limit)"))
+                    .help(record.tags.dropFirst(limit).joined(separator: ", "))
+            }
+            if !note.isEmpty {
+                Text(highlighted(note, ConnectionSearch.highlights(in: note, query: query)))
+                    .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                    .lineLimit(1).truncationMode(.tail)
+                    .help(record.note)
+            }
+        }
+        .padding(.top, 1)
     }
 }
 
@@ -196,7 +245,7 @@ struct RemoteSectionsList: View {
     let listing: ConnectionListing
     var showSectionLabels = true
     var dimmed: Set<RemoteProgram> = []
-    /// Правка записи (только для .xml); nil — пункта «Изменить…» нет.
+    /// Правка записи (.xml) или просмотр (.xlsx); nil — пункта «Изменить…» нет.
     var onEdit: ((ConnectionRecord) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -520,7 +569,7 @@ struct RemoteConnectionsPanel: View {
                     } else {
                         RemoteSectionsList(model: model, center: center, listing: listing,
                                            dimmed: Set(RemoteProgram.allCases).subtracting(installed),
-                                           onEdit: center.canEdit ? { editing = RemoteEditTarget(record: $0) } : nil)
+                                           onEdit: center.canView ? { editing = RemoteEditTarget(record: $0) } : nil)
                     }
                 }
                 .padding(.horizontal, DS.Space.l)

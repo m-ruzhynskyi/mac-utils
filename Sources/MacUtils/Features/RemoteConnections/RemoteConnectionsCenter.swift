@@ -188,6 +188,9 @@ final class RemoteConnectionsCenter: ObservableObject {
     /// Записи можно добавлять и править только в .xml; .xlsx правится в Excel.
     var canEdit: Bool { fileURL?.pathExtension.lowercased() == "xml" }
 
+    /// Запись можно открыть в карточке: в .xml — править, в .xlsx/.xlsm — только смотреть (правка — в Excel).
+    var canView: Bool { ["xml", "xlsx", "xlsm"].contains(fileURL?.pathExtension.lowercased() ?? "") }
+
     /// Добавить (`record == nil`) или изменить запись. Файл читается заново, меняются только байты этой записи,
     /// перед записью — `.bak` с теми же правами.
     func save(_ draft: ConnectionDraft, replacing record: ConnectionRecord?) throws {

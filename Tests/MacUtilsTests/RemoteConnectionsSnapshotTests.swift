@@ -34,7 +34,7 @@ final class RemoteConnectionsSnapshotTests: XCTestCase {
         <connection><name>Лаборатория Север</name><id>123456789</id><password>x</password><group>Лаборатории</group><app>AnyDesk</app></connection>
         <connection><name>Лаборатория Восток</name><id>1234567890</id><password>x</password><group>Лаборатории</group><app>TeamViewer</app></connection>
         <connection><name>Север · резервный сервер</name><id>678901234</id><group>Лаборатории</group><app>AnyDesk</app></connection>
-        <connection><name>Склад Харьков</name><id>345678901</id><password>x</password><group>Склады</group><app>AnyDesk</app></connection>
+        <connection><name>Склад Харьков</name><id>345678901</id><password>x</password><group>Склады</group><tags>склад, ночь, сервер, касса</tags><note>Ключ у охраны, звонить заранее</note><app>AnyDesk</app></connection>
         <connection><name>Склад Одесса · выдача</name><id>1987654321</id><group>Склады</group><app>TeamViewer</app></connection>
         <connection><name>Касса 4 · Запад</name><id>kassa4@ad</id><password>x</password><group>Офисы</group></connection>
         <connection><name>Бухгалтерия</name><id>567890123</id><password>x</password><group>Офисы</group><app>TeamViewer</app></connection>
@@ -128,6 +128,9 @@ final class RemoteConnectionsSnapshotTests: XCTestCase {
         let eastEntry = full.snapshot.records.first { $0.name == "Лаборатория Восток" }!
         render(RemoteEditSheet(center: full, record: eastEntry), size: NSSize(width: 480, height: 640), name: "rc14-edit")
         render(RemoteEditSheet(center: full, record: nil), size: NSSize(width: 480, height: 600), name: "rc15-add")
+        let book = try await center(nil)
+        book.setFile(work.appendingPathComponent("connections.xlsx"))
+        render(RemoteEditSheet(center: book, record: eastEntry), size: NSSize(width: 480, height: 640), name: "rc19-view-xlsx")
         defer { RemoteL10n.language = .ru }
         for language in [RemoteLanguage.uk, .en] {
             RemoteL10n.language = language
