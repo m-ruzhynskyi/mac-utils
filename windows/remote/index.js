@@ -208,7 +208,11 @@ function init(electron, options = {}) {
   ipcMain.handle("rc:getSettings", guarded(() => ({ ...settings.data }), null));
   ipcMain.handle("rc:setSettings", guarded((_e, patch) => setSettings(patch), null));
   ipcMain.handle("rc:sheets", guarded(() => store.sheetNames().catch(() => []), []));
-  ipcMain.handle("rc:createTemplate", guarded(async (_e, kind) => (options.templates || templates).create({ kind, dialog, parent: windowRef, settings, service, setSettings }), ""));
+  const createTemplate = async (kind) => {
+    const file = await (options.templates || templates).create({ kind, dialog, parent: alive(windowRef) ? windowRef : undefined, settings, service, setSettings });
+    return file || "";
+  };
+  ipcMain.handle("rc:createTemplate", guarded(async (_e, kind) => createTemplate(kind), ""));
   ipcMain.handle("rc:edit", guarded(async (_e, q) => {
     if (q?.action === "download") { shell.openExternal(require("./models").downloadURL(q.payload === "teamViewer" ? "teamViewer" : "anyDesk")); return true; }
     return editRecord(q);
@@ -231,14 +235,22 @@ function init(electron, options = {}) {
   service.onChange(notifyViews);
   service.start();
   applyEnabled();
-  // Вход в модуль без значка в трее: пункт в меню окна Share (меню скрыто, показывается по Alt) — по нему выбирают файл.
+  // Вход без файла (трея и горячей клавиши ещё нет): пункт «Удалённые подключения» в меню окна Share (меню скрыто, видно по Alt).
+  // Из него сразу выбирают файл или создают шаблон; после выбора открывается список.
+  const entryMenu = () => [
+    { label: "Открыть список…", click: openWindow },
+    { type: "separator" },
+    { label: "Выбрать файл…", click: async () => { if (await chooseFile()) openWindow(); } },
+    { label: "Создать шаблон .xlsx…", click: async () => { if (await createTemplate("xlsx")) openWindow(); } },
+    { label: "Создать шаблон .xml…", click: async () => { if (await createTemplate("xml")) openWindow(); } },
+  ];
   try {
     const menu = Menu.getApplicationMenu?.();
-    if (menu && MenuItem) { menu.append(new MenuItem({ label: "Удалённые подключения", submenu: [{ label: "Открыть список…", click: openWindow }] })); Menu.setApplicationMenu(menu); }
+    if (menu && MenuItem) { menu.append(new MenuItem({ label: "Удалённые подключения", submenu: entryMenu() })); Menu.setApplicationMenu(menu); }
   } catch (_) {}
 
   return {
-    service, settings, store, openWindow, openPalette, registerHotkey, trayTemplate, connect, hudAction, titles: TITLES,
+    service, settings, store, entryMenu, openWindow, openPalette, registerHotkey, trayTemplate, connect, hudAction, titles: TITLES,
     get hotkeyOk() { return hotkeyOk; },
     dispose() { try { globalShortcut.unregisterAll?.(); } catch (_) {} store.stop(); tray?.destroy?.(); },
   };

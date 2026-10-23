@@ -60,7 +60,9 @@ function emptyState(v) {
   const actions = el("div"); actions.style.cssText = "margin-top:14px;display:flex;gap:8px;justify-content:center";
   const choose = el("button", "btn pri", "Выбрать файл"); choose.onclick = async () => { await window.rc.chooseFile(); refresh(); };
   actions.append(choose);
-  if (!v.error || v.error.code === "noFile") { const t = el("button", "btn", "Создать шаблон"); t.onclick = () => { openSettings(); }; actions.append(t); }
+  if (!v.error || v.error.code === "noFile") {
+    for (const kind of ["xlsx", "xml"]) { const t = el("button", "btn", `Создать шаблон .${kind}`); t.onclick = async () => { await window.rc.createTemplate(kind); refresh(); }; actions.append(t); }
+  }
   box.append(actions);
   return box;
 }

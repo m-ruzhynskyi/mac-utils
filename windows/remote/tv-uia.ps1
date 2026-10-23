@@ -1,6 +1,6 @@
 # Ввод пароля в окно «Аутентификация» TeamViewer через UI Automation. Вход: stdin — строка 1: параметры JSON {"timeoutMs":N},
 # строка 2: пароль (в аргументах командной строки пароля нет). Выход: строки JSON {"state":"waiting"} … {"state":"entered"}
-# | "noWindow" | "elevated" | "focusLost" | "fieldNotFound" | "wrongPassword". Пароль не пишется ни в вывод, ни в файлы.
+# | "noWindow" | "noPrompt" | "elevated" | "focusLost" | "fieldNotFound" | "wrongPassword". Пароль не пишется ни в вывод, ни в файлы.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
 Add-Type @'
@@ -62,14 +62,16 @@ try {
   }
   Emit 'ready'
   $found = $null
+  $sawProcess = $false
   $tick = 0
   while ([DateTime]::UtcNow -lt $deadline) {
     $ids = Get-TeamViewerIds
-    if ($ids.Count) { $found = Find-PasswordField $ids; if ($found) { break } }
+    if ($ids.Count) { $sawProcess = $true; $found = Find-PasswordField $ids; if ($found) { break } }
     if (($tick++ % 4) -eq 0) { Emit 'waiting' }
     Start-Sleep -Milliseconds 250
   }
-  if (-not $found) { Emit 'noWindow'; return }
+  # TeamViewer запущен, но окна пароля нет — вход по сохранённому доступу (или ещё грузится): noPrompt; процесса нет вовсе — noWindow.
+  if (-not $found) { if ($sawProcess) { Emit 'noPrompt' } else { Emit 'noWindow' }; return }
 
   $pid2 = $found.Window.Current.ProcessId
   $process = Get-Process -Id $pid2

@@ -24,6 +24,7 @@ const MESSAGES = {
   gone: () => ({ kind: "info", title: "Записи больше нет в файле", detail: "Список обновлён.", actions: [{ id: "close", label: "Закрыть" }] }),
   elevated: (p) => ({ kind: "warning", title: `${TITLES[p]} запущен от администратора`, detail: "Mac Utils не может ввести пароль в его окно (UIPI). Перезапустите программу без прав администратора или введите пароль вручную.", actions: [{ id: "close", label: "Закрыть" }] }),
   launchFailed: (p) => ({ kind: "danger", title: `Не удалось запустить ${TITLES[p]}`, detail: "Программа не приняла команду.", actions: [{ id: "retry", label: "Повторить" }, { id: "close", label: "Закрыть" }] }),
+  noTeamViewerWindow: (p) => ({ kind: "warning", title: "Введите пароль вручную", detail: `${TITLES[p]} не показал окон за отведённое время. Пароль не вводился.`, actions: [{ id: "retry", label: "Повторить" }, { id: "close", label: "Закрыть" }] }),
   noPasswordInFile: () => ({ kind: "info", title: "Пароля в файле нет", detail: "Введите пароль вручную.", actions: [{ id: "close", label: "Закрыть" }] }),
 };
 
@@ -122,8 +123,10 @@ function createConnector(deps) {
       switch (result.state) {
         case "entered":
           hud.show({ kind: "success", title: "Пароль введён", detail: `${title} подключается к ${record.name}`, autoHideMs: 2500 }); log(`connect ok program=${program} password=1`); return { ok: true };
-        case "noWindow":     // окно пароля не появилось — вход без пароля (сохранённый доступ), ошибки нет
-          hud.show({ kind: "success", title: "Подключено", detail: `${record.name} · без пароля`, autoHideMs: 2500 }); log(`connect ok program=${program} password=0 prompt=0`); return { ok: true };
+        case "noPrompt":     // TeamViewer запущен, окна пароля нет — вероятно, вход по сохранённому доступу; о подключении не заявляем
+          hud.show({ kind: "info", title: `Открыт ${title}`, detail: `${record.name} · окно пароля не появилось, пароль не вводился`, autoHideMs: 4000 }); log(`connect ok program=${program} password=0 prompt=0`); return { ok: true };
+        case "noWindow":     // процесса TeamViewer не видно вовсе — ввода не было, пользователь вводит вручную
+          hud.show(MESSAGES.noTeamViewerWindow(program)); log(`connect fail code=noWindow`); return { ok: false, error: "noWindow" };
         case "wrongPassword": hud.show(MESSAGES.wrongPassword()); log(`connect fail code=wrongPassword`); return { ok: false, error: "wrongPassword" };
         case "focusLost": hud.show(MESSAGES.focusLost()); log(`connect fail code=focusLost`); return { ok: false, error: "focusLost" };
         case "elevated": hud.show(MESSAGES.elevated(program)); log(`connect fail code=elevated`); return { ok: false, error: "elevated" };

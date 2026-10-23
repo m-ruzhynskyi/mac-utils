@@ -8,7 +8,7 @@ const path = require("node:path");
 const SCRIPT = path.join(__dirname, "tv-uia.ps1").replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
 // powershell.exe — по полному пути из системной папки, а не по PATH и текущей папке.
 const POWERSHELL = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-const STATES = new Set(["ready", "waiting", "entered", "noWindow", "elevated", "focusLost", "fieldNotFound", "wrongPassword"]);
+const STATES = new Set(["ready", "waiting", "entered", "noWindow", "noPrompt", "elevated", "focusLost", "fieldNotFound", "wrongPassword"]);
 
 // spawn — child_process.spawn (в тестах двойник). Возвращает { enter(options, secret, onEvent), cancel() }.
 // options: { timeoutMs, afterReady? } — afterReady вызывается, когда скрипт запомнил уже открытые окна пароля и готов

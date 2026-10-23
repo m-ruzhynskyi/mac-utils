@@ -199,3 +199,24 @@ test("вызовы IPC — только от окон модуля: чужой �
   assert.equal(w.navigationBlocked, true);
   rc.dispose();
 });
+
+test("вход без файла: пункт меню окна Share — выбрать файл, шаблон .xlsx/.xml; после создания шаблона открывается список", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rc-glue-"));
+  const fake = fakeElectron();
+  let appended = null;
+  fake.electron.Menu.getApplicationMenu = () => ({ append: (item) => { appended = item; } });
+  fake.electron.MenuItem = class { constructor(o) { Object.assign(this, o); } };
+  const made = [];
+  const templates = { create: async ({ kind, setSettings }) => { made.push(kind); const file = path.join(dir, `t.${kind}`); fs.writeFileSync(file, kind === "xml" ? F.xmlRows(F.cleanRows(2)) : F.xlsxRows(F.cleanRows(2))); setSettings({ file, sheet: "" }); return file; } };
+  const rc = init(fake.electron, { userData: dir, icon: "icon.png", templates });
+  assert.equal(appended?.label, "Удалённые подключения");
+  assert.deepEqual(appended.submenu.filter((i) => i.label).map((i) => i.label), ["Открыть список…", "Выбрать файл…", "Создать шаблон .xlsx…", "Создать шаблон .xml…"]);
+  assert.equal(fake.windows.length, 0);
+  await appended.submenu.find((i) => i.label === "Создать шаблон .xml…").click();
+  assert.deepEqual(made, ["xml"]);
+  assert.ok(fake.windows.some((w) => w.file === "remote.html"), "после шаблона открыт список");
+  assert.equal(fake.registered.length, 1, "файл выбран — клавиша включилась");
+  rc.dispose();
+  const ui = fs.readFileSync(path.join(__dirname, "../../remote/ui/remote.js"), "utf8");
+  assert.match(ui, /rc\.createTemplate\(kind\)[\s\S]{0,40}refresh/, "пустой экран создаёт шаблон сразу, а не отправляет в настройки");
+});

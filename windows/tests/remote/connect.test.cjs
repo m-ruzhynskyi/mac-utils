@@ -108,7 +108,7 @@ test("TeamViewer: запуск с -i ID без пароля в аргумент�
 
 test("TeamViewer: исходы UI Automation → тосты по дизайну; пароль затёрт в каждом", async () => {
   const cases = [
-    ["noWindow", true, /Подключено/], ["wrongPassword", false, /Проверьте пароль в файле/], ["focusLost", false, /Ввод прерван/],
+    ["noPrompt", true, /Открыт TeamViewer/], ["noWindow", false, /Введите пароль вручную/], ["wrongPassword", false, /Проверьте пароль в файле/], ["focusLost", false, /Ввод прерван/],
     ["elevated", false, /запущен от администратора/], ["fieldNotFound", false, /Введите пароль вручную/], ["cancelled", false, /Отменено/],
   ];
   for (const [state, ok, title] of cases) {

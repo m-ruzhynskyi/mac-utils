@@ -148,7 +148,7 @@ test("TeamViewer: алиас не поддерживается; пароль н�
 
 test("TeamViewer: все исходы окна → правильные сообщения, пароль затёрт, в журнале только коды", async () => {
   const cases = [
-    [{ state: "entered" }, true, null, "success"], [{ state: "noWindow" }, true, null, "success"],
+    [{ state: "entered" }, true, null, "success"], [{ state: "noPrompt" }, true, null, "info"], [{ state: "noWindow" }, false, "noWindow", "warning"],
     [{ state: "wrongPassword" }, false, "wrongPassword", "danger"], [{ state: "focusLost" }, false, "focusLost", "warning"],
     [{ state: "elevated" }, false, "elevated", "warning"], [{ state: "fieldNotFound" }, false, "fieldNotFound", "warning"],
     [{ state: "cancelled" }, false, "cancelled", "info"], [{ state: "что-то-новое" }, false, "fieldNotFound", "warning"],
@@ -260,7 +260,7 @@ test("скрипт tv-uia.ps1: проверка процесса и фокуса
 test("перебор 200 сценариев: пароль только в stdin AnyDesk / вход UIA, затёрт, нигде больше", async () => {
   let seed = 31337;
   const rnd = (n) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) >> 8) % n;
-  const uiaStates = ["entered", "noWindow", "wrongPassword", "focusLost", "elevated", "fieldNotFound", "cancelled", "unknown"];
+  const uiaStates = ["entered", "noWindow", "noPrompt", "wrongPassword", "focusLost", "elevated", "fieldNotFound", "cancelled", "unknown"];
   const seen = new Set();
   for (let i = 0; i < 200; i++) {
     const program = rnd(2) ? "anyDesk" : "teamViewer";
