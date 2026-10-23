@@ -2076,9 +2076,12 @@ async function reconnectHost(code) {
   if (!capture) return;
   hostSocket = null;
   $("liveText").textContent = "Переподключаюсь…";
-  for (const delay of [1, 2, 3, 5, 8, 10, 15]) {
+  // 44 с частых попыток (relay ждёт ведущего 45 с), затем раз в 30 с ещё 10 минут: захват идёт, эфир вернётся под тем же ID.
+  const delays = [1, 2, 3, 5, 8, 10, 15, ...Array(20).fill(30)];
+  for (const [i, delay] of delays.entries()) {
     await new Promise((r) => setTimeout(r, delay * 1000));
     if (!capture) return;
+    if (i >= 7) $("liveText").textContent = `Нет связи с сервером, пробую снова… (${i - 6} из 20)`;
     if (await openHost(code)) {
       hostSocket.onclose = (event) => hostClosed(code, event);
       $("liveText").textContent = "В эфире";

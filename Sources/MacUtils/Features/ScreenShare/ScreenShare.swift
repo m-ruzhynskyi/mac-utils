@@ -1090,7 +1090,7 @@ final class ScreenShare: NSObject, ObservableObject {
         self.socket = nil
         Log.capture.info("Трансляция: переподключаюсь")
         Task {
-            for delay in [1, 2, 3, 5, 8, 10, 15] as [UInt64] {
+            for delay in ShareHostReconnect.delays {
                 try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 guard isLive, reconnecting else { return }
                 switch await openHostSocket() {
@@ -2937,6 +2937,14 @@ enum ShareJPEG {
               let cg = CGImageSourceCreateImageAtIndex(source, 0, options) else { return nil }
         return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
+}
+
+/// Паузы между попытками ведущего вернуться на сервер: 44 с частых попыток (relay ждёт ведущего 45 с, потом зрителей
+/// отключает), затем раз в 30 с ещё 10 минут — захват не останавливается, после возврата эфир идёт под тем же ID.
+enum ShareHostReconnect {
+    static let quick: [UInt64] = [1, 2, 3, 5, 8, 10, 15]
+    static let slow: [UInt64] = Array(repeating: 30, count: 20)
+    static var delays: [UInt64] { quick + slow }
 }
 
 /// Проигрывание звука трансляции у зрителя.
