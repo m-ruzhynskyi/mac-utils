@@ -2,6 +2,7 @@ import AVFoundation
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUAppSwitcher
 
 /// Первый запуск, перенос в «Программы», уровни разрешений и общий список исключённых программ.
 @MainActor

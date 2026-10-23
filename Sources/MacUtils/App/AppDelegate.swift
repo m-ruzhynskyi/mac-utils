@@ -2,6 +2,10 @@ import AppKit
 import Carbon.HIToolbox
 import MUCore
 import MUDesign
+import MUCutPaste
+import MUFocus
+import MUSmoothScroll
+import MUAppSwitcher
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения

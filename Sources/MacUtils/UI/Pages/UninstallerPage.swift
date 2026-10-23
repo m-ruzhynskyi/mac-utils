@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUUninstaller
 
 // MARK: - Общие части страниц-инструментов (Программы, Монитор, Задачи, Очистка)
 

@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUSmoothScroll
 
 final class GlideModelTests: XCTestCase {
     /// Прогоняет кадры по 120 Гц, пока модель не успокоится; возвращает сумму отданных пикселей и число кадров.

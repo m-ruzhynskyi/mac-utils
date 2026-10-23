@@ -4,59 +4,59 @@ import CoreGraphics
 import MUCore
 
 /// Одна карточка переключателя — одно окно, как в Mission Control.
-struct SwitcherItem: Identifiable {
-    let id: String
-    let app: NSRunningApplication
-    let appName: String
-    let title: String
-    let icon: NSImage
-    let windowID: CGWindowID?
-    let axWindow: AXUIElement?
-    let isMinimized: Bool
+package struct SwitcherItem: Identifiable {
+    package let id: String
+    package let app: NSRunningApplication
+    package let appName: String
+    package let title: String
+    package let icon: NSImage
+    package let windowID: CGWindowID?
+    package let axWindow: AXUIElement?
+    package let isMinimized: Bool
 
-    var pid: pid_t { app.processIdentifier }
-    var isHidden: Bool { app.isHidden }
+    package var pid: pid_t { app.processIdentifier }
+    package var isHidden: Bool { app.isHidden }
     /// Подпись под превью: заголовок окна, а без него — имя приложения.
-    var label: String { title.isEmpty ? appName : title }
+    package var label: String { title.isEmpty ? appName : title }
 }
 
 /// Собирает окна для переключателя: обычные окна текущего рабочего стола
 /// (по порядку на экране, спереди назад), затем свёрнутые и окна скрытых приложений.
 /// Служебные окна, панели и приложения без окон не попадают в список.
-enum WindowList {
+package enum WindowList {
     private static let minSize = CGSize(width: 100, height: 60)
 
     /// Сколько секунд суммарно можно ходить в Accessibility за один сбор: зависшее приложение не должно растягивать сбор
     /// (AX-запрос к нему ждёт свой таймаут). Приложения сверх бюджета берутся только по CG, без проверки через AX.
-    static let axBudget: TimeInterval = 1.0
+    package static let axBudget: TimeInterval = 1.0
 
     /// Собирает список. Вызывается НЕ из обработчика tap и не на главном потоке: AX-запросы могут быть медленными.
     /// `axBudget: 0` — только CG (быстрый черновик без Accessibility, пока идёт полный сбор).
     /// Программа и то, что про неё читается из NSWorkspace: снимается на главном потоке (Apple гарантирует актуальность
     /// этих свойств только там), а в фон уходит готовый снимок.
-    struct AppInfo {
-        let app: NSRunningApplication
-        let name: String
-        let icon: NSImage
-        let isHidden: Bool
+    package struct AppInfo {
+        package let app: NSRunningApplication
+        package let name: String
+        package let icon: NSImage
+        package let isHidden: Bool
         /// Только у самого Mac Utils: его окна из `NSApp.windows` (к своему процессу AX не ходим — из фона это падение AppKit).
-        var ownWindows: [OwnWindow]?
+        package var ownWindows: [OwnWindow]?
     }
 
     /// Своё окно для переключателя — снимок с главного потока.
-    struct OwnWindow: Equatable {
-        let number: CGWindowID
-        let title: String
-        let isMinimized: Bool
-        let isVisible: Bool
+    package struct OwnWindow: Equatable {
+        package let number: CGWindowID
+        package let title: String
+        package let isMinimized: Bool
+        package let isVisible: Bool
     }
 
-    static var ownPID: pid_t { ProcessInfo.processInfo.processIdentifier }
+    package static var ownPID: pid_t { ProcessInfo.processInfo.processIdentifier }
 
     /// Mac Utils в своём переключателе — пока у него есть значок в Dock (открыт редактор или трансляция, либо
     /// включено «Показывать в Dock»); с `.accessory` его в списке нет.
     @MainActor
-    static func snapshotApps(includeSelf: Bool? = nil) -> UncheckedSendable<[pid_t: AppInfo]> {
+    package static func snapshotApps(includeSelf: Bool? = nil) -> UncheckedSendable<[pid_t: AppInfo]> {
         let includeSelf = includeSelf ?? (NSApp.activationPolicy() == .regular)
         let ownPID = ownPID
         var apps = Dictionary(NSWorkspace.shared.runningApplications
@@ -77,25 +77,25 @@ enum WindowList {
     /// окна без заголовка и не на обычном уровне — нет. `canBecomeMain` у не показанного (свёрнутого) окна всегда false —
     /// проверяем его только у показанного.
     @MainActor
-    static func isSwitchable(_ window: NSWindow) -> Bool {
+    package static func isSwitchable(_ window: NSWindow) -> Bool {
         !(window is NSPanel) && (!window.isVisible || window.canBecomeMain) && window.styleMask.contains(.titled)
             && !window.title.isEmpty && window.level == .normal && !window.ignoresMouseEvents
     }
 
     @MainActor
-    static func ownWindows(_ windows: [NSWindow]) -> [OwnWindow] {
+    package static func ownWindows(_ windows: [NSWindow]) -> [OwnWindow] {
         windows.filter { isSwitchable($0) && ($0.isVisible || $0.isMiniaturized) && $0.windowNumber > 0 }.map {
             OwnWindow(number: CGWindowID($0.windowNumber), title: $0.title, isMinimized: $0.isMiniaturized, isVisible: $0.isVisible)
         }
     }
 
     /// Свои окна, которых нет среди видимых по CG (свёрнутые или все — если Mac Utils скрыт), в порядке `NSApp.windows`.
-    static func ownBackground(_ windows: [OwnWindow], appHidden: Bool, used: Set<CGWindowID>) -> [OwnWindow] {
+    package static func ownBackground(_ windows: [OwnWindow], appHidden: Bool, used: Set<CGWindowID>) -> [OwnWindow] {
         windows.filter { ($0.isMinimized || appHidden) && !used.contains($0.number) }
     }
 
     /// Ключи видимых окон текущего рабочего стола (`w<номер>`): быстрый запрос CG без Accessibility.
-    static func visibleWindowKeys() -> Set<String> {
+    package static func visibleWindowKeys() -> Set<String> {
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         return Set(list.compactMap { info in
             guard (info[kCGWindowLayer as String] as? Int) == 0, ((info[kCGWindowAlpha as String] as? Double) ?? 1) > 0,
@@ -104,7 +104,7 @@ enum WindowList {
         })
     }
 
-    static func collect(recent: [pid_t], apps snapshot: UncheckedSendable<[pid_t: AppInfo]>,
+    package static func collect(recent: [pid_t], apps snapshot: UncheckedSendable<[pid_t: AppInfo]>,
                         axBudget: TimeInterval = WindowList.axBudget) -> [SwitcherItem] {
         let deadline = Date().addingTimeInterval(axBudget)
         let infos = snapshot.value
@@ -200,22 +200,22 @@ enum WindowList {
         app.localizedName ?? app.bundleIdentifier ?? "?"
     }
 
-    static func icon(of app: NSRunningApplication) -> NSImage {
+    package static func icon(of app: NSRunningApplication) -> NSImage {
         app.icon ?? NSWorkspace.shared.icon(for: .application)
     }
 }
 
 /// Окно приложения по данным Accessibility.
-struct AXWindowInfo {
-    let element: AXUIElement
-    let windowID: CGWindowID?
-    let title: String
-    let frame: CGRect
-    let isMinimized: Bool
-    let isStandard: Bool
+package struct AXWindowInfo {
+    package let element: AXUIElement
+    package let windowID: CGWindowID?
+    package let title: String
+    package let frame: CGRect
+    package let isMinimized: Bool
+    package let isStandard: Bool
 
     /// nil — приложение не ответило по AX (тогда окна проверяются только по CG).
-    static func windows(pid: pid_t) -> [AXWindowInfo]? {
+    package static func windows(pid: pid_t) -> [AXWindowInfo]? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.15)
         var value: CFTypeRef?
@@ -224,7 +224,7 @@ struct AXWindowInfo {
         return elements.map(AXWindowInfo.init)
     }
 
-    init(_ element: AXUIElement) {
+    package init(_ element: AXUIElement) {
         self.element = element
         // Таймаут задаём на самом окне: наследуют ли его дочерние элементы приложения, не гарантировано.
         AXUIElementSetMessagingTimeout(element, 0.15)
@@ -262,7 +262,7 @@ struct AXWindowInfo {
 }
 
 /// CGWindowID окна Accessibility через закрытую `_AXUIElementGetWindow`.
-enum AXWindowID {
+package enum AXWindowID {
     private typealias GetWindow = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
 
     private static let function: GetWindow? = {
@@ -271,7 +271,7 @@ enum AXWindowID {
         return unsafeBitCast(symbol, to: GetWindow.self)
     }()
 
-    static func of(_ element: AXUIElement) -> CGWindowID? {
+    package static func of(_ element: AXUIElement) -> CGWindowID? {
         guard let function else { return nil }
         var id: CGWindowID = 0
         return function(element, &id) == .success && id != 0 ? id : nil
@@ -280,8 +280,8 @@ enum AXWindowID {
 
 /// Надёжная активация выбранного окна из фонового процесса.
 @MainActor
-enum WindowActivation {
-    static func activate(_ item: SwitcherItem) {
+package enum WindowActivation {
+    package static func activate(_ item: SwitcherItem) {
         if item.pid == WindowList.ownPID { return activateOwn(item) }
         let app = item.app
         if app.isHidden { app.unhide() }

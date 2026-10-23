@@ -4,11 +4,11 @@ import MUCore
 import MUDesign
 
 @MainActor
-final class SwitcherPanelController {
+package final class SwitcherPanelController {
     private var panel: NSPanel?
     private var host: NSHostingView<SwitcherView>?
 
-    func show() {
+    package func show() {
         let panel = self.panel ?? makePanel()
         guard let host else { return }
         let screen = NSScreen.withMouse ?? NSScreen.main
@@ -24,7 +24,7 @@ final class SwitcherPanelController {
         panel.orderFrontRegardlessOnScreen()
     }
 
-    func hide() {
+    package func hide() {
         panel?.orderOut(nil)
     }
 
@@ -46,13 +46,13 @@ final class SwitcherPanelController {
     }
 }
 
-struct SwitcherView: View {
-    @ObservedObject var model: AppSwitcher
-    let maxWidth: CGFloat
+package struct SwitcherView: View {
+    @ObservedObject package var model: AppSwitcher
+    package let maxWidth: CGFloat
 
     @AppStorage(Pref.switcherPreviews) private var showPreviews = true
 
-    var body: some View {
+    package var body: some View {
         SwitcherContent(items: model.items, selected: model.selected, previews: model.previews,
                         showPreviews: showPreviews, maxWidth: maxWidth,
                         hover: { model.selected = $0 }, choose: { model.choose($0) })
@@ -61,14 +61,14 @@ struct SwitcherView: View {
 
 /// Сетка карточек переключателя (Graphite: `panel`, обводка `line`, радиус 24; выбранная — `field` и рамка `accLine` 2 pt).
 /// Без модели — чтобы рисовать на готовых данных (снимки интерфейса).
-struct SwitcherContent: View {
-    let items: [SwitcherItem]
-    let selected: Int
-    let previews: [CGWindowID: NSImage]
-    var showPreviews = true
-    let maxWidth: CGFloat
-    var hover: (Int) -> Void = { _ in }
-    var choose: (Int) -> Void = { _ in }
+package struct SwitcherContent: View {
+    package let items: [SwitcherItem]
+    package let selected: Int
+    package let previews: [CGWindowID: NSImage]
+    package var showPreviews = true
+    package let maxWidth: CGFloat
+    package var hover: (Int) -> Void = { _ in }
+    package var choose: (Int) -> Void = { _ in }
 
     private let thumbSize = CGSize(width: 200, height: 125)
     private let spacing: CGFloat = 8
@@ -79,7 +79,7 @@ struct SwitcherContent: View {
         return max(1, min(items.count, fit))
     }
 
-    var body: some View {
+    package var body: some View {
         let grid = Array(repeating: GridItem(.fixed((showPreviews ? thumbSize.width : 72) + 16), spacing: spacing),
                          count: columns)
         LazyVGrid(columns: grid, spacing: spacing) {

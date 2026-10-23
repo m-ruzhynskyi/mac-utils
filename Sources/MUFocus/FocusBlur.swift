@@ -8,12 +8,12 @@ import MUDesign
 /// другие окна и рабочий стол — размывается и чуть затемняется.
 /// Размытие — прозрачные окна на каждом экране, которые держатся сразу под окном программы.
 @MainActor
-final class FocusBlur: ObservableObject {
-    static let shared = FocusBlur()
+package final class FocusBlur: ObservableObject {
+    package static let shared = FocusBlur()
 
     /// Программа в фокусе (bundle id); nil — режим выключен.
-    @Published private(set) var target: String?
-    @Published private(set) var targetName = ""
+    @Published package private(set) var target: String?
+    @Published package private(set) var targetName = ""
 
     private var overlays: [NSWindow] = []
     private var timer: Timer?
@@ -23,12 +23,12 @@ final class FocusBlur: ObservableObject {
     private var pollInterval: TimeInterval?
     private var visible = false
 
-    static var follow: Bool { UserDefaults.standard.bool(forKey: Pref.focusFollow) }
-    static var strength: Double { UserDefaults.standard.double(forKey: Pref.focusStrength) }
+    package static var follow: Bool { UserDefaults.standard.bool(forKey: Pref.focusFollow) }
+    package static var strength: Double { UserDefaults.standard.double(forKey: Pref.focusStrength) }
 
-    var isOn: Bool { target != nil }
+    package var isOn: Bool { target != nil }
 
-    func sync() {
+    package func sync() {
         let center = HotKeyCenter.shared
         guard UserDefaults.standard.bool(forKey: Pref.focus) else {
             center.unregister(id: HotKeyID.focus)
@@ -42,13 +42,13 @@ final class FocusBlur: ObservableObject {
     }
 
     /// ⌃⌥F: включить для активной программы или выключить.
-    func toggle() {
+    package func toggle() {
         if isOn { stop() } else if let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() {
             start(app)
         }
     }
 
-    func start(_ app: NSRunningApplication) {
+    package func start(_ app: NSRunningApplication) {
         guard let bundle = app.bundleIdentifier else { return }
         target = bundle
         targetName = app.localizedName ?? bundle
@@ -79,7 +79,7 @@ final class FocusBlur: ObservableObject {
         update()
     }
 
-    func stop() {
+    package func stop() {
         target = nil
         timer?.invalidate()
         timer = nil
@@ -226,16 +226,16 @@ final class FocusBlur: ObservableObject {
         }
     }
 
-    func restyle() {
+    package func restyle() {
         applyStyle()
     }
 }
 
 /// Чистая логика над списком окон CG (для тестов).
-enum FocusWindows {
+package enum FocusWindows {
     /// Самое нижнее из подряд идущих сверху окон программы `pid` (список спереди назад). Свои окна и окна с layer != 0 пропускаются;
     /// как только после окон программы идёт чужое окно, цепочка заканчивается. nil — у программы нет окон сверху.
-    static func lowestFront(in list: [[String: Any]], pid: pid_t, ownPID: pid_t) -> Int? {
+    package static func lowestFront(in list: [[String: Any]], pid: pid_t, ownPID: pid_t) -> Int? {
         var lowest: Int?
         for info in list {
             guard (info[kCGWindowLayer as String] as? Int) == 0,
@@ -251,12 +251,12 @@ enum FocusWindows {
 }
 
 /// Как часто опрашивать порядок окон.
-enum FocusPolling {
-    static let activeInterval: TimeInterval = 0.5
-    static let waitingForWindowInterval: TimeInterval = 1
+package enum FocusPolling {
+    package static let activeInterval: TimeInterval = 0.5
+    package static let waitingForWindowInterval: TimeInterval = 1
 
     /// nil — опрос не нужен: целевая программа не впереди, возврат придёт уведомлением об активации.
-    static func interval(targetIsFront: Bool, hasWindow: Bool) -> TimeInterval? {
+    package static func interval(targetIsFront: Bool, hasWindow: Bool) -> TimeInterval? {
         guard targetIsFront else { return nil }
         return hasWindow ? activeInterval : waitingForWindowInterval
     }
@@ -264,14 +264,17 @@ enum FocusPolling {
 
 // MARK: - Настройки
 
-struct FocusPage: View {
+package struct FocusPage: View {
+    package init() {
+    }
+
     @AppStorage(Pref.focus) private var enabled = true
     @AppStorage(Pref.focusFollow) private var follow = false
     @AppStorage(Pref.focusStrength) private var strength = 0.6
     @ObservedObject private var focus = FocusBlur.shared
     @State private var apps: [NSRunningApplication] = []
 
-    var body: some View {
+    package var body: some View {
         SettingsPage(.focus, isOn: $enabled, toggleLabel: "Режим «Фокус»") {
             GroupLabel("Сейчас")
             ListCard {

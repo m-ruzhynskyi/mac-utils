@@ -3,15 +3,15 @@ import Security
 import MUDesign
 
 /// Установленное приложение.
-struct InstalledApp: Identifiable, Hashable {
-    let url: URL
-    let name: String
-    let bundleID: String
-    let teamID: String?
+package struct InstalledApp: Identifiable, Hashable {
+    package let url: URL
+    package let name: String
+    package let bundleID: String
+    package let teamID: String?
 
-    var id: URL { url }
+    package var id: URL { url }
 
-    init?(url: URL) {
+    package init?(url: URL) {
         guard let bundle = Bundle(url: url), let bundleID = bundle.bundleIdentifier else { return nil }
         self.url = url
         self.bundleID = bundleID
@@ -22,7 +22,7 @@ struct InstalledApp: Identifiable, Hashable {
     }
 
     /// Почему приложение нельзя удалять (системное, Apple, сам Mac Utils).
-    var refusal: String? {
+    package var refusal: String? {
         if url.path.hasPrefix("/System/") { return "Системное приложение macOS" }
         if bundleID.hasPrefix("com.apple.") { return "Приложение Apple" }
         if bundleID == Bundle.main.bundleIdentifier { return "Это сам Mac Utils" }
@@ -39,7 +39,7 @@ struct InstalledApp: Identifiable, Hashable {
     }
 
     /// Приложения из /Applications и ~/Applications (с подпапками первого уровня).
-    static func all() -> [InstalledApp] {
+    package static func all() -> [InstalledApp] {
         let manager = FileManager.default
         let roots = [URL(fileURLWithPath: "/Applications"),
                      manager.homeDirectoryForCurrentUser.appendingPathComponent("Applications")]
@@ -66,39 +66,39 @@ struct InstalledApp: Identifiable, Hashable {
 }
 
 /// Найденный «хвост» приложения.
-struct Leftover: Identifiable, Hashable {
-    enum Kind { case app, file, receipt }
+package struct Leftover: Identifiable, Hashable {
+    package enum Kind { case app, file, receipt }
 
-    let url: URL
-    let group: String
-    let kind: Kind
+    package let url: URL
+    package let group: String
+    package let kind: Kind
     /// Найдено по совпадению Team ID (общая папка разработчика) — по умолчанию не отмечено.
-    let shared: Bool
-    let needsAdmin: Bool
+    package let shared: Bool
+    package let needsAdmin: Bool
     /// Найдено только по имени папки, без bundle id — по умолчанию не отмечено.
-    var nameOnly = false
+    package var nameOnly = false
     /// Размер не считаем (контейнеры других приложений защищены macOS).
-    let sizeUnknown: Bool
+    package let sizeUnknown: Bool
 
-    var id: URL { url }
-    var checkedByDefault: Bool { kind != .receipt && !shared && !nameOnly }
+    package var id: URL { url }
+    package var checkedByDefault: Bool { kind != .receipt && !shared && !nameOnly }
 }
 
 /// Поиск файлов приложения в стандартных папках. Только точные совпадения:
 /// bundle id (и «bundle id.что-то»), точное имя папки, префикс Team ID.
-enum AppScanner {
-    struct Location {
-        let path: String
-        let group: String
+package enum AppScanner {
+    package struct Location {
+        package let path: String
+        package let group: String
         /// Сравнивать с именем приложения (только для папок данных).
-        var byName = false
+        package var byName = false
         /// Группы приложений: «TEAMID.…».
-        var byTeam = false
-        var receipts = false
-        var protected = false
+        package var byTeam = false
+        package var receipts = false
+        package var protected = false
     }
 
-    static var locations: [Location] {
+    package static var locations: [Location] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var list: [Location] = [
             Location(path: "\(home)/Library/Application Support", group: "Данные приложения", byName: true),
@@ -130,7 +130,7 @@ enum AppScanner {
     }
 
     /// Папки данных, которые принадлежат системе или общим службам: по одному имени их не связываем с приложением.
-    static let systemNames: Set<String> = [
+    package static let systemNames: Set<String> = [
         "apple", "google", "microsoft", "adobe", "mozilla", "addressbook", "knowledge", "callhistorydb",
         "callhistorytransactions", "cloudstorage", "com.apple", "crashreporter", "diagnosticreports",
         "dock", "icloud", "mobilesync", "networkserviceproxy", "notes", "safari", "syncservices",
@@ -140,7 +140,7 @@ enum AppScanner {
 
     /// Другие установленные приложения того же разработчика (для пометки «общее»).
     /// `locations` — для тестов; по умолчанию стандартные папки.
-    static func scan(_ app: InstalledApp, others: [InstalledApp], locations: [Location]? = nil) -> [Leftover] {
+    package static func scan(_ app: InstalledApp, others: [InstalledApp], locations: [Location]? = nil) -> [Leftover] {
         let manager = FileManager.default
         var result: [Leftover] = [
             Leftover(url: app.url, group: "Приложение", kind: .app, shared: false,
@@ -200,7 +200,7 @@ enum AppScanner {
     }
 
     /// Размер файла или папки на диске (байты).
-    static func size(of url: URL) -> Int64 {
+    package static func size(of url: URL) -> Int64 {
         let keys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey, .isDirectoryKey]
         guard let values = try? url.resourceValues(forKeys: keys) else { return 0 }
         guard values.isDirectory == true else { return Int64(values.totalFileAllocatedSize ?? 0) }

@@ -5,11 +5,11 @@ import MUDesign
 
 /// Плавающая панель с вырезанными файлами, видна только пока активен Finder.
 @MainActor
-final class CutPanelController {
+package final class CutPanelController {
     private var panel: NSPanel?
     private var host: NSHostingView<CutPanelView>?
 
-    func show() {
+    package func show() {
         let panel = self.panel ?? makePanel()
         if let host {
             let size = host.fittingSize
@@ -24,7 +24,7 @@ final class CutPanelController {
         panel.orderFrontRegardlessOnScreen()
     }
 
-    func hide() {
+    package func hide() {
         panel?.orderOut(nil)
     }
 
@@ -47,21 +47,21 @@ final class CutPanelController {
     }
 }
 
-struct CutPanelView: View {
-    @ObservedObject var model: FinderCutPaste
+package struct CutPanelView: View {
+    @ObservedObject package var model: FinderCutPaste
 
-    var body: some View {
+    package var body: some View {
         CutPanelContent(items: model.items, isBusy: model.isBusy, cancel: { model.cancelCut() })
     }
 }
 
 /// Панель вырезанных файлов (Graphite: `panel`, обводка `line`, радиус 20). Без модели — для снимков интерфейса.
-struct CutPanelContent: View {
-    let items: [URL]
-    var isBusy = false
-    var cancel: () -> Void = {}
+package struct CutPanelContent: View {
+    package let items: [URL]
+    package var isBusy = false
+    package var cancel: () -> Void = {}
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "scissors").font(.system(size: 14, weight: .medium)).foregroundStyle(.dsAccText)

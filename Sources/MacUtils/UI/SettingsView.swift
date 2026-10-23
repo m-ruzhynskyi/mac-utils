@@ -2,6 +2,7 @@ import AppKit
 import ServiceManagement
 import SwiftUI
 import MUDesign
+import MUFocus
 
 // MARK: - Модель разрешений
 

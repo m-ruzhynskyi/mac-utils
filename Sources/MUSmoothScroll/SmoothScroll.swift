@@ -8,10 +8,10 @@ import MUDesign
 /// Трекпад и Magic Mouse (события с фазами) не затрагиваются; непрерывные
 /// события без фаз от драйверов мышей (Logi Options+) тоже сглаживаются.
 @MainActor
-final class SmoothScroll: NSObject, ObservableObject {
-    static let shared = SmoothScroll()
+package final class SmoothScroll: NSObject, ObservableObject {
+    package static let shared = SmoothScroll()
 
-    @Published private(set) var isRunning = false
+    @Published package private(set) var isRunning = false
 
     /// Метка наших собственных событий, чтобы tap их пропускал.
     private static let marker: Int64 = 0x4D55_5343
@@ -27,7 +27,7 @@ final class SmoothScroll: NSObject, ObservableObject {
         super.init()
     }
 
-    func sync() {
+    package func sync() {
         let wanted = UserDefaults.standard.bool(forKey: Pref.smoothScroll) && Permissions.accessibility
         if wanted {
             if tap == nil {
