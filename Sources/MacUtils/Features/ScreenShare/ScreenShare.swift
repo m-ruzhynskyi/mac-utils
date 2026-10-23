@@ -1766,16 +1766,20 @@ final class ShareViewer: ObservableObject {
     }
 
     private func receive(_ socket: URLSessionWebSocketTask) {
-        Self.listen(socket, video: video)
+        Self.listen(socket, video: video, acks: acks)
     }
+
+    /// Счёт видеопакетов для подтверждения relay (`ack`): по нему relay не копит очередь на медленном зрителе.
+    let acks = ShareVideoAck()
 
     /// Чтение сокета. Видео H.264 уходит в проигрыватель прямо из колбэка, и следующее чтение взводится сразу:
     /// занятый главный поток не тормозит картинку. На главный — только учёт и остальные сообщения.
-    nonisolated private static func listen(_ socket: URLSessionWebSocketTask, video: H264Player) {
+    nonisolated private static func listen(_ socket: URLSessionWebSocketTask, video: H264Player, acks: ShareVideoAck) {
         socket.receive { result in
             if case .success(.data(let data)) = result, data.first == H264Packet.type {
                 video.play(data.dropFirst(), from: socket)
-                listen(socket, video: video)
+                if let n = acks.received(on: socket) { socket.send(.string(ShareVideoAck.message(n))) { _ in } }
+                listen(socket, video: video, acks: acks)
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         let viewer = ShareViewer.shared
@@ -1800,6 +1804,7 @@ final class ShareViewer: ObservableObject {
                         viewer.reconnectsMade = 0
                         switch data.first {
                         case ShareProtocol.frame:
+                            if let n = viewer.acks.received(on: socket) { socket.send(.string(ShareVideoAck.message(n))) { _ in } }
                             viewer.jpegFrames += 1
                             if ShareVideoMode.jpegIsBridge(now: Date(), lastVideo: viewer.lastVideoAt),
                                let image = NSImage(data: data.dropFirst()) {
@@ -2787,6 +2792,26 @@ enum ShareProtocol {
               let channel = buffer.floatChannelData?[0] else { return nil }
         return audioPacket(Array(UnsafeBufferPointer(start: channel, count: Int(frames))))
     }
+}
+
+/// Подтверждение приёма видео: каждые `every` пакетов (H.264 и картинки) зритель сообщает relay, сколько получил за
+/// соединение. Старый relay сообщение игнорирует.
+final class ShareVideoAck: @unchecked Sendable {
+    static let every = 10
+    private let lock = NSLock()
+    private var owner: ObjectIdentifier?
+    private var count = 0
+
+    /// Пакет пришёл по `socket`; число, если пора подтверждать. Новый сокет — счёт заново (как у relay).
+    func received(on socket: AnyObject) -> Int? {
+        lock.lock(); defer { lock.unlock() }
+        let id = ObjectIdentifier(socket)
+        if owner != id { owner = id; count = 0 }
+        count += 1
+        return count % Self.every == 0 ? count : nil
+    }
+
+    static func message(_ n: Int) -> String { "{\"type\":\"ack\",\"n\":\(n)}" }
 }
 
 /// Проигрывание звука трансляции у зрителя.

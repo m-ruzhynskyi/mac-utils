@@ -313,6 +313,7 @@
   <label class="muted" id="allowSwitchBox" style="display:none"><input type="checkbox" id="allowSwitch" style="width:auto"> Зрители могут переключать мои мониторы<span class="new" id="allowSwitchNew">НОВОЕ</span></label>
   <p class="muted" id="allowSwitchHint" style="display:none">По умолчанию выключено. Включите — и зритель сам выберет монитор, вы увидите уведомление. Только когда показываете экран целиком; выбор запоминается.</p>
   <div id="muteBox" class="muted" style="display:none; margin-top:6px">Не передавать звук программ (например, созвона):
+    <label id="muteCallsBox" style="display:none; white-space:nowrap"><input type="checkbox" id="muteCalls" checked style="width:auto"> Не передавать звонки (Discord, Zoom, Teams, Telegram…)</label>
     <div id="muteApps"></div></div>
   <div style="text-align:right; margin-top:10px"><button id="pickerCancel">Отмена</button></div>
 </div></div>
@@ -330,6 +331,7 @@
 <div id="game"></div>
 <div id="mutePanel" class="floatBox"><div class="head"><b>Не передавать звук программ</b><button id="muteClose" aria-label="Закрыть">✕</button></div>
   <p class="muted" style="margin:0 0 8px">Отмеченных программ зрители не слышат. Меняется сразу, прямо в эфире.</p>
+  <label id="muteCallsLive" style="display:none; margin-bottom:8px"><input type="checkbox" id="muteCallsLiveBox" style="width:auto"> Звонки (Discord, Zoom, Teams, Telegram…)</label>
   <div id="muteLive"></div></div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -469,6 +471,7 @@ const AUTH_ERRORS = {
   "upgrade-required": "Сервер требует новую версию приложения — обновите Mac Utils Share.",
   "no-key": "Сервер проверяет ключ устройства, а эта версия приложения так не умеет — обновите Mac Utils Share.",
 };
+const VIEW_ACK_EVERY = 10;
 const CLOSE_CODES = { 4400: "id-format", 4401: "bad-signature", 4403: "id-claimed", 4408: "auth-timeout",
                       4409: "replaced", 4426: "upgrade-required", 4429: "rate-limited" };
 // Текст для статуса (HTML): свои сообщения — как есть, сообщение relay — экранированным.
@@ -911,12 +914,31 @@ async function watch() {
   stopWatch();
   status("Подключаюсь…");
   watchingId = id;
+  viewRetries = 0;
+  openView(id);
+}
+
+// Повторы после обрыва: как на Mac (`ShareViewerReconnect`) — 1, 2, 4, 8, 15, 15, 15 с, последний кадр остаётся на экране.
+const VIEW_RETRY_SECONDS = [1, 2, 4, 8, 15, 15, 15];
+let viewRetries = 0, viewRetryTimer = 0;
+function scheduleViewRetry(id) {
+  if (viewRetries >= VIEW_RETRY_SECONDS.length) { status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); return; }
+  const delay = VIEW_RETRY_SECONDS[viewRetries++];
+  status(`Связь потеряна, переподключаюсь… (${viewRetries} из ${VIEW_RETRY_SECONDS.length})`);
+  clearTimeout(viewRetryTimer);
+  viewRetryTimer = setTimeout(() => { if (watchingId === id && !viewSocket) openView(id); }, delay * 1000);
+}
+
+function openView(id) {
   viewHostKey = null; viewError = null;
   $("leave").style.display = "";
   const h264 = typeof VideoDecoder !== "undefined" ? "&h264=1" : "";
   const auth = authParam("signViewer") ? `&${authParam("signViewer")}` : "";
   const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}${h264}${auth}`);
   viewSocket.binaryType = "arraybuffer";
+  // Подтверждаем приём видео каждые ACK_EVERY пакетов: relay по этому видит, не отстал ли зритель, и ему не копит очередь.
+  let videoSeen = 0;
+  viewSocket.onopen = () => { viewRetries = 0; };
   viewSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
       let m; try { m = JSON.parse(event.data); } catch (_) { return; }
@@ -938,6 +960,7 @@ async function watch() {
       return;
     }
     const bytes = new Uint8Array(event.data);
+    if ((bytes[0] === 1 || bytes[0] === 3) && ++videoSeen % VIEW_ACK_EVERY === 0 && ws.readyState === 1) ws.send(JSON.stringify({ type: "ack", n: videoSeen }));
     if (bytes[0] === 1) {
       if (!jpegIsBridge(performance.now(), lastH264At)) return;
       const url = URL.createObjectURL(new Blob([bytes.subarray(1)], { type: "image/jpeg" }));
@@ -957,9 +980,13 @@ async function watch() {
     }
   };
   viewSocket.onclose = (event) => {
-    if (event.code === 1000 || !viewSocket) return;
+    if (event.code === 1000 || ws !== viewSocket) return;
     const code = CLOSE_CODES[event.code];
-    status(code ? authError(code, viewError?.message) : "Сейчас этот ID ничего не транслирует (или связь прервалась)");
+    if (code) { status(authError(code, viewError?.message)); return; }
+    // Обрыв сети, сон, перезапуск relay: до 7 попыток; не повторяем, если ведущий отказал (`declined`) или закончил (`ended`) —
+    // там stopWatch сам закрывает сокет с кодом 1000 и сюда не попадаем.
+    viewSocket = null;
+    scheduleViewRetry(id);
   };
 }
 
@@ -1040,6 +1067,7 @@ function stopWatch(keepStatus) {
   decoder = null;
   if (latestFrame) { latestFrame.close(); latestFrame = null; }
   $("video").style.display = "none"; $("screen").style.display = "";
+  clearTimeout(viewRetryTimer); viewRetries = 0;
   if (viewSocket) { viewSocket.onclose = null; viewSocket.close(1000); viewSocket = null; }
   watching = false; $("tools").style.display = "none";
   resetMonitors();
@@ -1173,6 +1201,11 @@ $("gameInvite").onclick = () => gameInvite("host", hostName || display(watchingI
 async function showMutePanel() {
   const list = $("muteLive");
   const saved = store.get("mu-muted-apps", []);
+  // Звонки исключаются сами (приложение знает их по имени программы); здесь их можно вернуть в трансляцию.
+  const callsLive = $("muteCallsLive");
+  callsLive.style.display = window.mu.setMuteCalls ? "" : "none";
+  $("muteCallsLiveBox").checked = store.get("mu-mute-calls", true);
+  $("muteCallsLiveBox").onchange = () => { store.set("mu-mute-calls", $("muteCallsLiveBox").checked); window.mu.setMuteCalls($("muteCallsLiveBox").checked); };
   const apps = (await window.mu.audioApps()) || [];
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
@@ -1205,6 +1238,9 @@ async function showMuteApps() {
   const apps = await window.mu.audioApps();
   if (!apps) { box.style.display = "none"; return; }
   helperAvailable = true;
+  // Старое приложение звонки само не исключает — тогда и галочки нет.
+  $("muteCallsBox").style.display = window.mu.setMuteCalls ? "" : "none";
+  $("muteCalls").checked = store.get("mu-mute-calls", true);
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
   if (!names.length) list.textContent = "Сейчас ни одна программа не играет звук — отметить можно и потом, прямо в эфире (кнопка «🔇 Звук»).";
@@ -1237,7 +1273,9 @@ function pickSource() {
         store.set("mu-muted-apps", muted);
         // Новые версии приложения: звук всегда через помощник — список можно менять в эфире.
         useHelperAudio = $("withAudio").checked && helperAvailable && !!window.mu.startAudio && (!!window.mu.setMuted || muted.length > 0);
-        await window.mu.choose(source.id, $("withAudio").checked, muted);
+        const muteCalls = !window.mu.setMuteCalls || $("muteCalls").checked;
+        store.set("mu-mute-calls", muteCalls);
+        await window.mu.choose(source.id, $("withAudio").checked, muted, muteCalls);
         resolve(true);
       };
       grid.appendChild(item);

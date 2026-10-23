@@ -1139,3 +1139,33 @@ test('switch-request тратит токены зрителя: больше вс
   for (let i = 0; i < 60; i++) f.room.webSocketMessage(viewer, '{"type":"switch-request","display":2,"rev":1}');
   assert.equal(host.messages.filter((m) => m.type === 'switch-request').length, 60);
 });
+
+test('медленный зритель: долг больше предела — дельта-кадры пропускаются до ключевого, ведущему уходит запрос ключевого, остальные не страдают', () => {
+  const f = fixture(), host = hostLive(f);
+  const slow = f.socket('viewer', { id: '1', approved: true, lastSeen: 1_000_000 });
+  const fast = f.socket('viewer', { id: '2', approved: true, lastSeen: 1_000_000 });
+  const old = f.socket('viewer', { id: '3', approved: true, lastSeen: 1_000_000 });
+  const got = new Map();
+  for (const v of [slow, fast, old]) { got.set(v, 0); v.send = (m) => { if (typeof m === 'string') v.messages.push(JSON.parse(m)); else got.set(v, got.get(v) + 1); }; }
+  const frame = (key) => new Uint8Array([3, key ? 1 : 0, 0, 0, 1]).buffer;
+  const ack = (v, n) => f.room.webSocketMessage(v, JSON.stringify({ type: 'ack', n }));
+  f.room.webSocketMessage(host, frame(true));
+  ack(slow, 1); ack(fast, 1); // оба подтверждающие; old не подтверждает никогда
+  const asks = () => host.messages.filter((m) => m.type === 'viewers').length;
+  const before = asks();
+  for (let i = 0; i < 100; i++) { f.room.webSocketMessage(host, frame(false)); ack(fast, got.get(fast)); }
+  assert.equal(got.get(fast), 101, 'быстрый получил всё');
+  assert.equal(got.get(old), 101, 'старый клиент без ack — как раньше');
+  assert.equal(got.get(slow), 62, 'медленный: пакеты до предела долга, дальше пропуск');
+  assert.equal(asks(), before, 'пока долг велик, ключевой не просим (зритель всё ещё получает старое)');
+  ack(slow, 62);
+  f.room.webSocketMessage(host, frame(false));
+  assert.equal(got.get(slow), 62, 'дельта-кадр после спада долга всё ещё пропущен');
+  assert.equal(asks(), before + 1, 'долг спал — просим у ведущего ключевой');
+  f.room.webSocketMessage(host, frame(true));
+  assert.equal(got.get(slow), 63, 'ключевой кадр возобновил поток');
+  f.room.webSocketMessage(host, frame(false));
+  assert.equal(got.get(slow), 64);
+  ack(slow, 9999); // подтвердить больше отправленного нельзя
+  assert.equal(f.room.flow.get(slow).acked, 62);
+});
