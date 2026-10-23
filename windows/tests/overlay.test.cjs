@@ -154,7 +154,7 @@ function electron(world) {
       desktopCapturer: { getSources: async () => world.sources },
       ipcMain: { on: (name, fn) => ipc.set(name, fn), handle: (name, fn) => handles.set(name, fn) },
       session: { defaultSession: { webRequest: { onBeforeSendHeaders() {} }, setDisplayMediaRequestHandler: (fn) => { displayMedia = fn; } } },
-      dialog: {}, shell: {},
+      dialog: { showMessageBox: async (...args) => { world.dialogs = (world.dialogs || 0) + 1; return { response: 1 }; } }, shell: {},
     },
   };
 }
@@ -162,8 +162,9 @@ function electron(world) {
 // Загрузить main.js с этим «Windows»: Electron, electron-updater, помощник (spawn) и его наличие (fs.existsSync).
 async function start(world) {
   const fake = electron(world);
-  const trackers = [];
-  const childProcess = { ...require("node:child_process"), spawn: () => {
+  const trackers = [], spawned = [], updater = new Map();
+  const childProcess = { ...require("node:child_process"), spawn: (file, args) => {
+    spawned.push(args);
     const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), kill() {} });
     trackers.push(child); return child;
   }, execFile: (_file, args, _opts, done) => fake.helper(args, done) };
@@ -172,7 +173,7 @@ async function start(world) {
   const load = Module._load, intervals = [], realInterval = global.setInterval;
   Module._load = function (request, ...rest) {
     if (request === "electron") return fake.module;
-    if (request === "electron-updater") return { autoUpdater: { on() {}, checkForUpdates: async () => {} } };
+    if (request === "electron-updater") return { autoUpdater: { on: (name, fn) => updater.set(name, fn), checkForUpdates: async () => {} } };
     if (request === "child_process") return childProcess;
     if (request === "fs") return fakeFs;
     return load.call(this, request, ...rest);
@@ -185,7 +186,7 @@ async function start(world) {
     await tick();
   } finally { Module._load = load; global.setInterval = realInterval; }
   const host = {
-    fake, trackers,
+    fake, trackers, spawned, updater,
     stop() { intervals.forEach(clearInterval); },
     // Ведущий выбрал источник и страница начала захват.
     async share(sourceId) {
@@ -844,5 +845,43 @@ test("система ужала окно меток до рабочей обла
     assert.ok(Math.abs(region.fh - 1080 / 1040) < 1e-9, `доля высоты ${region.fh}`);
     near(host.landed(), [960, 270], "метка при окне 1920x1040");
     assert.match(host.log(), / place-mismatch .* phys=0,0,1920x1040@/);
+  } finally { host.stop(); }
+});
+
+test("звонки (Discord и др.) исключаются из звука ведущего сами, пока галочку не сняли", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true);
+  const host = await start(world([d], [screenSource(d, 1)]));
+  try {
+    await host.fake.handles.get("choose")({}, "screen:1:0", true, ["Game.exe", "discord.exe"]);
+    host.fake.ipc.get("startAudio")({ sender: { isDestroyed: () => false, send() {} } });
+    const args = host.spawned.at(-1);
+    assert.equal(args[0], "capture");
+    const names = args.slice(1).map((n) => n.toLowerCase());
+    for (const need of ["game.exe", "discord.exe", "zoom.exe", "teams.exe", "telegram.exe"]) assert.ok(names.includes(need), need);
+    assert.equal(names.filter((n) => n === "discord.exe").length, 1, "без повторов");
+    host.fake.ipc.get("setMuteCalls")({ sender: { isDestroyed: () => false, send() {} } }, false);
+    assert.deepEqual(host.spawned.at(-1), ["capture", "Game.exe", "discord.exe"], "галочку сняли — только отмеченное вручную");
+    await host.fake.handles.get("choose")({}, "screen:1:0", true, [], false);
+    host.fake.ipc.get("startAudio")({ sender: { isDestroyed: () => false, send() {} } });
+    assert.deepEqual(host.spawned.at(-1), ["capture"], "выбор без звонков при начале эфира");
+  } finally { host.stop(); }
+});
+
+test("окно обновления не всплывает во время эфира: ждёт его конца", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true);
+  const w = world([d], [screenSource(d, 1)]);
+  const host = await start(w);
+  try {
+    const downloaded = host.updater.get("update-downloaded");
+    await host.share("screen:1:0");
+    downloaded({ version: "9.9.9" });
+    await tick(30);
+    assert.equal(w.dialogs || 0, 0, "во время эфира окна нет");
+    host.fake.ipc.get("stopped")({});
+    await tick(1700);
+    assert.equal(w.dialogs, 1, "после конца эфира — одно окно");
+    downloaded({ version: "9.9.10" });
+    await tick(30);
+    assert.equal(w.dialogs, 2, "без эфира — сразу");
   } finally { host.stop(); }
 });

@@ -12,6 +12,8 @@ const monitorsList = require("./displays");
 const RELAY = "https://mac-utils-relay.mako-62d.workers.dev/";
 let window = null;
 let chosen = null; // { source, audio }
+let broadcasting = false; // идёт эфир: захват начат и страница не сообщила `stopped`
+let pendingUpdate = null; // обновление скачано во время эфира: окно — после его конца
 let nextSource = null; // монитор, выбранный зрителем (switchTo): его отдаст следующий getDisplayMedia страницы
 let previousSource = null; // экран до этого переключения: страница не получила поток (switchTo(0)) — возвращаемся на него
 let pendingNotice = null; // уведомление «‹имя› переключает на монитор N» — ждёт окна меток, как метки
@@ -457,6 +459,14 @@ function hideOverlay() {
   pendingMarks.length = 0; pendingNotice = null;
 }
 
+// Программы созвонов (имена процессов Windows), как `callApps` на Mac. Дочерние процессы (Discord.exe, Teams) совпадают по имени.
+const CALL_APPS = ["Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe", "Telegram.exe", "Viber.exe", "WhatsApp.exe", "WhatsApp.Root.exe",
+  "Zoom.exe", "CptHost.exe", "Teams.exe", "ms-teams.exe", "Skype.exe", "Slack.exe", "Webex.exe", "CiscoCollabHost.exe"];
+function mutedProcesses(state) {
+  const names = state.calls ? [...state.muted, ...CALL_APPS] : state.muted;
+  return [...new Set(names.map((n) => n.toLowerCase()))].map((lower) => names.find((n) => n.toLowerCase() === lower));
+}
+
 function cleanNames(list) {
   return Array.isArray(list) ? list.filter((m) => typeof m === "string" && /^[^"\\/]{1,120}$/.test(m)).slice(0, 50) : [];
 }
@@ -505,6 +515,7 @@ app.whenReady().then(() => {
   // getDisplayMedia на странице получает то, что пользователь выбрал в нашем окне выбора.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     if (!chosen) return callback({});
+    broadcasting = true;
     // Зритель переключил монитор: тот же эфир, другой экран; окно меток (prepareOverlay) — на него.
     if (nextSource) { previousSource = chosen.source; chosen.source = nextSource; nextSource = null; }
     // Звук без выбранных программ идёт через помощник (mu-audio.exe), а не через общий loopback.
@@ -547,7 +558,11 @@ app.whenReady().then(() => {
     flushMarks();
   });
   ipcMain.on("page-log", (event, line) => { if (window && event.sender === window.webContents) logPage(line); });
-  ipcMain.on("stopped", () => { nextSource = null; previousSource = null; hideOverlay(); stopAudio(); });
+  ipcMain.on("stopped", () => {
+    nextSource = null; previousSource = null; hideOverlay(); stopAudio();
+    broadcasting = false;
+    if (pendingUpdate) { const info = pendingUpdate; pendingUpdate = null; setTimeout(() => offerUpdate(info), 1500); }
+  });
   ipcMain.on("overlay-report", (event, report) => {
     if (!overlay || overlay.isDestroyed() || event.sender !== overlay.webContents) return;
     checkClient(report);
@@ -566,6 +581,14 @@ app.whenReady().then(() => {
   ipcMain.on("startAudio", (event) => startAudio(event.sender));
 
   // Поменяли список в эфире — перезапускаем захват звука с новым списком.
+  // Звонки (Discord и др.) исключаются из звука сами, как на Mac, пока пользователь не снимет галочку: иначе собеседники
+  // из того же созвона слышат себя с задержкой. Имена — процессы Windows (без учёта регистра).
+  ipcMain.on("setMuteCalls", (event, on) => {
+    if (!chosen) return;
+    chosen.calls = on === true;
+    if (audioHelper) startAudio(event.sender);
+  });
+
   ipcMain.on("setMuted", (event, muted) => {
     if (!chosen) return;
     chosen.muted = cleanNames(muted);
@@ -575,7 +598,7 @@ app.whenReady().then(() => {
   function startAudio(sender) {
     stopAudio();
     if (!chosen?.audio || !hasHelper()) return;
-    const helper = spawn(HELPER, ["capture", ...chosen.muted], { windowsHide: true });
+    const helper = spawn(HELPER, ["capture", ...mutedProcesses(chosen)], { windowsHide: true });
     audioHelper = helper;
     let odd = null;
     audioHelper.stdout.on("data", (chunk) => {
@@ -595,10 +618,10 @@ app.whenReady().then(() => {
     return sources.map((s) => ({ id: s.id, name: s.name, thumbnail: s.thumbnail.toDataURL() }));
   });
 
-  ipcMain.handle("choose", async (_event, id, audio, muted) => {
+  ipcMain.handle("choose", async (_event, id, audio, muted, muteCalls) => {
     const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
     const source = sources.find((s) => s.id === id);
-    chosen = source ? { source, audio: !!audio, muted: cleanNames(muted) } : null;
+    chosen = source ? { source, audio: !!audio, muted: cleanNames(muted), calls: muteCalls !== false } : null;
     nextSource = null; previousSource = null;
     return !!source;
   });
@@ -668,7 +691,9 @@ function checkForUpdates() {
   autoUpdater.checkForUpdates().catch(() => {});
 }
 
-autoUpdater.on("update-downloaded", async (info) => {
+// Окно «Перезапустить» посреди эфира попало бы в трансляцию, а «Перезапустить сейчас» оборвало бы её: во время эфира
+// не показываем, обновление ставится при выходе (autoInstallOnAppQuit), а окно — после конца эфира.
+async function offerUpdate(info) {
   const parent = window && !window.isDestroyed() ? window : undefined;
   const { response } = await dialog.showMessageBox(parent, {
     type: "info",
@@ -678,4 +703,8 @@ autoUpdater.on("update-downloaded", async (info) => {
     detail: "Она установится при перезапуске.",
   });
   if (response === 0) autoUpdater.quitAndInstall();
+}
+autoUpdater.on("update-downloaded", (info) => {
+  if (broadcasting) { pendingUpdate = info; return; }
+  offerUpdate(info);
 });
