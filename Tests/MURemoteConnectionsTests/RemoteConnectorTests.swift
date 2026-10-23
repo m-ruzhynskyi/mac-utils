@@ -1,6 +1,5 @@
 import XCTest
 @testable import MURemoteConnections
-@testable import MUCore
 
 /// Подключение на моках AX-дерева: настоящие AnyDesk и TeamViewer не запускаются.
 @MainActor
