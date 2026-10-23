@@ -20,7 +20,7 @@ enum RTFWord: String, CaseIterable {
     case plain, f, fs, b, i, ul, uld, uldb, ulw, ulth, uldash, uldashd, uldashdd, ulwave, ulhwave, ululdbwave, ulthd, ulthdash
     case ulnone, strike, striked, cf, cb, highlight, chcbpat, v, super_ = "super", sub, nosupersub, up, dn, caps, scaps
     // Особые символы.
-    case tab, line, page, cell, row, nestcell, nestrow, uc, u, bin
+    case tab, line, page, cell, row, nestcell, nestrow, itap, uc, u, bin
     case emdash, endash, lquote, rquote, ldblquote, rdblquote, bullet, emspace, enspace, qmspace, zwj, zwnj, ltrmark, rtlmark, chpgn
     // Таблица.
     case trowd, cellx, clvmgf, clvmrg, clmgf, clmrg, clbrdrt, clbrdrb, clbrdrl, clbrdrr, clcbpat, clvertalt, clvertalc, clvertalb
@@ -44,7 +44,7 @@ enum RTFWord: String, CaseIterable {
         "stylesheet", "info", "rsidtbl", "generator", "datastore", "themedata",
         "colorschememapping", "latentstyles", "xmlnstbl", "mmathPr", "pgdsctbl", "revtbl", "filetbl", "userprops",
         "docvar", "template", "nonshppict", "footnote", "bkmkstart", "bkmkend", "pn", "pnseclvl", "pntxta", "pntxtb",
-        "ffdata", "formfield", "nesttableprops", "nonesttables", "xe", "tc", "tcn", "annotation", "atnid", "atnauthor",
+        "ffdata", "formfield", "nonesttables", "xe", "tc", "tcn", "annotation", "atnid", "atnauthor",
         "atrfstart", "atrfend", "atndate", "objdata", "objclass", "objname", "result", "blipuid", "picprop", "shptxt",
         "dptxbxtext", "oldcprops", "oldpprops", "oldsprops", "oldtprops", "defchp", "defpap", "fchars", "lchars",
         "wgrffmtfilter", "private", "comment", "doccomm", "title", "subject", "author", "operator", "keywords",

@@ -133,6 +133,7 @@ final class DocRenderer {
         var padRight: Int
         var padTop: Int
         var padBottom: Int
+        var exactHeight: Int?
     }
 
     private struct StyleKey: Hashable {
@@ -178,6 +179,11 @@ final class DocRenderer {
         var padRight: Int
         var padTop = 0
         var padBottom = 0
+        /// Ячейки внешних таблиц, в которых стоит эта (вложенная таблица), — от внешней к внутренней.
+        var outer: [CellPlace] = []
+        /// Высота строки вложенной таблицы, твипы, точно: у вложенной `NSTextTable` `minimumHeight` не действует, поэтому
+        /// строка, весь текст которой ниже `\trrh`, получает высоту `\trrh` точно (`nestedRowHeight`).
+        var exactHeight: Int?
     }
 
     fileprivate struct RunKey: Equatable {
@@ -208,10 +214,11 @@ final class DocRenderer {
     /// Показать модель. С `previous` перерисовываются только изменившиеся абзацы (заплатка), карта — целиком.
     func render(_ model: RTFDocumentModel, previous: DocRendering?) -> (DocRendering, DocRenderPatch) {
         let story = Self.aligningRows(model.body) { table in
-            model.sections[safe: Self.section(of: table, in: model.body)].map { Int((DocPageView.bodyRect($0.props).width * 20).rounded()) }
+            if model.body.tables[safe: table]?.nested == true { return Self.parentTextWidth(of: table, in: model.body) }
+            return model.sections[safe: Self.section(of: table, in: model.body)].map { Int((DocPageView.bodyRect($0.props).width * 20).rounded()) }
         }
         let frames = bodyFrames(model, story: story)
-        let places = cellPlaces(story) { table, left in
+        let places = cellPlaces(story, model: model) { table, left in
             frames[safe: Self.section(of: table, in: story)].map { $0.left + left } ?? 0
         }
         var rendering = DocRendering()
@@ -277,10 +284,10 @@ final class DocRenderer {
         // Выступ в поля: абзацы вне таблиц с отрицательными отступами и таблицы за полями текста (`\trleft` < 0,
         // `\cellx` за правым полем). Отступы абзацев ячеек — от ячейки, не от поля.
         let width = Int(((textWidth ?? contentWidth) * 20).rounded())
-        let story = Self.aligningRows(story) { _ in width }
+        let story = Self.aligningRows(story) { table in story.tables[safe: table]?.nested == true ? Self.parentTextWidth(of: table, in: story) : width }
         let frame = Self.frame(free: story.paragraphs.filter { $0.cell == nil }, edges: Self.tableEdges(story).map { ($0.left, $0.right) },
                                width: width)
-        let places = cellPlaces(story) { _, left in frame.left + left }
+        let places = cellPlaces(story, model: model) { _, left in frame.left + left }
         var map = DocSourceMap()
         let string = NSMutableAttributedString()
         let labels = DocListNumbers.labels(story, lists: model.lists)
@@ -438,6 +445,9 @@ final class DocRenderer {
         case .cell:
             pieces.append(Piece(units: [0x0A], ranges: [paragraph.endRange], kind: .cellEnd))
             end = 2
+        case .nestedCell:
+            pieces.append(Piece(units: [0x0A], ranges: [paragraph.endRange], kind: .cellEnd))
+            end = 5
         case .section:
             pieces.append(Piece(units: [0x0A], ranges: [paragraph.endRange], kind: .sectionEnd))
             end = 3
@@ -693,7 +703,8 @@ final class DocRenderer {
         }
         style.tabStops = tabStops
         if let place, let block = tableBlock(place, model: model) {
-            style.textBlocks = [block]
+            // Вложенная таблица — блок ячейки внутри блока ячейки внешней.
+            style.textBlocks = place.outer.compactMap { tableBlock($0, model: model) } + [block]
         } else if Self.hasBlock(props) {
             style.textBlocks = [borderBlock(props, model: model, frame: key.frame)]
         }
@@ -741,9 +752,20 @@ final class DocRenderer {
         return story
     }
 
+    /// Ширина текста ячейки внешней таблицы, в которой стоит вложенная (твипы): от неё — `\trqc`/`\trqr` вложенной.
+    private static func parentTextWidth(of table: Int, in story: RTFStory) -> Int? {
+        guard let parent = story.tables[safe: table]?.parent, let row = story.tables[safe: parent.table]?.rows[safe: parent.row],
+              let cell = row.cells[safe: parent.cell] else { return nil }
+        let left = parent.cell == 0 ? row.left : row.cells[parent.cell - 1].right
+        let margins = row.margins(cell)
+        return max(0, cell.right - left - margins.left - margins.right)
+    }
+
     /// Левый и правый край каждой таблицы истории от поля текста (`\trleft`, наибольший `\cellx`), твипы.
     private static func tableEdges(_ story: RTFStory) -> [(table: Int, left: Int, right: Int)] {
         story.tables.enumerated().compactMap { index, table in
+            // Вложенная таблица — внутри ячейки, за поля текста не выходит.
+            guard !table.nested else { return nil }
             var left: Int?, right: Int?
             for row in table.rows {
                 left = min(left ?? row.left, row.left)
@@ -758,9 +780,13 @@ final class DocRenderer {
 
     /// Место каждой ячейки в сетке таблицы: столбцы — все границы `\cellx` всех строк, объединение по вертикали.
     /// `offset` — отступ таблицы от края рамки по номеру таблицы и её левому краю `\trleft`.
-    private func cellPlaces(_ story: RTFStory, offset: (Int, Int) -> Int) -> [RTFCellRef: CellPlace] {
+    private func cellPlaces(_ story: RTFStory, model: RTFDocumentModel, offset: (Int, Int) -> Int) -> [RTFCellRef: CellPlace] {
         var places: [RTFCellRef: CellPlace] = [:]
-        for (ordinal, table) in story.tables.enumerated() {
+        // Сначала внешние таблицы: вложенной нужно место её ячейки.
+        let order = story.tables.indices.filter { !story.tables[$0].nested } + story.tables.indices.filter { story.tables[$0].nested }
+        for ordinal in order {
+            let table = story.tables[ordinal]
+            let parent = table.parent.flatMap { places[$0] }
             var hasher = Hasher()
             var bounds = Set<Int>()
             for row in table.rows {
@@ -777,10 +803,13 @@ final class DocRenderer {
                 }
             }
             let grid = bounds.sorted()
-            let tableKey = TableKey(ordinal: ordinal, signature: hasher.finalize(), offset: max(0, offset(ordinal, grid.first ?? 0)))
+            // Вложенная — от текста внешней ячейки: у Word её `\trleft` — от края текста ячейки, у `NSTextTable` — от поля блока.
+            let tableStart = parent.map { $0.marginLeft + (grid.first ?? 0) - $0.padLeft } ?? offset(ordinal, grid.first ?? 0)
+            let tableKey = TableKey(ordinal: ordinal, signature: hasher.finalize(), offset: max(0, tableStart))
             let columns = max(1, grid.count - 1)
             let tableWidth = (grid.last ?? 0) - (grid.first ?? 0)
             for (rowIndex, row) in table.rows.enumerated() {
+                let exactHeight = table.nested ? nestedRowHeight(row, story: story, model: model) : nil
                 var left = row.left
                 var cellIndex = 0
                 while cellIndex < row.cells.count {
@@ -813,9 +842,10 @@ final class DocRenderer {
                                           def: cell, marginLeft: margins.left, marginRight: margins.right, height: row.height, columns: columns, tableWidth: tableWidth,
                                           padLeft: max(0, margins.left + min(0, indentLeft)),
                                           padRight: max(0, margins.right + min(0, indentRight)),
-                                          padTop: row.padTop, padBottom: row.padBottom)
+                                          padTop: row.padTop, padBottom: row.padBottom, exactHeight: rowSpan == 1 ? exactHeight : nil)
                     for offset in 0..<span {
                         var placed = place
+                        if let parent { placed.outer = parent.outer + [parent] }
                         if offset > 0 { placed.skip = true }
                         places[RTFCellRef(table: ordinal, row: rowIndex, cell: cellIndex + offset)] = placed
                     }
@@ -825,6 +855,37 @@ final class DocRenderer {
             }
         }
         return places
+    }
+
+    /// Точная высота строки вложенной таблицы, твипы: `\trrh` < 0 — всегда; `\trrh` > 0 — если текст каждой ячейки
+    /// (оценка по шрифтам и ширине ячейки) не выше его. Иначе `nil` — строка растёт по тексту.
+    private func nestedRowHeight(_ row: RTFRow, story: RTFStory, model: RTFDocumentModel) -> Int? {
+        guard row.height != 0 else { return nil }
+        guard row.height > 0 else { return -row.height }
+        var left = row.left
+        for (index, cell) in row.cells.enumerated() {
+            let margins = row.margins(cell)
+            let width = CGFloat(max(cell.right, left) - left - margins.left - margins.right) / 20
+            left = max(cell.right, left)
+            var height = CGFloat(row.padTop + row.padBottom) / 20
+            for number in row.paragraphs[safe: index] ?? [] {
+                guard let paragraph = story.paragraphs[safe: number] else { continue }
+                let text = NSMutableAttributedString()
+                for run in paragraph.runs where run.isEditableText && (!run.props.hidden || showsHidden) {
+                    text.append(NSAttributedString(string: run.text, attributes: characterAttributes(run.props, model: model)))
+                }
+                if text.length == 0 { text.append(NSAttributedString(string: " ", attributes: characterAttributes(paragraph.endProps, model: model))) }
+                let indent = CGFloat(max(0, paragraph.props.left) + max(0, paragraph.props.right)) / 20
+                var lines = text.boundingRect(with: NSSize(width: max(4, width - indent), height: 10_000),
+                                              options: [.usesLineFragmentOrigin, .usesFontLeading]).height
+                let spacing = paragraph.props.lineSpacing
+                if spacing > 0, paragraph.props.lineMultiple { lines *= CGFloat(spacing) / 240 }
+                if spacing < 0 { lines = max(lines, CGFloat(-spacing) / 20) }
+                height += lines + CGFloat(paragraph.props.spaceBefore + paragraph.props.spaceAfter) / 20
+            }
+            if height * 20 > CGFloat(row.height) { return nil }
+        }
+        return row.height
     }
 
     private static func cell(in row: RTFRow, left: Int, right: Int) -> RTFCellDef? {
@@ -840,7 +901,7 @@ final class DocRenderer {
         BlockKey(table: place.table, row: place.row, column: place.column, rowSpan: place.rowSpan, columnSpan: place.columnSpan,
                  cell: place.def, marginLeft: place.marginLeft,
                  marginRight: place.marginRight, height: place.height, start: place.start, width: place.width, padLeft: place.padLeft,
-                 padRight: place.padRight, padTop: place.padTop, padBottom: place.padBottom)
+                 padRight: place.padRight, padTop: place.padTop, padBottom: place.padBottom, exactHeight: place.exactHeight)
     }
 
     private func tableBlock(_ place: CellPlace, model: RTFDocumentModel) -> NSTextTableBlock? {
@@ -886,7 +947,9 @@ final class DocRenderer {
         }
         if cell.shading > 0 { block.backgroundColor = color(cell.shading, model: model) }
         block.setContentWidth(max(4, width - padLeft - padRight), type: .absoluteValueType)
-        if place.height != 0 {
+        if let exact = place.exactHeight {
+            block.setValue(CGFloat(exact) / 20, type: .absoluteValueType, for: .height)
+        } else if place.height != 0 {
             block.setValue(CGFloat(abs(place.height)) / 20, type: .absoluteValueType, for: .minimumHeight)
         }
         // `\trrh` < 0 — «точно»: у Word строка не растёт, лишний текст ячейки обрезается.

@@ -87,6 +87,8 @@ struct RTFParaProps: Hashable {
     var lineMultiple = false
     var tabs: [RTFTabStop] = []
     var inTable = false
+    /// `\itapN` — глубина таблиц: 0 — вне таблицы, 1 — таблица, 2 — вложенная в её ячейку.
+    var nesting = 0
     var keepNext = false
     var pageBreakBefore = false
     var borderTop = RTFBorder()
@@ -372,6 +374,8 @@ enum RTFParagraphEnd: Hashable {
     case paragraph
     /// `\cell` — конец ячейки таблицы.
     case cell
+    /// `\nestcell` — конец ячейки вложенной таблицы.
+    case nestedCell
     /// `\sect` — конец раздела.
     case section
     /// Конец истории (текста, колонтитула) без завершающего кода.
@@ -399,6 +403,8 @@ struct RTFParagraph {
     var section = 0
     /// Ячейка таблицы: номер таблицы, строки и ячейки (заполняется на `\row`).
     var cell: RTFCellRef?
+    /// Абзац вложенной таблицы: ячейка внешней таблицы, в которой она стоит (`cell` — ячейка вложенной).
+    var outerCell: RTFCellRef?
     /// Группа готового номера `{\listtext …}` или `{\pntext …}` абзаца целиком.
     var listTextGroup: NSRange?
     /// Первая видимая единица абзаца в исходнике (или `endRange.location`, если абзац пуст).
@@ -476,6 +482,9 @@ struct RTFRow {
 
 struct RTFTable {
     var rows: [RTFRow] = []
+    /// Вложенная таблица (`\nestrow`): стоит в ячейке `parent` внешней.
+    var nested = false
+    var parent: RTFCellRef?
 }
 
 /// Текст одной истории: основной текст или колонтитул.
