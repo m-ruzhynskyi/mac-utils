@@ -372,6 +372,12 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
         return TVMain(window: window, field: field, connect: connect, searchAndConnect: search, clearAll: clear)
     }
 
+    /// Признак сеанса TeamViewer по контракту #155: новое окно подключения с ID в заголовке.
+    private func showTVSession(after ms: Int, id: String = "123456789") {
+        let w = TSNode("AXWindow", label: "\(id) - TeamViewer", children: [TSNode("AXGroup")])
+        clock.at(clock.milliseconds + ms) { [unowned self] in ax.show(w, pid: pid) }
+    }
+
     private enum FieldNames: CaseIterable { case placeholderAndDescription, placeholderOnly, descriptionOnly, classic }
 
     private func tvAuthWindow() -> Password {
@@ -398,7 +404,7 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
                     idAtConnect = main.field.text
                     if main.field.text == "123456789" { clock.at(clock.milliseconds + 1000) { [unowned self] in ax.show(auth.window, pid: pid) } }
                 }
-                auth.ok.onPress = { [unowned self] in ax.close(auth.window, pid: pid) }
+                auth.ok.onPress = { [unowned self] in ax.close(auth.window, pid: pid); showTVSession(after: 400) }
                 let outcome = await run(request("123456789", program: .teamViewer), provider: provider(.teamViewer, app: app))
                 let tag = "\(names) \(role)"
                 XCTAssertEqual(idAtConnect, "123456789", "\(tag): ID вписан до нажатия «Connect»")
@@ -424,7 +430,7 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
             _ = main.field.focus()
             clock.at(clock.milliseconds + 800) { [unowned self] in ax.show(auth.window, pid: pid); _ = main.field.focus() }
         }
-        auth.ok.onPress = { [unowned self] in ax.close(auth.window, pid: pid) }
+        auth.ok.onPress = { [unowned self] in ax.close(auth.window, pid: pid); showTVSession(after: 400) }
         await run(request("987654321", program: .teamViewer), provider: provider(.teamViewer, app: app))
         XCTAssertEqual(main.field.text, "987654321")
         XCTAssertFalse(main.field.text.contains("Pw-"))
@@ -437,7 +443,7 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
         let app = try makeTeamViewerApp()
         let main = teamViewerMain(), auth = tvAuthWindow()
         launches(.teamViewer, windows: [(300, auth.window), (350, main.window)])
-        auth.ok.onPress = { [unowned self] in ax.close(auth.window, pid: pid) }
+        auth.ok.onPress = { [unowned self] in ax.close(auth.window, pid: pid); showTVSession(after: 400) }
         let outcome = await run(request("123456789", program: .teamViewer), provider: provider(.teamViewer, app: app))
         XCTAssertTrue(outcome.isSuccess)
         XCTAssertEqual(auth.field.text, "Pw-секрет-1")
@@ -482,7 +488,7 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
         auth.window.defaultButtonNode = cancel
         launches(.teamViewer, windows: [(700, main.window)])
         main.connect.onPress = { [unowned self] in clock.at(clock.milliseconds + 500) { [unowned self] in ax.show(auth.window, pid: pid) } }
-        auth.ok.onPress = { [unowned self] in ax.close(auth.window, pid: pid) }
+        auth.ok.onPress = { [unowned self] in ax.close(auth.window, pid: pid); showTVSession(after: 400) }
         let outcome = await run(request("123456789", program: .teamViewer), provider: provider(.teamViewer, app: app))
         XCTAssertEqual(cancel.pressCount, 0, "Cancel по умолчанию не нажимается")
         XCTAssertTrue(keyboard.returns.isEmpty, "Return не уходит: он нажал бы Cancel")
@@ -497,8 +503,9 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
 
     // MARK: Что значит «Подключено» после пароля (решение Connection)
 
-    /// Решение: п.1 ТЗ про «без пароля». После ввода пароля «Подключено» = поле ушло и за settle нет отказа, окна сеанса не требуем.
-    func testPasswordAcceptedAndFieldGoneIsConnected() async throws {
+    /// Контракт #155 (ревью P2): «Подключено» только при признаке сеанса после пароля («Waiting for image» или окно этого
+    /// подключения). Окно пароля закрылось, а признака нет → `submitted`, не успех.
+    func testPasswordAcceptedWithoutSessionSignIsSubmittedNotConnected() async throws {
         try requireNewAPI()
         let app = try makeAnyDeskApp()
         let pw = passwordWindow()
@@ -506,6 +513,21 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
         pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: pid) }
         let outcome = await run(request("123456789", program: .anyDesk), provider: provider(.anyDesk, app: app))
         XCTAssertEqual(pw.field.text, "Pw-секрет-1")
+        XCTAssertEqual(outcome.code, "submitted")
+        XCTAssertFalse(outcome.isSuccess)
+    }
+
+    /// Признак сеанса есть («Waiting for image») → `connected`.
+    func testPasswordAcceptedWithSessionSignIsConnected() async throws {
+        try requireNewAPI()
+        let app = try makeAnyDeskApp()
+        let pw = passwordWindow()
+        launches(.anyDesk, windows: [(500, pw.window)])
+        pw.ok.onPress = { [unowned self] in
+            ax.close(pw.window, pid: pid)
+            clock.at(clock.milliseconds + 400) { [unowned self] in ax.show(sessionWindow(), pid: pid) }
+        }
+        let outcome = await run(request("123456789", program: .anyDesk), provider: provider(.anyDesk, app: app))
         XCTAssertEqual(outcome.code, "connected")
     }
 

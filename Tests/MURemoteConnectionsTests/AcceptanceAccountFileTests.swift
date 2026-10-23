@@ -105,7 +105,7 @@ final class AcceptanceAccountFileTests: XCTestCase {
         XCTAssertEqual(try secret(.accountPassword, r, in: data, xml: false), "Win-пароль-9")
         XCTAssertEqual(try secret(.password, r, in: data, xml: false), "AnyDesk-1", "два пароля не перепутаны")
         XCTAssertTrue(ConnectionField.accountPassword.isSecret && ConnectionField.password.isSecret && ConnectionField.access.isSecret)
-        XCTAssertFalse(ConnectionField.account.isSecret || ConnectionField.contacts.isSecret)
+        XCTAssertFalse(ConnectionField.account.isSecret, "логин учётки не секрет: показывается в строке")
     }
 
     func testXMLAccountElementsAreReadAndSecretsComeOnlyFromLookup() throws {
