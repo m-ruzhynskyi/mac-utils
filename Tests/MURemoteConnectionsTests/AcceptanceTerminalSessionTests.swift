@@ -479,20 +479,22 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
         launches(.teamViewer, windows: [(700, main.window)])
         main.connect.onPress = { [unowned self] in clock.at(clock.milliseconds + 500) { [unowned self] in ax.show(auth.window, pid: pid) } }
         auth.ok.onPress = { [unowned self] in ax.close(auth.window, pid: pid) }
-        await run(request("123456789", program: .teamViewer), provider: provider(.teamViewer, app: app), checkForbidden: false)
-        let options = XCTExpectedFailure.Options(); options.isStrict = false
-        XCTExpectFailure("ОШИБКА (rc-terminal-session-tests.md): submit() жмёт кнопку по умолчанию, не глядя на подпись — это Cancel", options: options) {
-            XCTAssertEqual(cancel.pressCount, 0)
-            assertNoForbiddenPresses()
+        let outcome = await run(request("123456789", program: .teamViewer), provider: provider(.teamViewer, app: app))
+        XCTAssertEqual(cancel.pressCount, 0, "Cancel по умолчанию не нажимается")
+        XCTAssertTrue(keyboard.returns.isEmpty, "Return не уходит: он нажал бы Cancel")
+        if auth.ok.pressCount > 0 {
+            XCTAssertEqual(auth.ok.pressCount, 1, "подтверждена явной кнопкой «OK»")
+            XCTAssertTrue(outcome.isSuccess)
+        } else {
+            XCTAssertEqual(outcome.code, "failed_nofield", "итог — «введите пароль вручную»")
+            XCTAssertEqual(auth.field.text, "", "пароль из поля убран")
         }
-        XCTAssertTrue(keyboard.returns.isEmpty || auth.ok.pressCount > 0, "Return не уходит в окно, где по умолчанию Cancel")
     }
 
-    // MARK: Пароль принят, а сеанса нет (спорное место — вопрос Connection)
+    // MARK: Что значит «Подключено» после пароля (решение Connection)
 
-    /// Окно пароля закрылось после ввода, но «Waiting for image» так и не появилось. ТЗ п.1: успех только при подтверждённой
-    /// сессии. Тест фиксирует это требование; если Connection считает закрытие окна пароля достаточным — решить и поправить ТЗ.
-    func testPasswordAcceptedWithoutAnySessionIsNotConnected() async throws {
+    /// Решение: п.1 ТЗ про «без пароля». После ввода пароля «Подключено» = поле ушло и за settle нет отказа, окна сеанса не требуем.
+    func testPasswordAcceptedAndFieldGoneIsConnected() async throws {
         try requireNewAPI()
         let app = try makeAnyDeskApp()
         let pw = passwordWindow()
@@ -500,9 +502,26 @@ final class AcceptanceTerminalSessionTests: XCTestCase {
         pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: pid) }
         let outcome = await run(request("123456789", program: .anyDesk), provider: provider(.anyDesk, app: app))
         XCTAssertEqual(pw.field.text, "Pw-секрет-1")
-        let options = XCTExpectedFailure.Options(); options.isStrict = false
-        XCTExpectFailure("ВОПРОС Connection (rc-terminal-session-tests.md): закрытие окна пароля сейчас считается подключением", options: options) {
-            XCTAssertNotEqual(outcome.code, "connected", "закрытие окна пароля ≠ подтверждённая сессия")
+        XCTAssertEqual(outcome.code, "connected")
+    }
+
+    /// После пароля висит «Connecting…» или «Terminal Session»: это ещё не «Подключено» (итог — submitted/не connected).
+    func testStillConnectingOrTerminalSessionAfterPasswordIsNotConnected() async throws {
+        try requireNewAPI()
+        let app = try makeAnyDeskApp()
+        for makeBusy in [{ (self: AcceptanceTerminalSessionTests) -> TSNode in
+            TSNode("AXWindow", label: "Connecting...", children: [TSNode("AXStaticText", label: "Connection in progress. Please wait.")]) },
+                         { (self: AcceptanceTerminalSessionTests) -> TSNode in self.terminal().window }] {
+            setUpFresh()
+            let pw = passwordWindow(), busy = makeBusy(self)
+            launches(.anyDesk, windows: [(500, pw.window)])
+            pw.ok.onPress = { [unowned self] in
+                ax.close(pw.window, pid: pid)
+                clock.at(clock.milliseconds + 200) { [unowned self] in ax.show(busy, pid: pid) }
+            }
+            let outcome = await run(request("123456789", program: .anyDesk), provider: provider(.anyDesk, app: app))
+            XCTAssertNotEqual(outcome.code, "connected", busy.label ?? "")
+            XCTAssertFalse(String(describing: outcome).isEmpty)
         }
     }
 
