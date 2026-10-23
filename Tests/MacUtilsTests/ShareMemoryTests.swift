@@ -2,6 +2,7 @@ import AVFoundation
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUScreenShare
 
 /// Очереди трансляции ограничены (долгая трансляция не съедает память): политика звука ведущего и зрителя.
 final class ShareMemoryTests: XCTestCase {

@@ -3,6 +3,7 @@ import SwiftUI
 import MUCore
 import MUDesign
 import MUDownloadsSorter
+import MUScreenShare
 
 // MARK: - ИИ
 

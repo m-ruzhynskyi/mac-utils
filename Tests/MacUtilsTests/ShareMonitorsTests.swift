@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUScreenShare
 
 /// Мониторы ведущего (SHARE-PROTOCOL §4.1): список с этого Mac, правило ведущего, зритель — запрос, ответ, таймаут.
 /// Формат сообщений сверяется с relay и страницей в ShareCompatTests (displays.json).

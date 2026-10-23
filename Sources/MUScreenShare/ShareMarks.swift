@@ -7,33 +7,33 @@ import MUAudio
 
 /// Метки и рисунки зрителей поверх трансляции (как пинг в League of Legends).
 /// Координаты — доли кадра (0…1, от левого верхнего угла), так они одинаковы у всех.
-struct ShareMark: Identifiable {
-    enum Kind { case ping, stroke }
+package struct ShareMark: Identifiable {
+    package enum Kind { case ping, stroke }
 
-    let id = UUID()
-    let kind: Kind
-    let points: [CGPoint]
-    let color: Color
-    let born = Date()
+    package let id = UUID()
+    package let kind: Kind
+    package let points: [CGPoint]
+    package let color: Color
+    package let born = Date()
     /// Метки уже в видео ведущего: своя копия — только короткий отклик в точке нажатия.
-    var echo = false
+    package var echo = false
 
-    static let echoLifetime: TimeInterval = 0.3
+    package static let echoLifetime: TimeInterval = 0.3
 
     /// Пинг живёт 1.6 с, рисунок — 5 с (последняя секунда — плавное исчезновение).
-    var lifetime: TimeInterval { echo ? Self.echoLifetime : kind == .ping ? 1.6 : 5 }
+    package var lifetime: TimeInterval { echo ? Self.echoLifetime : kind == .ping ? 1.6 : 5 }
 
-    static let palette: [(name: String, color: Color)] = [
+    package static let palette: [(name: String, color: Color)] = [
         ("red", .red), ("yellow", .yellow), ("green", .green), ("blue", .blue), ("white", .white),
     ]
 
-    static func color(named name: String?) -> Color {
+    package static func color(named name: String?) -> Color {
         palette.first { $0.name == name }?.color ?? .red
     }
 
     /// Сообщение зрителя: {"type":"ping","x":0.5,"y":0.3,"color":"red"} или
     /// {"type":"stroke","points":[[x,y],…],"color":"blue"}.
-    static func parse(_ text: String) -> ShareMark? {
+    package static func parse(_ text: String) -> ShareMark? {
         guard let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
               let type = json["type"] as? String else { return nil }
         let color = color(named: json["color"] as? String)
@@ -51,11 +51,11 @@ struct ShareMark: Identifiable {
         }
     }
 
-    static func message(ping point: CGPoint, color: String) -> String {
+    package static func message(ping point: CGPoint, color: String) -> String {
         String(format: #"{"type":"ping","x":%.4f,"y":%.4f,"color":"%@"}"#, point.x, point.y, color)
     }
 
-    static func message(stroke points: [CGPoint], color: String) -> String {
+    package static func message(stroke points: [CGPoint], color: String) -> String {
         let list = points.map { String(format: "[%.4f,%.4f]", $0.x, $0.y) }.joined(separator: ",")
         return #"{"type":"stroke","points":["# + list + #"],"color":""# + color + #""}"#
     }
@@ -63,15 +63,15 @@ struct ShareMark: Identifiable {
 
 /// Хранилище меток с автоочисткой.
 @MainActor
-final class ShareMarkStore: ObservableObject {
-    @Published private(set) var marks: [ShareMark] = []
+package final class ShareMarkStore: ObservableObject {
+    @Published package private(set) var marks: [ShareMark] = []
     private var timer: Timer?
 
     /// Ведущий сообщил (`marks: "video"` в displays), что метки поверх его экрана попадают в видео: чужие метки не рисуем,
     /// своя — короткий отклик, иначе рамка была бы двойной.
-    var inVideo = false
+    package var inVideo = false
 
-    func add(_ mark: ShareMark, local: Bool = false) {
+    package func add(_ mark: ShareMark, local: Bool = false) {
         var mark = mark
         if inVideo {
             guard local else { return }
@@ -87,7 +87,7 @@ final class ShareMarkStore: ObservableObject {
         self.timer = timer
     }
 
-    func clear() {
+    package func clear() {
         marks.removeAll()
     }
 
@@ -104,9 +104,9 @@ final class ShareMarkStore: ObservableObject {
 /// Геометрия меток, общая для всех сторон трансляции: точка — доля кадра (0…1) от его левого верхнего угла, кадр —
 /// ровно транслируемая область. Зритель Mac, страница relay и окно меток Windows считают одинаково
 /// (страница — `imageRect`/`framePoint`, Windows — overlay-place.js).
-enum ShareMarkGeometry {
+package enum ShareMarkGeometry {
     /// Где кадр внутри вида: вписан с сохранением пропорций и по центру (как `resizeAspect` у слоя видео).
-    static func imageRect(frame: CGSize?, in size: CGSize) -> CGRect {
+    package static func imageRect(frame: CGSize?, in size: CGSize) -> CGRect {
         guard let frame, frame.width > 0, frame.height > 0 else { return CGRect(origin: .zero, size: size) }
         let scale = min(size.width / frame.width, size.height / frame.height)
         let fitted = CGSize(width: frame.width * scale, height: frame.height * scale)
@@ -115,23 +115,23 @@ enum ShareMarkGeometry {
     }
 
     /// Точка вида (y вниз, как у SwiftUI) → доля кадра; вне кадра — nil.
-    static func normalized(_ point: CGPoint, in rect: CGRect) -> CGPoint? {
+    package static func normalized(_ point: CGPoint, in rect: CGRect) -> CGPoint? {
         guard rect.width > 0, rect.height > 0, rect.contains(point) else { return nil }
         return CGPoint(x: (point.x - rect.minX) / rect.width, y: (point.y - rect.minY) / rect.height)
     }
 
     /// Доля кадра → точка вида.
-    static func point(_ unit: CGPoint, in rect: CGRect) -> CGPoint {
+    package static func point(_ unit: CGPoint, in rect: CGRect) -> CGPoint {
         CGPoint(x: rect.minX + unit.x * rect.width, y: rect.minY + unit.y * rect.height)
     }
 }
 
 /// Рисует метки в прямоугольнике кадра (rect — где кадр внутри вида).
-struct ShareMarksLayer: View {
-    @ObservedObject var store: ShareMarkStore
-    var rect: CGRect
+package struct ShareMarksLayer: View {
+    @ObservedObject package var store: ShareMarkStore
+    package var rect: CGRect
 
-    var body: some View {
+    package var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 60, paused: store.marks.isEmpty)) { context in
             Canvas { canvas, _ in
                 for mark in store.marks {
@@ -174,11 +174,11 @@ struct ShareMarksLayer: View {
 /// Прозрачная панель поверх того, что транслируется (экран или окно): клики проходят сквозь неё.
 /// В ней же — уведомление ведущему «‹имя› переключает на монитор N»: панель исключена из захвата, зрители его не видят.
 @MainActor
-final class ShareMarksOverlay {
-    static let shared = ShareMarksOverlay()
+package final class ShareMarksOverlay {
+    package static let shared = ShareMarksOverlay()
 
-    let store = ShareMarkStore()
-    let notices = ShareHostNotices()
+    package let store = ShareMarkStore()
+    package let notices = ShareHostNotices()
     private var panel: NSPanel?
     private var filter: SCContentFilter?
     /// Транслируемый экран, если известен: рамка по нему, а не по экрану под курсором (macOS до 15.2).
@@ -186,9 +186,9 @@ final class ShareMarksOverlay {
     private var follow: Timer?
 
     /// Окно меток — его в трансляцию не берём.
-    var windowNumber: Int? { panel?.windowNumber }
+    package var windowNumber: Int? { panel?.windowNumber }
 
-    func attach(to filter: SCContentFilter, display: CGDirectDisplayID? = nil) {
+    package func attach(to filter: SCContentFilter, display: CGDirectDisplayID? = nil) {
         self.filter = filter
         self.display = filter.style == .display ? display : nil
         updateFrame()
@@ -202,7 +202,7 @@ final class ShareMarksOverlay {
         }
     }
 
-    func detach() {
+    package func detach() {
         follow?.invalidate()
         follow = nil
         panel?.orderOut(nil)
@@ -215,7 +215,7 @@ final class ShareMarksOverlay {
 
     /// Зритель переключил монитор: короткое уведомление в правом верхнем углу нового монитора, 4 с, без кнопок и звука.
     /// Показывается и при выключенных метках.
-    func notice(name: String, monitor: Int, displays: [ShareDisplay]) {
+    package func notice(name: String, monitor: Int, displays: [ShareDisplay]) {
         guard filter != nil else { return }
         if panel == nil { updateFrame() }
         let screen = display.flatMap { id in NSScreen.screens.first { $0.displayID == id } }
@@ -225,7 +225,7 @@ final class ShareMarksOverlay {
         panel?.orderFrontRegardlessOnScreen("Уведомление о мониторе")
     }
 
-    func show(_ mark: ShareMark) {
+    package func show(_ mark: ShareMark) {
         guard UserDefaults.standard.bool(forKey: Pref.shareAllowMarks), panel != nil || filter != nil else { return }
         if panel == nil { updateFrame() }
         store.add(mark)

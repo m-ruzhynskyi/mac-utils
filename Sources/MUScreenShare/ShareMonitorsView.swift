@@ -4,22 +4,22 @@ import MUAudio
 
 /// Схема мониторов ведущего: прямоугольники в пропорциях его раскладки (`at`), номер и масштаб внутри, у основного —
 /// полоска меню сверху. Текущий — лайм, переключаемый — пунктирная лаймовая рамка со спиннером, под курсором — подсветка.
-struct MonitorMap: View {
-    let displays: [ShareDisplay]
-    var current: Int?
-    var pending: Int?
-    var hover: Int?
-    var height: CGFloat = 40
-    var showsScale = true
+package struct MonitorMap: View {
+    package let displays: [ShareDisplay]
+    package var current: Int?
+    package var pending: Int?
+    package var hover: Int?
+    package var height: CGFloat = 40
+    package var showsScale = true
     /// Плитки — кнопки (панель зрителя); без этого — просто схема (уведомление ведущему).
-    var onTap: ((Int) -> Void)?
-    var onHover: ((Int?) -> Void)?
+    package var onTap: ((Int) -> Void)?
+    package var onHover: ((Int?) -> Void)?
 
     private let gap: CGFloat = 3
     private var bounds: CGRect { displays.map(\.at).reduce(displays.first?.at ?? .zero) { $0.union($1) } }
     private var unit: CGFloat { height / max(bounds.height, 1) }
 
-    var body: some View {
+    package var body: some View {
         let box = bounds, k = unit
         ZStack(alignment: .topLeading) {
             ForEach(displays, id: \.n) { display in
@@ -82,7 +82,7 @@ private struct MonitorSpinner: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var turning = false
 
-    var body: some View {
+    package var body: some View {
         ZStack {
             Circle().stroke(Color.dsAccText.opacity(0.25), lineWidth: 2)
             Circle().trim(from: 0, to: 0.3).stroke(Color.dsAccText, style: StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -97,25 +97,25 @@ private struct MonitorSpinner: View {
 }
 
 /// Уведомление ведущему (в окне меток, не в картинке): кто переключил и мини-схема с новым текущим.
-struct ShareHostNotice: Equatable {
-    let name: String
-    let monitor: Int
-    let displays: [ShareDisplay]
+package struct ShareHostNotice: Equatable {
+    package let name: String
+    package let monitor: Int
+    package let displays: [ShareDisplay]
 
-    var displayName: String { name.trimmingCharacters(in: .whitespaces).isEmpty ? "Зритель" : name }
-    var title: String { "\(displayName) переключает на монитор \(monitor)" }
+    package var displayName: String { name.trimmingCharacters(in: .whitespaces).isEmpty ? "Зритель" : name }
+    package var title: String { "\(displayName) переключает на монитор \(monitor)" }
 }
 
 @MainActor
-final class ShareHostNotices: ObservableObject {
-    static let lifetime: TimeInterval = 4
+package final class ShareHostNotices: ObservableObject {
+    package static let lifetime: TimeInterval = 4
 
-    @Published private(set) var current: ShareHostNotice?
+    @Published package private(set) var current: ShareHostNotice?
     /// Отступ сверху: строка меню и индикатор «Эфир».
-    @Published private(set) var top: CGFloat = 44
+    @Published package private(set) var top: CGFloat = 44
     private var hideTask: Task<Void, Never>?
 
-    func show(_ notice: ShareHostNotice, top: CGFloat) {
+    package func show(_ notice: ShareHostNotice, top: CGFloat) {
         self.top = top
         current = notice
         hideTask?.cancel()
@@ -126,18 +126,18 @@ final class ShareHostNotices: ObservableObject {
         }
     }
 
-    func hide() {
+    package func hide() {
         hideTask?.cancel()
         hideTask = nil
         current = nil
     }
 }
 
-struct ShareHostNoticeLayer: View {
-    @ObservedObject var notices: ShareHostNotices
+package struct ShareHostNoticeLayer: View {
+    @ObservedObject package var notices: ShareHostNotices
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
+    package var body: some View {
         ZStack(alignment: .topTrailing) {
             if let notice = notices.current {
                 HostSwitchNotice(notice: notice)
@@ -151,10 +151,10 @@ struct ShareHostNoticeLayer: View {
     }
 }
 
-struct HostSwitchNotice: View {
-    let notice: ShareHostNotice
+package struct HostSwitchNotice: View {
+    package let notice: ShareHostNotice
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: DS.Space.m) {
             Text(String(notice.displayName.prefix(1)).uppercased())
                 .font(DS.Font.manrope(13, .heavy, relativeTo: .headline))
@@ -179,12 +179,12 @@ struct HostSwitchNotice: View {
 }
 
 /// Раздел «Монитор» в панели зрителя: схема-кнопки, подсказка над плиткой под курсором.
-struct MonitorSwitcher: View {
-    let picker: ShareMonitorPicker
-    let request: (Int) -> Void
+package struct MonitorSwitcher: View {
+    package let picker: ShareMonitorPicker
+    package let request: (Int) -> Void
     @State private var hover: Int?
 
-    var body: some View {
+    package var body: some View {
         MonitorMap(displays: picker.list, current: picker.current, pending: picker.pending, hover: hover, height: 40,
                    onTap: request, onHover: { hover = $0 })
             .padding(.horizontal, 4)
@@ -199,10 +199,10 @@ struct MonitorSwitcher: View {
 }
 
 /// Подсказка над плиткой: «Монитор 3 · 1920×1080 · 100 %» и клавиша.
-struct MonitorTip: View {
-    let display: ShareDisplay
+package struct MonitorTip: View {
+    package let display: ShareDisplay
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: DS.Space.s) {
             Text(display.title).font(DS.Font.caption).foregroundStyle(.dsText)
             Text("\(display.n)").font(DS.Font.keycapCompact).foregroundStyle(.dsText)

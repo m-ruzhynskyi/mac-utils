@@ -7,35 +7,35 @@ import MUAudio
 /// История подключений (как в AnyDesk): к кому подключались, свои подписи, доверенные ID
 /// и отметка «сейчас в эфире» (опрос ретранслятора раз в 10 секунд, пока список на экране).
 @MainActor
-final class ShareHistory: ObservableObject {
-    static let shared = ShareHistory()
+package final class ShareHistory: ObservableObject {
+    package static let shared = ShareHistory()
 
-    struct Entry: Codable, Identifiable, Equatable {
-        var id: String
-        var name: String
-        var label: String?
-        var lastSeen: Date
-        var trusted = false
+    package struct Entry: Codable, Identifiable, Equatable {
+        package var id: String
+        package var name: String
+        package var label: String?
+        package var lastSeen: Date
+        package var trusted = false
         /// Только из «всегда разрешать» — не подключались сами.
-        var incomingOnly = false
+        package var incomingOnly = false
         // Протокол v2 (.audit/auth-design.md §3.1). Только опциональные: синтезированный Decodable
         // требует неопциональные ключи, и старая история (1.4.0) без них не прочиталась бы целиком.
         /// Публичный ключ зрителя, которому доверяем («Всегда разрешать» с ключом).
-        var key: String?
+        package var key: String?
         /// Публичный ключ ведущего, к которому подключались (pinning, §4.3).
-        var hostKey: String?
-        var keyConfirmedAt: Date?
+        package var hostKey: String?
+        package var keyConfirmedAt: Date?
 
-        var title: String { label?.isEmpty == false ? label! : (name.isEmpty ? ShareCode.display(id) : name) }
+        package var title: String { label?.isEmpty == false ? label! : (name.isEmpty ? ShareCode.display(id) : name) }
     }
 
-    @Published private(set) var entries: [Entry] = []
-    @Published private(set) var live: Set<String> = []
+    @Published package private(set) var entries: [Entry] = []
+    @Published package private(set) var live: Set<String> = []
 
     private var timer: Timer?
     private var users = 0
 
-    init() {
+    package init() {
         if let data = UserDefaults.standard.data(forKey: Pref.shareHistory) {
             entries = Self.decodeEntries(data)
         }
@@ -43,12 +43,12 @@ final class ShareHistory: ObservableObject {
 
     /// Элемент массива, который не прочитался, не должен обнулять всю историю: он пропускается, остальные сохраняются.
     private struct Lossy: Decodable {
-        let entry: Entry?
-        init(from decoder: Decoder) throws { entry = try? Entry(from: decoder) }
+        package let entry: Entry?
+        package init(from decoder: Decoder) throws { entry = try? Entry(from: decoder) }
     }
 
     /// История из сохранённых данных: поэлементно, с очисткой небезопасных полей. Не массив — пусто.
-    static func decodeEntries(_ data: Data) -> [Entry] {
+    package static func decodeEntries(_ data: Data) -> [Entry] {
         guard let saved = try? JSONDecoder().decode([Lossy].self, from: data) else { return [] }
         // Свой и невалидный ID доверенными быть не могут (иначе «всегда разрешать» возвращает автопринятие).
         // Ключи не того формата отбрасываются: с ними не совпадёт ни один настоящий ключ.
@@ -62,25 +62,25 @@ final class ShareHistory: ObservableObject {
     }
 
     /// Доверять можно только чужому ID из 10 ASCII-цифр (как принимает relay): свой и пустой/кривой ID подделывает любой зритель.
-    static func canTrust(_ id: String, myID: String = ShareCode.myID) -> Bool {
+    package static func canTrust(_ id: String, myID: String = ShareCode.myID) -> Bool {
         id != myID && isValidID(id)
     }
 
     /// 10 ASCII-цифр — как `^\d{10}$` в relay.
-    static func isValidID(_ id: String) -> Bool {
+    package static func isValidID(_ id: String) -> Bool {
         id.utf8.count == 10 && id.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 }
     }
 
     /// Публичный ключ устройства в base64url без `=`: Ed25519 (43 символа, 32 байта) или P-256 со страницы relay
     /// (87 символов, 65 байт, точка на кривой).
-    static func isPublicKey(_ pub: String) -> Bool {
+    package static func isPublicKey(_ pub: String) -> Bool {
         ShareIdentity.keyKind(ofBase64urlKey: pub) != nil
     }
 
-    var visitedEntries: [Entry] { entries.filter { !$0.incomingOnly }.sorted { $0.lastSeen > $1.lastSeen } }
-    var trustedEntries: [Entry] { entries.filter(\.trusted) }
+    package var visitedEntries: [Entry] { entries.filter { !$0.incomingOnly }.sorted { $0.lastSeen > $1.lastSeen } }
+    package var trustedEntries: [Entry] { entries.filter(\.trusted) }
 
-    func visited(_ id: String, name: String) {
+    package func visited(_ id: String, name: String) {
         update(id) { entry in
             if !name.isEmpty { entry.name = name }
             entry.lastSeen = Date()
@@ -89,7 +89,7 @@ final class ShareHistory: ObservableObject {
     }
 
     /// Доверие по одному ID (протокол v1). Остаётся до перехода ScreenShare на `trust(_:name:pub:)` (M2).
-    func trust(_ id: String, name: String) {
+    package func trust(_ id: String, name: String) {
         guard Self.canTrust(id) else { return }
         update(id) { entry in
             entry.trusted = true
@@ -98,7 +98,7 @@ final class ShareHistory: ObservableObject {
     }
 
     /// «Всегда разрешать» с ключом: доверие привязывается к паре ID + ключ, прежний ключ заменяется.
-    func trust(_ id: String, name: String, pub: String) {
+    package func trust(_ id: String, name: String, pub: String) {
         guard Self.canTrust(id), Self.isPublicKey(pub) else { return }
         update(id) { entry in
             entry.trusted = true
@@ -109,7 +109,7 @@ final class ShareHistory: ObservableObject {
     }
 
     /// Снимает доверие вместе с ключом: следующее «Всегда разрешать» запомнит ключ заново.
-    func untrust(_ id: String) {
+    package func untrust(_ id: String) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         // Запись без визитов (создана только «Всегда разрешать») удаляется целиком, но не вместе с запомненным
         // ключом ведущего: иначе «Снять доверие» стирает pinning (§4.3), и смена ключа ведущего пройдёт незамеченной.
@@ -124,39 +124,39 @@ final class ShareHistory: ObservableObject {
     }
 
     /// Доверие по одному ID (протокол v1). Остаётся до перехода ScreenShare на `isTrusted(id:pub:)` (M2).
-    func isTrusted(_ id: String) -> Bool { Self.canTrust(id) && entries.contains { $0.id == id && $0.trusted } }
+    package func isTrusted(_ id: String) -> Bool { Self.canTrust(id) && entries.contains { $0.id == id && $0.trusted } }
 
     /// v2: доверен этот ID **и** именно этот ключ. Совпадения одного ID недостаточно.
-    func isTrusted(id: String, pub: String) -> Bool {
+    package func isTrusted(id: String, pub: String) -> Bool {
         Self.canTrust(id) && Self.isPublicKey(pub) && entries.contains { $0.id == id && $0.trusted && $0.key == pub }
     }
 
     /// Доверенный по старому ID без ключа: на первый v2-запрос — окно подтверждения, без автоприёма (§3.2).
-    func needsKeyConfirmation(id: String) -> Bool {
+    package func needsKeyConfirmation(id: String) -> Bool {
         Self.canTrust(id) && entries.contains { $0.id == id && $0.trusted && $0.key == nil }
     }
 
     /// Запомнить ключ ведущего, к которому подключались (§4.3). Зритель вызывает `visited()` раньше: запись уже «посещённая».
-    func pinHost(id: String, key: String) {
+    package func pinHost(id: String, key: String) {
         guard Self.isValidID(id), Self.isPublicKey(key) else { return }
         update(id) { $0.hostKey = key }
     }
 
     /// Забыть ключ ведущего: он больше не подтверждает ключ (ID освобождён или стоит старая версия), пользователь согласился.
-    func unpinHost(id: String) {
+    package func unpinHost(id: String) {
         guard Self.isValidID(id), entries.contains(where: { $0.id == id }) else { return }
         update(id) { $0.hostKey = nil }
     }
 
-    func hostKey(for id: String) -> String? { entries.first { $0.id == id }?.hostKey }
+    package func hostKey(for id: String) -> String? { entries.first { $0.id == id }?.hostKey }
 
-    func label(for id: String) -> String? { entries.first { $0.id == id }.map(\.title) }
+    package func label(for id: String) -> String? { entries.first { $0.id == id }.map(\.title) }
 
-    func rename(_ id: String, to label: String) {
+    package func rename(_ id: String, to label: String) {
         update(id) { $0.label = label.trimmingCharacters(in: .whitespaces) }
     }
 
-    func remove(_ id: String) {
+    package func remove(_ id: String) {
         entries.removeAll { $0.id == id }
         save()
     }
@@ -178,7 +178,7 @@ final class ShareHistory: ObservableObject {
 
     // MARK: - Кто сейчас в эфире
 
-    func startPolling() {
+    package func startPolling() {
         users += 1
         guard timer == nil else { return }
         refreshLive()
@@ -190,7 +190,7 @@ final class ShareHistory: ObservableObject {
         self.timer = timer
     }
 
-    func stopPolling() {
+    package func stopPolling() {
         users = max(0, users - 1)
         guard users == 0 else { return }
         timer?.invalidate()
@@ -199,14 +199,14 @@ final class ShareHistory: ObservableObject {
 
     /// Ключ для подписанного `POST /status`. Пока nil — только прежний `GET`. Ставит ScreenShare (M2), когда ключ
     /// уже создан и relay понимает v2: сам опрос истории не должен создавать ключ и вызывать запрос Keychain.
-    static var statusIdentity: ShareIdentity?
+    package static var statusIdentity: ShareIdentity?
     /// Сервер, который не понял `POST /status` (старый или сторонний relay): до смены сервера только `GET`.
     private var signedStatusUnsupported: String?
     /// После 403 `not-owner` подписанный запрос откладывается (ключ привяжется при первой трансляции).
     private var signedStatusPausedUntil: (memo: String, until: Date)?
 
     /// Что делать с ответом на подписанный `POST /status` (N3).
-    enum SignedStatusAction: Equatable {
+    package enum SignedStatusAction: Equatable {
         /// 200 и ответ про все ID — берём его.
         case use
         /// Сервер не понял или не принял `POST` надолго (200 без карты, 403, 404, 405): дальше только `GET`.
@@ -220,14 +220,14 @@ final class ShareHistory: ObservableObject {
     }
 
     /// Через сколько повторить подписанный `/status` после 403 `not-owner`.
-    static let notOwnerRetryDelay: TimeInterval = 300
+    package static let notOwnerRetryDelay: TimeInterval = 300
 
     /// Код ошибки из тела ответа relay (`{"error":"not-owner"}`).
-    static func statusErrorCode(_ data: Data) -> String? {
+    package static func statusErrorCode(_ data: Data) -> String? {
         (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
     }
 
-    static func signedStatusAction(status: Int, parsed: Bool, error: String? = nil) -> SignedStatusAction {
+    package static func signedStatusAction(status: Int, parsed: Bool, error: String? = nil) -> SignedStatusAction {
         switch status {
         case 200: return parsed ? .use : .rememberUnsupportedThenGet
         case 403 where error == "not-owner": return .getOnceRetryLater
@@ -238,15 +238,15 @@ final class ShareHistory: ObservableObject {
     }
 
     /// Признак «этот сервер для этого ID не понимает подписанный запрос»: смена сервера или ID (новый ключ) даёт новую попытку.
-    static func signedStatusKey(server: String, myID: String) -> String { "\(server)|\(myID)" }
+    package static func signedStatusKey(server: String, myID: String) -> String { "\(server)|\(myID)" }
 
     /// Кого опрашивать: только 10-значные ID, не больше 20 самых свежих (лимит relay, §6).
-    static func statusIDs(_ entries: [Entry]) -> [String] {
+    package static func statusIDs(_ entries: [Entry]) -> [String] {
         Array(entries.sorted { $0.lastSeen > $1.lastSeen }.map(\.id).filter(isValidID).prefix(20))
     }
 
     /// Подписанный запрос «кто в эфире» (§6): тело `{v, id, pub, ts, ids, sig}`, подпись — `ShareIdentity.statusMessage`.
-    static func statusRequest(server: String, myID: String, ids: [String], identity: ShareIdentity,
+    package static func statusRequest(server: String, myID: String, ids: [String], identity: ShareIdentity,
                               ts: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> URLRequest? {
         guard !ids.isEmpty, let url = ShareCode.statusURL(server: server, ids: []),
               var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
@@ -266,13 +266,13 @@ final class ShareHistory: ObservableObject {
 
     /// Ответ `/status`: в эфире те из `ids`, что отмечены true. `complete` — ответ должен быть про все `ids`:
     /// старый relay на `POST` тело не читает и отвечает `{}`, это не «никого нет», а «не понял».
-    static func parseLive(_ data: Data, ids: [String], complete: Bool = false) -> Set<String>? {
+    package static func parseLive(_ data: Data, ids: [String], complete: Bool = false) -> Set<String>? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Bool],
               !complete || ids.allSatisfy({ json[$0] != nil }) else { return nil }
         return Set(ids.filter { json[$0] == true })
     }
 
-    func refreshLive() {
+    package func refreshLive() {
         let ids = Self.statusIDs(visitedEntries)
         let server = ScreenShare.server
         guard !ids.isEmpty, let url = ShareCode.statusURL(server: server, ids: ids) else { return }
@@ -308,13 +308,13 @@ final class ShareHistory: ObservableObject {
 }
 
 /// Список истории: отметка эфира, подпись, «Смотреть», переименовать, удалить.
-struct ShareHistoryList: View {
+package struct ShareHistoryList: View {
     @ObservedObject private var history = ShareHistory.shared
     @ObservedObject private var viewer = ShareViewer.shared
     @State private var renaming: ShareHistory.Entry?
     @State private var newLabel = ""
 
-    var body: some View {
+    package var body: some View {
         Group {
             if history.visitedEntries.isEmpty {
                 Text("Здесь появятся те, к кому вы подключались.").font(.caption).foregroundStyle(.secondary)

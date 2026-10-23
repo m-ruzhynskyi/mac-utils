@@ -3,6 +3,7 @@ import CoreAudio
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUScreenShare
 
 /// Что не передавать в трансляцию (эхо звонка): помощники программ, ответственный процесс, позднее появление,
 /// пересборка по событиям. Без захвата: ни экрана, ни звука.

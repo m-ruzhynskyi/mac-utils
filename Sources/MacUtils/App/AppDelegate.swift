@@ -20,6 +20,7 @@ import MUDownloadsSorter
 import MUDropShelf
 import MUCheatSheet
 import MUAnnotate
+import MUScreenShare
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения

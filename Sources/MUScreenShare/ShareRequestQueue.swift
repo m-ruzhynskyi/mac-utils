@@ -8,37 +8,37 @@ import MUAudio
 /// Немодальная панель с очередью запросов на подключение: вместо NSAlert.runModal на каждый запрос.
 /// Показывает первый запрос и «Ещё N»; панель не забирает фокус и не попадает в трансляцию.
 @MainActor
-final class ShareRequestQueue: ObservableObject {
-    static let shared = ShareRequestQueue()
+package final class ShareRequestQueue: ObservableObject {
+    package static let shared = ShareRequestQueue()
 
-    struct Item: Identifiable {
-        let request: ShareRequest
-        let prompt: ShareDecision.Prompt
-        let answer: (ShareAnswer) -> Void
-        var id: String { request.queueKey }
+    package struct Item: Identifiable {
+        package let request: ShareRequest
+        package let prompt: ShareDecision.Prompt
+        package let answer: (ShareAnswer) -> Void
+        package var id: String { request.queueKey }
     }
 
     /// Сколько запрос ждёт ответа: потом отклоняется сам, иначе зритель и место на ретрансляторе заняты бесконечно.
-    static let defaultTimeout: TimeInterval = 180
+    package static let defaultTimeout: TimeInterval = 180
 
-    @Published private(set) var items: [Item] = []
-    var timeout: TimeInterval = ShareRequestQueue.defaultTimeout
+    @Published package private(set) var items: [Item] = []
+    package var timeout: TimeInterval = ShareRequestQueue.defaultTimeout
     /// Сработало автоотклонение (имя зрителя) — для пометки и тестов.
-    var onTimeout: (Item) -> Void = { item in
+    package var onTimeout: (Item) -> Void = { item in
         Toast.show("Запрос от \(item.request.name.isEmpty ? "зрителя" : item.request.name) отклонён: нет ответа 3 минуты",
                    symbol: "clock.badge.xmark", tint: .orange)
     }
     private var timers: [String: Task<Void, Never>] = [:]
-    var playsSound = true
+    package var playsSound = true
     private var panel: NSPanel?
     private var host: FirstMouseHostingView<ShareRequestQueueView>?
     private var cancellable: AnyCancellable?
 
-    var windowNumber: Int? { panel?.windowNumber }
+    package var windowNumber: Int? { panel?.windowNumber }
 
     /// false — такой запрос уже в очереди.
     @discardableResult
-    func add(_ item: Item) -> Bool {
+    package func add(_ item: Item) -> Bool {
         guard !items.contains(where: { $0.id == item.id }) else { return false }
         let wasEmpty = items.isEmpty
         items.append(item)
@@ -74,14 +74,14 @@ final class ShareRequestQueue: ObservableObject {
     }
 
     /// Показать панель (клик по счётчику в «Эфир»).
-    func show() {
+    package func show() {
         guard !items.isEmpty else { return }
         present()
     }
 
     /// Создать панель заранее и скрытой: её номер окна нужен фильтру захвата ещё до первого запроса,
     /// иначе первые кадры с именем и отпечатком просителя уйдут зрителям.
-    func prepare() {
+    package func prepare() {
         guard panel == nil else { return }
         makePanel()
         guard let panel else { return }
@@ -90,23 +90,23 @@ final class ShareRequestQueue: ObservableObject {
         panel.orderOut(nil)
     }
 
-    func contains(key: String) -> Bool { items.contains { $0.id == key } }
+    package func contains(key: String) -> Bool { items.contains { $0.id == key } }
 
     /// Зритель отозвал запрос (или ушёл): убираем без ответа.
-    func remove(key: String) {
+    package func remove(key: String) {
         cancelTimer(key)
         items.removeAll { $0.id == key }
         refreshPanel()
     }
 
-    func removeAll() {
+    package func removeAll() {
         for id in timers.keys { timers[id]?.cancel() }
         timers = [:]
         items = []
         refreshPanel()
     }
 
-    func answer(_ item: Item, _ answer: ShareAnswer) {
+    package func answer(_ item: Item, _ answer: ShareAnswer) {
         guard items.contains(where: { $0.id == item.id }) else { return }
         cancelTimer(item.id)
         items.removeAll { $0.id == item.id }
@@ -162,7 +162,7 @@ final class ShareRequestQueue: ObservableObject {
     }
 
     /// Транслируется другой экран (зритель переключил монитор, «Сменить источник»): видимая панель — туда же.
-    func screenChanged() {
+    package func screenChanged() {
         guard let panel, panel.isVisible else { return }
         layout(force: true)
     }
@@ -177,11 +177,11 @@ final class ShareRequestQueue: ObservableObject {
     }
 }
 
-struct ShareRequestQueueView: View {
-    static let width: CGFloat = 380
-    @ObservedObject var queue: ShareRequestQueue
+package struct ShareRequestQueueView: View {
+    package static let width: CGFloat = 380
+    @ObservedObject package var queue: ShareRequestQueue
 
-    var body: some View {
+    package var body: some View {
         if let item = queue.items.first {
             ShareRequestCard(name: item.request.name, viewer: item.request.viewer, fingerprint: item.request.fp,
                              prompt: item.prompt, moreCount: queue.items.count - 1) { queue.answer(item, $0) }
@@ -189,7 +189,7 @@ struct ShareRequestQueueView: View {
     }
 
     /// «1 запрос», «2 запроса», «5 запросов».
-    static func requests(_ n: Int) -> String {
+    package static func requests(_ n: Int) -> String {
         let last = n % 10, lastTwo = n % 100
         if last == 1 && lastTwo != 11 { return "запрос" }
         if (2...4).contains(last) && !(12...14).contains(lastTwo) { return "запроса" }
@@ -200,19 +200,19 @@ struct ShareRequestQueueView: View {
 /// Запрос зрителя (по `MacHost.dc.html`): аватар-инициал, имя, ID, предупреждения; «Отклонить / Всегда / Разрешить»
 /// в ряд, а если ряд не помещается (длинные подписи, узкая панель) — столбиком, главное действие сверху.
 /// Все значения готовые, без очереди: так карточку можно снять для проверки вида.
-struct ShareRequestCard: View {
-    let name: String
-    let viewer: String
-    var fingerprint: String?
-    let prompt: ShareDecision.Prompt
-    var moreCount = 0
-    let answer: (ShareAnswer) -> Void
+package struct ShareRequestCard: View {
+    package let name: String
+    package let viewer: String
+    package var fingerprint: String?
+    package let prompt: ShareDecision.Prompt
+    package var moreCount = 0
+    package let answer: (ShareAnswer) -> Void
 
     private var title: String { name.isEmpty ? "Зритель" : name }
     private var confirmKey: Bool { prompt.kind == .confirmKey }
     private var allowTitle: String { confirmKey ? "Разрешить один раз" : "Разрешить" }
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(alignment: .center, spacing: DS.Space.m) {
                 Text(String(title.prefix(1)).uppercased())

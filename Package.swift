@@ -123,9 +123,14 @@ let package = Package(
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUAnnotate"
         ),
+        .target(
+            name: "MUScreenShare",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUScreenShare"
+        ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -139,7 +144,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare"],
             path: "Tests/MacUtilsTests"
         ),
     ]
