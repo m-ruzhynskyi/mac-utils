@@ -1,4 +1,5 @@
 @testable import MURemoteConnections
+import AppKit
 import XCTest
 
 /// «Пароль нигде»: ни в записях, ни в диагностике, ни в журнале, ни в файлах; модуль не трогает
@@ -87,6 +88,54 @@ final class PasswordSafetyTests: XCTestCase {
         _ = try ConnectionsFileStore.password(for: record, url: url, sheet: nil)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["c.xlsx"])
         XCTAssertEqual(try Data(contentsOf: url), data, "файл только читается")
+    }
+
+    /// Подключение с паролем-меткой из настоящего файла: метка доходит только до поля (мок AnyDesk),
+    /// её нет в журнале, фазах HUD, исходе, UserDefaults, буфере обмена и рядом с файлом; буфер затёрт.
+    func testConnectionLeavesPasswordNowhere() async throws {
+        let canary = "PWD-CANARY-\(UUID().uuidString.prefix(8))"
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mu-rc-canary-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var rows = Fixtures.cleanRows(10)
+        rows[3][2] = canary
+        let url = dir.appendingPathComponent("c.xlsx")
+        try Fixtures.xlsx(rows: rows).write(to: url)
+
+        let logger = RecordingLogger()
+        let store = ConnectionsFileStore(settings: InMemoryConnectionsSettings(filePath: url.path), logger: logger)
+        store.start()
+        let deadline = Date().addingTimeInterval(5)
+        while store.state != .ready, Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+        let record = try XCTUnwrap(store.snapshot.records.first { $0.sourceRow == 4 })
+
+        let ax = FakeAX(), launcher = FakeLauncher(), clock = FakeClock()
+        let window = FakePasswordWindow()
+        window.ok.onPress = { ax.close(window.window, pid: 77) }
+        launcher.onOpen = { _ in
+            launcher.launch(.anyDesk, pid: 77)
+            clock.at(clock.milliseconds + 500) { ax.show(window.window, pid: 77) }
+        }
+        let connector = RemoteConnector(ax: ax, launcher: launcher, keyboard: FakeKeyboard(ax: ax), clock: clock, logger: logger)
+        var phases: [ConnectionPhase] = []
+        var secret: SecretBuffer?
+        let outcome = await connector.connect(ConnectRequest(record: record, program: .anyDesk), provider: AnyDeskAutomator(),
+                                              password: {
+            let found = try await store.lookupPassword(for: record)
+            secret = found.secret
+            return found
+        }, progress: { phases.append($0) })
+        store.stop()
+
+        XCTAssertEqual(outcome, .connected)
+        XCTAssertEqual(window.field.text, canary, "метка дошла до поля")
+        XCTAssertEqual(secret?.isEmpty, true, "буфер затёрт")
+        var haystack = logger.events.map(\.message) + strings(in: phases) + strings(in: outcome) + strings(in: store.snapshot)
+        haystack += strings(in: connector) + launcher.opened.map(\.absoluteString)
+        haystack += UserDefaults.standard.dictionaryRepresentation().map { "\($0.key)=\($0.value)" }
+        haystack.append(NSPasteboard.general.string(forType: .string) ?? "")
+        for text in haystack { XCTAssertFalse(text.contains(canary), "метка в «\(text.prefix(60))»") }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["c.xlsx"])
     }
 
     /// Линт исходников модуля: нет API, через которые пароль мог бы утечь.

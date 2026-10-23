@@ -79,8 +79,12 @@ final class RemotePaletteController: NSObject, NSWindowDelegate {
         switch Int(event.keyCode) {
         case 125: model.move(1); return true                                // ↓
         case 126: model.move(-1); return true                               // ↑
-        case 36, 76:                                                        // ↩
-            if model.connectSelected() { close() }
+        case 36, 76:                                                        // ↩, ⌘↩ — без пароля
+            // Сначала закрыть: палитра не должна держать фокус, когда программа выходит вперёд.
+            let withPassword = !flags.contains(.command)
+            guard model.selectedRow(in: model.listing) != nil else { return true }
+            close()
+            model.connectSelected(withPassword: withPassword)
             return true
         case 48: model.cycleFilter(); return true                           // ⇥
         case 53: close(); return true                                       // ⎋
@@ -142,6 +146,7 @@ struct RemotePaletteView: View {
             HStack(spacing: 14) {
                 hint(["↑", "↓"], "выбор")
                 hint(["↩"], "подключиться")
+                hint(["⌘", "↩"], "без пароля")
                 hint(["⇥"], "программа")
                 hint(["⌘", "F"], "избранное")
                 Spacer()

@@ -94,5 +94,31 @@ final class RemoteConnectionsSnapshotTests: XCTestCase {
         render(RemoteConnectionsPanel(center: try await center("<hosts/>")), size: panel, name: "rc07-corrupt")
         let columns = try await center("<connections/>", name: "c.xlsx")
         render(RemoteConnectionsPanel(center: columns), size: panel, name: "rc08-bad-xlsx")
+
+        // HUD подключения (m06/m07).
+        let north = ConnectionRecord(sourceRow: 2, name: "Лаборатория Север", id: "123456789", hasPassword: true)
+        let east = ConnectionRecord(sourceRow: 3, name: "Лаборатория Восток", id: "1234567890", program: .teamViewer, hasPassword: true)
+        func cards(_ phases: [ConnectionPhase], _ program: RemoteProgram, _ record: ConnectionRecord) -> some View {
+            VStack(spacing: 14) {
+                ForEach(Array(phases.enumerated()), id: \.offset) { _, phase in
+                    RemoteHUDCard(content: .make(phase, program: program, record: record), program: program)
+                }
+            }
+            .padding(24)
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+        let progress: [ConnectionPhase] = [.opening, .waiting(elapsed: 7, timeout: 20), .entered, .finished(.connected),
+                                           .finished(.connectedWithoutPassword)]
+        render(cards(progress, .anyDesk, north), size: NSSize(width: 460, height: 640), name: "rc09-hud-anydesk")
+        let failures: [ConnectionFailure] = [.noAccessibility, .notInstalled, .fieldNotFound(structure: []), .wrongPassword,
+                                             .focusLost, .entryGone]
+        render(cards(failures.map { .finished(.failed($0)) }, .anyDesk, north), size: NSSize(width: 460, height: 900),
+               name: "rc10-hud-errors-anydesk")
+        render(cards([.finished(.failed(.wrongPassword)), .finished(.failed(.programNotSpecified))], .teamViewer, east),
+               size: NSSize(width: 460, height: 330), name: "rc11-hud-errors-teamviewer")
+        render(RemoteHUDCard(content: .make(.finished(.failed(.fieldNotFound(structure: ["AXWindow", "  AXGroup", "    AXStaticText", "  AXButton"]))),
+                                            program: .anyDesk, record: north), program: .anyDesk, showStructure: true)
+                .padding(24).frame(maxHeight: .infinity, alignment: .top),
+               size: NSSize(width: 460, height: 300), name: "rc12-hud-structure")
     }
 }
