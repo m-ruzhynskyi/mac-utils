@@ -28,7 +28,7 @@ package enum SettingsGroup: String, CaseIterable, Identifiable {
         case .capture: return [.screenshot, .shots, .annotate, .qr, .meetings]
         case .windowsInput: return [.switcher, .windows, .volume, .layout, .smoothScroll, .cutPaste, .textInput]
         case .filesSystem: return [.shelf, .downloads, .textEditor, .videoPlayer, .cheatSheet, .uninstaller, .cleanup, .monitor, .tasks]
-        case .more: return [.wellbeing, .focus, .music, .share, .ai]
+        case .more: return [.wellbeing, .focus, .music, .share, .remote, .ai]
         }
     }
 }
@@ -65,6 +65,7 @@ extension SettingsSection {
         case .ai: return "Всё работает на локальной модели через Ollama — тексты, снимки и файлы не уходят в интернет."
         case .textEditor: return "Вкладки, кодировки и знаки $ для .frm и других текстов"
         case .videoPlayer: return "Плейлист, субтитры, дорожки и запоминание места"
+        case .remote: return "AnyDesk и TeamViewer из своей таблицы: ⌃⌥⌘A, набрали имя — Enter"
         case .music, .share, .switcher, .wellbeing, .uninstaller, .monitor, .tasks, .cleanup, .shots: return ""
         }
     }

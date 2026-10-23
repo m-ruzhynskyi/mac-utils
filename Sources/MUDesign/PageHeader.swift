@@ -6,6 +6,8 @@ package struct HeaderTile: View {
     @Environment(\.colorScheme) private var scheme
     @ScaledMetric(relativeTo: .largeTitle) private var side = DS.Size.headerTile
 
+    package init(systemImage: String) { self.systemImage = systemImage }
+
     package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
         Image(systemName: systemImage)

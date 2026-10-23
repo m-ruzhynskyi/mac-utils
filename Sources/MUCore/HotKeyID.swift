@@ -18,4 +18,5 @@ package enum HotKeyID {
     package static let focus: UInt32 = 33
     package static let textEditor: UInt32 = 34
     package static let videoPlayer: UInt32 = 35
+    package static let remoteConnections: UInt32 = 36
 }

@@ -4,7 +4,7 @@ import MUCore
 package enum SettingsSection: String, CaseIterable, Identifiable {
     case general, hotKeys, exclusions, panel, music, share, focus, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
-         uninstaller, monitor, tasks, cleanup, shots, textEditor, videoPlayer
+         uninstaller, monitor, tasks, cleanup, shots, textEditor, videoPlayer, remote
 
     package var id: String { rawValue }
 
@@ -18,6 +18,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "Снимки"
         case .textEditor: return "Редактор"
         case .videoPlayer: return "Плеер"
+        case .remote: return "Удалённые"
         case .cutPaste: return "Вырезать"
         case .smoothScroll: return "Прокрутка"
         case .switcher: return "Переключатель"
@@ -76,6 +77,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "Мои снимки"
         case .textEditor: return "Текстовый редактор"
         case .videoPlayer: return "Видеоплеер"
+        case .remote: return "Удалённые подключения"
         }
     }
 
@@ -111,6 +113,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .shots: return "photo.on.rectangle.angled"
         case .textEditor: return "doc.plaintext"
         case .videoPlayer: return "play.rectangle"
+        case .remote: return "display.2"
         }
     }
 }

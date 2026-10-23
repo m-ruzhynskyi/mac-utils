@@ -28,7 +28,7 @@ final class ShareMemoryTests: XCTestCase {
     }
 
     func testPlayerQueueIsCappedAtOneSecond() {
-        let player = SharePlayer(silent: true)
+        let player = SharePlayer(silent: true, catchUp: .max)
         defer { player.stop() }
         let payload = Data(ShareProtocol.audioPacket([Float](repeating: 0.1, count: 2_400)).dropFirst())
         for _ in 0..<100 { player.play(payload) }
@@ -82,5 +82,37 @@ final class ShareVideoAckTests: XCTestCase {
         XCTAssertEqual(sent, [10, 20])
         XCTAssertNil(ack.received(on: b), "новый сокет — счёт заново")
         XCTAssertEqual(ShareVideoAck.message(10), #"{"type":"ack","n":10}"#)
+    }
+}
+
+final class SharePlayerCatchUpTests: XCTestCase {
+    func testLongQueueIsResetSoAudioCatchesUp() {
+        let player = SharePlayer(silent: true)
+        defer { player.stop() }
+        let payload = Data(ShareProtocol.audioPacket([Float](repeating: 0.1, count: 2_400)).dropFirst())
+        for _ in 0..<30 { player.play(payload) }
+        XCTAssertGreaterThanOrEqual(player.catchUps, 1, "очередь дошла до 0,5 с и была сброшена")
+        XCTAssertEqual(player.dropped, 0, "пока сброс срабатывает раньше предела, ничего не отбрасывается")
+        XCTAssertLessThanOrEqual(player.queuedSeconds, 0.6)
+    }
+}
+
+final class SharePlayerOwnerTests: XCTestCase {
+    func testPacketsOfAClosedSocketStartNothing() {
+        let player = SharePlayer(silent: true)
+        defer { player.stop() }
+        let payload = Data(ShareProtocol.audioPacket([Float](repeating: 0.1, count: 2_400)).dropFirst())
+        let old = NSObject(), fresh = NSObject()
+        player.attach(old)
+        player.play(payload, from: old)
+        XCTAssertGreaterThan(player.queuedSeconds, 0)
+        player.stop()
+        player.play(payload, from: old)
+        XCTAssertEqual(player.queuedSeconds, 0, "после выхода звук старого сокета не запускает движок")
+        player.attach(fresh)
+        player.play(payload, from: old)
+        XCTAssertEqual(player.queuedSeconds, 0, "старый сокет после переподключения молчит")
+        player.play(payload, from: fresh)
+        XCTAssertGreaterThan(player.queuedSeconds, 0)
     }
 }
