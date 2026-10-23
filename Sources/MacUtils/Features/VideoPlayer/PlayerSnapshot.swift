@@ -79,15 +79,14 @@ enum PlayerSnapshot {
     /// В папку снимков: при включённых «Моих снимках» — в папку дня «Видеоплеер», и запись в библиотеку.
     private static func save(_ image: CGImage, name: String) async -> URL? {
         let root = Pref.screenshotDirectory
-        let library = ScreenshotLibrary.shared
-        let folder = library.enabled ? ShotLibraryRules.folder(root: root, date: Date(), app: app) : root
+        let folder = ShotLibraryRules.libraryEnabled ? ShotLibraryRules.folder(root: root, date: Date(), app: app) : root
         let boxed = UncheckedSendable(image)
         let written = await Task.detached(priority: .userInitiated) { () -> URL? in
             guard let png = ScreenshotEncoding.png(boxed.value) else { return nil }
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             return try? ScreenshotEncoding.write(png, to: folder.appendingPathComponent(name))
         }.value
-        if let written { library.add(written, image: image, app: app) }
+        if let written { AppRouter.shared.addShot(written, image, app) }
         return written
     }
 
@@ -101,8 +100,8 @@ enum PlayerSnapshot {
 
     /// «Показать»: в «Моих снимках», а если они выключены — в Finder.
     static func reveal(_ url: URL) {
-        if ScreenshotLibrary.shared.enabled {
-            ToolsWindowController.shared.show(.shots)
+        if ShotLibraryRules.libraryEnabled {
+            AppRouter.shared.showShotsLibrary()
         } else {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }

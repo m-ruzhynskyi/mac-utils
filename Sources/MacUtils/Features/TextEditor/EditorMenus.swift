@@ -143,7 +143,7 @@ private final class EditorMenuActions: NSObject, NSMenuDelegate, NSMenuItemValid
     @objc func newDocument() { EditorWindowController.shared.newDocument() }
     /// «Файл → Открыть…» из окна плеера — видео в плеер (⌘O с клавиатуры плеер перехватывает раньше меню).
     @objc func open() {
-        if PlayerWindowController.isKey { PlayerWindowController.openPanel() } else { EditorWindowController.shared.openPanel() }
+        if AppRouter.shared.playerIsKey() { AppRouter.shared.openPlayerPanel() } else { EditorWindowController.shared.openPanel() }
     }
 
     @objc func openRecent(_ sender: NSMenuItem) {

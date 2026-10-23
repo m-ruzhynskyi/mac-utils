@@ -2158,7 +2158,7 @@ final class ShareViewer: ObservableObject {
 
     func showWindow() {
         isWindowOpen = true
-        AppDelegate.syncDock()
+        AppRouter.shared.syncDock(nil, nil)
         let window = self.window ?? {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 600),
                                   styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
@@ -2169,7 +2169,7 @@ final class ShareViewer: ObservableObject {
             NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
                 MainActor.assumeIsolated {
                     ShareViewer.shared.windowClosed()
-                    AppDelegate.syncDock()
+                    AppRouter.shared.syncDock(nil, nil)
                 }
             }
             self.window = window

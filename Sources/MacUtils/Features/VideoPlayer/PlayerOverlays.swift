@@ -3,6 +3,7 @@ import AVFoundation
 import SwiftUI
 import MUDesign
 import MUAudio
+import MUCore
 
 /// Всё, что поверх видео: подсказки (v08b, v14b), тосты (v08a, v08c, v14c), кнопка «Пропустить…» (v14),
 /// карточка следующей серии (v15), меню субтитров, дорожек и скорости (v04, v05).
@@ -250,7 +251,7 @@ private struct SnapshotToast: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(DS.Tone.success.line)
-                    Text(ScreenshotLibrary.shared.enabled ? "Кадр сохранён в «Мои снимки»" : "Кадр сохранён в папку снимков")
+                    Text(ShotLibraryRules.libraryEnabled ? "Кадр сохранён в «Мои снимки»" : "Кадр сохранён в папку снимков")
                         .font(DS.Font.bodyStrong).foregroundStyle(.dsText)
                 }
                 Text("\(Int(result.size.width)) × \(Int(result.size.height)) · \(PlayerFormat.time(result.time)) · скопирован в буфер")

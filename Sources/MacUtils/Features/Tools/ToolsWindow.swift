@@ -94,7 +94,7 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        if !SettingsWindowController.shared.isVisible { FocusReturn.restore() }
+        if !AppRouter.shared.settingsVisible() { FocusReturn.restore() }
     }
 }
 

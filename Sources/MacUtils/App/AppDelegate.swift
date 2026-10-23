@@ -36,6 +36,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsSection.installAppSubtitles()
         AppRouter.shared.showWhatsNewIfUpdated = { WhatsNewWindowController.shared.showIfUpdated() }
         AppRouter.shared.prepareForRelaunch = { AppSwitcher.shared.shutdown() }
+        AppRouter.shared.settingsVisible = { SettingsWindowController.shared.isVisible }
+        AppRouter.shared.syncDock = { AppDelegate.syncDock(editorOpen: $0, playerOpen: $1) }
+        AppRouter.shared.openMedia = { PlayerWindowController.open($0) }
+        AppRouter.shared.playerIsKey = { PlayerWindowController.isKey }
+        AppRouter.shared.openPlayerPanel = { PlayerWindowController.openPanel() }
+        AppRouter.shared.showShotsLibrary = { ToolsWindowController.shared.show(.shots) }
+        AppRouter.shared.addShot = { ScreenshotLibrary.shared.add($0, image: $1, app: $2) }
         AppRouter.shared.cheatFrontGroups = { PlayerWindowController.isKey ? [PlayerShortcuts.cheatGroup] : [] }
         AppRouter.shared.cheatMacUtilsGroup = { MainActor.assumeIsolated { CheatSheetGroups.macUtilsGroup() } }
         AppRouter.shared.isInApplications = { MoveToApplications.isInApplications }

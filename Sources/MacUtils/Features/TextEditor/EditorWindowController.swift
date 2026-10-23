@@ -30,7 +30,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         }
         let wasVisible = window.isVisible
         if !wasVisible { FocusReturn.remember() }
-        AppDelegate.syncDock(editorOpen: true)
+        AppRouter.shared.syncDock(true, nil)
         ScreenOutput.activateApp()
         window.makeKeyAndOrderFrontOnScreen()
         window.centerTrafficLights()
@@ -115,8 +115,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuItemValida
         workspace.findMode = nil
         workspace.overlay = nil
         DispatchQueue.main.async {
-            AppDelegate.syncDock(editorOpen: false)
-            if !SettingsWindowController.shared.isVisible { FocusReturn.restore() }
+            AppRouter.shared.syncDock(false, nil)
+            if !AppRouter.shared.settingsVisible() { FocusReturn.restore() }
         }
     }
 
