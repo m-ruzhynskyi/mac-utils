@@ -35,7 +35,7 @@ function rig({ installed = [AD, TV], secret = PW, uiaResult = { state: "entered"
     return child;
   };
   const store = { password: async () => { r.passwordCalls++; if (passwordThrows) throw new Error("gone"); if (secret == null) return null; const s = new SecretBuffer(secret); r.secrets.push(s); return s; } };
-  const uia = { enter: async (opts, s, onEvent) => { r.uiaCalls.push({ opts, bytes: Buffer.from(s.bytes) }); onEvent({ state: "waiting" }); if (uiaThrows) throw new Error("uia crashed"); return uiaResult; }, cancel() { r.cancelled = true; } };
+  const uia = { enter: async (opts, s, onEvent) => { await opts.afterReady?.(); r.uiaCalls.push({ opts, bytes: Buffer.from(s.bytes) }); onEvent({ state: "waiting" }); if (uiaThrows) throw new Error("uia crashed"); return uiaResult; }, cancel() { r.cancelled = true; } };
   r.connector = createConnector({ exists: (p) => installed.includes(p), spawn, uia, hud: { show: (s) => r.states.push(s) }, openExternal: (u) => r.opened.push(u), log: (l) => r.log.push(l) });
   r.store = store;
   r.run = (rec = record(), opts = {}) => r.connector.connectRecord(rec, { settings, store, noPassword: false, ...opts });
@@ -466,13 +466,13 @@ test(".bak: прежнее содержимое побайтно, права т�
   }
 });
 
-test("ОШИБКА: файл списка только для чтения (0o400): первая правка проходит, вторая падает — старый .bak нельзя перезаписать", { todo: "editor.js writeSafely: удалять прежний .bak перед копированием (Mac так и делает)" }, () => {
+test("(исправлено) файл списка только для чтения (0o400): первая правка проходит, вторая падает — старый .bak нельзя перезаписать", () => {
   const { file } = put(BODY, 0o400);
   assert.deepEqual(editor.apply(file, "add", { fields: { name: "Один", id: "555666777" } }), { ok: true });
   assert.deepEqual(editor.apply(file, "add", { fields: { name: "Два", id: "555666778" } }), { ok: true });
 });
 
-test("ОШИБКА (оба клиента): запись с тем же номером строки и ID (весь XML в одну строку, одинаковый ID у двух записей) — правка уходит в первую", { todo: "Mac XMLScan.find и Win editor.locate: при совпадении строки и ID сверять ещё и имя" }, () => {
+test("(исправлено; оба клиента): запись с тем же номером строки и ID (весь XML в одну строку, одинаковый ID у двух записей) — правка уходит в первую", () => {
   const { file } = put(VARIANTS["одна строка"]);
   const second = recordsOf(file)[3];
   assert.equal(second.name, "Дубликат");
@@ -480,7 +480,7 @@ test("ОШИБКА (оба клиента): запись с тем же номе
   assert.deepEqual(rowsOf(file).filter((r) => r.group === "Правка").map((r) => r.name), ["Дубликат"]);
 });
 
-test("ОШИБКА (проверить на Mac тем же тестом): пробелы по краям пароля теряются при чтении файла", { todo: "xmlsource/rawentry: пароль не trim-ить (Mac: testPasswordWithEdgeSpacesSurvivesRoundTrip)" }, () => {
+test("(исправлено; проверить на Mac тем же тестом): пробелы по краям пароля теряются при чтении файла", () => {
   const { file } = put(BODY);
   const rec = recordsOf(file)[0];
   editor.apply(file, "update", { record: rec, fields: form(rec, { password: " внутри пробелы " }) });
@@ -559,15 +559,15 @@ test("случайные цепочки правок (150 шагов × 3 вид
   }
 });
 
-// Обнаруженные ошибки (см. .audit/rc-acceptance.md): тесты помечены todo — падают, пока Разработчик 2 не исправит.
-test("ОШИБКА: запись, добавленная в файл с комментарием после корня (в нём есть </), попадает внутрь комментария и пропадает", { todo: "editor.js: rootClose = text.lastIndexOf('</') находит </ в хвостовом комментарии" }, () => {
+// Обнаруженные ошибки (см. .audit/rc-acceptance.md): исправлено (редактор правит отдельные поля, корень ищется по закрывающему тегу и т. д.), тесты оставлены как защита.
+test("(исправлено) запись, добавленная в файл с комментарием после корня (в нём есть </), попадает внутрь комментария и пропадает", () => {
   const { file } = put('<connections>\n  <connection><name>a</name><id>123456789</id></connection>\n</connections>\n<!-- конец </x> -->\n');
   const res = editor.apply(file, "add", { fields: { name: "Новый", id: "555666777" } });
   assert.equal(res.ok, true);
   assert.deepEqual(recordsOf(file).map((r) => r.name), ["a", "Новый"], "добавленная запись должна читаться из файла");
 });
 
-test("ОШИБКА: правка записи пересобирает её целиком — атрибутная форма, комментарий и CDATA внутри записи теряются", { todo: "editor.js update: serialize() вместо правки отдельных полей (Mac правит только поле)" }, () => {
+test("(исправлено) правка записи пересобирает её целиком — атрибутная форма, комментарий и CDATA внутри записи теряются", () => {
   const { file } = put(BODY);
   const before = fs.readFileSync(file, "utf8");
   const rec = recordsOf(file)[1];                                // запись в виде атрибутов
@@ -580,7 +580,7 @@ test("ОШИБКА: правка записи пересобирает её це
   void before;
 });
 
-test("ОШИБКА: «сохранить без изменений» переписывает файл (Mac оставляет байты в байт)", { todo: "editor.js update: не писать файл и .bak, если ничего не изменилось" }, () => {
+test("(исправлено) «сохранить без изменений» переписывает файл (Mac оставляет байты в байт)", () => {
   const { file } = put(VARIANTS["одна строка"]);
   const before = fs.readFileSync(file);
   for (const rec of recordsOf(file)) editor.apply(file, "update", { record: rec, fields: form(rec) });

@@ -30,7 +30,7 @@ function rig({ installed = [AD, TV], secret = PASSWORD, uiaResult = { state: "en
   let secretRef = null;
   const store = { password: async () => { if (passwordThrows) throw new Error("gone"); if (secret == null) return null; secretRef = new SecretBuffer(secret); return secretRef; } };
   const uiaCalls = [];
-  const uia = { enter: async (opts, s, onEvent) => { uiaCalls.push({ opts, bytes: Buffer.from(s.bytes) }); onEvent({ state: "waiting" }); return uiaResult; }, cancel() { uiaCalls.cancelled = true; } };
+  const uia = { enter: async (opts, s, onEvent) => { await opts.afterReady?.(); uiaCalls.push({ opts, bytes: Buffer.from(s.bytes) }); onEvent({ state: "waiting" }); return uiaResult; }, cancel() { uiaCalls.cancelled = true; } };
   const connector = createConnector({ exists: (p) => installed.includes(p), spawn: fakeSpawn, uia, hud: { show: (s) => states.push(s) }, openExternal: (u) => opened.push(u), log: (l) => log.push(l) });
   return { connector, states, spawned, log, opened, store, uiaCalls, get secret() { return secretRef; } };
 }
@@ -185,7 +185,11 @@ test("UI Automation: мусор в выводе игнорируется, про
 
 test("скрипт UI Automation: пароль читается из stdin, не печатается и не пишется; проверяет процесс, права и фокус", () => {
   const ps = fs.readFileSync(path.join(__dirname, "..", "..", "remote", "tv-uia.ps1"), "utf8");
-  assert.match(ps, /\[Console\]::In\.ReadLine\(\)/);
+  assert.match(ps, /OpenStandardInput\(\)/);                 // вход читается байтами
+  assert.match(ps, /UTF8Encoding/);                           // и в UTF-8: пароль не на латинице не искажается
+  assert.ok(!/\[Console\]::In\b/.test(ps), "кодировка консоли не используется");
+  assert.match(ps, /OpenProcess/);                            // «запущен от администратора» определяется и без доступа к процессу
+  assert.match(ps, /baseline/);                               // окна пароля, открытые до запуска, игнорируются
   assert.ok(!/param\s*\(/i.test(ps), "пароль не может прийти параметром");
   assert.ok(!/\$args|\$MyInvocation/.test(ps));
   assert.ok(!/(Write-Host|Write-Output|Out-File|Set-Content|Add-Content|Tee-Object|Export-)[^\n]*\$password/i.test(ps));

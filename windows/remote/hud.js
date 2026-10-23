@@ -15,6 +15,8 @@ function createHud(electron, onAction) {
       transparent: true, hasShadow: false, webPreferences: { preload: path.join(__dirname, "ui", "hud-preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
     win.setAlwaysOnTop(true, "screen-saver");
     win.loadFile(path.join(__dirname, "ui", "hud.html"));
+    win.webContents.on?.("will-navigate", (event) => event.preventDefault());
+    win.webContents.setWindowOpenHandler?.(() => ({ action: "deny" }));
     win.on("closed", () => { win = null; });
   }
 
@@ -25,7 +27,7 @@ function createHud(electron, onAction) {
     } catch (_) {}
   }
 
-  ipcMain.on("rc:hudAction", (_e, id) => { if (typeof id === "string") { onAction(id, last); if (id === "close" || id === "cancel") hide(); } });
+  ipcMain.on("rc:hudAction", (e, id) => { if (alive() && e && e.sender === win.webContents && typeof id === "string") { onAction(id, last); if (id === "close" || id === "cancel") hide(); } });
 
   function hide() { clearTimeout(timer); if (alive()) win.hide(); }
 

@@ -29,11 +29,12 @@ function scan(text) {
     end(name, endOffset) {
       if (depth === 3 && current) current.children[current.children.length - 1].end = endOffset;
       if (depth === 2 && current) { current.end = endOffset; items.push(current); current = null; }
-      if (depth === 1) rootClose = endOffset - ("</connections>".length);
+      // Закрывающий тег корня — а не последнее «</» в файле (после корня бывает комментарий с «</x>»).
+      if (depth === 1) rootClose = text.lastIndexOf("</", endOffset - 1);
       depth--;
     },
   });
-  return { items, rootClose: text.lastIndexOf("</"), rootOpenEnd };
+  return { items, rootClose, rootOpenEnd };
 }
 
 const eolOf = (text) => (text.includes("\r\n") ? "\r\n" : "\n");
@@ -76,15 +77,23 @@ function indentOf(text, items) {
 
 // Находит запись по номеру строки и ID (как в списке). null — файл успели поправить.
 function locate(text, record, items) {
-  const wanted = items.find((it) => it.row === record.sourceRow && recordID(text, it) === record.id);
-  if (wanted) return wanted;
+  // Номер строки и ID; если так подходят несколько записей (весь XML в одной строке, одинаковый ID) — выбирает имя.
+  const sameRow = items.filter((it) => it.row === record.sourceRow && recordID(text, it) === record.id);
+  if (sameRow.length === 1) return sameRow[0];
+  if (sameRow.length > 1) { const byName = sameRow.filter((it) => nameOf(text, it) === record.name); return byName.length === 1 ? byName[0] : null; }
   const same = items.filter((it) => recordID(text, it) === record.id && nameOf(text, it) === record.name);
   return same.length === 1 ? same[0] : null;
 }
+// Значение поля записи (тег или атрибут). Пароль — без обрезки пробелов по краям.
 function childText(text, it, field) {
+  const trim = (v) => (field === "password" ? v : v.trim());
   const child = it.children.find((c) => c.field === field);
-  if (child) { const inner = text.slice(child.start, child.end); return xml.decode(inner.replace(/^<[^>]*>/, "").replace(/<\/[^>]*>$/, "").replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/, "$1")).trim(); }
-  for (const [k, v] of Object.entries(it.attrs || {})) if (fieldFor(k) === field) return String(v).trim();
+  if (child) {
+    const inner = text.slice(child.start, child.end).replace(/^<[^>]*>/, "").replace(/<\/[^>]*>$/, "");
+    const cdata = /^\s*<!\[CDATA\[([\s\S]*)\]\]>\s*$/.exec(inner);
+    return trim(cdata ? cdata[1] : xml.decode(inner));
+  }
+  for (const [k, v] of Object.entries(it.attrs || {})) if (fieldFor(k) === field) return trim(String(v));
   return "";
 }
 const recordID = (text, it) => normalize(childText(text, it, "id"))?.value ?? "";
@@ -95,6 +104,8 @@ function writeSafely(file, original, next, bom) {
   const bak = `${file}.bak`;
   let mode = 0o600;
   try { mode = fs.statSync(file).mode & 0o777; } catch (_) {}
+  // Прежняя копия могла остаться только для чтения (права скопированы с файла): убираем, иначе новую не записать.
+  try { fs.rmSync(bak, { force: true }); } catch (_) {}
   fs.copyFileSync(file, bak);
   try { fs.chmodSync(bak, mode); } catch (_) {}
   const tmp = `${file}.tmp-${process.pid}`;
@@ -114,6 +125,82 @@ function read(file) {
   const raw = fs.readFileSync(file, "utf8");
   const bom = raw.charCodeAt(0) === 0xFEFF;
   return { text: bom ? raw.slice(1) : raw, bom };
+}
+
+// Правка записи по полям: меняются только те поля, что изменились; форма записи (теги или атрибуты), CDATA, комментарии внутри записи,
+// неизвестные теги и отступы остаются. value — проверенные значения формы.
+const attrEsc = (s) => esc(s).replace(/"/g, "&quot;");
+function sameValue(field, current, wanted) {
+  if (field === "id") return normalize(current)?.value === wanted;
+  if (field === "tags") return require("./builder").splitTags(current).join("\u0001") === require("./builder").splitTags(wanted).join("\u0001");
+  if (field === "program") return (parseProgram(current) || "") === (parseProgram(wanted) || "");
+  return current === wanted;
+}
+function patchRecord(text, target, value, eol, indent) {
+  const patches = [];   // {start, end, text}: правки не пересекаются
+  const openTag = text.slice(target.start, target.openEnd);
+  const selfClosed = openTag.endsWith("/>");
+  const closeStart = selfClosed ? -1 : text.lastIndexOf("</", target.end - 1);
+  const lineStart = text.lastIndexOf("\n", target.start - 1) + 1;
+  const lead = text.slice(lineStart, target.start);
+  const myIndent = /^[ \t]*$/.test(lead) && lead ? lead : "";
+  const childIndent = (() => {
+    const first = target.children[0];
+    if (first) { const ls = text.lastIndexOf("\n", first.start - 1) + 1; const l = text.slice(ls, first.start); if (/^[ \t]+$/.test(l)) return l; }
+    return myIndent + indent;
+  })();
+  for (const field of ORDER) {
+    const wanted = value[field];
+    const current = childText(text, target, field);
+    if (sameValue(field, current, wanted)) continue;
+    const child = target.children.find((c) => c.field === field);
+    const optional = field !== "name" && field !== "id";
+    if (child) {
+      const childOpenEnd = text.indexOf(">", child.start) + 1;
+      const childSelf = text[childOpenEnd - 2] === "/";
+      if (wanted === "" && optional) {
+        // Убрать элемент вместе с его строкой.
+        const ls = text.lastIndexOf("\n", child.start - 1) + 1;
+        const from = /^[ \t]*$/.test(text.slice(ls, child.start)) ? ls : child.start;
+        let to = child.end; if (text.startsWith("\r\n", to)) to += 2; else if (text[to] === "\n") to += 1;
+        patches.push({ start: from, end: to, text: "" });
+      } else {
+        const wasCdata = /<!\[CDATA\[/.test(text.slice(child.start, child.end));
+        const inner = wasCdata && !wanted.includes("]]>") ? `<![CDATA[${wanted}]]>` : esc(wanted);
+        if (childSelf) patches.push({ start: child.start, end: child.end, text: `${text.slice(child.start, childOpenEnd - 2).trimEnd()}>${inner}</${child.name}>` });
+        else patches.push({ start: childOpenEnd, end: text.lastIndexOf("</", child.end - 1), text: inner });
+      }
+      continue;
+    }
+    // Атрибутная форма: <connection name="…" id="…"/>.
+    const attr = Object.keys(target.attrs || {}).find((k) => fieldFor(k) === field);
+    if (attr) {
+      const re = new RegExp(`(\\s)${attr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=\\s*("[^"]*"|'[^']*')`);
+      const m = re.exec(openTag);
+      if (m) {
+        const at = target.start + m.index;
+        if (wanted === "" && optional) patches.push({ start: at, end: at + m[0].length, text: "" });
+        else patches.push({ start: at + m[1].length, end: at + m[0].length, text: `${attr}="${attrEsc(wanted)}"` });
+        continue;
+      }
+    }
+    if (wanted === "" ) continue;
+    // Поля нет — добавить: атрибутом в самозакрытую запись, иначе элементом перед закрывающим тегом.
+    if (selfClosed) {
+      const at = target.openEnd - 2 - (/\s$/.test(text.slice(target.openEnd - 3, target.openEnd - 2)) ? 1 : 0);
+      patches.push({ start: at, end: at, text: ` ${FIELD_TAG[field]}="${attrEsc(wanted)}"` });
+    } else {
+      const ls = text.lastIndexOf("\n", closeStart - 1) + 1;
+      const onOwnLine = /^[ \t]*$/.test(text.slice(ls, closeStart));
+      const at = onOwnLine ? ls : closeStart;
+      patches.push({ start: at, end: at, text: onOwnLine ? `${childIndent}<${FIELD_TAG[field]}>${esc(wanted)}</${FIELD_TAG[field]}>${eol}` : `<${FIELD_TAG[field]}>${esc(wanted)}</${FIELD_TAG[field]}>` });
+    }
+  }
+  if (!patches.length) return text;
+  patches.sort((a, b) => b.start - a.start || b.end - a.end);
+  let out = text;
+  for (const p of patches) out = out.slice(0, p.start) + p.text + out.slice(p.end);
+  return out;
 }
 
 // action: add | update | remove. record — запись списка (для update/remove); fields — поля формы.
@@ -147,11 +234,8 @@ function apply(file, action, { record = null, fields = {} } = {}) {
     } else if (action === "update") {
       const checked = validate({ password: childText(text, target, "password"), ...fields });
       if (checked.error) return { ok: false, error: checked.error };
-      const extra = target.children.filter((c) => !c.field).map((c) => text.slice(c.start, c.end));
-      const lineStart = text.lastIndexOf("\n", target.start - 1) + 1;
-      const lead = text.slice(lineStart, target.start);
-      const myIndent = /^[ \t]*$/.test(lead) && lead ? lead : indent;
-      next = text.slice(0, target.start) + serialize(checked.value, myIndent, eol, extra) + text.slice(target.end);
+      next = patchRecord(text, target, checked.value, eol, indent);
+      if (next === text) return { ok: true };   // ничего не изменилось — файл и .bak не трогаем
     } else return { ok: false, error: "action" };
   }
   try { writeSafely(file, text, next, bom); } catch (_) { return { ok: false, error: "writeFailed" }; }

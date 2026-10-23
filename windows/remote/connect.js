@@ -41,17 +41,24 @@ function createConnector(deps) {
   // AnyDesk: пароль через stdin. Процесс отвязан от нашего: подключение живёт своей жизнью.
   function launchAnyDesk(exe, id, secret) {
     return new Promise((resolve) => {
-      let settled = false;
-      const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+      let settled = false, payload = null;
+      const wipePayload = () => { if (payload) { payload.fill(0); payload = null; } };
+      const done = (r) => { if (!settled) { settled = true; wipePayload(); resolve(r); } };
       let child;
       try { child = spawn(exe, secret ? [id, "--with-password"] : [id], { stdio: ["pipe", "ignore", "ignore"], windowsHide: true, detached: true }); }
       catch (_) { return done({ ok: false }); }
+      // Обработчики ошибок — до записи: запуск мог не удаться асинхронно (exe заменён обновлением, путь неверен), и запись в stdin
+      // без слушателя ошибки уронила бы главный процесс (EPIPE).
       child.on?.("error", () => done({ ok: false }));
+      child.stdin?.on?.("error", () => done({ ok: false }));
       child.on?.("exit", (code) => done({ ok: code === 0 || code == null }));
       const finish = () => setTimeout(() => done({ ok: true }), 600);
       if (secret) {
-        // Пароль идёт в stdin байтами из буфера (не строкой), потом вход закрывается.
-        child.stdin.write(Buffer.concat([secret.bytes, Buffer.from("\n")]), () => { try { child.stdin.end(); } catch (_) {} finish(); });
+        // Пароль идёт в stdin байтами из буфера (не строкой), потом вход закрывается; копия затирается.
+        try {
+          payload = Buffer.concat([secret.bytes, Buffer.from("\n")]);
+          child.stdin.write(payload, () => { wipePayload(); try { child.stdin.end(); } catch (_) {} finish(); });
+        } catch (_) { return done({ ok: false }); }
       } else finish();
       child.unref?.();
     });
@@ -75,6 +82,8 @@ function createConnector(deps) {
     const title = TITLES[program];
     const exe = find(program, settings.programPaths?.[program]);
     if (!exe) { hud.show(MESSAGES.notInstalled(program)); log(`connect fail code=notInstalled`); return { ok: false, error: "notInstalled" }; }
+    // ID, начинающийся с «-», программа приняла бы за параметр командной строки.
+    if (record.id.startsWith("-")) { hud.show(MESSAGES.launchFailed(program)); log(`connect fail code=badID`); return { ok: false, error: "badID" }; }
     hud.show({ kind: "info", title: `Открываю ${title}…`, detail: record.name, spinner: true });
 
     // Запись и пароль — заново из файла в момент подключения.
@@ -97,14 +106,19 @@ function createConnector(deps) {
       }
       // TeamViewer
       if (record.id.includes("@")) { hud.show(MESSAGES.launchFailed(program)); return { ok: false, error: "alias" }; }
-      if (!(await launchTeamViewer(exe, record.id))) { hud.show(MESSAGES.launchFailed(program)); log(`connect fail code=launch program=${program}`); return { ok: false, error: "launch" }; }
-      if (!secret) { hud.show({ kind: "success", title: `Открыт ${title}`, detail: record.name, autoHideMs: 2500 }); log(`connect ok program=${program} password=0`); return { ok: true }; }
-      if (!uia) { hud.show(MESSAGES.fieldNotFound(program)); return { ok: false, error: "fieldNotFound" }; }
+      if (!secret || !uia) {
+        if (!(await launchTeamViewer(exe, record.id))) { hud.show(MESSAGES.launchFailed(program)); log(`connect fail code=launch program=${program}`); return { ok: false, error: "launch" }; }
+        if (!secret) { hud.show({ kind: "success", title: `Открыт ${title}`, detail: record.name, autoHideMs: 2500 }); log(`connect ok program=${program} password=0`); return { ok: true }; }
+        hud.show(MESSAGES.fieldNotFound(program)); return { ok: false, error: "fieldNotFound" };
+      }
       const timeoutMs = Math.max(5, settings.timeoutSeconds || 20) * 1000;
       const started = clock.now();
-      const result = await uia.enter({ timeoutMs }, secret, (event) => {
+      // TeamViewer запускается, когда скрипт запомнил уже открытые окна пароля: пароль не уйдёт в окно прежнего подключения.
+      let launched = null;
+      const result = await uia.enter({ timeoutMs, afterReady: async () => { launched = await launchTeamViewer(exe, record.id); } }, secret, (event) => {
         if (event.state === "waiting") hud.show({ kind: "info", title: "Жду окно пароля…", detail: `${Math.round((clock.now() - started) / 1000)} с`, progress: Math.min(1, (clock.now() - started) / timeoutMs), actions: [{ id: "cancel", label: "Отмена" }] });
       });
+      if (launched === false) { hud.show(MESSAGES.launchFailed(program)); log(`connect fail code=launch program=${program}`); return { ok: false, error: "launch" }; }
       switch (result.state) {
         case "entered":
           hud.show({ kind: "success", title: "Пароль введён", detail: `${title} подключается к ${record.name}`, autoHideMs: 2500 }); log(`connect ok program=${program} password=1`); return { ok: true };

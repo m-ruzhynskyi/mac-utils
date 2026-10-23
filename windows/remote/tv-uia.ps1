@@ -12,16 +12,25 @@ public static class MuNative {
   [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr p, uint access, out IntPtr token);
   [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetTokenInformation(IntPtr t, int cls, out int info, int len, out int ret);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
-  public static bool Elevated(IntPtr process) {
-    IntPtr token; if (!OpenProcessToken(process, 8, out token)) return true;   // нет доступа к токену — считаем «выше нас»
-    try { int v; int ret; return GetTokenInformation(token, 20, out v, 4, out ret) && v != 0; } finally { CloseHandle(token); }
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  // Процесс запущен от администратора. Не удалось даже открыть процесс с минимальными правами (PROCESS_QUERY_LIMITED_INFORMATION) или
+  // его токен — он «выше нас»: так же отвечает Windows для поднятого процесса.
+  public static bool Elevated(int pid) {
+    IntPtr process = OpenProcess(0x1000, false, pid);
+    if (process == IntPtr.Zero) return true;
+    try {
+      IntPtr token; if (!OpenProcessToken(process, 8, out token)) return true;
+      try { int v; int ret; return GetTokenInformation(token, 20, out v, 4, out ret) && v != 0; } finally { CloseHandle(token); }
+    } finally { CloseHandle(process); }
   }
 }
 '@
 function Emit($state) { [Console]::Out.WriteLine((@{ state = $state } | ConvertTo-Json -Compress)); [Console]::Out.Flush() }
 
-$options = [Console]::In.ReadLine() | ConvertFrom-Json
-$password = [Console]::In.ReadLine()
+# Вход — UTF-8 независимо от кодовой страницы консоли (иначе пароль не на латинице искажается): читаем байты stdin сами.
+$reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), (New-Object System.Text.UTF8Encoding($false)))
+$options = $reader.ReadLine() | ConvertFrom-Json
+$password = $reader.ReadLine()
 $deadline = [DateTime]::UtcNow.AddMilliseconds([double]$options.timeoutMs)
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $isEdit = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
@@ -29,10 +38,14 @@ $isButton = New-Object System.Windows.Automation.PropertyCondition([System.Windo
 
 function Get-TeamViewerIds { @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'TeamViewer*' } | ForEach-Object { $_.Id }) }
 
+# Окна пароля, уже открытые до запуска подключения (прежнее подключение, чужой диалог): их игнорируем, пароль уйдёт только в новое.
+$baseline = New-Object System.Collections.Generic.HashSet[int]
+
 # Окно пароля: окно процесса TeamViewer с полем ввода, помеченным как пароль.
-function Find-PasswordField($ids) {
+function Find-PasswordField($ids, $skipKnown = $true) {
   foreach ($window in $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
     if ($ids -notcontains $window.Current.ProcessId) { continue }
+    if ($skipKnown -and $baseline.Contains([int]$window.Current.NativeWindowHandle)) { continue }
     foreach ($edit in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $isEdit)) {
       if ($edit.Current.IsPassword) { return @{ Window = $window; Edit = $edit } }
     }
@@ -41,6 +54,13 @@ function Find-PasswordField($ids) {
 }
 
 try {
+  # Запоминаем уже открытые окна пароля и сообщаем «готов»: TeamViewer запускается только после этого.
+  foreach ($window in $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+    if ((Get-TeamViewerIds) -contains $window.Current.ProcessId) {
+      foreach ($edit in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $isEdit)) { if ($edit.Current.IsPassword) { [void]$baseline.Add([int]$window.Current.NativeWindowHandle) } }
+    }
+  }
+  Emit 'ready'
   $found = $null
   $tick = 0
   while ([DateTime]::UtcNow -lt $deadline) {
@@ -54,7 +74,7 @@ try {
   $pid2 = $found.Window.Current.ProcessId
   $process = Get-Process -Id $pid2
   if ($process.ProcessName -notlike 'TeamViewer*') { Emit 'focusLost'; return }
-  if ([MuNative]::Elevated($process.Handle) -and -not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Emit 'elevated'; return }
+  if ([MuNative]::Elevated($pid2) -and -not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Emit 'elevated'; return }
 
   # Фокус: окно пароля должно быть на переднем плане и принадлежать TeamViewer; иначе одна попытка вернуть, потом отказ.
   $handle = [IntPtr]$found.Window.Current.NativeWindowHandle

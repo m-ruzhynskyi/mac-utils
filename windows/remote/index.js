@@ -1,10 +1,10 @@
-// «Удалённые подключения»: окно, палитра Ctrl+Alt+A, меню в трее. Единственная точка подключения к main.js — init().
+// «Удалённые подключения»: окно, палитра (Win+Shift+A по умолчанию), меню в трее. Единственная точка подключения к main.js — init().
 // Вся логика — в service.js и соседних модулях (без Electron, с тестами); здесь только окна, трей, клавиша и IPC.
 "use strict";
 
 const path = require("node:path");
 const { ConnectionsFileStore } = require("./filestore");
-const { RemoteSettings } = require("./settings");
+const { RemoteSettings, hotkeyProblem } = require("./settings");
 const { RemoteService } = require("./service");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
@@ -18,13 +18,30 @@ const templates = require("./templates");
 const UI = path.join(__dirname, "ui");
 const PRELOAD = path.join(UI, "preload.js");
 
-// "Ctrl+Alt+A" → ускоритель Electron "Control+Alt+A".
+// "Win+Shift+A" → ускоритель Electron "Super+Shift+A"; "Ctrl+Alt+A" → "Control+Alt+A".
 const accelerator = (hotkey) => String(hotkey).replace(/\bctrl\b/i, "Control").replace(/\bwin\b/i, "Super");
+
+// Только файлы списка и сами программы: окно и страницы не могут направить приложение на произвольный путь.
+const LIST_FILE = /\.(xlsx|xlsm|xml)$/i;
+const PROGRAM_FILE = { anyDesk: /(^|[\\/])AnyDesk\.exe$/i, teamViewer: /(^|[\\/])TeamViewer\.exe$/i };
+function sanitizePatch(patch) {
+  const out = { ...patch };
+  if (typeof out.file === "string" && out.file !== "" && !LIST_FILE.test(out.file)) delete out.file;
+  if (out.programPaths && typeof out.programPaths === "object") {
+    const clean = {};
+    for (const p of ["anyDesk", "teamViewer"]) {
+      const v = out.programPaths[p];
+      if (typeof v === "string" && (v === "" || PROGRAM_FILE[p].test(v))) clean[p] = v;
+    }
+    out.programPaths = clean;
+  }
+  return out;
+}
 
 // electron: { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, dialog, nativeImage, screen };
 // options: { icon, userData, connector?, editor?, templates?, hud?, log? }. Возвращает управляющий объект (тесты и main.js).
 function init(electron, options = {}) {
-  const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, dialog, nativeImage, screen } = electron;
+  const { app, BrowserWindow, Tray, Menu, MenuItem, globalShortcut, ipcMain, shell, dialog, nativeImage, screen } = electron;
   const userData = options.userData || app.getPath("userData");
   const settings = new RemoteSettings(path.join(userData, "remote-connections.json"));
   const store = new ConnectionsFileStore(options.timing);
@@ -40,11 +57,19 @@ function init(electron, options = {}) {
 
   const alive = (w) => w && !w.isDestroyed();
   const secure = { preload: PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false };
+  // Окна модуля показывают только свою страницу: переход куда-либо (в том числе перетаскивание файла в окно) и новые окна запрещены.
+  const lock = (win) => {
+    win.webContents.on?.("will-navigate", (event) => event.preventDefault());
+    win.webContents.setWindowOpenHandler?.(() => ({ action: "deny" }));
+  };
+  // Вызов принят только от окон модуля (список, палитра).
+  const trusted = (event) => !!event && !!event.sender && ((alive(windowRef) && event.sender === windowRef.webContents) || (alive(paletteRef) && event.sender === paletteRef.webContents));
 
   function openWindow() {
     if (alive(windowRef)) { if (windowRef.isMinimized()) windowRef.restore(); windowRef.show(); windowRef.focus(); return windowRef; }
     windowRef = new BrowserWindow({ width: 760, height: 760, minWidth: 520, minHeight: 480, title: "Mac Utils · Удалённые подключения",
       autoHideMenuBar: true, backgroundColor: "#111111", icon: options.icon, webPreferences: secure });
+    lock(windowRef);
     windowRef.loadFile(path.join(UI, "remote.html"));
     windowRef.on("closed", () => { windowRef = null; });
     return windowRef;
@@ -54,6 +79,7 @@ function init(electron, options = {}) {
     if (!alive(paletteRef)) {
       paletteRef = new BrowserWindow({ width: 700, height: 460, frame: false, resizable: false, show: false, alwaysOnTop: true, skipTaskbar: true,
         transparent: true, hasShadow: false, webPreferences: secure });
+      lock(paletteRef);
       paletteRef.loadFile(path.join(UI, "remote.html"), { hash: "palette" });
       paletteRef.on("blur", () => { if (alive(paletteRef)) paletteRef.hide(); });
       paletteRef.on("closed", () => { paletteRef = null; });
@@ -67,13 +93,25 @@ function init(electron, options = {}) {
     paletteRef.webContents.send("rc:show");
   }
 
-  function registerHotkey() {
+  // Клавиша и значок в трее живут, только пока выбран файл: без него функции не видно, и сочетание ни у кого не отнимается.
+  function applyEnabled() {
     if (registered) { try { globalShortcut.unregister(registered); } catch (_) {} registered = ""; }
-    const want = accelerator(settings.data.hotkey);
-    try { hotkeyOk = !!globalShortcut.register(want, openPalette); } catch (_) { hotkeyOk = false; }
-    if (hotkeyOk) registered = want; else log(`горячая клавиша не зарегистрирована`);
+    const on = !!settings.data.file;
+    hotkeyOk = true;
+    if (on) {
+      const problem = hotkeyProblem(settings.data.hotkey);
+      if (problem === "noModifier" || problem === "noKey") hotkeyOk = false;
+      else {
+        const want = accelerator(settings.data.hotkey);
+        try { hotkeyOk = !!globalShortcut.register(want, openPalette); } catch (_) { hotkeyOk = false; }
+        if (hotkeyOk) registered = want;
+      }
+      if (!hotkeyOk) log("горячая клавиша не зарегистрирована");
+      buildTray();
+    } else if (tray) { try { tray.destroy?.(); } catch (_) {} tray = null; }
     return hotkeyOk;
   }
+  const registerHotkey = applyEnabled;
 
   function buildTray() {
     if (!tray) {
@@ -135,35 +173,46 @@ function init(electron, options = {}) {
     const picked = await dialog.showOpenDialog(alive(windowRef) ? windowRef : undefined, { title: "Файл подключений", properties: ["openFile"],
       filters: [{ name: "Список подключений", extensions: ["xlsx", "xml"] }] });
     if (picked.canceled || !picked.filePaths[0]) return "";
+    if (!LIST_FILE.test(picked.filePaths[0])) return "";
     settings.update({ file: picked.filePaths[0], sheet: "" });
     service.start();
+    applyEnabled();
+    notifyViews();
     return picked.filePaths[0];
   }
 
-  function setSettings(patch) {
+  function setSettings(rawPatch) {
+    const patch = sanitizePatch(rawPatch && typeof rawPatch === "object" ? rawPatch : {});
+    // Сочетание без модификатора («A», «Shift+A») нельзя: оно отняло бы ввод. Ctrl+Alt допустимо, но с предупреждением про AltGr.
+    let problem = "";
+    if (Object.hasOwn(patch, "hotkey")) {
+      problem = hotkeyProblem(patch.hotkey);
+      if (problem === "noModifier" || problem === "noKey") delete patch.hotkey;
+    }
     const before = settings.data.file + "|" + settings.data.sheet;
-    const data = settings.update(patch || {});
+    const data = settings.update(patch);
     if (before !== data.file + "|" + data.sheet) service.start();
-    let ok = true;
-    if (patch && Object.hasOwn(patch, "hotkey")) ok = registerHotkey();
+    const ok = applyEnabled();
     notifyViews();
-    return { ...data, hotkeyOk: ok };
+    return { ...data, hotkeyOk: problem === "noModifier" || problem === "noKey" ? false : ok, hotkeyProblem: problem || hotkeyProblem(data.hotkey) };
   }
 
-  ipcMain.handle("rc:view", (_e, q) => service.view({ query: String(q?.query ?? ""), filter: ["anyDesk", "teamViewer"].includes(q?.filter) ? q.filter : "all" }));
-  ipcMain.handle("rc:toggleFavorite", (_e, key) => service.toggleFavorite(String(key)));
-  ipcMain.handle("rc:connect", (_e, q) => connect(String(q?.key), !!q?.noPassword));
-  ipcMain.handle("rc:openFile", () => openFile());
-  ipcMain.handle("rc:reload", () => store.reload());
-  ipcMain.handle("rc:chooseFile", chooseFile);
-  ipcMain.handle("rc:getSettings", () => ({ ...settings.data }));
-  ipcMain.handle("rc:setSettings", (_e, patch) => setSettings(patch));
-  ipcMain.handle("rc:sheets", () => store.sheetNames().catch(() => []));
-  ipcMain.handle("rc:createTemplate", async (_e, kind) => (options.templates || templates).create({ kind, dialog, parent: windowRef, settings, service, setSettings }));
-  ipcMain.handle("rc:edit", async (_e, q) => {
+  // Вызовы принимаются только от окон модуля.
+  const guarded = (fn, denied = null) => (event, ...args) => (trusted(event) ? fn(event, ...args) : denied);
+  ipcMain.handle("rc:view", guarded((_e, q) => service.view({ query: String(q?.query ?? ""), filter: ["anyDesk", "teamViewer"].includes(q?.filter) ? q.filter : "all" })));
+  ipcMain.handle("rc:toggleFavorite", guarded((_e, key) => service.toggleFavorite(String(key)), false));
+  ipcMain.handle("rc:connect", guarded((_e, q) => connect(String(q?.key), !!q?.noPassword), { ok: false, error: "denied" }));
+  ipcMain.handle("rc:openFile", guarded(() => openFile()));
+  ipcMain.handle("rc:reload", guarded(() => store.reload()));
+  ipcMain.handle("rc:chooseFile", guarded(chooseFile, ""));
+  ipcMain.handle("rc:getSettings", guarded(() => ({ ...settings.data }), null));
+  ipcMain.handle("rc:setSettings", guarded((_e, patch) => setSettings(patch), null));
+  ipcMain.handle("rc:sheets", guarded(() => store.sheetNames().catch(() => []), []));
+  ipcMain.handle("rc:createTemplate", guarded(async (_e, kind) => (options.templates || templates).create({ kind, dialog, parent: windowRef, settings, service, setSettings }), ""));
+  ipcMain.handle("rc:edit", guarded(async (_e, q) => {
     if (q?.action === "download") { shell.openExternal(require("./models").downloadURL(q.payload === "teamViewer" ? "teamViewer" : "anyDesk")); return true; }
     return editRecord(q);
-  });
+  }, { ok: false, error: "denied" }));
 
   // Правка списка (только .xml; .xlsx не пишется): добавить, изменить, удалить; затем файл перечитывается.
   async function editRecord(q) {
@@ -177,12 +226,16 @@ function init(electron, options = {}) {
     if (result.ok) store.reload();
     return result;
   }
-  ipcMain.on("rc:closePalette", () => { if (alive(paletteRef)) paletteRef.hide(); });
+  ipcMain.on("rc:closePalette", (e) => { if (trusted(e) && alive(paletteRef)) paletteRef.hide(); });
 
   service.onChange(notifyViews);
   service.start();
-  registerHotkey();
-  buildTray();
+  applyEnabled();
+  // Вход в модуль без значка в трее: пункт в меню окна Share (меню скрыто, показывается по Alt) — по нему выбирают файл.
+  try {
+    const menu = Menu.getApplicationMenu?.();
+    if (menu && MenuItem) { menu.append(new MenuItem({ label: "Удалённые подключения", submenu: [{ label: "Открыть список…", click: openWindow }] })); Menu.setApplicationMenu(menu); }
+  } catch (_) {}
 
   return {
     service, settings, store, openWindow, openPalette, registerHotkey, trayTemplate, connect, hudAction, titles: TITLES,

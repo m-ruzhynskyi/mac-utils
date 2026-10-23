@@ -69,7 +69,7 @@ test("настройки: допустимые значения, права фа
   settings.update({ timeoutSeconds: 9999, defaultProgram: "нет", hotkey: "", programPaths: { teamViewer: "D:\\TV\\TeamViewer.exe" } });
   assert.equal(settings.data.timeoutSeconds, 120);
   assert.equal(settings.data.defaultProgram, "anyDesk");
-  assert.equal(settings.data.hotkey, "Ctrl+Alt+A");
+  assert.equal(settings.data.hotkey, "Win+Shift+A");
   assert.equal(settings.data.programPaths.teamViewer, "D:\\TV\\TeamViewer.exe");
   assert.deepEqual(fs.readdirSync(path.join(dir, "settings")), ["remote.json"], "без временных файлов");
   store.stop();

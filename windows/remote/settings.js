@@ -10,7 +10,8 @@ const DEFAULTS = Object.freeze({
   file: "",              // путь к .xlsx/.xml
   sheet: "",             // лист .xlsx; пусто — первый
   defaultProgram: "anyDesk",
-  hotkey: "Ctrl+Alt+A",
+  // Win+Shift+A: без Ctrl+Alt (AltGr на польской, венгерской и др. раскладках) и без Ctrl+Shift+Space (в Excel выделяет лист).
+  hotkey: "Win+Shift+A",
   timeoutSeconds: 20,    // ожидание окна пароля
   autoLogin: false,      // отметка «входить автоматически» (AnyDesk)
   notify: true,          // уведомление после подключения
@@ -18,6 +19,20 @@ const DEFAULTS = Object.freeze({
   favoriteIDs: [],
   recentIDs: [],
 });
+
+// Сочетание годится для глобальной клавиши: есть Ctrl, Alt или Win и одна обычная клавиша. "altgr" — Ctrl+Alt без Win: на раскладках
+// с AltGr (Ctrl+Alt) оно перехватит ввод букв во всех программах.
+function hotkeyProblem(hotkey) {
+  const parts = String(hotkey).split("+").map((p) => p.trim().toLowerCase()).filter(Boolean);
+  if (parts.length < 2) return "noModifier";
+  const mods = new Set(["ctrl", "control", "alt", "shift", "win", "super", "cmd"]);
+  const keys = parts.filter((p) => !mods.has(p)), modifiers = parts.filter((p) => mods.has(p));
+  if (keys.length !== 1) return "noKey";
+  const has = (...n) => modifiers.some((m) => n.includes(m));
+  if (!has("ctrl", "control", "alt", "win", "super", "cmd")) return "noModifier";   // «Shift+буква» — это просто заглавная буква
+  if (has("ctrl", "control") && has("alt") && !has("win", "super", "cmd")) return "altgr";
+  return "";
+}
 
 const str = (value, fallback) => (typeof value === "string" ? value : fallback);
 const ids = (list) => (Array.isArray(list) ? list.filter((x) => typeof x === "string" && /^[A-Za-z0-9._@-]{1,64}$/.test(x)).slice(0, 500) : []);
@@ -71,4 +86,4 @@ class RemoteSettings {
   }
 }
 
-module.exports = { RemoteSettings, DEFAULTS, normalize };
+module.exports = { RemoteSettings, DEFAULTS, normalize, hotkeyProblem };

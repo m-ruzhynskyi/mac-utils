@@ -28,6 +28,7 @@
       "overlay-preload.js",
       "overlay-place.js",
       "displays.js",
+      "remote/**",
       "offline.html",
       "package.json",
       "assets/icon.png"
@@ -53,6 +54,9 @@
         "provider": "generic",
         "url": "https://github.com/m-ruzhynskyi/mac-utils/releases/download/windows-latest/"
       }
+    ],
+    "asarUnpack": [
+      "remote/tv-uia.ps1"
     ]
   }
 }

@@ -135,7 +135,8 @@ class ConnectionsFileStore extends EventEmitter {
   async password(record) {
     if (!this.file) return null;
     const data = await fs.promises.readFile(this.file);
-    return passwordFor(record, data, kindOf(this.file), this.sheet);
+    try { return passwordFor(record, data, kindOf(this.file), this.sheet); }
+    finally { data.fill(0); }   // в буфере файла — пароли всех записей
   }
 }
 

@@ -1,4 +1,4 @@
-// Окно «Удалённые подключения» и палитра Ctrl+Alt+A. Данные приходят готовыми из основного процесса; всё, что из файла
+// Окно «Удалённые подключения» и палитра (Win+Shift+A по умолчанию). Данные приходят готовыми из основного процесса; всё, что из файла
 // (названия, группы, заметки), вставляется только как textContent.
 "use strict";
 
@@ -230,7 +230,7 @@ async function openSettings() {
   const s = await window.rc.getSettings();
   const field = (label, input) => { const l = el("label", null, label); l.append(input); return l; };
   const text = (value, onChange, type = "text") => { const i = el("input"); i.type = type; i.value = value; i.onchange = () => onChange(i.value); return i; };
-  const warn = el("div", "banner warning"); warn.append(el("div", null, "Пароли лежат в файле открытым текстом. Включите шифрование диска, ограничьте права на файл и не пересылайте его. Mac Utils пароли нигде не хранит."));
+  const warn = el("div", "banner warning"); warn.append(el("div", null, "Пароли лежат в файле открытым текстом. Включите шифрование диска, ограничьте доступ к файлу и папке, не пересылайте его. Mac Utils пароли нигде не хранит. При правке XML рядом остаётся копия .bak с теми же паролями (права Windows на неё не переносятся, облако её синхронизирует) — удаляйте её, когда она не нужна."));
   const row = el("div"); row.style.cssText = "display:flex;gap:8px";
   const path = text(s.file, async (v) => { await window.rc.setSettings({ file: v }); });
   path.style.flex = "1";
@@ -239,8 +239,14 @@ async function openSettings() {
   const sheetSel = el("select"); sheetSel.onchange = () => window.rc.setSettings({ sheet: sheetSel.value });
   const loadSheets = async () => { const names = await window.rc.sheets(); sheetSel.textContent = ""; sheetSel.append(new Option("Первый лист", "")); for (const n of names) sheetSel.append(new Option(n, n, false, n === s.sheet)); sheetSel.disabled = !names.length; };
   const program = el("select"); program.append(new Option("AnyDesk", "anyDesk"), new Option("TeamViewer", "teamViewer")); program.value = s.defaultProgram; program.onchange = () => window.rc.setSettings({ defaultProgram: program.value });
-  const hot = text(s.hotkey, async (v) => { const r = await window.rc.setSettings({ hotkey: v }); note.textContent = r.hotkeyOk === false ? "Эта комбинация занята — выберите другую." : ""; });
-  const note = el("div", "muted"); note.textContent = "На раскладках с AltGr (польская, немецкая и др.) Ctrl+Alt+буква вводит символ — выберите другую клавишу.";
+  const hot = text(s.hotkey, async (v) => {
+    const r = await window.rc.setSettings({ hotkey: v });
+    note.textContent = r.hotkeyOk === false ? "Сочетание занято или не подходит: нужен Ctrl, Alt или Win и клавиша (например, Win+Shift+A)."
+      : r.hotkeyProblem === "altgr" ? "Осторожно: Ctrl+Alt — это AltGr на польской, венгерской и других раскладках, сочетание перехватит ввод букв. Лучше Win+Shift+буква."
+      : HOTKEY_NOTE;
+  });
+  const HOTKEY_NOTE = "По умолчанию Win+Shift+A. Клавиша и значок в трее включаются после выбора файла. Не используйте Ctrl+Alt+буква: на раскладках с AltGr оно перехватит ввод.";
+  const note = el("div", "muted"); note.textContent = HOTKEY_NOTE;
   const timeout = text(String(s.timeoutSeconds), (v) => window.rc.setSettings({ timeoutSeconds: Number(v) }), "number");
   const check = (label, key, value) => { const l = el("label", "inline"); const c = el("input"); c.type = "checkbox"; c.checked = value; c.onchange = () => window.rc.setSettings({ [key]: c.checked }); l.append(c, document.createTextNode(label)); return l; };
   const paths = ["anyDesk", "teamViewer"].map((p) => field(`Путь к ${p === "anyDesk" ? "AnyDesk" : "TeamViewer"} (если не найден сам)`, text(s.programPaths[p], (v) => window.rc.setSettings({ programPaths: { [p]: v } }))));
