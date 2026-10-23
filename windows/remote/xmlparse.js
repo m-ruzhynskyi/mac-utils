@@ -18,7 +18,7 @@ function decode(text) {
 
 const localName = (name) => name.slice(name.lastIndexOf(":") + 1);
 
-// handler: { start(name, attrs, line), end(name), text(text), cdata(text) } — name без префикса пространства имён.
+// handler: { start(name, attrs, line, startOffset, endOffset), end(name, endOffset), text(text), cdata(text) } — смещения в строке без BOM; — name без префикса пространства имён.
 // Бросает ConnectionsError corrupt при нарушении вложенности и обрывах.
 function parse(input, handler, { maxDepth = 64 } = {}) {
   const s = Buffer.isBuffer(input) ? input.toString("utf8").replace(/^﻿/, "") : String(input);
@@ -48,11 +48,11 @@ function parse(input, handler, { maxDepth = 64 } = {}) {
       const e = s.indexOf(">", i); if (e < 0) fail("Не закрыт тег");
       const name = localName(s.slice(i + 2, e).trim());
       if (!stack.length || stack[stack.length - 1] !== name) fail("Нарушена вложенность тегов");
-      stack.pop(); handler.end?.(name);
+      stack.pop(); handler.end?.(name, e + 1);
       lineTo(e + 1); i = e + 1; continue;
     }
     // Открывающий тег: имя, атрибуты в кавычках, необязательный «/».
-    const tagLine = line;
+    const tagLine = line, tagStart = i;
     let k = i + 1;
     while (k < s.length && !/[\s/>]/.test(s[k])) k++;
     const name = localName(s.slice(i + 1, k));
@@ -80,8 +80,8 @@ function parse(input, handler, { maxDepth = 64 } = {}) {
     }
     if (stack.length >= maxDepth) fail("Слишком глубокая вложенность");
     lineTo(k); i = k;
-    stack.push(name); handler.start?.(name, attrs, tagLine);
-    if (selfClose) { stack.pop(); handler.end?.(name); }
+    stack.push(name); handler.start?.(name, attrs, tagLine, tagStart, k);
+    if (selfClose) { stack.pop(); handler.end?.(name, k); }
   }
   if (stack.length) fail("Не закрыт тег " + stack[stack.length - 1]);
 }

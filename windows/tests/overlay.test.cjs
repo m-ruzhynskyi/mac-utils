@@ -545,7 +545,7 @@ test("журнал размещения: мониторы номерами по 
     await tick(80);
     const line = host.log().split("\n").find((l) => / placed /.test(l));
     assert.match(line, / displays=\[1:-1920,248,1920x1080@1 2:0,0,2195x1235@1\.75 3:2195,258,1920x1080@1\] primary=2 source=1 /);
-    assert.doesNotMatch(host.log(), /\b1[123]:|=1[123]\b/, "ID мониторов (11, 12, 13) в журнал не попадают");
+    assert.doesNotMatch(host.log().replace(/^\S+Z /gm, ""), /\b1[123]:|=1[123]\b/, "ID мониторов (11, 12, 13) в журнал не попадают");   // без меток времени: минута :11 давала ложное срабатывание
   } finally { host.stop(); }
 });
 

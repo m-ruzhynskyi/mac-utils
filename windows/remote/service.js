@@ -36,7 +36,7 @@ class RemoteService {
     const s = this.settings.data, state = this.store.state;
     const installed = Object.fromEntries(PROGRAMS.map((p) => [p, this.connector ? this.connector.installed(p) : true]));
     const base = { status: state.status, error: state.error && { code: state.error.code, found: state.error.found || [], detail: state.error.code === "corrupt" ? state.error.detail : "" },
-      installed, defaultProgram: s.defaultProgram, titles: TITLES, file: s.file, hotkey: s.hotkey };
+      installed, defaultProgram: s.defaultProgram, titles: TITLES, file: s.file, hotkey: s.hotkey, canEdit: /\.xml$/i.test(s.file) };
     if (state.status !== "ready" || !state.snapshot) return { ...base, sections: [], counts: { all: 0, anyDesk: 0, teamViewer: 0 }, hint: null, query, diagnostics: null };
     const listing = lists.buildListing({ search: this.index(), query, filter, defaultProgram: s.defaultProgram, favorites: s.favoriteIDs, recents: s.recentIDs });
     const effective = listing.effectiveQuery;
@@ -44,7 +44,7 @@ class RemoteService {
       const program = programOf(record, s.defaultProgram);
       const shownID = displayID(record);
       return {
-        rowID: `${sectionID}|${record.sourceRow}:${record.id}`, key: `${record.sourceRow}:${record.id}`, name: record.name, id: shownID, group: record.group, note: record.note,
+        rowID: `${sectionID}|${record.sourceRow}:${record.id}`, rawID: record.id, tags: record.tags.join(", "), programFile: record.program || "", key: `${record.sourceRow}:${record.id}`, name: record.name, id: shownID, group: record.group, note: record.note,
         program, programTitle: TITLES[program], hasPassword: record.hasPassword, favorite: lists.isFavorite(record, s), dim: !installed[program],
         nameMarks: effective ? highlights(record.name, effective) : [], idMarks: effective ? highlightsInID(shownID, effective) : [],
       };

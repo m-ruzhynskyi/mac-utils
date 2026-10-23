@@ -109,6 +109,7 @@ function render() {
     highlight();
   }
   renderSummary();
+  $("addBtn").hidden = !(v.status === "ready" && v.canEdit);
 }
 
 function rowElement(r, index, kind) {
@@ -124,6 +125,7 @@ function rowElement(r, index, kind) {
   const star = el("button", "star" + (r.favorite ? " on" : "")); star.append(icon("star")); star.title = r.favorite ? "Убрать из избранного" : "В избранное"; star.setAttribute("aria-label", star.title);
   star.style.cssText = "border:0;background:transparent"; star.onclick = async (e) => { e.stopPropagation(); await window.rc.toggleFavorite(r.key); };
   row.append(tile, text, prov, pw, star);
+  if (view.canEdit) { const edit = el("button", "star", "✎"); edit.title = "Изменить запись"; edit.setAttribute("aria-label", "Изменить запись"); edit.style.cssText = "border:0;background:transparent"; edit.onclick = (e) => { e.stopPropagation(); openEditor(r); }; row.append(edit); }
   row.onclick = () => { selected = index; highlight(); };
   row.ondblclick = () => connect(r, false);
   return row;
@@ -167,7 +169,7 @@ function move(delta) {
 
 $("query").addEventListener("input", () => { selected = 0; refresh(); });
 document.addEventListener("keydown", (e) => {
-  if (mode === "settings") return;
+  if (mode === "settings" || mode === "edit") return;
   if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
   else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
   else if (e.key === "Enter") { e.preventDefault(); connect(rows[selected], e.ctrlKey || e.metaKey); }
@@ -179,9 +181,44 @@ document.addEventListener("keydown", (e) => {
   else if ((e.key === "f" || e.key === "F") && e.ctrlKey) { e.preventDefault(); if (rows[selected]) window.rc.toggleFavorite(rows[selected].key); }
   else if (e.key === "Escape") { if (palette) window.rc.closePalette(); else if ($("query").value) { $("query").value = ""; refresh(); } }
 });
+$("addBtn").hidden = true;
+$("addBtn").onclick = () => openEditor(null);
 $("openFile").onclick = () => window.rc.openFile();
 $("reload").onclick = () => window.rc.reload();
 $("settingsBtn").onclick = () => openSettings();
+
+// ---- правка записи (только .xml): лист поверх списка ----
+const EDIT_ERRORS = { missingName: "Укажите название.", missingID: "Укажите ID.", invalidID: "ID должен быть из 9–10 цифр или вида имя@ad.", unknownProgram: "Неизвестная программа.",
+  aliasNotSupported: "Алиас вида имя@ad работает только с AnyDesk.", gone: "Записи больше нет в файле — список обновлён.", writeFailed: "Не удалось сохранить файл. Копия .bak рядом.", corrupt: "Файл не читается как XML.", xlsxReadOnly: "Файлы .xlsx не правятся — только .xml." };
+function openEditor(record) {
+  mode = "edit";
+  $("page").hidden = true;
+  let box = $("editBox"); if (box) box.remove();
+  box = el("div", "settings"); box.id = "editBox"; document.body.append(box);
+  const inputs = {};
+  const field = (key, label, value) => { const l = el("label", null, label); const i = el("input"); i.type = "text"; i.value = value || ""; inputs[key] = i; l.append(i); return l; };
+  const program = el("select"); program.append(new Option("По умолчанию", ""), new Option("AnyDesk", "AnyDesk"), new Option("TeamViewer", "TeamViewer"));
+  program.value = record ? ({ anyDesk: "AnyDesk", teamViewer: "TeamViewer" }[record.programFile] || "") : "";
+  const error = el("div", "banner danger"); error.hidden = true;
+  const close = () => { box.remove(); $("page").hidden = false; mode = "list"; refresh(); };
+  const save = el("button", "btn pri", record ? "Сохранить" : "Добавить");
+  save.onclick = async () => {
+    const fields = { name: inputs.name.value, id: inputs.id.value, group: inputs.group.value, tags: inputs.tags.value, note: inputs.note.value, program: program.value };
+    const r = await window.rc.edit(record ? "update" : "add", { key: record && record.key, fields });
+    if (r.ok) return close();
+    error.textContent = EDIT_ERRORS[r.error] || "Не удалось сохранить."; error.hidden = false;
+  };
+  const cancel = el("button", "btn", "Отмена"); cancel.onclick = close;
+  const actions = el("div"); actions.style.cssText = "display:flex;gap:8px"; actions.append(save, cancel);
+  if (record) {
+    const del = el("button", "btn dng", "Удалить"); let armed = false;
+    del.onclick = async () => { if (!armed) { armed = true; del.textContent = "Точно удалить?"; return; } const r = await window.rc.edit("remove", { key: record.key }); if (r.ok) close(); else { error.textContent = EDIT_ERRORS[r.error] || "Не удалось удалить."; error.hidden = false; } };
+    actions.append(del);
+  }
+  box.append(el("h2", null, record ? "Изменить запись" : "Добавить запись"), error, field("name", "Название", record && record.name), field("id", "ID или алиас (имя@ad)", record && record.rawID),
+    field("group", "Группа", record && record.group), field("tags", "Теги (через запятую)", record && record.tags), field("note", "Заметка", record && record.note), (() => { const l = el("label", null, "Программа"); l.append(program); return l; })(),
+    el("div", "muted", "Пароль здесь не показывается и не меняется. Перед сохранением рядом создаётся копия .bak."), actions);
+}
 
 // ---- настройки (раздел внутри окна) ----
 async function openSettings() {
@@ -217,6 +254,6 @@ async function openSettings() {
 }
 
 window.rc.onChanged(refresh);
-window.rc.onShow(() => { if (mode === "settings") return; $("query").value = ""; filter = "all"; selected = 0; refresh(); $("query").focus(); });
+window.rc.onShow(() => { if (mode === "settings" || mode === "edit") return; $("query").value = ""; filter = "all"; selected = 0; refresh(); $("query").focus(); });
 if (palette) { $("hints").hidden = false; $("bar").hidden = true; }
 refresh().then(() => $("query").focus());

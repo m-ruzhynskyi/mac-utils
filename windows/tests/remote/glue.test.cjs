@@ -129,3 +129,23 @@ test("интерфейс: строгая CSP, нет встроенных скр
   assert.ok(!/eval\(|new Function|document\.write/.test(js));
   assert.doesNotThrow(() => new (require("node:vm").Script)(js));
 });
+
+test("правка через IPC: .xlsx — только чтение; .xml — запись, .bak, список обновляется; кнопка «Скачать» открывает страницу программы", async () => {
+  const { fake, rc, dir } = await setup();
+  assert.equal((await fake.handles.get("rc:view")({}, {})).canEdit, false);
+  const readOnly = await fake.handles.get("rc:edit")({}, { action: "add", payload: { fields: { name: "A", id: "123456789" } } });
+  assert.deepEqual(readOnly, { ok: false, error: "xlsxReadOnly" });
+  const xmlFile = path.join(dir, "list.xml");
+  fs.writeFileSync(xmlFile, F.xmlRows(F.cleanRows(3)));
+  await fake.handles.get("rc:setSettings")({}, { file: xmlFile });
+  for (let i = 0; i < 200 && rc.store.state.snapshot?.records.length !== 3; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal((await fake.handles.get("rc:view")({}, {})).canEdit, true);
+  assert.deepEqual(await fake.handles.get("rc:edit")({}, { action: "add", payload: { fields: { name: "Новая", id: "523456789" } } }), { ok: true });
+  for (let i = 0; i < 200 && rc.store.state.snapshot?.records.length !== 4; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(rc.store.state.snapshot.records.length, 4);
+  assert.ok(fs.existsSync(`${xmlFile}.bak`));
+  assert.deepEqual(await fake.handles.get("rc:edit")({}, { action: "remove", payload: { key: "999:1" } }), { ok: false, error: "gone" });
+  assert.equal(await fake.handles.get("rc:edit")({}, { action: "download", payload: "teamViewer" }), true);
+  assert.deepEqual(fake.opened.at(-1), ["url", "https://www.teamviewer.com/download/"]);
+  rc.dispose();
+});

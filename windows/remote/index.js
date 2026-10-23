@@ -12,6 +12,8 @@ const { TITLES, downloadURL, programOf } = require("./models");
 const { createConnector } = require("./connect");
 const { createUia } = require("./uia");
 const { createHud } = require("./hud");
+const editor = require("./editor");
+const templates = require("./templates");
 
 const UI = path.join(__dirname, "ui");
 const PRELOAD = path.join(UI, "preload.js");
@@ -157,11 +159,24 @@ function init(electron, options = {}) {
   ipcMain.handle("rc:getSettings", () => ({ ...settings.data }));
   ipcMain.handle("rc:setSettings", (_e, patch) => setSettings(patch));
   ipcMain.handle("rc:sheets", () => store.sheetNames().catch(() => []));
-  ipcMain.handle("rc:createTemplate", async (_e, kind) => options.templates ? options.templates.create({ kind, dialog, parent: windowRef, settings, service, setSettings }) : "");
+  ipcMain.handle("rc:createTemplate", async (_e, kind) => (options.templates || templates).create({ kind, dialog, parent: windowRef, settings, service, setSettings }));
   ipcMain.handle("rc:edit", async (_e, q) => {
     if (q?.action === "download") { shell.openExternal(require("./models").downloadURL(q.payload === "teamViewer" ? "teamViewer" : "anyDesk")); return true; }
-    return options.editor ? options.editor.handle(q, { settings, store, service }) : { ok: false, error: "unsupported" };
+    return editRecord(q);
   });
+
+  // Правка списка (только .xml; .xlsx не пишется): добавить, изменить, удалить; затем файл перечитывается.
+  async function editRecord(q) {
+    const file = settings.data.file;
+    if (!file || !["add", "update", "remove"].includes(q?.action)) return { ok: false, error: "action" };
+    const p = q.payload || {};
+    const record = q.action === "add" ? null : service.recordByKey(String(p.key));
+    if (q.action !== "add" && !record) return { ok: false, error: "gone" };
+    const fields = p.fields && typeof p.fields === "object" ? p.fields : {};
+    const result = (options.editor || editor).apply(file, q.action, { record, fields });
+    if (result.ok) store.reload();
+    return result;
+  }
   ipcMain.on("rc:closePalette", () => { if (alive(paletteRef)) paletteRef.hide(); });
 
   service.onChange(notifyViews);
