@@ -99,22 +99,46 @@ function childText(text, it, field) {
 const recordID = (text, it) => normalize(childText(text, it, "id"))?.value ?? "";
 const nameOf = (text, it) => childText(text, it, "name");
 
+// Windows: права POSIX сводятся к атрибуту «только для чтения» (stat даёт 0o666/0o444), а подмена файла и удаление
+// read-only файла падают с EPERM — перед ними атрибут снимается, после записи возвращается.
+const isWin = () => process.platform === "win32";
+const readOnly = (file) => { try { return (fs.statSync(file).mode & 0o200) === 0; } catch (_) { return false; } };
+function makeWritable(file) { if (isWin() && readOnly(file)) { try { fs.chmodSync(file, 0o666); } catch (_) {} } }
+function sleep(ms) { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (_) {} }
+
+// Подмена может на миг упереться в антивирус/индексатор, держащий файл: на Windows несколько коротких повторов.
+function replace(tmp, file) {
+  for (let attempt = 0; ; attempt++) {
+    try { return fs.renameSync(tmp, file); } catch (error) {
+      if (!isWin() || attempt >= 4 || !["EPERM", "EBUSY", "EACCES"].includes(error.code)) throw error;
+      sleep(40 * (attempt + 1));
+    }
+  }
+}
+
 // Запись текста в файл: .bak с теми же правами → временный файл → подмена → проверка.
 function writeSafely(file, original, next, bom) {
   const bak = `${file}.bak`;
   let mode = 0o600;
   try { mode = fs.statSync(file).mode & 0o777; } catch (_) {}
   // Прежняя копия могла остаться только для чтения (права скопированы с файла): убираем, иначе новую не записать.
+  makeWritable(bak);
   try { fs.rmSync(bak, { force: true }); } catch (_) {}
   fs.copyFileSync(file, bak);
   try { fs.chmodSync(bak, mode); } catch (_) {}
   const tmp = `${file}.tmp-${process.pid}`;
   try {
-    fs.writeFileSync(tmp, (bom ? "﻿" : "") + next, { encoding: "utf8", mode });
-    fs.renameSync(tmp, file);
+    // Временный файл всегда записываемый (на Windows read-only tmp не удалить при ошибке); права файла возвращаются после подмены.
+    fs.writeFileSync(tmp, (bom ? "﻿" : "") + next, { encoding: "utf8", mode: isWin() ? 0o666 : mode });
+    makeWritable(file);
+    replace(tmp, file);
+    try { fs.chmodSync(file, mode); } catch (_) {}
     load(fs.readFileSync(file), "xml");        // перечитывается: файл должен быть корректным
   } catch (error) {
+    makeWritable(file);
     try { fs.copyFileSync(bak, file); } catch (_) {}
+    try { fs.chmodSync(file, mode); } catch (_) {}
+    makeWritable(tmp);
     try { fs.rmSync(tmp, { force: true }); } catch (_) {}
     throw new ConnectionsError("corrupt", "Не удалось сохранить файл");
   }

@@ -214,3 +214,35 @@ test("W-R11: ID, начинающийся с «-», не передаётся п
   assert.deepEqual(result, { ok: false, error: "badID" });
   assert.equal(spawned.length, 0);
 });
+
+// ---- Windows: запись XML при read-only файле (имитация семантики NTFS на любой ОС) ----
+test("Windows (имитация NTFS): rename/удаление read-only файла → EPERM; правка всё равно проходит, атрибут и .bak сохраняются", () => {
+  const os = require("node:os");
+  const editor = require("../../remote/editor");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mu-ntfs-"));
+  const file = path.join(dir, "list.xml");
+  fs.writeFileSync(file, '<?xml version="1.0"?>\n<connections>\n  <c><name>A</name><id>123456789</id></c>\n</connections>\n');
+  fs.chmodSync(file, 0o444);
+  const ro = (f) => { try { return (fs.statSync(f).mode & 0o200) === 0; } catch (_) { return false; } };
+  const real = { rename: fs.renameSync, rm: fs.rmSync, copy: fs.copyFileSync, write: fs.writeFileSync };
+  const eperm = () => Object.assign(new Error("EPERM"), { code: "EPERM" });
+  let renameFails = 0;
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { value: "win32" });
+  fs.renameSync = (a, b) => { if (ro(b)) throw eperm(); if (renameFails++ < 1) throw eperm(); return real.rename(a, b); };   // первый раз — «антивирус держит файл»
+  fs.rmSync = (f, o) => { if (ro(f)) throw eperm(); return real.rm(f, o); };
+  try {
+    for (const id of ["555666777", "555666778"]) {
+      assert.deepEqual(editor.apply(file, "add", { fields: { name: `N${id}`, id } }), { ok: true }, "правка read-only файла");
+      assert.ok(ro(file), "атрибут только для чтения возвращён");
+    }
+    assert.ok(fs.readFileSync(file, "utf8").includes("555666778"));
+    assert.ok(fs.readFileSync(`${file}.bak`, "utf8").includes("555666777") && !fs.readFileSync(`${file}.bak`, "utf8").includes("555666778"), ".bak — предыдущая версия");
+    assert.deepEqual(fs.readdirSync(dir).sort(), ["list.xml", "list.xml.bak"], "лишних файлов нет");
+  } finally {
+    fs.renameSync = real.rename; fs.rmSync = real.rm; fs.copyFileSync = real.copy; fs.writeFileSync = real.write;
+    Object.defineProperty(process, "platform", platform);
+    for (const f of [file, `${file}.bak`]) { try { fs.chmodSync(f, 0o666); } catch (_) {} }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

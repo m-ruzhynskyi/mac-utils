@@ -458,8 +458,14 @@ test(".bak: прежнее содержимое побайтно, права т�
     const v1 = fs.readFileSync(file);
     const bak = `${file}.bak`;
     assert.equal(fs.readFileSync(bak).compare(v0), 0, ".bak = версия до правки");
-    assert.equal(fs.statSync(bak).mode & 0o777, mode, `права .bak ${mode.toString(8)}`);
-    assert.equal(fs.statSync(file).mode & 0o777, mode, `права файла ${mode.toString(8)}`);
+    // На NTFS есть только атрибут «только для чтения» (stat даёт 0o666/0o444): биты 0o640 там не проверяются, а запись остаётся доступной.
+    if (process.platform === "win32") {
+      assert.ok(fs.statSync(bak).mode & 0o200, ".bak не только для чтения");
+      assert.ok(fs.statSync(file).mode & 0o200, "файл не только для чтения");
+    } else {
+      assert.equal(fs.statSync(bak).mode & 0o777, mode, `права .bak ${mode.toString(8)}`);
+      assert.equal(fs.statSync(file).mode & 0o777, mode, `права файла ${mode.toString(8)}`);
+    }
     editor.apply(file, "add", { fields: { name: "Два", id: "555666778" } });
     assert.equal(fs.readFileSync(bak).compare(v1), 0, "второй .bak — предыдущая версия");
     assert.deepEqual(fs.readdirSync(dir).sort(), ["list.xml", "list.xml.bak"], `лишние файлы: ${fs.readdirSync(dir)}`);
@@ -470,6 +476,9 @@ test("(исправлено) файл списка только для чтен�
   const { file } = put(BODY, 0o400);
   assert.deepEqual(editor.apply(file, "add", { fields: { name: "Один", id: "555666777" } }), { ok: true });
   assert.deepEqual(editor.apply(file, "add", { fields: { name: "Два", id: "555666778" } }), { ok: true });
+  // Атрибут «только для чтения» сохраняется (на Windows chmod 0o400 — это он и есть).
+  assert.equal(fs.statSync(file).mode & 0o200, 0, "файл остался только для чтения");
+  fs.chmodSync(file, 0o600); fs.chmodSync(`${file}.bak`, 0o600);
 });
 
 test("(исправлено; оба клиента): запись с тем же номером строки и ID (весь XML в одну строку, одинаковый ID у двух записей) — правка уходит в первую", () => {
@@ -490,13 +499,23 @@ test("(исправлено; проверить на Mac тем же тесто�
 test("ошибка записи: исходный файл цел, мусора нет; .xlsx не пишется никогда; файла нет → unavailable", () => {
   const { dir, file } = put(BODY);
   const orig = fs.readFileSync(file);
-  fs.chmodSync(dir, 0o555);
-  try {
+  if (process.platform === "win32") {
+    // chmod каталога на NTFS ничего не запрещает: сбой записи создаём занятым именем временного файла (на его месте каталог).
+    fs.mkdirSync(`${file}.tmp-${process.pid}`);
     const res = editor.apply(file, "add", { fields: { name: "x", id: "123456789" } });
-    if (process.getuid?.() !== 0) assert.equal(res.ok, false);
-  } finally { fs.chmodSync(dir, 0o755); }
-  assert.equal(fs.readFileSync(file).compare(orig), 0);
-  assert.deepEqual(fs.readdirSync(dir).filter((n) => n !== "list.xml"), process.getuid?.() === 0 ? ["list.xml.bak"] : [], "ни .tmp, ни .bak без записи");
+    assert.equal(res.ok, false);
+    fs.rmdirSync(`${file}.tmp-${process.pid}`);
+    assert.equal(fs.readFileSync(file).compare(orig), 0);
+    assert.deepEqual(fs.readdirSync(dir).sort(), ["list.xml", "list.xml.bak"], "остаётся только .bak = исходный файл");
+  } else {
+    fs.chmodSync(dir, 0o555);
+    try {
+      const res = editor.apply(file, "add", { fields: { name: "x", id: "123456789" } });
+      if (process.getuid?.() !== 0) assert.equal(res.ok, false);
+    } finally { fs.chmodSync(dir, 0o755); }
+    assert.equal(fs.readFileSync(file).compare(orig), 0);
+    assert.deepEqual(fs.readdirSync(dir).filter((n) => n !== "list.xml"), process.getuid?.() === 0 ? ["list.xml.bak"] : [], "ни .tmp, ни .bak без записи");
+  }
   const x = path.join(tmp(), "never.xlsx");
   const data = F.xlsxRows(F.cleanRows(5));
   fs.writeFileSync(x, data);
