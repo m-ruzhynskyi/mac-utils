@@ -893,10 +893,16 @@ final class DocRenderer {
         if place.height < 0, place.rowSpan == 1 {
             block.setValue(CGFloat(-place.height) / 20, type: .absoluteValueType, for: .maximumHeight)
         }
+        if place.rowSpan == 1 { block.rowHeight = CGFloat(place.height) / 20 }
         switch cell.verticalAlign {
         case .top: block.verticalAlignment = .topAlignment
         case .center: block.verticalAlignment = .middleAlignment
         case .bottom: block.verticalAlignment = .bottomAlignment
+        }
+        // В строке с `\trrh` ячейка выравнивается сама (см. `DocCellBlock.ownAlignment`).
+        if block.rowHeight != 0, cell.verticalAlign != .top {
+            block.ownAlignment = cell.verticalAlign == .center ? 0.5 : 1
+            block.verticalAlignment = .topAlignment
         }
         blocks[key] = block
         return block
@@ -964,6 +970,68 @@ final class DocCellBlock: NSTextTableBlock {
     }
 
     var lines: [Line] = []
+    /// Высота строки `\trrh` в пунктах: > 0 — «не меньше», < 0 — «точно» (у ячеек в одну строку).
+    var rowHeight: CGFloat = 0
+
+    /// Выравнивание по вертикали в строке с `\trrh` (0 — сверху, 0,5 — по центру, 1 — снизу) — своё: `NSTextTable`
+    /// выравнивает ячейки по высоте их текста, а не по рамке, и строку, которую задаёт `\trrh`, не видит.
+    var ownAlignment: CGFloat = 0
+
+    override func rectForLayout(at startingPoint: NSPoint, in rect: NSRect, textContainer: NSTextContainer,
+                                characterRange charRange: NSRange) -> NSRect {
+        var layout = super.rectForLayout(at: startingPoint, in: rect, textContainer: textContainer, characterRange: charRange)
+        var shift: CGFloat = 0
+        if ownAlignment > 0, rowHeight != 0, let storage = textContainer.layoutManager?.textStorage, charRange.length > 0,
+           NSMaxRange(charRange) <= storage.length {
+            let inner = abs(rowHeight) - width(for: .padding, edge: .minY) - width(for: .padding, edge: .maxY)
+            let content = MainActor.assumeIsolated { Self.height(of: storage.attributedSubstring(from: charRange), width: layout.width) }
+            shift = max(0, (inner - content) * ownAlignment)
+        }
+        layout.origin.y += shift
+        appliedShift = shift
+        return layout
+    }
+
+    /// Сдвиг текста при последней раскладке: рамка ячейки — от верха строки, а не от текста (от рамки предыдущей
+    /// ячейки `NSTextTable` отсчитывает верх строки для следующих).
+    private var appliedShift: CGFloat = 0
+
+
+    /// Высота текста ячейки: те же абзацы без блока таблицы, в ширину текста ячейки, высота строк — как в документе
+    /// (`DocLineMetrics`, с `\sb`/`\sa`).
+    @MainActor private static func height(of text: NSAttributedString, width: CGFloat) -> CGFloat {
+        let plain = NSMutableAttributedString(attributedString: text)
+        plain.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: plain.length)) { value, range, _ in
+            guard let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle else { return }
+            style.textBlocks = []
+            plain.addAttribute(.paragraphStyle, value: style, range: range)
+        }
+        let storage = NSTextStorage(attributedString: plain)
+        let manager = NSLayoutManager()
+        manager.delegate = DocLineMetricsDelegate.shared
+        storage.addLayoutManager(manager)
+        let container = NSTextContainer(size: NSSize(width: max(1, width), height: 100_000))
+        container.lineFragmentPadding = 0
+        manager.addTextContainer(container)
+        manager.ensureLayout(for: container)
+        // По строкам текста: пустая строка за последним «\n» (её добавляет TextKit) — не в счёт.
+        var bottom: CGFloat = 0
+        manager.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs)) { rect, _, _, _, _ in
+            bottom = max(bottom, rect.maxY)
+        }
+        return bottom
+    }
+
+    /// Высота ячейки по `\trrh`: `NSTextTable` берёт высоту строки из рамок ячеек, а `minimumHeight` блока не учитывает.
+    /// «Точно», когда текст не помещается: Word его обрезает, у нас он наехал бы на следующую строку — тогда по тексту.
+    override func boundsRect(forContentRect contentRect: NSRect, in rect: NSRect, textContainer: NSTextContainer,
+                             characterRange charRange: NSRange) -> NSRect {
+        var bounds = super.boundsRect(forContentRect: contentRect, in: rect, textContainer: textContainer, characterRange: charRange)
+        bounds.origin.y -= appliedShift
+        bounds.size.height += appliedShift
+        if rowHeight != 0 { bounds.size.height = max(bounds.height, abs(rowHeight)) }
+        return bounds
+    }
 
     override func drawBackground(withFrame frameRect: NSRect, in controlView: NSView?, characterRange charRange: NSRange,
                                  layoutManager: NSLayoutManager) {

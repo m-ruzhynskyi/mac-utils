@@ -213,6 +213,23 @@ final class WordFidelityTests: XCTestCase {
                     let sizes = zip(WordFidelity.pageSizes(wordPDF), WordFidelity.pageSizes(ours))
                     result.sizeMismatch = sizes.contains { abs($0.width - $1.width) > 1 || abs($0.height - $1.height) > 1 }
                     report.add(name, result, lines: ourLines, category: geometry.category, constructs: geometry.constructs)
+                    if let dump = ProcessInfo.processInfo.environment["MU_WORD_FIDELITY_DUMP"] {
+                        let word = WordFidelity.lines(wordPDF)
+                        var rows = ""
+                        for (w, o) in WordFidelity.align(word, ourLines) where word[w].page == ourLines[o].page {
+                            let a = word[w], b = ourLines[o]
+                            rows += "\(name)\t\(geometry.category(b))\t\(b.page)\t\(Int(a.rect.minX))\t\(Int(a.rect.maxX))\t"
+                            rows += String(format: "%.1f\t%.1f\t%.1f\t%.1f\t", b.rect.minX - a.rect.minX, b.rect.maxX - a.rect.maxX, b.rect.minY - a.rect.minY, a.rect.minY)
+                            rows += geometry.info(b) + "\n"
+                        }
+                        for item in result.discrepancies where item.kind == .cellWrap {
+                            rows += "\(name)\twrap\t\(item.ours.page)\t\(Int(item.ours.rect.minX))\t\(Int(item.ours.rect.maxX))\t0\t0\t0\t0\t"
+                            rows += geometry.info(item.ours) + "\n"
+                        }
+                        if let handle = FileHandle(forWritingAtPath: dump) ?? { FileManager.default.createFile(atPath: dump, contents: nil); return FileHandle(forWritingAtPath: dump) }() {
+                            handle.seekToEndOfFile(); handle.write(Data(rows.utf8)); handle.closeFile()
+                        }
+                    }
                     rows.append(WordGate.Row(name: name, result))
                 } catch {
                     report.failed.append(name)
@@ -391,6 +408,19 @@ private struct PageGeometry {
     }
 
     /// Управляющие слова RTF, которыми задан абзац строки (для топа причин; без текста).
+    /// Диагностика (только числа и слова RTF): выравнивание, отступы, ширина блока ячейки, поле, верт. выравнивание.
+    func info(_ line: WordFidelity.Line) -> String {
+        let found = (storage.string as NSString).range(of: String(line.key.prefix(12)))
+        guard found.location != NSNotFound else { return "?" }
+        let attributes = storage.attributes(at: found.location, effectiveRange: nil)
+        let style = attributes[.paragraphStyle] as? NSParagraphStyle
+        let props = (attributes[.docPara] as? DocParaInfo)?.props
+        let block = style?.textBlocks.last as? NSTextTableBlock
+        let valign = block.map { "\($0.verticalAlignment.rawValue)" } ?? "-"
+        return "\(style?.alignment.rawValue ?? -1)\t\(props?.left ?? 0)\t\(props?.right ?? 0)\t\(props?.firstLine ?? 0)\t"
+            + "\(Int(block?.contentWidth ?? 0))\t\(Int(block?.width(for: .padding, edge: .minX) ?? 0))\t\(valign)\t\(Self.words(attributes).joined())"
+    }
+
     func constructs(_ line: WordFidelity.Line) -> [String] {
         let probe = String(line.key.prefix(40))
         var sources: [NSAttributedString] = [storage]
