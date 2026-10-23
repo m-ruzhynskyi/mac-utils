@@ -490,6 +490,10 @@ function createWindow() {
   });
   // Закрыли главное окно — выходим совсем (окно меток не должно держать приложение без окна).
   window.on("closed", () => { window = null; app.quit(); });
+  // Страница с эфиром ушла (перезагрузка, offline.html, падение): эфира больше нет.
+  window.webContents.on("did-start-navigation", (_e, _url, inPlace, isMainFrame) => { if (isMainFrame && !inPlace && broadcasting) { hideOverlay(); stopAudio(); endBroadcast(); } });
+  window.webContents.on("render-process-gone", () => { hideOverlay(); stopAudio(); endBroadcast(); });
+  window.webContents.on("did-fail-load", () => endBroadcast());
   // Главное окно двигают, сворачивают — схема меток на странице только когда оно не над транслируемой областью.
   for (const event of ["move", "resize", "minimize", "restore"]) window.on(event, coveredChanged);
   window.loadURL(RELAY).catch(() => window.loadFile(path.join(__dirname, "offline.html")));
@@ -560,8 +564,7 @@ app.whenReady().then(() => {
   ipcMain.on("page-log", (event, line) => { if (window && event.sender === window.webContents) logPage(line); });
   ipcMain.on("stopped", () => {
     nextSource = null; previousSource = null; hideOverlay(); stopAudio();
-    broadcasting = false;
-    if (pendingUpdate) { const info = pendingUpdate; pendingUpdate = null; setTimeout(() => offerUpdate(info), 1500); }
+    endBroadcast();
   });
   ipcMain.on("overlay-report", (event, report) => {
     if (!overlay || overlay.isDestroyed() || event.sender !== overlay.webContents) return;
@@ -581,7 +584,7 @@ app.whenReady().then(() => {
   ipcMain.on("startAudio", (event) => startAudio(event.sender));
 
   // Поменяли список в эфире — перезапускаем захват звука с новым списком.
-  // Звонки (Discord и др.) исключаются из звука сами, как на Mac, пока пользователь не снимет галочку: иначе собеседники
+  // Звонки (Discord и др.) исключаются из звука сами (на Mac это настройка, по умолчанию выключена), пока пользователь не снимет галочку на странице ведущего: иначе собеседники
   // из того же созвона слышат себя с задержкой. Имена — процессы Windows (без учёта регистра).
   ipcMain.on("setMuteCalls", (event, on) => {
     if (!chosen) return;
@@ -689,6 +692,19 @@ app.on("will-quit", () => { stopAudio(); hideOverlay(); });
 function checkForUpdates() {
   if (!app.isPackaged) return;
   autoUpdater.checkForUpdates().catch(() => {});
+}
+
+// Эфир кончился (страница сказала `stopped`) или страница пропала (перезагрузка, ошибка загрузки, падение отрисовки) —
+// иначе `broadcasting` остался бы включённым и окно обновления не появилось бы до следующего эфира.
+function endBroadcast() {
+  broadcasting = false;
+  if (!pendingUpdate) return;
+  // Новый эфир, начатый за эти 1,5 с, окно не получает: оно придёт после его конца.
+  setTimeout(() => {
+    if (broadcasting || !pendingUpdate) return;
+    const info = pendingUpdate; pendingUpdate = null;
+    offerUpdate(info);
+  }, 1500);
 }
 
 // Окно «Перезапустить» посреди эфира попало бы в трансляцию, а «Перезапустить сейчас» оборвало бы её: во время эфира

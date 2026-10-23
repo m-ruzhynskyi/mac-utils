@@ -885,3 +885,33 @@ test("окно обновления не всплывает во время эф
     assert.equal(w.dialogs, 2, "без эфира — сразу");
   } finally { host.stop(); }
 });
+
+test("страница с эфиром ушла (перезагрузка, падение) без stopped: эфир считается оконченным, окно обновления не теряется", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true);
+  const w = world([d], [screenSource(d, 1)]);
+  const host = await start(w);
+  try {
+    const downloaded = host.updater.get("update-downloaded");
+    await host.share("screen:1:0");
+    downloaded({ version: "9.9.9" });
+    host.main.webContents.emit("did-start-navigation", {}, "https://x/", true, true); // внутри страницы — не конец
+    await tick(30);
+    assert.equal(w.dialogs || 0, 0);
+    host.main.webContents.emit("render-process-gone", {});
+    await tick(1700);
+    assert.equal(w.dialogs, 1, "после падения страницы окно приходит");
+    // Новый эфир в окне ожидания 1,5 с: окно ждёт его конца.
+    downloaded({ version: "9.9.10" });
+    await tick(30);
+    assert.equal(w.dialogs, 2);
+    await host.share("screen:1:0");
+    downloaded({ version: "9.9.11" });
+    host.main.webContents.emit("did-fail-load", {});
+    await host.share("screen:1:0");
+    await tick(1700);
+    assert.equal(w.dialogs, 2, "эфир начат раньше срока — окно не поверх него");
+    host.fake.ipc.get("stopped")({});
+    await tick(1700);
+    assert.equal(w.dialogs, 3);
+  } finally { host.stop(); }
+});
