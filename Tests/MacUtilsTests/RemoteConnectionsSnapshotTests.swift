@@ -120,5 +120,19 @@ final class RemoteConnectionsSnapshotTests: XCTestCase {
                                             program: .anyDesk, record: north), program: .anyDesk, showStructure: true)
                 .padding(24).frame(maxHeight: .infinity, alignment: .top),
                size: NSSize(width: 460, height: 300), name: "rc12-hud-structure")
+
+        // A-4: настройки (m15), правка и добавление (m16/m17), вкладка на украинском и английском.
+        render(RemoteSettingsPage(center: full), size: NSSize(width: 820, height: 1500), name: "rc13-settings")
+        let eastEntry = full.snapshot.records.first { $0.name == "Лаборатория Восток" }!
+        render(RemoteEditSheet(center: full, record: eastEntry), size: NSSize(width: 480, height: 640), name: "rc14-edit")
+        render(RemoteEditSheet(center: full, record: nil), size: NSSize(width: 480, height: 600), name: "rc15-add")
+        defer { RemoteL10n.language = .ru }
+        for language in [RemoteLanguage.uk, .en] {
+            RemoteL10n.language = language
+            render(RemoteConnectionsPanel(center: full, diagnosticsExpanded: true), size: panel, name: "rc16-panel-\(language.rawValue)")
+            render(cards(failures.map { .finished(.failed($0)) }, .anyDesk, north), size: NSSize(width: 460, height: 900),
+                   name: "rc17-hud-\(language.rawValue)")
+            render(RemoteSettingsPage(center: full), size: NSSize(width: 820, height: 1500), name: "rc18-settings-\(language.rawValue)")
+        }
     }
 }

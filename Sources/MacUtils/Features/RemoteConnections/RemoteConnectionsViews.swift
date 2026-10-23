@@ -22,7 +22,7 @@ struct RemoteProgramBadge: View {
         .background(Color.dsPanel, in: Capsule())
         .overlay(Capsule().strokeBorder(Color.dsLine, lineWidth: 1))
         .opacity(dimmed ? DS.State.disabledOpacity : 1)
-        .help(dimmed ? "\(program.title) не установлен" : program.title)
+        .help(dimmed ? RL("%@ не установлен", program.title) : program.title)
         .accessibilityLabel(program.title)
     }
 }
@@ -38,8 +38,8 @@ struct RemotePasswordBadge: View {
             .frame(width: 26, height: 26)
             .background(Color.dsPanel, in: Circle())
             .overlay(Circle().strokeBorder(has ? Color.dsAccLine : Color.dsLine, lineWidth: 1))
-            .help(has ? "Пароль есть в файле" : "В файле нет пароля — введите вручную")
-            .accessibilityLabel(has ? "Пароль есть" : "Пароля нет")
+            .help(has ? RL("Пароль есть в файле") : RL("В файле нет пароля — введите вручную"))
+            .accessibilityLabel(has ? RL("Пароль есть") : RL("Пароля нет"))
     }
 }
 
@@ -93,7 +93,7 @@ struct RemoteRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(favorite ? "Убрать из избранного" : "В избранное")
+            .help(favorite ? RL("Убрать из избранного") : RL("В избранное"))
             if selected { Keycap(["↩"], compact: true, onPanel: true) }
         }
         .padding(.vertical, 6)
@@ -105,7 +105,7 @@ struct RemoteRow: View {
         .opacity(dimmed ? 0.75 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
-        .accessibilityAction(named: "Подключиться", onConnect)
+        .accessibilityAction(named: RL("Подключиться"), onConnect)
     }
 }
 
@@ -130,11 +130,11 @@ struct RemoteSectionLabel: View {
 extension ConnectionSection {
     var title: String {
         switch kind {
-        case .favorites: return "Избранное"
-        case .recents: return "Недавние"
+        case .favorites: return RL("Избранное")
+        case .recents: return RL("Недавние")
         case .group(let name): return name
-        case .ungrouped: return "Без группы"
-        case .results: return "Найдено"
+        case .ungrouped: return RL("Без группы")
+        case .results: return RL("Найдено")
         }
     }
 
@@ -151,7 +151,7 @@ extension ConnectionSection {
 /// Поле поиска с подсказкой клавиши и плашкой раскладки («ctdth → север»).
 struct RemoteSearchField: View {
     @Binding var text: String
-    var placeholder = "Название, ID, группа, тег…"
+    var placeholder = RL("Название, ID, группа, тег…")
     var large = false
     var hint: ConnectionSearch.LayoutHint?
     var programPill: String?
@@ -169,11 +169,11 @@ struct RemoteSearchField: View {
                 .font(large ? DS.Font.manrope(19, .semibold, relativeTo: .title3) : DS.Font.bodyStrong)
                 .foregroundStyle(.dsText)
                 .focused(focused)
-                .accessibilityLabel("Поиск подключений")
+                .accessibilityLabel(RL("Поиск подключений"))
             if let programPill {
                 Button { onClearProgram?() } label: { Pill(.neutral, "\(programPill) ✕") }
                     .buttonStyle(.plain)
-                    .help("Показать все программы")
+                    .help(RL("Показать все программы"))
             }
             if let hint { Pill(.info, "\(hint.typed) → \(hint.converted)") }
             if let trailingKeys { Keycap(trailingKeys, compact: true, onPanel: true) }
@@ -194,6 +194,8 @@ struct RemoteSectionsList: View {
     let listing: ConnectionListing
     var showSectionLabels = true
     var dimmed: Set<RemoteProgram> = []
+    /// Правка записи (только для .xml); nil — пункта «Изменить…» нет.
+    var onEdit: ((ConnectionRecord) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -218,6 +220,17 @@ struct RemoteSectionsList: View {
                                           onConnect: { model.select(row); model.connectSelected() })
                                     .id(row.id)
                                     .onTapGesture { model.select(row) }
+                                    .contextMenu {
+                                        Button(RL("Подключиться")) { model.select(row); model.connectSelected() }
+                                        Button(RL("Открыть без пароля")) { model.select(row); model.connectSelected(withPassword: false) }
+                                        Button(center.isFavorite(record) ? RL("Убрать из избранного") : RL("В избранное")) {
+                                            center.toggleFavorite(record)
+                                        }
+                                        if let onEdit {
+                                            Divider()
+                                            Button(RL("Изменить…")) { onEdit(record) }
+                                        }
+                                    }
                             }
                         }
                     }
@@ -237,11 +250,11 @@ struct RemoteSectionsList: View {
 extension SkippedRow {
     var message: String {
         switch reason {
-        case .missingName: return "Нет названия — запись пропущена"
-        case .missingID: return "Нет ID — запись пропущена"
-        case .invalidID: return "ID «\(value)» — не 9–10 цифр и не алиас — пропущена"
-        case .unknownProgram: return "Программа «\(value)» не распознана — запись пропущена"
-        case .aliasNotSupported: return "Алиас «\(value)» у TeamViewer — нужен числовой ID"
+        case .missingName: return RL("Нет названия — запись пропущена")
+        case .missingID: return RL("Нет ID — запись пропущена")
+        case .invalidID: return RL("ID «%@» — не 9–10 цифр и не алиас — пропущена", value)
+        case .unknownProgram: return RL("Программа «%@» не распознана — запись пропущена", value)
+        case .aliasNotSupported: return RL("Алиас «%@» у TeamViewer — нужен числовой ID", value)
         }
     }
 }
@@ -249,13 +262,13 @@ extension SkippedRow {
 extension ConnectionField {
     var columnTitle: String {
         switch self {
-        case .name: return "Название"
+        case .name: return RL("Название")
         case .id: return "ID"
-        case .password: return "Пароль"
-        case .group: return "Группа"
-        case .tags: return "Теги"
-        case .note: return "Заметка"
-        case .program: return "Программа"
+        case .password: return RL("Пароль")
+        case .group: return RL("Группа")
+        case .tags: return RL("Теги")
+        case .note: return RL("Заметка")
+        case .program: return RL("Программа")
         }
     }
 }
@@ -266,11 +279,11 @@ struct RemoteDiagnosticsSummary: View {
     @Binding var expanded: Bool
 
     private var text: String {
-        var parts = ["Загружено \(diagnostics.loaded)"]
-        if !diagnostics.skipped.isEmpty { parts.append("пропущено \(diagnostics.skipped.count)") }
-        if diagnostics.duplicateCount > 0 { parts.append("дубликатов \(diagnostics.duplicateCount)") }
+        var parts = [RL("Загружено %@", diagnostics.loaded)]
+        if !diagnostics.skipped.isEmpty { parts.append(RL("пропущено %@", diagnostics.skipped.count)) }
+        if diagnostics.duplicateCount > 0 { parts.append(RL("дубликатов %@", diagnostics.duplicateCount)) }
         let other = diagnostics.unrecognizedColumns.count + diagnostics.lossyIDRows.count + diagnostics.ambiguousProgramRows.count
-        if other > 0 { parts.append("замечаний \(other)") }
+        if other > 0 { parts.append(RL("замечаний %@", other)) }
         return parts.joined(separator: " · ")
     }
 
@@ -287,8 +300,8 @@ struct RemoteDiagnosticsSummary: View {
                 }
             }
             .buttonStyle(.plain)
-            .help(expanded ? "Скрыть подробности" : "Показать пропущенные строки и дубликаты")
-            .accessibilityHint("Подробности проверки файла")
+            .help(expanded ? RL("Скрыть подробности") : RL("Показать пропущенные строки и дубликаты"))
+            .accessibilityHint(RL("Подробности проверки файла"))
         }
     }
 }
@@ -306,23 +319,23 @@ struct RemoteDiagnosticsList: View {
     }
 
     private var issues: [Issue] {
-        var out = diagnostics.skipped.map { Issue(id: "s\($0.row)", text: $0.message, detail: "строка \($0.row)") }
+        var out = diagnostics.skipped.map { Issue(id: "s\($0.row)", text: $0.message, detail: RL("строка %@", $0.row)) }
         out += diagnostics.duplicates.map { d in
             let names = d.names.map { "«\($0)»" }.joined(separator: ", ")
             let display = ConnectionRecord(sourceRow: 0, name: "", id: d.id).displayID
-            return Issue(id: "d\(d.id)", text: "\(display) — \(names) — показаны все",
-                         detail: "строки " + d.rows.map(String.init).joined(separator: ", "))
+            return Issue(id: "d\(d.id)", text: RL("%@ — %@ — показаны все", display, names),
+                         detail: RL("строки ") + d.rows.map(String.init).joined(separator: ", "))
         }
         out += diagnostics.lossyIDRows.map {
-            Issue(id: "l\($0)", text: "ID записан как 1,23E+08 — цифры могли потеряться; сделайте ячейку текстовой",
-                  detail: "строка \($0)")
+            Issue(id: "l\($0)", text: RL("ID записан как 1,23E+08 — цифры могли потеряться; сделайте ячейку текстовой"),
+                  detail: RL("строка %@", $0))
         }
         out += diagnostics.ambiguousProgramRows.map {
-            Issue(id: "a\($0)", text: "Программа пуста — взята по умолчанию (\(defaultProgram.title))", detail: "строка \($0)")
+            Issue(id: "a\($0)", text: RL("Программа пуста — взята по умолчанию (%@)", defaultProgram.title), detail: RL("строка %@", $0))
         }
         if !diagnostics.unrecognizedColumns.isEmpty {
-            out.append(Issue(id: "c", text: "Не распознаны колонки: " + diagnostics.unrecognizedColumns.map { "«\($0)»" }.joined(separator: ", "),
-                             detail: "их значения не читаются"))
+            out.append(Issue(id: "c", text: RL("Не распознаны колонки: ") + diagnostics.unrecognizedColumns.map { "«\($0)»" }.joined(separator: ", "),
+                             detail: RL("их значения не читаются")))
         }
         return out
     }
@@ -335,7 +348,7 @@ struct RemoteDiagnosticsList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            RemoteSectionLabel(title: "Проверка файла", symbol: "stethoscope")
+            RemoteSectionLabel(title: RL("Проверка файла"), symbol: "stethoscope")
             ListCard(style: .field) {
                 ForEach(issues) { issue in
                     HStack(alignment: .top, spacing: 10) {
@@ -355,12 +368,12 @@ struct RemoteDiagnosticsList: View {
                     .accessibilityElement(children: .combine)
                 }
                 if !diagnostics.columns.isEmpty {
-                    Text("Колонки: \(columnsLine)").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                    Text(RL("Колонки: %@", columnsLine)).font(DS.Font.rowSub).foregroundStyle(.dsMute)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.vertical, 6).padding(.horizontal, 10)
                 }
             }
-            Text("Пароли здесь и в журнале не показываются: только номера строк и причины.")
+            Text(RL("Пароли здесь и в журнале не показываются: только номера строк и причины."))
                 .font(DS.Font.rowSub).foregroundStyle(.dsMute).padding(.horizontal, 6)
         }
     }
@@ -375,19 +388,19 @@ struct RemoteFileStateView: View {
     var body: some View {
         switch center.state {
         case .noFile:
-            panel("Файл подключений не выбран", "doc.badge.plus",
-                  "Укажите таблицу .xlsx или .xml со своими компьютерами (AnyDesk, TeamViewer) — Mac Utils её только читает.",
-                  primary: ("Выбрать файл подключений", center.chooseFile))
+            panel(RL("Файл подключений не выбран"), "doc.badge.plus",
+                  RL("Укажите таблицу .xlsx или .xml со своими компьютерами (AnyDesk, TeamViewer) — Mac Utils её только читает."),
+                  primary: (RL("Выбрать файл подключений"), center.chooseFile))
         case .loading:
-            EmptyState.loading("Читаю файл подключений…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            EmptyState.loading(RL("Читаю файл подключений…")).frame(maxWidth: .infinity, maxHeight: .infinity)
         case .cloudNotDownloaded:
-            panel("Файл ещё скачивается", "icloud.and.arrow.down",
-                  "\(fileName) скачивается из облака. Список появится сам, как только файл будет на диске.",
-                  primary: ("Выбрать файл", center.chooseFile))
+            panel(RL("Файл ещё скачивается"), "icloud.and.arrow.down",
+                  RL("%@ скачивается из облака. Список появится сам, как только файл будет на диске.", fileName),
+                  primary: (RL("Выбрать файл"), center.chooseFile))
         case .unavailable:
-            panel("Файл подключений недоступен", "externaldrive.badge.xmark",
-                  "\(filePath) не открывается: диск отключён или файл ещё не скачан из облака. Повторю сам, как только он появится.",
-                  primary: ("Выбрать файл", center.chooseFile), secondary: ("Повторить", center.reload))
+            panel(RL("Файл подключений недоступен"), "externaldrive.badge.xmark",
+                  RL("%@ не открывается: диск отключён или файл ещё не скачан из облака. Повторю сам, как только он появится.", filePath),
+                  primary: (RL("Выбрать файл"), center.chooseFile), secondary: (RL("Повторить"), center.reload))
         case .failed(let error):
             failed(error)
         case .ready:
@@ -395,37 +408,37 @@ struct RemoteFileStateView: View {
         }
     }
 
-    private var fileName: String { center.fileURL?.lastPathComponent ?? "Файл" }
-    private var filePath: String { (center.fileURL?.path as NSString?)?.abbreviatingWithTildeInPath ?? "Файл" }
+    private var fileName: String { center.fileURL?.lastPathComponent ?? RL("Файл") }
+    private var filePath: String { (center.fileURL?.path as NSString?)?.abbreviatingWithTildeInPath ?? RL("Файл") }
 
     @ViewBuilder private func failed(_ error: ConnectionsError) -> some View {
         switch error {
         case .missingColumns(let found):
-            panel("Не нашёл нужные колонки", "tablecells.badge.ellipsis",
-                  found.isEmpty ? "Лист пуст: в первой строке нужны «Название» и «ID»."
-                      : "В первой строке нет «Название» и «ID/Адрес». Нашёл заголовки:",
-                  primary: ("Открыть файл", center.openFile), secondary: ("Выбрать другой", center.chooseFile),
+            panel(RL("Не нашёл нужные колонки"), "tablecells.badge.ellipsis",
+                  found.isEmpty ? RL("Лист пуст: в первой строке нужны «Название» и «ID».")
+                      : RL("В первой строке нет «Название» и «ID/Адрес». Нашёл заголовки:"),
+                  primary: (RL("Открыть файл"), center.openFile), secondary: (RL("Выбрать другой"), center.chooseFile),
                   pills: found)
         case .noSheet(let name):
-            panel("Нет листа «\(name)»", "tablecells",
-                  "В книге \(fileName) нет выбранного листа. Будет прочитан первый лист.",
-                  primary: ("Читать первый лист", { center.setSheet(nil) }), secondary: ("Открыть файл", center.openFile))
+            panel(RL("Нет листа «%@»", name), "tablecells",
+                  RL("В книге %@ нет выбранного листа. Будет прочитан первый лист.", fileName),
+                  primary: (RL("Читать первый лист"), { center.setSheet(nil) }), secondary: (RL("Открыть файл"), center.openFile))
         case .locked:
-            panel("Файл занят", "lock",
-                  "\(fileName) не читается — другая программа держит его или ещё сохраняет. Повторю, когда он изменится.",
-                  primary: ("Повторить", center.reload))
+            panel(RL("Файл занят"), "lock",
+                  RL("%@ не читается — другая программа держит его или ещё сохраняет. Повторю, когда он изменится.", fileName),
+                  primary: (RL("Повторить"), center.reload))
         case .unsupportedType:
-            panel("Этот формат не подходит", "doc.questionmark",
-                  "Нужна таблица .xlsx или файл .xml. Сохраните список в одном из этих форматов.",
-                  primary: ("Выбрать файл", center.chooseFile))
+            panel(RL("Этот формат не подходит"), "doc.questionmark",
+                  RL("Нужна таблица .xlsx или файл .xml. Сохраните список в одном из этих форматов."),
+                  primary: (RL("Выбрать файл"), center.chooseFile))
         case .tooLarge:
-            panel("Файл слишком большой", "doc.badge.ellipsis",
-                  "\(fileName) больше 64 МБ — это не похоже на список подключений.",
-                  primary: ("Выбрать файл", center.chooseFile))
+            panel(RL("Файл слишком большой"), "doc.badge.ellipsis",
+                  RL("%@ больше 64 МБ — это не похоже на список подключений.", fileName),
+                  primary: (RL("Выбрать файл"), center.chooseFile))
         case .corrupt(let reason):
-            panel("Файл повреждён", "exclamationmark.triangle",
-                  "\(reason). Прежний список не сохранён — исправьте файл, список обновится сам.",
-                  primary: ("Открыть файл", center.openFile), secondary: ("Выбрать другой", center.chooseFile))
+            panel(RL("Файл повреждён"), "exclamationmark.triangle",
+                  RL("%@. Прежний список не сохранён — исправьте файл, список обновится сам.", reason),
+                  primary: (RL("Открыть файл"), center.openFile), secondary: (RL("Выбрать другой"), center.chooseFile))
         case .noFile, .unavailable, .cloudNotDownloaded:
             EmptyView()
         }
@@ -461,6 +474,7 @@ struct RemoteConnectionsPanel: View {
     @FocusState private var searchFocused: Bool
     @State private var diagnosticsExpanded: Bool
     @State private var installed: Set<RemoteProgram> = Set(RemoteProgram.allCases)
+    @State private var editing: RemoteEditTarget?
 
     /// `center`, `query`, `diagnosticsExpanded` — для снимков интерфейса; в приложении — общий центр и пустой поиск.
     init(center: RemoteConnectionsCenter? = nil, query: String = "", diagnosticsExpanded: Bool = false) {
@@ -503,7 +517,8 @@ struct RemoteConnectionsPanel: View {
                         emptyList
                     } else {
                         RemoteSectionsList(model: model, center: center, listing: listing,
-                                           dimmed: Set(RemoteProgram.allCases).subtracting(installed))
+                                           dimmed: Set(RemoteProgram.allCases).subtracting(installed),
+                                           onEdit: center.canEdit ? { editing = RemoteEditTarget(record: $0) } : nil)
                     }
                 }
                 .padding(.horizontal, DS.Space.l)
@@ -520,15 +535,16 @@ struct RemoteConnectionsPanel: View {
             searchFocused = true
         }
         .onChange(of: center.snapshot.diagnostics.isClean) { _, clean in if clean { diagnosticsExpanded = false } }
+        .sheet(item: $editing) { RemoteEditSheet(center: center, record: $0.record) }
     }
 
     @ViewBuilder private var emptyList: some View {
         if center.snapshot.records.isEmpty {
-            EmptyState("В файле нет записей", systemImage: "tray",
-                       message: "Добавьте строки с названием и ID — список обновится сам.", compact: true)
+            EmptyState(RL("В файле нет записей"), systemImage: "tray",
+                       message: RL("Добавьте строки с названием и ID — список обновится сам."), compact: true)
         } else {
-            EmptyState("Ничего не найдено", systemImage: "magnifyingglass",
-                       message: "Поиск идёт по названию, ID, группе, тегам и заметке. Раскладка уже учтена.", compact: true)
+            EmptyState(RL("Ничего не найдено"), systemImage: "magnifyingglass",
+                       message: RL("Поиск идёт по названию, ID, группе, тегам и заметке. Раскладка уже учтена."), compact: true)
         }
     }
 
@@ -537,10 +553,10 @@ struct RemoteConnectionsPanel: View {
         let missing = RemoteProgram.allCases.filter { !installed.contains($0) && (listing.counts[.program($0)] ?? 0) > 0 }
         if let program = missing.first {
             let others = RemoteProgram.allCases.filter { installed.contains($0) }.map(\.title)
-            Banner(.danger, title: "\(program.title) не установлен",
-                   message: "Записи \(program.title) (\(listing.counts[.program(program)] ?? 0)) приглушены."
-                       + (others.isEmpty ? "" : " \(others.joined(separator: ", ")) работает.")) {
-                Button("Скачать \(program.title)") { NSWorkspace.shared.open(program.downloadURL) }
+            Banner(.danger, title: RL("%@ не установлен", program.title),
+                   message: RL("Записи %@ (%@) приглушены.", program.title, listing.counts[.program(program)] ?? 0)
+                       + (others.isEmpty ? "" : RL(" %@ работает.", others.joined(separator: ", ")))) {
+                Button(RL("Скачать %@", program.title)) { NSWorkspace.shared.open(program.downloadURL) }
                     .buttonStyle(.graphite(.primary, size: .compact))
             }
         }
@@ -552,11 +568,14 @@ struct RemoteConnectionsPanel: View {
             HStack(spacing: 6) {
                 Button { center.openFile() } label: { Label("Excel", systemImage: "tablecells") }
                     .buttonStyle(.graphite(.secondary, size: .compact))
-                    .help("Открыть файл подключений")
+                    .help(RL("Открыть файл подключений"))
                     .disabled(center.fileURL == nil)
-                IconButton("Перечитать", systemImage: "arrow.clockwise", compact: true) { center.reload() }
+                IconButton(RL("Перечитать"), systemImage: "arrow.clockwise", compact: true) { center.reload() }
                     .disabled(center.fileURL == nil)
-                IconButton("Выбрать файл", systemImage: "folder", compact: true) { center.chooseFile() }
+                IconButton(RL("Выбрать файл"), systemImage: "folder", compact: true) { center.chooseFile() }
+                if center.canEdit, center.state == .ready {
+                    IconButton(RL("Добавить запись"), systemImage: "plus", compact: true) { editing = RemoteEditTarget(record: nil) }
+                }
                 Spacer()
                 if center.state == .ready {
                     RemoteDiagnosticsSummary(diagnostics: center.snapshot.diagnostics, expanded: $diagnosticsExpanded)

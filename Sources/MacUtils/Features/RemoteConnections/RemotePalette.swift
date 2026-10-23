@@ -127,15 +127,15 @@ struct RemotePaletteView: View {
     var body: some View {
         let listing = model.listing
         VStack(spacing: DS.Space.s) {
-            RemoteSearchField(text: $model.query, placeholder: "Подключиться к…", large: true, hint: listing.hint,
+            RemoteSearchField(text: $model.query, placeholder: RL("Подключиться к…"), large: true, hint: listing.hint,
                               programPill: programPill, focused: $focused, trailingKeys: ["⎋"],
                               onClearProgram: { model.filter = .all })
             Group {
                 if center.state != .ready {
                     RemoteFileStateView(center: center)
                 } else if listing.isEmpty {
-                    EmptyState("Ничего не найдено", systemImage: "magnifyingglass",
-                               message: "Поиск идёт по названию, ID, группе, тегам и заметке. Проверьте написание — раскладка уже учтена.",
+                    EmptyState(RL("Ничего не найдено"), systemImage: "magnifyingglass",
+                               message: RL("Поиск идёт по названию, ID, группе, тегам и заметке. Проверьте написание — раскладка уже учтена."),
                                compact: true)
                 } else {
                     RemoteSectionsList(model: model, center: center, listing: listing,
@@ -144,11 +144,11 @@ struct RemotePaletteView: View {
             }
             .frame(maxHeight: .infinity)
             HStack(spacing: 14) {
-                hint(["↑", "↓"], "выбор")
-                hint(["↩"], "подключиться")
-                hint(["⌘", "↩"], "без пароля")
-                hint(["⇥"], "программа")
-                hint(["⌘", "F"], "избранное")
+                hint(["↑", "↓"], RL("выбор"))
+                hint(["↩"], RL("подключиться"))
+                hint(["⌘", "↩"], RL("без пароля"))
+                hint(["⇥"], RL("программа"))
+                hint(["⌘", "F"], RL("избранное"))
                 Spacer()
             }
             .padding(.horizontal, 6)

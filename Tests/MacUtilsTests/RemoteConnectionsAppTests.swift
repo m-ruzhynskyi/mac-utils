@@ -133,4 +133,62 @@ final class RemoteConnectionsAppTests: XCTestCase {
         XCTAssertEqual(hud(.finished(.failed(.wrongPassword)), .teamViewer).detail, "TeamViewer отклонил пароль для «Лаборатория Север».")
         XCTAssertEqual(RemoteHUDAction.download.title(.teamViewer), "Скачать TeamViewer")
     }
+    /// Правка .xml через центр: запись меняется в файле, рядом — .bak с теми же правами, список перечитан.
+    func testCenterEditsXMLWithBackup() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mu-rc-edit-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("c.xml")
+        let original = """
+            <connections>
+              <!-- офис -->
+              <connection><name>Касса 2</name><id>123456789</id><password>p</password></connection>
+            </connections>
+
+            """
+        try Data(original.utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let center = RemoteConnectionsCenter(defaults: defaults)
+        center.setFile(url)
+        func wait(_ count: Int) async throws {
+            let deadline = Date().addingTimeInterval(5)
+            while center.snapshot.records.count != count || center.state != .ready, Date() < deadline {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+        }
+        try await wait(1)
+        XCTAssertTrue(center.canEdit)
+        try center.save(ConnectionDraft(name: "Склад", id: "223 456 789", program: .teamViewer, password: "PWD-CANARY-7"), replacing: nil)
+        try await wait(2)
+        XCTAssertEqual(center.snapshot.records.map(\.name), ["Касса 2", "Склад"])
+        let bak = dir.appendingPathComponent("c.xml.bak")
+        XCTAssertEqual(try String(contentsOf: bak, encoding: .utf8), original)
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: bak.path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+
+        let cash = center.snapshot.records[0]
+        center.toggleFavorite(cash)
+        try center.delete(cash)
+        try await wait(1)
+        XCTAssertEqual(center.snapshot.records.map(\.name), ["Склад"])
+        XCTAssertFalse(center.isFavorite(cash), "из избранного убрана")
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.contains("<!-- офис -->"), "чужие байты на месте")
+        XCTAssertFalse("\(defaults.persistentDomain(forName: suite) ?? [:])".contains("PWD-CANARY"), "пароль в настройки не попал")
+        center.setFile(nil)
+        XCTAssertFalse(center.canEdit)
+    }
+
+    func testLanguageAndNotifySettings() {
+        let center = RemoteConnectionsCenter(defaults: defaults)
+        defer { center.language = .ru }
+        XCTAssertEqual(center.language, .ru)
+        XCTAssertTrue(center.notifySuccess)
+        center.language = .uk
+        XCTAssertEqual(RemoteHUDContent.make(.opening, program: .anyDesk,
+                                             record: ConnectionRecord(sourceRow: 1, name: "a", id: "123456789")).title,
+                       "Відкриваю AnyDesk…")
+        XCTAssertEqual(RemoteConnectionsCenter(defaults: defaults).language, .uk, "язык запоминается")
+        center.notifySuccess = false
+        XCTAssertFalse(RemoteConnectionsCenter(defaults: defaults).notifySuccess)
+    }
 }
