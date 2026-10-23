@@ -120,10 +120,11 @@ enum AXTree {
         return found
     }
 
-    /// Подходящий элемент, ближайший к `target`: в самом тесном общем контейнере.
-    static func nearest(to target: AXNode, in root: AXNode, where match: (AXNode) -> Bool) -> AXNode? {
+    /// Подходящий элемент, ближайший к `target`: в самом тесном общем контейнере. `levels` — на сколько
+    /// контейнеров вверх подниматься (nil — до корня).
+    static func nearest(to target: AXNode, in root: AXNode, levels: Int? = nil, where match: (AXNode) -> Bool) -> AXNode? {
         guard let path = path(to: target, in: root) else { return nil }
-        for ancestor in path.reversed() {
+        for ancestor in path.reversed().prefix(levels.map { $0 + 1 } ?? path.count) {
             if let hit = first(in: ancestor, where: match) { return hit }
         }
         return nil

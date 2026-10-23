@@ -81,8 +81,15 @@ final class FakeAX: AXAccess {
         windows[pid, default: []].append(window)
     }
 
+    /// Как настоящая программа: окно пароля закрылось — открылось окно сеанса с ID в заголовке.
+    /// Тесты «сеанса нет» выключают это.
+    var sessionAfterPassword = true
+
     func close(_ window: FakeNode, pid: Int32) {
         windows[pid]?.removeAll { $0 === window }
+        guard sessionAfterPassword, window.descendants().contains(where: { $0.subrole == "AXSecureTextField" }),
+              let id = FakeLauncher.current?.openedID else { return }
+        show(FakeNode("AXWindow", subrole: "AXStandardWindow", label: "Сеанс \(id)", children: [FakeNode("AXGroup")]), pid: pid)
     }
 }
 
@@ -100,6 +107,18 @@ final class FakeLauncher: AppLauncher {
     /// Программа выходит вперёд по `activate`.
     var activationWorks = true
     var onOpen: ((URL) -> Void)?
+    /// Последний созданный — для окна сеанса в `FakeAX.close`.
+    nonisolated(unsafe) static weak var current: FakeLauncher?
+
+    init() { FakeLauncher.current = self }
+
+    /// ID из последней открытой ссылки (`anydesk:ID`, `teamviewer10://control?device=ID`).
+    var openedID: String? {
+        guard let url = opened.last?.absoluteString else { return nil }
+        if let r = url.range(of: "device=") { return String(url[r.upperBound...]) }
+        if url.hasPrefix("anydesk:") { return String(url.dropFirst("anydesk:".count)) }
+        return nil
+    }
 
     func isInstalled(bundleID: String) -> Bool { installed.contains(bundleID) }
 

@@ -301,7 +301,8 @@ final class RemoteConnectionsCenter: ObservableObject {
             })
             guard let self, let outcome else { return }
             self.isConnecting = false
-            if opened, outcome != .failed(.launchFailed) {
+            // В «Недавние» — только то, что открылось: «не подтверждено» и «сеанс закрыт» туда не попадают.
+            if opened, outcome.isSuccess {
                 ConnectionLists.noteConnected(record, in: self.prefs)
                 self.recents = self.prefs.recentIDs
             }

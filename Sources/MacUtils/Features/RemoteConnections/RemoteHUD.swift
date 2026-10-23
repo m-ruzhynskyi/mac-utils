@@ -76,12 +76,15 @@ struct RemoteHUDContent: Equatable {
         case .connected:
             return RemoteHUDContent(tone: .success, title: RL("Подключено"), detail: who)
         case .submitted:
-            return RemoteHUDContent(tone: .success, title: RL("Пароль введён"),
-                                    detail: RL("Окно %@ ещё открыто — подключение ждёт ответа той стороны.", p))
+            return RemoteHUDContent(tone: .neutral, title: RL("Пароль введён · сеанс не подтверждён"),
+                                    detail: RL("Проверьте окно %@: открылся ли сеанс.", p), actions: [.close])
+        case .sessionClosed:
+            return RemoteHUDContent(tone: .warning, title: RL("%@ закрыл сеанс", p),
+                                    detail: RL("Пароль введён, но сеанс не открылся. Причина — в окне %@.", p), actions: [.retry, .close])
         case .connectedWithoutPassword:
             return RemoteHUDContent(tone: .success, title: RL("Подключено без пароля"),
-                                    detail: isAnyDesk ? RL("Окно пароля не появилось — AnyDesk уже помнит этот компьютер")
-                                                      : RL("Окно аутентификации не появилось — TeamViewer пустил без пароля"))
+                                    detail: isAnyDesk ? RL("Сеанс открыт — AnyDesk уже помнит этот компьютер")
+                                                      : RL("Сеанс открыт — TeamViewer пустил без пароля"))
         case .unconfirmed(copyID: true):
             return RemoteHUDContent(tone: .neutral, title: RL("Не удалось подключиться — ID скопирован"),
                                     detail: RL("Вставьте ID в %@ (⌘V) и нажмите «Connect».", p), actions: [.retry, .close])

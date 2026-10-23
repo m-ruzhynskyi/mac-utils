@@ -262,8 +262,9 @@ final class IntermediateWindowTests: XCTestCase {
 
     // MARK: AnyDesk — подтверждение сеанса без пароля
 
-    /// Компьютер запомнен: «Connecting…», затем экран сеанса без диалогов — подключено без пароля, до таймаута.
-    func testConnectingThenCalmSessionIsConnectedWithoutPassword() async {
+    /// Компьютер запомнен: «Connecting…», затем экран сеанса без диалогов. Пароль в файле есть и ждётся, поэтому
+    /// тишина — ещё не сеанс (ревью #155, P3): к таймауту окно без ID в заголовке — «не подтверждено».
+    func testConnectingThenCalmWindowWithoutIDWhilePasswordExpectedIsUnconfirmed() async {
         let window = sessionWindow(title: "AnyDesk")
         launcher.onOpen = { [unowned self] _ in
             launcher.launch(.anyDesk, pid: adPID)
@@ -272,8 +273,8 @@ final class IntermediateWindowTests: XCTestCase {
             clock.at(2000) { [unowned self] in put(remoteScreen(), in: window, pid: adPID) }
         }
         let outcome = await connect(anyDesk(), AnyDeskAutomator(texts: adTexts))
-        XCTAssertEqual(outcome, .connectedWithoutPassword)
-        XCTAssertTrue((7000...7500).contains(clock.milliseconds), "сеанс спокоен 5 с после диалога: \(clock.milliseconds) мс")
+        XCTAssertEqual(outcome, .unconfirmed(copyID: false))
+        XCTAssertFalse(finishedPhases.contains(.connectedWithoutPassword))
         XCTAssertTrue(keyboard.typed.isEmpty)
     }
 
@@ -358,6 +359,177 @@ final class IntermediateWindowTests: XCTestCase {
         XCTAssertTrue(phases.contains(.intermediate(.unknown)))
         XCTAssertEqual(outcome, .unconfirmed(copyID: false))
         XCTAssertGreaterThanOrEqual(clock.milliseconds, 30_000, "5 с таймаута отсчитаны после закрытия диалога")
+    }
+
+    // MARK: Ревью #155: подтверждение после пароля, ленивый пароль
+
+    /// Окно пароля AnyDesk; по «ОК» оно закрывается и выполняется `then`.
+    private func adPasswordWindow(at ms: Int, then: @escaping () -> Void = {}) -> FakePasswordWindow {
+        let pw = FakePasswordWindow(title: "Authorization")
+        pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: adPID); then() }
+        clock.at(ms) { [unowned self] in ax.show(pw.window, pid: adPID) }
+        return pw
+    }
+
+    /// P1: после пароля AnyDesk закрыл сеанс не из-за пароля («Client Offline») — не «Подключено».
+    func testSessionClosedAfterPasswordIsNotConnected() async {
+        let window = sessionWindow()
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            _ = adPasswordWindow(at: 500) { [unowned self] in
+                put([FakeNode("AXStaticText", label: "Client Offline"), FakeNode("AXButton", label: "OK")], in: window, pid: adPID)
+            }
+        }
+        let outcome = await connect(anyDesk(), AnyDeskAutomator(texts: adTexts))
+        XCTAssertEqual(outcome, .sessionClosed)
+        XCTAssertFalse(outcome.isSuccess)
+    }
+
+    /// P2: окно пароля закрылось, а признака сеанса нет — «Пароль введён · сеанс не подтверждён», не успех.
+    func testPasswordAcceptedWithoutAnySessionIsNotConnected() async {
+        ax.sessionAfterPassword = false
+        var pw: FakePasswordWindow?
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            pw = adPasswordWindow(at: 500)
+        }
+        let outcome = await connect(anyDesk(), AnyDeskAutomator(texts: adTexts))
+        XCTAssertEqual(outcome, .submitted)
+        XCTAssertFalse(outcome.isSuccess)
+        XCTAssertEqual(pw?.field.text, password)
+    }
+
+    /// P2: после пароля — спокойное окно сеанса (с ID в заголовке) — «Подключено».
+    func testPasswordThenCalmSessionWindowIsConnected() async {
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            _ = adPasswordWindow(at: 500) { [unowned self] in
+                let w = sessionWindow()
+                ax.show(w, pid: adPID)
+                put(remoteScreen(), in: w, pid: adPID)
+            }
+        }
+        let outcome = await connect(anyDesk(), AnyDeskAutomator(texts: adTexts))
+        XCTAssertEqual(outcome, .connected)
+    }
+
+    /// P2: «Waiting for image» после пароля — сразу «Подключено».
+    func testPasswordThenWaitingForImageIsConnected() async {
+        let window = sessionWindow(title: "AnyDesk")
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            _ = adPasswordWindow(at: 500) { [unowned self] in
+                put([FakeNode("AXStaticText", label: "Waiting for image.")], in: window, pid: adPID)
+            }
+        }
+        let outcome = await connect(anyDesk(), AnyDeskAutomator(texts: adTexts))
+        XCTAssertEqual(outcome, .connected)
+    }
+
+    /// P3: «Terminal Session» → «Connect» → 6 с тишины в окне сеанса → окно пароля: пароль введён, не «без пароля».
+    func testQuietSessionWindowWhileWaitingForPasswordIsNotASession() async {
+        let window = sessionWindow()
+        let prompt = TerminalPrompt()
+        var pw: FakePasswordWindow?
+        prompt.connect.onPress = { [unowned self] in
+            put(remoteScreen(), in: window, pid: adPID)
+            pw = adPasswordWindow(at: clock.milliseconds + 6500) { [unowned self] in
+                put([FakeNode("AXStaticText", label: "Waiting for image.")], in: window, pid: adPID)
+            }
+        }
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+        }
+        let outcome = await connect(anyDesk(), AnyDeskAutomator(texts: adTexts))
+        XCTAssertEqual(outcome, .connected)
+        XCTAssertEqual(pw?.field.text, password)
+        XCTAssertFalse(finishedPhases.contains(.connectedWithoutPassword))
+    }
+
+    /// P3: пароль ждём, а до конца таймаута — спокойное новое окно с ID: тогда (и только тогда) «без пароля».
+    func testTitledCalmWindowCountsAsSessionOnlyAtTimeout() async {
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            let w = sessionWindow()
+            ax.show(w, pid: adPID)
+            put(remoteScreen(), in: w, pid: adPID)
+        }
+        let outcome = await connect(anyDesk(timeout: 10), AnyDeskAutomator(texts: adTexts))
+        XCTAssertEqual(outcome, .connectedWithoutPassword)
+        XCTAssertGreaterThanOrEqual(clock.milliseconds, 10_000, "не раньше таймаута")
+        XCTAssertEqual(lookups, 1, "только проверка до ссылки")
+        XCTAssertTrue(secrets.allSatisfy(\.isEmpty))
+    }
+
+    /// P4: пароль читается из файла только когда найдено поле, не на время промежуточных окон.
+    func testPasswordIsReadOnlyWhenFieldIsFound() async {
+        let window = sessionWindow()
+        let prompt = TerminalPrompt(withConnect: false)
+        var pw: FakePasswordWindow?
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+            clock.at(60_000) { [unowned self] in
+                put(remoteScreen(), in: window, pid: adPID)
+                pw = adPasswordWindow(at: 60_500)
+            }
+        }
+        var readAt: Int?
+        let pwText = password
+        let outcome = await connector().connect(anyDesk(), provider: AnyDeskAutomator(texts: adTexts), password: {
+            readAt = self.clock.milliseconds
+            let s = SecretBuffer(pwText.utf8)
+            self.secrets.append(s)
+            return .found(s)
+        }, progress: { _ in })
+        XCTAssertEqual(pw?.field.text, password)
+        XCTAssertGreaterThanOrEqual(readAt ?? 0, 60_500, "до окна пароля файл не читался")
+        XCTAssertNotEqual(outcome, .connectedWithoutPassword)
+        XCTAssertTrue(secrets.allSatisfy(\.isEmpty))
+    }
+
+    /// P4: окна пароля так и не было — пароль прочитан только для проверки до ссылки и сразу затёрт.
+    func testPasswordNotKeptWithoutPasswordWindow() async {
+        var wipedBeforeOpen: Bool?
+        launcher.onOpen = { [unowned self] _ in
+            wipedBeforeOpen = secrets.allSatisfy(\.isEmpty)
+            launcher.launch(.anyDesk, pid: adPID)
+        }
+        let outcome = await connect(anyDesk(timeout: 3), AnyDeskAutomator(texts: adTexts))
+        XCTAssertEqual(outcome, .unconfirmed(copyID: false))
+        XCTAssertEqual(lookups, 1)
+        XCTAssertEqual(wipedBeforeOpen, true, "к открытию ссылки пароля в памяти уже нет")
+    }
+
+    /// P9: у формы ID нет своей «Connect» — плитку другого компьютера не жмём; Return в поле ID.
+    func testTeamViewerNeverPressesAnotherDevicesConnect() async {
+        let field = FakeNode("AXComboBox")
+        field.placeholder = "Enter end user’s ID, IP, or hostname"
+        let arrow = FakeNode("AXButton")   // кнопка формы — только значок, подписи нет
+        let tile = FakeNode("AXButton")
+        tile.detail = "Connect"
+        var tilePressed = false
+        tile.onPress = { tilePressed = true }
+        let form = FakeNode("AXGroup", children: [FakeNode("AXGroup", children: [field]), arrow])
+        let window = FakeNode("AXWindow", subrole: "AXStandardWindow", label: "TeamViewer", children: [
+            FakeNode("AXWebArea", children: [
+                FakeNode("AXGroup", children: [form]),
+                FakeNode("AXGroup", children: [FakeNode("AXGroup", children: [FakeNode("AXStaticText", label: "Другой компьютер"), tile])]),
+            ]),
+        ])
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.teamViewer, pid: tvPID)
+            ax.show(window, pid: tvPID)
+        }
+        _ = await connect(teamViewer(timeout: 4), TeamViewerAutomator(texts: tvTexts))
+        XCTAssertFalse(tilePressed, "«Connect» плитки другого компьютера не нажата")
+        XCTAssertEqual(field.text, "123456789")
+        XCTAssertEqual(keyboard.returns, [tvPID], "Return — в поле ID")
     }
 
     // MARK: TeamViewer — главный экран без ID

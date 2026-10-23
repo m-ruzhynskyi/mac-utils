@@ -300,7 +300,7 @@ final class AcceptanceConnectTests: XCTestCase {
         programShowsPassword(closeOnOK: false)
         let outcome = await connect(request(), lookup: found("Pw"))
         XCTAssertEqual(outcome, .submitted)
-        XCTAssertTrue(outcome.isSuccess)
+        XCTAssertFalse(outcome.isSuccess, "сеанс не подтверждён — не успех (ревью #155, P2)")
     }
 
     // MARK: Только в AnyDesk, пока фокус у него (§ 4)
