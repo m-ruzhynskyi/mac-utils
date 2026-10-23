@@ -604,6 +604,25 @@ final class IntermediateWindowTests: XCTestCase {
         XCTAssertEqual(main.field.text, "123456789")
     }
 
+    /// По умолчанию в окне пароля стоит «Cancel» — её не нажимаем, Return тоже не шлём; пароль убран из поля.
+    func testDefaultCancelIsNeverPressed() async {
+        let field = FakeNode("AXTextField", subrole: "AXSecureTextField")
+        let cancel = FakeNode("AXButton", label: "Cancel")
+        var cancelPressed = false
+        cancel.onPress = { cancelPressed = true }
+        let window = FakeNode("AXWindow", subrole: "AXDialog", label: "Authentication", children: [field, cancel])
+        window.defaultButtonNode = cancel
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.teamViewer, pid: tvPID)
+            ax.show(window, pid: tvPID)
+        }
+        let outcome = await connect(teamViewer(), TeamViewerAutomator(texts: tvTexts))
+        XCTAssertFalse(cancelPressed)
+        XCTAssertTrue(keyboard.returns.isEmpty, "Return нажал бы «Cancel»")
+        XCTAssertEqual(field.text, "", "пароль не остался в поле")
+        if case .failed(.fieldNotFound) = outcome {} else { XCTFail("\(outcome)") }
+    }
+
     /// TeamViewer не выходит вперёд — ID через `AXValue`, «Connect» всё равно нажат.
     func testTeamViewerIDByAXValueWhenNotFrontmost() async {
         launcher.activationWorks = false

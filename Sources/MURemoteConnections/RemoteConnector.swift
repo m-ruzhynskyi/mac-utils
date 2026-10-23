@@ -679,23 +679,39 @@ public final class RemoteConnector {
         return expected.contains(length)
     }
 
-    /// «ОК»: кнопка по умолчанию, кнопка с надписью подтверждения, иначе Return в процесс программы.
-    private func submit(_ target: Target, _ texts: ProviderTexts, _ bundleID: String) -> Bool {
-        if let button = target.window.defaultButton, button.press() { return true }
-        let buttons = AXTree.all(in: target.window) { $0.role == "AXButton" }
-        if let ok = buttons.first(where: { $0.label.map { texts.confirmTitles.contains(ProviderTexts.key($0)) } == true }),
-           ok.press() { return true }
-        guard isFront(target.pid, bundleID) else { return false }
+    /// Отмена, закрытие, отказ — такие кнопки не нажимаются никогда, даже если они «по умолчанию».
+    static let cancelTitles: Set<String> = Set(["Cancel", "Отмена", "Скасувати", "Abbrechen", "Annuler", "Cancelar", "Annulla",
+                                                "Close", "Закрыть", "Закрити", "Deny", "Отклонить", "Відхилити", "Abort",
+                                                "Прервать", "Перервати", "Disconnect", "Отключить"].map(ProviderTexts.key))
+
+    private enum Submit { case pressed, notFront, onlyCancel }
+
+    /// «ОК»: кнопка по умолчанию (если это не отмена), кнопка с надписью подтверждения, иначе Return в процесс
+    /// программы — но не тогда, когда по умолчанию стоит отмена: Return нажал бы её.
+    private func submit(_ target: Target, _ texts: ProviderTexts, _ bundleID: String) -> Submit {
+        let isCancel: (AXNode) -> Bool = { ProviderTexts.named($0, Self.cancelTitles) }
+        let defaultButton = target.window.defaultButton
+        if let button = defaultButton, !isCancel(button), button.press() { return .pressed }
+        let buttons = AXTree.all(in: target.window) { $0.role == "AXButton" && !isCancel($0) }
+        if let ok = buttons.first(where: { ProviderTexts.named($0, texts.confirmTitles) }), ok.press() { return .pressed }
+        if let button = defaultButton, isCancel(button) { return .onlyCancel }
+        guard isFront(target.pid, bundleID) else { return .notFront }
         keyboard.pressReturn(to: target.pid)
-        return true
+        return .pressed
     }
 
     // MARK: - Ответ программы
 
     private func confirm(_ target: Target, _ provider: RemoteProvider, known: [AXNode]) async -> ConnectionOutcome {
-        guard submit(target, provider.texts, provider.program.bundleID) else {
+        switch submit(target, provider.texts, provider.program.bundleID) {
+        case .pressed: break
+        case .notFront:
             _ = target.field.clearValue()
             return .failed(.focusLost)
+        case .onlyCancel:
+            // Кнопки подтверждения не нашлось — пароль не отправляем, пусть пользователь нажмёт сам.
+            _ = target.field.clearValue()
+            return .failed(.fieldNotFound(structure: AXTree.structure(of: target.window)))
         }
         let start = clock.milliseconds
         var goneAt: Int?
