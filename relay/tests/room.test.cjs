@@ -1234,3 +1234,23 @@ test('viewers: периодическое напоминание помечен�
   await f.room.alarm();
   assert.ok(host.messages.some((m) => m.type === 'viewers' && m.tick === true), 'тревога шлёт tick');
 });
+
+test('B2: зритель пропускал кадры, экран замер — ключевой кадр просится по ack без новых кадров от ведущего, не чаще KEY_ASK_MS', () => {
+  const f = fixture(), host = hostLive(f);
+  const slow = f.socket('viewer', { id: '1', approved: true, h264: true, lastSeen: 1_000_000 });
+  slow.send = () => {};
+  const frame = (key) => new Uint8Array([3, key ? 1 : 0, 0, 0, 1]).buffer;
+  const ack = (n) => f.room.webSocketMessage(slow, JSON.stringify({ type: 'ack', n }));
+  const asks = () => host.messages.filter((m) => m.type === 'viewers' && m.key === true).length;
+  f.room.webSocketMessage(host, frame(true));
+  ack(1);
+  for (let i = 0; i < 100; i++) f.room.webSocketMessage(host, frame(false));   // долг вырос, зритель в пропуске; дальше экран стоит
+  assert.equal(f.room.flow.get(slow).skipping, true);
+  const before = asks();
+  ack(30);
+  assert.equal(asks(), before, 'долг ещё велик — не просим');
+  ack(62);
+  assert.equal(asks(), before + 1, 'долг спал, кадров от ведущего нет — просьба ключевого по ack');
+  ack(62);
+  assert.equal(asks(), before + 1, 'не чаще раза в KEY_ASK_MS');
+});

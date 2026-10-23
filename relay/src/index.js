@@ -857,12 +857,19 @@ export class Room {
       if (key && debt <= DEBT_RESUME) flow.skipping = false;
       else {
         flow.skipped++;
-        if (debt <= DEBT_RESUME && now - this.lastKeyAsk >= KEY_ASK_MS) { this.lastKeyAsk = now; this.notifyHost(undefined, { key: true }); }
+        this.askKeyFrame(debt, now);
         return false;
       }
     }
     flow.sent++;
     return true;
+  }
+
+  // Просьба ведущему о ключевом кадре для зрителя, пропускающего кадры: не чаще раза в KEY_ASK_MS на комнату и только когда долг спал.
+  askKeyFrame(debt, now) {
+    if (debt > DEBT_RESUME || now - this.lastKeyAsk < KEY_ASK_MS) return;
+    this.lastKeyAsk = now;
+    this.notifyHost(undefined, { key: true });
   }
 
   toHost(message) {
@@ -907,6 +914,8 @@ export class Room {
       const flow = this.flow.get(socket);
       if (info.approved && flow && Number.isInteger(command.n) && command.n >= flow.acked && command.n <= flow.sent) {
         flow.acked = command.n; flow.acking = true;
+        // На статичном экране кадров от ведущего нет, `admit` не зовётся: просим ключевой кадр, как только долг спал.
+        if (flow.skipping) this.askKeyFrame(flow.sent - flow.acked, Date.now());
       }
       return;
     }
