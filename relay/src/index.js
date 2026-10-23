@@ -31,6 +31,11 @@ const HOST_TIMEOUT_MS = 120_000;
 const HOST_GRACE_MS = 45_000;
 const HOST_CHECK_MS = 30_000;
 const VIEWER_TIMEOUT_MS = 120_000;
+// Медленный зритель: «долг» — видеопакетов отправлено, но не подтверждено (`ack`). Больше предела — зрителю идут только
+// ключевые кадры после того, как долг спал; ведущему уходит запрос ключевого кадра (не чаще раза в KEY_ASK_MS).
+const DEBT_LIMIT = 60;
+const DEBT_RESUME = 15;
+const KEY_ASK_MS = 1000;
 const ID = /^\d{6}$|^\d{10}$/;
 const ID10 = /^\d{10}$/;
 const OWNER_TTL_MS = 180 * 86_400_000;
@@ -129,6 +134,8 @@ function sanitizeDisplays(command) {
   displays.list = list;
   // Как ведущий кодирует видео (необязательно): hw — видеокарта, sw — программно, jpeg — картинки. Прочее — без поля.
   if (["hw", "sw", "jpeg"].includes(command.video)) displays.video = command.video;
+  // Метки зрителей попадают в видео ведущего (окно меток не исключено из захвата): зрители свою копию не рисуют.
+  if (command.marks === "video") displays.marks = "video";
   return displays;
 }
 
@@ -288,6 +295,9 @@ export class Room {
     // В памяти: после выгрузки объекта обнуляются, это допустимо (.audit/auth-design.md §7).
     this.declines = new Map();
     this.requestWindow = new Map();
+    // Поток видео к каждому зрителю: { sent, acked, acking, skipping, skipped } (в памяти, после выгрузки — заново).
+    this.flow = new WeakMap();
+    this.lastKeyAsk = 0;
     // Цепочка для операций «прочитать — сравнить — записать» в storage (владелец ID, квота привязок).
     this.chain = Promise.resolve();
   }
@@ -807,6 +817,35 @@ export class Room {
     return this.activeViewers().filter((s) => s.deserializeAttachment()?.approved);
   }
 
+  // Пускать ли кадр этому зрителю. Старые клиенты `ack` не шлют — для них всё как раньше. Подтверждающий зритель, у которого
+  // накопился долг, пропускает кадры до ключевого: очередь на нём не растёт, остальные и ведущий не затронуты.
+  admit(viewer, message) {
+    const bytes = Object.prototype.toString.call(message) === "[object ArrayBuffer]" ? new Uint8Array(message) : ArrayBuffer.isView(message) ? new Uint8Array(message.buffer, message.byteOffset, message.byteLength) : null;
+    if (!bytes || !bytes.length) return true;
+    const type = bytes[0];
+    if (type !== 1 && type !== 3) return true; // звук и прочее — как раньше
+    let flow = this.flow.get(viewer);
+    if (!flow) { flow = { sent: 0, acked: 0, acking: false, skipping: false, skipped: 0, lastH264: 0 }; this.flow.set(viewer, flow); }
+    if (!flow.acking) { flow.sent++; return true; }
+    const debt = flow.sent - flow.acked;
+    const now = Date.now();
+    if (type === 3) flow.lastH264 = now;
+    // H.264-зритель возобновляется только на ключевом H.264, пока ведущий его шлёт (JPEG при этом — параллельные картинки
+    // для старых зрителей или мост); ведущий только с картинками (H.264 нет дольше секунды) — на любом JPEG.
+    const key = type === 3 ? bytes[1] === 1 : (!viewer.deserializeAttachment()?.h264 || now - flow.lastH264 > 1000);
+    if (!flow.skipping && debt > DEBT_LIMIT) { flow.skipping = true; flow.skipped = 0; }
+    if (flow.skipping) {
+      if (key && debt <= DEBT_RESUME) flow.skipping = false;
+      else {
+        flow.skipped++;
+        if (debt <= DEBT_RESUME && now - this.lastKeyAsk >= KEY_ASK_MS) { this.lastKeyAsk = now; this.notifyHost(); }
+        return false;
+      }
+    }
+    flow.sent++;
+    return true;
+  }
+
   toHost(message) {
     for (const host of this.activeHosts()) {
       try { host.send(JSON.stringify(message)); } catch (_) {}
@@ -829,7 +868,7 @@ export class Room {
       if (typeof message === "string" || Date.now() - (info.lastSeen ?? 0) > 1000) socket.serializeAttachment({ ...info, lastSeen: Date.now() });
       if (typeof message === "string") return this.hostCommand(message, socket);
       for (const viewer of this.approvedViewers()) {
-        try { viewer.send(message); } catch (_) { /* зритель отвалился */ }
+        try { if (this.admit(viewer, message)) viewer.send(message); } catch (_) { /* зритель отвалился */ }
       }
       return;
     }
@@ -842,6 +881,14 @@ export class Room {
     if (!command || typeof command !== "object") return;
     if (command.type === "heartbeat") {
       socket.serializeAttachment({ ...info, lastSeen: Date.now() });
+      return;
+    }
+    // Подтверждение приёма видео: n — сколько видеопакетов зритель получил за соединение.
+    if (command.type === "ack") {
+      const flow = this.flow.get(socket);
+      if (info.approved && flow && Number.isInteger(command.n) && command.n >= flow.acked && command.n <= flow.sent) {
+        flow.acked = command.n; flow.acking = true;
+      }
       return;
     }
     // До проверки ключа разрешены только auth и heartbeat; auth принимается один раз на сокет.

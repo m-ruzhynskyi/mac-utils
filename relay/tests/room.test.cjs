@@ -1073,6 +1073,16 @@ test('displays: режим видео ведущего (video: hw | sw | jpeg) �
   f.room.webSocketMessage(host, '{"type":"displays","v":1,"rev":8,"list":[],"video":"sw"}');
   assert.deepEqual(viewer.messages.at(-1), { type: 'displays', v: 1, rev: 8, list: [], video: 'sw' }, 'и при пустом списке (окно, переключение выключено)');
 });
+test('displays: marks: "video" (метки ведущего идут в видео) доходит до зрителей, чужое значение вырезается', () => {
+  const f = fixture(), host = hostLive(f);
+  const viewer = f.socket('viewer', { id: '1111111111', approved: true });
+  f.room.webSocketMessage(host, KATE.message.replace('"rev":7', '"rev":7,"marks":"video"'));
+  assert.deepEqual(viewer.messages.at(-1), { ...KATE.expected, marks: 'video' });
+  for (const marks of ['"screen"', '1', 'true', '"VIDEO"', '"<b>"']) {
+    f.room.webSocketMessage(host, KATE.message.replace('"rev":7', `"rev":7,"marks":${marks}`));
+    assert.deepEqual(viewer.messages.at(-1), KATE.expected, `marks=${marks} — без поля, список доходит`);
+  }
+});
 test('displays от хоста, не прошедшего проверку ключа, и негодный список не доходят никому', () => {
   const f = fixture();
   const pending = f.socket('host', { auth: 'pending', nonce: 'n', connectedAt: 1_000_000, lastSeen: 1_000_000 });
@@ -1138,4 +1148,54 @@ test('switch-request тратит токены зрителя: больше вс
   f.advance(1000);
   for (let i = 0; i < 60; i++) f.room.webSocketMessage(viewer, '{"type":"switch-request","display":2,"rev":1}');
   assert.equal(host.messages.filter((m) => m.type === 'switch-request').length, 60);
+});
+
+test('медленный зритель: долг больше предела — дельта-кадры пропускаются до ключевого, ведущему уходит запрос ключевого, остальные не страдают', () => {
+  const f = fixture(), host = hostLive(f);
+  const slow = f.socket('viewer', { id: '1', approved: true, lastSeen: 1_000_000 });
+  const fast = f.socket('viewer', { id: '2', approved: true, lastSeen: 1_000_000 });
+  const old = f.socket('viewer', { id: '3', approved: true, lastSeen: 1_000_000 });
+  const got = new Map();
+  for (const v of [slow, fast, old]) { got.set(v, 0); v.send = (m) => { if (typeof m === 'string') v.messages.push(JSON.parse(m)); else got.set(v, got.get(v) + 1); }; }
+  const frame = (key) => new Uint8Array([3, key ? 1 : 0, 0, 0, 1]).buffer;
+  const ack = (v, n) => f.room.webSocketMessage(v, JSON.stringify({ type: 'ack', n }));
+  f.room.webSocketMessage(host, frame(true));
+  ack(slow, 1); ack(fast, 1); // оба подтверждающие; old не подтверждает никогда
+  const asks = () => host.messages.filter((m) => m.type === 'viewers').length;
+  const before = asks();
+  for (let i = 0; i < 100; i++) { f.room.webSocketMessage(host, frame(false)); ack(fast, got.get(fast)); }
+  assert.equal(got.get(fast), 101, 'быстрый получил всё');
+  assert.equal(got.get(old), 101, 'старый клиент без ack — как раньше');
+  assert.equal(got.get(slow), 62, 'медленный: пакеты до предела долга, дальше пропуск');
+  assert.equal(asks(), before, 'пока долг велик, ключевой не просим (зритель всё ещё получает старое)');
+  ack(slow, 62);
+  f.room.webSocketMessage(host, frame(false));
+  assert.equal(got.get(slow), 62, 'дельта-кадр после спада долга всё ещё пропущен');
+  assert.equal(asks(), before + 1, 'долг спал — просим у ведущего ключевой');
+  f.room.webSocketMessage(host, frame(true));
+  assert.equal(got.get(slow), 63, 'ключевой кадр возобновил поток');
+  f.room.webSocketMessage(host, frame(false));
+  assert.equal(got.get(slow), 64);
+  ack(slow, 9999); // подтвердить больше отправленного нельзя
+  assert.equal(f.room.flow.get(slow).acked, 62);
+});
+
+test('медленный H.264-зритель возобновляется на ключевом H.264, а не на параллельном JPEG', () => {
+  const f = fixture(), host = hostLive(f);
+  const slow = f.socket('viewer', { id: '1', approved: true, h264: true, lastSeen: 1_000_000 });
+  let got = 0;
+  slow.send = (m) => { if (typeof m !== 'string') got++; else slow.messages.push(JSON.parse(m)); };
+  const h264 = (key) => new Uint8Array([3, key ? 1 : 0, 0, 0, 1]).buffer;
+  const jpeg = new Uint8Array([1, 0xff, 0xd8]).buffer;
+  f.room.webSocketMessage(host, h264(true));
+  f.room.webSocketMessage(slow, JSON.stringify({ type: 'ack', n: 1 }));
+  for (let i = 0; i < 70; i++) f.room.webSocketMessage(host, h264(false));
+  const stuck = got;
+  f.room.webSocketMessage(slow, JSON.stringify({ type: 'ack', n: stuck }));
+  f.room.webSocketMessage(host, jpeg);
+  assert.equal(got, stuck, 'JPEG не возобновляет, пока идёт H.264');
+  f.room.webSocketMessage(host, h264(false));
+  assert.equal(got, stuck, 'дельта не возобновляет');
+  f.room.webSocketMessage(host, h264(true));
+  assert.equal(got, stuck + 1, 'ключевой H.264 возобновляет');
 });

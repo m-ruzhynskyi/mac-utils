@@ -1594,14 +1594,14 @@ final class ShareViewer: ObservableObject {
     /// Своя метка: показываем сразу и отправляем ведущему и остальным зрителям.
     func sendPing(_ point: CGPoint) {
         guard let mark = ShareMark.parse(ShareMark.message(ping: point, color: color)) else { return }
-        marks.add(mark)
+        marks.add(mark, local: true)
         socket?.send(.string(ShareMark.message(ping: point, color: color))) { _ in }
     }
 
     func sendStroke(_ points: [CGPoint]) {
         let message = ShareMark.message(stroke: points, color: color)
         guard let mark = ShareMark.parse(message) else { return }
-        marks.add(mark)
+        marks.add(mark, local: true)
         socket?.send(.string(message)) { _ in }
     }
 
@@ -1622,6 +1622,7 @@ final class ShareViewer: ObservableObject {
         jpegFrames = 0
         pictures = nil
         hostVideo = nil
+        marks.inVideo = false
         lastVideoAt = nil
         video.reset()
         resetMonitors()
@@ -1766,16 +1767,20 @@ final class ShareViewer: ObservableObject {
     }
 
     private func receive(_ socket: URLSessionWebSocketTask) {
-        Self.listen(socket, video: video)
+        Self.listen(socket, video: video, acks: acks)
     }
+
+    /// Счёт видеопакетов для подтверждения relay (`ack`): по нему relay не копит очередь на медленном зрителе.
+    let acks = ShareVideoAck()
 
     /// Чтение сокета. Видео H.264 уходит в проигрыватель прямо из колбэка, и следующее чтение взводится сразу:
     /// занятый главный поток не тормозит картинку. На главный — только учёт и остальные сообщения.
-    nonisolated private static func listen(_ socket: URLSessionWebSocketTask, video: H264Player) {
+    nonisolated private static func listen(_ socket: URLSessionWebSocketTask, video: H264Player, acks: ShareVideoAck) {
         socket.receive { result in
             if case .success(.data(let data)) = result, data.first == H264Packet.type {
                 video.play(data.dropFirst(), from: socket)
-                listen(socket, video: video)
+                if let n = acks.received(on: socket) { socket.send(.string(ShareVideoAck.message(n))) { _ in } }
+                listen(socket, video: video, acks: acks)
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         let viewer = ShareViewer.shared
@@ -1800,6 +1805,7 @@ final class ShareViewer: ObservableObject {
                         viewer.reconnectsMade = 0
                         switch data.first {
                         case ShareProtocol.frame:
+                            if let n = viewer.acks.received(on: socket) { socket.send(.string(ShareVideoAck.message(n))) { _ in } }
                             viewer.jpegFrames += 1
                             if ShareVideoMode.jpegIsBridge(now: Date(), lastVideo: viewer.lastVideoAt),
                                let image = NSImage(data: data.dropFirst()) {
@@ -1941,6 +1947,7 @@ final class ShareViewer: ObservableObject {
 
     fileprivate func received(displays json: [String: Any]) {
         if hostVideo != ShareVideoMode.host(from: json) { hostVideo = ShareVideoMode.host(from: json) }
+        marks.inVideo = ShareVideoMode.marksInVideo(from: json)
         guard let parsed = ShareDisplays.parse(json) else { return }
         let change = monitors.apply(parsed)
         if change.done { monitorWaitTask?.cancel() }
@@ -2789,9 +2796,29 @@ enum ShareProtocol {
     }
 }
 
+/// Подтверждение приёма видео: каждые `every` пакетов (H.264 и картинки) зритель сообщает relay, сколько получил за
+/// соединение. Старый relay сообщение игнорирует.
+final class ShareVideoAck: @unchecked Sendable {
+    static let every = 10
+    private let lock = NSLock()
+    private var owner: ObjectIdentifier?
+    private var count = 0
+
+    /// Пакет пришёл по `socket`; число, если пора подтверждать. Новый сокет — счёт заново (как у relay).
+    func received(on socket: AnyObject) -> Int? {
+        lock.lock(); defer { lock.unlock() }
+        let id = ObjectIdentifier(socket)
+        if owner != id { owner = id; count = 0 }
+        count += 1
+        return count % Self.every == 0 ? count : nil
+    }
+
+    static func message(_ n: Int) -> String { "{\"type\":\"ack\",\"n\":\(n)}" }
+}
+
 /// Проигрывание звука трансляции у зрителя.
 final class SharePlayer: @unchecked Sendable {
-    private let engine = AVAudioEngine()
+    let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
     private let format = AVAudioFormat(standardFormatWithSampleRate: ShareProtocol.sampleRate, channels: 1)!
     private var started = false
@@ -2800,19 +2827,59 @@ final class SharePlayer: @unchecked Sendable {
     /// не растёт, пока не кончится память (≈ 345 МБ в час без предела), и задержка звука не копится.
     private let lock = NSLock()
     private var queuedFrames = 0
+    /// Поколение очереди: пакеты, запланированные до смены выхода, не должны вычитаться из новой очереди.
+    private var generation = 0
+    /// Движок и узел трогает один поток за раз: play() с сокета и перезапуск по уведомлению системы.
+    private let engineLock = NSLock()
     private let limit: Int
     private(set) var dropped = 0
+    private(set) var restarts = 0
+    private var observer: NSObjectProtocol?
+    private let center: NotificationCenter
+    /// Перезапуск — на своей очереди: обработчик уведомления не ждёт замок на внутренней очереди AVAudioEngine
+    /// (иначе взаимная блокировка с play(), который держит замок и запускает движок).
+    private let restartQueue = DispatchQueue(label: "macutils.share.player.restart")
 
     /// ≈ 1 с звука трансляции.
     static let defaultLimit = Int(ShareProtocol.sampleRate)
 
     /// `silent` — для тестов и стендов: движок рендерит вручную, в динамики ничего не идёт и ничего не потребляется
     /// (как остановленный системой движок).
-    init(silent: Bool = false, limit: Int = SharePlayer.defaultLimit) {
+    /// `center` — откуда приходит `.AVAudioEngineConfigurationChange` (в тестах свой центр уведомлений).
+    init(silent: Bool = false, limit: Int = SharePlayer.defaultLimit, center: NotificationCenter = .default) {
         self.limit = limit
+        self.center = center
         if silent {
             try? engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 4096)
         }
+        observer = center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+            self?.restartQueue.async { self?.outputChanged() }
+        }
+    }
+
+    deinit {
+        if let observer { center.removeObserver(observer) }
+    }
+
+    /// Сменилось устройство вывода (наушники, AirPods, HDMI): система останавливает движок, и без перезапуска звук
+    /// пропадает. Старую очередь бросаем — в ней звук на секунду позади — и продолжаем со свежих пакетов.
+    /// Для тестов: дождаться перезапуска, поставленного уведомлением.
+    func waitForRestart() { restartQueue.sync {} }
+
+    func outputChanged() {
+        engineLock.lock(); defer { engineLock.unlock() }
+        guard started else { return }
+        node.stop()
+        lock.lock()
+        queuedFrames = 0
+        generation += 1
+        lock.unlock()
+        engine.disconnectNodeOutput(node)
+        engine.connect(node, to: engine.mainMixerNode, format: format)
+        restarts += 1
+        let running = (try? engine.start()) != nil
+        if running { node.play() }
+        Log.capture.info("звук зрителя: смена выхода, перезапуск \(self.restarts) (запущен \(running ? 1 : 0))")
     }
 
     /// Сколько секунд звука ждёт проигрывания.
@@ -2833,6 +2900,7 @@ final class SharePlayer: @unchecked Sendable {
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else { return }
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count) }
+        engineLock.lock(); defer { engineLock.unlock() }
         if !started {
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: format)
@@ -2840,22 +2908,24 @@ final class SharePlayer: @unchecked Sendable {
             node.play()
             started = true
         } else if !engine.isRunning {
-            // Система остановила движок (наушники, AirPods, другое устройство вывода) — запускаем снова.
+            // Запасной путь, если уведомление не дошло: запускаем движок снова.
             guard (try? engine.start()) != nil else { return }
             node.play()
         }
         lock.lock()
         queuedFrames += count
+        let scheduled = generation
         lock.unlock()
         node.scheduleBuffer(buffer) { [weak self] in
             guard let self else { return }
             self.lock.lock()
-            self.queuedFrames = max(0, self.queuedFrames - count)
+            if self.generation == scheduled { self.queuedFrames = max(0, self.queuedFrames - count) }
             self.lock.unlock()
         }
     }
 
     func stop() {
+        engineLock.lock(); defer { engineLock.unlock() }
         guard started else { return }
         node.stop()
         engine.stop()
@@ -2863,6 +2933,7 @@ final class SharePlayer: @unchecked Sendable {
         started = false
         lock.lock()
         queuedFrames = 0
+        generation += 1
         lock.unlock()
     }
 }

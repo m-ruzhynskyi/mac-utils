@@ -313,6 +313,7 @@
   <label class="muted" id="allowSwitchBox" style="display:none"><input type="checkbox" id="allowSwitch" style="width:auto"> Зрители могут переключать мои мониторы<span class="new" id="allowSwitchNew">НОВОЕ</span></label>
   <p class="muted" id="allowSwitchHint" style="display:none">По умолчанию выключено. Включите — и зритель сам выберет монитор, вы увидите уведомление. Только когда показываете экран целиком; выбор запоминается.</p>
   <div id="muteBox" class="muted" style="display:none; margin-top:6px">Не передавать звук программ (например, созвона):
+    <label id="muteCallsBox" style="display:none; white-space:nowrap"><input type="checkbox" id="muteCalls" checked style="width:auto"> Не передавать звонки (Discord, Zoom, Teams, Telegram…)</label>
     <div id="muteApps"></div></div>
   <div style="text-align:right; margin-top:10px"><button id="pickerCancel">Отмена</button></div>
 </div></div>
@@ -330,6 +331,7 @@
 <div id="game"></div>
 <div id="mutePanel" class="floatBox"><div class="head"><b>Не передавать звук программ</b><button id="muteClose" aria-label="Закрыть">✕</button></div>
   <p class="muted" style="margin:0 0 8px">Отмеченных программ зрители не слышат. Меняется сразу, прямо в эфире.</p>
+  <label id="muteCallsLive" style="display:none; margin-bottom:8px"><input type="checkbox" id="muteCallsLiveBox" style="width:auto"> Звонки (Discord, Zoom, Teams, Telegram…)</label>
   <div id="muteLive"></div></div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -469,6 +471,7 @@ const AUTH_ERRORS = {
   "upgrade-required": "Сервер требует новую версию приложения — обновите Mac Utils Share.",
   "no-key": "Сервер проверяет ключ устройства, а эта версия приложения так не умеет — обновите Mac Utils Share.",
 };
+const VIEW_ACK_EVERY = 10;
 const CLOSE_CODES = { 4400: "id-format", 4401: "bad-signature", 4403: "id-claimed", 4408: "auth-timeout",
                       4409: "replaced", 4426: "upgrade-required", 4429: "rate-limited" };
 // Текст для статуса (HTML): свои сообщения — как есть, сообщение relay — экранированным.
@@ -571,7 +574,13 @@ const COLORS = { red: "#ff453a", yellow: "#ffd60a", green: "#30d158", blue: "#0a
 const marks = [];
 let tool = "ping", color = "red", drawing = null;
 
-function addMark(mark) { mark.born = performance.now(); marks.push(mark); if (marks.length === 1) requestAnimationFrame(renderMarks); }
+// Ведущий сообщил `marks: "video"` — его метки поверх экрана уже в видео: чужие не рисуем, своя — короткий отклик.
+let viewMarksInVideo = false;
+const ECHO_SECONDS = 0.3;
+function addMark(mark, own = false) {
+  if (viewMarksInVideo) { if (!own) return; mark.echo = true; }
+  mark.born = performance.now(); marks.push(mark); if (marks.length === 1) requestAnimationFrame(renderMarks);
+}
 
 function imageRect() {
   // Видео H.264 (холст) или картинка JPEG от старых версий.
@@ -593,7 +602,7 @@ function renderMarks() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const rect = imageRect(), now = performance.now();
   for (let i = marks.length - 1; i >= 0; i--) {
-    const m = marks[i], age = (now - m.born) / 1000, life = m.type === "ping" ? 1.6 : 5;
+    const m = marks[i], age = (now - m.born) / 1000, life = m.echo ? ECHO_SECONDS : m.type === "ping" ? 1.6 : 5;
     if (age > life) { marks.splice(i, 1); continue; }
     if (rect) drawMark(ctx, m, age, life, (p) => [rect.x + p[0] * rect.w, rect.y + p[1] * rect.h]);
   }
@@ -637,7 +646,7 @@ function framePoint(event) {
 }
 
 function sendMark(mark) {
-  addMark(mark);
+  addMark(mark, true);
   if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify(mark));
 }
 
@@ -702,10 +711,11 @@ function displaysRevision(memo, list) {
 
 // Сообщение displays; переключать нельзя (настройка, окно, нет списка) — пустой список без current. `video` — как
 // ведущий кодирует (hw — видеокарта, sw — программно, jpeg — картинки): необязательное поле, старые зрители его не читают.
-function displaysMessage(rev, list, current, allowed, video) {
+function displaysMessage(rev, list, current, allowed, video, marksInVideo) {
   const shown = allowed && list.some((d) => d.n === current) ? list.slice(0, MAX_DISPLAYS) : [];
   const message = shown.length ? { type: "displays", v: 1, rev, current, list: shown } : { type: "displays", v: 1, rev, list: [] };
   if (VIDEO_MODES.includes(video)) message.video = video;
+  if (marksInVideo === true) message.marks = "video";
   return message;
 }
 
@@ -911,12 +921,31 @@ async function watch() {
   stopWatch();
   status("Подключаюсь…");
   watchingId = id;
+  viewRetries = 0; viewEverOpened = false;
+  openView(id);
+}
+
+// Повторы после обрыва: как на Mac (`ShareViewerReconnect`) — 1, 2, 4, 8, 15, 15, 15 с, последний кадр остаётся на экране.
+const VIEW_RETRY_SECONDS = [1, 2, 4, 8, 15, 15, 15];
+let viewRetries = 0, viewRetryTimer = 0, viewEverOpened = false;
+function scheduleViewRetry(id) {
+  if (viewRetries >= VIEW_RETRY_SECONDS.length) { status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); return; }
+  const delay = VIEW_RETRY_SECONDS[viewRetries++];
+  status(`Связь потеряна, переподключаюсь… (${viewRetries} из ${VIEW_RETRY_SECONDS.length})`);
+  clearTimeout(viewRetryTimer);
+  viewRetryTimer = setTimeout(() => { if (watchingId === id && !viewSocket) openView(id); }, delay * 1000);
+}
+
+function openView(id) {
   viewHostKey = null; viewError = null;
   $("leave").style.display = "";
   const h264 = typeof VideoDecoder !== "undefined" ? "&h264=1" : "";
   const auth = authParam("signViewer") ? `&${authParam("signViewer")}` : "";
   const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}${h264}${auth}`);
   viewSocket.binaryType = "arraybuffer";
+  // Подтверждаем приём видео каждые ACK_EVERY пакетов: relay по этому видит, не отстал ли зритель, и ему не копит очередь.
+  let videoSeen = 0;
+  viewSocket.onopen = () => { viewEverOpened = true; };
   viewSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
       let m; try { m = JSON.parse(event.data); } catch (_) { return; }
@@ -927,17 +956,18 @@ async function watch() {
       }
       else if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
       else if (m.type === "game") gameReceive(m, "host", hostName || display(id), viewGameSend);
-      else if (m.type === "accepted") { hostName = m.name || ""; visited(id, m.name, viewHostKey); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; renderMonitors(); }
+      else if (m.type === "accepted") { viewRetries = 0; hostName = m.name || ""; visited(id, m.name, viewHostKey); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; renderMonitors(); }
       else if (m.type === "declined") { status("Вам не разрешили подключиться"); stopWatch(true); }
       else if (m.type === "ended") { status("Трансляция завершена"); stopWatch(true); }
       else if (m.type === "reconnecting") status("Ведущий переподключается…");
       else if (m.type === "resumed") status("");
       else if (m.type === "ping" || m.type === "stroke") addMark(m);
-      else if (m.type === "displays") { setViewVideo(viewKind, VIDEO_MODES.includes(m.video) ? m.video : ""); onViewerDisplays(m); }
+      else if (m.type === "displays") { setViewVideo(viewKind, VIDEO_MODES.includes(m.video) ? m.video : ""); viewMarksInVideo = m.marks === "video"; onViewerDisplays(m); }
       else if (m.type === "switch-result") onSwitchResult(m);
       return;
     }
     const bytes = new Uint8Array(event.data);
+    if ((bytes[0] === 1 || bytes[0] === 3) && ++videoSeen % VIEW_ACK_EVERY === 0 && ws.readyState === 1) ws.send(JSON.stringify({ type: "ack", n: videoSeen }));
     if (bytes[0] === 1) {
       if (!jpegIsBridge(performance.now(), lastH264At)) return;
       const url = URL.createObjectURL(new Blob([bytes.subarray(1)], { type: "image/jpeg" }));
@@ -957,9 +987,16 @@ async function watch() {
     }
   };
   viewSocket.onclose = (event) => {
-    if (event.code === 1000 || !viewSocket) return;
+    if (event.code === 1000 || ws !== viewSocket) return;
     const code = CLOSE_CODES[event.code];
-    status(code ? authError(code, viewError?.message) : "Сейчас этот ID ничего не транслирует (или связь прервалась)");
+    if (code) { status(authError(code, viewError?.message)); return; }
+    // Обрыв сети, сон, перезапуск relay: до 7 попыток; не повторяем, если ведущий отказал (`declined`) или закончил (`ended`) —
+    // там stopWatch сам закрывает сокет с кодом 1000 и сюда не попадаем.
+    viewSocket = null;
+    // ID без трансляции (relay отвечает 404 на подключение, код 1006 без открытия) и опечатка в ID — сразу сообщение,
+    // без повторов: они нужны, только если соединение уже было.
+    if (!viewEverOpened) { status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); return; }
+    scheduleViewRetry(id);
   };
 }
 
@@ -1040,6 +1077,7 @@ function stopWatch(keepStatus) {
   decoder = null;
   if (latestFrame) { latestFrame.close(); latestFrame = null; }
   $("video").style.display = "none"; $("screen").style.display = "";
+  clearTimeout(viewRetryTimer); viewRetries = 0;
   if (viewSocket) { viewSocket.onclose = null; viewSocket.close(1000); viewSocket = null; }
   watching = false; $("tools").style.display = "none";
   resetMonitors();
@@ -1173,6 +1211,11 @@ $("gameInvite").onclick = () => gameInvite("host", hostName || display(watchingI
 async function showMutePanel() {
   const list = $("muteLive");
   const saved = store.get("mu-muted-apps", []);
+  // Звонки исключаются сами (приложение знает их по имени программы); здесь их можно вернуть в трансляцию.
+  const callsLive = $("muteCallsLive");
+  callsLive.style.display = window.mu.setMuteCalls ? "" : "none";
+  $("muteCallsLiveBox").checked = store.get("mu-mute-calls", true);
+  $("muteCallsLiveBox").onchange = () => { store.set("mu-mute-calls", $("muteCallsLiveBox").checked); window.mu.setMuteCalls($("muteCallsLiveBox").checked); };
   const apps = (await window.mu.audioApps()) || [];
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
@@ -1205,6 +1248,9 @@ async function showMuteApps() {
   const apps = await window.mu.audioApps();
   if (!apps) { box.style.display = "none"; return; }
   helperAvailable = true;
+  // Старое приложение звонки само не исключает — тогда и галочки нет.
+  $("muteCallsBox").style.display = window.mu.setMuteCalls ? "" : "none";
+  $("muteCalls").checked = store.get("mu-mute-calls", true);
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
   if (!names.length) list.textContent = "Сейчас ни одна программа не играет звук — отметить можно и потом, прямо в эфире (кнопка «🔇 Звук»).";
@@ -1237,7 +1283,9 @@ function pickSource() {
         store.set("mu-muted-apps", muted);
         // Новые версии приложения: звук всегда через помощник — список можно менять в эфире.
         useHelperAudio = $("withAudio").checked && helperAvailable && !!window.mu.startAudio && (!!window.mu.setMuted || muted.length > 0);
-        await window.mu.choose(source.id, $("withAudio").checked, muted);
+        const muteCalls = !window.mu.setMuteCalls || $("muteCalls").checked;
+        store.set("mu-mute-calls", muteCalls);
+        await window.mu.choose(source.id, $("withAudio").checked, muted, muteCalls);
         resolve(true);
       };
       grid.appendChild(item);
@@ -1274,7 +1322,7 @@ async function share() {
   let ok = await openHost(myId);
   // ID закреплён за ключом страницы, а ключ не загрузился (медленная или зависшая IndexedDB): сначала грузим ключ ещё раз.
   if (!ok && !pageKey && pageKeySupported() && (await hostCheckReason()) === "id-claimed" && (await retryPageKey())) ok = await openHost(myId);
-  if (!ok) { stream.getTracks().forEach((t) => t.stop()); return explainHostFailure(); }
+  if (!ok) { stream.getTracks().forEach((t) => t.stop()); if (window.mu && window.mu.stopped) window.mu.stopped(); return explainHostFailure(); }
   startCapture(stream, myId);
   announceDisplays();
 }
@@ -1607,7 +1655,7 @@ function startCapture(stream, code) {
     if (typeof announceDisplays === "function") announceDisplays();
   };
   hostVideoMode = ladder.name;
-  marksOnScreen = null; marksReason = ""; marksCovered = null;
+  marksOnScreen = null; marksReason = ""; marksCovered = null; hostMarksInVideo = false;
   try { hostSurface = stream.getVideoTracks()[0]?.getSettings?.().displaySurface || ""; } catch (_) { hostSurface = ""; }
   if (!canEncode) { ladder.supported(false, false, performance.now()); applyMode(); }
   else probeEncoders((hardware, software) => { if (ladder.supported(hardware, software, performance.now())) applyMode(); });
@@ -1827,7 +1875,7 @@ function announceDisplays() {
     hostMonitors.rev = displaysRevision(hostMonitors.memo, list);
     renderSwitchButton();
     if (!capture || !hostSocket || hostSocket.readyState !== 1) return;
-    hostSocket.send(JSON.stringify(displaysMessage(hostMonitors.rev, list, hostMonitors.current, allowSwitch(), hostVideoMode)));
+    hostSocket.send(JSON.stringify(displaysMessage(hostMonitors.rev, list, hostMonitors.current, allowSwitch(), hostVideoMode, hostMarksInVideo)));
     hostMonitors.announcedAt = Date.now();
   }).catch(() => {});
   return announceChain;
@@ -1899,6 +1947,7 @@ let hostVideoMode = "";
 // встало: старая Windows 10, отказ Windows, нет помощника) — или это обычный браузер, где поверх экрана рисовать нечем.
 // Тогда ведущий видит их здесь, на схеме транслируемой области, а зрители — только свои (без копии в видео).
 const hostMarks = [];
+let hostMarksInVideo = false;
 let marksOnScreen = null, marksReason = "", marksCovered = null, hostSurface = "", hostSourceAspect = 16 / 9, hostMarkTextTimer = 0;
 const HOST_MARKS_NOTES = {
   "old-windows": "Метки зрителей — здесь: эта версия Windows не умеет скрывать окно меток из трансляции.",
@@ -1950,6 +1999,9 @@ if (window.mu && typeof window.mu.onMarksState === "function") {
   window.mu.onMarksState((state) => {
     marksOnScreen = !!state?.screen; marksReason = typeof state?.reason === "string" ? state.reason : "";
     marksCovered = typeof state?.covered === "boolean" ? state.covered : null;
+    // Окно меток не исключено из захвата — метки идут в видео: зрителям сообщаем, чтобы не рисовали свою копию.
+    const inVideo = state?.inVideo === true;
+    if (inVideo !== hostMarksInVideo) { hostMarksInVideo = inVideo; if (capture) announceDisplays(); }
   });
 }
 

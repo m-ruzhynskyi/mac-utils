@@ -292,6 +292,10 @@ enum ShareVideoMode {
         (json["video"] as? String).flatMap { hostModes.contains($0) ? $0 : nil }
     }
 
+    /// `marks: "video"` из `displays`: метки поверх экрана ведущего попадают в видео (Windows без подтверждённого
+    /// исключения окна из захвата). Нет поля или другое значение — false: зритель рисует метки сам, как раньше.
+    static func marksInVideo(from json: [String: Any]) -> Bool { json["marks"] as? String == "video" }
+
     /// JPEG после H.264 — мост ведущего (кодер пересоздаётся), только если H.264 не было дольше `bridgeGap`. Иначе это кадры
     /// для старых зрителей, которые ведущий Mac шлёт параллельно (раз в 0,25 с): их не показываем, чтобы картинка и подпись
     /// не мигали. Как у страницы (`jpegIsBridge`).
