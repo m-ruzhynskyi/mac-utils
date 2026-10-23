@@ -24,7 +24,11 @@ if [[ "$ASSIGNED" -gt 0 ]]; then
     # Имена — только [A-Za-z0-9_./]; точку экранируем, якоря не дают захватить чужой тест по префиксу.
     FILTER="^($(sed 's/\./\\./g' "$WORK/mine.txt" | paste -sd'|' -))\$"
     swift test --skip-build --filter "$FILTER" 2>&1 | tee "$WORK/log.txt"
-    EXECUTED=$(grep -oE 'Executed [0-9]+ tests?' "$WORK/log.txt" | tail -1 | grep -oE '[0-9]+' || echo 0)
+    # Каждая цель тестов (MacUtilsTests, MURemoteConnectionsTests…) — свой бандл и свой прогон XCTest:
+    # складываем итоги всех бандлов («Executed N» сразу после «Test Suite '<цель>.xctest' passed/failed»).
+    EXECUTED=$(awk '/^Test Suite .*\.xctest. (passed|failed) at/ { grab = 1; next }
+        grab && match($0, /Executed [0-9]+ tests?/) { s += substr($0, RSTART + 9, RLENGTH - 9) + 0; grab = 0 }
+        END { print s + 0 }' "$WORK/log.txt")
 fi
 if [[ -n "${SHARD_REPORT:-}" ]]; then
     echo "listed=$LISTED assigned=$ASSIGNED executed=$EXECUTED tree=$(git rev-parse 'HEAD^{tree}')" > "$SHARD_REPORT"
