@@ -659,8 +659,10 @@ final class DocRenderer {
         case .right: style.alignment = .right
         case .justify: style.alignment = .justified
         }
-        style.headIndent = CGFloat(props.left) / 20
-        style.firstLineHeadIndent = CGFloat(props.left + props.firstLine) / 20
+        // В блоке абзаца с рамкой строка не начинается левее него (так она и ложилась: левее края TextKit её не ставит).
+        let floor = place == nil && Self.hasBlock(props) ? 0 : Int.min
+        style.headIndent = CGFloat(max(floor, props.left)) / 20
+        style.firstLineHeadIndent = CGFloat(max(floor, props.left + props.firstLine)) / 20
         style.tailIndent = props.right > 0 ? -CGFloat(props.right) / 20 : 0
         style.paragraphSpacingBefore = CGFloat(props.spaceBefore) / 20
         style.paragraphSpacing = CGFloat(props.spaceAfter) / 20
@@ -703,10 +705,9 @@ final class DocRenderer {
         let key = BorderKey(props: props, frame: frame)
         if let block = borderBlocks[key] { return block }
         let block = NSTextBlock()
-        // Рамка абзаца — в полосе текста, а не во всю рамку с выступом в поля.
-        if frame.left > 0 { block.setWidth(CGFloat(frame.left) / 20, type: .absoluteValueType, for: .margin, edge: .minX) }
-        if frame.right > 0 { block.setWidth(CGFloat(frame.right) / 20, type: .absoluteValueType, for: .margin, edge: .maxX) }
-        for (edge, border) in [(NSRectEdge.minY, props.borderTop), (.maxY, props.borderBottom), (.minX, props.borderLeft), (.maxX, props.borderRight)] {
+        // Только сверху и снизу: `NSTextBlock` со слоем слева или справа (поле, рамка, отступ), разорванный между
+        // страницами, зацикливает typesetter (зависание 1.9.6), а на место строк такие слои и не влияли.
+        for (edge, border) in [(NSRectEdge.minY, props.borderTop), (.maxY, props.borderBottom)] {
             guard border.isVisible else { continue }
             block.setWidth(max(0.5, CGFloat(border.width) / 20), type: .absoluteValueType, for: .border, edge: edge)
             block.setBorderColor(color(border.color, model: model) ?? .black, for: edge)
