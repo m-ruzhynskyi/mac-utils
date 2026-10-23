@@ -15,6 +15,10 @@ enum RemotePref {
     static let autologin = "remoteConnectionsAutologin"
     /// Сколько секунд ждать окно пароля.
     static let timeout = "remoteConnectionsTimeout"
+    /// Показывать HUD «Подключено» (ошибки показываются всегда).
+    static let notify = "remoteConnectionsNotify"
+    /// Язык интерфейса модуля: ru, uk, en.
+    static let language = "remoteConnectionsLanguage"
     /// Вкладка «Удалённые» уже добавлена в панель 🔧 (один раз при обновлении).
     static let panelTabAdded = "panelTabsRemoteAdded"
 }
@@ -79,6 +83,7 @@ final class RemoteConnectionsCenter: ObservableObject {
         store = ConnectionsFileStore(settings: prefs, logger: RemoteConnectionsLog())
         favorites = prefs.favoriteIDs
         recents = prefs.recentIDs
+        RemoteL10n.language = defaults.string(forKey: RemotePref.language).flatMap(RemoteLanguage.init(rawValue:)) ?? .ru
         store.onChange = { [weak self] in self?.sync() }
     }
 
@@ -146,13 +151,70 @@ final class RemoteConnectionsCenter: ObservableObject {
         store.setFile(url, sheet: sheet)
     }
 
-    func setSheet(_ name: String?) { store.setSheet(name) }
+    func setSheet(_ name: String?) {
+        store.setSheet(name)
+        objectWillChange.send()
+    }
+
+    /// Листы книги для выбора в настройках; у .xml — пусто.
+    static func sheetNames(of url: URL) -> [String] {
+        guard ["xlsx", "xlsm"].contains(url.pathExtension.lowercased()) else { return [] }
+        return (try? ConnectionsFileStore.sheetNames(url: url)) ?? []
+    }
+
+    /// «Создать шаблон»: таблица с колонками и строкой-примером, права 600; затем — выбрать её файлом подключений.
+    func createTemplate(xlsx: Bool) {
+        let panel = NSSavePanel()
+        panel.title = RL("Шаблон файла подключений")
+        panel.nameFieldStringValue = xlsx ? "connections.xlsx" : "connections.xml"
+        panel.allowedContentTypes = [xlsx ? UTType(filenameExtension: "xlsx") : .xml].compactMap { $0 }
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let data = xlsx ? ConnectionsTemplate.xlsx() : ConnectionsTemplate.xml()
+        guard FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
+            Toast.show(RL("Не удалось сохранить шаблон"), symbol: "xmark.octagon.fill", tint: .red)
+            return
+        }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        setFile(url)
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: Правка записей (.xml)
+
+    /// Записи можно добавлять и править только в .xml; .xlsx правится в Excel.
+    var canEdit: Bool { fileURL?.pathExtension.lowercased() == "xml" }
+
+    /// Добавить (`record == nil`) или изменить запись. Файл читается заново, меняются только байты этой записи,
+    /// перед записью — `.bak` с теми же правами.
+    func save(_ draft: ConnectionDraft, replacing record: ConnectionRecord?) throws {
+        try edit { data in
+            if let record { return try XMLConnectionsEditor.update(record, with: draft, in: data) }
+            return try XMLConnectionsEditor.add(draft, to: data)
+        }
+    }
+
+    func delete(_ record: ConnectionRecord) throws {
+        try edit { try XMLConnectionsEditor.delete(record, in: $0) }
+        prefs.favoriteIDs.removeAll { $0 == record.favoriteKey }
+        prefs.recentIDs.removeAll { $0 == record.favoriteKey }
+        favorites = prefs.favoriteIDs
+        recents = prefs.recentIDs
+    }
+
+    private func edit(_ change: (Data) throws -> Data) throws {
+        guard canEdit, let url = fileURL else { throw XMLEditError.unsupported }
+        let data: Data
+        do { data = try Data(contentsOf: url) } catch { throw XMLEditError.writeFailed }
+        try XMLConnectionsEditor.write(try change(data), to: url)
+        store.reload()
+    }
 
     /// Выбор таблицы. Только путь; файл не копируется и не меняется.
     func chooseFile() {
         let panel = NSOpenPanel()
-        panel.title = "Файл подключений"
-        panel.message = "Таблица .xlsx или .xml со списком компьютеров"
+        panel.title = RL("Файл подключений")
+        panel.message = RL("Таблица .xlsx или .xml со списком компьютеров")
         panel.allowedContentTypes = [UTType(filenameExtension: "xlsx"), UTType(filenameExtension: "xlsm"), .xml].compactMap { $0 }
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -180,6 +242,21 @@ final class RemoteConnectionsCenter: ObservableObject {
 
     func isInstalled(_ program: RemoteProgram) -> Bool {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: program.bundleID) != nil
+    }
+
+    /// Сообщение «Подключено» после ввода пароля. Ошибки показываются всегда.
+    var notifySuccess: Bool {
+        get { defaults.object(forKey: RemotePref.notify) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: RemotePref.notify); objectWillChange.send() }
+    }
+
+    var language: RemoteLanguage {
+        get { RemoteL10n.language }
+        set {
+            defaults.set(newValue.rawValue, forKey: RemotePref.language)
+            RemoteL10n.language = newValue
+            objectWillChange.send()
+        }
     }
 
     // MARK: Подключение
@@ -214,8 +291,9 @@ final class RemoteConnectionsCenter: ObservableObject {
             var opened = false
             let outcome = await self?.connector.connect(request, provider: provider, password: {
                 try await store.lookupPassword(for: record)
-            }, progress: { phase in
+            }, progress: { [weak self] phase in
                 if phase == .opening { opened = true }
+                if case .finished(let outcome) = phase, outcome.isSuccess, self?.notifySuccess == false { return hud.dismiss() }
                 hud.show(phase, program: program, record: record)
             })
             guard let self, let outcome else { return }
@@ -227,6 +305,8 @@ final class RemoteConnectionsCenter: ObservableObject {
             if outcome == .failed(.entryGone) { self.store.reload() }
         }
     }
+
+    func appURL(_ program: RemoteProgram) -> URL? { launcher.appURL(bundleID: program.bundleID) }
 
     /// Надписи окна пароля — из установленной программы, на всех её языках.
     private func texts(for program: RemoteProgram) -> ProviderTexts {
