@@ -1315,7 +1315,7 @@ async function share() {
   let ok = await openHost(myId);
   // ID закреплён за ключом страницы, а ключ не загрузился (медленная или зависшая IndexedDB): сначала грузим ключ ещё раз.
   if (!ok && !pageKey && pageKeySupported() && (await hostCheckReason()) === "id-claimed" && (await retryPageKey())) ok = await openHost(myId);
-  if (!ok) { stream.getTracks().forEach((t) => t.stop()); return explainHostFailure(); }
+  if (!ok) { stream.getTracks().forEach((t) => t.stop()); if (window.mu && window.mu.stopped) window.mu.stopped(); return explainHostFailure(); }
   startCapture(stream, myId);
   announceDisplays();
 }
