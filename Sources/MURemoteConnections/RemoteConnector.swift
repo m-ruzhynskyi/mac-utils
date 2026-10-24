@@ -40,8 +40,11 @@ public enum ConnectionPhase: Equatable, Sendable {
 }
 
 public enum IntermediateWindow: Equatable, Sendable {
-    /// «Terminal Session»: выбор по умолчанию оставлен, «Connect» нажат.
+    /// «Terminal Session»: «Console» выбран, «Connect» нажат.
     case sessionChoice
+    /// «Terminal Session» само не прошло (нет «Connect», «Console» не выбрался или окно не ушло) — пусть пользователь
+    /// выберет «Console» и нажмёт «Connect»; пароль введём после.
+    case chooseConsole
     /// Программа соединяется или ждёт, пока та сторона примет запрос.
     case remoteSide
     /// Незнакомое окно — ничего не нажимаем, ждём.
@@ -61,6 +64,8 @@ public enum ConnectionOutcome: Equatable, Sendable {
     case unconfirmed(copyID: Bool)
     /// Программа открыта на этом ID, пароль не вводился.
     case openedWithoutPassword(NoPasswordReason)
+    /// «Terminal Session» не закрылось за `promptTimeout` (до пароля или после него): сеанс не выбран. Не успех.
+    case sessionNotChosen
     case cancelled
     case failed(ConnectionFailure)
 
@@ -80,6 +85,7 @@ public enum ConnectionOutcome: Equatable, Sendable {
         case .connectedWithoutPassword: return "auto"
         case .unconfirmed: return "unconfirmed"
         case .openedWithoutPassword(let r): return "opened_\(r == .userChoice ? "user" : "nopassword")"
+        case .sessionNotChosen: return "sessionchoice"
         case .cancelled: return "cancelled"
         case .failed(let f): return "failed_\(f.code)"
         }
@@ -88,7 +94,7 @@ public enum ConnectionOutcome: Equatable, Sendable {
     public var isSuccess: Bool {
         switch self {
         case .connected, .connectedWithoutPassword, .openedWithoutPassword: return true
-        case .submitted, .sessionClosed, .unconfirmed, .cancelled, .failed: return false
+        case .submitted, .sessionClosed, .unconfirmed, .sessionNotChosen, .cancelled, .failed: return false
         }
     }
 }
@@ -135,7 +141,8 @@ public enum ConnectionFailure: Equatable, Sendable {
 /// Подключение с вводом пароля в окно программы. Порядок:
 /// 1) программа установлена, ссылка есть; 2) пароль — из файла сейчас, в `SecretBuffer`; 3) открыть ссылку;
 /// 4) ждать окно с защищённым полем у процесса с нужным bundle id. Промежуточные окна проходятся сами («Terminal
-/// Session» — «Connect» с выбором по умолчанию; отмену не нажимаем никогда), пока они открыты, таймаут стоит.
+/// Session» — всегда «Console» и «Connect»; отмену не нажимаем никогда), пока они открыты, таймаут стоит.
+/// Вводится пароль программы; пароль учётки — только если его нет, а окно явно просит пароль учётки.
 /// Без пароля подключено, только когда виден открытый сеанс; к таймауту его нет — «не подтверждено»;
 /// 5) программа впереди, поле её — `AXValue`, не взялось — посимвольно, с проверкой фокуса перед каждым символом;
 /// 6) галочка автологина, «ОК»; 7) поле закрылось — подключено, отказ или новое окно пароля — неверный пароль.
@@ -158,6 +165,8 @@ public final class RemoteConnector {
         public var formGrace = 3000
         /// Нажатое нами «Connect» не закрыло промежуточное окно за это время — дальше ждём, ничего не нажимая.
         public var promptGrace = 3000
+        /// «Terminal Session» открыто дольше этого — сеанс не выбран, HUD не висит.
+        public var promptTimeout = 60_000
         /// Дольше этого не ждём даже с промежуточными окнами: пароль не держится в памяти без конца.
         public var limit = 180_000
 
@@ -255,16 +264,24 @@ public final class RemoteConnector {
         case .neverStarted: return .failed(.launchFailed)
         case .untrusted: return .failed(.untrustedProgram)
         case .noField(let structure): return .failed(.fieldNotFound(structure: structure))
+        case .sessionNotChosen: return .sessionNotChosen
         case .cancelled: return .cancelled
         }
 
-        // Окно просит пароль учётки Windows — только его (и логин, если поле пустое). Окно пароля программы — только
-        // пароль программы. Перепутать нельзя ни в одну сторону.
+        // В защищённое поле окна пароля — пароль программы из записи, что бы окно ни просило: после «Console» AnyDesk
+        // может написать «Administrator account password required» — пароль записи вводится и туда (решение
+        // пользователя, rc-console; раньше здесь было «пароля нет в файле»).
+        // Пароль учётки Windows (и логин, если поле пустое) — только когда пароля программы в записи нет, а окно явно
+        // просит пароль учётки. В обычное окно пароля программы пароль учётки не вводится никогда.
         var accountSecret: SecretBuffer?
         defer { accountSecret?.wipe() }
-        let wantsAccount = provider.texts.shows(provider.texts.accountPasswordTexts, in: target.window) != nil
-        if wantsAccount {
-            guard let accountPassword else { return .openedWithoutPassword(.notInFile) }
+        if hasSecret {
+            switch await readPassword(password) {
+            case .success(let s) where !s.isEmpty: secret = s
+            case .success(let s): s.wipe(); return .openedWithoutPassword(.notInFile)
+            case .failure(let outcome): return outcome
+            }
+        } else if let accountPassword, provider.texts.shows(provider.texts.accountPasswordTexts, in: target.window) != nil {
             switch await readPassword(accountPassword) {
             case .success(let s) where !s.isEmpty: accountSecret = s
             case .success(let s): s.wipe(); return .openedWithoutPassword(.notInFile)
@@ -272,12 +289,7 @@ public final class RemoteConnector {
             }
             fillLogin(request.record.account, in: target)
         } else {
-            guard hasSecret else { return .openedWithoutPassword(.notInFile) }
-            switch await readPassword(password) {
-            case .success(let s) where !s.isEmpty: secret = s
-            case .success(let s): s.wipe(); return .openedWithoutPassword(.notInFile)
-            case .failure(let outcome): return outcome
-            }
+            return .openedWithoutPassword(.notInFile)
         }
         guard let typed = accountSecret ?? secret else { return .openedWithoutPassword(.notInFile) }
 
@@ -319,6 +331,7 @@ public final class RemoteConnector {
         switch await waitForField(request, provider, known: known, before: before, expectsPassword: false, progress) {
         case .found, .noField: return .openedWithoutPassword(reason)
         case .session: return .connectedWithoutPassword
+        case .sessionNotChosen: return .sessionNotChosen
         case .timeout, .neverStarted: return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
         case .untrusted: return .failed(.untrustedProgram)
         case .cancelled: return .cancelled
@@ -344,7 +357,6 @@ public final class RemoteConnector {
         let field: AXNode
         /// Окна этого подключения, замеченные до пароля (окно сеанса AnyDesk с диалогами внутри).
         var tracked: [AXNode] = []
-        var account = ""
     }
 
     private enum Wait {
@@ -355,6 +367,8 @@ public final class RemoteConnector {
         case neverStarted
         case noField([String])
         case untrusted
+        /// «Terminal Session» открыто дольше `promptTimeout`.
+        case sessionNotChosen
         case cancelled
     }
 
@@ -384,6 +398,7 @@ public final class RemoteConnector {
         var calmSince: Int?
         var formFilled = false
         var calmEnough = false
+        var promptSince: Int?
         var watch = SessionWatch()
         while true {
             let now = clock.milliseconds
@@ -398,19 +413,19 @@ public final class RemoteConnector {
                 let windows = ax.windows(ofProcess: pid)
                 var bare: AXNode?
                 var blocked = false
+                var prompted = false
                 for window in windows {
                     // Промежуточное окно — раньше поля: в «Terminal Session» может быть своё поле, не для нашего пароля.
                     if let marker = texts.shows(texts.promptTexts, in: window) {
                         watch.track(window)
                         blocked = true
-                        let pressed = continuePrompt(marker, in: window, texts, account: request.record.account, &watch, now: now)
-                        intermediate = pressed ? .sessionChoice : .unknown
+                        prompted = true
+                        intermediate = continuePrompt(marker, in: window, texts, &watch, now: now) ? .sessionChoice : .chooseConsole
                         continue
                     }
                     let fields = AXTree.all(in: window, where: AXTree.isSecureField)
                     if let field = fields.first(where: { f in !known.contains { $0.isSame(as: f) } }) {
-                        return .found(Target(pid: pid, window: window, field: field, tracked: watch.windows,
-                                             account: request.record.account))
+                        return .found(Target(pid: pid, window: window, field: field, tracked: watch.windows))
                     }
                     if !fields.isEmpty { continue }   // окно пароля другого подключения
                     if texts.isPasswordWindow(window) {
@@ -436,6 +451,14 @@ public final class RemoteConnector {
                         continue
                     }
                     if isNew, Self.title(of: window, matches: request.record) { watch.track(window, titled: true) }
+                }
+                // «Terminal Session» не уходит — не висим вечно: пользователю — подсказка, итог не успех.
+                if prompted {
+                    let since = promptSince ?? now
+                    promptSince = since
+                    if now - since >= timing.promptTimeout { return .sessionNotChosen }
+                } else {
+                    promptSince = nil
                 }
                 if let bare {
                     let since = passwordWindowSince ?? now
@@ -471,6 +494,7 @@ public final class RemoteConnector {
             }
             paused = intermediate != nil
             if clock.milliseconds - start >= timing.limit || counted >= timeout {
+                if promptSince != nil { return .sessionNotChosen }
                 if expectsPassword, calmEnough { return .session }
                 return sawProcess ? .timeout : .neverStarted
             }
@@ -522,36 +546,28 @@ public final class RemoteConnector {
         return digits.count >= 6 && title.filter(\.isNumber).contains(digits)
     }
 
-    /// Промежуточное окно с кнопкой продолжения: выбор по умолчанию оставить (поставить, если программа запомнила
-    /// другой), нажать «Connect». У записи есть логин учётки — выбрать «User account» и вписать его.
+    /// «Terminal Session»: всегда «Console» (нажать, если программа запомнила другой выбор), затем «Connect».
+    /// «User account» не выбираем никогда — даже если у записи есть логин учётки (решение пользователя, rc-console).
     /// Только кнопки из `promptContinueTitles` — отмену и закрытие не нажимаем никогда.
-    /// false — кнопки нет, выбора нет или нажатая не помогла: ждём, ничего не трогая.
-    private func continuePrompt(_ marker: AXNode, in window: AXNode, _ texts: ProviderTexts, account: String,
+    /// false — кнопки нет, «Console» не нашёлся или не выбрался, нажатое «Connect» не помогло: ждём пользователя.
+    private func continuePrompt(_ marker: AXNode, in window: AXNode, _ texts: ProviderTexts,
                                 _ watch: inout SessionWatch, now: Int) -> Bool {
         let isContinue: (AXNode) -> Bool = { $0.role == "AXButton" && ProviderTexts.named($0, texts.promptContinueTitles) }
         guard let button = AXTree.nearest(to: marker, in: window, where: isContinue) else { return false }
         if let done = watch.pressed.first(where: { $0.button.isSame(as: button) }) {
             return now - done.at < timing.promptGrace
         }
-        let isDefault: (AXNode) -> Bool = { node in
+        let isConsole: (AXNode) -> Bool = { node in
             node.role == "AXRadioButton" && AXTree.names(of: node).contains { name in
                 texts.promptDefaultTitles.contains { ProviderTexts.key(name).hasPrefix($0) }
             }
         }
-        if account.isEmpty {
-            if let choice = AXTree.nearest(to: marker, in: window, where: isDefault), choice.isChecked == false { _ = choice.press() }
-        } else {
-            let isAccount: (AXNode) -> Bool = { node in
-                node.role == "AXRadioButton" && AXTree.names(of: node).contains { name in
-                    texts.promptAccountTitles.contains { ProviderTexts.key(name).hasPrefix($0) }
-                }
-            }
-            guard let choice = AXTree.nearest(to: marker, in: window, where: isAccount),
-                  let login = AXTree.nearest(to: choice, in: window, where: AXTree.isTextInput) else { return false }
-            if choice.isChecked == false { _ = choice.press() }
-            _ = login.clearValue()
-            guard login.setText(account), login.valueLength.map({ $0 == account.count || $0 == account.utf16.count }) ?? true
-            else { return false }
+        if let console = AXTree.nearest(to: marker, in: window, where: isConsole) {
+            if console.isChecked == false { _ = console.press() }
+            // Не выбрался (пока) — «Connect» не жмём: подключил бы к другому сеансу. Следующий опрос попробует снова.
+            guard console.isChecked != false else { return false }
+        } else if AXTree.first(in: window, where: { $0.role == "AXRadioButton" }) != nil {
+            return false   // выбор есть, а «Console» среди него не узнали — не жмём
         }
         guard button.press() else { return false }
         watch.pressed.append((button, now))
@@ -770,6 +786,7 @@ public final class RemoteConnector {
         let start = clock.milliseconds
         var deadline = start + timing.confirm
         var calmSince: Int?
+        var promptSince: Int?
         var watch = SessionWatch(target.tracked)
         watch.track(target.window)
         while clock.milliseconds < min(deadline, start + timing.limit) {
@@ -782,16 +799,25 @@ public final class RemoteConnector {
             // После пароля бывает «Terminal Session» или ожидание той стороны — это ещё не подключено; ждём дольше.
             var busy = false
             var blocked = false
+            var prompted = false
             for window in windows {
                 if let marker = texts.shows(texts.promptTexts, in: window) {
-                    _ = continuePrompt(marker, in: window, texts, account: target.account, &watch, now: now)
+                    _ = continuePrompt(marker, in: window, texts, &watch, now: now)
                     busy = true
+                    prompted = true
                 } else if texts.shows(texts.progressTexts, in: window) != nil {
                     busy = true
                 } else if !before.contains(where: { $0.isSame(as: window) }) {
                     if Self.isDialog(window), !window.isSame(as: target.window) { blocked = true }
                     if Self.title(of: window, matches: record) { watch.track(window, titled: true) }
                 }
+            }
+            if prompted {
+                let since = promptSince ?? now
+                promptSince = since
+                if now - since >= timing.promptTimeout { return .sessionNotChosen }
+            } else {
+                promptSince = nil
             }
             if busy { deadline = max(deadline, now + timing.confirm) }
             let fields = windows.flatMap { AXTree.all(in: $0, where: AXTree.isSecureField) }
