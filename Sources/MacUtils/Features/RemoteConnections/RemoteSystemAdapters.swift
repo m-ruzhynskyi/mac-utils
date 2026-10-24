@@ -28,23 +28,44 @@ final class SystemAXNode: AXNode {
         return (value as! AXUIElement)
     }
 
-    var role: String? { attribute(kAXRoleAttribute) as? String }
-    var subrole: String? { attribute(kAXSubroleAttribute) as? String }
+    /// Роль, подписи и дети — одним запросом на узел и до конца жизни узла: окна читаются заново на каждом опросе,
+    /// а за опрос дерево обходится несколько раз (большое главное окно AnyDesk, rc-console2). Значение (`AXValue`)
+    /// сюда не входит: у полей оно не читается вовсе, у надписей — отдельно, у галочек — каждый раз заново.
+    private lazy var basics: [String: CFTypeRef] = {
+        let names = [kAXRoleAttribute, kAXSubroleAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
+                     kAXPlaceholderValueAttribute, kAXChildrenAttribute]
+        var values: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(element, names as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0),
+                                                     &values) == .success,
+              let list = values as? [AnyObject], list.count == names.count else { return [:] }
+        var out: [String: CFTypeRef] = [:]
+        for (name, value) in zip(names, list) {
+            // Атрибута нет — на его месте AXValue с ошибкой.
+            if CFGetTypeID(value) == AXValueGetTypeID(), AXValueGetType(value as! AXValue) == .axError { continue }
+            out[name] = value
+        }
+        return out
+    }()
+
+    var role: String? { basics[kAXRoleAttribute] as? String }
+    var subrole: String? { basics[kAXSubroleAttribute] as? String }
+
+    private lazy var staticText: String? = attribute(kAXValueAttribute) as? String
 
     var label: String? {
         switch role {
-        case kAXStaticTextRole: return attribute(kAXValueAttribute) as? String
+        case kAXStaticTextRole: return staticText
         case kAXTextFieldRole, kAXTextAreaRole, "AXSecureTextField": return nil
-        default: return attribute(kAXTitleAttribute) as? String
+        default: return basics[kAXTitleAttribute] as? String
         }
     }
 
-    var children: [AXNode] {
-        guard let list = attribute(kAXChildrenAttribute) as? [AnyObject] else { return [] }
+    private(set) lazy var children: [AXNode] = {
+        guard let list = basics[kAXChildrenAttribute] as? [AnyObject] else { return [] }
         return list.compactMap { item in
             CFGetTypeID(item) == AXUIElementGetTypeID() ? SystemAXNode(item as! AXUIElement) : nil
         }
-    }
+    }()
 
     var processID: Int32? {
         var pid: pid_t = 0
@@ -53,8 +74,8 @@ final class SystemAXNode: AXNode {
 
     var valueLength: Int? { (attribute(kAXNumberOfCharactersAttribute) as? NSNumber)?.intValue }
 
-    var placeholder: String? { attribute(kAXPlaceholderValueAttribute) as? String }
-    var detail: String? { attribute(kAXDescriptionAttribute) as? String }
+    var placeholder: String? { basics[kAXPlaceholderValueAttribute] as? String }
+    var detail: String? { basics[kAXDescriptionAttribute] as? String }
 
     var isChecked: Bool? {
         guard role == kAXCheckBoxRole || role == kAXRadioButtonRole else { return nil }

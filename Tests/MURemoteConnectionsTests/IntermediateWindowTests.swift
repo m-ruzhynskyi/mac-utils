@@ -1092,7 +1092,9 @@ final class IntermediateWindowTests: XCTestCase {
         let json = #"{"remote_support": {"participant_id": {"search_dropdown": {"recent_connections_with_ip": {"placeholder": "Введіть ID"}}}, "connections": {"connect": "Підключитися"}}}"#
         try json.write(to: web.appendingPathComponent("translation.json"), atomically: true, encoding: .utf8)
 
-        let ad = ProviderTexts.load(appURL: app, keys: AnyDeskAutomator.keys)
+        var adKeys = AnyDeskAutomator.keys
+        adKeys.builtIn = []   // здесь — только то, что прочитано из файлов
+        let ad = ProviderTexts.load(appURL: app, keys: adKeys)
         XCTAssertEqual(ad.promptTexts, ["terminal session"])
         XCTAssertEqual(ad.promptContinueTitles, ["connect"])
         XCTAssertEqual(ad.promptDefaultTitles, ["console"])

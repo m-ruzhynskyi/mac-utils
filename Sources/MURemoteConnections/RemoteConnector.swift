@@ -183,6 +183,9 @@ public final class RemoteConnector {
     private var interrupted: (recordID: String, program: RemoteProgram, pid: Int32, field: AXNode)?
     /// Пароль учётки текущего подключения (читается из файла, только когда его попросят).
     private var accountPassword: (() async throws -> PasswordLookup)?
+    /// Окна программы к концу последнего подключения, если оно не подтвердилось или сеанс не выбран: только роли,
+    /// глубина, состояние галочек и ключи совпавших надписей программы (`AXTree.diagnostics`). Пусто — нечего показать.
+    public private(set) var lastDiagnostics: [String] = []
 
     public init(ax: AXAccess, launcher: AppLauncher, keyboard: KeyboardSender, clock: RemoteClock = SystemClock(),
                 logger: RemoteLogger? = nil) {
@@ -201,6 +204,7 @@ public final class RemoteConnector {
                         progress: (ConnectionPhase) -> Void) async -> ConnectionOutcome {
         let started = clock.milliseconds
         var opened = false
+        lastDiagnostics = []
         self.accountPassword = request.record.hasAccountPassword ? accountPassword : nil
         defer { self.accountPassword = nil }
         let outcome = await run(request, provider, password, progress, opened: &opened)
@@ -260,11 +264,11 @@ public final class RemoteConnector {
         switch await waitForField(request, provider, known: known, before: before, expectsPassword: true, progress) {
         case .found(let t): target = t
         case .session: return .connectedWithoutPassword
-        case .timeout: return unconfirmed
+        case .timeout: noteDiagnostics(provider); return unconfirmed
         case .neverStarted: return .failed(.launchFailed)
         case .untrusted: return .failed(.untrustedProgram)
         case .noField(let structure): return .failed(.fieldNotFound(structure: structure))
-        case .sessionNotChosen: return .sessionNotChosen
+        case .sessionNotChosen: noteDiagnostics(provider); return .sessionNotChosen
         case .cancelled: return .cancelled
         }
 
@@ -287,7 +291,7 @@ public final class RemoteConnector {
             case .success(let s): s.wipe(); return .openedWithoutPassword(.notInFile)
             case .failure(let outcome): return outcome
             }
-            fillLogin(request.record.account, in: target)
+            fillLogin(request.record.account, in: target, provider.texts)
         } else {
             return .openedWithoutPassword(.notInFile)
         }
@@ -331,17 +335,26 @@ public final class RemoteConnector {
         switch await waitForField(request, provider, known: known, before: before, expectsPassword: false, progress) {
         case .found, .noField: return .openedWithoutPassword(reason)
         case .session: return .connectedWithoutPassword
-        case .sessionNotChosen: return .sessionNotChosen
-        case .timeout, .neverStarted: return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
+        case .sessionNotChosen: noteDiagnostics(provider); return .sessionNotChosen
+        case .timeout: noteDiagnostics(provider); return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
+        case .neverStarted: return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
         case .untrusted: return .failed(.untrustedProgram)
         case .cancelled: return .cancelled
         }
     }
 
-    /// Поле логина в окне пароля учётки: только если оно пустое.
-    private func fillLogin(_ account: String, in target: Target) {
+    /// «Диагностика» для итога: окна процесса программы (только нужный bundle id), без надписей и значений.
+    private func noteDiagnostics(_ provider: RemoteProvider) {
+        guard let pid = launcher.runningProcess(bundleID: provider.program.bundleID),
+              launcher.bundleID(ofProcess: pid) == provider.program.bundleID else { return }
+        lastDiagnostics = AXTree.diagnostics(of: ax.windows(ofProcess: pid), texts: provider.texts)
+    }
+
+    /// Поле логина в окне пароля учётки: только если оно пустое и стоит рядом с полем пароля (не адресная строка
+    /// главного окна).
+    private func fillLogin(_ account: String, in target: Target, _ texts: ProviderTexts) {
         guard !account.isEmpty,
-              let login = AXTree.nearest(to: target.field, in: target.window, where: AXTree.isTextInput),
+              let login = AXTree.nearest(to: target.field, in: Self.passwordScope(target, texts), where: AXTree.isTextInput),
               login.processID == target.pid, login.valueLength == 0 else { return }
         _ = login.setText(account)
     }
@@ -546,36 +559,92 @@ public final class RemoteConnector {
         return digits.count >= 6 && title.filter(\.isNumber).contains(digits)
     }
 
-    /// «Terminal Session»: всегда «Console» (нажать, если программа запомнила другой выбор), затем «Connect».
+    /// «Terminal Session»: всегда «Console» (нажать, если он не выбран), затем «Connect».
     /// «User account» не выбираем никогда — даже если у записи есть логин учётки (решение пользователя, rc-console).
-    /// Только кнопки из `promptContinueTitles` — отмену и закрытие не нажимаем никогда.
+    /// Только кнопки из `promptContinueTitles` и только внутри карточки — «Connect» адресной строки и плиток главного
+    /// окна AnyDesk не наши; отмену и закрытие не нажимаем никогда.
+    /// «Connect» — когда «Console» читается выбранным, или его состояние не читается, а все другие выборы карточки
+    /// читаются невыбранными (в группе радиокнопок это и есть «Console»). Другой выбор выбран или тоже не читается,
+    /// «Console» точно не выбран — «Connect» не жмём: следующий опрос попробует снова (rc-console FIX 1, rc-console2 FIX 1).
     /// false — кнопки нет, «Console» не нашёлся или не выбрался, нажатое «Connect» не помогло: ждём пользователя.
     private func continuePrompt(_ marker: AXNode, in window: AXNode, _ texts: ProviderTexts,
                                 _ watch: inout SessionWatch, now: Int) -> Bool {
         let isContinue: (AXNode) -> Bool = { $0.role == "AXButton" && ProviderTexts.named($0, texts.promptContinueTitles) }
-        guard let button = AXTree.nearest(to: marker, in: window, where: isContinue) else { return false }
+        let isRadio: (AXNode) -> Bool = { $0.role == "AXRadioButton" }
+        let console = Self.consoleChoice(near: marker, in: window, texts)
+        // Карточка — ближайший общий контейнер «Console» и надписи окна; без «Console» — три уровня над надписью.
+        let card = console.flatMap { console in
+            AXTree.path(to: console, in: window)?.reversed().first { AXTree.path(to: marker, in: $0) != nil }
+        }
+        let button = card.flatMap { AXTree.first(in: $0, where: isContinue) }
+            ?? (console == nil ? AXTree.nearest(to: marker, in: window, levels: 3, where: isContinue) : nil)
+        guard let button else { return false }
         if let done = watch.pressed.first(where: { $0.button.isSame(as: button) }) {
             return now - done.at < timing.promptGrace
         }
-        let isConsole: (AXNode) -> Bool = { node in
-            node.role == "AXRadioButton" && AXTree.names(of: node).contains { name in
-                texts.promptDefaultTitles.contains { ProviderTexts.key(name).hasPrefix($0) }
+        if let console, let card {
+            if console.isChecked != true { _ = console.press() }
+            let others = (AXTree.all(in: card, where: isRadio)
+                + AXTree.all(in: window) { isRadio($0) && ProviderTexts.named($0, texts.promptOtherTitles) })
+                .filter { !$0.isSame(as: console) }
+            switch console.isChecked {
+            case true?: guard !others.contains(where: { $0.isChecked == true }) else { return false }
+            case nil: guard !others.isEmpty, others.allSatisfy({ $0.isChecked == false }) else { return false }
+            case false?: return false
             }
-        }
-        if let console = AXTree.nearest(to: marker, in: window, where: isConsole) {
-            // Состояние могло не прочитаться (nil) — тогда тоже жмём «Console». «Connect» — только если «Console» точно
-            // выбран или состояние не читается, а «Console» мы только что нажали успешно (иначе при AX без `AXValue`
-            // окно не прошло бы никогда). Не выбрался — «Connect» не жмём: подключил бы к другому сеансу; следующий опрос
-            // попробует снова (ревью rc-console, FIX 1).
-            let pressed = console.isChecked != true && console.press()
-            let state = console.isChecked
-            guard state == true || (state == nil && pressed) else { return false }
-        } else if AXTree.first(in: window, where: { $0.role == "AXRadioButton" }) != nil {
+        } else if AXTree.first(in: window, where: isRadio) != nil {
             return false   // выбор есть, а «Console» среди него не узнали — не жмём
         }
         guard button.press() else { return false }
         watch.pressed.append((button, now))
         return true
+    }
+
+    /// Радиокнопка «Console» — только по своей подписи (заголовок, описание; «Console (active)» — тоже). Радиокнопку
+    /// без подписи не угадываем по соседней надписи: так легко взять «User account» (ревью rc-console2, FIX 2).
+    static func consoleChoice(near marker: AXNode, in window: AXNode, _ texts: ProviderTexts) -> AXNode? {
+        AXTree.nearest(to: marker, in: window) { node in
+            node.role == "AXRadioButton" && AXTree.names(of: node).contains { name in
+                texts.promptDefaultTitles.contains { ProviderTexts.key(name).hasPrefix($0) }
+            }
+        }
+    }
+
+    /// Где искать «ОК», галочку автологина и поле логина окна пароля (rc-console2 FIX 3 и SCOPE): отдельное окно-диалог
+    /// или лист — целиком. Иначе от поля вверх — самый высокий предок, который ещё похож на окно пароля: не больше
+    /// `passwordScopeNodes` узлов, без панели инструментов и вкладок, без поля ID главного экрана (`connectFieldTexts`).
+    /// Отдельное маленькое окно пароля (`AXStandardWindow` AnyDesk/TeamViewer) проходит целиком — как в 1.10.2, на любой
+    /// глубине «OK»; диалог во вкладке главного окна AnyDesk — только сам диалог: «Connect» адресной строки и плитки не наши.
+    private static func passwordScope(_ target: Target, _ texts: ProviderTexts) -> AXNode {
+        if isDialog(target.window) { return target.window }
+        guard let path = AXTree.path(to: target.field, in: target.window), path.count >= 2 else { return target.window }
+        if let sheet = path.last(where: { $0.role == "AXSheet" }) { return sheet }
+        var scope = path[path.count - 2]
+        for ancestor in path.dropLast().reversed() {
+            guard looksLikePasswordDialog(ancestor, texts) else { break }
+            scope = ancestor
+        }
+        return scope
+    }
+
+    /// Предел размера окна пароля: у AnyDesk и TeamViewer в нём десятки узлов, у главного окна — сотни и тысячи.
+    static let passwordScopeNodes = 300
+
+    /// Поддерево — ещё окно пароля, а не главное окно: мало узлов, нет панели инструментов, вкладок и поля ID.
+    private static func looksLikePasswordDialog(_ node: AXNode, _ texts: ProviderTexts) -> Bool {
+        var count = 0
+        var main = false
+        AXTree.visit(node) { n, _ in
+            count += 1
+            if count > passwordScopeNodes || ["AXToolbar", "AXTabGroup"].contains(n.role ?? "")
+                || (!texts.connectFieldTexts.isEmpty && (AXTree.isTextInput(n) || n.role == "AXStaticText")
+                    && ProviderTexts.named(n, texts.connectFieldTexts)) {
+                main = true
+                return false
+            }
+            return true
+        }
+        return !main
     }
 
     private struct ConnectForm {
@@ -650,7 +719,9 @@ public final class RemoteConnector {
         launcher.activate(process: target.pid)
         guard await waitFrontmost(target.pid) else { return .focusLost }
 
-        if request.autologin, provider.supportsAutologin { tickAutologin(in: target.window, provider.texts) }
+        if request.autologin, provider.supportsAutologin {
+            tickAutologin(in: Self.passwordScope(target, provider.texts), provider.texts)
+        }
 
         let expected = Self.lengths(of: secret)
         guard isFront(target.pid, bundleID) else { return .focusLost }
@@ -696,9 +767,9 @@ public final class RemoteConnector {
         launcher.frontmostProcess == pid && ax.focusedElement(ofProcess: pid).map { $0.isSame(as: field) } == true
     }
 
-    /// Галочка «входить автоматически»: по надписи, иначе единственная галочка окна.
-    private func tickAutologin(in window: AXNode, _ texts: ProviderTexts) {
-        let boxes = AXTree.all(in: window) { $0.role == "AXCheckBox" }
+    /// Галочка «входить автоматически»: по надписи, иначе единственная галочка окна пароля (`passwordScope`).
+    private func tickAutologin(in scope: AXNode, _ texts: ProviderTexts) {
+        let boxes = AXTree.all(in: scope) { $0.role == "AXCheckBox" }
         let box = boxes.first { $0.label.map { texts.autologinTitles.contains(ProviderTexts.key($0)) } == true }
             ?? (boxes.count == 1 ? boxes[0] : nil)
         if let box, box.isChecked == false { _ = box.press() }
@@ -757,13 +828,16 @@ public final class RemoteConnector {
     private enum Submit { case pressed, notFront, onlyCancel }
 
     /// «ОК»: кнопка по умолчанию (если это не отмена), кнопка с надписью подтверждения, иначе Return в процесс
-    /// программы — но не тогда, когда по умолчанию стоит отмена: Return нажал бы её.
+    /// программы — но не тогда, когда по умолчанию стоит отмена: Return нажал бы её. Кнопки — только окна пароля
+    /// (`passwordScope`): «Connect» главного окна AnyDesk не наш.
     private func submit(_ target: Target, _ texts: ProviderTexts, _ bundleID: String) -> Submit {
         let isCancel: (AXNode) -> Bool = { ProviderTexts.named($0, Self.cancelTitles) }
-        let defaultButton = target.window.defaultButton
+        let scope = Self.passwordScope(target, texts)
+        let defaultButton = target.window.defaultButton.flatMap { AXTree.path(to: $0, in: scope) != nil ? $0 : nil }
         if let button = defaultButton, !isCancel(button), button.press() { return .pressed }
-        let buttons = AXTree.all(in: target.window) { $0.role == "AXButton" && !isCancel($0) }
-        if let ok = buttons.first(where: { ProviderTexts.named($0, texts.confirmTitles) }), ok.press() { return .pressed }
+        if let ok = AXTree.nearest(to: target.field, in: scope, where: { node in
+            node.role == "AXButton" && !isCancel(node) && ProviderTexts.named(node, texts.confirmTitles)
+        }), ok.press() { return .pressed }
         if let button = defaultButton, isCancel(button) { return .onlyCancel }
         guard isFront(target.pid, bundleID) else { return .notFront }
         keyboard.pressReturn(to: target.pid)

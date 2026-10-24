@@ -438,13 +438,21 @@ final class RemoteConnectorTests: XCTestCase {
             "unrelated" = "x";
             """.write(to: dir.appendingPathComponent("Localizable.strings"), atomically: true, encoding: .utf8)
         }
+        // Только файлы программы (без встроенных надписей) — ровно их строки.
+        var fileKeys = AnyDeskAutomator.keys
+        fileKeys.builtIn = []
+        let fromFiles = ProviderTexts.load(appURL: app, keys: fileKeys)
+        XCTAssertEqual(fromFiles.passwordWindowTitles, ["авторизация", "authorization"])
+        XCTAssertEqual(fromFiles.rejectionTexts, ["пароль отклонён", "password rejected"])
+        // Со встроенными en/ru/uk — плюс украинские, которых в этой «программе» нет.
         let texts = ProviderTexts.load(appURL: app, keys: AnyDeskAutomator.keys)
-        XCTAssertEqual(texts.passwordWindowTitles, ["авторизация", "authorization"])
-        XCTAssertEqual(texts.rejectionTexts, ["пароль отклонён", "password rejected"])
+        XCTAssertEqual(texts.passwordWindowTitles, ["авторизация", "authorization", "необхідно вказати пароль"])
         XCTAssertTrue(texts.autologinTitles.contains("log in automatically from now on"))
         XCTAssertTrue(texts.isPasswordWindow(FakeNode("AXWindow", label: "Authorization")))
         XCTAssertFalse(texts.isPasswordWindow(FakeNode("AXWindow", label: "AnyDesk")))
-        XCTAssertEqual(ProviderTexts.load(appURL: app.appendingPathComponent("nope"), keys: AnyDeskAutomator.keys), ProviderTexts())
+        XCTAssertEqual(ProviderTexts.load(appURL: app.appendingPathComponent("nope"), keys: fileKeys), ProviderTexts())
+        XCTAssertEqual(ProviderTexts.load(appURL: app.appendingPathComponent("nope"), keys: AnyDeskAutomator.keys),
+                       ProviderTexts.builtIn(keys: AnyDeskAutomator.keys), "файлов нет — встроенные надписи")
     }
 
     func testLengthsCountScalarsAndUTF16() {
