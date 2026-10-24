@@ -955,8 +955,10 @@ final class ScreenShare: NSObject, ObservableObject {
         let stream = SCStream(filter: filter, configuration: config, delegate: sender)
         try stream.addStreamOutput(sender, type: .screen, sampleHandlerQueue: sender.queue)
         // Звук — отдельным потоком: из него можно убрать выбранные программы (чтобы не дублировать лишнее).
-        if UserDefaults.standard.bool(forKey: Pref.shareAudio) { try await startAudio(sender: sender) }
+        // sender назначается до запуска звука: startAudio сверяет по нему, что эфир тот же (иначе запасной звук гасился бы сразу).
+        // Если видео не пойдёт, teardownCapture в вызывающем гасит и sender, и звук (SH2).
         self.sender = sender
+        if UserDefaults.standard.bool(forKey: Pref.shareAudio) { try await startAudio(sender: sender) }
         // Видео не пошло, а звук уже идёт — его останавливает teardownCapture в вызывающем (SH2).
         try await stream.startCapture()
         self.stream = stream

@@ -63,4 +63,30 @@ final class ShareAudit3bTests: XCTestCase {
         XCTAssertFalse(ShareFallbackAudioGate(hasStream: true).mayAttach(sameBroadcast: true), "другая ветка уже подняла звук")
         XCTAssertFalse(ShareFallbackAudioGate(hasTap: true).mayAttach(sameBroadcast: true))
     }
+
+    // MARK: R1
+
+    /// R1: при начале эфира sender должен быть назначен до запуска звука, иначе созданный запасной звук (macOS 14.0–14.1,
+    /// сбой перехвата Core Audio) сразу считается «чужим эфиром» и гасится — эфир идёт без звука.
+    func testBeginCaptureAssignsSenderBeforeStartingAudio() throws {
+        let source = try String(contentsOfFile: #filePath.replacingOccurrences(of: "Tests/MacUtilsTests/ShareAudit3bTests.swift",
+                                                                              with: "Sources/MacUtils/Features/ScreenShare/ScreenShare.swift"))
+        let begin = try XCTUnwrap(source.range(of: "private func beginCapture(filter: SCContentFilter) async throws {"))
+        let body = String(source[begin.upperBound...].prefix(2500))
+        let assigned = try XCTUnwrap(body.range(of: "self.sender = sender"))
+        let started = try XCTUnwrap(body.range(of: "try await startAudio(sender: sender)"))
+        XCTAssertLessThan(assigned.lowerBound, started.lowerBound, "self.sender = sender должен идти до startAudio")
+    }
+
+    /// Тот же сценарий на подменённых зависимостях: эфир начинается, sender уже назначен — поток принимается;
+    /// пока sender не назначен (старый порядок) — отвергается, а смена эфира всё равно отвергает.
+    func testFallbackAudioAttachDependsOnAssignedSender() {
+        final class Token {}
+        let sender = Token()
+        func same(current: Token?, started: Token) -> Bool { current === started }
+        let gate = ShareFallbackAudioGate()
+        XCTAssertTrue(gate.mayAttach(sameBroadcast: same(current: sender, started: sender)), "sender назначен до запуска — звук принят")
+        XCTAssertFalse(gate.mayAttach(sameBroadcast: same(current: nil, started: sender)), "порядок до исправления: звук гасился")
+        XCTAssertFalse(gate.mayAttach(sameBroadcast: same(current: Token(), started: sender)), "эфир сменился — гасится")
+    }
 }
