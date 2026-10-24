@@ -17,5 +17,10 @@ package final class AppRouter {
     /// Подготовка к перезапуску приложения (например, перед установкой обновления): остановить перехваты и фоновые службы.
     package var prepareForRelaunch: () -> Void = {}
 
+    /// «Шпаргалка»: группы, показываемые первыми, когда впереди окно самого приложения (например, клавиши плеера).
+    package var cheatFrontGroups: () -> [CheatGroup] = { [] }
+    /// «Шпаргалка»: группа сочетаний Mac Utils, которые действительно работают сейчас.
+    package var cheatMacUtilsGroup: () -> CheatGroup = { CheatGroup(title: "Mac Utils", items: []) }
+
     private init() {}
 }

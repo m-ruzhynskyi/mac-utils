@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import MUCore
 
 /// Действие плеера по клавише (§ 8.1 плана). Клавиши — только в окне плеера, без глобальных `HotKeyRegistry`.
 enum PlayerAction: String, CaseIterable {

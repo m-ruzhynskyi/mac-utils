@@ -18,6 +18,7 @@ import MUWindowSnap
 import MUAI
 import MUDownloadsSorter
 import MUDropShelf
+import MUCheatSheet
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения
@@ -35,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsSection.installAppSubtitles()
         AppRouter.shared.showWhatsNewIfUpdated = { WhatsNewWindowController.shared.showIfUpdated() }
         AppRouter.shared.prepareForRelaunch = { AppSwitcher.shared.shutdown() }
+        AppRouter.shared.cheatFrontGroups = { PlayerWindowController.isKey ? [PlayerShortcuts.cheatGroup] : [] }
+        AppRouter.shared.cheatMacUtilsGroup = { MainActor.assumeIsolated { CheatSheetGroups.macUtilsGroup() } }
         AppRouter.shared.isInApplications = { MoveToApplications.isInApplications }
         AppRouter.shared.runHotKey = { id in HotKeyAction.action(forHotKeyID: id).map { AppAction(hotKey: $0).run() } }
         KeepAwake.shared.observeWake()
