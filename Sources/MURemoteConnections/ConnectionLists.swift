@@ -37,21 +37,18 @@ public enum ConnectionLists {
     }
 }
 
-/// Фильтр-чипы «Все · AnyDesk · TeamViewer · RDP · VPN».
+/// Фильтр-чипы — только программа подключения: «Все · AnyDesk · TeamViewer · Другое».
 public enum ProgramFilter: Hashable, Sendable {
     case all
     case program(RemoteProgram)
-    /// Через удалённый рабочий стол (программа RDP или метка RDP).
-    case rdp
-    /// Нужен VPN (программа VPN или метка VPN).
-    case vpn
+    /// Не через AnyDesk/TeamViewer: RDP, VPN, «Другое». Значки VPN/RDP в строке остаются.
+    case other
 
     func matches(_ r: ConnectionRecord, _ defaultProgram: RemoteProgram) -> Bool {
         switch self {
         case .all: return true
         case .program(let p): return r.method == nil && r.program(default: defaultProgram) == p
-        case .rdp: return r.usesRDP
-        case .vpn: return r.needsVPN
+        case .other: return r.method != nil
         }
     }
 }
@@ -96,7 +93,7 @@ public struct ConnectionListing: Equatable, Sendable {
     public var counts: [ProgramFilter: Int]
     public var hint: ConnectionSearch.LayoutHint?
     public var effectiveQuery: String
-    /// Метки найденных записей: «Рег», «Фито», затем по частоте. VPN и RDP — не метки, а фильтры программ.
+    /// Метки найденных записей: «Рег», «Фито», затем по частоте. VPN и RDP — не метки, а значки в строке.
     public var tags: [TagCount] = []
 
     /// Плоский порядок для стрелок: запись может стоять и в «Избранном», и в группе — это разные строки.
@@ -129,12 +126,9 @@ public enum ConnectionListBuilder {
         let result = search.search(query)
         var counts: [ProgramFilter: Int] = [.all: result.records.count]
         for p in RemoteProgram.allCases { counts[.program(p)] = 0 }
-        counts[.rdp] = 0
-        counts[.vpn] = 0
+        counts[.other] = 0
         for r in result.records {
-            if r.method == nil { counts[.program(r.program(default: defaultProgram)), default: 0] += 1 }
-            if r.usesRDP { counts[.rdp, default: 0] += 1 }
-            if r.needsVPN { counts[.vpn, default: 0] += 1 }
+            if r.method == nil { counts[.program(r.program(default: defaultProgram)), default: 0] += 1 } else { counts[.other, default: 0] += 1 }
         }
 
         let byProgram = result.records.filter { filter.matches($0, defaultProgram) }

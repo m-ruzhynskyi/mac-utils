@@ -175,3 +175,21 @@ final class ProcessKeyboard: KeyboardSender {
         }
     }
 }
+
+/// Звонок: открыть `tel:` именно в UniTalk. `NSWorkspace.open(_:withApplicationAt:)` обработчик по умолчанию не меняет.
+/// `completion(false)` — UniTalk не открылся (ошибка в completion `NSWorkspace.open`); вызывается на главном потоке.
+protocol RemoteDialer: AnyObject {
+    func appURL(bundleID: String) -> URL?
+    func open(_ url: URL, withApplicationAt app: URL, completion: @escaping @MainActor (Bool) -> Void)
+}
+
+final class WorkspaceDialer: RemoteDialer {
+    func appURL(bundleID: String) -> URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) }
+
+    func open(_ url: URL, withApplicationAt app: URL, completion: @escaping @MainActor (Bool) -> Void) {
+        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+            let ok = error == nil
+            Task { @MainActor in completion(ok) }
+        }
+    }
+}
