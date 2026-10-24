@@ -563,9 +563,13 @@ public final class RemoteConnector {
             }
         }
         if let console = AXTree.nearest(to: marker, in: window, where: isConsole) {
-            if console.isChecked == false { _ = console.press() }
-            // Не выбрался (пока) — «Connect» не жмём: подключил бы к другому сеансу. Следующий опрос попробует снова.
-            guard console.isChecked != false else { return false }
+            // Состояние могло не прочитаться (nil) — тогда тоже жмём «Console». «Connect» — только если «Console» точно
+            // выбран или состояние не читается, а «Console» мы только что нажали успешно (иначе при AX без `AXValue`
+            // окно не прошло бы никогда). Не выбрался — «Connect» не жмём: подключил бы к другому сеансу; следующий опрос
+            // попробует снова (ревью rc-console, FIX 1).
+            let pressed = console.isChecked != true && console.press()
+            let state = console.isChecked
+            guard state == true || (state == nil && pressed) else { return false }
         } else if AXTree.first(in: window, where: { $0.role == "AXRadioButton" }) != nil {
             return false   // выбор есть, а «Console» среди него не узнали — не жмём
         }

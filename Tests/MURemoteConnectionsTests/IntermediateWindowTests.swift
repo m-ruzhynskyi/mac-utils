@@ -500,6 +500,90 @@ final class IntermediateWindowTests: XCTestCase {
         XCTAssertEqual(pw.field.text, password)
     }
 
+    // MARK: Ревью rc-console, FIX 1: состояние «Console» не читается (`AXValue` радиокнопки — nil)
+
+    /// «Terminal Session», где AX не отдаёт состояние «Console», а AnyDesk запомнил «User account». Нажатие «Console»
+    /// (если удалось) выбирает его: «User account» снимается. Пишется порядок нажатий.
+    private func unreadableConsolePrompt(pressWorks: Bool) -> (prompt: TerminalPrompt, presses: () -> [String]) {
+        let prompt = TerminalPrompt(consoleSelected: false)
+        var log: [String] = []
+        prompt.console.isChecked = nil
+        prompt.console.pressFails = !pressWorks
+        let user = prompt.user
+        prompt.console.onPress = { log.append("console"); user.isChecked = false }
+        prompt.user.onPress = { log.append("user") }
+        prompt.connect.onPress = { log.append("connect") }
+        return (prompt, { log })
+    }
+
+    /// (a) Состояние nil, нажатие «Console» прошло — «Console», затем «Connect»; «User account» не тронут.
+    func testUnreadableConsoleStatePressedThenConnect() async {
+        let window = sessionWindow()
+        let (prompt, presses) = unreadableConsolePrompt(pressWorks: true)
+        let pw = FakePasswordWindow(title: "Authorization")
+        pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: adPID); put(remoteScreen(), in: window, pid: adPID) }
+        let logConnect = prompt.connect.onPress
+        var userAtConnect: Bool?
+        prompt.connect.onPress = { [unowned self] in
+            logConnect?()
+            userAtConnect = prompt.user.isChecked
+            put([progress()], in: window, pid: adPID)
+            clock.at(clock.milliseconds + 1000) { [unowned self] in ax.show(pw.window, pid: adPID) }
+        }
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+        }
+        let outcome = await connect(ConnectRequest(record: accountRecord, program: .anyDesk), AnyDeskAutomator(texts: adTexts),
+                                    accountPassword: "Win-9-выдумка")
+        XCTAssertEqual(outcome, .connected)
+        XCTAssertEqual(presses(), ["console", "connect"])
+        XCTAssertEqual(userAtConnect, false, "к «Connect» выбран «Console», а не «User account»")
+        XCTAssertEqual(pw.field.text, password)
+    }
+
+    /// (b) Состояние nil, нажатие «Console» не прошло — «Connect» не нажат ни разу; подсказка «Выберите Console…»,
+    /// итог «сеанс не выбран», пароль не вводился.
+    func testUnreadableConsoleStateAndFailedPressNeverConnects() async {
+        let window = sessionWindow()
+        let (prompt, presses) = unreadableConsolePrompt(pressWorks: false)
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+        }
+        let outcome = await connect(ConnectRequest(record: accountRecord, program: .anyDesk), AnyDeskAutomator(texts: adTexts),
+                                    connector { $0.promptTimeout = 10_000 }, accountPassword: "Win-9-выдумка")
+        XCTAssertEqual(outcome, .sessionNotChosen)
+        XCTAssertFalse(presses().contains("connect"), "«Connect» не нажат")
+        XCTAssertFalse(presses().contains("user"))
+        XCTAssertEqual(prompt.user.isChecked, true, "выбор AnyDesk не тронут")
+        XCTAssertTrue(phases.contains(.intermediate(.chooseConsole)))
+        XCTAssertFalse(phases.contains(.intermediate(.sessionChoice)))
+        XCTAssertTrue(keyboard.typed.isEmpty)
+        XCTAssertTrue(secrets.allSatisfy(\.isEmpty))
+    }
+
+    /// (c) «Console» не выбран (false) — нажат, затем «Connect».
+    func testUncheckedConsoleIsPressedThenConnect() async {
+        let window = sessionWindow()
+        let prompt = TerminalPrompt(consoleSelected: false)
+        var log: [String] = []
+        let select = prompt.console.onPress
+        prompt.console.onPress = { log.append("console"); select?() }
+        prompt.connect.onPress = { log.append("connect") }
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+        }
+        _ = await connect(anyDesk(timeout: 2), AnyDeskAutomator(texts: adTexts), connector { $0.limit = 10_000 })
+        XCTAssertEqual(log, ["console", "connect"])
+        XCTAssertEqual(prompt.console.isChecked, true)
+        XCTAssertEqual(prompt.user.isChecked, false)
+    }
+
     /// Выбор сеансов есть, а «Console» среди них не узнан — «Connect» не нажимается (подключил бы к другому сеансу).
     func testUnknownChoiceIsNotContinued() async {
         let window = sessionWindow()
