@@ -166,17 +166,18 @@ test("поиск: логин учётки и метки ищутся; «Дост
 
 // ---------- фильтры и метки ----------
 
-test("фильтры RDP/VPN и строка «МЕТКИ»: AnyDesk/TV не считают RDP/VPN/«Другое»; метки — все выбранные сразу, вместе с фильтром программы", () => {
+test("фильтр — только программа: «Другое» вместо RDP/VPN (RDP, VPN, «Другое»); строка «МЕТКИ»: все выбранные сразу, вместе с фильтром программы", () => {
   const search = new ConnectionSearch(load(FILE, "xml").records);
   const build = (filter, tags = [], query = "") => lists.buildListing({ search, query, filter, defaultProgram: "anyDesk", favorites: [], recents: [], tags });
   const all = build("all");
-  assert.deepEqual(all.counts, { all: 5, anyDesk: 1, teamViewer: 1, rdp: 1, vpn: 3 });
+  assert.deepEqual(all.counts, { all: 5, anyDesk: 1, teamViewer: 1, other: 3 });
+  assert.deepEqual(lists.FILTERS, ["all", "anyDesk", "teamViewer", "other"], "чипов RDP и VPN больше нет");
   assert.deepEqual(all.tags.map((t) => [t.title, t.count, t.kind]), [["Рег", 4, "reg"], ["Фито", 2, "phyto"], ["Сервер", 1, "other"]]);
-  assert.deepEqual(new Set(build("vpn").rows.map((x) => x.record.name)), new Set(["Вінницька · Філія 2", "Лісова", "Східна"]));
-  assert.deepEqual(build("rdp").rows.map((x) => x.record.name), ["Вінницька · Філія 2"]);
+  assert.deepEqual(new Set(build("other").rows.map((x) => x.record.name)), new Set(["Вінницька · Філія 2", "Озерна", "Лісова"]));
+  assert.deepEqual(build("teamViewer").rows.map((x) => [x.record.name, models.needsVPN(x.record)]), [["Східна", true]], "TeamViewer с меткой VPN — в TeamViewer, значок остаётся");
   assert.deepEqual(build("anyDesk").rows.map((x) => x.record.name), ["Північна лабораторія"]);
   assert.deepEqual(build("all", [tagKey("Рег"), tagKey("Фито")]).rows.map((x) => x.record.name), ["Вінницька · Філія 2"], "все выбранные сразу");
-  assert.deepEqual(new Set(build("vpn", [tagKey("фіто")]).rows.map((x) => x.record.name)), new Set(["Вінницька · Філія 2", "Східна"]));
+  assert.deepEqual(build("other", [tagKey("фіто")]).rows.map((x) => x.record.name), ["Вінницька · Філія 2"]);
   // Счётчики меток — по записям после поиска и фильтра программы; выбранная метка остаётся и с нулём.
   assert.deepEqual(build("teamViewer").tags.map((t) => [t.title, t.count]), [["Фито", 1]]);
   assert.deepEqual(build("teamViewer", ["рег"]).tags.map((t) => [t.title, t.count]), [["Рег", 0], ["Фито", 1]]);
@@ -360,7 +361,7 @@ test("вид окна: строка с метками, значками, лог�
   const a = await app();
   const v = await a.call("rc:view", { query: "", filter: "all", tags: [] });
   noSecrets(v, "view");
-  assert.deepEqual(v.counts, { all: 5, anyDesk: 1, teamViewer: 1, rdp: 1, vpn: 3 });
+  assert.deepEqual(v.counts, { all: 5, anyDesk: 1, teamViewer: 1, other: 3 });
   assert.deepEqual(v.tags.map((t) => t.title), ["Рег", "Фито", "Сервер"]);
   assert.equal(v.diagnostics.vpn, 3);
   assert.equal(v.diagnostics.rdp, 1);
@@ -384,12 +385,12 @@ test("вид окна: строка с метками, значками, лог�
   a.rc.dispose();
 });
 
-test("подробности: запись по ключу; «Показать» — «Доступ» из файла с пустыми строками; копия пароля учётки и «Доступа» — в буфер на 30 с; в журнале — только код поля", async () => {
+test("подробности: запись по ключу; «Показать» — «Доступ» из файла с пустыми строками, пароли под маской; копия паролей и «Доступа» — в буфер на 30 с; в журнале — только код поля", async () => {
   const a = await app();
   const details = await a.call("rc:details", a.key("Вінницька · Філія 2"));
   assert.equal(details.name, "Вінницька · Філія 2");
   noSecrets(details, "details");
-  assert.deepEqual(await a.call("rc:revealAccess", a.key("Вінницька · Філія 2")), { ok: true, text: ACCESS });
+  assert.deepEqual(await a.call("rc:revealAccess", a.key("Вінницька · Філія 2")), { ok: true, text: ACCESS.replace("пароль: Demo-77-выдумка", "пароль: ••••••") });
   assert.deepEqual(await a.call("rc:revealAccess", a.key("Озерна")), { ok: false });
   assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: "accountPassword" }), { ok: true });
   assert.equal(a.cb.text, "Win-pass-2");
@@ -398,18 +399,23 @@ test("подробности: запись по ключу; «Показать»
   assert.match(a.huds.at(-1).detail, /30 с/);
   assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Лісова"), field: "access" }), { ok: true });
   assert.equal(a.cb.text, "Профиль: лес");
-  // Пароль программы так не достать.
-  assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Північна лабораторія"), field: "password" }), { ok: false, error: "field" });
-  assert.equal(a.cb.text, "Профиль: лес");
+  // Пароль подключения (карточка v2: ⧉ рядом с ID) — тем же путём; другие поля — нет.
+  assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Північна лабораторія"), field: "password", quiet: true }), { ok: true });
+  assert.equal(a.cb.text, "AD-pass-1");
+  assert.match(a.huds.at(-1).title, /«Доступ» скопирован/, "quiet — без тоста: подпись показывает карточка");
+  assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Північна лабораторія"), field: "contacts" }), { ok: false, error: "field" });
+  assert.deepEqual(await a.call("rc:revealSecret", { key: a.key("Північна лабораторія"), field: "password" }), { ok: true, value: "AD-pass-1" });
+  assert.deepEqual(await a.call("rc:revealSecret", { key: a.key("Північна лабораторія"), field: "accountPassword" }), { ok: false }, "👁 — только поля карточки");
   // Нет пароля учётки — честно «не удалось прочитать».
   assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Озерна"), field: "accountPassword" }), { ok: false, error: "unavailable" });
-  assert.deepEqual(a.log, ["copy ok field=accountPassword", "copy ok field=access", "copy fail field=accountPassword"]);
+  assert.deepEqual(a.log, ["copy ok field=accountPassword", "copy ok field=access", "copy ok field=password", "copy fail field=accountPassword"]);
   a.log.length = 0;
   noSecrets([a.huds, a.log], "тосты и журнал");
   // Адрес RDP — обычной копией (не секрет).
   assert.deepEqual(await a.call("rc:copyAddress", { key: a.key("Вінницька · Філія 2") }), { ok: true });
   assert.deepEqual(a.copied, ["10.20.0.15"]);
   // Выход из приложения: секрет не остаётся в буфере.
+  await a.call("rc:copySecret", { key: a.key("Лісова"), field: "access" });
   a.rc.dispose();
   assert.equal(a.cb.text, "");
 });
@@ -508,15 +514,20 @@ test("шаблон: колонки учётки, «Доступа» и «Кон�
   assert.ok(models.isClean(load(templates.templateBuffer("xml"), "xml").diagnostics));
 });
 
-test("окно: метки и «Доступ» только через textContent; пароль учётки окну не отдаётся; «Доступ» убирается при уходе с подробностей", () => {
+test("окно: метки и «Доступ» только через textContent; пароли — «••••••••», 👁 на 10 с, сами скрываются; при уходе с подробностей всё убирается", () => {
   const ui = path.join(__dirname, "..", "..", "remote", "ui");
   const js = fs.readFileSync(path.join(ui, "remote.js"), "utf8"), preload = fs.readFileSync(path.join(ui, "preload.js"), "utf8");
   assert.equal((js.match(/innerHTML/g) || []).length, 1);
-  assert.ok(!/revealAccess\([^)]*accountPassword/.test(js) && !/rc:revealAccount|revealPassword/.test(js + preload), "пароль учётки на экран не выводится");
-  assert.match(js, /function closeDetails\(\)[\s\S]{0,200}detailsBox"\)\?\.remove\(\)/, "при уходе с подробностей их узел (и «Доступ») удаляется");
-  assert.match(js, /visibilitychange/, "окно скрыто — «Доступ» убирается");
+  assert.ok(!/rc:revealAccount|revealPassword/.test(js + preload));
+  assert.match(js, /const REVEAL_MS = 10_000, COPIED_MS = 30_000;/);
+  assert.match(js, /if \(until && now >= until\) row\.hide\(\);/, "через 10 с значение скрывается само");
+  assert.match(js, /if \(until\) \{ row\.hide\(\); row\.tick\(Date\.now\(\)\); return; \}/, "повторное 👁 — скрыть сразу");
+  assert.match(js, /Показан · скроется через \$\{Math\.max\(1, Math\.ceil\(\(until - now\) \/ 1000\)\)\} с/);
+  assert.match(js, /Скопирован · буфер очистится через 30 с/);
+  assert.match(js, /function closeDetails\(\) \{\s*forgetSecrets\(\);[\s\S]{0,200}detailsBox"\)\?\.remove\(\)/, "при уходе с подробностей их узел (и показанное) удаляется");
+  assert.match(js, /visibilitychange/, "окно скрыто — карточка перерисовывается без показанного");
   assert.match(js, /"без ID"/);
-  assert.match(js, /могут быть пароли/);
+  assert.match(js, /пароли скрыты/);
 });
 
 // ---------- последние правки: «Как подключиться», «Контакты», палитра; секреты — мимо журнала буфера (W2-5) ----------
@@ -528,28 +539,6 @@ const DEMO_FILE = xml([...ROWS,
   `<connection><name>Демо-лаборатория</name><id>111222333</id><tags>Рег, VPN</tags><access>${esc(DEMO_ACCESS)}</access><contacts>${esc(DEMO_CONTACTS)}</contacts><app>AnyDesk</app></connection>`]);
 const DEMO_SECRETS = [DEMO_KEY, "Ольга", "000-00-00", "067 000", "Дежурный"];
 
-test("«Как подключиться»: тип VPN по тексту, сервер, логин, ключ (с «=» в конце); RDP — адрес с портом и логин; не разобралось — строки как есть", () => {
-  const kinds = { "VPN WireGuard 1.2.3.4": "WireGuard", "pptp-vpn: 1.2.3.4": "PPTP", "L2TP/IPsec 1.2.3.4": "L2TP", "FortiClient · сервер forti.demo.invalid": "FortiClient", "OpenVPN профиль demo.ovpn": "OpenVPN", "VPN: 1.2.3.4": null };
-  for (const [line, kind] of Object.entries(kinds)) assert.equal(access.parseAccess(line).vpn.kind, kind, line);
-  const info = access.parseAccess(DEMO_ACCESS);
-  assert.deepEqual({ ...info.vpn, lines: undefined }, { kind: "WireGuard", server: "vpn.demo.invalid:51820", login: "demo-user", secret: DEMO_KEY, lines: undefined });
-  assert.deepEqual({ ...info.rdp, lines: undefined }, { address: "192.0.2.10:3390", login: "demo-admin", lines: undefined });
-  assert.deepEqual(access.parseAccess("PPTP 192.0.2.7 логин demo пароль p@ss").vpn.secret, "p@ss");
-  // Окну — без секрета; адрес RDP из «Доступа» помечен fromAccess (окно его не передаёт обратно — файл читается заново).
-  const howto = access.howToConnect({ method: null, id: "111222333", account: "" }, info, { needsVPN: true });
-  assert.deepEqual(howto.vpn, { kind: "WireGuard", server: "vpn.demo.invalid:51820", login: "demo-user", hasSecret: true, lines: [] });
-  assert.deepEqual(howto.rdp, { address: "192.0.2.10:3390", login: "demo-admin", canOpen: true, fromAccess: true, lines: [] });
-  assert.ok(!JSON.stringify(howto).includes(DEMO_KEY));
-  // Запись RDP: адрес — её ID, логин — учётка записи.
-  const own = access.howToConnect({ method: "rdp", id: "10.20.0.15", account: "lims.admin" }, access.parseAccess(ACCESS), { needsVPN: true, usesRDP: true });
-  assert.deepEqual(own.rdp, { address: "10.20.0.15", login: "lims.admin", canOpen: true, fromAccess: false, lines: [] });
-  assert.deepEqual(own.vpn, { kind: "WireGuard", server: null, login: null, hasSecret: false, lines: ["VPN (WireGuard) | профиль Выдуманный-1"] }, "не разобралось — строка как есть");
-  const raw = access.howToConnect({ method: null, id: "1", account: "" }, access.parseAccess("Подключение через VPN — спросить у админа\nRDP — по запросу"), {});
-  assert.deepEqual([raw.vpn.lines, raw.rdp.lines, raw.rdp.address], [["Подключение через VPN — спросить у админа"], ["RDP — по запросу"], null]);
-  assert.deepEqual(access.howToConnect({ method: "vpn", id: "", account: "" }, null, { needsVPN: true }).vpn, { kind: null, server: null, login: null, hasSecret: false, lines: [] });
-  assert.equal(access.howToConnect({ method: null, id: "1", account: "" }, null, {}).rdp, null, "нет ни метки, ни строк RDP — блока RDP нет");
-});
-
 test("телефоны в «Контактах»: цифры с + ( ) - и пробелами, не меньше 7 цифр; перенос строки телефон не продолжает", () => {
   assert.deepEqual(access.findPhones(DEMO_CONTACTS), ["+38 (044) 000-00-00", "067 000 11 22"]);
   assert.deepEqual(access.findPhones("Иван, 050 000 00 00"), ["050 000 00 00"]);
@@ -559,21 +548,179 @@ test("телефоны в «Контактах»: цифры с + ( ) - и пр�
   for (const bad of ["12-34", "067 000 11 22; calc", "+38 (044) <b>", "1".repeat(25)]) assert.ok(!access.isPhone(bad), bad);
 });
 
-test("карточка: «Как подключиться» и «Контакты» — из файла по запросу; ключа VPN в ответе нет; контактов нет в строке, поиске, подробностях и журнале", async () => {
+// Карточка v2 (task-rc-card-v2): шаги из блоков «Доступа», учётные записи — формы строк как в .audit/rc-access-shapes.txt, данные
+// выдуманные. 1:1 с Mac (`ConnectionCardTests.swift`).
+const rec = (o = {}) => ({ method: null, id: "123456789", tags: [], account: "", ...o });
+const pairsOf = (card) => card.accounts.map((a) => `${a.kind}:${a.login ?? "—"}/${a.password ?? "—"}`);
+
+test("карточка v2: L2TP с IP1/IP2/L2tpPsk, затем блоки RDP и Router; пары из шагов не повторяются; у роутера логин не указан", () => {
+  const card = access.buildCard(rec({ method: "rdp", id: "", tags: ["Рег", "VPN", "RDP"], account: "Администратор" }), [
+    "VPN — подключение средствами Windows, тип L2TP с общим ключом. Если первый сервер не отвечает — второй",
+    "IP1: 203.0.113.10 · основной адрес для подключения через L2tp туннель",
+    "IP2: 203.0.113.11 · запасной адрес для подключения через L2tp туннель",
+    "L2tpPsk: Demo-Psk-10", "login: lims", "pass: demo-Vpn-7731", "",
+    "RDP", "IP: 10.20.0.15", "login: lims", "pass: Demo-Rdp-13", "",
+    "Router", "pass: Demo-Rtr-8"].join("\r\n"), "Demo-Win-1");
+  assert.deepEqual(card.vpn, { kind: "L2TP/IPsec", server: "203.0.113.10", backupServer: "203.0.113.11", key: "Demo-Psk-10", login: "lims",
+    password: "demo-Vpn-7731", note: "подключение средствами Windows, тип L2TP с общим ключом. Если первый сервер не отвечает — второй" });
+  assert.deepEqual(card.rdp, { address: "10.20.0.15", login: "lims", password: "Demo-Rdp-13", useAccountsBelow: false });
+  assert.deepEqual(pairsOf(card), ["windows:Администратор/Demo-Win-1", "router:—/Demo-Rtr-8"]);
+  assert.deepEqual(card.accounts.map((a) => a.source), ["columns", "access"]);
+});
+
+test("карточка v2: RDP с несколькими «Логин · Пароль» — все в учётках, шаг только с адресом; RDP-блок с User/Password", () => {
+  const many = access.buildCard(rec({ method: "rdp", id: "demo-lab.example.net", tags: ["RDP"] }), [
+    "Філія · Адрес основний / резервний сервер 192.0.2.40 через шлюз · Логин: operator · Пароль: Demo-Op1-11",
+    "Логин: operator2 · Пароль: demo-Op2-58", "Логин: lab.manager · Пароль: Demo-Mgr-33"].join("\n"), null);
+  assert.equal(many.vpn, null);
+  assert.deepEqual(many.rdp, { address: "demo-lab.example.net", login: null, password: null, useAccountsBelow: true });
+  assert.deepEqual(pairsOf(many), ["windows:operator/Demo-Op1-11", "windows:operator2/demo-Op2-58", "windows:lab.manager/Demo-Mgr-33"]);
+  const block = access.buildCard(rec({ tags: ["RDP"] }), [
+    "RDP до сервера через основной канал — адрес 10.0.36.1", "Запасной канал RDP через другой порт IP:", "10.0.36.2",
+    "User: Admin", "Password: Demo-Pw-36 · после · смены", "", "Бухгалтерия-2", "Окно-обслуживания"].join("\n"), null);
+  assert.deepEqual(block.rdp, { address: "10.0.36.1", login: "Admin", password: "Demo-Pw-36", useAccountsBelow: false });
+  assert.deepEqual(block.accounts, [], "одиночные слова без меток — не учётки");
+});
+
+test("карточка v2: FortiClient и PPTP («логин — пароль», «Роутер — VPN PPTP · IP:»), VPN с пояснением, многострочное пояснение", () => {
+  const forti = access.buildCard(rec({ method: "rdp", id: "", tags: ["VPN", "RDP"] }), "FortiClient — шлюз · demo-gw\nvpnuser — Demo-Fc-12\nRDP — IP: 10.0.2.5", null);
+  assert.deepEqual([forti.vpn.kind, forti.vpn.login, forti.vpn.password, forti.vpn.server, forti.rdp.address], ["FortiClient", "vpnuser", "Demo-Fc-12", null, "10.0.2.5"]);
+  for (const first of ["Шлюз-1", "Роутер"]) {
+    const pptp = access.buildCard(rec({ method: "vpn", id: "", tags: ["VPN"] }), `${first} — VPN PPTP · IP: 198.51.100.9\nLogin: admin\nPassword: Demo-Pptp-10\nКомпьютер — IP: 10.0.0.9`, null);
+    assert.deepEqual([pptp.vpn.kind, pptp.vpn.server, pptp.vpn.login, pptp.vpn.password, pptp.rdp, pptp.accounts], ["PPTP", "198.51.100.9", "admin", "Demo-Pptp-10", null, []], first);
+  }
+  const note = access.buildCard(rec({ program: "anyDesk", tags: ["VPN", "RDP"] }),
+    "VPN — 203.0.113.34 · подключение средствами Windows через встроенный клиент\nvpn34 — Demo-V34 · PPTP · шифрование обязательно для этого подключения\nRDP — 10.0.34.2", null);
+  assert.deepEqual([note.vpn.server, note.vpn.kind, note.vpn.login, note.vpn.password, note.vpn.note, note.rdp.address],
+    ["203.0.113.34", "PPTP", "vpn34", "Demo-V34", "подключение средствами Windows через встроенный клиент", "10.0.34.2"]);
+  const multi = access.buildCard(rec({ tags: ["VPN"] }), [
+    "AnyDesk: 123 456 789 пароль у заведующего", "",
+    "Для входа в VPN использовать встроенный клиент Windows с типом подключения", "протокол туннеля выбирается автоматически при первом входе",
+    "Login: lab25", "Password: Demo-V25", "IP: IP: 198.51.100.25", "логін і пароль такі ж як на сервер", "", "Администратор", "Demo-Adm-8"].join("\n"), null);
+  assert.deepEqual([multi.vpn.server, multi.vpn.login, multi.vpn.password, multi.vpn.kind, multi.rdp, multi.accounts], ["198.51.100.25", "lab25", "Demo-V25", null, null, []]);
+  assert.equal(multi.vpn.note, "Для входа в VPN использовать встроенный клиент Windows с типом подключения протокол туннеля выбирается автоматически при первом входе логін і пароль ••••••");
+});
+
+test("карточка v2: «Учётка Server», Router одной строкой, «логин — пароль» и пароль отдельным блоком; ничего не выдумывается", () => {
+  const server = access.buildCard(rec({ program: "teamViewer", tags: ["RDP"], account: "Администратор" }),
+    "Учётка Server — логин и пароль в колонках «Учётная запись» и «Пароль учётной записи»\nServer — логин: Администратор · пароль: Demo-Srv-8\n\nRDP — IP: 10.0.22.1", "Demo-Srv-8");
+  assert.deepEqual(pairsOf(server), ["server:Администратор/Demo-Srv-8"]);
+  assert.deepEqual(server.rdp, { address: "10.0.22.1", login: null, password: null, useAccountsBelow: false });
+  assert.deepEqual(pairsOf(access.buildCard(rec({ account: "Администратор" }), "Server — логин: Администратор · пароль: Demo-Other-1", "Demo-Win-2")),
+    ["windows:Администратор/Demo-Win-2", "server:Администратор/Demo-Other-1"]);
+  const generic = access.buildCard(rec({ tags: ["RDP"] }), "Router / pass: Demo-R1\n\nАдминистратор — Demo-Adm-15\n\nrdp — 10.0.31.1\n\nLims\n\nпароль: Demo-P31", null);
+  assert.deepEqual(pairsOf(generic), ["router:—/Demo-R1", "windows:Администратор/Demo-Adm-15", "windows:—/Demo-P31"]);
+  assert.equal(generic.rdp.useAccountsBelow, true);
+  assert.deepEqual(access.buildCard(rec(), "AnyDesk: 123 456 789\nLOCAL IP: 10.1.1.1\nIP: 10.1.1.2 · касса на втором этаже", null), { vpn: null, rdp: null, accounts: [] });
+  const bare = access.buildCard(rec({ tags: ["VPN", "RDP"] }), "VPN включено\nRDP\nServer", null);
+  assert.deepEqual([bare.vpn, bare.rdp.address, bare.accounts], [{ kind: null, server: null, backupServer: null, key: null, login: null, password: null, note: null }, null, []]);
+  assert.deepEqual(pairsOf(access.buildCard(rec({ account: "kassa" }), null, null)), ["windows:kassa/—"]);
+  assert.equal(access.buildCard(rec({ tags: ["RDP"] }), "RDP — IP: 10.20.0.15 · порт 3390", null).rdp.address, "10.20.0.15:3390");
+});
+
+test("карточка v2 для окна: без паролей и ключей — признаки и id для 👁/⧉; значение — cardSecret по id", () => {
+  const record = rec({ id: "111222333", tags: ["Рег", "VPN"] });
+  const full = access.buildCard(record, DEMO_ACCESS, null);
+  const pub = access.publicCard(record, full);
+  assert.deepEqual(pub.vpn, { kind: "WireGuard", server: "vpn.demo.invalid:51820", backupServer: null, login: "demo-user", note: null, hasKey: true, hasPassword: false });
+  assert.deepEqual(pub.rdp, { address: "192.0.2.10:3390", login: "demo-admin", useAccountsBelow: false, hasPassword: false, canOpen: true, fromAccess: true });
+  assert.ok(!JSON.stringify(pub).includes(DEMO_KEY));
+  assert.equal(access.cardSecret(full, "vpn.key"), DEMO_KEY, "ключ целиком, с «=» в конце");
+  assert.equal(access.cardSecret(full, "vpn.password"), null);
+  assert.equal(access.cardSecret(full, "account.7"), null);
+  for (const id of ["vpn.key", "vpn.password", "rdp.password", "account.0", "account.12"]) assert.ok(access.CARD_SECRETS.test(id), id);
+  for (const id of ["password", "access", "account.", "account.x", "vpn.key2"]) assert.ok(!access.CARD_SECRETS.test(id), id);
+});
+
+test("контакты v2: многострочная должность — одна строка; телефон — кнопка; нет телефона — «Телефона в файле нет»; номер — +380…", () => {
+  assert.deepEqual(access.parseContacts("Іваненко Олена\nЗаступник директора\nвірусологічного відділу\n050 000 00 01\n\nАдміністратор мережі\n\n"
+    + "Ольга (бухгалтерия) +38 (044) 000-00-00\nДежурный: 067 000 11 22, каб. 12\nСклад 050 000 00 02, 050 000 00 03"), [
+    { title: "Іваненко Олена", detail: "Заступник директора вірусологічного відділу", phones: ["050 000 00 01"] },
+    { title: "Адміністратор мережі", detail: null, phones: [] },
+    { title: "Ольга (бухгалтерия)", detail: null, phones: ["+38 (044) 000-00-00"] },
+    { title: "Дежурный", detail: "каб. 12", phones: ["067 000 11 22"] },
+    { title: "Склад", detail: null, phones: ["050 000 00 02", "050 000 00 03"] },
+  ]);
+  assert.deepEqual(access.parseContacts("Заступник директора\r\nвірусологічного відділу"), [{ title: "Заступник директора вірусологічного відділу", detail: null, phones: [] }]);
+  const cases = [["050 000 00 01", "+380500000001"], ["+38 (044) 000-00-00", "+380440000000"], ["380670001122", "+380670001122"], ["8 050 000 00 01", "+380500000001"],
+    ["500000001", "+380500000001"], ["+48 600 000 000", "+48600000000"], ["12-34", null], ["0500000", null], ["050 000 00 0123", null]];
+  for (const [raw, want] of cases) assert.equal(access.dialable(raw), want, raw);
+  assert.equal(access.telURL("050 000 00 01"), "tel:+380500000001");
+});
+
+test("звонок: обработчик tel:/callto: — по реестру, только чтение (reg query); UniTalk → tel:+380…, иначе номер копируется", async () => {
+  const dialer = require("../../remote/dialer");
+  assert.deepEqual(dialer.callPlan("050 000 00 01", true), { call: "tel:+380500000001" });
+  assert.deepEqual(dialer.callPlan(" 050 000 00 01 ", false), { copy: "050 000 00 01", reason: "noUniTalk" });
+  assert.deepEqual(dialer.callPlan("каб. 12-34", true), { copy: "каб. 12-34", reason: "notANumber" });
+  assert.equal(dialer.regValue("\r\nHKEY_CURRENT_USER\\...\\UserChoice\r\n    ProgId    REG_SZ    UniTalk.tel\r\n"), "UniTalk.tel");
+  assert.equal(dialer.regValue("    (Default)    REG_EXPAND_SZ    \"C:\\Program Files\\UniTalk\\UniTalk.exe\" \"%1\"\r\n"), "\"C:\\Program Files\\UniTalk\\UniTalk.exe\" \"%1\"");
+  // Двойник execFile: реестр — словарь; запись в реестр невозможна (только query).
+  const run = (reg) => {
+    const calls = [];
+    const execFile = (file, args, opts, cb) => {
+      calls.push([path.win32.basename(file), ...args]);
+      assert.equal(args[0], "query", "только чтение");
+      assert.equal(opts.windowsHide, true);
+      const v = reg[args[1]];
+      setImmediate(() => (v == null ? cb(new Error("not found"), "") : cb(null, `\r\n${args[1]}\r\n    x    REG_SZ    ${v}\r\n`)));
+    };
+    return { calls, lookup: dialer.createHandlerLookup(execFile) };
+  };
+  const UC = (s) => `HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\${s}\\UserChoice`;
+  const chosen = run({ [UC("tel")]: "UniTalk.tel", "HKCR\\UniTalk.tel\\shell\\open\\command": "\"C:\\UniTalk\\UniTalk.exe\" \"%1\"" });
+  assert.equal(await chosen.lookup.isUniTalk(), true);
+  assert.deepEqual(chosen.calls, [["reg.exe", "query", UC("tel"), "/v", "ProgId"], ["reg.exe", "query", "HKCR\\UniTalk.tel\\shell\\open\\command", "/ve"]]);
+  assert.equal(await run({ "HKCR\\callto\\shell\\open\\command": "\"C:\\Program Files\\UniTalk\\UniTalk.exe\" %1" }).lookup.isUniTalk(), true, "без выбора пользователя — HKCR, и callto: тоже");
+  assert.equal(await run({ [UC("tel")]: "ChromeHTML", "HKCR\\ChromeHTML\\shell\\open\\command": "chrome.exe %1" }).lookup.isUniTalk(), false);
+  assert.equal(await run({ [UC("tel")]: "bad\\..\\key" }).lookup.isUniTalk(), false, "странный ProgId в путь реестра не подставляется");
+  assert.equal(await dialer.createHandlerLookup(null).isUniTalk(), false, "не Windows — реестра нет");
+
+  // Через IPC: двойник звонилки — UniTalk не запускается; без UniTalk — номер в буфер и «UniTalk не найден — номер скопирован».
+  const opened = [];
+  let uniTalk = true;
+  const a = await app({ file: DEMO_FILE, extra: { dialer: { isUniTalk: async () => uniTalk, open: async (url) => { opened.push(url); } } } });
+  assert.deepEqual(await a.call("rc:call", "067 000 11 22"), { ok: true, call: true });
+  assert.deepEqual(opened, ["tel:+380670001122"]);
+  assert.deepEqual(a.copied, []);
+  uniTalk = false;
+  assert.deepEqual(await a.call("rc:call", "067 000 11 22"), { ok: true, call: false, reason: "noUniTalk" });
+  assert.deepEqual(a.copied, ["067 000 11 22"]);
+  assert.equal(a.huds.at(-1).title, "UniTalk не найден — номер скопирован");
+  assert.deepEqual(await a.call("rc:call", "calc.exe & 0670001122"), { ok: false, error: "phone" });
+  assert.equal(opened.length, 1);
+  assert.deepEqual(a.log, ["call ok", "call copy reason=noUniTalk"], "номер в журнал не пишется");
+  a.rc.dispose();
+});
+
+test("карточка через IPC: шаги, учётки и контакты — из файла по запросу; паролей и ключей в ответе нет; 👁 и ⧉ — по id, файл читается заново", async () => {
   const a = await app({ file: DEMO_FILE });
   const key = a.key("Демо-лаборатория");
-  const card = await a.call("rc:cardInfo", key);
-  assert.equal(card.ok, true);
-  assert.deepEqual(card.howto.vpn, { kind: "WireGuard", server: "vpn.demo.invalid:51820", login: "demo-user", hasSecret: true, lines: [] });
-  assert.deepEqual(card.howto.rdp, { address: "192.0.2.10:3390", login: "demo-admin", canOpen: true, fromAccess: true, lines: [] });
-  assert.deepEqual(card.contacts, { text: DEMO_CONTACTS, phones: ["+38 (044) 000-00-00", "067 000 11 22"] });
-  assert.ok(!JSON.stringify(card).includes(DEMO_KEY), "пароль или ключ VPN окну не уходит");
-  // Без «Доступа» и «Контактов» — пусто; запись RDP — адрес из ID.
+  const info = await a.call("rc:cardInfo", key);
+  assert.equal(info.ok, true);
+  assert.deepEqual(info.card.vpn, { kind: "WireGuard", server: "vpn.demo.invalid:51820", backupServer: null, login: "demo-user", note: null, hasKey: true, hasPassword: false });
+  assert.deepEqual(info.card.rdp, { address: "192.0.2.10:3390", login: "demo-admin", useAccountsBelow: false, hasPassword: false, canOpen: true, fromAccess: true });
+  assert.deepEqual(info.contacts, [{ title: "Ольга (бухгалтерия)", detail: null, phones: ["+38 (044) 000-00-00"] }, { title: "Дежурный", detail: "каб. 12", phones: ["067 000 11 22"] }]);
+  assert.ok(!JSON.stringify(info).includes(DEMO_KEY), "ключ VPN окну не уходит");
+  assert.deepEqual(await a.call("rc:revealSecret", { key, field: "vpn.key" }), { ok: true, value: DEMO_KEY });
+  assert.deepEqual(await a.call("rc:revealSecret", { key, field: "vpn.password" }), { ok: false });
+  assert.deepEqual(await a.call("rc:revealSecret", { key, field: "../access" }), { ok: false });
+  // Запись RDP: адрес — её ID; учётки — колонки, Server и «Login: operator».
+  const branch = await a.call("rc:cardInfo", a.key("Вінницька · Філія 2"));
+  assert.equal(branch.card.rdp.address, "10.20.0.15");
+  assert.equal(branch.card.rdp.useAccountsBelow, true);
+  assert.deepEqual(branch.card.accounts, [
+    { id: "account.0", kind: "windows", source: "columns", login: "lims.admin", hasPassword: true },
+    { id: "account.1", kind: "server", source: "access", login: "lims.admin", hasPassword: true },
+    { id: "account.2", kind: "windows", source: "access", login: "operator", hasPassword: false }]);
+  assert.ok(!JSON.stringify(branch).includes("Win-pass-2") && !JSON.stringify(branch).includes("Demo-77"));
+  assert.deepEqual(await a.call("rc:revealSecret", { key: a.key("Вінницька · Філія 2"), field: "account.1" }), { ok: true, value: "Demo-77-выдумка" });
+  assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: "account.0", quiet: true }), { ok: true });
+  assert.equal(a.cb.text, "Win-pass-2");
+  // Без «Доступа» и «Контактов» — пусто; метка VPN без строк — пустой шаг VPN.
   const plain = await a.call("rc:cardInfo", a.key("Східна"));
-  assert.deepEqual([plain.contacts, plain.howto.rdp], [null, null]);
-  assert.equal(plain.howto.vpn.hasSecret, false);
-  assert.equal((await a.call("rc:cardInfo", a.key("Вінницька · Філія 2"))).howto.rdp.address, "10.20.0.15");
-  assert.equal((await a.call("rc:cardInfo", a.key("Північна лабораторія"))).contacts.text, CONTACT);
+  assert.deepEqual([plain.contacts, plain.card.rdp, plain.card.accounts], [[], null, []]);
+  assert.deepEqual(plain.card.vpn, { kind: null, server: null, backupServer: null, login: null, note: null, hasKey: false, hasPassword: false });
   assert.deepEqual(await a.call("rc:cardInfo", "999:x"), { ok: false });
   // Строка, подробности (rc:details) и поиск контактов не знают.
   const all = await a.call("rc:view", { query: "" });
@@ -584,59 +731,50 @@ test("карточка: «Как подключиться» и «Контакт�
     const v = await a.call("rc:view", { query: q });
     assert.ok(!v.sections.flatMap((s) => s.records).some((r) => r.name === "Демо-лаборатория"), `поиск «${q}» не по «Контактам»/«Доступу»`);
   }
-  assert.deepEqual(a.log, [], "чтение карточки в журнал не пишется");
+  assert.deepEqual(a.log, ["copy ok field=account"], "чтение карточки и 👁 в журнал не пишутся; копия — только код поля");
   a.rc.dispose();
 });
 
-test("RW-1: неразобранные строки «Как подключиться» — пароли и ключи под маской ещё в основном процессе; в окне — по «Показать»", async () => {
+test("RW-1 / v2: «Доступ · как в файле» — пароли и ключи под маской ещё в основном процессе; пояснение «Из файла» — тоже", async () => {
   const RAW_ACCESS = "RDP — сервер srv01 · логин: admin · пароль: Qw3rty-выдумка\nL2TP VPN · L2tpPsk=Demo-Psk-1 · Password: Demo Pass 2 | профиль у админа";
-  const masked = access.parseAccess(RAW_ACCESS);
-  assert.deepEqual(masked.rdp.lines, ["RDP — сервер srv01 · логин: admin · пароль: ••••••"]);
-  assert.equal(masked.vpn.secret, "Demo-Psk-1", "для «Скопировать» значение берётся из исходной строки");
-  assert.deepEqual(masked.vpn.lines, ["L2TP VPN · L2tpPsk=•••••• · Password: •••••• | профиль у админа"]);
   const cases = {
     "VPN pass Demo-3": "VPN pass ••••••", "VPN, пароля: Demo-4": "VPN, пароля: ••••••", "VPN WireGuard key = QUJD=": "VPN WireGuard key = ••••••",
     "VPN PSK: Demo-5; сервер vpn.demo.invalid": "VPN PSK: ••••••; сервер vpn.demo.invalid", "VPN pre-shared key — Demo-6": "VPN pre-shared key — ••••••",
     "RDP pwd:Demo-7": "RDP pwd:••••••", "RDP secret Demo-8 · порт 3389": "RDP secret •••••• · порт 3389", "RDP — пароль:": "RDP — пароль:",
-    "VPN Passport office · keyboard US": "VPN Passport office · keyboard US",
+    "VPN Passport office · keyboard US": "VPN Passport office · keyboard US", "тип L2TP с общим ключом. Если": "тип L2TP с общим ключом. Если",
   };
   for (const [line, want] of Object.entries(cases)) assert.equal(access.maskSecrets(line), want, line);
-  // Через IPC: в ответе окну ни пароля RDP, ни PSK, ни пароля VPN.
   const a = await app({ file: xml([...ROWS, `<connection><name>Без адреса</name><id>111222334</id><tags>VPN, RDP</tags><access>${esc(RAW_ACCESS)}</access><app>AnyDesk</app></connection>`]) });
-  const card = await a.call("rc:cardInfo", a.key("Без адреса"));
-  assert.equal(card.howto.rdp.address, null);
-  assert.deepEqual(card.howto.rdp.lines, masked.rdp.lines);
-  for (const x of ["Qw3rty", "Demo-Psk-1", "Demo Pass 2"]) assert.ok(!JSON.stringify(card).includes(x), x);
+  const key = a.key("Без адреса");
+  const info = await a.call("rc:cardInfo", key);
+  assert.equal(info.card.rdp.address, null, "имя без точки — не адрес");
+  assert.equal(info.card.vpn.hasKey, true);
+  assert.deepEqual((await a.call("rc:revealAccess", key)).text.split("\n"),
+    ["RDP — сервер srv01 · логин: admin · пароль: ••••••", "L2TP VPN · L2tpPsk=•••••• · Password: •••••• | профиль у админа"]);
+  for (const x of ["Qw3rty", "Demo-Psk-1", "Demo Pass 2"]) assert.ok(!JSON.stringify([info, await a.call("rc:revealAccess", key)]).includes(x), x);
   a.rc.dispose();
-  // Окно: строки — только после «Показать», до того размытые полосы и «могут быть пароли».
-  const js = fs.readFileSync(path.join(__dirname, "..", "..", "remote", "ui", "remote.js"), "utf8");
-  const raw = js.slice(js.indexOf("function rawLines"), js.indexOf("function howToCard"));
-  assert.match(raw, /let shown = false;/);
-  assert.match(raw, /if \(shown\) \{\s*pane\.append\(el\("pre", "rawlines"/);
-  assert.match(raw, /могут быть пароли/);
-  assert.match(raw, /"Показать"/);
 });
 
-test("W2-5: пароль/ключ VPN, пароль учётки и «Доступ» — в буфер через помощник мимо журнала Win+V и облака; не вышло — ничего не скопировано", async () => {
+test("W2-5: ключ VPN, пароль учётки и «Доступ» — в буфер через помощник мимо журнала Win+V и облака; не вышло — ничего не скопировано", async () => {
   const concealed = [];
   let works = true;
   const writeConcealed = async (secret) => { concealed.push(Buffer.from(secret.bytes).toString("utf8")); return works; };
   const a = await app({ file: DEMO_FILE, extra: { writeConcealed } });
   const key = a.key("Демо-лаборатория");
-  assert.deepEqual(await a.call("rc:copySecret", { key, field: "vpnSecret" }), { ok: true });
+  assert.deepEqual(await a.call("rc:copySecret", { key, field: "vpn.key" }), { ok: true });
   assert.deepEqual(concealed, [DEMO_KEY], "ключ целиком, с «=» в конце");
   assert.equal(a.cb.writes, 0, "обычным writeText секрет не пишется");
-  assert.equal(a.huds.at(-1).title, "Пароль VPN скопирован");
+  assert.equal(a.huds.at(-1).title, "Пароль скопирован");
   assert.match(a.huds.at(-1).detail, /30 с/);
   assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: "accountPassword" }), { ok: true });
   assert.equal(concealed.at(-1), "Win-pass-2");
   // У записи без ключа VPN — честно «не удалось».
-  assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: "vpnSecret" }), { ok: false, error: "unavailable" });
+  assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: "vpn.key" }), { ok: false, error: "unavailable" });
   works = false;
   assert.deepEqual(await a.call("rc:copySecret", { key, field: "access" }), { ok: false });
   assert.equal(a.cb.writes, 0, "помощник не справился — секрет не уходит в буфер обычным текстом");
   assert.equal(a.huds.at(-1).kind, "warning");
-  assert.deepEqual(a.log, ["copy ok field=vpnSecret", "copy ok field=accountPassword", "copy fail field=vpnSecret", "copy fail field=access"]);
+  assert.deepEqual(a.log, ["copy ok field=vpn.key", "copy ok field=accountPassword", "copy fail field=vpn.key", "copy fail field=access"]);
   for (const x of [...DEMO_SECRETS, "Win-pass-2"]) assert.ok(!JSON.stringify([a.huds, a.log]).includes(x), x);
   a.rc.dispose();
 });
@@ -671,8 +809,12 @@ test("палитра: внизу только «Обновить» (↻); Excel,
   assert.match(js, /\$\("folderBtn"\)\.onclick = \(\) => window\.rc\.showFolder\(\)/);
   const row = js.slice(js.indexOf("function rowElement"), js.indexOf("function fitAllLabels"));
   assert.ok(!/contacts|phone/i.test(row), "в строке списка контактов нет");
-  assert.ok(js.indexOf("contactsCard(currentCard.contacts)") > js.indexOf("async function renderDetails"));
-  // Пароль/ключ VPN — только точки и «Скопировать» (vpnSecret копирует основной процесс).
-  assert.match(js, /window\.rc\.copySecret\(r\.key, "vpnSecret"\)/);
-  assert.ok(!/howto\.vpn\.secret|vpn\.secret/.test(js));
+  assert.ok(js.indexOf("contactsCard(contacts)") > js.indexOf("async function renderDetails"));
+  assert.ok(js.indexOf("contactsCard(contacts)") > js.indexOf("accessCard(r)"), "контакты — в самом низу карточки");
+  // Пароли и ключи — только точки, 👁 и ⧉ по id (значение даёт и копирует основной процесс).
+  assert.match(js, /window\.rc\.revealSecret\(r\.key, id\)/);
+  assert.match(js, /window\.rc\.copySecret\(r\.key, id, true\)/);
+  const cardJs = js.slice(js.indexOf("function stepsCard"), js.indexOf("function accessCard"));
+  assert.ok(!/(?<!")\b(?:v|d|a|vpn|rdp)\.(?:key|password|secret)\b/.test(cardJs), "в карточку значения не приходят — только hasKey/hasPassword");
+  assert.match(cardJs, /v\.hasKey/);
 });

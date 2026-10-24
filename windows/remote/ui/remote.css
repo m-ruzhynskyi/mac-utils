@@ -105,7 +105,7 @@ body.palette .scroller { padding:0; } body.palette .top { padding:0 0 8px; }
   --vpn-bg:#33270F; --vpn-fg:#FFB65C; --vpn-dot:#FFB65C; --rdp-bg:#251F3D; --rdp-fg:#B9A6FF; --rdp-dot:#B9A6FF;
   --ban-bg:#2A2110; --ban-line:#5A4318; --ban-title:#FFD8A3; --ban-text:#D9B98C; --pill-fg:#E6E8EB; } }
 
-.chip { gap:6px; } .chip svg.ci { width:13px; height:13px; stroke-width:2.2; } .chip svg.ci.rdp { color:var(--rdp-fg); } .chip svg.ci.vpn { color:var(--vpn-fg); }
+.chip { gap:6px; }
 .tagrow { display:flex; align-items:center; gap:6px; flex-wrap:wrap; } .tagrow[hidden] { display:none; }
 .tagrow .cap { font-size:11px; font-weight:700; letter-spacing:.1em; color:var(--mute); margin-right:2px; }
 
@@ -160,38 +160,44 @@ body.palette .details { background:var(--panel); border:1px solid var(--line); b
 .dtitles span { font-size:12.5px; color:var(--mute); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dscroll { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:12px; padding-bottom:8px; }
 .dtags { display:flex; gap:6px; flex-wrap:wrap; }
-.vpnbanner { display:flex; gap:10px; align-items:flex-start; padding:12px 14px; border-radius:14px; background:var(--ban-bg); border:1px solid var(--ban-line); }
-.vpnbanner svg { width:18px; height:18px; stroke-width:2.2; color:var(--vpn-fg); margin-top:1px; }
-.vpnbanner b { display:block; font-size:13.5px; font-weight:700; color:var(--ban-title); } .vpnbanner span { display:block; margin-top:3px; font-size:12.5px; line-height:1.4; color:var(--ban-text); }
 .dcard { display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:14px; background:var(--panel); border:1px solid var(--line); flex:none; }
 .dlbl { font-size:11px; font-weight:700; letter-spacing:.12em; color:var(--mute); }
-.dlbl.rdp { display:flex; align-items:center; gap:8px; color:var(--rdp-fg); } .dlbl.rdp svg { width:16px; height:16px; stroke-width:2.2; }
 .dlbl.row2 { display:flex; align-items:center; gap:8px; } .dlbl.row2 > span { flex:1; }
-.addr { display:flex; align-items:baseline; gap:8px; min-width:0; } .addr b { font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:.03em; white-space:nowrap; } .addr span { font-size:12.5px; color:var(--mute); }
 .dacts { display:flex; gap:8px; flex-wrap:wrap; }
-.acct { display:flex; align-items:center; gap:10px; min-width:0; } .acct b { flex:1; min-width:0; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; user-select:text; }
-.acct .dots { font-size:15px; letter-spacing:.2em; color:var(--mute); }
 .dnote { font-size:13.5px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
 .dcard small.muted { font-size:11.5px; }
 .btn.sm { height:28px; padding:0 10px; gap:6px; } .btn.sm svg { width:13px; height:13px; stroke-width:2.2; }
-.apane { position:relative; min-height:90px; border-radius:10px; background:var(--bg); border:1px solid var(--line); overflow:hidden; }
-.apane .bars { display:flex; flex-direction:column; gap:9px; padding:14px; filter:blur(3px); }
-.apane .bars i { display:block; height:8px; border-radius:4px; background:var(--mute); opacity:.45; max-width:100%; }
-.apane .veil { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:12.5px; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 10px; white-space:nowrap; }
-.apane .atext { margin:0; padding:12px; font:12px/1.7 "Cascadia Mono",Consolas,ui-monospace,monospace; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
 .settings textarea { border-radius:10px; border:1px solid var(--line); background:var(--field); color:var(--text); padding:8px 10px; font:inherit; resize:vertical; }
 .settings input:disabled, .settings textarea:disabled, .settings select:disabled { opacity:.75; }
 /* «Как подключиться», «Контакты»; палитра — внизу только «Обновить» */
-.dlbl.vpn { display:flex; align-items:center; gap:8px; color:var(--vpn-fg); } .dlbl.vpn svg { width:16px; height:16px; stroke-width:2.2; }
-.dlbl.vpn .kind { color:var(--text); font-size:13px; font-weight:600; letter-spacing:0; }
-.howto .dlbl.rdp, .howto .dlbl.vpn { margin-top:4px; }
-.fact { display:flex; align-items:center; gap:10px; min-width:0; } .fact .fk { flex:none; width:118px; font-size:12.5px; color:var(--mute); }
-.fact .fv { min-width:0; font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; user-select:text; }
-.fact .fv.mono, .phone .pn { font:13px "Cascadia Mono",Consolas,ui-monospace,monospace; }
-.fact .dots { font-size:15px; letter-spacing:.2em; color:var(--mute); } .fact .sp, .phone .sp { flex:1; }
-.rawbox { display:flex; flex-direction:column; align-items:flex-start; gap:8px; } .apane.raw { min-height:60px; width:100%; }
-.rawlines { margin:0; padding:10px; border-radius:10px; background:var(--bg); font:12px/1.7 "Cascadia Mono",Consolas,ui-monospace,monospace; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
-.phone { display:flex; align-items:center; gap:10px; min-width:0; } .phone svg { width:15px; height:15px; flex:none; stroke:var(--mute); fill:none; stroke-width:2; }
-.phone .pn { color:var(--text); white-space:nowrap; user-select:text; }
 #folderBtn svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; }
 body.palette .bar { border-top:none; padding:6px 2px 0; justify-content:flex-end; }
+/* карточка v2 (макеты Details и Accounts): шаги, учётки, пароль подключения, «Доступ», контакты */
+.kv { display:flex; align-items:center; gap:8px; min-height:30px; min-width:0; } .kv .k { width:92px; flex:none; font-size:12.5px; color:var(--mute); }
+.kv .v { flex:1; min-width:0; font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; user-select:text; }
+.kv .v.mono, .sval, .callbtn { font-family:"Cascadia Mono",Consolas,ui-monospace,monospace; font-variant-numeric:tabular-nums; }
+.kv .v.sec { font-weight:500; color:var(--mute); } .kv .v.none, .acc .login.none { font-weight:500; color:var(--mute); } .kv .v.id { flex:1; }
+.dots { font-size:15px; letter-spacing:.22em; color:var(--mute); font-weight:600; } .kv .dots { flex:1; }
+.sval { flex:1; min-width:0; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; user-select:text; }
+.ib { display:inline-grid; place-items:center; width:30px; height:30px; border-radius:8px; border:1px solid var(--line); background:var(--field); color:var(--text); flex:none; cursor:pointer; padding:0; }
+.ib svg { width:15px; height:15px; stroke-width:2; } .ib.on { background:var(--text); color:var(--panel); border-color:var(--text); }
+.ib.ok { background:var(--phy-bg); color:var(--phy-fg); border-color:var(--phy-dot); }
+.ibs { display:inline-flex; gap:6px; flex:none; } .kvs { display:flex; flex-direction:column; gap:2px; }
+.scap { font-size:11.5px; min-height:0; } .scap:empty { display:none; } .scap.shown { color:var(--vpn-fg); } .scap.copied { color:var(--phy-fg); }
+.scap.indent { margin-left:100px; } .scap.indent-n { margin-left:30px; }
+.step { display:flex; gap:12px; } .sbody { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.step .num { width:24px; height:24px; border-radius:12px; flex:none; display:grid; place-items:center; font-size:12.5px; font-weight:700; }
+.step .num.vpn { background:var(--vpn-bg); color:var(--vpn-fg); } .step .num.rdp { background:var(--rdp-bg); color:var(--rdp-fg); }
+.stitle { font-size:14px; font-weight:700; } .ssep { height:1px; background:var(--line); margin-left:36px; } .hsep { height:1px; background:var(--line); }
+.howto { gap:14px; } .howto .dacts { margin-top:4px; align-items:center; }
+.from { font-size:12px; line-height:1.45; color:var(--mute); background:var(--field); border-radius:8px; padding:8px 10px; margin-top:2px; }
+.akind { display:flex; align-items:center; gap:6px; } .atag { height:20px; padding:0 8px; border-radius:10px; font-size:11px; font-weight:600; display:inline-flex; align-items:center; background:var(--oth-bg); color:var(--oth-fg); }
+.acc { display:flex; align-items:center; gap:8px; min-height:38px; min-width:0; } .acc .n { width:22px; flex:none; text-align:center; font-size:12px; font-weight:700; color:var(--mute); }
+.acc .login { flex:1; min-width:0; text-align:left; font:inherit; font-size:13.5px; font-weight:600; color:var(--text); background:none; border:0; padding:0; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.acc .dots, .acc .sval { flex:none; width:110px; }
+.arow { display:flex; align-items:center; gap:10px; } .atitles { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.access .atext { margin:0; padding:12px; border-radius:10px; background:var(--bg); border:1px solid var(--line); font:12px/1.7 "Cascadia Mono",Consolas,ui-monospace,monospace; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
+.contact { display:flex; align-items:center; gap:10px; min-width:0; } .who { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; } .who b { font-size:13.5px; font-weight:600; }
+.phones { display:flex; flex-direction:column; align-items:flex-end; gap:6px; } .phone { display:flex; align-items:center; gap:6px; }
+.callbtn { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 10px; border-radius:8px; border:0; background:var(--acc); color:var(--acc-ink); font-size:13.5px; font-weight:600; white-space:nowrap; cursor:pointer; }
+.callbtn svg { width:14px; height:14px; stroke-width:2.2; }

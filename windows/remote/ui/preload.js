@@ -1,6 +1,7 @@
-// Мост окна «Удалённые подключения» и палитры: только вызовы к основному процессу. Пароли сюда не приходят (пароль или ключ VPN —
-// тоже: только признак «есть», копирует основной процесс); «Доступ» — только по «Показать» в подробностях (revealAccess); «Как
-// подключиться» и «Контакты» — при открытии подробностей (cardInfo). Всё это живёт в окне, пока подробности открыты.
+// Мост окна «Удалённые подключения» и палитры: только вызовы к основному процессу. Пароли и ключи в карточку не приходят — только
+// признак «есть»; значение — по 👁 на 10 с (revealSecret), копирует основной процесс (copySecret). «Доступ» — по «Показать», пароли
+// под маской (revealAccess); шаги, учётки и контакты — при открытии подробностей (cardInfo). Всё это живёт в окне, пока подробности
+// открыты.
 "use strict";
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -9,7 +10,10 @@ contextBridge.exposeInMainWorld("rc", {
   details: (key) => ipcRenderer.invoke("rc:details", key),
   pendingDetails: () => ipcRenderer.invoke("rc:pendingDetails"),
   revealAccess: (key) => ipcRenderer.invoke("rc:revealAccess", key),
-  copySecret: (key, field) => ipcRenderer.invoke("rc:copySecret", { key, field }),
+  copySecret: (key, field, quiet) => ipcRenderer.invoke("rc:copySecret", { key, field, quiet: !!quiet }),
+  revealSecret: (key, field) => ipcRenderer.invoke("rc:revealSecret", { key, field }),
+  copyText: (text) => ipcRenderer.invoke("rc:copyText", String(text)),
+  call: (phone) => ipcRenderer.invoke("rc:call", String(phone)),
   copyAddress: (key, fromAccess) => ipcRenderer.invoke("rc:copyAddress", { key, fromAccess: !!fromAccess }),
   copyPhone: (text) => ipcRenderer.invoke("rc:copyPhone", String(text)),
   cardInfo: (key) => ipcRenderer.invoke("rc:cardInfo", key),

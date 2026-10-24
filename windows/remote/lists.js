@@ -2,11 +2,11 @@
 // 1:1 с Mac (`ConnectionLists.swift`).
 "use strict";
 
-const { PROGRAMS, programOf, identity, favoriteKey, needsVPN, usesRDP, labelsOf } = require("./models");
+const { PROGRAMS, programOf, identity, favoriteKey, labelsOf } = require("./models");
 const { tagKey, tagKind, displayTag } = require("./tags");
 
 const RECENT_LIMIT = 5;
-const FILTERS = ["all", ...PROGRAMS, "rdp", "vpn"];
+const FILTERS = ["all", ...PROGRAMS, "other"];
 
 // store: { favoriteIDs: string[], recentIDs: string[] } (хранит приложение).
 const isFavorite = (record, store) => store.favoriteIDs.includes(favoriteKey(record));
@@ -21,11 +21,10 @@ function noteConnected(record, store) {
   store.recentIDs = [key, ...store.recentIDs.filter((id) => id !== key)].slice(0, RECENT_LIMIT);
 }
 
-// Фильтр-чип: "all" | "anyDesk" | "teamViewer" — программа (записи RDP/VPN/«Другое» к ним не относятся); "rdp" | "vpn" — способ
-// или метка.
+// Фильтр-чип — только программа подключения: "all" | "anyDesk" | "teamViewer" | "other" (RDP, VPN и «Другое» — записи не через
+// программу; значки VPN/RDP в строке остаются).
 function matchesFilter(record, filter, defaultProgram) {
-  if (filter === "rdp") return usesRDP(record);
-  if (filter === "vpn") return needsVPN(record);
+  if (filter === "other") return !!record.method;
   if (PROGRAMS.includes(filter)) return !record.method && programOf(record, defaultProgram) === filter;
   return true;
 }
@@ -35,12 +34,10 @@ function matchesFilter(record, filter, defaultProgram) {
 // программы. Исчезнувшие ID не показываются.
 function buildListing({ search, query, filter, defaultProgram, favorites, recents, tags = [] }) {
   const result = search.search(query);
-  const counts = { all: result.records.length, rdp: 0, vpn: 0 };
+  const counts = { all: result.records.length, other: 0 };
   for (const p of PROGRAMS) counts[p] = 0;
   for (const r of result.records) {
-    if (!r.method) counts[programOf(r, defaultProgram)]++;
-    if (usesRDP(r)) counts.rdp++;
-    if (needsVPN(r)) counts.vpn++;
+    if (r.method) counts.other++; else counts[programOf(r, defaultProgram)]++;
   }
   const byProgram = result.records.filter((r) => matchesFilter(r, filter, defaultProgram));
   const selected = new Set(tags);

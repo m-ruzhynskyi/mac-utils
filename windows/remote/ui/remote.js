@@ -22,6 +22,8 @@ const SVG = {
   back: '<path d="M15 5l-7 7 7 7"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   eyeOff: '<path d="M2 12s3.5-7 10-7c2 0 3.8.7 5.2 1.6M22 12s-3.5 7-10 7c-2 0-3.8-.7-5.2-1.6M4 4l16 16"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+  check: '<path d="M5 12l5 5 9-10"/>',
   phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
 };
 function icon(name, cls) {
@@ -54,14 +56,6 @@ function marked(parent, text, marks) {
   if (at < text.length) parent.append(text.slice(at));
 }
 
-// «1 строка скрыта», «3 строки скрыты», «6 строк скрыто».
-function hiddenLines(n) {
-  const d = n % 10, h = n % 100;
-  if (d === 1 && h !== 11) return `${n} строка скрыта`;
-  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return `${n} строки скрыты`;
-  return `${n} строк скрыто`;
-}
-
 async function refresh() {
   view = await window.rc.view($("query").value, filter, [...selectedTags]);
   if (mode === "details") return renderDetails();
@@ -71,7 +65,7 @@ async function refresh() {
 const SKIP_REASONS = { missingName: "нет названия", missingID: "нет ID", invalidID: "ID не похож на ID", unknownProgram: "неизвестная программа", aliasNotSupported: "алиас не поддерживается этой программой" };
 const FIELD_TITLES = { name: "Название", id: "ID", password: "Пароль", group: "Группа", tags: "Теги", note: "Заметка", program: "Программа",
   account: "Учётная запись", accountPassword: "Пароль учётной записи", access: "Доступ", contacts: "Контакты" };
-const PROGRAM_FILTERS = [["all", "Все"], ["anyDesk", "AnyDesk"], ["teamViewer", "TeamViewer"], ["rdp", "RDP"], ["vpn", "VPN"]];
+const PROGRAM_FILTERS = [["all", "Все"], ["anyDesk", "AnyDesk"], ["teamViewer", "TeamViewer"], ["other", "Другое"]];
 
 function emptyState(v) {
   const box = el("div", "empty");
@@ -96,9 +90,10 @@ function emptyState(v) {
   return box;
 }
 
-// Фильтры программы: «Все / AnyDesk / TeamViewer», RDP и VPN — только если такие записи есть (или фильтр уже выбран).
+// Фильтр — только программа подключения: «Все / AnyDesk / TeamViewer», «Другое» (RDP, VPN и записи не через программу) — только
+// если такие записи есть (или фильтр уже выбран). Значки VPN/RDP остаются в строке.
 function visibleFilters(v) {
-  return PROGRAM_FILTERS.filter(([id]) => !(id === "rdp" || id === "vpn") || (v.counts[id] || 0) > 0 || filter === id);
+  return PROGRAM_FILTERS.filter(([id]) => id !== "other" || (v.counts[id] || 0) > 0 || filter === id);
 }
 
 function setFilter(id) { filter = id; selected = 0; refresh(); $("query").focus(); }
@@ -108,7 +103,7 @@ function renderChips(v) {
   if (v.status !== "ready") return;
   for (const [id, title] of visibleFilters(v)) {
     const b = el("button", "chip" + (filter === id ? " sel" : "")); b.type = "button";
-    if (id === "rdp" || id === "vpn") b.append(icon(id === "rdp" ? "monitor" : "shield", "ci " + id));
+    if (id === "other") b.title = "RDP, VPN и записи без программы подключения";
     b.append(`${title} ${v.counts[id] ?? 0}`);
     b.setAttribute("aria-pressed", String(filter === id));
     b.onclick = () => setFilter(id);
@@ -313,7 +308,7 @@ document.addEventListener("keydown", (e) => {
   if (mode === "details") {
     if (e.key === "Escape") { e.preventDefault(); closeDetails(); }
     else if (e.key === "Enter" && !e.target.closest?.("button")) {
-      const r = currentDetails, rdp = currentCard && currentCard.howto && currentCard.howto.rdp;
+      const r = currentDetails, rdp = currentCard && currentCard.card && currentCard.card.rdp;
       if (r && rdp && rdp.canOpen) { e.preventDefault(); openRDPFromDetails(r, rdp.fromAccess); }
     }
     return;
@@ -338,10 +333,10 @@ $("folderBtn").onclick = () => window.rc.showFolder();
 $("reload").onclick = () => window.rc.reload();
 $("settingsBtn").onclick = () => openSettings();
 
-// ---- подробности записи (макет Details): экран вместо списка ----
-// Пароль учётки и пароль/ключ VPN на экран не выводятся никогда (в окно они и не приходят); «Доступ» — только по «Показать»;
-// «Как подключиться» и «Контакты» — из файла при открытии экрана. Всё это живёт, только пока открыт этот экран: при уходе с
-// экрана (и при перечитывании файла) текст из окна убирается.
+// ---- подробности записи (макеты Details и Accounts): экран вместо списка ----
+// Пароли и ключи в карточку не приходят: только «••••••••»; 👁 — значение на 10 с, ⧉ — копия (оба — запросом к основному процессу,
+// файл читается заново). «Доступ · как в файле» — по «Показать», пароли под маской. Шаги, учётки и контакты — из файла при
+// открытии экрана; всё это живёт, только пока открыт этот экран: при уходе с экрана (и при перечитывании файла) убирается.
 let currentDetails = null, currentCard = null;
 
 async function openDetails(key) {
@@ -352,6 +347,7 @@ async function openDetails(key) {
 }
 
 function closeDetails() {
+  forgetSecrets();
   detailsKey = null; currentDetails = null; currentCard = null;
   $("detailsBox")?.remove();   // вместе с ним — показанный «Доступ»
   $("page").hidden = false;
@@ -366,11 +362,13 @@ function openRDPFromDetails(r, fromAccess = false) {
 
 async function renderDetails() {
   const key = detailsKey;
-  const [r, card] = key ? await Promise.all([window.rc.details(key), window.rc.cardInfo(key)]) : [null, null];
+  const [r, info] = key ? await Promise.all([window.rc.details(key), window.rc.cardInfo(key)]) : [null, null];
   if (mode !== "details" || key !== detailsKey) return;
   if (!r) return closeDetails();   // записи больше нет в файле
-  currentDetails = r; currentCard = card && card.ok ? card : null;
-  const howto = currentCard ? currentCard.howto : { vpn: null, rdp: null };
+  forgetSecrets();
+  currentDetails = r; currentCard = info && info.ok ? info : null;
+  const card = currentCard ? currentCard.card : { vpn: null, rdp: null, accounts: [] };
+  const contacts = currentCard ? currentCard.contacts : [];
   $("detailsBox")?.remove();
   const box = el("div", "details"); box.id = "detailsBox"; box.setAttribute("role", "region"); box.setAttribute("aria-label", `Подробности: ${r.name}`);
   document.body.append(box);
@@ -380,8 +378,8 @@ async function renderDetails() {
   const titles = el("div", "dtitles");
   const parts = [];
   if (r.group) parts.push(`Группа «${r.group}»`);
-  parts.push(r.methodTitle || r.programTitle);
-  if (r.id) parts.push(r.id);
+  parts.push(card.vpn && card.rdp ? "VPN, затем RDP" : r.methodTitle || r.programTitle);
+  if (!r.method && r.id) parts.push(r.id);
   titles.append(el("h2", null, r.name), el("span", null, parts.join(" · ")));
   head.append(back, titles);
   box.append(head);
@@ -394,145 +392,222 @@ async function renderDetails() {
     if (r.usesRDP) tags.append(badge("rdp", true));
     scroll.append(tags);
   }
-  if (r.needsVPN) {
-    const b = el("div", "vpnbanner"); b.append(icon("shield"));
-    const t = el("div"); t.append(el("b", null, "Сначала подключите VPN"),
-      el("span", null, r.accessLines > 0 ? "Компьютер виден только через VPN. Профиль и ключ — в разделе «Доступ» ниже." : "Компьютер виден только через VPN."));
-    b.append(t); scroll.append(b);
-  }
-  if (r.needsVPN || r.usesRDP || howto.vpn || howto.rdp) scroll.append(howToCard(r, howto));
-  if (r.account || r.hasAccountPassword) {
-    const card = el("div", "dcard");
-    card.append(el("div", "dlbl", "УЧЁТКА WINDOWS"));
-    const line = el("div", "acct");
-    line.append(el("b", null, r.account || "—"));
-    if (r.hasAccountPassword) {
-      const dots = el("span", "dots", "••••••••"); dots.setAttribute("aria-hidden", "true");
-      line.append(dots, button("btn c", "Копировать пароль", () => window.rc.copySecret(r.key, "accountPassword"), "Скопировать пароль учётки"));
-    }
-    card.append(line);
-    if (r.hasAccountPassword) card.append(el("small", "muted", "Буфер очистится через 30 с. Пароль на экране не показывается."));
-    scroll.append(card);
-  }
-  if (currentCard && currentCard.contacts && currentCard.contacts.text) scroll.append(contactsCard(currentCard.contacts));
+  if (card.vpn || card.rdp) scroll.append(stepsCard(r, card));
+  if (card.accounts.length) scroll.append(accountsCard(r, card.accounts));
+  if (!r.method && r.hasPassword) scroll.append(connectionPasswordCard(r));
   if (r.note) {
-    const card = el("div", "dcard"); card.append(el("div", "dlbl", "ЗАМЕТКА"), el("div", "dnote", r.note)); scroll.append(card);
+    const c = el("div", "dcard"); c.append(el("div", "dlbl", "ЗАМЕТКА"), el("div", "dnote", r.note)); scroll.append(c);
   }
   if (r.accessLines > 0) scroll.append(accessCard(r));
+  if (contacts.length) scroll.append(contactsCard(contacts));
 }
 
-// Строка «название — значение» в карточке.
-function fact(title, value, mono = false) {
-  const line = el("div", "fact"); line.append(el("span", "fk", title), el("b", mono ? "fv mono" : "fv", value)); return line;
+// ---- пароли и ключи в карточке: «••••••••», 👁 — на 10 с (сам скрывается), ⧉ — скопировать (буфер очистится через 30 с) ----
+// Значение приходит из основного процесса по 👁 (файл читается заново) и живёт только в узле строки, пока показано.
+const REVEAL_MS = 10_000, COPIED_MS = 30_000;
+let secretRows = new Map(), secretTimer = null;
+
+function forgetSecrets() {
+  for (const row of secretRows.values()) row.hide();
+  secretRows = new Map();
+  clearInterval(secretTimer); secretTimer = null;
 }
-// Строки «Доступа», которые разобрать не удалось, — как сам «Доступ»: до «Показать» только размытые полосы, после — строки
-// (моноширинно, с переносами) с паролями и ключами под маской (её ставит основной процесс). Пароль без метки маска не найдёт —
-// поэтому «Показать».
-function rawLines(lines) {
-  const box = el("div", "rawbox"), pane = el("div", "apane raw"), toggle = button("btn c sm");
-  let shown = false;
-  const render = () => {
-    pane.textContent = ""; toggle.textContent = "";
-    if (shown) {
-      pane.append(el("pre", "rawlines", lines.join("\n")));
-      toggle.append(icon("eyeOff"), "Скрыть");
-    } else {
-      const bars = el("div", "bars"); bars.setAttribute("aria-hidden", "true");
-      const widths = [190, 240, 150, 120, 210, 230, 170, 140];
-      for (let i = 0; i < Math.min(lines.length, 8); i++) { const b = el("i"); b.style.width = `${widths[i % 8]}px`; bars.append(b); }
-      pane.append(bars, el("span", "veil", `${hiddenLines(lines.length)} · могут быть пароли`));
-      toggle.append(icon("eye"), "Показать");
-    }
+function tickSecrets() {
+  const now = Date.now();
+  for (const row of secretRows.values()) row.tick(now);
+  if (![...secretRows.values()].some((row) => row.busy())) { clearInterval(secretTimer); secretTimer = null; }
+}
+function startTick() { if (!secretTimer) secretTimer = setInterval(tickSecrets, 500); }
+
+// Секрет: id — "password" (пароль программы) или id карточки (vpn.key, vpn.password, rdp.password, account.N); what — для подписей
+// кнопок. Возвращает { value, buttons, caption } — части, которые строка раскладывает сама.
+function secretParts(r, id, what) {
+  const value = el("span", "dots", "••••••••");
+  const caption = el("small", "scap");
+  let until = 0, copiedUntil = 0;
+  const eye = button("ib", null, null, `Показать ${what}`); eye.append(icon("eye"));
+  const copy = button("ib", null, null, `Скопировать ${what}`); copy.append(icon("copy"));
+  const row = {
+    hide() { until = 0; value.className = "dots"; value.textContent = "••••••••"; eye.classList.remove("on"); eye.textContent = ""; eye.append(icon("eye")); eye.title = `Показать ${what}`; eye.setAttribute("aria-label", eye.title); },
+    tick(now) {
+      if (until && now >= until) row.hide();
+      if (copiedUntil && now >= copiedUntil) { copiedUntil = 0; copy.textContent = ""; copy.append(icon("copy")); copy.classList.remove("ok"); }
+      caption.className = "scap" + (until ? " shown" : copiedUntil ? " copied" : "");
+      caption.textContent = until ? `Показан · скроется через ${Math.max(1, Math.ceil((until - now) / 1000))} с` : copiedUntil ? "Скопирован · буфер очистится через 30 с" : "";
+    },
+    busy() { return !!until || !!copiedUntil; },
   };
-  toggle.onclick = () => { shown = !shown; render(); };
-  render();
-  box.append(pane, toggle);
-  return box;
+  eye.onclick = async () => {
+    if (until) { row.hide(); row.tick(Date.now()); return; }
+    const res = await window.rc.revealSecret(r.key, id);
+    if (!res || !res.ok || currentDetails !== r || !value.isConnected) return;
+    until = Date.now() + REVEAL_MS;
+    value.className = "sval"; value.textContent = res.value;
+    eye.classList.add("on"); eye.textContent = ""; eye.append(icon("eyeOff")); eye.title = `Скрыть ${what}`; eye.setAttribute("aria-label", eye.title);
+    row.tick(Date.now()); startTick();
+  };
+  copy.onclick = async () => {
+    const res = await window.rc.copySecret(r.key, id, true);
+    if (!res || !res.ok || !copy.isConnected) return;
+    copiedUntil = Date.now() + COPIED_MS;
+    copy.textContent = ""; copy.append(icon("check")); copy.classList.add("ok");
+    row.tick(Date.now()); startTick();
+  };
+  secretRows.set(id, row);
+  const buttons = el("span", "ibs"); buttons.append(eye, copy);
+  return { value, buttons, caption };
 }
 
-// «Как подключиться»: VPN (тип, сервер, логин, пароль или ключ — скрыт, «Скопировать») и RDP (адрес, логин, «Открыть», «Скопировать
-// адрес»). Не разобралось — соответствующие строки «Доступа» по «Показать», пароли в них под маской. Разбирает основной процесс;
-// пароль или ключ сюда не приходит.
-function howToCard(r, howto) {
-  const card = el("div", "dcard howto");
-  card.append(el("div", "dlbl", "КАК ПОДКЛЮЧИТЬСЯ"));
-  if (r.needsVPN || howto.vpn) {
-    const vpn = howto.vpn || { kind: null, server: null, login: null, hasSecret: false, lines: [] };
-    const h = el("div", "dlbl vpn"); h.append(icon("shield"), "VPN");
-    if (vpn.kind) h.append(el("span", "kind", vpn.kind));
-    card.append(h);
-    if (vpn.server || vpn.login || vpn.hasSecret) {
-      if (vpn.server) card.append(fact("Сервер", vpn.server, true));
-      if (vpn.login) card.append(fact("Логин", vpn.login));
-      if (vpn.hasSecret) {
-        const line = el("div", "fact"); line.append(el("span", "fk", "Пароль или ключ"));
-        const dots = el("span", "dots", "••••••••"); dots.setAttribute("aria-hidden", "true");
-        line.append(dots, el("span", "sp"), button("btn c sm", "Скопировать", () => window.rc.copySecret(r.key, "vpnSecret"), "Скопировать пароль VPN"));
-        card.append(line);
-      }
-    } else if (vpn.lines.length) card.append(rawLines(vpn.lines));
-    else card.append(el("small", "muted", r.accessLines > 0 ? "Профиль и ключ — в разделе «Доступ» ниже." : "Подробностей о VPN в файле нет."));
+// Строка «название — значение» с ⧉ (не секрет: обычной копией).
+function plainRow(title, value, { mono = false, secondary = false, copyLabel } = {}) {
+  const line = el("div", "kv"); line.append(el("span", "k", title));
+  const v = el("span", "v" + (mono ? " mono" : "") + (secondary ? " sec" : ""), value); line.append(v);
+  const copy = button("ib", null, () => window.rc.copyText(value), copyLabel); copy.append(icon("copy"));
+  line.append(copy);
+  return line;
+}
+function secretRow(r, title, id, what) {
+  const wrap = el("div", "kvs");
+  const line = el("div", "kv"); line.append(el("span", "k", title));
+  const p = secretParts(r, id, what);
+  p.value.classList.add("v"); line.append(p.value, p.buttons);
+  p.caption.classList.add("indent");
+  wrap.append(line, p.caption);
+  return wrap;
+}
+
+// ---- «Как подключиться»: шаги из блоков «Доступа» (макет Details) ----
+function stepsCard(r, card) {
+  const c = el("div", "dcard howto");
+  const n = (card.vpn ? 1 : 0) + (card.rdp ? 1 : 0);
+  c.append(el("div", "dlbl", n === 1 ? "КАК ПОДКЛЮЧИТЬСЯ · 1 ШАГ" : `КАК ПОДКЛЮЧИТЬСЯ · ${n} ШАГА`));
+  const step = (num, kind, title) => {
+    const s = el("div", "step"); const badgeEl = el("span", `num ${kind}`, String(num)); badgeEl.setAttribute("aria-label", `Шаг ${num}`);
+    const body = el("div", "sbody"); body.append(el("b", "stitle", title));
+    s.append(badgeEl, body); c.append(s); return body;
+  };
+  if (card.vpn) {
+    const v = card.vpn;
+    const body = step(1, "vpn", v.kind ? `Включите VPN · ${v.kind}` : "Включите VPN");
+    const empty = !v.kind && !v.server && !v.backupServer && !v.hasKey && !v.login && !v.hasPassword && !v.note;
+    if (empty) body.append(el("small", "muted", "Подробностей о VPN в файле нет."));
+    if (v.server) body.append(plainRow("Сервер", v.server, { mono: true, copyLabel: "Скопировать сервер" }));
+    if (v.backupServer) body.append(plainRow("Запасной", v.backupServer, { mono: true, secondary: true, copyLabel: "Скопировать запасной сервер" }));
+    if (v.hasKey) body.append(secretRow(r, "Общий ключ", "vpn.key", "общий ключ"));
+    if (v.login) body.append(plainRow("Логин", v.login, { copyLabel: "Скопировать логин VPN" }));
+    if (v.hasPassword) body.append(secretRow(r, "Пароль", "vpn.password", "пароль VPN"));
+    if (v.note) body.append(el("div", "from", `Из файла: «${v.note}»`));
   }
-  if (r.usesRDP || howto.rdp) {
-    const rdp = howto.rdp || { address: null, login: null, canOpen: false, fromAccess: false, lines: [] };
-    const h = el("div", "dlbl rdp"); h.append(icon("monitor"), "ПОДКЛЮЧЕНИЕ ЧЕРЕЗ RDP"); card.append(h);
-    if (rdp.address) {
-      const addr = el("div", "addr"); addr.append(el("b", null, rdp.address), el("span", null, "удалённый рабочий стол")); card.append(addr);
-      if (rdp.login) card.append(fact("Логин", rdp.login));
+  if (card.vpn && card.rdp) c.append(el("div", "ssep"));
+  if (card.rdp) {
+    const d = card.rdp;
+    const body = step(card.vpn ? 2 : 1, "rdp", "Подключитесь по RDP");
+    if (d.address) body.append(plainRow("Адрес", d.address, { mono: true, copyLabel: "Скопировать адрес RDP" }));
+    else body.append(el("small", "muted", "Адрес в файле не указан."));
+    if (d.login) body.append(plainRow("Логин", d.login, { copyLabel: "Скопировать логин RDP" }));
+    if (d.hasPassword) body.append(secretRow(r, "Пароль", "rdp.password", "пароль RDP"));
+    if (d.useAccountsBelow) body.append(el("small", "muted", "Войдите одной из учёток ниже."));
+    if (d.canOpen) {
       const acts = el("div", "dacts");
-      if (rdp.canOpen) { const open = button("btn c pri", "Открыть в mstsc ⏎", () => openRDPFromDetails(r, rdp.fromAccess)); open.title = "Подключение к удалённому рабочему столу (mstsc)"; acts.append(open); }
-      acts.append(button("btn c", "Скопировать адрес", () => window.rc.copyAddress(r.key, rdp.fromAccess)));
-      card.append(acts);
-      if (!rdp.canOpen) card.append(el("small", "muted", "Адрес не похож на имя или IP — откройте его вручную."));
-    } else if (rdp.lines.length) card.append(rawLines(rdp.lines));
-    else card.append(el("small", "muted", "Адрес — в разделе «Доступ»."));
+      const open = button("btn c pri", "Открыть в mstsc", () => openRDPFromDetails(r, d.fromAccess)); open.title = "Подключение к удалённому рабочему столу (mstsc)";
+      acts.append(open);
+      if (card.vpn) acts.append(el("small", "muted", "сначала шаг 1"));
+      body.append(acts);
+    }
   }
-  return card;
+  return c;
 }
 
-// «Контакты»: люди и телефоны как в файле; у каждого телефона — «Скопировать». Только здесь: не в строке, не в поиске, не в журнале.
-function contactsCard(contacts) {
-  const card = el("div", "dcard");
-  card.append(el("div", "dlbl", "КОНТАКТЫ"), el("div", "dnote", contacts.text));
-  for (const phone of contacts.phones || []) {
-    const line = el("div", "phone"); line.append(icon("phone"), el("span", "pn", phone), el("span", "sp"),
-      button("btn c sm", "Скопировать", () => window.rc.copyPhone(phone), `Скопировать телефон ${phone}`));
-    card.append(line);
-  }
-  return card;
+// ---- «Учётные записи · N» (макеты Details и Accounts) ----
+const KIND_TITLES = { windows: "Windows", server: "Server", router: "Роутер", vpn: "VPN" };
+const KIND_HINTS = { windows: "для входа на компьютер", server: "для входа на сервер", router: "из блока «Router»", vpn: "ещё одна пара из блока VPN" };
+function accountsCard(r, accounts) {
+  const c = el("div", "dcard");
+  c.append(el("div", "dlbl", `УЧЁТНЫЕ ЗАПИСИ · ${accounts.length}`));
+  // Несколько пар одного вида (RDP-сервер с тремя входами) — нумерованным списком.
+  const numbered = accounts.length > 1 && new Set(accounts.map((a) => a.kind)).size === 1 && accounts.every((a) => a.source === "access");
+  if (numbered) c.append(el("small", "muted", "В файле несколько пар «Логин · Пароль» — показаны все, по порядку."));
+  accounts.forEach((a, i) => {
+    if (i) c.append(el("div", "hsep"));
+    if (numbered) {
+      const wrap = el("div", "kvs"), line = el("div", "acc");
+      line.append(el("span", "n", String(i + 1)));
+      if (a.login) { const l = button("login", a.login, () => window.rc.copyText(a.login), `Скопировать логин ${a.login}`); line.append(l); }
+      else line.append(el("span", "login none", "не указан"));
+      if (a.hasPassword) { const p = secretParts(r, a.id, `пароль ${i + 1}`); line.append(p.value, p.buttons); p.caption.classList.add("indent-n"); wrap.append(line, p.caption); }
+      else wrap.append(line);
+      c.append(wrap);
+      return;
+    }
+    const tagLine = el("div", "akind"); tagLine.append(el("span", "atag", KIND_TITLES[a.kind]), el("small", "muted", KIND_HINTS[a.kind]));
+    c.append(tagLine);
+    if (a.login) c.append(plainRow("Логин", a.login, { copyLabel: `Скопировать логин ${KIND_TITLES[a.kind]}` }));
+    else { const line = el("div", "kv"); line.append(el("span", "k", "Логин"), el("span", "v none", "не указан")); c.append(line); }
+    if (a.hasPassword) c.append(secretRow(r, "Пароль", a.id, `пароль ${KIND_TITLES[a.kind]}`));
+  });
+  if (numbered) c.append(el("small", "muted", "Нажатие на логин копирует его. Пароль — 👁 показать на 10 с, ⧉ скопировать."));
+  return c;
 }
 
-// «Доступ · из файла»: вместо текста — размытые полосы (самого текста в окне нет), «Показать» читает его из файла.
+// ---- «Пароль подключения · AnyDesk/TeamViewer»: ID и пароль программы ----
+function connectionPasswordCard(r) {
+  const c = el("div", "dcard");
+  c.append(el("div", "dlbl", `ПАРОЛЬ ПОДКЛЮЧЕНИЯ · ${String(r.programTitle).toUpperCase()}`));
+  const line = el("div", "kv");
+  line.append(el("span", "v mono id", r.id));
+  const p = secretParts(r, "password", `пароль ${r.programTitle}`);
+  line.append(p.value, p.buttons);
+  c.append(line, p.caption);
+  return c;
+}
+
+// ---- «Доступ · как в файле»: свёрнуто; «Показать» — текст из файла, пароли и ключи под маской (ставит основной процесс) ----
 function accessCard(r) {
-  const card = el("div", "dcard access");
-  const h = el("div", "dlbl row2"); const cap = el("span", null, "ДОСТУП · ИЗ ФАЙЛА");
-  const toggle = button("btn c sm"), copy = button("btn c sm", "Скопировать", () => window.rc.copySecret(r.key, "access"));
-  h.append(cap, toggle, copy);
-  const pane = el("div", "apane");
-  const caption = el("small", "muted", "Всё, что было на вкладке в Excel, без изменений. Не участвует в поиске и не пишется в журнал.");
-  let shown = false;
-  const conceal = (message) => {
-    shown = false;
-    pane.textContent = "";
-    toggle.textContent = ""; toggle.append(icon("eye"), "Показать");
-    const bars = el("div", "bars"); bars.setAttribute("aria-hidden", "true");
-    const widths = [190, 240, 150, 120, 210, 230, 170, 140];
-    for (let i = 0; i < Math.min(r.accessLines, 8); i++) { const b = el("i"); b.style.width = `${widths[i % 8]}px`; bars.append(b); }
-    pane.append(bars, el("span", "veil", message || `${hiddenLines(r.accessLines)} · могут быть пароли`));
-  };
+  const c = el("div", "dcard access");
+  const h = el("div", "arow");
+  const caption = el("div", "atitles");
+  caption.append(el("div", "dlbl", "ДОСТУП · КАК В ФАЙЛЕ"), el("small", "muted", `строк: ${r.accessLines}. Всё выше собрано из них; пароли скрыты`));
+  const toggle = button("btn c", "Показать");
+  h.append(caption, toggle);
+  c.append(h);
+  let pane = null;
   toggle.onclick = async () => {
-    if (shown) return conceal();
+    if (pane) { pane.remove(); pane = null; toggle.textContent = "Показать"; return; }
     const res = await window.rc.revealAccess(r.key);
-    if (!res || !res.ok || currentDetails !== r || !pane.isConnected) return pane.isConnected && conceal("Не удалось прочитать файл");
-    shown = true;
-    pane.textContent = "";
+    if (!res || !res.ok || currentDetails !== r || !c.isConnected) { if (c.isConnected) caption.lastChild.textContent = "Не удалось прочитать файл"; return; }
     // Переносы и пустые строки между блоками — как в файле (моноширинный, white-space: pre-wrap).
-    pane.append(el("pre", "atext", res.text));
-    toggle.textContent = ""; toggle.append(icon("eyeOff"), "Скрыть");
+    pane = el("pre", "atext", res.text);
+    c.append(pane);
+    toggle.textContent = "Скрыть";
   };
-  conceal();
-  card.append(h, pane, caption);
-  return card;
+  return c;
+}
+
+// ---- «Контакты» — в самом низу: имя или должность, телефон-кнопка (звонок через UniTalk) и ⧉ ----
+function contactsCard(contacts) {
+  const c = el("div", "dcard");
+  c.append(el("div", "dlbl", "КОНТАКТЫ"));
+  contacts.forEach((contact, i) => {
+    if (i) c.append(el("div", "hsep"));
+    const line = el("div", "contact"), who = el("div", "who");
+    if (contact.title) who.append(el("b", null, contact.title));
+    if (contact.detail) who.append(el("small", "muted", contact.detail));
+    if (!contact.phones.length) who.append(el("small", "muted", "Телефона в файле нет"));
+    line.append(who);
+    if (contact.phones.length) {
+      const phones = el("div", "phones");
+      for (const phone of contact.phones) {
+        const row = el("div", "phone");
+        const callBtn = button("callbtn", null, () => window.rc.call(phone), `Позвонить ${phone}`); callBtn.append(icon("phone"), phone);
+        const copy = button("ib", null, () => window.rc.copyPhone(phone), `Скопировать телефон ${phone}`); copy.append(icon("copy"));
+        row.append(callBtn, copy); phones.append(row);
+      }
+      line.append(phones);
+    }
+    c.append(line);
+  });
+  if (contacts.some((x) => x.phones.length)) c.append(el("small", "muted", "Нажатие на номер — звонок через UniTalk; ⧉ — скопировать номер."));
+  return c;
 }
 
 // ---- карточка записи: правка (.xml) или просмотр (.xlsx/.xlsm — правка в Excel, в книгу ничего не пишется) ----
@@ -643,7 +718,7 @@ window.rc.onChanged(refresh);
 // Палитра показана снова — с чистого листа (подробности закрыты, поиск и фильтры сброшены).
 window.rc.onShow(() => {
   if (mode === "settings" || mode === "edit") return;
-  if (mode === "details") { $("detailsBox")?.remove(); detailsKey = null; currentDetails = null; currentCard = null; $("page").hidden = false; mode = "list"; }
+  if (mode === "details") { forgetSecrets(); $("detailsBox")?.remove(); detailsKey = null; currentDetails = null; currentCard = null; $("page").hidden = false; mode = "list"; }
   $("query").value = ""; filter = "all"; selectedTags.clear(); tagsExpanded = false; selected = 0; refresh(); $("query").focus();
 });
 // Окно скрыто или свёрнуто — показанный «Доступ» убирается (подробности перерисовываются без текста).

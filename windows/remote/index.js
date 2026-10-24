@@ -7,12 +7,13 @@ const { ConnectionsFileStore } = require("./filestore");
 const { RemoteSettings, hotkeyProblem } = require("./settings");
 const { RemoteService } = require("./service");
 const fs = require("node:fs");
-const { spawn } = require("node:child_process");
+const { spawn, execFile } = require("node:child_process");
 const { TITLES, downloadURL, programOf } = require("./models");
 const { createConnector } = require("./connect");
 const { createUia } = require("./uia");
 const { createConcealedWriter } = require("./concealed");
-const { parseAccess, howToConnect, findPhones, isPhone } = require("./access");
+const { buildCard, publicCard, cardSecret, CARD_SECRETS, maskSecrets, parseContacts, isPhone } = require("./access");
+const { createHandlerLookup, callPlan } = require("./dialer");
 const { SecretBuffer } = require("./secret");
 const { createHud } = require("./hud");
 const editor = require("./editor");
@@ -44,10 +45,11 @@ function sanitizePatch(patch) {
 }
 
 // electron: { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, dialog, nativeImage, screen };
-// options: { icon, userData, connector?, editor?, templates?, hud?, log?, copyText?, clipboard?, writeConcealed? } — copyText(text) кладёт в
+// options: { icon, userData, connector?, editor?, templates?, hud?, log?, copyText?, clipboard?, writeConcealed?, dialer? } — copyText(text) кладёт в
 // буфер обмена ID TeamViewer или адрес RDP (передаётся из main.js; пароль через него не идёт); clipboard — буфер для секретов
 // («Скопировать пароль учётки», «Доступ»: очищается через 30 с), по умолчанию — electron.clipboard; writeConcealed(secret) →
-// Promise<boolean> кладёт секрет в буфер мимо журнала Win+V и облака. Возвращает управляющий объект (тесты и main.js).
+// Promise<boolean> кладёт секрет в буфер мимо журнала Win+V и облака; dialer — { isUniTalk() → Promise<boolean>, open(url) } (в тестах
+// двойник: UniTalk не запускается). Возвращает управляющий объект (тесты и main.js).
 function init(electron, options = {}) {
   const { app, BrowserWindow, Tray, Menu, MenuItem, globalShortcut, ipcMain, shell, dialog, nativeImage, screen } = electron;
   const userData = options.userData || app.getPath("userData");
@@ -64,6 +66,9 @@ function init(electron, options = {}) {
   // (W2-5). Не Windows — журнала Win+V нет, помощника тоже (null): там секрет пишется обычным текстом (сборка для разработки).
   const writeConcealed = options.writeConcealed || (process.platform === "win32" ? createConcealedWriter(spawn) : null);
   const service = new RemoteService({ settings, store, connector });
+  // Звонок: обработчик `tel:` — по реестру (только чтение); UniTalk — openExternal, иначе номер копируется.
+  const dialer = options.dialer || { isUniTalk: createHandlerLookup(process.platform === "win32" ? execFile : null).isUniTalk,
+    open: (url) => shell.openExternal(url) };
   const secretClipboard = createSecretClipboard({ clipboard: options.clipboard || electron.clipboard, writeConcealed });
   const copyPlain = (text) => {
     if (typeof options.copyText === "function") { try { return options.copyText(String(text)) !== false; } catch (_) { return false; } }
@@ -178,12 +183,25 @@ function init(electron, options = {}) {
     try { win.webContents.send("rc:details"); } catch (_) {}
   }
 
-  // Адрес RDP из «Доступа» (запись не RDP, но в «Доступе» есть строка RDP): файл читается заново, окну адрес не доверяем.
+  // Карточка записи с паролями — только здесь, в основном процессе: «Доступ» и пароль учётки читаются из файла сейчас и сразу
+  // затираются. null — записи нет.
+  async function fullCard(key) {
+    const record = service.recordByKey(key);
+    if (!record) return null;
+    const read = async (field) => {
+      let secret = null;
+      try { secret = await service.secret(key, field); } catch (_) { secret = null; }
+      if (!secret) return null;
+      try { return secret.bytes.toString("utf8"); } finally { secret.wipe(); }
+    };
+    const access = record.accessLines > 0 ? await read("access") : null;
+    const accountPassword = record.hasAccountPassword ? await read("accountPassword") : null;
+    return { record, card: buildCard(record, access, accountPassword) };
+  }
+
+  // Адрес RDP из «Доступа» (запись не RDP, но в «Доступе» есть блок RDP): файл читается заново, окну адрес не доверяем.
   async function accessRDPAddress(key) {
-    let secret = null;
-    try { secret = await service.secret(key, "access"); } catch (_) { secret = null; }
-    if (!secret) return null;
-    try { return parseAccess(secret.bytes.toString("utf8")).rdp?.address || null; } finally { secret.wipe(); }
+    return (await fullCard(key))?.card.rdp?.address || null;
   }
 
   // RDP — «Подключение к удалённому рабочему столу» (mstsc); не тот адрес — подробности. fromAccess — адрес из строк «Доступа».
@@ -201,44 +219,57 @@ function init(electron, options = {}) {
     return result;
   }
 
-  // Пароль или ключ VPN из строк «Доступа» — файл читается заново, окну он не передаётся. SecretBuffer или null.
-  async function vpnSecret(key) {
-    let access = null;
-    try { access = await service.secret(key, "access"); } catch (_) { access = null; }
-    if (!access) return null;
-    try { const value = parseAccess(access.bytes.toString("utf8")).vpn?.secret; return value ? new SecretBuffer(value) : null; }
-    finally { access.wipe(); }
+  // Секрет по полю: пароль программы, пароль учётки, «Доступ» — из файла; секрет карточки (vpn.key, vpn.password, rdp.password,
+  // account.N) — из «Доступа» и колонок, файл читается заново. SecretBuffer или null.
+  async function secretOf(key, field) {
+    if (CARD_SECRETS.test(field)) {
+      const value = cardSecret((await fullCard(key))?.card || { accounts: [] }, field);
+      return value ? new SecretBuffer(value) : null;
+    }
+    return service.secret(key, field);
   }
 
-  const COPY_TITLES = { accountPassword: "Пароль учётки скопирован", access: "«Доступ» скопирован", vpnSecret: "Пароль VPN скопирован" };
-  // Пароль учётки, «Доступ» или пароль/ключ VPN — из файла сейчас, в буфер на 30 с (мимо журнала Win+V). В журнал — только код поля.
-  async function copySecret(key, field) {
-    if (!Object.hasOwn(COPY_TITLES, field)) return { ok: false, error: "field" };
+  const COPY_TITLES = { password: "Пароль скопирован", accountPassword: "Пароль учётки скопирован", access: "«Доступ» скопирован" };
+  const copyable = (field) => Object.hasOwn(COPY_TITLES, field) || CARD_SECRETS.test(field);
+  // Секрет — из файла сейчас, в буфер на 30 с (мимо журнала Win+V). quiet — без тоста (подпись показывает карточка). В журнал —
+  // только код поля.
+  async function copySecret(key, field, quiet = false) {
+    if (!copyable(field)) return { ok: false, error: "field" };
+    const code = CARD_SECRETS.test(field) ? field.replace(/\.\d+$/, "") : field;
     let secret = null;
-    try { secret = field === "vpnSecret" ? await vpnSecret(key) : await service.secret(key, field); } catch (_) { secret = null; }
+    try { secret = await secretOf(key, field); } catch (_) { secret = null; }
     try {
       if (!secret) {
         hud.show({ kind: "warning", title: "Не удалось прочитать файл", detail: "Проверьте, что файл на месте, и повторите.", actions: [{ id: "close", label: "Закрыть" }] });
-        log(`copy fail field=${field}`);
+        log(`copy fail field=${code}`);
         return { ok: false, error: "unavailable" };
       }
       const ok = await secretClipboard.copy(secret);
-      hud.show(ok ? { kind: "success", title: COPY_TITLES[field], detail: "Буфер очистится через 30 с. В журнал буфера Windows не попадает.", autoHideMs: 2500 }
-                  : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен — секрет не скопирован.", actions: [{ id: "close", label: "Закрыть" }] });
-      log(`copy ${ok ? "ok" : "fail"} field=${field}`);
+      if (!ok) hud.show({ kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен — секрет не скопирован.", actions: [{ id: "close", label: "Закрыть" }] });
+      else if (!quiet) hud.show({ kind: "success", title: COPY_TITLES[field] || "Пароль скопирован", detail: "Буфер очистится через 30 с. В журнал буфера Windows не попадает.", autoHideMs: 2500 });
+      log(`copy ${ok ? "ok" : "fail"} field=${code}`);
       return { ok };
     } finally { secret?.wipe(); }
   }
 
-  // «Показать» в «Доступе»: текст уходит только в окно подробностей и живёт там, пока они открыты.
+  // 👁 в карточке: значение уходит только в окно подробностей, на 10 с (скрывает окно). В журнал — ничего.
+  async function revealSecret(key, field) {
+    if (field !== "password" && !CARD_SECRETS.test(field)) return { ok: false };
+    let secret = null;
+    try { secret = await secretOf(key, field); } catch (_) { secret = null; }
+    if (!secret) return { ok: false };
+    try { return { ok: true, value: secret.bytes.toString("utf8") }; } finally { secret.wipe(); }
+  }
+
+  // «Показать» в «Доступе · как в файле»: текст уходит только в окно подробностей, пароли и ключи — под маской.
   async function revealAccess(key) {
     let secret = null;
     try { secret = await service.secret(key, "access"); } catch (_) { secret = null; }
     if (!secret) return { ok: false };
-    try { return { ok: true, text: secret.bytes.toString("utf8") }; } finally { secret.wipe(); }
+    try { return { ok: true, text: secret.bytes.toString("utf8").split(/\r\n|\n|\r/).map(maskSecrets).join("\n") }; } finally { secret.wipe(); }
   }
 
-  // Адрес RDP: ID записи RDP или (fromAccess) адрес из строк «Доступа» — файл читается заново.
+  // Адрес RDP: ID записи RDP или (fromAccess) адрес из «Доступа» — файл читается заново.
   async function copyAddress(key, fromAccess = false) {
     const record = service.recordByKey(key);
     if (!record) return { ok: false };
@@ -247,6 +278,16 @@ function init(electron, options = {}) {
     const ok = copyPlain(address);
     hud.show(ok ? { kind: "success", title: "Адрес скопирован", detail: record.name, autoHideMs: 2000 } : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен.", actions: [{ id: "close", label: "Закрыть" }] });
     log(`copy ${ok ? "ok" : "fail"} field=address`);
+    return { ok };
+  }
+
+  // Не секрет из карточки (сервер, логин) — обычной копией; окно присылает только то, что само показывает.
+  function copyText(text) {
+    const value = String(text ?? "");
+    if (!value || value.length > 256 || /[\r\n]/.test(value)) return { ok: false };
+    const ok = copyPlain(value);
+    hud.show(ok ? { kind: "success", title: "Скопировано", autoHideMs: 1500 } : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен.", actions: [{ id: "close", label: "Закрыть" }] });
+    log(`copy ${ok ? "ok" : "fail"} field=text`);
     return { ok };
   }
 
@@ -259,26 +300,38 @@ function init(electron, options = {}) {
     return { ok };
   }
 
-  // Карточка подробностей: «Как подключиться» (из строк «Доступа»; пароль или ключ VPN — только признак) и «Контакты» (текст и
-  // телефоны). Читается из файла при открытии карточки, как «Доступ»; живёт в окне, пока карточка открыта. В журнал — ничего.
-  async function cardInfo(key) {
-    const record = service.recordByKey(key);
-    if (!record) return { ok: false };
-    const p = service.present(record, "details");
-    let info = null, contacts = null;
-    if (record.accessLines > 0) {
-      let access = null;
-      try { access = await service.secret(key, "access"); } catch (_) { access = null; }
-      if (access) { try { info = parseAccess(access.bytes.toString("utf8")); } finally { access.wipe(); } }
+  // Звонок: обработчик tel:/callto: — UniTalk → openExternal('tel:+380…'); нет — номер копируется («UniTalk не найден — номер
+  // скопирован»). Только строка вида телефона. В журнал — только код.
+  async function call(text) {
+    if (!isPhone(text)) return { ok: false, error: "phone" };
+    let uniTalk = false;
+    try { uniTalk = await dialer.isUniTalk(); } catch (_) { uniTalk = false; }
+    const plan = callPlan(text, uniTalk);
+    if (plan.call) {
+      try { await dialer.open(plan.call); } catch (_) { return { ok: false, error: "open" }; }
+      log("call ok");
+      return { ok: true, call: true };
     }
-    if (record.hasContacts) {
+    const ok = copyPlain(plan.copy);
+    hud.show(ok ? { kind: "success", title: plan.reason === "noUniTalk" ? "UniTalk не найден — номер скопирован" : "Номер скопирован", autoHideMs: 2500 }
+                : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен.", actions: [{ id: "close", label: "Закрыть" }] });
+    log(`call copy reason=${plan.reason}`);
+    return { ok, call: false, reason: plan.reason };
+  }
+
+  // Карточка подробностей (макеты Details и Accounts): шаги «Как подключиться», учётные записи — без паролей и ключей (только
+  // признаки и id для 👁/⧉); «Контакты» — люди и телефоны. Читается из файла при открытии карточки; живёт в окне, пока она
+  // открыта. В журнал — ничего.
+  async function cardInfo(key) {
+    const full = await fullCard(key);
+    if (!full) return { ok: false };
+    let contacts = [];
+    if (full.record.hasContacts) {
       let secret = null;
       try { secret = await service.secret(key, "contacts"); } catch (_) { secret = null; }
-      if (secret) { try { const text = secret.bytes.toString("utf8"); contacts = { text, phones: findPhones(text) }; } finally { secret.wipe(); } }
+      if (secret) { try { contacts = parseContacts(secret.bytes.toString("utf8")); } finally { secret.wipe(); } }
     }
-    const howto = howToConnect(record, info, { needsVPN: p.needsVPN, usesRDP: p.usesRDP });
-    if (info?.vpn) info.vpn.secret = null;
-    return { ok: true, howto, contacts };
+    return { ok: true, card: publicCard(full.record, full.card), contacts };
   }
 
   function showFolder() {
@@ -360,7 +413,10 @@ function init(electron, options = {}) {
   ipcMain.handle("rc:details", guarded((_e, key) => service.details(String(key))));
   ipcMain.handle("rc:pendingDetails", guarded(() => { const key = pendingDetails; pendingDetails = null; return key; }));
   ipcMain.handle("rc:revealAccess", guarded((_e, key) => revealAccess(String(key)), { ok: false }));
-  ipcMain.handle("rc:copySecret", guarded((_e, q) => copySecret(String(q?.key), String(q?.field)), { ok: false }));
+  ipcMain.handle("rc:copySecret", guarded((_e, q) => copySecret(String(q?.key), String(q?.field), !!q?.quiet), { ok: false }));
+  ipcMain.handle("rc:revealSecret", guarded((_e, q) => revealSecret(String(q?.key), String(q?.field)), { ok: false }));
+  ipcMain.handle("rc:copyText", guarded((_e, text) => copyText(text), { ok: false }));
+  ipcMain.handle("rc:call", guarded((_e, text) => call(String(text ?? "")), { ok: false }));
   ipcMain.handle("rc:copyAddress", guarded((_e, q) => copyAddress(String(q?.key), !!q?.fromAccess), { ok: false }));
   ipcMain.handle("rc:copyPhone", guarded((_e, text) => copyPhone(String(text ?? "")), { ok: false }));
   ipcMain.handle("rc:cardInfo", guarded((_e, key) => cardInfo(String(key)), { ok: false }));
@@ -417,7 +473,7 @@ function init(electron, options = {}) {
   } catch (_) {}
 
   return {
-    service, settings, store, entryMenu, openWindow, openPalette, registerHotkey, trayTemplate, rowMenuTemplate, connect, openRDP, copySecret, copyAddress, copyPhone, cardInfo, revealAccess, hudAction, writeConcealed, titles: TITLES,
+    service, settings, store, entryMenu, openWindow, openPalette, registerHotkey, trayTemplate, rowMenuTemplate, connect, openRDP, copySecret, revealSecret, copyAddress, copyText, copyPhone, call, cardInfo, revealAccess, hudAction, writeConcealed, titles: TITLES,
     get hotkeyOk() { return hotkeyOk; },
     dispose() { try { globalShortcut.unregisterAll?.(); } catch (_) {} secretClipboard.flush(); store.stop(); tray?.destroy?.(); },
   };

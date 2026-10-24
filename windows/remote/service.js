@@ -36,7 +36,7 @@ class RemoteService {
     return this.search;
   }
 
-  // Что показывать в окне и в палитре. filter: "all" | "anyDesk" | "teamViewer" | "rdp" | "vpn"; tags — ключи выбранных меток.
+  // Что показывать в окне и в палитре. filter: "all" | "anyDesk" | "teamViewer" | "other"; tags — ключи выбранных меток.
   // Секретов (пароль, пароль учётки, «Доступ») и контактов здесь нет: только признаки и число строк «Доступа».
   view({ query = "", filter = "all", tags = [] } = {}) {
     const s = this.settings.data, state = this.store.state;
@@ -84,10 +84,11 @@ class RemoteService {
     return record ? this.present(record, "details") : null;
   }
 
-  // Секрет записи из файла сейчас (пароль учётки, «Доступ», «Контакты»). SecretBuffer или null; вызывающий затирает.
+  // Секрет записи из файла сейчас (пароль подключения — для 👁/⧉ карточки, пароль учётки, «Доступ», «Контакты»). SecretBuffer или
+  // null; вызывающий затирает.
   async secret(key, field) {
     const record = this.recordByKey(key);
-    if (!record || !["accountPassword", "access", "contacts"].includes(field)) return null;
+    if (!record || !["password", "accountPassword", "access", "contacts"].includes(field)) return null;
     return this.store.secret(record, field);
   }
 
