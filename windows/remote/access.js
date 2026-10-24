@@ -1,5 +1,6 @@
 // «Как подключиться» из текста «Доступа» (строки про VPN и RDP) и телефоны из «Контактов». 1:1 с Mac (`AccessParser.swift`).
-// Разбор — подсказка, а не истина: что не разобралось, показывается строками «Доступа» как есть. Пароль или ключ VPN наружу из
+// Разбор — подсказка, а не истина: что не разобралось, показывается строками «Доступа» по «Показать», значения паролей и ключей
+// в них — под маской (maskSecrets, ещё в основном процессе). Пароль или ключ VPN наружу из
 // основного процесса не уходит: окну — только признак «есть», копируется он отдельным запросом (файл читается заново).
 "use strict";
 
@@ -8,7 +9,7 @@ const { isValidHost } = require("./rdp");
 const VPN_KINDS = ["WireGuard", "PPTP", "L2TP", "FortiClient", "OpenVPN", "IPsec", "IKEv2", "SoftEther"];
 const SERVER_LABELS = ["сервер", "server", "адрес", "address", "host", "ip"];
 const LOGIN_LABELS = ["логин", "логін", "login", "user", "користувач", "пользователь"];
-const SECRET_LABELS = ["пароль", "password", "pass", "ключ", "key", "psk", "secret"];
+const SECRET_LABELS = ["пароль", "password", "pass", "ключ", "key", "l2tppsk", "psk", "secret"];
 const PORT_LABELS = ["порт", "port"];
 const isLetter = (ch) => !!ch && /\p{L}/u.test(ch);
 
@@ -36,6 +37,17 @@ function valueAfter(labels, lines) {
   return null;
 }
 
+const MASK = "••••••";
+// Метки паролей и ключей (1:1 с Mac `AccessParser.mask`); значение после них до «·», «|», «;» или конца строки уходит под маску.
+// Длинные варианты раньше коротких: «password» раньше «pass».
+const SECRET_LABEL = new RegExp("(?<![\\p{L}\\d])(парол\\p{L}*|ключ\\p{L}*|секрет\\p{L}*|токен\\p{L}*|пін|пин|"
+  + "password|passwort|passphrase|passwd|pass|pwd|pw|l2tp ?psk|pre-?shared[ -]?key|psk|private ?key|key|"
+  + "secret|token|pin)(?![\\p{L}\\d])([\\s:=—–\\-]*)([^\\s·|;:=—–\\-](?:[^·|;\\n]*[^\\s·|;\\n])?)", "giu");
+
+// Строка «Доступа» для окна: значения после меток пароля, ключа и PSK заменены точками.
+// «пароль: Qw3rty · логин admin» → «пароль: •••••• · логин admin».
+const maskSecrets = (line) => String(line).replace(SECRET_LABEL, (_, label, sep) => `${label}${sep}${MASK}`);
+
 // IPv4[:порт] или имя вида host.domain[:порт] (с буквой); null — не адрес.
 function host(token) {
   const t = String(token).replace(/^[:—–\-.]+|[:—–\-.]+$/g, "");
@@ -49,7 +61,8 @@ function firstHost(lines) {
   return null;
 }
 
-// text — «Доступ» целиком. { vpn: {kind, server, login, secret, lines} | null, rdp: {address, login, lines} | null }.
+// text — «Доступ» целиком. { vpn: {kind, server, login, secret, lines} | null, rdp: {address, login, lines} | null };
+// lines — строки про VPN/RDP с паролями и ключами под маской.
 function parseAccess(text) {
   const lines = linesOf(text);
   const info = { vpn: null, rdp: null };
@@ -61,7 +74,7 @@ function parseAccess(text) {
       server: valueAfter(SERVER_LABELS, vpnLines) || firstHost(vpnLines),
       login: valueAfter(LOGIN_LABELS, vpnLines),
       secret: valueAfter(SECRET_LABELS, vpnLines),
-      lines: vpnLines,
+      lines: vpnLines.map(maskSecrets),
     };
   }
   const rdpLines = lines.filter((line) => { const l = line.toLowerCase(); return l.includes("rdp") || l.includes("remote desktop"); });
@@ -72,13 +85,13 @@ function parseAccess(text) {
       const port = (valueAfter(PORT_LABELS, rdpLines) || "").match(/^\d+/);
       if (port) address = `${address}:${port[0]}`;
     }
-    info.rdp = { address: address || null, login: valueAfter(LOGIN_LABELS, rdpLines), lines: rdpLines };
+    info.rdp = { address: address || null, login: valueAfter(LOGIN_LABELS, rdpLines), lines: rdpLines.map(maskSecrets) };
   }
   return info;
 }
 
 // Блок «Как подключиться» для окна: без пароля или ключа VPN (только признак). record — запись (method, id, account, needsVPN/usesRDP);
-// info — parseAccess(…) или null (нет «Доступа»). Не разобралось — строки «Доступа» про VPN/RDP как есть (lines).
+// info — parseAccess(…) или null (нет «Доступа»). Не разобралось — строки «Доступа» про VPN/RDP с маской паролей (lines).
 function howToConnect(record, info, { needsVPN = false, usesRDP = false } = {}) {
   const out = { vpn: null, rdp: null };
   const vpn = info && info.vpn, rdp = info && info.rdp;
@@ -112,4 +125,4 @@ function isPhone(text) {
   return s.length <= 40 && /^[+\d ()\-\u00A0]+$/.test(s) && digits >= 7 && digits <= 20;
 }
 
-module.exports = { parseAccess, howToConnect, findPhones, isPhone, valueAfter, host, VPN_KINDS };
+module.exports = { parseAccess, howToConnect, maskSecrets, findPhones, isPhone, valueAfter, host, VPN_KINDS };

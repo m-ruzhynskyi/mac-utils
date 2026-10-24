@@ -425,11 +425,34 @@ async function renderDetails() {
 function fact(title, value, mono = false) {
   const line = el("div", "fact"); line.append(el("span", "fk", title), el("b", mono ? "fv mono" : "fv", value)); return line;
 }
-// Строки «Доступа» как есть — когда разобрать их не удалось (моноширинно, с переносами).
-function rawLines(lines) { return el("pre", "rawlines", lines.join("\n")); }
+// Строки «Доступа», которые разобрать не удалось, — как сам «Доступ»: до «Показать» только размытые полосы, после — строки
+// (моноширинно, с переносами) с паролями и ключами под маской (её ставит основной процесс). Пароль без метки маска не найдёт —
+// поэтому «Показать».
+function rawLines(lines) {
+  const box = el("div", "rawbox"), pane = el("div", "apane raw"), toggle = button("btn c sm");
+  let shown = false;
+  const render = () => {
+    pane.textContent = ""; toggle.textContent = "";
+    if (shown) {
+      pane.append(el("pre", "rawlines", lines.join("\n")));
+      toggle.append(icon("eyeOff"), "Скрыть");
+    } else {
+      const bars = el("div", "bars"); bars.setAttribute("aria-hidden", "true");
+      const widths = [190, 240, 150, 120, 210, 230, 170, 140];
+      for (let i = 0; i < Math.min(lines.length, 8); i++) { const b = el("i"); b.style.width = `${widths[i % 8]}px`; bars.append(b); }
+      pane.append(bars, el("span", "veil", `${hiddenLines(lines.length)} · могут быть пароли`));
+      toggle.append(icon("eye"), "Показать");
+    }
+  };
+  toggle.onclick = () => { shown = !shown; render(); };
+  render();
+  box.append(pane, toggle);
+  return box;
+}
 
 // «Как подключиться»: VPN (тип, сервер, логин, пароль или ключ — скрыт, «Скопировать») и RDP (адрес, логин, «Открыть», «Скопировать
-// адрес»). Не разобралось — соответствующие строки «Доступа» как есть. Разбирает основной процесс; пароль или ключ сюда не приходит.
+// адрес»). Не разобралось — соответствующие строки «Доступа» по «Показать», пароли в них под маской. Разбирает основной процесс;
+// пароль или ключ сюда не приходит.
 function howToCard(r, howto) {
   const card = el("div", "dcard howto");
   card.append(el("div", "dlbl", "КАК ПОДКЛЮЧИТЬСЯ"));

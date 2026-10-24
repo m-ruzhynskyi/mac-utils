@@ -583,6 +583,35 @@ test("карточка: «Как подключиться» и «Контакт�
   a.rc.dispose();
 });
 
+test("RW-1: неразобранные строки «Как подключиться» — пароли и ключи под маской ещё в основном процессе; в окне — по «Показать»", async () => {
+  const RAW_ACCESS = "RDP — сервер srv01 · логин: admin · пароль: Qw3rty-выдумка\nL2TP VPN · L2tpPsk=Demo-Psk-1 · Password: Demo Pass 2 | профиль у админа";
+  const masked = access.parseAccess(RAW_ACCESS);
+  assert.deepEqual(masked.rdp.lines, ["RDP — сервер srv01 · логин: admin · пароль: ••••••"]);
+  assert.equal(masked.vpn.secret, "Demo-Psk-1", "для «Скопировать» значение берётся из исходной строки");
+  assert.deepEqual(masked.vpn.lines, ["L2TP VPN · L2tpPsk=•••••• · Password: •••••• | профиль у админа"]);
+  const cases = {
+    "VPN pass Demo-3": "VPN pass ••••••", "VPN, пароля: Demo-4": "VPN, пароля: ••••••", "VPN WireGuard key = QUJD=": "VPN WireGuard key = ••••••",
+    "VPN PSK: Demo-5; сервер vpn.demo.invalid": "VPN PSK: ••••••; сервер vpn.demo.invalid", "VPN pre-shared key — Demo-6": "VPN pre-shared key — ••••••",
+    "RDP pwd:Demo-7": "RDP pwd:••••••", "RDP secret Demo-8 · порт 3389": "RDP secret •••••• · порт 3389", "RDP — пароль:": "RDP — пароль:",
+    "VPN Passport office · keyboard US": "VPN Passport office · keyboard US",
+  };
+  for (const [line, want] of Object.entries(cases)) assert.equal(access.maskSecrets(line), want, line);
+  // Через IPC: в ответе окну ни пароля RDP, ни PSK, ни пароля VPN.
+  const a = await app({ file: xml([...ROWS, `<connection><name>Без адреса</name><id>111222334</id><tags>VPN, RDP</tags><access>${esc(RAW_ACCESS)}</access><app>AnyDesk</app></connection>`]) });
+  const card = await a.call("rc:cardInfo", a.key("Без адреса"));
+  assert.equal(card.howto.rdp.address, null);
+  assert.deepEqual(card.howto.rdp.lines, masked.rdp.lines);
+  for (const x of ["Qw3rty", "Demo-Psk-1", "Demo Pass 2"]) assert.ok(!JSON.stringify(card).includes(x), x);
+  a.rc.dispose();
+  // Окно: строки — только после «Показать», до того размытые полосы и «могут быть пароли».
+  const js = fs.readFileSync(path.join(__dirname, "..", "..", "remote", "ui", "remote.js"), "utf8");
+  const raw = js.slice(js.indexOf("function rawLines"), js.indexOf("function howToCard"));
+  assert.match(raw, /let shown = false;/);
+  assert.match(raw, /if \(shown\) \{\s*pane\.append\(el\("pre", "rawlines"/);
+  assert.match(raw, /могут быть пароли/);
+  assert.match(raw, /"Показать"/);
+});
+
 test("W2-5: пароль/ключ VPN, пароль учётки и «Доступ» — в буфер через помощник мимо журнала Win+V и облака; не вышло — ничего не скопировано", async () => {
   const concealed = [];
   let works = true;
