@@ -172,6 +172,8 @@ public final class RemoteConnector {
     public var timing = Timing()
     /// Окно пароля, ввод в которое прервался («Ввод прерван»): «Повторить» для той же записи может вводить только в него.
     private var interrupted: (recordID: String, program: RemoteProgram, pid: Int32, field: AXNode)?
+    /// Пароль учётки текущего подключения (читается из файла, только когда его попросят).
+    private var accountPassword: (() async throws -> PasswordLookup)?
 
     public init(ax: AXAccess, launcher: AppLauncher, keyboard: KeyboardSender, clock: RemoteClock = SystemClock(),
                 logger: RemoteLogger? = nil) {
@@ -182,12 +184,16 @@ public final class RemoteConnector {
         self.logger = logger
     }
 
-    /// `password` вызывается один раз, только если пароль действительно будет вводиться.
+    /// `password` вызывается один раз, только если пароль действительно будет вводиться. `accountPassword` —
+    /// пароль учётки Windows: только если программа попросит именно его.
     public func connect(_ request: ConnectRequest, provider: RemoteProvider,
                         password: () async throws -> PasswordLookup,
+                        accountPassword: (() async throws -> PasswordLookup)? = nil,
                         progress: (ConnectionPhase) -> Void) async -> ConnectionOutcome {
         let started = clock.milliseconds
         var opened = false
+        self.accountPassword = request.record.hasAccountPassword ? accountPassword : nil
+        defer { self.accountPassword = nil }
         let outcome = await run(request, provider, password, progress, opened: &opened)
         logger?.log(.connection(result: outcome.code, typed: opened, milliseconds: clock.milliseconds - started))
         progress(.finished(outcome))
@@ -236,7 +242,7 @@ public final class RemoteConnector {
             return watching ? await openOnly(.userChoice, request, provider, known, before, progress) : .openedWithoutPassword(.userChoice)
         }
         guard trusted else { return .failed(.noAccessibility) }
-        guard hasSecret else {
+        guard hasSecret || accountPassword != nil else {
             return provider.fillsConnectForm ? await openOnly(.notInFile, request, provider, known, before, progress)
                                              : .openedWithoutPassword(.notInFile)
         }
@@ -252,19 +258,35 @@ public final class RemoteConnector {
         case .cancelled: return .cancelled
         }
 
-        switch await readPassword(password) {
-        case .success(let s) where !s.isEmpty: secret = s
-        case .success(let s): s.wipe(); return .openedWithoutPassword(.notInFile)
-        case .failure(let outcome): return outcome
+        // Окно просит пароль учётки Windows — только его (и логин, если поле пустое). Окно пароля программы — только
+        // пароль программы. Перепутать нельзя ни в одну сторону.
+        var accountSecret: SecretBuffer?
+        defer { accountSecret?.wipe() }
+        let wantsAccount = provider.texts.shows(provider.texts.accountPasswordTexts, in: target.window) != nil
+        if wantsAccount {
+            guard let accountPassword else { return .openedWithoutPassword(.notInFile) }
+            switch await readPassword(accountPassword) {
+            case .success(let s) where !s.isEmpty: accountSecret = s
+            case .success(let s): s.wipe(); return .openedWithoutPassword(.notInFile)
+            case .failure(let outcome): return outcome
+            }
+            fillLogin(request.record.account, in: target)
+        } else {
+            guard hasSecret else { return .openedWithoutPassword(.notInFile) }
+            switch await readPassword(password) {
+            case .success(let s) where !s.isEmpty: secret = s
+            case .success(let s): s.wipe(); return .openedWithoutPassword(.notInFile)
+            case .failure(let outcome): return outcome
+            }
         }
-        guard let secret else { return .openedWithoutPassword(.notInFile) }
+        guard let typed = accountSecret ?? secret else { return .openedWithoutPassword(.notInFile) }
 
         opened = true
         let outcome: ConnectionOutcome
-        if let failure = await enter(secret, into: target, request, provider) {
+        if let failure = await enter(typed, into: target, request, provider) {
             outcome = .failed(failure)
         } else {
-            secret.wipe()
+            typed.wipe()
             progress(.entered)
             outcome = await confirm(target, provider, request.record, known: known, before: before)
         }
@@ -303,6 +325,14 @@ public final class RemoteConnector {
         }
     }
 
+    /// Поле логина в окне пароля учётки: только если оно пустое.
+    private func fillLogin(_ account: String, in target: Target) {
+        guard !account.isEmpty,
+              let login = AXTree.nearest(to: target.field, in: target.window, where: AXTree.isTextInput),
+              login.processID == target.pid, login.valueLength == 0 else { return }
+        _ = login.setText(account)
+    }
+
     /// Процесс — та программа: bundle id и Team ID действительной подписи.
     private func isGenuine(_ pid: Int32, _ program: RemoteProgram) -> Bool {
         launcher.bundleID(ofProcess: pid) == program.bundleID && launcher.teamID(ofProcess: pid) == program.teamID
@@ -314,6 +344,7 @@ public final class RemoteConnector {
         let field: AXNode
         /// Окна этого подключения, замеченные до пароля (окно сеанса AnyDesk с диалогами внутри).
         var tracked: [AXNode] = []
+        var account = ""
     }
 
     private enum Wait {
@@ -372,13 +403,14 @@ public final class RemoteConnector {
                     if let marker = texts.shows(texts.promptTexts, in: window) {
                         watch.track(window)
                         blocked = true
-                        let pressed = continuePrompt(marker, in: window, texts, &watch, now: now)
+                        let pressed = continuePrompt(marker, in: window, texts, account: request.record.account, &watch, now: now)
                         intermediate = pressed ? .sessionChoice : .unknown
                         continue
                     }
                     let fields = AXTree.all(in: window, where: AXTree.isSecureField)
                     if let field = fields.first(where: { f in !known.contains { $0.isSame(as: f) } }) {
-                        return .found(Target(pid: pid, window: window, field: field, tracked: watch.windows))
+                        return .found(Target(pid: pid, window: window, field: field, tracked: watch.windows,
+                                             account: request.record.account))
                     }
                     if !fields.isEmpty { continue }   // окно пароля другого подключения
                     if texts.isPasswordWindow(window) {
@@ -491,9 +523,10 @@ public final class RemoteConnector {
     }
 
     /// Промежуточное окно с кнопкой продолжения: выбор по умолчанию оставить (поставить, если программа запомнила
-    /// другой), нажать «Connect». Только кнопки из `promptContinueTitles` — отмену и закрытие не нажимаем никогда.
-    /// false — кнопки нет или нажатая не помогла: ждём, ничего не трогая.
-    private func continuePrompt(_ marker: AXNode, in window: AXNode, _ texts: ProviderTexts,
+    /// другой), нажать «Connect». У записи есть логин учётки — выбрать «User account» и вписать его.
+    /// Только кнопки из `promptContinueTitles` — отмену и закрытие не нажимаем никогда.
+    /// false — кнопки нет, выбора нет или нажатая не помогла: ждём, ничего не трогая.
+    private func continuePrompt(_ marker: AXNode, in window: AXNode, _ texts: ProviderTexts, account: String,
                                 _ watch: inout SessionWatch, now: Int) -> Bool {
         let isContinue: (AXNode) -> Bool = { $0.role == "AXButton" && ProviderTexts.named($0, texts.promptContinueTitles) }
         guard let button = AXTree.nearest(to: marker, in: window, where: isContinue) else { return false }
@@ -505,7 +538,21 @@ public final class RemoteConnector {
                 texts.promptDefaultTitles.contains { ProviderTexts.key(name).hasPrefix($0) }
             }
         }
-        if let choice = AXTree.nearest(to: marker, in: window, where: isDefault), choice.isChecked == false { _ = choice.press() }
+        if account.isEmpty {
+            if let choice = AXTree.nearest(to: marker, in: window, where: isDefault), choice.isChecked == false { _ = choice.press() }
+        } else {
+            let isAccount: (AXNode) -> Bool = { node in
+                node.role == "AXRadioButton" && AXTree.names(of: node).contains { name in
+                    texts.promptAccountTitles.contains { ProviderTexts.key(name).hasPrefix($0) }
+                }
+            }
+            guard let choice = AXTree.nearest(to: marker, in: window, where: isAccount),
+                  let login = AXTree.nearest(to: choice, in: window, where: AXTree.isTextInput) else { return false }
+            if choice.isChecked == false { _ = choice.press() }
+            _ = login.clearValue()
+            guard login.setText(account), login.valueLength.map({ $0 == account.count || $0 == account.utf16.count }) ?? true
+            else { return false }
+        }
         guard button.press() else { return false }
         watch.pressed.append((button, now))
         return true
@@ -737,7 +784,7 @@ public final class RemoteConnector {
             var blocked = false
             for window in windows {
                 if let marker = texts.shows(texts.promptTexts, in: window) {
-                    _ = continuePrompt(marker, in: window, texts, &watch, now: now)
+                    _ = continuePrompt(marker, in: window, texts, account: target.account, &watch, now: now)
                     busy = true
                 } else if texts.shows(texts.progressTexts, in: window) != nil {
                     busy = true

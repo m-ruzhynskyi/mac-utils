@@ -41,10 +41,11 @@ struct XMLScan {
     // MARK: Поиск записи
 
     func find(_ record: ConnectionRecord) throws -> Element {
+        // Как в списке: ID AnyDesk/TeamViewer нормализован, адрес RDP — как есть, без ID — пустая строка.
         func id(_ e: Element) -> String? {
-            if let c = e.children.first(where: { $0.field == .id }), let content = c.content { return ConnectionID.normalize(text(content))?.value }
-            if let a = e.attributes.first(where: { $0.field == .id }) { return ConnectionID.normalize(text(a.value))?.value }
-            return nil
+            if let c = e.children.first(where: { $0.field == .id }) { return c.content.map { ConnectionsBuilder.idKey(text($0)) } ?? "" }
+            if let a = e.attributes.first(where: { $0.field == .id }) { return ConnectionsBuilder.idKey(text(a.value)) }
+            return ""
         }
         func name(_ e: Element) -> String? {
             if let c = e.children.first(where: { $0.field == .name }), let content = c.content {
@@ -55,7 +56,7 @@ struct XMLScan {
         let sameID = connections.filter { id($0) == record.id }
         if let e = sameID.first(where: { $0.lines.contains(record.sourceRow) }) { return e }
         if let e = sameID.first(where: { name($0) == record.name }) { return e }
-        if sameID.count == 1 { return sameID[0] }
+        if sameID.count == 1, !record.id.isEmpty { return sameID[0] }
         throw XMLEditError.entryNotFound
     }
 

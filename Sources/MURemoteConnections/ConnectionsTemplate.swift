@@ -5,26 +5,29 @@ import Foundation
 public enum ConnectionsTemplate {
     /// Заголовки на языке модуля — все три варианта распознаются при чтении.
     public static var headers: [String] {
-        [RL("Название"), "ID", RL("Пароль"), RL("Группа"), RL("Теги"), RL("Заметка"), RL("Программа")]
+        [RL("Название"), "ID", RL("Пароль"), RL("Группа"), RL("Теги"), RL("Заметка"), RL("Программа"),
+         RL("Учётная запись"), RL("Пароль учётной записи"), RL("Доступ"), RL("Контакты")]
     }
 
     public static var example: [String] {
-        [RL("Пример · Офис"), "123 456 789", "", RL("Офисы"), RL("пример"), RL("Удалите эту строку"), "AnyDesk"]
+        [RL("Пример · Офис"), "123 456 789", "", RL("Офисы"), RL("пример"), RL("Удалите эту строку"), "AnyDesk", "", "", "", ""]
     }
 
     static var sheetName: String { RL("Подключения") }
 
     public static func xml() -> Data {
-        let tags = ["name", "id", "password", "group", "tags", "note", "app"]
+        let tags: [ConnectionField] = [.name, .id, .password, .group, .tags, .note, .program, .account, .accountPassword, .access, .contacts]
         var row = "  <connection>"
         // Пустые поля тоже пишем: видно, что их можно заполнить.
-        for (tag, value) in zip(tags, example) {
+        for (field, value) in zip(tags, example) {
+            let tag = XMLConnectionsEditor.tag(field)
             row += "<\(tag)>\(XMLConnectionsEditor.escape(value))</\(tag)>"
         }
         row += "</connection>"
         return Data("""
             <?xml version="1.0" encoding="UTF-8"?>
-            <!-- Mac Utils: name, id, password, group, tags (a, b), note, app (AnyDesk | TeamViewer) -->
+            <!-- Mac Utils: name, id, password, group, tags (a, b), note, app (AnyDesk | TeamViewer | RDP | VPN | Other),
+                 account, accountPassword (Windows), access (VPN/RDP details, multi-line), contacts -->
             <connections>
             \(row)
             </connections>
@@ -42,7 +45,7 @@ public enum ConnectionsTemplate {
             }
             return out + "</row>"
         }
-        let widths = [28, 16, 18, 16, 18, 28, 14]
+        let widths = [28, 16, 18, 16, 18, 28, 14, 18, 18, 40, 24]
         let cols = widths.enumerated().map { "<col min=\"\($0.offset + 1)\" max=\"\($0.offset + 1)\" width=\"\($0.element)\" customWidth=\"1\"/>" }.joined()
         let main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
         let rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"

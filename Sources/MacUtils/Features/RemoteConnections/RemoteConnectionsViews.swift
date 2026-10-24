@@ -59,7 +59,8 @@ private func highlighted(_ text: String, _ ranges: [Range<String.Index>]) -> Att
     return out
 }
 
-/// Строка записи: значок, название, ID (и группа), программа, ключ, звезда; выбранная — с ↩.
+/// Строка записи (макет rc-tags-design): название и значки VPN/RDP; ID (никогда не переносится) и логин учётки;
+/// метки одной строкой; заметка; справа — программа, «i» (подробности) и ключ. Выбранная — с лаймовой рамкой.
 struct RemoteRow: View {
     let record: ConnectionRecord
     let program: RemoteProgram
@@ -70,37 +71,72 @@ struct RemoteRow: View {
     var dimmed = false
     var onFavorite: () -> Void
     var onConnect: () -> Void
+    var onDetails: () -> Void = {}
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             RowTile(systemImage: "display", kind: selected ? .accent : .neutral)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(highlighted(record.name, ConnectionSearch.highlights(in: record.name, query: query)))
-                    .font(DS.Font.rowTitle).foregroundStyle(.dsText).lineLimit(1)
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
-                    Text(highlighted(record.displayID, ConnectionSearch.highlightsInID(record.displayID, query: query)))
-                        .font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText)
-                    if showGroup, !record.group.isEmpty {
-                        Text("· \(record.group)").font(DS.Font.rowSub).foregroundStyle(.dsMute).lineLimit(1)
+                    Text(highlighted(record.name, ConnectionSearch.highlights(in: record.name, query: query)))
+                        .font(DS.Font.rowTitle).foregroundStyle(.dsText).lineLimit(1)
+                    ForEach(record.badges, id: \.title) { badge in
+                        Button(action: onDetails) { RemoteMethodBadge(kind: badge) }.buttonStyle(.plain)
                     }
+                }
+                HStack(spacing: 8) {
+                    // ID не переносится никогда: ужимаются логин и группа.
+                    idText.lineLimit(1).fixedSize().layoutPriority(1)
+                    if !record.account.isEmpty {
+                        Label {
+                            Text(highlighted(record.account, ConnectionSearch.highlights(in: record.account, query: query)))
+                                .lineLimit(1).truncationMode(.tail)
+                        } icon: {
+                            Image(systemName: "person").font(.system(size: 10, weight: .semibold))
+                        }
+                        .labelStyle(CompactLabelStyle())
+                        .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                        .help(RL("Учётка Windows"))
+                    } else if showGroup, !record.group.isEmpty {
+                        Text("· \(record.group)").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
+                }
+                if !record.labels.isEmpty { RemoteLabelStrip(labels: record.labels) }
+                if !note.isEmpty {
+                    Label {
+                        Text(highlighted(note, ConnectionSearch.highlights(in: note, query: query)))
+                            .lineLimit(1).truncationMode(.tail)
+                    } icon: {
+                        Image(systemName: "note.text").font(.system(size: 11, weight: .semibold))
+                    }
+                    .labelStyle(CompactLabelStyle())
+                    .font(DS.Font.manrope(12.5, .regular, relativeTo: .subheadline)).foregroundStyle(.dsMute)
+                    .help(record.note)
                 }
             }
             Spacer(minLength: 8)
-            RemoteProgramBadge(program: program, dimmed: dimmed)
-            RemotePasswordBadge(has: record.hasPassword)
-            Button(action: onFavorite) {
-                Image(systemName: favorite ? "star.fill" : "star")
-                    .font(.system(size: 13))
-                    .foregroundStyle(favorite ? Color.dsAccText : Color.dsMute)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
+            VStack(alignment: .trailing, spacing: 8) {
+                RemoteKindBadge(record: record, program: program, dimmed: dimmed)
+                HStack(spacing: 6) {
+                    Button(action: onDetails) {
+                        Image(systemName: "info")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Color.dsMute)
+                            .frame(width: 26, height: 26)
+                            .background(Color.dsPanel, in: Circle())
+                            .overlay(Circle().strokeBorder(Color.dsLine, lineWidth: 1))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(RL("Подробности"))
+                    .accessibilityLabel(RL("Подробности"))
+                    RemotePasswordBadge(has: record.hasPassword)
+                }
             }
-            .buttonStyle(.plain)
-            .help(favorite ? RL("Убрать из избранного") : RL("В избранное"))
-            if selected { Keycap(["↩"], compact: true, onPanel: true) }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .background(selected ? Color.dsPanel : .clear, in: shape)
         .overlay(shape.strokeBorder(selected ? Color.dsAccLine : .clear, lineWidth: selected ? DS.State.focusRing : 0))
@@ -110,6 +146,29 @@ struct RemoteRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
         .accessibilityAction(named: RL("Подключиться"), onConnect)
+        .accessibilityAction(named: RL("Подробности"), onDetails)
+        .accessibilityAction(named: favorite ? RL("Убрать из избранного") : RL("В избранное"), onFavorite)
+    }
+
+    @ViewBuilder private var idText: some View {
+        if record.id.isEmpty {
+            Text(RL("без ID")).font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute)
+        } else {
+            Text(highlighted(record.displayID, ConnectionSearch.highlightsInID(record.displayID, query: query)))
+                .font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText)
+        }
+    }
+
+    /// Заметка одной строкой: переводы строк — пробелы. Полная — в подсказке.
+    private var note: String {
+        record.note.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+    }
+}
+
+/// Значок и текст вплотную (4 pt), значок по центру строки.
+private struct CompactLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) { configuration.icon; configuration.title }
     }
 }
 
@@ -155,7 +214,7 @@ extension ConnectionSection {
 /// Поле поиска с подсказкой клавиши и плашкой раскладки («ctdth → север»).
 struct RemoteSearchField: View {
     @Binding var text: String
-    var placeholder = RL("Название, ID, группа, тег…")
+    var placeholder = RL("Название, ID, группа, метка…")
     var large = false
     var hint: ConnectionSearch.LayoutHint?
     var programPill: String?
@@ -198,7 +257,7 @@ struct RemoteSectionsList: View {
     let listing: ConnectionListing
     var showSectionLabels = true
     var dimmed: Set<RemoteProgram> = []
-    /// Правка записи (только для .xml); nil — пункта «Изменить…» нет.
+    /// Правка записи (.xml) или просмотр (.xlsx); nil — пункта «Изменить…» нет.
     var onEdit: ((ConnectionRecord) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -221,7 +280,8 @@ struct RemoteSectionsList: View {
                                           showGroup: section.kind == .results || section.kind == .recents || section.kind == .favorites,
                                           favorite: center.isFavorite(record), dimmed: dimmed.contains(program),
                                           onFavorite: { center.toggleFavorite(record) },
-                                          onConnect: { model.select(row); model.connectSelected() })
+                                          onConnect: { model.select(row); model.connectSelected() },
+                                          onDetails: { model.select(row); center.detailsRecord = record })
                                     .id(row.id)
                                     .onTapGesture { model.select(row) }
                                     .contextMenu {
@@ -229,6 +289,10 @@ struct RemoteSectionsList: View {
                                         Button(RL("Открыть без пароля")) { model.select(row); model.connectSelected(withPassword: false) }
                                         Button(center.isFavorite(record) ? RL("Убрать из избранного") : RL("В избранное")) {
                                             center.toggleFavorite(record)
+                                        }
+                                        Button(RL("Подробности")) { center.detailsRecord = record }
+                                        if record.hasAccountPassword {
+                                            Button(RL("Скопировать пароль учётки")) { center.copySecret(.accountPassword, of: record) }
                                         }
                                         if let onEdit {
                                             Divider()
@@ -273,6 +337,10 @@ extension ConnectionField {
         case .tags: return RL("Теги")
         case .note: return RL("Заметка")
         case .program: return RL("Программа")
+        case .account: return RL("Учётная запись")
+        case .accountPassword: return RL("Пароль учётной записи")
+        case .access: return RL("Доступ")
+        case .contacts: return RL("Контакты")
         }
     }
 }
@@ -281,9 +349,13 @@ extension ConnectionField {
 struct RemoteDiagnosticsSummary: View {
     let diagnostics: ConnectionsDiagnostics
     @Binding var expanded: Bool
+    var vpn = 0
+    var rdp = 0
 
     private var text: String {
         var parts = [RL("Загружено %@", diagnostics.loaded)]
+        if vpn > 0 { parts.append("VPN \(vpn)") }
+        if rdp > 0 { parts.append("RDP \(rdp)") }
         if !diagnostics.skipped.isEmpty { parts.append(RL("пропущено %@", diagnostics.skipped.count)) }
         if diagnostics.duplicateCount > 0 { parts.append(RL("дубликатов %@", diagnostics.duplicateCount)) }
         let other = diagnostics.unrecognizedColumns.count + diagnostics.lossyIDRows.count + diagnostics.ambiguousProgramRows.count
@@ -476,23 +548,22 @@ struct RemoteConnectionsPanel: View {
     @StateObject private var model: RemoteListModel
     @ObservedObject private var center: RemoteConnectionsCenter
     @FocusState private var searchFocused: Bool
-    @State private var diagnosticsExpanded: Bool
     @State private var installed: Set<RemoteProgram> = Set(RemoteProgram.allCases)
     @State private var editing: RemoteEditTarget?
 
-    /// `center`, `query`, `diagnosticsExpanded` — для снимков интерфейса; в приложении — общий центр и пустой поиск.
-    init(center: RemoteConnectionsCenter? = nil, query: String = "", diagnosticsExpanded: Bool = false) {
+    /// `center`, `query` — для снимков интерфейса; в приложении — общий центр и пустой поиск.
+    init(center: RemoteConnectionsCenter? = nil, query: String = "") {
         let center = center ?? .shared
         let model = RemoteListModel(center: center)
         model.query = query
         _center = ObservedObject(wrappedValue: center)
         _model = StateObject(wrappedValue: model)
-        _diagnosticsExpanded = State(initialValue: diagnosticsExpanded)
     }
 
     var body: some View {
         let listing = model.listing
         VStack(spacing: DS.Space.s) {
+if center.detailsRecord == nil {
             RemoteSearchField(text: $model.query, hint: listing.hint, focused: $searchFocused, hotKey: .remoteConnections)
                 .disabled(center.state != .ready)
                 .opacity(center.state == .ready ? 1 : DS.State.disabledOpacity)
@@ -502,27 +573,32 @@ struct RemoteConnectionsPanel: View {
                     model.connectSelected(withPassword: !press.modifiers.contains(.command)) ? .handled : .ignored
                 }
                 .padding(.horizontal, DS.Space.l)
-            if center.state == .ready {
-                HStack(spacing: 6) {
-                    ForEach([ProgramFilter.all] + RemoteProgram.allCases.map { .program($0) }, id: \.self) { f in
-                        Chip(model.chipTitle(f, counts: listing.counts), selected: model.filter == f) { model.filter = f }
+            }
+            if let record = center.detailsRecord, center.state == .ready {
+                RemoteDetailsView(record: record, center: center) { center.detailsRecord = nil }
+                    .padding(.horizontal, DS.Space.l)
+                    .frame(maxHeight: .infinity, alignment: .top)
+            } else if center.state == .ready {
+                FlowLayout(spacing: 6) {
+                    ForEach(model.filters(listing.counts), id: \.self) { f in
+                        RemoteFilterChip(title: model.chipTitle(f, counts: listing.counts),
+                                         badge: f == .rdp ? .rdp : f == .vpn ? .vpn : nil,
+                                         selected: model.filter == f) { model.filter = f }
                     }
-                    Spacer()
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, DS.Space.l)
+                RemoteTagFilterRow(tags: listing.tags, selected: $model.tags)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, DS.Space.l)
                 missingProgramBanner(listing).padding(.horizontal, DS.Space.l)
                 Group {
-                    if diagnosticsExpanded {
-                        ScrollView {
-                            RemoteDiagnosticsList(diagnostics: center.snapshot.diagnostics, defaultProgram: center.defaultProgram,
-                                                  records: center.snapshot.records)
-                        }
-                    } else if listing.isEmpty {
+                    if listing.isEmpty {
                         emptyList
                     } else {
                         RemoteSectionsList(model: model, center: center, listing: listing,
                                            dimmed: Set(RemoteProgram.allCases).subtracting(installed),
-                                           onEdit: center.canEdit ? { editing = RemoteEditTarget(record: $0) } : nil)
+                                           onEdit: center.canView ? { editing = RemoteEditTarget(record: $0) } : nil)
                     }
                 }
                 .padding(.horizontal, DS.Space.l)
@@ -538,7 +614,6 @@ struct RemoteConnectionsPanel: View {
             installed = Set(RemoteProgram.allCases.filter(center.isInstalled))
             searchFocused = true
         }
-        .onChange(of: center.snapshot.diagnostics.isClean) { _, clean in if clean { diagnosticsExpanded = false } }
         .sheet(item: $editing) { RemoteEditSheet(center: center, record: $0.record) }
     }
 
@@ -566,24 +641,14 @@ struct RemoteConnectionsPanel: View {
         }
     }
 
+    /// В трее внизу — только «Обновить»: файл, Excel, добавление и проверка файла — в разделе настроек.
     private var bottomBar: some View {
         VStack(spacing: DS.Space.s) {
             Divider().overlay(Color.dsLine)
-            HStack(spacing: 6) {
-                Button { center.openFile() } label: { Label("Excel", systemImage: "tablecells") }
-                    .buttonStyle(.graphite(.secondary, size: .compact))
-                    .help(RL("Открыть файл подключений"))
+            HStack {
+                IconButton(RL("Обновить"), systemImage: "arrow.clockwise", compact: true) { center.reload() }
                     .disabled(center.fileURL == nil)
-                IconButton(RL("Перечитать"), systemImage: "arrow.clockwise", compact: true) { center.reload() }
-                    .disabled(center.fileURL == nil)
-                IconButton(RL("Выбрать файл"), systemImage: "folder", compact: true) { center.chooseFile() }
-                if center.canEdit, center.state == .ready {
-                    IconButton(RL("Добавить запись"), systemImage: "plus", compact: true) { editing = RemoteEditTarget(record: nil) }
-                }
                 Spacer()
-                if center.state == .ready {
-                    RemoteDiagnosticsSummary(diagnostics: center.snapshot.diagnostics, expanded: $diagnosticsExpanded)
-                }
             }
             .padding(.horizontal, DS.Space.l)
         }

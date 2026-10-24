@@ -1,6 +1,7 @@
 @testable import MacUtils
 import Carbon.HIToolbox
 import MURemoteConnections
+import SwiftUI
 import XCTest
 import MUCore
 import MUDesign
@@ -155,6 +156,62 @@ final class RemoteConnectionsAppTests: XCTestCase {
         XCTAssertEqual(hud(.finished(.failed(.wrongPassword)), .teamViewer).detail, "TeamViewer отклонил пароль для «Лаборатория Север».")
         XCTAssertEqual(RemoteHUDAction.download.title(.teamViewer), "Скачать TeamViewer")
     }
+    /// Промежуточные окна и «не подтверждено» (task-rc-terminal-session): нейтральные, без галочки.
+    func testHUDIntermediateAndUnconfirmedAreNeutral() {
+        let record = ConnectionRecord(sourceRow: 2, name: "Лаборатория Север", id: "123456789", hasPassword: true)
+        func hud(_ phase: ConnectionPhase, _ program: RemoteProgram = .anyDesk) -> RemoteHUDContent {
+            RemoteHUDContent.make(phase, program: program, record: record)
+        }
+        XCTAssertEqual(hud(.intermediate(.sessionChoice)).title, "Выбираю сеанс в AnyDesk…")
+        XCTAssertEqual(hud(.intermediate(.sessionChoice)).detail, "Пароль введу после")
+        XCTAssertEqual(hud(.intermediate(.unknown)).detail, "Ответьте в окне AnyDesk — пароль введу после")
+        XCTAssertEqual(hud(.typingID, .teamViewer).title, "Ввожу ID в TeamViewer…")
+        for phase in [ConnectionPhase.intermediate(.sessionChoice), .intermediate(.remoteSide), .intermediate(.unknown), .typingID] {
+            let c = hud(phase)
+            XCTAssertEqual(c.tone, .info)
+            XCTAssertFalse(c.fadesOut, "\(phase) — не итог")
+            XCTAssertEqual(c.actions, [.cancel])
+        }
+        let ad = hud(.finished(.unconfirmed(copyID: false)))
+        XCTAssertEqual(ad.title, "Не удалось подтвердить подключение")
+        XCTAssertEqual(ad.tone, .neutral)
+        let tv = hud(.finished(.unconfirmed(copyID: true)), .teamViewer)
+        XCTAssertEqual(tv.title, "Не удалось подключиться — ID скопирован")
+        XCTAssertEqual(tv.tone, .neutral)
+        XCTAssertTrue(tv.fadesOut)
+    }
+
+    /// Строка списка: ID не переносится рядом с длинной группой; теги и заметка — одной строкой под ID.
+    func testRowKeepsIDOnOneLineAndShowsTagsAndNote() {
+        func height(_ record: ConnectionRecord, showGroup: Bool = true) -> CGFloat {
+            let host = NSHostingView(rootView: RemoteRow(record: record, program: .anyDesk, showGroup: showGroup,
+                                                         onFavorite: {}, onConnect: {}).frame(width: 340))
+            return host.fittingSize.height
+        }
+        let plain = ConnectionRecord(sourceRow: 2, name: "Вінниця", id: "1333427133", group: "Офіс")
+        let grouped = ConnectionRecord(sourceRow: 2, name: "Вінниця", id: "1333427133",
+                                       group: "Вінницька область · філія на Соборній, другий поверх")
+        XCTAssertEqual(height(grouped), height(plain), "ID «1 333 427 133» и длинная группа — одна строка, группа обрезается")
+
+        let tagged = ConnectionRecord(sourceRow: 2, name: "Вінниця", id: "1333427133", group: "Офіс", tags: ["каса", "ніч", "сервер", "склад"],
+                                      note: "Дзвонити заздалегідь\nключ у охорони, другий поверх, кабінет 12, з 9 до 18")
+        XCTAssertGreaterThan(height(tagged), height(plain), "теги и заметка видны")
+        let short = ConnectionRecord(sourceRow: 2, name: "Вінниця", id: "1333427133", group: "Офіс", tags: ["каса"], note: "ок")
+        XCTAssertEqual(height(tagged), height(short), "длинная заметка — одной строкой с обрезкой")
+    }
+
+    /// .xlsx: карточка записи открывается только для просмотра, правка — в Excel.
+    func testExcelRecordsOpenReadOnly() {
+        let center = RemoteConnectionsCenter(defaults: defaults)
+        XCTAssertFalse(center.canView)
+        for (ext, edit) in [("xlsx", false), ("xlsm", false), ("XML", true)] {
+            center.setFile(FileManager.default.temporaryDirectory.appendingPathComponent("mu-rc-view-\(UUID().uuidString).\(ext)"))
+            XCTAssertTrue(center.canView, ext)
+            XCTAssertEqual(center.canEdit, edit, ext)
+        }
+        center.setFile(nil)
+    }
+
     /// Правка .xml через центр: запись меняется в файле, рядом — .bak с теми же правами, список перечитан.
     func testCenterEditsXMLWithBackup() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mu-rc-edit-\(UUID().uuidString)")
