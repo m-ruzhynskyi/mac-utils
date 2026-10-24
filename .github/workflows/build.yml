@@ -77,10 +77,22 @@ jobs:
           done
           echo "::notice::Нет успешного прогона PR #$PR_NUMBER с деревом $TREE — тесты как обычно."
 
+  # Секунды, до macOS-раннеров: импорты MU* против dependencies в Package.swift и слои модулей.
+  # Локальная инкрементальная сборка пропускает отсутствующую зависимость, чистая — падает.
+  module-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Self-test
+        run: python3 scripts/check-module-deps.py --self-test
+      - name: Module dependencies
+        run: python3 scripts/check-module-deps.py
+
   test-shard:
-    needs: tested-tree
+    needs: [tested-tree, module-deps]
     # tested-tree пропущена (не push в main/development) или упала — outputs пустые, тесты идут.
-    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    if: ${{ !cancelled() && needs.module-deps.result == 'success' && needs.tested-tree.outputs.tested != 'true' }}
     name: test-shard ${{ matrix.shard }}
     runs-on: macos-15
     timeout-minutes: 35
@@ -125,9 +137,9 @@ jobs:
   # Тесты скриптов и relay, сборка приложения и кэш .build — рядом с шардами, не в одном из них:
   # так все четыре шарда делят только тесты.
   app:
-    needs: tested-tree
+    needs: [tested-tree, module-deps]
     # При push в development работает и когда тесты переиспользованы: сборка кладёт кэш для следующих прогонов.
-    if: ${{ !cancelled() && (needs.tested-tree.outputs.tested != 'true' || github.ref == 'refs/heads/development') }}
+    if: ${{ !cancelled() && needs.module-deps.result == 'success' && (needs.tested-tree.outputs.tested != 'true' || github.ref == 'refs/heads/development') }}
     runs-on: macos-15
     timeout-minutes: 35
     steps:
@@ -182,11 +194,14 @@ jobs:
   # Обязательная проверка «test» в правилах main: зелёная, только если все шарды прошли и вместе
   # выполнили все тесты одного дерева, либо это дерево уже прошло тесты в PR (tested-tree).
   test:
-    needs: [tested-tree, test-shard, app]
+    needs: [tested-tree, module-deps, test-shard, app]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Module dependencies
+        if: needs.module-deps.result != 'success'
+        run: echo "::error::Проверка зависимостей модулей (module-deps) не прошла"; exit 1
       - name: Reused PR result
         if: needs.tested-tree.outputs.tested == 'true' && needs.test-shard.result == 'skipped' && (needs.app.result == 'skipped' || needs.app.result == 'success')
         run: echo "Тесты этого дерева прошли в прогоне PR — см. задачу tested-tree."
