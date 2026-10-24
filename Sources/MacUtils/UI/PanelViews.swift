@@ -13,6 +13,7 @@ import MUDropShelf
 import MUAnnotate
 import MUScreenshot
 import MUVideoPlayer
+import MUTextEditor
 
 extension Notification.Name {
     /// Открыть в настройках нужный раздел (object — SettingsSection).

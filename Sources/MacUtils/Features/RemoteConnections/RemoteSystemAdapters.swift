@@ -4,6 +4,7 @@ import Carbon.HIToolbox
 import MURemoteConnections
 import Security
 import MUScreenshot
+import MUTextEditor
 
 /// Элемент интерфейса AnyDesk/TeamViewer через AXUIElement. Значение защищённого поля не читается — только
 /// `AXNumberOfCharacters`.

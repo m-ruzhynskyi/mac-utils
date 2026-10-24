@@ -23,6 +23,7 @@ import MUAnnotate
 import MUScreenShare
 import MUScreenshot
 import MUVideoPlayer
+import MUTextEditor
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения

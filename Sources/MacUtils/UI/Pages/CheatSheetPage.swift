@@ -4,6 +4,7 @@ import MUCore
 import MUDesign
 import MUCheatSheet
 import MUScreenshot
+import MUTextEditor
 
 struct CheatSheetPage: View {
     @AppStorage(Pref.cheatSheet) private var enabled = true

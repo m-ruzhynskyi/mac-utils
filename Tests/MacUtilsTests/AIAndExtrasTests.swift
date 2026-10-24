@@ -7,6 +7,7 @@ import XCTest
 @testable import MUWindowSnap
 @testable import MUScreenShare
 @testable import MUScreenshot
+@testable import MUTextEditor
 
 final class AIAndExtrasTests: XCTestCase {
     func testJSONInsideChatter() {

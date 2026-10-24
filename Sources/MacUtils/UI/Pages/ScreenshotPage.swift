@@ -4,6 +4,7 @@ import MUCore
 import MUDesign
 import MUScreenShare
 import MUScreenshot
+import MUTextEditor
 
 /// Образец фона в настройках снимков.
 private struct BackgroundSwatch: View {

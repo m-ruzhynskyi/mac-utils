@@ -3,6 +3,7 @@ import XCTest
 @testable import MUCore
 @testable import MUAudio
 @testable import MUScreenShare
+@testable import MUTextEditor
 
 /// B1: «Всегда разрешать» не должно делать доверенными свой ID, пустой и невалидные ID (иначе возвращается C1).
 ///

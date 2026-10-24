@@ -5,6 +5,7 @@ import XCTest
 @testable import MUCore
 @testable import MUDesign
 @testable import MUAudio
+@testable import MUTextEditor
 
 /// Демо-документы режима «Документ» (выдуманное содержимое, как на макетах `d01`–`d11`).
 enum DocDemo {

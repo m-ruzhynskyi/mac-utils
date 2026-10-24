@@ -4,6 +4,7 @@ import SwiftUI
 import MUCore
 import MUDesign
 import MUScreenshot
+import MUTextEditor
 
 /// Кнопка в HUD подключения.
 enum RemoteHUDAction: Hashable {

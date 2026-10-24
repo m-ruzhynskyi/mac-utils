@@ -5,6 +5,7 @@ import XCTest
 @testable import MUCore
 @testable import MUAudio
 @testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Mac Utils в «Командах» и ссылках `macutils://`: каждое действие зовёт ту же функцию, что горячая клавиша и панель
 /// (`AppAction.run`); действия с файлами — без окна, с теми же гарантиями байтов, что «Убрать значения» в редакторе.

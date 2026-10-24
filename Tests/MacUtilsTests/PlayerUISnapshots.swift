@@ -7,6 +7,7 @@ import XCTest
 @testable import MUAudio
 @testable import MUScreenshot
 @testable import MUVideoPlayer
+@testable import MUTextEditor
 
 /// Настоящие виды плеера офскрин в PNG — сверка с макетами `v01`–`v15b` (кадр видео `cacheDisplay` не захватывает:
 /// там чёрное поле, проверяются панель, меню, подсказки и тосты). Без переменной окружения тест пропускается.

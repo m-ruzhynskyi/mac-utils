@@ -4,6 +4,7 @@ import XCTest
 @testable import MUCore
 @testable import MUAudio
 @testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Этап 2.7: поиск и замена по папке (на копии фикстур во временной папке) и несколько курсоров.
 final class FolderSearchTests: XCTestCase {

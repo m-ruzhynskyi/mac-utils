@@ -3,6 +3,7 @@ import XCTest
 @testable import MUUpdate
 @testable import MUAudio
 @testable import MUScreenshot
+@testable import MUTextEditor
 
 @MainActor
 final class UpdaterTests: XCTestCase {
