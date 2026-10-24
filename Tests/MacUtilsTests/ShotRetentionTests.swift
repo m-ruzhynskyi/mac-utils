@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUCore
 
 /// Срок хранения умной папки: Корзина, пустые папки, пропавшие файлы. Всё — во временной папке:
 /// настоящие папки снимков, индекс и Корзина пользователя не трогаются.

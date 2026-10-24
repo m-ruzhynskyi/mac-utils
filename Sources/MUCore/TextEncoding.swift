@@ -1,22 +1,20 @@
 import Foundation
-import MUDesign
-import MUAudio
 
 /// Кодировки текстового редактора (меню «Кодировка», как в Notepad++).
 /// Главное правило: открыть и сохранить без правок — байты те же. Однобайтовые кодировки декодируются таблицей
 /// на 256 значений, где у каждого байта свой символ (неопределённые байты — U+0080…U+009F и т. п.), поэтому
 /// обратное преобразование однозначно.
-enum TextEncoding: String, CaseIterable, Codable, Sendable {
+package enum TextEncoding: String, CaseIterable, Codable, Sendable {
     case utf8, utf8BOM, utf16LE, utf16BE
     case windows1251, windows1252, windows1250
     case koi8R, koi8U
     case iso8859_1, iso8859_2, iso8859_5
     case macRoman, cp866
 
-    enum Group: CaseIterable {
+    package enum Group: CaseIterable {
         case unicode, cyrillic, western, central
 
-        var title: String {
+        package var title: String {
             switch self {
             case .unicode: return "Юникод"
             case .cyrillic: return "Кириллица"
@@ -26,7 +24,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    var title: String {
+    package var title: String {
         switch self {
         case .utf8: return "UTF-8"
         case .utf8BOM: return "UTF-8 с BOM"
@@ -45,7 +43,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    var group: Group {
+    package var group: Group {
         switch self {
         case .utf8, .utf8BOM, .utf16LE, .utf16BE: return .unicode
         case .windows1251, .koi8R, .koi8U, .iso8859_5, .cp866: return .cyrillic
@@ -55,7 +53,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
     }
 
     /// Кодовая страница Windows (`\ansicpgNNNN` в RTF).
-    var codePage: Int {
+    package var codePage: Int {
         switch self {
         case .utf8, .utf8BOM: return 65001
         case .utf16LE: return 1200
@@ -73,7 +71,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    init?(codePage: Int) {
+    package init?(codePage: Int) {
         guard let match = Self.allCases.first(where: { $0.codePage == codePage && $0 != .utf8BOM }) else { return nil }
         self = match
     }
@@ -82,7 +80,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
 
     /// Текст из байтов; `nil` — байты не годятся для этой кодировки (неверный UTF-8, нечётная длина UTF-16).
     /// BOM своей кодировки снимается; у UTF-16 без BOM декодируются все байты.
-    func decode(_ data: Data) -> String? {
+    package func decode(_ data: Data) -> String? {
         switch self {
         case .utf8, .utf8BOM:
             let bytes = self == .utf8BOM && data.starts(with: Self.bomUTF8) ? data.dropFirst(3) : data[...]
@@ -121,7 +119,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
 
     /// Байты для сохранения; `nil` — в тексте есть символы, которых в этой кодировке нет (`unrepresentable`).
     /// `utf16BOM` — писать ли BOM в UTF-16 (новые и преобразованные файлы — с ним; открытый без BOM — без).
-    func encode(_ text: String, utf16BOM: Bool = true) -> Data? {
+    package func encode(_ text: String, utf16BOM: Bool = true) -> Data? {
         switch self {
         case .utf8: return Data(text.utf8)
         case .utf8BOM: return Self.bomUTF8 + Data(text.utf8)
@@ -150,7 +148,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
     }
 
     /// Первые `limit` символов текста, которых нет в этой кодировке (для предупреждения перед «Преобразовать в…»).
-    func unrepresentable(in text: String, limit: Int = 10) -> [Character] {
+    package func unrepresentable(in text: String, limit: Int = 10) -> [Character] {
         guard let table = SingleByteTable.table(for: self) else { return [] }
         var found: [Character] = []
         for scalar in text.unicodeScalars where table.byte(for: scalar.value) == nil {
@@ -162,7 +160,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
     }
 
     /// UTF-16 текста одним куском (у `NSString` из редактора — без перекодирования).
-    static func units(_ text: String) -> [UInt16] {
+    package static func units(_ text: String) -> [UInt16] {
         let string = text as NSString
         var units = [UInt16](repeating: 0, count: string.length)
         units.withUnsafeMutableBufferPointer { buffer in
@@ -173,7 +171,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
     }
 
     /// Каждая половинка суррогатной пары стоит в паре.
-    static func validSurrogates(_ units: [UInt16]) -> Bool {
+    package static func validSurrogates(_ units: [UInt16]) -> Bool {
         units.withUnsafeBufferPointer { buffer in
             var i = 0
             while i < buffer.count {
@@ -192,7 +190,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
     }
 
     /// Есть ли байты ≥ 0x80 (по 8 байт за шаг).
-    static func hasHighBytes(_ data: Data) -> Bool {
+    package static func hasHighBytes(_ data: Data) -> Bool {
         data.withUnsafeBytes { raw in
             let count = raw.count
             var i = 0
@@ -208,16 +206,16 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    static let bomUTF8 = Data([0xEF, 0xBB, 0xBF])
-    static let bomUTF16LE = Data([0xFF, 0xFE])
-    static let bomUTF16BE = Data([0xFE, 0xFF])
+    package static let bomUTF8 = Data([0xEF, 0xBB, 0xBF])
+    package static let bomUTF16LE = Data([0xFF, 0xFE])
+    package static let bomUTF16BE = Data([0xFE, 0xFF])
 
     // MARK: - Автоопределение
 
-    enum Reason: Equatable {
+    package enum Reason: Equatable {
         case bom, validUTF8, rtfCodePage(Int), fallback, manual
 
-        var title: String {
+        package var title: String {
             switch self {
             case .bom: return "по BOM"
             case .validUTF8: return "текст — правильный UTF-8"
@@ -230,7 +228,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
 
     /// Порядок: BOM → правильный UTF-8 с не-ASCII байтами → `\ansicpgNNNN` из заголовка RTF → правильный UTF-8
     /// (чистый ASCII без кодовой страницы) → Windows-1252.
-    static func detect(_ data: Data) -> (encoding: TextEncoding, reason: Reason) {
+    package static func detect(_ data: Data) -> (encoding: TextEncoding, reason: Reason) {
         if data.starts(with: bomUTF8) { return (.utf8BOM, .bom) }
         if data.starts(with: bomUTF16LE) { return (.utf16LE, .bom) }
         if data.starts(with: bomUTF16BE) { return (.utf16BE, .bom) }
@@ -247,7 +245,7 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
     }
 
     /// Номер из `\ansicpgNNNN` в начале файла (RTF пишет его в заголовке).
-    static func rtfCodePage(_ data: Data) -> Int? {
+    package static func rtfCodePage(_ data: Data) -> Int? {
         let head = data.prefix(64 * 1024)
         let marker = Array("\\ansicpg".utf8)
         guard let start = head.firstRange(of: marker)?.upperBound else { return nil }
@@ -264,8 +262,8 @@ enum TextEncoding: String, CaseIterable, Codable, Sendable {
 
 /// Однобайтовая кодировка: байт ↔ символ. Строится из таблицы CoreFoundation; байт, которого в кодировке нет,
 /// становится символом U+00XX (как делает Windows для 0x81 в 1252) — так у каждого байта свой символ.
-struct SingleByteTable {
-    let decodeTable: [UInt16]
+package struct SingleByteTable {
+    package let decodeTable: [UInt16]
     /// Символ BMP → байт; −1 — символа в кодировке нет. Все символы таблицы — из BMP (U+F700… тоже).
     private let encodeTable: [Int16]
 
@@ -297,7 +295,7 @@ struct SingleByteTable {
     }
 
     /// Текст сразу в `NSString` (UTF-16): редактор и скан `$` читают его без перекодирования.
-    func decode(_ data: Data) -> String {
+    package func decode(_ data: Data) -> String {
         let count = data.count
         guard count > 0 else { return "" }
         let units = UnsafeMutablePointer<UInt16>.allocate(capacity: count)
@@ -310,13 +308,13 @@ struct SingleByteTable {
         return NSString(charactersNoCopy: units, length: count, freeWhenDone: true) as String
     }
 
-    func byte(for scalar: UInt32) -> UInt8? {
+    package func byte(for scalar: UInt32) -> UInt8? {
         guard scalar < 0x10000 else { return nil }
         let byte = encodeTable[Int(scalar)]
         return byte < 0 ? nil : UInt8(byte)
     }
 
-    func encode(_ text: String) -> Data? {
+    package func encode(_ text: String) -> Data? {
         let units = TextEncoding.units(text)
         var bytes = [UInt8](repeating: 0, count: units.count)
         let ok = encodeTable.withUnsafeBufferPointer { table in
@@ -344,7 +342,7 @@ struct SingleByteTable {
         return tables
     }()
 
-    static func table(for encoding: TextEncoding) -> SingleByteTable? { tables[encoding] }
+    package static func table(for encoding: TextEncoding) -> SingleByteTable? { tables[encoding] }
 
     private static func cfEncoding(_ encoding: TextEncoding) -> CFStringEncoding? {
         switch encoding {
@@ -365,10 +363,10 @@ struct SingleByteTable {
 
 // MARK: - Переводы строк
 
-enum LineEnding: String, CaseIterable, Codable, Sendable {
+package enum LineEnding: String, CaseIterable, Codable, Sendable {
     case crlf, lf, cr
 
-    var title: String {
+    package var title: String {
         switch self {
         case .crlf: return "CRLF"
         case .lf: return "LF"
@@ -376,7 +374,7 @@ enum LineEnding: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    var detail: String {
+    package var detail: String {
         switch self {
         case .crlf: return "Windows"
         case .lf: return "macOS и Linux"
@@ -384,7 +382,7 @@ enum LineEnding: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    var string: String {
+    package var string: String {
         switch self {
         case .crlf: return "\r\n"
         case .lf: return "\n"
@@ -393,12 +391,12 @@ enum LineEnding: String, CaseIterable, Codable, Sendable {
     }
 
     /// Сколько переводов строк каждого вида.
-    struct Counts: Equatable {
-        var crlf = 0, lf = 0, cr = 0
-        var isMixed: Bool { [crlf, lf, cr].filter { $0 > 0 }.count > 1 }
+    package struct Counts: Equatable {
+        package var crlf = 0, lf = 0, cr = 0
+        package var isMixed: Bool { [crlf, lf, cr].filter { $0 > 0 }.count > 1 }
 
         /// Вид, которого больше; при равенстве — CRLF, LF, CR. Переводов нет — `nil`.
-        var dominant: LineEnding? {
+        package var dominant: LineEnding? {
             let best = max(crlf, lf, cr)
             guard best > 0 else { return nil }
             return crlf == best ? .crlf : (lf == best ? .lf : .cr)
@@ -406,7 +404,7 @@ enum LineEnding: String, CaseIterable, Codable, Sendable {
     }
 
     /// UTF-16 текста кусками по 64 К (без копирования всего текста и без побуквенных вызовов).
-    static func forEachChunk(_ text: NSString, _ body: (UnsafeBufferPointer<UInt16>) -> Void) {
+    package static func forEachChunk(_ text: NSString, _ body: (UnsafeBufferPointer<UInt16>) -> Void) {
         let length = text.length
         if let pointer = CFStringGetCharactersPtr(text as CFString) {
             body(UnsafeBufferPointer(start: pointer, count: length))
@@ -425,7 +423,7 @@ enum LineEnding: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    static func count(in text: NSString) -> Counts {
+    package static func count(in text: NSString) -> Counts {
         var counts = Counts()
         var previousCR = false
         forEachChunk(text) { units in
@@ -442,7 +440,7 @@ enum LineEnding: String, CaseIterable, Codable, Sendable {
     }
 
     /// Все переводы строк — одного вида (по UTF-16, без перебора символов `String`).
-    static func convert(_ text: NSString, to ending: LineEnding) -> String {
+    package static func convert(_ text: NSString, to ending: LineEnding) -> String {
         var result: [UInt16] = []
         result.reserveCapacity(text.length + text.length / 16)
         let replacement = Array(ending.string.utf16)
@@ -463,7 +461,7 @@ enum LineEnding: String, CaseIterable, Codable, Sendable {
         return result.withUnsafeBufferPointer { NSString(characters: $0.baseAddress!, length: $0.count) } as String
     }
 
-    static func count(in text: String) -> Counts {
+    package static func count(in text: String) -> Counts {
         var counts = Counts()
         var previousCR = false
         for unit in text.utf16 {
@@ -478,7 +476,7 @@ enum LineEnding: String, CaseIterable, Codable, Sendable {
     }
 
     /// Вид, которого больше; при равенстве — CRLF, LF, CR. Переводов нет — `nil` (новый файл берёт LF).
-    static func detect(_ text: String) -> LineEnding? {
+    package static func detect(_ text: String) -> LineEnding? {
         let counts = count(in: text)
         let best = max(counts.crlf, counts.lf, counts.cr)
         guard best > 0 else { return nil }
@@ -486,7 +484,7 @@ enum LineEnding: String, CaseIterable, Codable, Sendable {
     }
 
     /// Все переводы строк — одного вида.
-    static func convert(_ text: String, to ending: LineEnding) -> String {
+    package static func convert(_ text: String, to ending: LineEnding) -> String {
         var result = String.UnicodeScalarView()
         var previousCR = false
         for scalar in text.unicodeScalars {

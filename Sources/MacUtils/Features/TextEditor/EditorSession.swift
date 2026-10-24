@@ -217,33 +217,3 @@ enum EditorSession {
         }
     }
 }
-
-/// Недавние файлы редактора: 15 путей, последний — первым.
-enum EditorRecent {
-    static let limit = 15
-
-    static var paths: [String] { UserDefaults.standard.stringArray(forKey: Pref.editorRecent) ?? [] }
-
-    static var urls: [URL] { paths.map { URL(fileURLWithPath: $0) } }
-
-    static func add(_ url: URL) {
-        var list = paths.filter { $0 != url.path }
-        list.insert(url.path, at: 0)
-        UserDefaults.standard.set(Array(list.prefix(limit)), forKey: Pref.editorRecent)
-    }
-
-    static func remove(_ url: URL) {
-        UserDefaults.standard.set(paths.filter { $0 != url.path }, forKey: Pref.editorRecent)
-    }
-
-    static func clear() { UserDefaults.standard.removeObject(forKey: Pref.editorRecent) }
-
-    /// «~/Documents/Формы» вместо полного пути (папка файла).
-    static func folderTitle(_ url: URL) -> String { folderTitle(ofFolder: url.deletingLastPathComponent()) }
-
-    static func folderTitle(ofFolder folder: URL) -> String {
-        let path = folder.path
-        let home = NSHomeDirectory()
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
-}

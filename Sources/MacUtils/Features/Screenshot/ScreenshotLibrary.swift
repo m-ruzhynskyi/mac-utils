@@ -7,98 +7,6 @@ import MUDesign
 import MUAudio
 import MUDownloadsSorter
 
-/// Запись в индексе: путь, день, программа и распознанный текст.
-struct ShotRecord: Codable, Hashable, Identifiable {
-    var path: String
-    var date: Date
-    var app: String
-    var text: String
-
-    var id: String { path }
-    var url: URL { URL(fileURLWithPath: path) }
-    /// Запись экрана (MP4 или GIF), а не снимок.
-    var isVideo: Bool { ShotLibraryRules.isVideo(url) }
-}
-
-/// Раскладка и поиск (без UI и диска — для тестов).
-enum ShotLibraryRules {
-    /// Папка снимка: «Снимки экрана/2026-10-07/Safari».
-    static func folder(root: URL, date: Date, app: String) -> URL {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return root.appendingPathComponent("Снимки экрана", isDirectory: true)
-            .appendingPathComponent(formatter.string(from: date), isDirectory: true)
-            .appendingPathComponent(sanitized(app), isDirectory: true)
-    }
-
-    static func sanitized(_ app: String) -> String {
-        let cleaned = app.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleaned.isEmpty ? "Другое" : cleaned
-    }
-
-    /// Все слова запроса должны найтись в тексте, имени программы или дате.
-    static func matches(_ record: ShotRecord, query: String) -> Bool {
-        let words = query.lowercased().split(whereSeparator: \.isWhitespace)
-        guard !words.isEmpty else { return true }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        let haystack = (record.text + " " + record.app + " " + formatter.string(from: record.date)
-                        + " " + record.url.lastPathComponent).lowercased()
-        return words.allSatisfy { haystack.contains($0) }
-    }
-
-    /// Снимки и записи, которые можно забрать из корня папки: наши и системные.
-    static func isCapture(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        let media = ["png", "jpg", "jpeg", "heic", "gif", "mp4", "mov"].contains((lower as NSString).pathExtension)
-        let prefixes = ["screenshot", "снимок экрана", "знімок екрана", "recording", "screen recording",
-                        "запись экрана", "длинный снимок", "qr "]
-        return media && prefixes.contains { lower.hasPrefix($0) }
-    }
-
-    static let smartFolderName = "Снимки экрана"
-
-    /// Корень умной папки внутри папки снимков: «…/Снимки экрана».
-    static func smartRoot(in base: URL) -> URL {
-        base.appendingPathComponent(smartFolderName, isDirectory: true)
-    }
-
-    /// Корень умной папки, в которой лежит снимок («Снимки экрана/дата/программа/файл»); nil — снимок не оттуда.
-    static func smartRoot(of record: ShotRecord) -> URL? {
-        let root = record.url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        return root.lastPathComponent == smartFolderName ? root : nil
-    }
-
-    /// Имя папки дня, как в `folder(root:date:app:)`.
-    static func dayName(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
-    }
-
-    static func isDayName(_ name: String) -> Bool {
-        name.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil
-    }
-
-    static func isExpired(_ record: ShotRecord, days: Int, now: Date = Date()) -> Bool {
-        days > 0 && now.timeIntervalSince(record.date) > Double(days) * 86_400
-    }
-
-    static func isVideo(_ url: URL) -> Bool {
-        ["mp4", "mov", "m4v", "gif"].contains(url.pathExtension.lowercased())
-    }
-
-    /// Похоже на системный снимок (⌘⇧3/4): «Screenshot …» / «Снимок экрана …».
-    static func isSystemScreenshot(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        guard lower.hasSuffix(".png") || lower.hasSuffix(".jpg") || lower.hasSuffix(".heic") else { return false }
-        return lower.hasPrefix("screenshot") || lower.hasPrefix("снимок экрана") || lower.hasPrefix("знімок екрана")
-    }
-}
-
 /// Пустые папки дней и программ внутри умной папки — после очистки и ручного удаления снимков.
 enum ShotFolderCleanup {
     /// Удаляет пустые папки «дата/программа» и «дата» внутри `root` («…/Снимки экрана»). Пустая — внутри ничего,
@@ -210,7 +118,7 @@ final class ScreenshotLibrary: ObservableObject {
         }
     }
 
-    var enabled: Bool { UserDefaults.standard.bool(forKey: Pref.screenshotLibrary) }
+    var enabled: Bool { ShotLibraryRules.libraryEnabled }
 
     /// Проверка из `sync()`: сразу при включении и смене срока, иначе не чаще `checkInterval`. Возвращает, была ли проверка.
     @discardableResult
@@ -482,8 +390,8 @@ struct ScreenshotLibraryView: View {
                                     .contextMenu {
                                         Button("Скопировать") { Self.copy(record) }
                                         Button("Открыть") { Self.open(record) }
-                                        if record.isVideo, record.url.pathExtension.lowercased() != "gif", !PlayerPrefs.opensShots {
-                                            Button("Открыть в плеере Mac Utils") { PlayerWindowController.open([record.url]) }
+                                        if record.isVideo, record.url.pathExtension.lowercased() != "gif", !UserDefaults.standard.bool(forKey: Pref.playerOpensShots) {
+                                            Button("Открыть в плеере Mac Utils") { AppRouter.shared.openMedia([record.url]) }
                                         }
                                         Button("Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([record.url]) }
                                         Button("Скопировать текст") {
@@ -542,8 +450,8 @@ struct ScreenshotLibraryView: View {
 extension ScreenshotLibraryView {
     /// Видео (кроме GIF) — в плеере Mac Utils, если так выбрано в настройках плеера; остальное — программой по умолчанию.
     static func open(_ record: ShotRecord) {
-        if record.isVideo, record.url.pathExtension.lowercased() != "gif", PlayerPrefs.opensShots {
-            PlayerWindowController.open([record.url])
+        if record.isVideo, record.url.pathExtension.lowercased() != "gif", UserDefaults.standard.bool(forKey: Pref.playerOpensShots) {
+            AppRouter.shared.openMedia([record.url])
         } else {
             NSWorkspace.shared.open(record.url)
         }

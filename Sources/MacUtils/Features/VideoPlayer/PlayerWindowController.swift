@@ -118,7 +118,7 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     static var isKey: Bool { windows.contains { $0.window.isKeyWindow } }
     static var current: PlayerWindowController? { windows.first { $0.window.isKeyWindow } ?? windows.last }
     /// Значок в Dock (подменяется в тестах: процесс тестов не трогает свою политику активации).
-    static var syncDock: (Bool) -> Void = { AppDelegate.syncDock(playerOpen: $0) }
+    static var syncDock: (Bool) -> Void = { AppRouter.shared.syncDock(nil, $0) }
 
     let model: PlayerModel
     let ui = PlayerUIState()
@@ -297,7 +297,7 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         window.contentView = nil
         DispatchQueue.main.async {
             Self.syncDock(Self.anyOpen)
-            if !Self.anyOpen, !SettingsWindowController.shared.isVisible { FocusReturn.restore() }
+            if !Self.anyOpen, !AppRouter.shared.settingsVisible() { FocusReturn.restore() }
         }
     }
 

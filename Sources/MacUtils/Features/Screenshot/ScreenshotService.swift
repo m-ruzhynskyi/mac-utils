@@ -95,7 +95,7 @@ final class ScreenshotService: ObservableObject {
             windows.append(window)
             window.orderFrontRegardlessOnScreen()
         }
-        if !SettingsWindowController.shared.isVisible { FocusReturn.remember() }
+        if !AppRouter.shared.settingsVisible() { FocusReturn.remember() }
         ScreenOutput.activateApp()
         if !NSApp.isActive { ScreenOutput.activateApp(ignoringOtherApps: true) }
         var keyWindow = windows.first { NSMouseInRect(mouse, $0.frame, false) } ?? windows.first
@@ -165,7 +165,7 @@ final class ScreenshotService: ObservableObject {
         let previewShown = StepsSession.captureClosed(resume: resumeSteps)
         if previewShown {
             FocusReturn.forget()
-        } else if !SettingsWindowController.shared.isVisible {
+        } else if !AppRouter.shared.settingsVisible() {
             // Возвращаем фокус приложению, которое было активно до снимка.
             FocusReturn.restore()
         }
