@@ -1,6 +1,7 @@
 import Foundation
 import MUDesign
 import MUAudio
+import MUScreenshot
 
 /// Лексема исходника RTF для точечных правок: группа, управляющее слово или символ, `\'hh`, текст, перевод строки.
 struct RTFToken: Equatable {

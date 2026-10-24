@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
+import MUScreenshot
 
 /// Окно редактора (макет a): заголовок со вкладками, текст, панель `$` справа, строка состояния.
 struct EditorRootView: View {

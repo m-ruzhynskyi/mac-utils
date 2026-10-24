@@ -4,17 +4,16 @@ import SwiftUI
 import Vision
 import MUCore
 import MUDesign
-import MUAudio
 import MUDownloadsSorter
 
 /// Пустые папки дней и программ внутри умной папки — после очистки и ручного удаления снимков.
-enum ShotFolderCleanup {
+package enum ShotFolderCleanup {
     /// Удаляет пустые папки «дата/программа» и «дата» внутри `root` («…/Снимки экрана»). Пустая — внутри ничего,
     /// кроме `.DS_Store`. Сам корень, папки не с датой в имени, ссылки и всё за пределами корня не трогаются.
     /// Сегодняшняя и вчерашняя папки дня тоже: снимок сначала получает папку, а файл пишется чуть позже
     /// (кодирование в фоне), в том числе и после полуночи. Возвращает число удалённых папок.
     @discardableResult
-    static func removeEmptyFolders(in root: URL, now: Date = Date(), manager: FileManager = .default) -> Int {
+    package static func removeEmptyFolders(in root: URL, now: Date = Date(), manager: FileManager = .default) -> Int {
         guard root.lastPathComponent == ShotLibraryRules.smartFolderName, isPlainDirectory(root) else { return 0 }
         let calendar = Calendar.current
         let recent: Set<String> = [ShotLibraryRules.dayName(now),
@@ -53,14 +52,14 @@ enum ShotFolderCleanup {
 /// «Умная папка» снимков: свои снимки сохраняются по дням и программам, системные
 /// (⌘⇧3/4) — по желанию тоже; текст на картинках распознаётся для поиска.
 @MainActor
-final class ScreenshotLibrary: ObservableObject {
-    static let shared = ScreenshotLibrary()
+package final class ScreenshotLibrary: ObservableObject {
+    package static let shared = ScreenshotLibrary()
 
-    @Published private(set) var records: [ShotRecord] = []
-    @Published private(set) var indexing = 0
+    @Published package private(set) var records: [ShotRecord] = []
+    @Published package private(set) var indexing = 0
 
     /// Программа, которая была впереди, когда начали снимок.
-    var captureApp = ""
+    package var captureApp = ""
 
     private var watcher: DispatchSourceFileSystemObject?
     private var watchedFolder: URL?
@@ -71,8 +70,8 @@ final class ScreenshotLibrary: ObservableObject {
     private var lastCheckDays: Int?
     /// Когда в последний раз писали в журнал про файлы, не ушедшие в Корзину.
     private var lastFailureLog: Date?
-    static let checkInterval: TimeInterval = 600
-    static let failureLogInterval: TimeInterval = 3600
+    package static let checkInterval: TimeInterval = 600
+    package static let failureLogInterval: TimeInterval = 3600
 
     /// Файл индекса; nil — индекс не пишется (тесты, снимки интерфейса).
     private let indexFile: URL?
@@ -90,7 +89,7 @@ final class ScreenshotLibrary: ObservableObject {
 
     /// Для тестов и снимков интерфейса: готовые записи, индекс на диске не читается. Без `indexFile` индекс
     /// не пишется, без `folderRoots` пустые папки убираются только там, где лежали удалённые снимки.
-    init(records: [ShotRecord], indexFile: URL? = nil, folderRoots: [URL] = [],
+    package init(records: [ShotRecord], indexFile: URL? = nil, folderRoots: [URL] = [],
          trash: @escaping (URL) throws -> Void = { _ in throw CocoaError(.featureUnsupported) }) {
         self.records = records
         self.indexFile = indexFile
@@ -118,11 +117,11 @@ final class ScreenshotLibrary: ObservableObject {
         }
     }
 
-    var enabled: Bool { ShotLibraryRules.libraryEnabled }
+    package var enabled: Bool { ShotLibraryRules.libraryEnabled }
 
     /// Проверка из `sync()`: сразу при включении и смене срока, иначе не чаще `checkInterval`. Возвращает, была ли проверка.
     @discardableResult
-    func checkIfDue(now: Date = Date(), days: Int? = nil) -> Bool {
+    package func checkIfDue(now: Date = Date(), days: Int? = nil) -> Bool {
         let days = days ?? UserDefaults.standard.integer(forKey: Pref.screenshotLibraryTrashDays)
         if let lastCheck, lastCheckDays == days, now >= lastCheck, now.timeIntervalSince(lastCheck) < Self.checkInterval {
             return false
@@ -131,7 +130,7 @@ final class ScreenshotLibrary: ObservableObject {
         return true
     }
 
-    func sync() {
+    package func sync() {
         watcher?.cancel()
         watcher = nil
         cleanupTimer?.invalidate()
@@ -169,7 +168,7 @@ final class ScreenshotLibrary: ObservableObject {
     }
 
     /// Куда macOS кладёт снимки ⌘⇧3/4 (com.apple.screencapture location, иначе Рабочий стол).
-    static var systemScreenshotFolder: URL {
+    package static var systemScreenshotFolder: URL {
         if let path = UserDefaults(suiteName: "com.apple.screencapture")?.string(forKey: "location"), !path.isEmpty {
             return URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
         }
@@ -179,7 +178,7 @@ final class ScreenshotLibrary: ObservableObject {
     // MARK: - Сохранение
 
     /// Путь для нового снимка: в умной папке — по дню и программе.
-    func destination(fileName: String, root: URL) -> URL {
+    package func destination(fileName: String, root: URL) -> URL {
         guard enabled else { return root.appendingPathComponent(fileName) }
         let folder = ShotLibraryRules.folder(root: root, date: Date(), app: captureApp)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -187,7 +186,7 @@ final class ScreenshotLibrary: ObservableObject {
     }
 
     /// Запомнить снимок и распознать текст в фоне.
-    func add(_ url: URL, image: CGImage?, app: String, date: Date = Date()) {
+    package func add(_ url: URL, image: CGImage?, app: String, date: Date = Date()) {
         guard enabled else { return }
         let record = ShotRecord(path: url.path, date: date, app: ShotLibraryRules.sanitized(app), text: "")
         records.removeAll { $0.path == record.path }
@@ -213,7 +212,7 @@ final class ScreenshotLibrary: ObservableObject {
     }
 
     /// Умное имя по распознанному тексту (локальная модель); файл переименовывается.
-    func nameWithAI(_ path: String, text: String, app: String) {
+    package func nameWithAI(_ path: String, text: String, app: String) {
         guard Ollama.isOn(Pref.aiShotNames), text.count >= 12 else { return }
         Task {
             guard let name = try? await ShotNamer.name(for: text, app: app),
@@ -226,7 +225,7 @@ final class ScreenshotLibrary: ObservableObject {
     }
 
     /// Системные снимки с Рабочего стола (или их папки) — в умную папку.
-    func collectSystemScreenshots() {
+    package func collectSystemScreenshots() {
         guard enabled, let folder = watchedFolder else { return }
         let manager = FileManager.default
         let app = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Другое"
@@ -241,13 +240,13 @@ final class ScreenshotLibrary: ObservableObject {
     /// Уже сохранённые снимки и записи из корня папки — в «Снимки экрана/дата/Другое».
     /// Из папки снимков и из папки видео (если она своя).
     @discardableResult
-    func importExisting() -> Int {
+    package func importExisting() -> Int {
         let roots = Set([Pref.screenshotDirectory.standardizedFileURL, Pref.recordingDirectory.standardizedFileURL])
         return roots.reduce(0) { $0 + importExisting(from: $1) }
     }
 
     @discardableResult
-    func importExisting(from root: URL) -> Int {
+    package func importExisting(from root: URL) -> Int {
         guard enabled else { return 0 }
         let manager = FileManager.default
         var count = 0
@@ -272,7 +271,7 @@ final class ScreenshotLibrary: ObservableObject {
     /// остаётся, попытка повторится при следующей проверке. Файл удалили руками — запись уходит из индекса.
     /// Потом убираются пустые папки дней и программ. Возвращает, сколько файлов ушло в Корзину.
     @discardableResult
-    func removeExpired(now: Date = Date(), days: Int? = nil) -> Int {
+    package func removeExpired(now: Date = Date(), days: Int? = nil) -> Int {
         let days = days ?? UserDefaults.standard.integer(forKey: Pref.screenshotLibraryTrashDays)
         lastCheck = now
         lastCheckDays = days
@@ -324,7 +323,7 @@ final class ScreenshotLibrary: ObservableObject {
 
     /// «В Корзину» из умной папки. Не получилось — снимок остаётся в списке.
     @discardableResult
-    func remove(_ record: ShotRecord) -> Bool {
+    package func remove(_ record: ShotRecord) -> Bool {
         if FileManager.default.fileExists(atPath: record.path) {
             do {
                 try trash(record.url)
@@ -353,9 +352,14 @@ final class ScreenshotLibrary: ObservableObject {
 
 // MARK: - Вид
 
-struct ScreenshotLibraryView: View {
-    @ObservedObject var library: ScreenshotLibrary
-    var compact = false
+package struct ScreenshotLibraryView: View {
+    package init(library: ScreenshotLibrary, compact: Bool = false) {
+        self.library = library
+        self.compact = compact
+    }
+
+    @ObservedObject package var library: ScreenshotLibrary
+    package var compact = false
     @State private var query = ""
     @State private var kind = 0
     @AppStorage(Pref.screenshotLibrary) private var enabled = true
@@ -370,7 +374,7 @@ struct ScreenshotLibraryView: View {
         }
     }
 
-    var body: some View {
+    package var body: some View {
         ToolsPageFrame(.shots, compact: compact) {
             VStack(spacing: compact ? DS.Space.s : DS.Space.m) {
                 toolbar
@@ -449,7 +453,7 @@ struct ScreenshotLibraryView: View {
 
 extension ScreenshotLibraryView {
     /// Видео (кроме GIF) — в плеере Mac Utils, если так выбрано в настройках плеера; остальное — программой по умолчанию.
-    static func open(_ record: ShotRecord) {
+    package static func open(_ record: ShotRecord) {
         if record.isVideo, record.url.pathExtension.lowercased() != "gif", UserDefaults.standard.bool(forKey: Pref.playerOpensShots) {
             AppRouter.shared.openMedia([record.url])
         } else {
@@ -458,7 +462,7 @@ extension ScreenshotLibraryView {
     }
 
     /// В буфер — и файл (вставка в Finder, Telegram, почту), и картинка (вставка в редакторы и чаты).
-    static func copy(_ record: ShotRecord) {
+    package static func copy(_ record: ShotRecord) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         var objects: [NSPasteboardWriting] = [record.url as NSURL]
@@ -471,11 +475,11 @@ extension ScreenshotLibraryView {
 private struct ShotThumbnail: View {
     @State private var hovering = false
 
-    let record: ShotRecord
-    let compact: Bool
+    package let record: ShotRecord
+    package let compact: Bool
     @State private var image: NSImage?
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
             ZStack {

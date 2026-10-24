@@ -3,6 +3,7 @@ import SwiftUI
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUScreenshot
 
 /// Сессия коллажа без окон и без настоящего захвата: окружение (`StepsEnvironment`) подменено.
 @MainActor

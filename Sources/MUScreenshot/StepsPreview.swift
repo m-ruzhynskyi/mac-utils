@@ -6,39 +6,39 @@ import MUDesign
 /// Предпросмотр коллажа шагов: раскладка, оформление, подписи и порядок — до сохранения.
 /// Настройки оформления запоминаются (те же, что в разделе «Снимки»), подписи — только для этого коллажа.
 @MainActor
-final class StepsPreviewModel: ObservableObject {
-    enum Delivery { case save, copy }
+package final class StepsPreviewModel: ObservableObject {
+    package enum Delivery { case save, copy }
 
-    @Published var layout: StepsLayout { didSet { changed(Pref.screenshotStepsLayout, layout.rawValue) } }
-    @Published var equalSize: Bool { didSet { changed(Pref.screenshotStepsEqualSize, equalSize) } }
-    @Published var windowFrame: Bool { didSet { changed(Pref.screenshotStepsFrame, windowFrame) } }
-    @Published var titles: Bool { didSet { changed(Pref.screenshotStepsTitles, titles) } }
-    @Published var badges: Bool { didSet { changed(Pref.screenshotStepsBadges, badges) } }
-    @Published var arrows: Bool { didSet { changed(Pref.screenshotStepsArrows, arrows) } }
+    @Published package var layout: StepsLayout { didSet { changed(Pref.screenshotStepsLayout, layout.rawValue) } }
+    @Published package var equalSize: Bool { didSet { changed(Pref.screenshotStepsEqualSize, equalSize) } }
+    @Published package var windowFrame: Bool { didSet { changed(Pref.screenshotStepsFrame, windowFrame) } }
+    @Published package var titles: Bool { didSet { changed(Pref.screenshotStepsTitles, titles) } }
+    @Published package var badges: Bool { didSet { changed(Pref.screenshotStepsBadges, badges) } }
+    @Published package var arrows: Bool { didSet { changed(Pref.screenshotStepsArrows, arrows) } }
 
-    @Published private(set) var steps: [StepShot] = []
+    @Published package private(set) var steps: [StepShot] = []
     /// Уменьшенная копия коллажа для окна (полный размер собирается только при сохранении).
-    @Published private(set) var image: NSImage?
+    @Published package private(set) var image: NSImage?
     /// Размер итоговой картинки и уменьшена ли она под предел.
-    @Published private(set) var outputSize: CGSize = .zero
-    @Published private(set) var downscaled = false
+    @Published package private(set) var outputSize: CGSize = .zero
+    @Published package private(set) var downscaled = false
     /// Коллаж собирается и сохраняется (или копируется): кнопки заняты, на «Сохранить» — индикатор.
-    @Published private(set) var delivering: Delivery?
+    @Published package private(set) var delivering: Delivery?
 
     /// Сторона уменьшенной копии для окна: быстро собирается и чётко выглядит на Retina.
-    static let previewSide: CGFloat = 2400
+    package static let previewSide: CGFloat = 2400
 
     private let defaults: UserDefaults
     private let source: () -> [StepShot]
     private let onCaption: (String, UUID) -> Void
     private let onMove: (UUID, Int) -> Void
-    let back: () -> Void
+    package let back: () -> Void
     private let onDeliver: @MainActor (CGImage, Delivery, @escaping @MainActor (Bool) -> Void) -> Void
     private var renderTask: Task<Void, Never>?
     /// Номер последней заказанной сборки: результат устаревшей (переключатель уже сдвинули) отбрасывается.
     private var renderGeneration = 0
 
-    init(defaults: UserDefaults = .standard, steps: @escaping () -> [StepShot],
+    package init(defaults: UserDefaults = .standard, steps: @escaping () -> [StepShot],
          setCaption: @escaping (String, UUID) -> Void = { _, _ in }, move: @escaping (UUID, Int) -> Void = { _, _ in },
          back: @escaping () -> Void = {},
          deliver: @escaping @MainActor (CGImage, Delivery, @escaping @MainActor (Bool) -> Void) -> Void = { _, _, done in done(true) }) {
@@ -58,7 +58,7 @@ final class StepsPreviewModel: ObservableObject {
     }
 
     /// Оформление по сохранённым настройкам (выдача без предпросмотра — при выходе из приложения).
-    static func savedOptions(captions: [String], defaults: UserDefaults = .standard) -> ShotComposer.Options {
+    package static func savedOptions(captions: [String], defaults: UserDefaults = .standard) -> ShotComposer.Options {
         var options = ShotComposer.Options()
         options.layout = StepsLayout(rawValue: defaults.string(forKey: Pref.screenshotStepsLayout) ?? "") ?? .auto
         options.equalSize = defaults.bool(forKey: Pref.screenshotStepsEqualSize)
@@ -72,7 +72,7 @@ final class StepsPreviewModel: ObservableObject {
         return options
     }
 
-    var options: ShotComposer.Options {
+    package var options: ShotComposer.Options {
         var options = Self.savedOptions(captions: steps.map(\.caption), defaults: defaults)
         options.layout = layout
         options.equalSize = equalSize
@@ -83,29 +83,29 @@ final class StepsPreviewModel: ObservableObject {
         return options
     }
 
-    func reload() {
+    package func reload() {
         steps = source()
         scheduleRender(immediately: true)
     }
 
-    func caption(for id: UUID) -> String {
+    package func caption(for id: UUID) -> String {
         steps.first { $0.id == id }?.caption ?? ""
     }
 
-    func setCaption(_ text: String, for id: UUID) {
+    package func setCaption(_ text: String, for id: UUID) {
         onCaption(text, id)
         steps = source()
         scheduleRender(immediately: false)
     }
 
-    func move(_ id: UUID, by offset: Int) {
+    package func move(_ id: UUID, by offset: Int) {
         guard let index = steps.firstIndex(where: { $0.id == id }) else { return }
         onMove(id, index + offset)
         reload()
     }
 
     /// Полноразмерный коллаж (с пределом размера итога), собирается вне главного потока.
-    func export() async -> CGImage? {
+    package func export() async -> CGImage? {
         await Self.compose(steps, options: options)
     }
 
@@ -118,7 +118,7 @@ final class StepsPreviewModel: ObservableObject {
         return output.value
     }
 
-    func deliver(_ action: Delivery) {
+    package func deliver(_ action: Delivery) {
         guard delivering == nil, !steps.isEmpty else { return }
         delivering = action
         Task { @MainActor [weak self] in
@@ -141,7 +141,7 @@ final class StepsPreviewModel: ObservableObject {
 
     /// Пересборка уменьшенной копии: переключатели и порядок — сразу, набор подписи — после короткой паузы,
     /// чтобы не собирать коллаж на каждую букву.
-    func scheduleRender(immediately: Bool) {
+    package func scheduleRender(immediately: Bool) {
         renderTask?.cancel()
         renderTask = Task { @MainActor [weak self] in
             if !immediately { try? await Task.sleep(nanoseconds: 150_000_000) }
@@ -176,12 +176,12 @@ final class StepsPreviewModel: ObservableObject {
 // MARK: - Окно
 
 @MainActor
-final class StepsPreviewWindowController: NSObject, NSWindowDelegate {
-    private(set) var window: NSWindow?
+package final class StepsPreviewWindowController: NSObject, NSWindowDelegate {
+    package private(set) var window: NSWindow?
     private weak var session: StepsSession?
     private let model: StepsPreviewModel
 
-    init(session: StepsSession) {
+    package init(session: StepsSession) {
         self.session = session
         model = StepsPreviewModel(
             steps: { [weak session] in session?.model.steps ?? [] },
@@ -195,7 +195,7 @@ final class StepsPreviewWindowController: NSObject, NSWindowDelegate {
         super.init()
     }
 
-    func show() {
+    package func show() {
         model.reload()
         let window = self.window ?? makeWindow()
         self.window = window
@@ -203,7 +203,7 @@ final class StepsPreviewWindowController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFrontOnScreen()
     }
 
-    func dismiss() {
+    package func dismiss() {
         window?.delegate = nil
         window?.orderOut(nil)
         window = nil
@@ -227,7 +227,7 @@ final class StepsPreviewWindowController: NSObject, NSWindowDelegate {
     }
 
     /// Красная кнопка и ⌘W — «Назад к шагам»: шаги не теряются.
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
+    package func windowShouldClose(_ sender: NSWindow) -> Bool {
         session?.closePreview()
         return false
     }
@@ -235,10 +235,10 @@ final class StepsPreviewWindowController: NSObject, NSWindowDelegate {
 
 // MARK: - Представление
 
-struct StepsPreviewView: View {
-    @ObservedObject var model: StepsPreviewModel
+package struct StepsPreviewView: View {
+    @ObservedObject package var model: StepsPreviewModel
 
-    var body: some View {
+    package var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 preview
@@ -349,13 +349,13 @@ private func busyLabel(_ title: String, busy: Bool) -> some View {
 }
 
 private struct StepCaptionRow: View {
-    let number: Int
-    let step: StepShot
-    @Binding var caption: String
-    let moveUp: (() -> Void)?
-    let moveDown: (() -> Void)?
+    package let number: Int
+    package let step: StepShot
+    @Binding package var caption: String
+    package let moveUp: (() -> Void)?
+    package let moveDown: (() -> Void)?
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: DS.Space.s) {
             ZStack(alignment: .topLeading) {
                 Image(decorative: step.thumbnail, scale: 1)

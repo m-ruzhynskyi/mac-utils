@@ -1,6 +1,7 @@
 import AppKit
 import MUCore
 import MUDesign
+import MUScreenshot
 
 /// Сессия редактора: вкладки и черновики в `~/Library/Application Support/Mac Utils/Editor/`
 /// (`session.json` + `Drafts/<uuid>.txt`, запись атомарная). Черновики — UTF-8, незашифрованные.

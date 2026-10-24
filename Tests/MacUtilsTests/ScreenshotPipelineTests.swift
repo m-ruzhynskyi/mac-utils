@@ -4,6 +4,7 @@ import XCTest
 @testable import MUCore
 @testable import MUDesign
 @testable import MUAudio
+@testable import MUScreenshot
 
 func isOnMainThread() -> Bool { pthread_main_np() != 0 }
 

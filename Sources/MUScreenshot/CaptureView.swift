@@ -4,14 +4,13 @@ import Carbon.HIToolbox
 import CoreImage
 import MUCore
 import MUDesign
-import MUAudio
 
 /// Полноэкранное окно с «замороженным» снимком одного монитора.
 @MainActor
-final class CaptureWindow: NSWindow {
-    private(set) var captureView: CaptureView!
+package final class CaptureWindow: NSWindow {
+    package private(set) var captureView: CaptureView!
 
-    static func make(shot: ScreenShot, snapFrames: [CGRect], mode: ScreenshotService.Mode) -> CaptureWindow {
+    package static func make(shot: ScreenShot, snapFrames: [CGRect], mode: ScreenshotService.Mode) -> CaptureWindow {
         let frame = shot.screen.frame
         let local = snapFrames.compactMap { rect -> CGRect? in
             let visible = rect.intersection(frame)
@@ -35,14 +34,14 @@ final class CaptureWindow: NSWindow {
         return window
     }
 
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+    package override var canBecomeKey: Bool { true }
+    package override var canBecomeMain: Bool { true }
 }
 
 /// Выделение области, «прилипание» к окнам и разметка.
 @MainActor
-final class CaptureView: NSView, NSTextFieldDelegate {
-    static let palette: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemGreen,
+package final class CaptureView: NSView, NSTextFieldDelegate {
+    package static let palette: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemGreen,
                                      .systemBlue, .systemPurple, .white, .black]
 
     /// Ручки изменения размера выделения.
@@ -87,12 +86,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var dragSnapshot: [Annotation]?
     private var selectedIndex: Int?
     private var current: Annotation?
-    private(set) var tool: Tool = .arrow
-    private(set) var color: NSColor = .systemRed
+    package private(set) var tool: Tool = .arrow
+    package private(set) var color: NSColor = .systemRed
     private let lineWidth: CGFloat = 4
     private var toolbar: CaptureToolbar?
     /// Оформить снимок рамкой окна macOS при выдаче (кнопка «Рамка», клавиша F).
-    private(set) var framed = UserDefaults.standard.bool(forKey: Pref.screenshotFrameDefault)
+    package private(set) var framed = UserDefaults.standard.bool(forKey: Pref.screenshotFrameDefault)
     private var textField: NSTextField?
 
     private var pixelScale: CGFloat { CGFloat(image.width) / max(bounds.width, 1) }
@@ -102,7 +101,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         return false
     }
 
-    init(frame: NSRect, image: CGImage, snapRects: [CGRect], mode: ScreenshotService.Mode) {
+    package init(frame: NSRect, image: CGImage, snapRects: [CGRect], mode: ScreenshotService.Mode) {
         self.image = image
         self.baseImage = NSImage(cgImage: image, size: frame.size)
         self.snapRects = snapRects
@@ -113,16 +112,16 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                                        owner: self, userInfo: nil))
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    package required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var acceptsFirstResponder: Bool { true }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func cursorUpdate(with event: NSEvent) { updateCursor(at: convert(event.locationInWindow, from: nil)) }
+    package override var acceptsFirstResponder: Bool { true }
+    package override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    package override func cursorUpdate(with event: NSEvent) { updateCursor(at: convert(event.locationInWindow, from: nil)) }
 
-    var hasSelection: Bool { selection != nil }
+    package var hasSelection: Bool { selection != nil }
 
     /// Следующий шаг коллажа: область уже выделена (как у прошлого шага), панель инструментов на месте.
-    func preselect(_ rect: NSRect) {
+    package func preselect(_ rect: NSRect) {
         selection = rect.integral.intersection(bounds)
         hoverRect = nil
         showToolbar()
@@ -131,7 +130,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     /// Идёт коллаж шагов: Enter и двойной щелчок добавляют шаг, а не выдают снимок.
     private var stepsActive: Bool { mode == .edit && StepsSession.current != nil }
 
-    func resetSelection() {
+    package func resetSelection() {
         commitTextField()
         selection = nil
         hoverRect = nil
@@ -166,13 +165,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     private var hoveringModeSwitch = false
 
-    func toggleWindowMode() {
+    package func toggleWindowMode() {
         UserDefaults.standard.set(!autoWindow, forKey: Pref.screenshotWindowSnap)
         hoverRect = nil
         ScreenshotService.shared.redrawAll()
     }
 
-    override func mouseMoved(with event: NSEvent) {
+    package override func mouseMoved(with event: NSEvent) {
         let p = point(event)
         updateCursor(at: p)
         guard selection == nil, !isSelecting else { return }
@@ -220,7 +219,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         }
     }
 
-    override func mouseDown(with event: NSEvent) {
+    package override func mouseDown(with event: NSEvent) {
         let p = point(event)
         if selection == nil, !isSelecting, modeSwitchRect.contains(p) {
             toggleWindowMode()
@@ -291,7 +290,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
-    override func mouseDragged(with event: NSEvent) {
+    package override func mouseDragged(with event: NSEvent) {
         let p = point(event)
         switch drag {
         case .none:
@@ -335,7 +334,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
-    override func mouseUp(with event: NSEvent) {
+    package override func mouseUp(with event: NSEvent) {
         let finished = drag
         drag = .none
         switch finished {
@@ -571,11 +570,11 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     // MARK: - Клавиатура
 
-    override func keyDown(with event: NSEvent) {
+    package override func keyDown(with event: NSEvent) {
         if !handleKey(event) { super.keyDown(with: event) }
     }
 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    package override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard window?.isKeyWindow == true,
               event.modifierFlags.contains(.command),
               !(window?.firstResponder is NSText) else {
@@ -585,12 +584,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     /// Идёт ввод текста в поле надписи: клавиши должны попадать в него.
-    var isEditingText: Bool { textField != nil }
+    package var isEditingText: Bool { textField != nil }
 
     /// Обрабатывает клавишу оверлея; `false` — клавиша не наша.
     /// Вызывается и из keyDown, и из перехватчика клавиш ScreenshotService,
     /// который работает, даже если окно оверлея не стало ключевым.
-    func handleKey(_ event: NSEvent) -> Bool {
+    package func handleKey(_ event: NSEvent) -> Bool {
         // Только коды клавиш: в русской раскладке ⌘C приходит как «⌘с».
         let code = Int(event.keyCode)
         let flags = event.modifierFlags
@@ -656,13 +655,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     // MARK: - Действия панели
 
-    func select(tool: Tool) {
+    package func select(tool: Tool) {
         commitTextField()
         self.tool = tool
         toolbar?.update(tool: tool, color: color)
     }
 
-    func cycleColor() {
+    package func cycleColor() {
         let index = Self.palette.firstIndex(of: color) ?? 0
         color = Self.palette[(index + 1) % Self.palette.count]
         textField?.textColor = color
@@ -674,7 +673,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
-    func undo() {
+    package func undo() {
         if textField != nil {
             textField?.removeFromSuperview()
             textField = nil
@@ -687,7 +686,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
-    func redo() {
+    package func redo() {
         guard textField == nil, let next = redoStack.popLast() else { return }
         undoStack.append(annotations)
         annotations = next
@@ -702,54 +701,54 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         return ShotComposer.framedSingle(result, unit: pixelScale) ?? result
     }
 
-    func toggleFrame() {
+    package func toggleFrame() {
         framed.toggle()
         toolbar?.update(framed: framed)
     }
 
-    func copyResult() {
+    package func copyResult() {
         guard let result = exportImage() else { return }
         ScreenshotService.shared.copy(result)
     }
 
     /// Enter / двойной клик: в буфер, в папку или туда и туда — по настройке.
-    func confirmResult() {
+    package func confirmResult() {
         guard let result = exportImage() else { return }
         ScreenshotService.shared.deliver(result)
     }
 
     /// «Шаг +»: снимок уходит в коллаж шагов, оверлей закрывается. Область запоминается (в глобальных точках),
     /// чтобы «Ещё шаг» предложил её снова.
-    func addStep() {
+    package func addStep() {
         guard let result = renderSelection() else { return }
         let global = selection.flatMap { rect in window.map { rect.offsetBy(dx: $0.frame.minX, dy: $0.frame.minY) } }
         StepsSession.add(result, unit: pixelScale, rect: global)
         ScreenshotService.shared.close()
     }
 
-    func saveResult() {
+    package func saveResult() {
         guard let result = exportImage() else { return }
         ScreenshotService.shared.save(result)
     }
 
-    func recognizeText() {
+    package func recognizeText() {
         guard let result = renderSelection(includeAnnotations: false) else { return }
         ScreenshotService.shared.recognizeText(result)
     }
 
-    func startScrollCapture() {
+    package func startScrollCapture() {
         guard let selection, let window else { return }
         let global = selection.offsetBy(dx: window.frame.minX, dy: window.frame.minY)
         ScreenshotService.shared.startScrollCapture(rect: global)
     }
 
-    func startRecording() {
+    package func startRecording() {
         guard let selection, let window else { return }
         let global = selection.offsetBy(dx: window.frame.minX, dy: window.frame.minY)
         ScreenshotService.shared.startRecording(rect: global)
     }
 
-    func closeCapture() {
+    package func closeCapture() {
         ScreenshotService.shared.close()
     }
 
@@ -789,7 +788,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         textField = field
     }
 
-    func controlTextDidEndEditing(_ obj: Notification) {
+    package func controlTextDidEndEditing(_ obj: Notification) {
         commitTextField()
     }
 
@@ -843,7 +842,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         hint.draw(at: NSPoint(x: rect.midX - hint.size().width / 2, y: rect.minY - 16))
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    package override func draw(_ dirtyRect: NSRect) {
         baseImage.draw(in: bounds)
 
         guard let selection else {
@@ -947,7 +946,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                            selection: rect, canvas: bounds)
     }
 
-    static func drawSizeBadge(width: Int, height: Int, selection rect: NSRect, canvas: NSRect) {
+    package static func drawSizeBadge(width: Int, height: Int, selection rect: NSRect, canvas: NSRect) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: CaptureFont.mono(12),
             .foregroundColor: DS.Palette.accInk,
@@ -964,7 +963,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     // MARK: - Итоговое изображение
 
-    func renderSelection(includeAnnotations: Bool = true) -> CGImage? {
+    package func renderSelection(includeAnnotations: Bool = true) -> CGImage? {
         commitTextField()
         guard let rect = selection?.intersection(bounds), rect.width >= 1, rect.height >= 1 else { return nil }
         let scale = pixelScale

@@ -4,6 +4,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUAudio
+@testable import MUScreenshot
 
 /// Этап 3 плеера: окно с настоящей моделью (без звука, окно не показывается), события клавиш — как от системы.
 @MainActor

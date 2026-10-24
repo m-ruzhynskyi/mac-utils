@@ -2,6 +2,7 @@ import CoreGraphics
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUScreenshot
 
 /// Журнал длинного снимка: только числа и имена, последние 10 файлов, кадры — лишь по скрытой настройке.
 /// Все файлы — во временной папке теста, не в ~/Library/Logs.

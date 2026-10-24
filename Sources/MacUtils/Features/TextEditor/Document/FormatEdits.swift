@@ -1,6 +1,7 @@
 import Foundation
 import MUDesign
 import MUAudio
+import MUScreenshot
 
 /// Одна точечная правка исходника. Байты вне `range` не меняются.
 struct FormatEdit: Equatable {

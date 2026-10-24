@@ -1,6 +1,7 @@
 import AppKit
 import MUDesign
 import MUAudio
+import MUScreenshot
 
 /// Раскладка страниц документа: обычный `NSLayoutManager` плюс невидимые знаки Word (¶ · ° → ↵ ¤ и разрывы).
 final class DocLayoutManager: NSLayoutManager {

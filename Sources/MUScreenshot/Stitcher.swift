@@ -1,6 +1,5 @@
 import Accelerate
 import CoreGraphics
-import MUAudio
 
 /// Склеивает кадры одной области по вертикали. Чистая логика без экрана: кадры на входе, изображение на выходе.
 ///
@@ -21,75 +20,75 @@ import MUAudio
 ///   анимация) не принимаются за прокрутку.
 /// - Если захват неточный (шум, масштабирование) и точных совпадений нет вовсе, сдвиг ищется по похожести, как
 ///   запасной вариант — но только пока в съёмке не было ни одной точной склейки.
-struct Stitcher {
-    enum Result { case first, appended, unchanged, lost }
+package struct Stitcher {
+    package enum Result { case first, appended, unchanged, lost }
 
     /// Прокрутка между кадрами по событиям ввода — подсказка для поиска сдвига.
-    struct Motion: Equatable {
+    package struct Motion: Equatable {
         /// Точные события (трекпад, Magic Mouse, плавная прокрутка): на сколько пикселей кадра содержимое
         /// должно было уйти вверх (> 0 — прокрутка вниз). Приложения прокручивают почти 1:1, коэффициент уточняется.
-        var pixels: Double = 0
+        package var pixels: Double = 0
         /// Колесо мыши без точных дельт, в строках (> 0 — вниз). Сколько это пикселей, решает приложение — коэффициент
         /// узнаётся по уверенным склейкам.
-        var lines: Double = 0
+        package var lines: Double = 0
         /// PageDown и пробел (+1), PageUp и Shift+пробел (−1): на сколько пикселей прокручивает страница, решает
         /// приложение (в браузере — видимая высота без 40 CSS px) — коэффициент узнаётся по уверенным склейкам.
-        var pages: Double = 0
+        package var pages: Double = 0
         /// Прокрутка неизвестной величины: клавиши, перетаскивание, щелчок по ползунку, колесо мимо области,
         /// продолжение анимированной прокрутки. Решает изображение.
-        var unknown = 0
+        package var unknown = 0
 
-        var isEmpty: Bool { abs(pixels) < 0.5 && lines == 0 && pages == 0 && unknown == 0 }
+        package var isEmpty: Bool { abs(pixels) < 0.5 && lines == 0 && pages == 0 && unknown == 0 }
 
-        static func + (a: Motion, b: Motion) -> Motion {
+        package static func + (a: Motion, b: Motion) -> Motion {
             Motion(pixels: a.pixels + b.pixels, lines: a.lines + b.lines, pages: a.pages + b.pages, unknown: a.unknown + b.unknown)
         }
     }
 
     /// Сдвиг содержимого между кадрами и закреплённые строки сверху и снизу.
-    struct Match: Equatable {
+    package struct Match: Equatable {
         /// На сколько строк содержимое уехало вверх (> 0 — прокрутка вниз).
-        var shift: Int
-        var header: Int
-        var footer: Int
+        package var shift: Int
+        package var header: Int
+        package var footer: Int
     }
 
     /// Подпись кадра: строки сохранены, колонки сжаты.
-    struct Signature {
-        let rows: Int
+    package struct Signature {
+        package let rows: Int
         /// Точная подпись: `fineColumns` колонок на строку (в Float — для vDSP).
-        let fineValues: [Float]
-        let fineColumns: Int
+        package let fineValues: [Float]
+        package let fineColumns: Int
         /// Грубая подпись: `columns` колонок на строку.
-        let coarse: [UInt8]
+        package let coarse: [UInt8]
         /// Строка — довод для сдвига по похожести: в ней есть рисунок (не однотонная), и она не фон — почти такая
         /// же строка не встречается в кадре часто (пустые строки, полоса сайдбара).
-        let detail: [Bool]
+        package let detail: [Bool]
         /// Строка однотонная целиком (разброс яркости не больше 2): пустота, а не бледный край букв.
-        let flat: [Bool]
+        package let flat: [Bool]
         /// Отпечатки полос: `columns` на строку, по пикселям полного разрешения.
-        let hashes: [UInt64]
+        package let hashes: [UInt64]
         /// Полосы с рисунком: бит `j` — полоса `j`.
-        let textured: [UInt64]
+        package let textured: [UInt64]
         /// Полосы-доводы: с рисунком и не повторяются в своей колонке часто.
-        let distinct: [UInt64]
+        package let distinct: [UInt64]
         /// Полосы, единственные в своей колонке кадра (цифры в логе, номер функции): если сдвиг объясняет такую
         /// полосу, другой сдвиг, считающий эту строку новым содержимым, невозможен.
-        let unique: [UInt64]
+        package let unique: [UInt64]
         /// Строка с рисунком, единственная в кадре целиком (одинаковые строки подряд — одна): строка лога, кода,
         /// текста. Сдвиг, при котором такие строки не совпадают целиком, объясняет кадр лишь повторяющимися местами.
-        let uniqueRow: [Bool]
+        package let uniqueRow: [Bool]
         /// Отпечаток строки целиком (по всем полосам): одинаковые строки в разных местах кадров.
-        let rowKeys: [UInt64]
+        package let rowKeys: [UInt64]
         /// Редкие полосы (не больше `rareLimit` повторов в колонке) по колонкам, отсортированы по отпечатку:
         /// колонка `j` — `indexStart[j]..<indexStart[j + 1]`. Для голосования за сдвиг.
-        let indexKeys: [UInt64]
-        let indexRows: [Int32]
-        let indexStart: [Int]
+        package let indexKeys: [UInt64]
+        package let indexRows: [Int32]
+        package let indexStart: [Int]
 
         /// Та же подпись перевёрнутого по вертикали кадра (для склейки вверх): строки в обратном порядке, индекс
         /// и серии одинаковых строк пересчитаны.
-        func flipped() -> Signature {
+        package func flipped() -> Signature {
             func reversed<T>(_ values: [T], _ stride: Int) -> [T] {
                 var out: [T] = []
                 out.reserveCapacity(values.count)
@@ -108,7 +107,7 @@ struct Stitcher {
 
         /// Подпись без полос `mask` и соседних с ними в строках `range`: остаётся только движущийся слой
         /// (см. `layerSearch`). Строки сравниваются целиком лишь по оставшимся полосам.
-        func without(_ mask: [UInt64], rows range: Range<Int>) -> Signature {
+        package func without(_ mask: [UInt64], rows range: Range<Int>) -> Signature {
             var textured = self.textured
             for r in range {
                 let m = mask[r]
@@ -122,11 +121,11 @@ struct Stitcher {
         }
     }
 
-    static let columns = 64
-    static let maxFineColumns = 1024
+    package static let columns = 64
+    package static let maxFineColumns = 1024
     /// Предел итога по высоте и площади: склейка и PNG держат его в памяти целиком.
-    static let maxHeight = 40_000
-    static let maxPixels = 100_000_000
+    package static let maxHeight = 40_000
+    package static let maxPixels = 100_000_000
     /// Средняя разница грубой подписи в строке (после отсечки), при которой строка ещё считается совпавшей.
     private static let tolerance = 5
     private static let clip = 64
@@ -135,18 +134,18 @@ struct Stitcher {
 
     /// Неподвижный фон с рисунком (обои чата) по месту в кадре: полосы, которые при прокрутке совпали на своём месте.
     /// Копится за съёмку: позади сообщений обои то видны, то закрыты, и по одной паре кадров их не отличить от текста.
-    struct Background {
-        var hashes: [UInt64]
+    package struct Background {
+        package var hashes: [UInt64]
         /// Бит `j` строки `r` — отпечаток полосы известен.
-        var known: [UInt64]
+        package var known: [UInt64]
 
-        init(rows: Int) {
+        package init(rows: Int) {
             hashes = [UInt64](repeating: 0, count: rows * Stitcher.columns)
             known = [UInt64](repeating: 0, count: rows)
         }
 
         /// Полосы подписи, совпавшие с фоном на своём месте.
-        func mask(_ s: Signature) -> [UInt64] {
+        package func mask(_ s: Signature) -> [UInt64] {
             (0..<s.rows).map { r in
                 var bits = known[r] & s.textured[r], out: UInt64 = 0
                 while bits != 0 {
@@ -159,7 +158,7 @@ struct Stitcher {
         }
 
         /// Содержимое сдвинулось, а полоса осталась на месте — это фон.
-        mutating func learn(_ p: Signature, _ c: Signature, rows range: Range<Int>) {
+        package mutating func learn(_ p: Signature, _ c: Signature, rows range: Range<Int>) {
             let w = Stitcher.columns
             for r in range {
                 var bits = p.textured[r] & c.textured[r]
@@ -175,51 +174,51 @@ struct Stitcher {
     }
 
     /// Отметка неоднозначности из поиска: несколько настоящих совпадений, подсказка их не развела.
-    final class Ambiguity {
-        var repeated = false
+    package final class Ambiguity {
+        package var repeated = false
         /// Строгое правило увидело, что текст сдвинулся (узкая полоса, но строка переехала или появилась), а сдвиг не
         /// нашёлся: это потеря места, а не «кадр стоит» мягкого правила.
-        var textMoved = false
+        package var textMoved = false
     }
 
     /// Чем найден сдвиг: точное совпадение, выбор подсказкой среди одинаковых, точное совпадение движущегося слоя
     /// поверх неподвижных обоев, шаг через пустоту, похожесть,
     /// кадр на месте, изображение опровергло события.
-    enum Source: String { case exact, hint, layer, blank, fuzzy, still, refuted }
+    package enum Source: String { case exact, hint, layer, blank, fuzzy, still, refuted }
 
     /// Почему кадр не приклеен.
     /// `otherSide` — склейка другой стороны отвергла сдвиг: не совпал с местом, известным по первой стороне, мало
     /// перекрытия после потери места или против событий.
     /// `torn` — кадр снят посреди перерисовки (у края новых строк перекрытие не совпадает) и пропущен.
-    enum Reason: String { case full, noMotion, frameSize, noMatch, still, back, hidden, limit, copy, otherSide, torn }
+    package enum Reason: String { case full, noMotion, frameSize, noMatch, still, back, hidden, limit, copy, otherSide, torn }
 
     /// Как решён последний кадр — для журнала съёмки: только числа и имена, без пикселей.
-    struct Trace: Equatable {
+    package struct Trace: Equatable {
         /// Решала склейка вверх (сдвиг — в её перевёрнутом кадре: > 0 — содержимое ушло вниз).
-        var up = false
-        var shift: Int?
-        var header = 0
-        var footer = 0
-        var source: Source?
+        package var up = false
+        package var shift: Int?
+        package var header = 0
+        package var footer = 0
+        package var source: Source?
         /// Сдвиг по событиям; nil — подсказки нет (величина неизвестна или место потеряно).
-        var expected: Int?
-        var reason: Reason?
+        package var expected: Int?
+        package var reason: Reason?
         /// Прошлая склейка откачена: кадр, приклеенный последним, был снят посреди перерисовки (см. `add`).
-        var undone = false
+        package var undone = false
     }
     /// Высота итога в пикселях (без строк за концом страницы, которые `makeImage` ещё вырежет).
-    var height: Int {
+    package var height: Int {
         // Как в `makeImage`: прирост вверх — только со строками с рисунком; если вниз приросла лишь пустота, а вверх —
         // текст, итог — склейка вверх.
         let above = up.addedText ? max(0, up.grown) : 0, below = down.addedText || !up.addedText ? max(0, down.grown) : 0
         return down.rows + above + below
     }
-    private(set) var isFull = false
+    package private(set) var isFull = false
     /// Последний `.lost` — из-за одинаковых строк (несколько сдвигов объясняют кадр одинаково), а не из-за
     /// быстрой прокрутки или другого содержимого: HUD подсказывает другое.
-    private(set) var lostOnRepeats = false
+    package private(set) var lostOnRepeats = false
     /// Как решён последний кадр (той стороной склейки, которая его приклеила или нашла).
-    private(set) var trace = Trace()
+    package private(set) var trace = Trace()
 
     /// Склейка растёт от первого кадра в обе стороны: вниз и вверх — в историю чата, к началу документа. Вверх — та же
     /// склейка над перевёрнутыми кадрами: строки, пришедшие сверху, в перевёрнутом кадре приходят снизу.
@@ -250,14 +249,14 @@ struct Stitcher {
 
     /// Склейка до последнего приклеенного кадра, какой стороной он приклеен, и события с него (см. `add`).
     private final class Undo {
-        let state: Stitcher
-        let upward: Bool
-        var motion: Motion?
+        package let state: Stitcher
+        package let upward: Bool
+        package var motion: Motion?
         /// Кадров после той склейки.
-        var age = 0
+        package var age = 0
         /// Последний кадр, не нашедшийся после той склейки.
-        var failed: Signature?
-        init(state: Stitcher, upward: Bool, motion: Motion?) {
+        package var failed: Signature?
+        package init(state: Stitcher, upward: Bool, motion: Motion?) {
             self.state = state
             self.upward = upward
             self.motion = motion
@@ -267,7 +266,7 @@ struct Stitcher {
 
     /// `motion` — события ввода после прошлого кадра (nil — неизвестно: склейка только по изображению).
     @discardableResult
-    mutating func add(_ frame: CGImage, motion input: Motion? = nil) -> Result {
+    package mutating func add(_ frame: CGImage, motion input: Motion? = nil) -> Result {
         trace = Trace()
         guard !isFull, let signature = Self.signature(frame) else {
             trace.reason = isFull ? .full : .copy
@@ -423,7 +422,7 @@ struct Stitcher {
                         reach: reach, opening: opening)
     }
 
-    func makeImage() -> CGImage? {
+    package func makeImage() -> CGImage? {
         guard down.started else { return nil }
         let below = down.pieces()
         // Сверху приросли только однотонные строки (отскок у начала страницы) — их не рисуем.
@@ -486,22 +485,22 @@ struct Stitcher {
     /// Склейка от первого кадра в одну сторону: новые строки приходят снизу. Склейка вверх получает перевёрнутые
     /// кадры (`flipped`) — и подписи, и кусочки итога у неё перевёрнуты.
     private struct Strip {
-        let flipped: Bool
-        var started: Bool { previous != nil }
+        package let flipped: Bool
+        package var started: Bool { previous != nil }
         /// Сумма приклеенных сдвигов: на сколько строк дальний кадр этой стороны ушёл от первого.
-        private(set) var advanced = 0
+        package private(set) var advanced = 0
         /// Насколько итог вырос с этой стороны от первого кадра.
-        var grown: Int { bodyHeight + footerRows - rows }
-        private(set) var isFull = false
-        private(set) var rows = 0
+        package var grown: Int { bodyHeight + footerRows - rows }
+        package private(set) var isFull = false
+        package private(set) var rows = 0
         /// Склеенное содержимое без закреплённого низа. Каждый кусочек — своя копия, а не вырезка из кадра:
         /// вырезка держала бы буфер всего кадра.
         private var chunks: [CGImage] = []
         /// Первый кусочек — первый кадр (быть может, без закреплённого низа); nil — его срезали целиком.
-        var firstRows: Int? { firstIntact ? chunks.first?.height : nil }
+        package var firstRows: Int? { firstIntact ? chunks.first?.height : nil }
         private var firstIntact = true
         /// Приклеены строки с рисунком (а не только однотонный фон за концом страницы).
-        private(set) var addedText = false
+        package private(set) var addedText = false
         private var bodyHeight = 0
         private var footer: CGImage?
         private var footerRows = 0
@@ -530,21 +529,21 @@ struct Stitcher {
         private var lostSinceAppend = false
         /// Была склейка по точному совпадению: захват точный, поиск по похожести больше не нужен (и опасен —
         /// похожие строки лога при нём совпадают).
-        private(set) var exactCapture = false
-        private(set) var lostOnRepeats = false
+        package private(set) var exactCapture = false
+        package private(set) var lostOnRepeats = false
         /// Прошлый кадр пропущен как снятый посреди перерисовки (см. `torn`); в перекрытии видео или анимация — разрыв
         /// не проверяется.
         private var skippedTorn = false
         private var animated = false
         /// Куда последним двигалось содержимое: 1 — вперёд (приклеено), −1 — назад, 0 — ещё никуда.
-        private(set) var heading = 0
+        package private(set) var heading = 0
         /// Обои позади содержимого, по уверенным склейкам (см. `Background`).
         private var background: Background?
-        private(set) var trace = Trace()
+        package private(set) var trace = Trace()
 
-        init(flipped: Bool) { self.flipped = flipped }
+        package init(flipped: Bool) { self.flipped = flipped }
 
-        mutating func start(_ frame: CGImage, _ signature: Signature, tracksMotion: Bool) -> Bool {
+        package mutating func start(_ frame: CGImage, _ signature: Signature, tracksMotion: Bool) -> Bool {
             guard let copy = cut(frame, rows: 0..<frame.height) else { return false }
             rows = frame.height
             chunks = [copy]
@@ -562,7 +561,7 @@ struct Stitcher {
 
         /// Кадр приклеен с другой стороны: события копятся, но сдвиг от дальнего кадра этой стороны по ним уже
         /// не подсказка — место отсюда «потеряно», пока изображение снова не найдёт его.
-        mutating func skip(_ input: Motion?) {
+        package mutating func skip(_ input: Motion?) {
             if let input {
                 motion = motion + oriented(input)
                 tracksMotion = true
@@ -574,7 +573,7 @@ struct Stitcher {
         /// стороной (или этой): без подсказки принимается лишь сдвиг с перекрытием не меньше трети (у своей стороны — четверти), достижимый от
         /// последнего известного места (`reach`), а на другой стороне — и не против событий (у своей стороны после
         /// потери места события ненадёжны: рывок, который монитор не видел).
-        mutating func add(_ frame: CGImage, _ signature: Signature, _ input: Motion?, limit heightLimit: Int,
+        package mutating func add(_ frame: CGImage, _ signature: Signature, _ input: Motion?, limit heightLimit: Int,
                           exactCapture shared: Bool, hint: Int? = nil, strict: Bool = false,
                           reach: ClosedRange<Int>? = nil, opening: Bool = false) -> Result {
             trace = Trace(up: flipped)
@@ -885,7 +884,7 @@ struct Stitcher {
 
         /// Кусочки итога этой стороны по порядку (в её ориентации): тело и закреплённый низ, без однотонных строк
         /// за концом страницы. `first` — строки первого кадра.
-        func pieces() -> [(image: CGImage, rows: Range<Int>, first: Bool)] {
+        package func pieces() -> [(image: CGImage, rows: Range<Int>, first: Bool)] {
             // Отскок в конце: однотонные строки за концом страницы не рисуются.
             let total = bodyHeight + footerRows
             let skip = overscroll().map { (total - (rows - $0.lowerBound))..<(total - (rows - $0.upperBound)) }
@@ -1046,7 +1045,7 @@ struct Stitcher {
     }
 
     /// Подпись кадра. Первая строка буфера — верх изображения.
-    static func signature(_ image: CGImage) -> Signature? {
+    package static func signature(_ image: CGImage) -> Signature? {
         let height = image.height
         let fineColumns = max(columns, min(image.width, maxFineColumns))
         guard height > 0 else { return nil }
@@ -1220,16 +1219,16 @@ struct Stitcher {
 
     // MARK: - Поиск сдвига
 
-    struct Found {
-        var match: Match
+    package struct Found {
+        package var match: Match
         /// Сдвиг однозначен по самому изображению (по нему можно уточнять коэффициент событий).
-        var confident: Bool
+        package var confident: Bool
         /// Найден по точному совпадению строк (а не по похожести).
-        var exact = true
+        package var exact = true
         /// Изображение опровергло события: содержимое сдвинулось не так, как они говорят (колесо у конца страницы,
         /// а движется анимация).
-        var refutesMotion = false
-        var source = Source.exact
+        package var refutesMotion = false
+        package var source = Source.exact
     }
 
     /// Сдвиг содержимого между подписями двух кадров. nil — совпадение не найдено или неоднозначно
@@ -1239,7 +1238,7 @@ struct Stitcher {
     /// `minSpan` — без подсказки (или когда изображение с ней спорит) движущаяся часть меньше этого — не прокрутка.
     /// `allowFuzzy` — разрешён ли поиск по похожести, когда точных совпадений нет вовсе (шумный захват).
     /// `offPixel` — похожесть для кадра на дробной доле пикселя, `expected` — точные события (см. `Side.add`).
-    static func match(previous p: Signature, current c: Signature, expected: Int? = nil, hintError: Double = 0.25,
+    package static func match(previous p: Signature, current c: Signature, expected: Int? = nil, hintError: Double = 0.25,
                       minSpan: Int = 0, spanKnown: Bool = true, allowFuzzy: Bool = true, allowBlank: Bool = true,
                       background: Background? = nil, partialHint: Bool = false, minColumns: Int = 1,
                       ambiguity given: Ambiguity? = nil, offPixel: Bool = false) -> Found? {
@@ -1391,40 +1390,40 @@ struct Stitcher {
 
     /// Пара кадров и их неподвижные шапка и низ: точный поиск сдвига и запасной — по похожести.
     private struct Frame {
-        let p: Signature
-        let c: Signature
-        let header: Int
-        let footer: Int
-        let sizeRule: Int
+        package let p: Signature
+        package let c: Signature
+        package let header: Int
+        package let footer: Int
+        package let sizeRule: Int
         /// Подсказка — лишь верхняя граница: колесо и PageDown прокручиваются анимацией, и кадр мог застать её
         /// в начале.
-        var partialHint = false
+        package var partialHint = false
         /// Совпавшие полосы должны быть хотя бы в стольких колонках: ползунок полосы прокрутки (одна колонка) движется
         /// навстречу содержимому, и склейка вверх иначе приняла бы его за прокрутку.
-        var minColumns = 1
-        var h: Int { p.rows }
-        var lo: Int { header }
-        var hi: Int { p.rows - footer }
-        var span: Int { hi - lo }
+        package var minColumns = 1
+        package var h: Int { p.rows }
+        package var lo: Int { header }
+        package var hi: Int { p.rows - footer }
+        package var span: Int { hi - lo }
 
-        enum Decision { case found(Found), ambiguous(repeated: Bool), noExactMatch }
+        package enum Decision { case found(Found), ambiguous(repeated: Bool), noExactMatch }
 
         /// Точные совпадения при сдвиге `shift`: по строкам нового кадра — совпавшие полосы-доводы; по колонкам —
         /// сколько полос с рисунком сравнено и сколько совпало.
-        struct Evaluation {
-            var shift: Int
-            var matched: [UInt64]
+        package struct Evaluation {
+            package var shift: Int
+            package var matched: [UInt64]
             /// Совпавшие полосы, единственные в своей колонке в обоих кадрах.
-            var unique: [UInt64]
+            package var unique: [UInt64]
             /// Не совпавшие полосы с рисунком.
-            var missed: [UInt64]
-            var compared = [Int](repeating: 0, count: Stitcher.columns)
-            var hits = [Int](repeating: 0, count: Stitcher.columns)
+            package var missed: [UInt64]
+            package var compared = [Int](repeating: 0, count: Stitcher.columns)
+            package var hits = [Int](repeating: 0, count: Stitcher.columns)
         }
 
-        func overlap(_ s: Int) -> Range<Int> { max(lo, lo - s)..<max(max(lo, lo - s), min(hi, hi - s)) }
+        package func overlap(_ s: Int) -> Range<Int> { max(lo, lo - s)..<max(max(lo, lo - s), min(hi, hi - s)) }
 
-        func evaluate(_ s: Int) -> Evaluation {
+        package func evaluate(_ s: Int) -> Evaluation {
             let w = Stitcher.columns
             var e = Evaluation(shift: s, matched: [UInt64](repeating: 0, count: h), unique: [UInt64](repeating: 0, count: h),
                                missed: [UInt64](repeating: 0, count: h))
@@ -1455,7 +1454,7 @@ struct Stitcher {
         }
 
         /// Совпавшие полосы с рисунком при сдвиге `s`, по каждой `step`-й строке (быстрая оценка).
-        func sampledHits(_ s: Int, step: Int) -> Int {
+        package func sampledHits(_ s: Int, step: Int) -> Int {
             let w = Stitcher.columns
             var hits = 0
             for r in stride(from: overlap(s).lowerBound, to: overlap(s).upperBound, by: step) {
@@ -1471,7 +1470,7 @@ struct Stitcher {
 
         /// Колонки, неподвижные относительно сдвига `e`: на месте совпали, при сдвиге — нет (сайдбар, ползунок,
         /// плавающая кнопка). При повторяющемся содержимом совпадает и то и другое — такие колонки не неподвижны.
-        func stillColumns(_ e: Evaluation, zero: Evaluation) -> UInt64 {
+        package func stillColumns(_ e: Evaluation, zero: Evaluation) -> UInt64 {
             var mask: UInt64 = 0
             for j in 0..<Stitcher.columns {
                 let t0 = zero.compared[j], m0 = zero.hits[j], t = e.compared[j], m = e.hits[j]
@@ -1480,14 +1479,14 @@ struct Stitcher {
             return mask
         }
 
-        func distinctHits(_ e: Evaluation, excluding mask: UInt64) -> Int {
+        package func distinctHits(_ e: Evaluation, excluding mask: UInt64) -> Int {
             e.matched.reduce(0) { $0 + ($1 & ~mask).nonzeroBitCount }
         }
 
         /// Сравнение двух сдвигов на общих строках перекрытий (вне них один из сдвигов считает строки новым
         /// содержимым, и возразить ему нечем): собственные доводы `a` (совпали при нём, но не при `b`), `b` — наоборот,
         /// и сколько всего полос-доводов совпало хоть при одном.
-        func compare(_ a: Evaluation, _ b: Evaluation, excluding mask: UInt64) -> (a: Int, b: Int, total: Int) {
+        package func compare(_ a: Evaluation, _ b: Evaluation, excluding mask: UInt64) -> (a: Int, b: Int, total: Int) {
             let x = overlap(a.shift), y = overlap(b.shift)
             var own = (a: 0, b: 0, total: 0)
             for r in max(x.lowerBound, y.lowerBound)..<max(max(x.lowerBound, y.lowerBound), min(x.upperBound, y.upperBound)) {
@@ -1502,15 +1501,15 @@ struct Stitcher {
 
         /// Сдвиг-кандидат: точные совпадения, неподвижные колонки, совпавшие полосы-доводы, доля совпавших полос
         /// с рисунком и сколько их не совпало.
-        struct Scored {
-            var e: Evaluation
-            var mask: UInt64
-            var hits: Int
-            var rate: Double
-            var misses: Int
+        package struct Scored {
+            package var e: Evaluation
+            package var mask: UInt64
+            package var hits: Int
+            package var rate: Double
+            package var misses: Int
         }
 
-        func score(_ e: Evaluation, mask: UInt64) -> Scored {
+        package func score(_ e: Evaluation, mask: UInt64) -> Scored {
             var compared = 0, hits = 0
             for j in 0..<Stitcher.columns where mask & (1 << UInt64(j)) == 0 {
                 compared += e.compared[j]
@@ -1522,7 +1521,7 @@ struct Stitcher {
 
         /// Уникальные полосы (единственные в колонке обоих кадров), совпавшие при `a` и не совпавшие при `b`, —
         /// на всех строках: если `b` верен, эти строки — новое содержимое, а оно же есть в прошлом кадре в другом месте.
-        func uniqueOwn(_ a: Evaluation, _ b: Evaluation, excluding mask: UInt64) -> Int {
+        package func uniqueOwn(_ a: Evaluation, _ b: Evaluation, excluding mask: UInt64) -> Int {
             var count = 0
             for r in 0..<a.unique.count where a.unique[r] != 0 { count += (a.unique[r] & ~b.unique[r] & ~mask).nonzeroBitCount }
             return count
@@ -1539,7 +1538,7 @@ struct Stitcher {
         /// Сила довода `a` против `b`: 2 — свои совпадения (уникальные строки или общие строки перекрытий), 1 — только
         /// доли и размеры, 0 — довода нет. Два сдвига могут «побить» друг друга (у одного выше доля на маленьком
         /// перекрытии, у другого — уникальные строки): решает более сильный довод.
-        func evidence(_ a: Scored, _ b: Scored, excluding mask: UInt64) -> Int {
+        package func evidence(_ a: Scored, _ b: Scored, excluding mask: UInt64) -> Int {
             let mine = uniqueOwn(a.e, b.e, excluding: mask), theirs = uniqueOwn(b.e, a.e, excluding: mask)
             if mine >= 8, theirs * 4 <= mine { return 2 }
             let own = compare(a.e, b.e, excluding: mask)
@@ -1551,12 +1550,12 @@ struct Stitcher {
             return b.misses >= 8 && 1 - b.rate >= 2 * (1 - a.rate) + 0.01 ? 1 : 0
         }
 
-        func beats(_ a: Scored, _ b: Scored, excluding mask: UInt64) -> Bool {
+        package func beats(_ a: Scored, _ b: Scored, excluding mask: UInt64) -> Bool {
             let mine = evidence(a, b, excluding: mask)
             return mine > 0 && mine > evidence(b, a, excluding: b.mask)
         }
 
-        func exactSearch(expected: Int?, hintError: Double) -> Decision {
+        package func exactSearch(expected: Int?, hintError: Double) -> Decision {
             let w = Stitcher.columns
             // Перекрытие кадров — от 1/20 прокручиваемой части: PageDown и пробел в браузерах оставляют 40 CSS px
             // (~7% окна). Точное совпадение надёжно и на таком перекрытии.
@@ -1743,7 +1742,7 @@ struct Stitcher {
         /// не совпадает целиком, и обычный поиск сдвиг отвергает (или считает кадр стоящим — по обоям). Тогда сдвиг
         /// ищется ещё раз — без неподвижных полос и соседних с ними — и принимается, только если движущийся слой
         /// занимает большую часть высоты, а не полосу посреди стоящего окна.
-        func layerSearch(expected: Int?, hintError: Double, background: Background?) -> Found? {
+        package func layerSearch(expected: Int?, hintError: Double, background: Background?) -> Found? {
             let w = Stitcher.columns
             // Неподвижное: совпало на месте в этой паре кадров или с обоями, известными по прошлым склейкам.
             var stillP = background?.mask(p) ?? [UInt64](repeating: 0, count: h)
@@ -1792,7 +1791,7 @@ struct Stitcher {
 
         /// Строки, принятые мягким правилом за шапку или низ, при найденном сдвиге совпадают точнее, чем на месте:
         /// значит, они уехали вместе с содержимым.
-        func staticRowsMoved(by s: Int) -> Bool {
+        package func staticRowsMoved(by s: Int) -> Bool {
             let w = Stitcher.columns
             var moved = 0, stayed = 0
             for r in Array(0..<header) + Array((h - footer)..<h) where r + s >= 0 && r + s < h {
@@ -1819,7 +1818,7 @@ struct Stitcher {
 
         /// Однотонный участок длиннее кадра: ни при каком сдвиге в перекрытии нет строк с рисунком — нечему
         /// противоречить, сокращается пустота, а не текст. С подсказкой — ближайший к ней сдвиг, без неё — наименьший.
-        func blankShift(expected: Int?) -> Found? {
+        package func blankShift(expected: Int?) -> Found? {
             let limit = span - min(span, max(16, span / 5))
             guard limit >= 0 else { return nil }
             // Строки с рисунком есть в обоих кадрах — значит, текст виден в обоих и сдвиг должен был найтись точно.
@@ -1867,7 +1866,7 @@ struct Stitcher {
         /// Захват неточный (шум, масштабирование): точных совпадений нет вовсе. Сдвиг ищется по похожести строк:
         /// кандидаты голосованием по грубой подписи, проверка по точной подписи с допуском.
         /// `subPixel` — кадр на дробной доле пикселя, `expected` — точные события (см. `offPixel` в `Side.add`).
-        func fuzzySearch(expected: Int?, hintError: Double, subPixel: Bool = false) -> Found? {
+        package func fuzzySearch(expected: Int?, hintError: Double, subPixel: Bool = false) -> Found? {
             let w = Stitcher.columns
             let pc = p.coarse, cc = c.coarse
             // Колонки, которые стоят на месте, пока остальное движется: боковая панель, плавающая кнопка, ползунок.

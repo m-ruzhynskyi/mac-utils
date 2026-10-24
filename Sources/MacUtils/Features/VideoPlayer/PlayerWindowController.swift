@@ -5,6 +5,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
+import MUScreenshot
 
 /// Состояние интерфейса одного окна: режимы, меню, подсказки поверх видео, тосты.
 @MainActor

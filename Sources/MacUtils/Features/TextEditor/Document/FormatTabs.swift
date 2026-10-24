@@ -1,5 +1,6 @@
 import Foundation
 import MUAudio
+import MUScreenshot
 
 /// Правка позиции табуляции с линейки.
 enum TabEdit: Equatable {

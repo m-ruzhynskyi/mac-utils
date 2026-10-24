@@ -4,6 +4,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUDesign
+@testable import MUScreenshot
 
 /// Этап 2.5: невидимые символы, парные скобки, regex в фоне и пункты ревью (UTF-16 без BOM, проверка значения,
 /// путь вкладки без черновика в сессии).

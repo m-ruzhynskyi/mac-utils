@@ -2,11 +2,10 @@ import AppKit
 import Darwin
 import PDFKit
 import MUCore
-import MUAudio
 
-enum ShotNamer {
+package enum ShotNamer {
     /// Короткое имя по распознанному тексту: «Счёт за интернет», «Ошибка сборки Xcode».
-    static func name(for text: String, app: String) async throws -> String? {
+    package static func name(for text: String, app: String) async throws -> String? {
         BackgroundAIQueue.shared.enter()
         defer { BackgroundAIQueue.shared.leave() }
         let prompt = """
@@ -21,7 +20,7 @@ enum ShotNamer {
     }
 
     /// «Снимок экрана 2026-10-07 в 20.15.03.png» → «Счёт за интернет 20.15.03.png».
-    static func renamed(_ url: URL, to name: String) -> URL? {
+    package static func renamed(_ url: URL, to name: String) -> URL? {
         let base = url.deletingPathExtension().lastPathComponent
         let time = base.range(of: #"\d{1,2}[.:]\d{2}[.:]\d{2}"#, options: .regularExpression).map { String(base[$0]) }
         var candidate = [name, time].compactMap { $0 }.joined(separator: " ")
@@ -37,15 +36,15 @@ enum ShotNamer {
     }
 }
 @MainActor
-final class SemanticShotSearch: ObservableObject {
-    static let shared = SemanticShotSearch()
+package final class SemanticShotSearch: ObservableObject {
+    package static let shared = SemanticShotSearch()
 
-    @Published private(set) var expansions: [String: [String]] = [:]
-    @Published private(set) var thinking = false
+    @Published package private(set) var expansions: [String: [String]] = [:]
+    @Published package private(set) var thinking = false
     private var task: Task<Void, Never>?
 
     /// Связанные слова для запроса (рус. и англ.) — с задержкой, пока печатают.
-    func expand(_ query: String) {
+    package func expand(_ query: String) {
         task?.cancel()
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard Ollama.isOn(Pref.aiShotSearch), query.count >= 3, expansions[query] == nil else { return }
@@ -69,11 +68,11 @@ final class SemanticShotSearch: ObservableObject {
         }
     }
 
-    func words(for query: String) -> [String] {
+    package func words(for query: String) -> [String] {
         expansions[query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] ?? []
     }
 
-    nonisolated static func matches(_ record: ShotRecord, words: [String]) -> Bool {
+    package nonisolated static func matches(_ record: ShotRecord, words: [String]) -> Bool {
         guard !words.isEmpty else { return false }
         let text = record.text.lowercased()
         return words.contains { text.contains($0) }

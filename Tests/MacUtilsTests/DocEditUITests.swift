@@ -4,6 +4,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUAudio
+@testable import MUScreenshot
 
 /// Правка в окне «Документа»: набор и удаление в странице, общая отмена с «Кодом», метод ввода, запись с проверками
 /// без потерь и лист `d10`, скорость ввода.

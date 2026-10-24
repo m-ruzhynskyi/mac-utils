@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import MUCore
+import MUScreenshot
 
 /// Знак `$` для панели и подсветки: где стоит, строка, значение, оттенок по значению.
 struct DollarEntry: Identifiable, Equatable {

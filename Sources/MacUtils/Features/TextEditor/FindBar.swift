@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUScreenshot
 
 /// Поиск и замена в текущей вкладке: запрос, опции, совпадения и переходы по ним.
 @MainActor

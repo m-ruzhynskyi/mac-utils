@@ -2,6 +2,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUUpdate
 @testable import MUAudio
+@testable import MUScreenshot
 
 @MainActor
 final class UpdaterTests: XCTestCase {

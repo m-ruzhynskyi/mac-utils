@@ -4,6 +4,7 @@ import MUCore
 import MUAI
 import MUDownloadsSorter
 import MUScreenShare
+import MUScreenshot
 
 // Действия Mac Utils в приложении «Команды» (App Intents). Каждое зовёт `AppAction.run()` — ту же функцию, что горячая
 // клавиша, панель и ссылка `macutils://…`; действия с файлами — `FileTools`, без окна редактора.

@@ -5,6 +5,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUDesign
 @testable import MUAudio
+@testable import MUScreenshot
 
 /// «Документ» против эталона Word. Эталон — PDF, которые сделал сам Word из копий форм (`pdf/fNNN.pdf` к `rtf/fNNN.rtf`).
 /// Наша сторона раскладывается тем же путём, что в приложении (вкладка в «Документе», `DocPageView`, колонтитулы),

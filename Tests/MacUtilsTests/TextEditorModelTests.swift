@@ -2,6 +2,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUAudio
+@testable import MUScreenshot
 
 /// Модели редактора без окон: документ и правила сохранения, индекс строк при правках, поиск, команды строк,
 /// сессия, поколения скана `$`.

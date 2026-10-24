@@ -1,6 +1,7 @@
 import AppKit
 import MUCore
 import MUDesign
+import MUScreenshot
 
 /// Меню текстового редактора в строке меню: «Файл / Правка / Поиск / Вид / Кодировка / Синтаксис».
 /// Пункты, которым нужна вкладка, идут по цепочке ответчиков к `EditorWindowController` (делегат окна редактора)
