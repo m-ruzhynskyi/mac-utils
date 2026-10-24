@@ -561,24 +561,36 @@ function connectionPasswordCard(r) {
   return c;
 }
 
-// ---- «Доступ · как в файле»: свёрнуто; «Показать» — текст из файла, пароли и ключи под маской (ставит основной процесс) ----
+// ---- «Доступ · как в файле»: свёрнуто; «Показать» — текст из файла под маской (её ставит основной процесс: пароли, пары и слова
+// без меток), на 10 с — потом скрывается сам, как остальные секреты ----
 function accessCard(r) {
   const c = el("div", "dcard access");
   const h = el("div", "arow");
   const caption = el("div", "atitles");
-  caption.append(el("div", "dlbl", "ДОСТУП · КАК В ФАЙЛЕ"), el("small", "muted", `строк: ${r.accessLines}. Всё выше собрано из них; пароли скрыты`));
+  const note = el("small", "muted", `строк: ${r.accessLines}. Всё выше собрано из них; пароли скрыты`);
+  caption.append(el("div", "dlbl", "ДОСТУП · КАК В ФАЙЛЕ"), note);
   const toggle = button("btn c", "Показать");
+  const left = el("small", "scap shown");
   h.append(caption, toggle);
-  c.append(h);
-  let pane = null;
+  c.append(h, left);
+  let pane = null, until = 0;
+  const hide = () => { pane?.remove(); pane = null; until = 0; toggle.textContent = "Показать"; left.textContent = ""; };
+  // Свой «ряд» среди секретов карточки: тот же таймер, то же забывание при уходе с подробностей.
+  secretRows.set("access", {
+    hide,
+    tick(now) { if (until && now >= until) hide(); left.textContent = until ? `Показан · скроется через ${Math.max(1, Math.ceil((until - now) / 1000))} с` : ""; },
+    busy() { return !!until; },
+  });
   toggle.onclick = async () => {
-    if (pane) { pane.remove(); pane = null; toggle.textContent = "Показать"; return; }
+    if (pane) { hide(); return; }
     const res = await window.rc.revealAccess(r.key);
-    if (!res || !res.ok || currentDetails !== r || !c.isConnected) { if (c.isConnected) caption.lastChild.textContent = "Не удалось прочитать файл"; return; }
+    if (!res || !res.ok || currentDetails !== r || !c.isConnected) { if (c.isConnected) note.textContent = "Не удалось прочитать файл"; return; }
     // Переносы и пустые строки между блоками — как в файле (моноширинный, white-space: pre-wrap).
     pane = el("pre", "atext", res.text);
     c.append(pane);
     toggle.textContent = "Скрыть";
+    until = Date.now() + REVEAL_MS;
+    secretRows.get("access").tick(Date.now()); startTick();
   };
   return c;
 }

@@ -735,12 +735,12 @@ test("карточка через IPC: шаги, учётки и контакт�
   a.rc.dispose();
 });
 
-test("RW-1 / v2: «Доступ · как в файле» — пароли и ключи под маской ещё в основном процессе; пояснение «Из файла» — тоже", async () => {
+test("RW-1 / v2: «Доступ · как в файле» — после метки пароля маска до конца строки, ещё в основном процессе; пояснение «Из файла» — тоже", async () => {
   const RAW_ACCESS = "RDP — сервер srv01 · логин: admin · пароль: Qw3rty-выдумка\nL2TP VPN · L2tpPsk=Demo-Psk-1 · Password: Demo Pass 2 | профиль у админа";
   const cases = {
     "VPN pass Demo-3": "VPN pass ••••••", "VPN, пароля: Demo-4": "VPN, пароля: ••••••", "VPN WireGuard key = QUJD=": "VPN WireGuard key = ••••••",
-    "VPN PSK: Demo-5; сервер vpn.demo.invalid": "VPN PSK: ••••••; сервер vpn.demo.invalid", "VPN pre-shared key — Demo-6": "VPN pre-shared key — ••••••",
-    "RDP pwd:Demo-7": "RDP pwd:••••••", "RDP secret Demo-8 · порт 3389": "RDP secret •••••• · порт 3389", "RDP — пароль:": "RDP — пароль:",
+    "VPN PSK: Demo-5; сервер vpn.demo.invalid": "VPN PSK: ••••••", "VPN pre-shared key — Demo-6": "VPN pre-shared key — ••••••",
+    "RDP pwd:Demo-7": "RDP pwd:••••••", "RDP secret Demo-8 · порт 3389": "RDP secret ••••••", "RDP — пароль:": "RDP — пароль:",
     "VPN Passport office · keyboard US": "VPN Passport office · keyboard US", "тип L2TP с общим ключом. Если": "тип L2TP с общим ключом. Если",
   };
   for (const [line, want] of Object.entries(cases)) assert.equal(access.maskSecrets(line), want, line);
@@ -750,7 +750,7 @@ test("RW-1 / v2: «Доступ · как в файле» — пароли и к
   assert.equal(info.card.rdp.address, null, "имя без точки — не адрес");
   assert.equal(info.card.vpn.hasKey, true);
   assert.deepEqual((await a.call("rc:revealAccess", key)).text.split("\n"),
-    ["RDP — сервер srv01 · логин: admin · пароль: ••••••", "L2TP VPN · L2tpPsk=•••••• · Password: •••••• | профиль у админа"]);
+    ["RDP — сервер srv01 · логин: admin · пароль: ••••••", "L2TP VPN · L2tpPsk=••••••"]);
   for (const x of ["Qw3rty", "Demo-Psk-1", "Demo Pass 2"]) assert.ok(!JSON.stringify([info, await a.call("rc:revealAccess", key)]).includes(x), x);
   a.rc.dispose();
 });
@@ -817,4 +817,77 @@ test("палитра: внизу только «Обновить» (↻); Excel,
   const cardJs = js.slice(js.indexOf("function stepsCard"), js.indexOf("function accessCard"));
   assert.ok(!/(?<!")\b(?:v|d|a|vpn|rdp)\.(?:key|password|secret)\b/.test(cardJs), "в карточку значения не приходят — только hasKey/hasPassword");
   assert.match(cardJs, /v\.hasKey/);
+});
+
+// ---------- ревью карточки v2 (.audit/review-rc-card-v2.md): 1:1 с Mac (`ConnectionCardTests`) ----------
+
+test("ревью v2, FIX 1: «Доступ · как в файле» — ни одного пароля открыто (формы row 2, 3, 10, 11/17, 12/27, 21, 25/35, 34, 36–38)", async () => {
+  const text = [
+    "Учётка Server — логин и пароль в колонках", "FortiClient — шлюз · demo-gw", "vpnuser — Demo-Fc-12", "lims — Demo-Lims-12",
+    "Перевірка доступу на сервері — Администратор · Demo-Tail-11", "RDP — 10.0.11.1 · LIMS · Demo-Rdp-17", "Администратор — Demo-Adm-15",
+    "vpn34 — Demo-V34 · PPTP · шифрование обязательно для этого подключения", "User: Admin", "Password: Demo-Pw-36 · Demo-Pw2-8 · Demo-Pw3-10",
+    "pass: ab;cd-Demo", "Пароль: Demo, with comma", "", "Администратор", "Demo-Col-8", "IP: 10.0.0.9 · кабинет 12"].join("\n");
+  const record = { method: null, id: "123456789", tags: ["VPN", "RDP"], account: "Администратор" };
+  const card = access.buildCard(record, text, "Demo-Win-1");
+  const shown = access.maskedAccess(`${text}\nAnyDesk пароль подключения как в колонке: Demo-ID-9 \nкопия Demo-Win-1`, [...access.cardSecrets(card), "Demo-ID-9"]);
+  for (const secret of ["Demo-Fc-12", "Demo-Lims-12", "Demo-Tail-11", "Demo-Rdp-17", "Demo-Adm-15", "Demo-V34", "Demo-Pw-36", "Demo-Pw2-8", "Demo-Pw3-10",
+    "ab;cd", "cd-Demo", "with comma", "Demo-Col-8", "Demo-ID-9", "Demo-Win-1"]) assert.ok(!shown.includes(secret), `открыто: ${secret}`);
+  for (const kept of ["Учётка Server", "FortiClient", "RDP — 10.0.11.1", "User: Admin", "IP: 10.0.0.9 · кабинет 12", "PPTP", "vpnuser — ••••••"]) {
+    assert.ok(shown.includes(kept), `должно остаться: ${kept}`);
+  }
+  assert.equal(access.maskedAccess("a\r\nb c\r\n", []), "••••••\r\nb c\r\n");
+  assert.equal(access.maskedAccess("Demo-X1x · Demo-X1xx", ["Demo-X1x"]), "•••••• · ••••••");
+
+  // Через IPC: пароль ID и пароль учётки из колонки — по значению; окно скрывает показанное через 10 с.
+  const file = xml([`<connection><name>Демо-доступ</name><id>222333444</id><password>Demo-ID-77</password><tags>RDP</tags><account>Администратор</account><accountPassword>Demo-Win-77</accountPassword><access>${esc("копия пароля ID: см. AnyDesk\nRDP — 10.0.11.1 · LIMS · Demo-ID-77\nстарый Demo-Win-77 рабочий")}</access><app>AnyDesk</app></connection>`]);
+  const a = await app({ file });
+  const res = await a.call("rc:revealAccess", a.key("Демо-доступ"));
+  assert.equal(res.ok, true);
+  for (const x of ["Demo-ID-77", "Demo-Win-77"]) assert.ok(!res.text.includes(x), x);
+  assert.deepEqual(a.log, [], "показ «Доступа» в журнал не пишется");
+  a.rc.dispose();
+  const js = fs.readFileSync(path.join(__dirname, "..", "..", "remote", "ui", "remote.js"), "utf8");
+  const card2 = js.slice(js.indexOf("function accessCard"), js.indexOf("function contactsCard"));
+  assert.match(card2, /until = Date\.now\(\) \+ REVEAL_MS;/, "«Доступ» показывается 10 с");
+  assert.match(card2, /if \(until && now >= until\) hide\(\);/, "и скрывается сам");
+  assert.match(card2, /secretRows\.set\("access"/, "при уходе с подробностей забывается вместе с остальными");
+});
+
+test("ревью v2, FIX 2: «слово — слово» не придумывает учётку (row 39, модель, телефон, ID)", () => {
+  const rec = { method: null, id: "123456789", tags: [], account: "" };
+  for (const text of ["Справка — 0501234567 · ночь · 123456789", "Принтер — HP", "Телефон — 0501234567", "Склад — касса", "Каса — 1234567890"]) {
+    assert.deepEqual(access.buildCard(rec, text, null).accounts, [], text);
+  }
+  assert.deepEqual(access.buildCard(rec, "delta — Demo-D-4", null).accounts.map((x) => [x.login, x.password]), [["delta", "Demo-D-4"]]);
+  const vpn = access.buildCard({ ...rec, tags: ["VPN"] }, "VPN PPTP\nshort — Ab1\nТелефон — 050 123 45 67", null).vpn;
+  assert.deepEqual([vpn.login, vpn.password], ["short", "Ab1"], "в блоке VPN пара без строгих условий, но номер — не пароль");
+});
+
+test("ревью v2, FIX 3 и п. 8 Тестера: пароль и ключ — целиком; сервер — только хост, явная метка сильнее прозы", () => {
+  const rec = { method: null, id: "123456789", tags: [], account: "" };
+  const cases = [["pass: ab;cd", "ab;cd"], ["Пароль: ab, cd", "ab, cd"], ["пароль: -Qw1", "-Qw1"], ["password = =Qw2=", "=Qw2="],
+    ["Password: Demo-12 · после · смены", "Demo-12"], ["пароль — a / b", "a / b"], ["pass:Qw:3", "Qw:3"]];
+  for (const [text, want] of cases) assert.equal(access.buildCard(rec, text, null).accounts[0]?.password, want, text);
+  assert.equal(access.buildCard({ ...rec, tags: ["VPN"] }, "VPN L2TP\nL2tpPsk: k;e,y / 1", null).vpn.key, "k;e,y / 1");
+  assert.deepEqual(access.buildCard(rec, "login: alpha / pass: Demo-A-1", null).accounts.map((x) => [x.login, x.password]), [["alpha", "Demo-A-1"]]);
+  const vpnRec = { method: "vpn", id: "", tags: ["VPN"], account: "" };
+  const prose = access.buildCard(vpnRec, "VPN — сервер: второй\nIP2: запасной", null).vpn;
+  assert.deepEqual([prose.server, prose.backupServer], [null, null]);
+  assert.equal(access.buildCard(vpnRec, "VPN — подключение средствами Windows, тип L2TP с общим ключом, при недоступности первого адреса второй\nIP1: 198.51.100.10", null).vpn.server, "198.51.100.10");
+  assert.equal(access.buildCard(vpnRec, "VPN — 203.0.113.1 · подключение через встроенный клиент Windows\nСервер: 203.0.113.2", null).vpn.server, "203.0.113.2");
+});
+
+test("ревью v2, п. 5 и мелочи: «одной из учёток» — только Windows/Server; номер +380 — ровно 12 цифр, 00 — как +; UniTalk не открылся — номер скопирован", async () => {
+  const one = access.buildCard({ method: null, id: "1", tags: ["RDP"], account: "Администратор" }, "RDP — 10.0.0.5\n\nRouter\npass: Demo-R-1", "Demo-W-1");
+  assert.equal(one.accounts.length, 2);
+  assert.equal(one.rdp.useAccountsBelow, false);
+  assert.equal(access.dialable("+380 50 000 00 01 1"), null);
+  assert.equal(access.dialable("3805000000011"), null);
+  assert.equal(access.dialable("00380 50 000 00 01"), "+380500000001");
+  assert.equal(access.dialable("0048 600 000 000"), "+48600000000");
+  const a = await app({ file: DEMO_FILE, extra: { dialer: { isUniTalk: async () => true, open: async () => { throw new Error("no handler"); } } } });
+  assert.deepEqual(await a.call("rc:call", "067 000 11 22"), { ok: true, call: false, reason: "openFailed" });
+  assert.deepEqual(a.copied, ["067 000 11 22"]);
+  assert.equal(a.huds.at(-1).title, "UniTalk не открылся — номер скопирован");
+  a.rc.dispose();
 });

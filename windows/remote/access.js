@@ -8,15 +8,15 @@ const { isValidHost } = require("./rdp");
 const { needsVPN, usesRDP } = require("./models");
 
 const MASK = "••••••";
-// Метки паролей и ключей (1:1 с Mac `AccessParser.mask`); значение после них до «·», «|», «;» или конца строки уходит под маску.
-// Длинные варианты раньше коротких: «password» раньше «pass». Сразу за меткой — пробел, «:», «=» или тире: «с общим ключом.» в
-// пояснении — не значение.
+// Метки паролей и ключей (1:1 с Mac `AccessParser.mask`); всё после них до конца строки уходит под маску («Password: a · b · c» —
+// все три). Длинные варианты раньше коротких: «password» раньше «pass». Сразу за меткой — пробел, «:», «=» или тире: «с общим
+// ключом.» в пояснении — не значение.
 const SECRET_LABEL = new RegExp("(?<![\\p{L}\\d])(парол\\p{L}*|ключ\\p{L}*|секрет\\p{L}*|токен\\p{L}*|пін|пин|"
   + "password|passwort|passphrase|passwd|pass|pwd|pw|l2tp ?psk|pre-?shared[ -]?key|psk|private ?key|key|"
-  + "secret|token|pin)(?![\\p{L}\\d])([\\s:=—–\\-]+)([^\\s·|;:=—–\\-](?:[^·|;\\n]*[^\\s·|;\\n])?)", "giu");
+  + "secret|token|pin)(?![\\p{L}\\d])([ \\t:=—–\\-]+)([^\\s:=—–\\-][^\\n]*)", "giu");
 
-// Строка «Доступа» для показа: значения после меток пароля, ключа и PSK заменены точками.
-// «пароль: Qw3rty · логин admin» → «пароль: •••••• · логин admin».
+// Строка «Доступа»: всё после метки пароля, ключа или PSK до конца строки заменено точками.
+// «логин admin · пароль: Qw3rty · ещё» → «логин admin · пароль: ••••••».
 const maskSecrets = (line) => String(line).replace(SECRET_LABEL, (_, label, sep) => `${label}${sep}${MASK}`);
 
 // ---------- разбор ----------
@@ -68,8 +68,8 @@ function headed(line) {
   return { section, rest };
 }
 
-// Части строки: «·», «|», «;», «, » и « / ».
-const segments = (text) => String(text).split(/·|\||;|, | \/ /).map((s) => s.trim()).filter(Boolean);
+// Части строки: «·» и «|». Внутри части «;», «,» и « / » могут быть в самом пароле — по ним не делим.
+const segments = (text) => String(text).split(/[·|]/).map((s) => s.trim()).filter(Boolean);
 
 // IPv4[:порт] или имя вида host.domain[:порт] (с буквой); null — не адрес.
 function host(token) {
@@ -83,10 +83,13 @@ function firstHost(text) {
   return null;
 }
 
-// Пары [поле, значение] в части строки. Разделитель — «:», «=», тире; без разделителя — только если за значением конец части
-// («user ivan»), иначе «логин и пароль в колонках» дал бы логин «и».
+// Пары { field, value, explicit, at } в части строки, в порядке строки. Разделитель — «:», «=», тире; срезается только он, символы
+// значения — нет. Пароль и ключ — вся часть после разделителя (до «·», «|» или конца строки: «ab;cd», «ab, cd», «-Qw1» — целиком),
+// остальное — первое слово. Без разделителя — только одно слово в конце короткой части («user ivan»): иначе «логин и пароль в
+// колонках» дал бы логин «и», а «…при недоступности первого адреса второй» — сервер «второй».
 function labelled(part) {
   const out = [], lower = part.toLowerCase(), taken = [];
+  const wordCount = part.split(/\s+/).filter(Boolean).length;
   for (const [field, names] of LABELS) {
     let done = false;
     for (const name of names) {
@@ -98,32 +101,49 @@ function labelled(part) {
         if (isWordChar(lower[at - 1]) || isWordChar(lower[end])) continue;
         const afterSpace = part.slice(end).replace(/^[ \t]+/, "");
         const separated = !!afterSpace && (":=—–".includes(afterSpace[0]) || (afterSpace[0] === "-" && afterSpace[1] === " "));
-        const tokens = afterSpace.replace(/^[ :=—–\-\t]+/, "").split(" ").filter(Boolean);
+        // Только сам разделитель: «: », «= », « — ».
+        let body = (separated ? afterSpace.slice(1) : afterSpace).replace(/^[ \t]+/, "");
+        let tokens = body.split(" ").filter(Boolean);
         // «IP: IP: 10.0.0.1» — повтор метки пропускаем.
-        while (tokens.length && tokens[0].endsWith(":") && names.includes(tokens[0].slice(0, -1).toLowerCase())) tokens.shift();
-        const value = tokens[0];
+        while (tokens.length && tokens[0].endsWith(":") && names.includes(tokens[0].slice(0, -1).toLowerCase())) {
+          tokens.shift();
+          body = body.replace(/^\S*\s*/, "");
+        }
+        if (!tokens[0]) continue;
+        if (!separated && (tokens.length > 1 || wordCount > 3)) continue;
+        const secret = field === "password" || field === "key";
+        const value = secret ? body.trim() : tokens[0].replace(/[,;]+$/, "");
         if (!value) continue;
-        if (!separated && tokens.length > 1) continue;
         taken.push([at, end]);
-        out.push([field, value]);
+        out.push({ field, value, explicit: separated, at: end });
         done = true;
         break;
       }
       if (done) break;
     }
   }
-  return out;
+  // В порядке строки: «login: a / pass: b» — сначала логин, потом пароль к нему.
+  return out.sort((a, b) => a.at - b.at);
 }
 
-// «<логин> — <пароль>»: одно слово, тире, одно слово.
-function dashPair(part) {
+// Только цифры (с пробелами, «+ ( ) -»), 7 и больше: телефон или ID.
+const looksLikeNumber = (s) => /^[\d+()\- ]+$/.test(s) && (s.match(/\d/g) || []).length >= 7;
+
+// «<логин> — <пароль>». «Пароль» из одних цифр (7 и больше) — номер или ID, не пароль. strict — блок без заголовка: true — строка
+// из одной этой части, тогда «пароль» должен быть похож на пароль (от 4 символов, с цифрой или знаком: «Принтер — HP», «Склад —
+// касса» — не учётки); null — строка из нескольких частей: пары нет (row 39).
+function dashPair(part, strict = false) {
+  if (strict === null) return null;
   const w = part.split(" ").filter(Boolean);
   if (w.length !== 3 || !["—", "–", "-"].includes(w[1])) return null;
   const ok = (x) => !header(x) && !host(x) && !x.includes(":") && !LABEL_WORDS.has(x.toLowerCase());
-  return ok(w[0]) && ok(w[2]) ? { login: w[0], password: w[2] } : null;
+  if (!ok(w[0]) || !ok(w[2]) || looksLikeNumber(w[2])) return null;
+  if (strict && (w[2].length < 4 || /^\p{L}+$/u.test(w[2]))) return null;
+  return { login: w[0], password: w[2] };
 }
 
-function newBlock(section) { return { section, pairs: [], server: null, backup: null, key: null, port: null, kinds: [], notes: [] }; }
+// serverExplicit — сервер задан явной меткой с разделителем («IP1:», «Сервер:»): найденное в прозе его не заменяет.
+function newBlock(section) { return { section, pairs: [], server: null, serverExplicit: false, backup: null, key: null, port: null, kinds: [], notes: [] }; }
 function addLogin(block, login) {
   const last = block.pairs[block.pairs.length - 1];
   if (last && last.login == null && last.password == null) last.login = login; else block.pairs.push({ login, password: null });
@@ -144,16 +164,23 @@ function read(text, block, isHeader) {
   let used = false;
   parts.forEach((part, i) => {
     const found = labelled(part);
-    for (const [field, value] of found) {
+    for (const { field, value, explicit } of found) {
       if (field === "login") addLogin(block, value);
       else if (field === "password") addPassword(block, value);
       else if (field === "key") block.key ??= value;
-      else if (field === "server") { const h = host(value) || (block.section === "vpn" ? value : null); if (block.server == null && h) block.server = h; }
-      else if (field === "backup") block.backup ??= host(value) || value;
+      else if (field === "server") {
+        // Сервер и адрес — только хост (IP или имя с точкой): «второй» из пояснения — не сервер.
+        const h = host(value);
+        if (h && explicit && !block.serverExplicit) { block.server = h; block.serverExplicit = true; }
+        else if (h && block.server == null) block.server = h;
+      }
+      else if (field === "backup") { const h = host(value); if (h) block.backup ??= h; }
       else if (field === "port") { if (block.port == null && /^\d+$/.test(value)) block.port = value; }
     }
     if (found.length) { used = true; return; }
-    const pair = i === 0 ? dashPair(part) : null;
+    // «<логин> — <пароль>»: только в начале строки; в блоке без заголовка — строже (см. dashPair).
+    const strict = block.section !== "none" ? false : parts.length === 1 ? true : null;
+    const pair = i === 0 ? dashPair(part, strict) : null;
     if (pair) { block.pairs.push(pair); used = true; return; }
     if (block.section === "vpn" || block.section === "rdp") {
       const h = firstHost(part);
@@ -259,8 +286,63 @@ function buildCard(record, access, accountPassword) {
   const seen = new Set([...stepPairs, ...accounts].map(pairKey));
   for (const a of accessAccounts) { const k = pairKey(a); if (!seen.has(k)) { seen.add(k); accounts.push(a); } }
   card.accounts = accounts;
-  if (card.rdp && card.rdp.login == null && card.rdp.password == null && accounts.length > 1) card.rdp.useAccountsBelow = true;
+  // «Войдите одной из учёток ниже» — только про учётки входа на компьютер (Windows, Server), не роутер и не VPN.
+  const logins = accounts.filter((a) => a.kind === "windows" || a.kind === "server").length;
+  if (card.rdp && card.rdp.login == null && card.rdp.password == null && logins > 1) card.rdp.useAccountsBelow = true;
   return card;
+}
+
+// Все значения, которые карточка считает секретами: пароли, ключ, пароли учёток (для маски «Доступа» по значению).
+const cardSecrets = (card) => [card.vpn?.key, card.vpn?.password, card.rdp?.password, ...card.accounts.map((a) => a.password)].filter((v) => v != null);
+
+const isPlainWord = (w) => {
+  const bare = w.replace(/:$/, "");
+  return !!w && !w.includes(MASK) && !header(bare) && !host(w) && !LABEL_WORDS.has(bare.toLowerCase());
+};
+const isWordCh = (ch) => ch != null && /[\p{L}\p{N}]/u.test(ch);
+// Значение отдельным словом (по краям — не буква и не цифра) — точками.
+function replaceWord(value, line) {
+  let out = "", rest = line, at;
+  while ((at = rest.indexOf(value)) >= 0) {
+    const bounded = !isWordCh(rest[at - 1]) && !isWordCh(rest[at + value.length]);
+    out += rest.slice(0, at) + (bounded ? MASK : value);
+    rest = rest.slice(at + value.length);
+  }
+  return out + rest;
+}
+// Одиночные слова после «·»/«|», пароль в «слово — слово», строка из одного слова.
+function maskLoosePieces(line) {
+  const trimmed = line.trim();
+  if (!/\s/.test(trimmed) && isPlainWord(trimmed)) return line.replace(trimmed, MASK);
+  const pieces = line.split(/([·|])/);
+  let index = 0;
+  return pieces.map((piece) => {
+    if (piece === "·" || piece === "|") return piece;
+    const words = piece.trim().split(" ").filter(Boolean);
+    let res = piece;
+    if (index > 0 && words.length === 1 && isPlainWord(words[0])) res = piece.replace(words[0], MASK);
+    else if (words.length === 3 && ["—", "–", "-"].includes(words[1]) && isPlainWord(words[2])) {
+      const lead = piece.match(/^ */)[0], tail = piece.match(/ *$/)[0];
+      res = `${lead}${words[0]} ${words[1]} ${MASK}${tail}`;
+    }
+    index++;
+    return res;
+  }).join("");
+}
+
+// «Доступ · как в файле» для показа (1:1 с Mac `AccessParser.masked`). Под маской: всё после метки пароля, ключа или PSK до конца
+// строки; каждое значение из secrets (пароли и ключи карточки, пароль ID, пароли учёток) отдельным словом; «пароль» в форме «слово —
+// слово»; одиночные слова без метки после «·»/«|» и строки из одного слова, кроме заголовков блоков и адресов. Логины в таких местах
+// тоже закрываются: лучше спрятать лишнее, чем показать пароль.
+function maskedAccess(text, secrets = []) {
+  const values = [...new Set(secrets.map((v) => String(v).trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
+  return String(text || "").split("\n").map((raw) => {
+    const cr = raw.endsWith("\r");
+    let line = maskSecrets(cr ? raw.slice(0, -1) : raw);
+    for (const v of values) line = replaceWord(v, line);
+    line = maskLoosePieces(line);
+    return cr ? `${line}\r` : line;
+  }).join("\n");
 }
 
 // Карточка для окна: без паролей и ключей — только признаки и id секрета для 👁/⧉ (vpn.key, vpn.password, rdp.password,
@@ -355,7 +437,11 @@ function isPhone(text) {
 // с «+» — как есть, только цифры. 1:1 с Mac (`PhoneNumber.dialable`).
 function dialable(raw) {
   const s = String(raw ?? "");
-  const digits = s.replace(/\D/g, ""), plus = s.trim().startsWith("+");
+  let digits = s.replace(/\D/g, ""), plus = s.trim().startsWith("+");
+  // «00380…» — международный префикс вместо «+».
+  if (!plus && digits.startsWith("00")) { digits = digits.slice(2); plus = true; }
+  // С кодом Украины — ровно 12 цифр: «+380 50 000 00 01 1» не номер.
+  if (digits.startsWith("380") && digits.length !== 12 && (plus || digits.length > 12)) return null;
   if (digits.length === 12 && digits.startsWith("380")) return `+${digits}`;
   if (digits.length === 11 && digits.startsWith("80")) return `+3${digits}`;
   if (digits.length === 10 && digits.startsWith("0")) return `+38${digits}`;
@@ -365,5 +451,5 @@ function dialable(raw) {
 }
 const telURL = (raw) => { const n = dialable(raw); return n ? `tel:${n}` : null; };
 
-module.exports = { maskSecrets, buildCard, publicCard, cardSecret, CARD_SECRETS, blocksOf, labelled, dashPair, host, VPN_KINDS,
+module.exports = { maskSecrets, maskedAccess, cardSecrets, buildCard, publicCard, cardSecret, CARD_SECRETS, blocksOf, labelled, dashPair, host, VPN_KINDS,
   parseContacts, findPhones, isPhone, dialable, telURL };

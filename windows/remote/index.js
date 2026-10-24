@@ -12,7 +12,7 @@ const { TITLES, downloadURL, programOf } = require("./models");
 const { createConnector } = require("./connect");
 const { createUia } = require("./uia");
 const { createConcealedWriter } = require("./concealed");
-const { buildCard, publicCard, cardSecret, CARD_SECRETS, maskSecrets, parseContacts, isPhone } = require("./access");
+const { buildCard, publicCard, cardSecret, cardSecrets, CARD_SECRETS, maskedAccess, parseContacts, isPhone } = require("./access");
 const { createHandlerLookup, callPlan } = require("./dialer");
 const { SecretBuffer } = require("./secret");
 const { createHud } = require("./hud");
@@ -261,12 +261,22 @@ function init(electron, options = {}) {
     try { return { ok: true, value: secret.bytes.toString("utf8") }; } finally { secret.wipe(); }
   }
 
-  // «Показать» в «Доступе · как в файле»: текст уходит только в окно подробностей, пароли и ключи — под маской.
+  // «Показать» в «Доступе · как в файле»: текст уходит только в окно подробностей (на 10 с), под маской — метки паролей до конца
+  // строки, все секреты карточки и пароль ID по значению, пары и одиночные слова без меток (maskedAccess).
   async function revealAccess(key) {
     let secret = null;
     try { secret = await service.secret(key, "access"); } catch (_) { secret = null; }
     if (!secret) return { ok: false };
-    try { return { ok: true, text: secret.bytes.toString("utf8").split(/\r\n|\n|\r/).map(maskSecrets).join("\n") }; } finally { secret.wipe(); }
+    try {
+      const full = await fullCard(key);
+      const secrets = full ? cardSecrets(full.card) : [];
+      if (full && !full.record.method && full.record.hasPassword) {
+        let program = null;
+        try { program = await service.secret(key, "password"); } catch (_) { program = null; }
+        if (program) { try { secrets.push(program.bytes.toString("utf8")); } finally { program.wipe(); } }
+      }
+      return { ok: true, text: maskedAccess(secret.bytes.toString("utf8").split(/\r\n|\n|\r/).join("\n"), secrets) };
+    } finally { secret.wipe(); }
   }
 
   // Адрес RDP: ID записи RDP или (fromAccess) адрес из «Доступа» — файл читается заново.
@@ -308,12 +318,15 @@ function init(electron, options = {}) {
     try { uniTalk = await dialer.isUniTalk(); } catch (_) { uniTalk = false; }
     const plan = callPlan(text, uniTalk);
     if (plan.call) {
-      try { await dialer.open(plan.call); } catch (_) { return { ok: false, error: "open" }; }
-      log("call ok");
-      return { ok: true, call: true };
+      let opened = true;
+      try { await dialer.open(plan.call); } catch (_) { opened = false; }
+      if (opened) { log("call ok"); return { ok: true, call: true }; }
+      // UniTalk не открылся — номер всё равно не теряется: копируется.
+      plan.copy = String(text).trim(); plan.reason = "openFailed";
     }
     const ok = copyPlain(plan.copy);
-    hud.show(ok ? { kind: "success", title: plan.reason === "noUniTalk" ? "UniTalk не найден — номер скопирован" : "Номер скопирован", autoHideMs: 2500 }
+    const title = { noUniTalk: "UniTalk не найден — номер скопирован", openFailed: "UniTalk не открылся — номер скопирован" }[plan.reason] || "Номер скопирован";
+    hud.show(ok ? { kind: "success", title, autoHideMs: 2500 }
                 : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен.", actions: [{ id: "close", label: "Закрыть" }] });
     log(`call copy reason=${plan.reason}`);
     return { ok, call: false, reason: plan.reason };
