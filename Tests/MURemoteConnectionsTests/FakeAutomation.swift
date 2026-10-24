@@ -58,7 +58,11 @@ final class FakeNode: AXNode {
         return true
     }
 
+    /// AX отказал в нажатии (`AXPress` вернул ошибку): ничего не меняется.
+    var pressFails = false
+
     func press() -> Bool {
+        if pressFails { return false }
         if isChecked != nil { isChecked?.toggle() }
         onPress?()
         return true

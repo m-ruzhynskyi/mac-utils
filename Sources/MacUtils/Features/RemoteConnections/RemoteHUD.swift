@@ -67,6 +67,9 @@ struct RemoteHUDContent: Equatable {
         case .intermediate(.sessionChoice):
             return RemoteHUDContent(tone: .info, title: RL("Выбираю сеанс в %@…", p), detail: RL("Пароль введу после"),
                                     spinner: true, actions: [.cancel])
+        case .intermediate(.chooseConsole):
+            return RemoteHUDContent(tone: .info, title: RL("Выберите Console и нажмите Connect"),
+                                    detail: RL("В окне %@ «Terminal Session» — пароль введу после", p), spinner: true, actions: [.cancel])
         case .intermediate(.remoteSide):
             return RemoteHUDContent(tone: .info, title: RL("Жду ответа удалённого компьютера…"),
                                     detail: RL("Пароль введу, когда %@ его попросит", p), spinner: true, actions: [.cancel])
@@ -111,7 +114,10 @@ struct RemoteHUDContent: Equatable {
             return RemoteHUDContent(tone: .success, title: RL("%@ открыт", p), detail: RL("%@. Пароль введите в окне %@.", who, p))
         case .openedWithoutPassword(.notInFile):
             return RemoteHUDContent(tone: .success, title: RL("%@ открыт", p),
-                                    detail: RL("В файле нет пароля для «%@» — введите его в окне %@.", record.name, p))
+                                    detail: RL("В файле нет пароля %@ для «%@» — введите его в окне %@.", p, record.name, p))
+        case .sessionNotChosen:
+            return RemoteHUDContent(tone: .neutral, title: RL("Сеанс в %@ не выбран", p),
+                                    detail: RL("Выберите Console и нажмите Connect в окне %@.", p), actions: [.retry, .close])
         case .cancelled:
             return RemoteHUDContent(tone: .neutral, title: RL("Отменено"), detail: nil)
         case .failed(let failure):

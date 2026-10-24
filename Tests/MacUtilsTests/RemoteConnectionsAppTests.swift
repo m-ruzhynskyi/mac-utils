@@ -166,7 +166,10 @@ final class RemoteConnectionsAppTests: XCTestCase {
         XCTAssertEqual(hud(.intermediate(.sessionChoice)).detail, "Пароль введу после")
         XCTAssertEqual(hud(.intermediate(.unknown)).detail, "Ответьте в окне AnyDesk — пароль введу после")
         XCTAssertEqual(hud(.typingID, .teamViewer).title, "Ввожу ID в TeamViewer…")
-        for phase in [ConnectionPhase.intermediate(.sessionChoice), .intermediate(.remoteSide), .intermediate(.unknown), .typingID] {
+        XCTAssertEqual(hud(.intermediate(.chooseConsole)).title, "Выберите Console и нажмите Connect")
+        XCTAssertEqual(hud(.intermediate(.chooseConsole)).detail, "В окне AnyDesk «Terminal Session» — пароль введу после")
+        for phase in [ConnectionPhase.intermediate(.sessionChoice), .intermediate(.chooseConsole), .intermediate(.remoteSide),
+                      .intermediate(.unknown), .typingID] {
             let c = hud(phase)
             XCTAssertEqual(c.tone, .info)
             XCTAssertFalse(c.fadesOut, "\(phase) — не итог")
@@ -175,6 +178,17 @@ final class RemoteConnectionsAppTests: XCTestCase {
         let ad = hud(.finished(.unconfirmed(copyID: false)))
         XCTAssertEqual(ad.title, "Не удалось подтвердить подключение")
         XCTAssertEqual(ad.tone, .neutral)
+        // rc-console: «Terminal Session» не прошло — нейтральный итог с подсказкой, не успех и не «нет пароля».
+        let stuck = hud(.finished(.sessionNotChosen))
+        XCTAssertEqual(stuck.title, "Сеанс в AnyDesk не выбран")
+        XCTAssertEqual(stuck.detail, "Выберите Console и нажмите Connect в окне AnyDesk.")
+        XCTAssertEqual(stuck.tone, .neutral)
+        XCTAssertEqual(stuck.actions, [.retry, .close])
+        XCTAssertTrue(stuck.fadesOut)
+        // «Нет пароля» называет программу и отличается от «поле не найдено».
+        let noPassword = hud(.finished(.openedWithoutPassword(.notInFile)))
+        XCTAssertEqual(noPassword.detail, "В файле нет пароля AnyDesk для «Лаборатория Север» — введите его в окне AnyDesk.")
+        XCTAssertNotEqual(noPassword.title, hud(.finished(.failed(.fieldNotFound(structure: [])))).title)
         let tv = hud(.finished(.unconfirmed(copyID: true)), .teamViewer)
         XCTAssertEqual(tv.title, "Не удалось подключиться — ID скопирован")
         XCTAssertEqual(tv.tone, .neutral)

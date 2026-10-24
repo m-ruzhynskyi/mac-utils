@@ -26,7 +26,14 @@ final class IntermediateWindowTests: XCTestCase {
         promptContinueTitles: ["Connect"], promptDefaultTitles: ["Console"],
         progressTexts: ["Connecting...", "Connection in progress. Please wait.", "Please wait for the remote side to accept your session request."],
         sessionTexts: ["Waiting for image."], closedTexts: ["Client Offline", "Session Closed"],
-        promptAccountTitles: ["User account"], accountPasswordTexts: ["User account password required."])
+        accountPasswordTexts: ["User account password required.", "User account password or user confirmation required.",
+                               "Administrator account password required."])
+
+    /// Сообщения окна пароля AnyDesk (`ad.dlg.passwd.msg.*`, en): после «Console» приходит любое из них.
+    private let passwordMessages = ["Administrator account password required.", "User account password required.",
+                                    "User account password or user confirmation required.", "AnyDesk password required.",
+                                    "AnyDesk or administrator account password required.", "AnyDesk or user account password required.",
+                                    "Password required."]
 
     override func setUp() async throws {
         ax = FakeAX(); launcher = FakeLauncher(); keyboard = FakeKeyboard(ax: ax); clock = FakeClock()
@@ -40,10 +47,12 @@ final class IntermediateWindowTests: XCTestCase {
     }
 
     private func connect(_ request: ConnectRequest, _ provider: RemoteProvider,
-                         _ connector: RemoteConnector? = nil, accountPassword: String? = nil) async -> ConnectionOutcome {
+                         _ connector: RemoteConnector? = nil, accountPassword: String? = nil,
+                         programPassword: Bool = true) async -> ConnectionOutcome {
         let pw = password
         return await (connector ?? self.connector()).connect(request, provider: provider, password: {
             self.lookups += 1
+            guard programPassword else { return .noPassword }
             let s = SecretBuffer(pw.utf8)
             self.secrets.append(s)
             return .found(s)
@@ -94,6 +103,9 @@ final class IntermediateWindowTests: XCTestCase {
                         FakeNode("AXStaticText", label: "Please select the terminal session you would like to connect to:"),
                         console, FakeNode("AXGroup", children: [user, login]), cancel] + (withConnect ? [connect] : [])
             group = FakeNode("AXGroup", children: kids)
+            let (c, u) = (console, user)
+            console.onPress = { u.isChecked = !(c.isChecked ?? false) }
+            user.onPress = { c.isChecked = !(u.isChecked ?? false) }
         }
     }
 
@@ -186,13 +198,13 @@ final class IntermediateWindowTests: XCTestCase {
         let outcome = await connect(anyDesk(timeout: 5), AnyDeskAutomator(texts: adTexts))
         XCTAssertEqual(outcome, .connected, "30 с промежуточного окна при таймауте 5 с — не таймаут")
         XCTAssertFalse(cancelPressed)
-        XCTAssertTrue(phases.contains(.intermediate(.unknown)))
+        XCTAssertTrue(phases.contains(.intermediate(.chooseConsole)), "HUD подсказывает выбрать Console")
         XCTAssertFalse(phases.contains(.intermediate(.sessionChoice)))
         XCTAssertEqual(pw.field.text, password)
     }
 
-    /// Промежуточное окно висит бесконечно — ждём не дольше `limit`, итог нейтральный.
-    func testPromptThatNeverClosesEndsAtLimitWithoutSuccess() async {
+    /// «Terminal Session» висит бесконечно — ждём не дольше `promptTimeout`, итог «сеанс не выбран», не успех.
+    func testPromptThatNeverClosesEndsWithSessionNotChosen() async {
         let window = sessionWindow()
         let prompt = TerminalPrompt(withConnect: false)
         launcher.onOpen = { [unowned self] _ in
@@ -200,10 +212,10 @@ final class IntermediateWindowTests: XCTestCase {
             ax.show(window, pid: adPID)
             put([prompt.group], in: window, pid: adPID)
         }
-        let c = connector { $0.limit = 60_000 }
-        let outcome = await connect(anyDesk(timeout: 5), AnyDeskAutomator(texts: adTexts), c)
-        XCTAssertEqual(outcome, .unconfirmed(copyID: false))
+        let outcome = await connect(anyDesk(timeout: 5), AnyDeskAutomator(texts: adTexts))
+        XCTAssertEqual(outcome, .sessionNotChosen)
         XCTAssertFalse(outcome.isSuccess)
+        XCTAssertEqual(finishedPhases, [.sessionNotChosen])
         XCTAssertTrue((60_000...60_500).contains(clock.milliseconds), "ждали \(clock.milliseconds) мс")
         XCTAssertTrue(secrets.allSatisfy(\.isEmpty))
     }
@@ -222,9 +234,9 @@ final class IntermediateWindowTests: XCTestCase {
         let c = connector { $0.limit = 30_000 }
         let outcome = await connect(anyDesk(timeout: 5), AnyDeskAutomator(texts: adTexts), c)
         XCTAssertEqual(presses, 1)
-        XCTAssertEqual(outcome, .unconfirmed(copyID: false))
+        XCTAssertEqual(outcome, .sessionNotChosen, "и на `limit` — «сеанс не выбран», а не «не подтверждено»")
         XCTAssertTrue(phases.contains(.intermediate(.sessionChoice)))
-        XCTAssertTrue(phases.contains(.intermediate(.unknown)), "после неудачного «Connect» — ждём пользователя")
+        XCTAssertTrue(phases.contains(.intermediate(.chooseConsole)), "после неудачного «Connect» — ждём пользователя")
     }
 
     /// «Terminal Session» после ввода пароля — тоже проходится сам; «подключено» только после него.
@@ -250,6 +262,24 @@ final class IntermediateWindowTests: XCTestCase {
         XCTAssertEqual(pw.field.text, password)
     }
 
+    /// «Terminal Session» после пароля не уходит («Connect» не помог) — не «подключено» и не вечное ожидание.
+    func testStuckTerminalSessionAfterPasswordIsSessionNotChosen() async {
+        let window = sessionWindow()
+        let prompt = TerminalPrompt()
+        let pw = FakePasswordWindow(title: "Authorization")
+        pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: adPID); put([prompt.group], in: window, pid: adPID) }
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([progress()], in: window, pid: adPID)
+            clock.at(1000) { [unowned self] in ax.show(pw.window, pid: adPID) }
+        }
+        let outcome = await connect(anyDesk(), AnyDeskAutomator(texts: adTexts), connector { $0.promptTimeout = 15_000 })
+        XCTAssertEqual(outcome, .sessionNotChosen)
+        XCTAssertEqual(pw.field.text, password)
+        XCTAssertTrue(secrets.allSatisfy(\.isEmpty))
+    }
+
     /// «Ожидание принятия» той стороной — таймаут стоит; окно пароля через 40 с — пароль введён.
     func testWaitingForAcceptPausesTimeout() async {
         let window = sessionWindow()
@@ -267,30 +297,34 @@ final class IntermediateWindowTests: XCTestCase {
         XCTAssertEqual(pw.field.text, password)
     }
 
-    // MARK: Учётка Windows (задача 4)
+    // MARK: Учётка Windows (задача 4) и rc-console: «Terminal Session» — всегда Console
 
     private let accountRecord = ConnectionRecord(sourceRow: 4, name: "Філія 2", id: "123456789", hasPassword: true,
                                                  account: "lims.admin", hasAccountPassword: true)
 
-    /// Окно AnyDesk «Authorization», которое просит пароль учётной записи; `login` — поле логина, если есть.
-    private func accountPasswordWindow(withLogin: Bool = false) -> (window: FakePasswordWindow, login: FakeNode) {
+    /// Окно AnyDesk «Authorization» с сообщением `message`; `login` — поле логина, если есть.
+    private func accountPasswordWindow(_ message: String = "User account password required.",
+                                       withLogin: Bool = false) -> (window: FakePasswordWindow, login: FakeNode) {
         let w = FakePasswordWindow(title: "Authorization")
         let login = FakeNode("AXTextField")
-        w.window.kids.insert(FakeNode("AXStaticText", label: "User account password required."), at: 0)
+        w.window.kids.insert(FakeNode("AXStaticText", label: message), at: 0)
         if withLogin { w.window.kids.insert(login, at: 1) }
         return (w, login)
     }
 
-    /// Есть логин учётки — «User account», логин вписан, «Connect»; затем пароль учётки — в окно, которое его просит.
-    func testTerminalSessionWithAccountSelectsUserAccountAndEntersAccountPassword() async {
+    /// Баг rc-console: AnyDesk запомнил «User account», у записи есть логин учётки — всё равно «Console» и «Connect».
+    /// «User account» не нажимается, логин в окно не вписывается; пароль AnyDesk — в окно пароля после него.
+    func testTerminalSessionWithAccountAndUserAccountSelectedPicksConsole() async {
         let window = sessionWindow()
-        let prompt = TerminalPrompt()
-        let (pw, _) = accountPasswordWindow()
+        let prompt = TerminalPrompt(consoleSelected: false)
+        let (pw, _) = accountPasswordWindow("Administrator account password required.")
         pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: adPID); put(remoteScreen(), in: window, pid: adPID) }
-        var atConnect: (user: Bool?, console: Bool?, login: String)?
-        prompt.user.onPress = { prompt.user.isChecked = true; prompt.console.isChecked = false }
+        var userPressed = false
+        let userPress = prompt.user.onPress
+        prompt.user.onPress = { userPressed = true; userPress?() }
+        var atConnect: (console: Bool?, user: Bool?)?
         prompt.connect.onPress = { [unowned self] in
-            atConnect = (prompt.user.isChecked, prompt.console.isChecked, prompt.login.text)
+            atConnect = (prompt.console.isChecked, prompt.user.isChecked)
             put([progress()], in: window, pid: adPID)
             clock.at(clock.milliseconds + 1000) { [unowned self] in ax.show(pw.window, pid: adPID) }
         }
@@ -302,44 +336,68 @@ final class IntermediateWindowTests: XCTestCase {
         let request = ConnectRequest(record: accountRecord, program: .anyDesk)
         let outcome = await connect(request, AnyDeskAutomator(texts: adTexts), accountPassword: "Win-9-выдумка")
         XCTAssertEqual(outcome, .connected)
-        XCTAssertEqual(atConnect?.user, true, "выбрано «User account»")
-        XCTAssertEqual(atConnect?.console, false)
-        XCTAssertEqual(atConnect?.login, "lims.admin")
-        XCTAssertEqual(pw.field.text, "Win-9-выдумка", "в окно учётки — пароль учётки")
-        XCTAssertFalse(prompt.login.text.contains(password), "пароль программы — нигде")
-        XCTAssertTrue(secrets.allSatisfy(\.isEmpty), "оба пароля затёрты")
+        XCTAssertEqual(atConnect?.console, true, "выбрано «Console»")
+        XCTAssertEqual(atConnect?.user, false)
+        XCTAssertFalse(userPressed, "«User account» не нажимается никогда")
+        XCTAssertEqual(prompt.login.text, "", "логин учётки в «Terminal Session» не вписывается")
+        XCTAssertEqual(pw.field.text, password, "пароль AnyDesk записи")
+        XCTAssertTrue(secrets.allSatisfy(\.isEmpty))
     }
 
-    /// Пустое поле логина в окне пароля учётки заполняется.
-    func testAccountPasswordWindowGetsLoginWhenEmpty() async {
-        let (pw, login) = accountPasswordWindow(withLogin: true)
-        pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: adPID) }
-        launcher.onOpen = { [unowned self] _ in
-            launcher.launch(.anyDesk, pid: adPID)
-            clock.at(500) { [unowned self] in ax.show(pw.window, pid: adPID) }
+    /// Окно пароля после «Terminal Session» с любым сообщением (`pwd_required.*`, `pwd_or_confirm.*`) — пароль AnyDesk
+    /// введён, с логином учётки у записи и без. Раньше на «Administrator/User account password required» было
+    /// «пароля нет в файле», хотя пароль AnyDesk в записи был.
+    func testPasswordWindowAfterConsoleGetsProgramPasswordForEveryMessage() async {
+        for message in passwordMessages {
+            for record in [record, accountRecord] {
+                ax = FakeAX(); launcher = FakeLauncher(); keyboard = FakeKeyboard(ax: ax); clock = FakeClock(); secrets = []
+                let window = sessionWindow()
+                let prompt = TerminalPrompt()
+                let (pw, login) = accountPasswordWindow(message, withLogin: true)
+                pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: adPID); put(remoteScreen(), in: window, pid: adPID) }
+                prompt.connect.onPress = { [unowned self] in
+                    put([progress()], in: window, pid: adPID)
+                    clock.at(clock.milliseconds + 1500) { [unowned self] in ax.show(pw.window, pid: adPID) }
+                }
+                launcher.onOpen = { [unowned self] _ in
+                    launcher.launch(.anyDesk, pid: adPID)
+                    ax.show(window, pid: adPID)
+                    put([prompt.group], in: window, pid: adPID)
+                }
+                let outcome = await connect(ConnectRequest(record: record, program: .anyDesk), AnyDeskAutomator(texts: adTexts),
+                                            accountPassword: record.hasAccountPassword ? "Win-9-выдумка" : nil)
+                XCTAssertEqual(outcome, .connected, "\(message) · \(record.name)")
+                XCTAssertEqual(pw.field.text, password, "\(message) · \(record.name): пароль AnyDesk")
+                XCTAssertEqual(login.text, "", "\(message): логин не вписывается вместе с паролем AnyDesk")
+                XCTAssertTrue(secrets.allSatisfy(\.isEmpty))
+            }
         }
-        let outcome = await connect(ConnectRequest(record: accountRecord, program: .anyDesk), AnyDeskAutomator(texts: adTexts),
-                                    accountPassword: "Win-9-выдумка")
-        XCTAssertEqual(outcome, .connected)
-        XCTAssertEqual(login.text, "lims.admin")
-        XCTAssertEqual(pw.field.text, "Win-9-выдумка")
     }
 
-    /// Окно просит пароль учётки, а его в файле нет — пароль AnyDesk туда не вводится.
-    func testProgramPasswordNeverGoesIntoAccountPasswordWindow() async {
-        let (pw, _) = accountPasswordWindow()
-        launcher.onOpen = { [unowned self] _ in
-            launcher.launch(.anyDesk, pid: adPID)
-            ax.show(pw.window, pid: adPID)
+    /// Пароля AnyDesk в записи нет, пароль учётки есть, окно явно просит пароль учётки — вводится он; пустое поле
+    /// логина заполняется.
+    func testAccountPasswordGoesOnlyIntoAccountWindowWhenNoProgramPassword() async {
+        let noProgramPassword = ConnectionRecord(sourceRow: 5, name: "Філія 3", id: "123456789", hasPassword: false,
+                                                 account: "lims.admin", hasAccountPassword: true)
+        for message in ["User account password required.", "Administrator account password required."] {
+            ax = FakeAX(); launcher = FakeLauncher(); keyboard = FakeKeyboard(ax: ax); clock = FakeClock(); secrets = []
+            let (pw, login) = accountPasswordWindow(message, withLogin: true)
+            pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: adPID) }
+            launcher.onOpen = { [unowned self] _ in
+                launcher.launch(.anyDesk, pid: adPID)
+                clock.at(500) { [unowned self] in ax.show(pw.window, pid: adPID) }
+            }
+            let outcome = await connect(ConnectRequest(record: noProgramPassword, program: .anyDesk), AnyDeskAutomator(texts: adTexts),
+                                        accountPassword: "Win-9-выдумка", programPassword: false)
+            XCTAssertEqual(outcome, .connected, message)
+            XCTAssertEqual(login.text, "lims.admin")
+            XCTAssertEqual(pw.field.text, "Win-9-выдумка")
+            XCTAssertTrue(secrets.allSatisfy(\.isEmpty))
         }
-        let outcome = await connect(anyDesk(), AnyDeskAutomator(texts: adTexts))
-        XCTAssertEqual(outcome, .openedWithoutPassword(.notInFile))
-        XCTAssertEqual(pw.field.text, "")
-        XCTAssertTrue(keyboard.typed.isEmpty)
     }
 
     /// Ревью #157, H1: пароля программы в файле нет, пароль учётки есть, окно — обычное окно пароля программы
-    /// (AnyDesk или TeamViewer). Пароль учётки туда не вводится и даже не читается.
+    /// (AnyDesk или TeamViewer). Пароль учётки туда не вводится и даже не читается; итог — честное «нет пароля в файле».
     func testAccountPasswordNeverGoesIntoProgramPasswordWindow() async {
         let noProgramPassword = ConnectionRecord(sourceRow: 5, name: "Філія 3", id: "123456789", hasPassword: false,
                                                  account: "lims.admin", hasAccountPassword: true)
@@ -363,7 +421,19 @@ final class IntermediateWindowTests: XCTestCase {
         }
     }
 
-    /// Без логина учётки — как раньше: Console и «Connect»; поле логина не трогаем.
+    /// В записи нет ни пароля AnyDesk, ни пароля учётки — честное «нет пароля в файле», окно не трогаем.
+    func testNoPasswordsInRecordIsHonestNotInFile() async {
+        let empty = ConnectionRecord(sourceRow: 6, name: "Філія 4", id: "123456789", hasPassword: false, account: "lims.admin")
+        let (pw, _) = accountPasswordWindow("Administrator account password required.")
+        launcher.onOpen = { [unowned self] _ in launcher.launch(.anyDesk, pid: adPID); ax.show(pw.window, pid: adPID) }
+        let outcome = await connect(ConnectRequest(record: empty, program: .anyDesk), AnyDeskAutomator(texts: adTexts),
+                                    programPassword: false)
+        XCTAssertEqual(outcome, .openedWithoutPassword(.notInFile))
+        XCTAssertEqual(pw.field.text, "")
+        XCTAssertTrue(keyboard.typed.isEmpty)
+    }
+
+    /// Без логина учётки — тоже Console и «Connect»; поле логина не трогаем.
     func testTerminalSessionWithoutAccountKeepsConsole() async {
         let window = sessionWindow()
         let prompt = TerminalPrompt()
@@ -378,6 +448,157 @@ final class IntermediateWindowTests: XCTestCase {
         XCTAssertTrue(pressed)
         XCTAssertEqual(prompt.console.isChecked, true)
         XCTAssertEqual(prompt.login.text, "")
+    }
+
+    /// «Connect» неактивен после Console (нажатие ничего не делает) — HUD не висит вечно: подсказка «Выберите Console»,
+    /// затем «сеанс не выбран» по `promptTimeout`; ни успеха, ни ввода пароля.
+    func testDisabledConnectEndsWithHintNotSuccess() async {
+        let window = sessionWindow()
+        let prompt = TerminalPrompt(consoleSelected: false)
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+        }
+        let outcome = await connect(ConnectRequest(record: accountRecord, program: .anyDesk), AnyDeskAutomator(texts: adTexts),
+                                    connector { $0.promptTimeout = 20_000 }, accountPassword: "Win-9-выдумка")
+        XCTAssertEqual(outcome, .sessionNotChosen)
+        XCTAssertFalse(outcome.isSuccess)
+        XCTAssertEqual(prompt.console.isChecked, true)
+        XCTAssertTrue(phases.contains(.intermediate(.chooseConsole)))
+        XCTAssertFalse(finishedPhases.contains { $0.isSuccess })
+        XCTAssertTrue((20_000...20_500).contains(clock.milliseconds), "ждали \(clock.milliseconds) мс")
+        XCTAssertTrue(keyboard.typed.isEmpty)
+        XCTAssertTrue(secrets.allSatisfy(\.isEmpty))
+    }
+
+    /// Пользователь сам выбрал Console и нажал «Connect», пока HUD подсказывал, — окно пароля после этого не пропущено:
+    /// пароль AnyDesk введён.
+    func testManualConsoleChoiceThenPasswordWindowIsHandled() async {
+        let window = sessionWindow()
+        let prompt = TerminalPrompt(consoleSelected: false)
+        let console = prompt.console
+        console.onPress = { console.isChecked = false }   // программно Console не выбирается
+        let (pw, _) = accountPasswordWindow("Administrator account password required.")
+        pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: adPID); put(remoteScreen(), in: window, pid: adPID) }
+        var autoPresses = 0
+        prompt.connect.onPress = { autoPresses += 1 }
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+            clock.at(25_000) { [unowned self] in   // руками: Console, Connect — окно уходит, приходит окно пароля
+                put([progress()], in: window, pid: adPID)
+                clock.at(27_000) { [unowned self] in ax.show(pw.window, pid: adPID) }
+            }
+        }
+        let outcome = await connect(ConnectRequest(record: accountRecord, program: .anyDesk), AnyDeskAutomator(texts: adTexts),
+                                    accountPassword: "Win-9-выдумка")
+        XCTAssertEqual(outcome, .connected)
+        XCTAssertEqual(autoPresses, 0, "Console не выбрался — «Connect» сами не жмём")
+        XCTAssertTrue(phases.contains(.intermediate(.chooseConsole)))
+        XCTAssertEqual(pw.field.text, password)
+    }
+
+    // MARK: Ревью rc-console, FIX 1: состояние «Console» не читается (`AXValue` радиокнопки — nil)
+
+    /// «Terminal Session», где AX не отдаёт состояние «Console», а AnyDesk запомнил «User account». Нажатие «Console»
+    /// (если удалось) выбирает его: «User account» снимается. Пишется порядок нажатий.
+    private func unreadableConsolePrompt(pressWorks: Bool) -> (prompt: TerminalPrompt, presses: () -> [String]) {
+        let prompt = TerminalPrompt(consoleSelected: false)
+        var log: [String] = []
+        prompt.console.isChecked = nil
+        prompt.console.pressFails = !pressWorks
+        let user = prompt.user
+        prompt.console.onPress = { log.append("console"); user.isChecked = false }
+        prompt.user.onPress = { log.append("user") }
+        prompt.connect.onPress = { log.append("connect") }
+        return (prompt, { log })
+    }
+
+    /// (a) Состояние nil, нажатие «Console» прошло — «Console», затем «Connect»; «User account» не тронут.
+    func testUnreadableConsoleStatePressedThenConnect() async {
+        let window = sessionWindow()
+        let (prompt, presses) = unreadableConsolePrompt(pressWorks: true)
+        let pw = FakePasswordWindow(title: "Authorization")
+        pw.ok.onPress = { [unowned self] in ax.close(pw.window, pid: adPID); put(remoteScreen(), in: window, pid: adPID) }
+        let logConnect = prompt.connect.onPress
+        var userAtConnect: Bool?
+        prompt.connect.onPress = { [unowned self] in
+            logConnect?()
+            userAtConnect = prompt.user.isChecked
+            put([progress()], in: window, pid: adPID)
+            clock.at(clock.milliseconds + 1000) { [unowned self] in ax.show(pw.window, pid: adPID) }
+        }
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+        }
+        let outcome = await connect(ConnectRequest(record: accountRecord, program: .anyDesk), AnyDeskAutomator(texts: adTexts),
+                                    accountPassword: "Win-9-выдумка")
+        XCTAssertEqual(outcome, .connected)
+        XCTAssertEqual(presses(), ["console", "connect"])
+        XCTAssertEqual(userAtConnect, false, "к «Connect» выбран «Console», а не «User account»")
+        XCTAssertEqual(pw.field.text, password)
+    }
+
+    /// (b) Состояние nil, нажатие «Console» не прошло — «Connect» не нажат ни разу; подсказка «Выберите Console…»,
+    /// итог «сеанс не выбран», пароль не вводился.
+    func testUnreadableConsoleStateAndFailedPressNeverConnects() async {
+        let window = sessionWindow()
+        let (prompt, presses) = unreadableConsolePrompt(pressWorks: false)
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+        }
+        let outcome = await connect(ConnectRequest(record: accountRecord, program: .anyDesk), AnyDeskAutomator(texts: adTexts),
+                                    connector { $0.promptTimeout = 10_000 }, accountPassword: "Win-9-выдумка")
+        XCTAssertEqual(outcome, .sessionNotChosen)
+        XCTAssertFalse(presses().contains("connect"), "«Connect» не нажат")
+        XCTAssertFalse(presses().contains("user"))
+        XCTAssertEqual(prompt.user.isChecked, true, "выбор AnyDesk не тронут")
+        XCTAssertTrue(phases.contains(.intermediate(.chooseConsole)))
+        XCTAssertFalse(phases.contains(.intermediate(.sessionChoice)))
+        XCTAssertTrue(keyboard.typed.isEmpty)
+        XCTAssertTrue(secrets.allSatisfy(\.isEmpty))
+    }
+
+    /// (c) «Console» не выбран (false) — нажат, затем «Connect».
+    func testUncheckedConsoleIsPressedThenConnect() async {
+        let window = sessionWindow()
+        let prompt = TerminalPrompt(consoleSelected: false)
+        var log: [String] = []
+        let select = prompt.console.onPress
+        prompt.console.onPress = { log.append("console"); select?() }
+        prompt.connect.onPress = { log.append("connect") }
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+        }
+        _ = await connect(anyDesk(timeout: 2), AnyDeskAutomator(texts: adTexts), connector { $0.limit = 10_000 })
+        XCTAssertEqual(log, ["console", "connect"])
+        XCTAssertEqual(prompt.console.isChecked, true)
+        XCTAssertEqual(prompt.user.isChecked, false)
+    }
+
+    /// Выбор сеансов есть, а «Console» среди них не узнан — «Connect» не нажимается (подключил бы к другому сеансу).
+    func testUnknownChoiceIsNotContinued() async {
+        let window = sessionWindow()
+        let prompt = TerminalPrompt()
+        prompt.console.label = "Сеанс 1"
+        var pressed = false
+        prompt.connect.onPress = { pressed = true }
+        launcher.onOpen = { [unowned self] _ in
+            launcher.launch(.anyDesk, pid: adPID)
+            ax.show(window, pid: adPID)
+            put([prompt.group], in: window, pid: adPID)
+        }
+        let outcome = await connect(anyDesk(), AnyDeskAutomator(texts: adTexts), connector { $0.promptTimeout = 10_000 })
+        XCTAssertFalse(pressed)
+        XCTAssertEqual(outcome, .sessionNotChosen)
     }
 
     // MARK: AnyDesk — подтверждение сеанса без пароля
