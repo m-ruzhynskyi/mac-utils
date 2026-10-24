@@ -174,18 +174,18 @@ final class AccountAndAccessTests: XCTestCase {
 
     // MARK: Маска паролей
 
-    /// R157-1: строки «Доступа» для показа не несут паролей и ключей.
+    /// R157-1 и ревью v2: строки «Доступа» для показа не несут паролей и ключей — после метки маска до конца строки.
     func testMaskHidesPasswordsAndKeys() {
         let cases: [(String, String)] = [
             ("RDP — сервер srv01 · логин: admin · пароль: Qw3rty-выдумка", "RDP — сервер srv01 · логин: admin · пароль: ••••••"),
-            ("L2TP VPN · L2tpPsk=Demo-Psk-1 · Password: Demo Pass 2 | user ivan", "L2TP VPN · L2tpPsk=•••••• · Password: •••••• | user ivan"),
+            ("L2TP VPN · L2tpPsk=Demo-Psk-1 · Password: Demo Pass 2 | user ivan", "L2TP VPN · L2tpPsk=••••••"),
             ("VPN pass Demo-3", "VPN pass ••••••"),
             ("VPN, пароля: Demo-4", "VPN, пароля: ••••••"),
             ("VPN WireGuard key = QUJD=", "VPN WireGuard key = ••••••"),
-            ("VPN PSK: Demo-5; сервер vpn.example.lan", "VPN PSK: ••••••; сервер vpn.example.lan"),
+            ("VPN PSK: Demo-5; сервер vpn.example.lan", "VPN PSK: ••••••"),
             ("VPN pre-shared key — Demo-6", "VPN pre-shared key — ••••••"),
             ("RDP pwd:Demo-7", "RDP pwd:••••••"),
-            ("RDP secret Demo-8 · порт 3389", "RDP secret •••••• · порт 3389"),
+            ("RDP secret Demo-8 · порт 3389", "RDP secret ••••••"),
             ("RDP — пароль:", "RDP — пароль:"),
             ("VPN Passport office · keyboard US", "VPN Passport office · keyboard US"),
         ]

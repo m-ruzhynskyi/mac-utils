@@ -288,4 +288,99 @@ final class ConnectionCardTests: XCTestCase {
         reveal.hideAll()
         XCTAssertTrue(reveal.isEmpty)
     }
+
+    // MARK: Ревью v2 (.audit/review-rc-card-v2.md)
+
+    /// FIX 1: «Доступ · как в файле» — ни одного пароля открыто. Формы row 2, 3, 10, 11/17, 12/27, 21, 25/35, 34, 36–38.
+    func testShownAccessHidesEveryPassword() {
+        let access = """
+            Учётка Server — логин и пароль в колонках
+            FortiClient — шлюз · demo-gw
+            vpnuser — Demo-Fc-12
+            lims — Demo-Lims-12
+            Перевірка доступу на сервері — Администратор · Demo-Tail-11
+            RDP — 10.0.11.1 · LIMS · Demo-Rdp-17
+            Администратор — Demo-Adm-15
+            vpn34 — Demo-V34 · PPTP · шифрование обязательно для этого подключения
+            User: Admin
+            Password: Demo-Pw-36 · Demo-Pw2-8 · Demo-Pw3-10
+            pass: ab;cd-Demo
+            Пароль: Demo, with comma
+
+            Администратор
+            Demo-Col-8
+            IP: 10.0.0.9 · кабинет 12
+            """
+        let record = record(program: .anyDesk, tags: ["VPN", "RDP"], account: "Администратор")
+        let card = AccessParser.card(record: record, access: access, accountPassword: "Demo-Win-1")
+        let shown = AccessParser.masked(access + "\nAnyDesk пароль подключения как в колонке: Demo-ID-9 \nкопия Demo-Win-1",
+                                        secrets: card.secrets + ["Demo-ID-9"])
+        for secret in ["Demo-Fc-12", "Demo-Lims-12", "Demo-Tail-11", "Demo-Rdp-17", "Demo-Adm-15", "Demo-V34", "Demo-Pw-36", "Demo-Pw2-8",
+                       "Demo-Pw3-10", "ab;cd", "cd-Demo", "with comma", "Demo-Col-8", "Demo-ID-9", "Demo-Win-1"] {
+            XCTAssertFalse(shown.contains(secret), "в показе «Доступа» открыто: \(secret)")
+        }
+        // Что паролем не является — остаётся: заголовки, адреса, логины в метках, пояснения.
+        for kept in ["Учётка Server", "FortiClient", "RDP — 10.0.11.1", "User: Admin", "IP: 10.0.0.9 · кабинет 12", "PPTP",
+                     "vpnuser — ••••••"] {
+            XCTAssertTrue(shown.contains(kept), "должно остаться: \(kept)")
+        }
+        XCTAssertEqual(AccessParser.masked("a\r\nb c\r\n", secrets: []), "••••••\r\nb c\r\n", "переводы строк — как в файле")
+        XCTAssertEqual(AccessParser.masked("Demo-X1x · Demo-X1xx", secrets: ["Demo-X1x"]), "•••••• · ••••••",
+                       "значение — отдельным словом; одиночное слово после «·» — тоже под маской")
+    }
+
+    /// FIX 2: «слово — слово» не придумывает учётку: row 39, модель, телефон, ID.
+    func testDashPairDoesNotInventAccounts() {
+        for text in ["Справка — 0501234567 · ночь · 123456789", "Принтер — HP", "Телефон — 0501234567", "Склад — касса",
+                     "Каса — 1234567890"] {
+            XCTAssertEqual(AccessParser.card(record: record(program: .anyDesk), access: text, accountPassword: nil).accounts, [], text)
+        }
+        XCTAssertEqual(pairs(AccessParser.card(record: record(program: .anyDesk), access: "delta — Demo-D-4", accountPassword: nil).accounts),
+                       ["windows:delta/Demo-D-4"])
+        let vpn = AccessParser.card(record: record(program: .anyDesk, tags: ["VPN"]), access: "VPN PPTP\nshort — Ab1\nТелефон — 050 123 45 67",
+                                    accountPassword: nil).vpn
+        XCTAssertEqual([vpn?.login, vpn?.password], ["short", "Ab1"], "в блоке VPN пара без строгих условий, но номер — не пароль")
+    }
+
+    /// FIX 3: пароль и ключ — целиком до «·»/«|» или конца строки; срезается только разделитель после метки.
+    func testPasswordValueIsNotCut() {
+        let cases: [(String, String)] = [
+            ("pass: ab;cd", "ab;cd"), ("Пароль: ab, cd", "ab, cd"), ("пароль: -Qw1", "-Qw1"), ("password = =Qw2=", "=Qw2="),
+            ("Password: Demo-12 · после · смены", "Demo-12"), ("пароль — a / b", "a / b"), ("pass:Qw:3", "Qw:3"),
+        ]
+        for (text, want) in cases {
+            XCTAssertEqual(AccessParser.card(record: record(program: .anyDesk), access: text, accountPassword: nil).accounts.first?.password,
+                           want, text)
+        }
+        let key = AccessParser.card(record: record(program: .anyDesk, tags: ["VPN"]), access: "VPN L2TP\nL2tpPsk: k;e,y / 1", accountPassword: nil)
+        XCTAssertEqual(key.vpn?.key, "k;e,y / 1")
+        XCTAssertEqual(pairs(AccessParser.card(record: record(program: .anyDesk), access: "login: alpha / pass: Demo-A-1", accountPassword: nil).accounts),
+                       ["windows:alpha/Demo-A-1"], "логин до « / », пароль после")
+    }
+
+    /// Тестер, п. 8: сервер — только хост; явная метка сильнее найденного в прозе.
+    func testServerIsHostAndExplicitLabelWins() {
+        let prose = AccessParser.card(record: record(method: .vpn, id: "", tags: ["VPN"]), access: "VPN — сервер: второй\nIP2: запасной", accountPassword: nil)
+        XCTAssertNil(prose.vpn?.server)
+        XCTAssertNil(prose.vpn?.backupServer)
+        let explicit = AccessParser.card(record: record(method: .vpn, id: "", tags: ["VPN"]),
+                                         access: "VPN — 203.0.113.1 · подключение через встроенный клиент Windows\nСервер: 203.0.113.2", accountPassword: nil)
+        XCTAssertEqual(explicit.vpn?.server, "203.0.113.2", "«Сервер:» сильнее адреса из строки-заголовка")
+    }
+
+    /// Ревью п. 5: «Войдите одной из учёток ниже» — только про учётки Windows/Server.
+    func testUseAccountsBelowCountsOnlyComputerAccounts() {
+        let one = AccessParser.card(record: record(program: .anyDesk, tags: ["RDP"], account: "Администратор"),
+                                    access: "RDP — 10.0.0.5\n\nRouter\npass: Demo-R-1", accountPassword: "Demo-W-1")
+        XCTAssertEqual(one.accounts.count, 2)
+        XCTAssertEqual(one.rdp?.useAccountsBelow, false, "одна учётка Windows и роутер — подсказка не нужна")
+    }
+
+    /// Ревью, мелочи: «+380» — ровно 12 цифр; «00380…» — как «+380…».
+    func testPhoneEdgeCases() {
+        XCTAssertNil(PhoneNumber.dialable("+380 50 000 00 01 1"))
+        XCTAssertNil(PhoneNumber.dialable("3805000000011"))
+        XCTAssertEqual(PhoneNumber.dialable("00380 50 000 00 01"), "+380500000001")
+        XCTAssertEqual(PhoneNumber.dialable("0048 600 000 000"), "+48600000000")
+    }
 }

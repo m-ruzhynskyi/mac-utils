@@ -252,7 +252,8 @@ struct RemoteDetailsView: View {
             }
         }
         .onExitCommand(perform: back)
-        .task(id: record.identity) { await loadDetails() }
+        // Другая запись или файл перечитан — карточка строится заново, показанное и скопированное сбрасывается.
+        .task(id: "\(record.identity)|\(center.loadedAt?.timeIntervalSinceReferenceDate ?? 0)") { await loadDetails() }
         .task(id: reveal.isEmpty && copied == nil) { await tick() }
         .onDisappear(perform: forget)
     }
@@ -273,6 +274,7 @@ struct RemoteDetailsView: View {
 
     /// Шаги, учётки и контакты — из файла при открытии карточки; тексты «Доступа» и пароля учётки тут же отпускаются.
     private func loadDetails() async {
+        forget()
         var accessText: String?
         if record.accessLines > 0, let secret = await center.readSecret(.access, of: record) {
             accessText = secret.withBytes { String(decoding: $0, as: UTF8.self) }
@@ -294,7 +296,10 @@ struct RemoteDetailsView: View {
     private func tick() async {
         while !Task.isCancelled, !reveal.isEmpty || copied != nil {
             now = Date()
-            for key in reveal.expire(now: now) { revealed[key] = nil }
+            for key in reveal.expire(now: now) {
+                revealed[key] = nil
+                if key == Self.accessKey { access = nil }
+            }
             if let c = copied, c.until <= now { copied = nil }
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
@@ -614,6 +619,8 @@ struct RemoteDetailsView: View {
 
     // MARK: «Доступ · как в файле»
 
+    private static let accessKey = "access"
+
     private var accessCard: some View {
         cardBox {
             HStack(spacing: 10) {
@@ -624,10 +631,11 @@ struct RemoteDetailsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Button(access == nil ? RL("Показать") : RL("Скрыть")) {
-                    if access == nil { Task { await loadAccess() } } else { access = nil }
+                    if access == nil { Task { await loadAccess() } } else { hideAccess() }
                 }
                 .buttonStyle(.graphite(.secondary, size: .compact))
             }
+            secretCaption(key: Self.accessKey)
             if let access {
                 // Переносы и пустые строки между блоками — как в файле; пароли и ключи — под маской.
                 Text(access).font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText)
@@ -639,6 +647,8 @@ struct RemoteDetailsView: View {
         }
     }
 
+    /// Текст из файла сейчас, под маской: метки паролей до конца строки, все секреты карточки и пароль ID по значению,
+    /// пары и одиночные слова без меток. Показывается 10 с, как остальные секреты.
     private func loadAccess() async {
         accessError = nil
         guard let secret = await center.readSecret(.access, of: record) else {
@@ -646,9 +656,21 @@ struct RemoteDetailsView: View {
             return
         }
         defer { secret.wipe() }
-        access = secret.withBytes {
-            String(decoding: $0, as: UTF8.self).components(separatedBy: "\n").map(AccessParser.mask).joined(separator: "\n")
+        var secrets = card.secrets
+        if record.method == nil, record.hasPassword, let program = await center.readSecret(.password, of: record) {
+            secrets.append(program.withBytes { String(decoding: $0, as: UTF8.self) })
+            program.wipe()
         }
+        access = secret.withBytes { AccessParser.masked(String(decoding: $0, as: UTF8.self), secrets: secrets) }
+        now = Date()
+        if !reveal.isShown(Self.accessKey, now: now) { reveal.toggle(Self.accessKey, now: now) }
+        revealed[Self.accessKey] = ""
+    }
+
+    private func hideAccess() {
+        access = nil
+        if reveal.isShown(Self.accessKey, now: Date()) { reveal.toggle(Self.accessKey, now: Date()) }
+        revealed[Self.accessKey] = nil
     }
 
     // MARK: Контакты

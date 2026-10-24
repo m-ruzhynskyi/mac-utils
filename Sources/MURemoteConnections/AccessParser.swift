@@ -69,27 +69,101 @@ public struct ConnectionCard: Equatable, Sendable {
 
     public var stepCount: Int { (vpn == nil ? 0 : 1) + (rdp == nil ? 0 : 1) }
 
+    /// Все значения, которые карточка считает секретами: пароли, ключ, пароли учёток (для маски «Доступа» по значению).
+    public var secrets: [String] {
+        [vpn?.key, vpn?.password, rdp?.password].compactMap { $0 } + accounts.compactMap(\.password)
+    }
+
     public init() {}
 }
 
 public enum AccessParser {
     static let maskDots = "••••••"
 
-    /// Метки паролей и ключей; значение после них до «·», «|», «;» или конца строки уходит под маску.
+    /// Метки паролей и ключей; всё после них до конца строки уходит под маску («Password: a · b · c» — все три).
     /// Длинные варианты раньше коротких: «password» раньше «pass».
     private static let secretLabel = try! NSRegularExpression(pattern:
         #"(?<![\p{L}\d])(парол\p{L}*|ключ\p{L}*|секрет\p{L}*|токен\p{L}*|пін|пин|"#
         + #"password|passwort|passphrase|passwd|pass|pwd|pw|l2tp ?psk|pre-?shared[ -]?key|psk|private ?key|key|"#
-        + #"secret|token|pin)(?![\p{L}\d])([\s:=—–\-]+)([^\s·|;:=—–\-](?:[^·|;\n]*[^\s·|;\n])?)"#,
+        + #"secret|token|pin)(?![\p{L}\d])([ \t:=—–\-]+)([^\s:=—–\-][^\n]*)"#,
         options: [.caseInsensitive])
 
-    /// Строка «Доступа» для показа: значения после меток пароля, ключа и PSK заменены точками.
-    /// «пароль: Qw3rty · логин admin» → «пароль: •••••• · логин admin». Сразу за меткой — пробел, «:», «=» или тире:
+    /// Строка «Доступа»: всё после метки пароля, ключа или PSK до конца строки заменено точками.
+    /// «логин admin · пароль: Qw3rty · ещё» → «логин admin · пароль: ••••••». Сразу за меткой — пробел, «:», «=» или тире:
     /// «с общим ключом.» в пояснении — не значение.
     public static func mask(_ line: String) -> String {
         let ns = line as NSString
         return secretLabel.stringByReplacingMatches(in: line, range: NSRange(location: 0, length: ns.length),
                                                     withTemplate: "$1$2" + maskDots)
+    }
+
+    /// «Доступ · как в файле» для показа. Под маской:
+    /// - всё после метки пароля, ключа или PSK до конца строки (`mask`);
+    /// - каждое значение из `secrets` (пароли и ключи, которые распознала карточка, пароль ID, пароли учёток) — везде,
+    ///   где оно стоит отдельным словом;
+    /// - «пароль» в форме «слово — слово»;
+    /// - одиночные слова без метки после «·» или «|» (`RDP — 10.0.0.1 · LIMS · Qw1`) и строки из одного слова
+    ///   (`Администратор` / `Qw1` двумя строками), кроме заголовков блоков и адресов.
+    /// Логины в таких местах тоже закрываются: лучше спрятать лишнее, чем показать пароль.
+    public static func masked(_ text: String, secrets: [String]) -> String {
+        let values = Array(Set(secrets.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }))
+            .sorted { $0.count > $1.count }
+        return text.components(separatedBy: "\n").map { raw -> String in
+            let cr = raw.hasSuffix("\r")
+            var line = mask(cr ? String(raw.dropLast()) : raw)
+            for v in values { line = replaceWord(v, in: line) }
+            line = maskLoosePieces(line)
+            return cr ? line + "\r" : line
+        }.joined(separator: "\n")
+    }
+
+    private static func isPlainWord(_ w: String) -> Bool {
+        !w.isEmpty && !w.contains(maskDots) && header(w.trimmingCharacters(in: CharacterSet(charactersIn: ":"))) == nil
+            && host(w) == nil && !labels.contains { $0.1.contains(w.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ":"))) }
+    }
+
+    /// Одиночные слова после «·»/«|», пароль в «слово — слово», строка из одного слова.
+    private static func maskLoosePieces(_ line: String) -> String {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if !trimmed.contains(where: \.isWhitespace), isPlainWord(trimmed) {
+            return line.replacingOccurrences(of: trimmed, with: maskDots)
+        }
+        var out = ""
+        var index = 0
+        var piece = ""
+        func flush() {
+            let core = piece.trimmingCharacters(in: .whitespaces)
+            let words = core.split(separator: " ").map(String.init)
+            if index > 0, words.count == 1, isPlainWord(words[0]) {
+                piece = piece.replacingOccurrences(of: words[0], with: maskDots)
+            } else if words.count == 3, ["—", "–", "-"].contains(words[1]), isPlainWord(words[2]) {
+                let lead = piece.prefix { $0 == " " }, tail = piece.reversed().prefix { $0 == " " }
+                piece = String(lead) + words[0] + " " + words[1] + " " + maskDots + String(tail)
+            }
+            out += piece
+            piece = ""
+            index += 1
+        }
+        for ch in line {
+            if ch == "·" || ch == "|" { flush(); out.append(ch) } else { piece.append(ch) }
+        }
+        flush()
+        return out
+    }
+
+    /// Значение отдельным словом (по краям — не буква и не цифра) — точками.
+    private static func replaceWord(_ value: String, in line: String) -> String {
+        var result = ""
+        var rest = Substring(line)
+        while let r = rest.range(of: value) {
+            let before = r.lowerBound > rest.startIndex ? rest[rest.index(before: r.lowerBound)] : nil
+            let after = r.upperBound < rest.endIndex ? rest[r.upperBound] : nil
+            let bounded = !(before.map(isWordChar) ?? false) && !(after.map(isWordChar) ?? false)
+            result += rest[..<r.lowerBound]
+            result += bounded ? maskDots : String(rest[r])
+            rest = rest[r.upperBound...]
+        }
+        return result + rest
     }
 
     // MARK: Разбор
@@ -132,6 +206,8 @@ public enum AccessParser {
         var section: Section
         var pairs: [Pair] = []
         var server: String?
+        /// Сервер задан явной меткой с разделителем («IP1:», «Сервер:») — найденное в прозе его не заменяет.
+        var serverExplicit = false
         var backup: String?
         var key: String?
         var port: String?
@@ -215,13 +291,10 @@ public enum AccessParser {
         return (section, rest)
     }
 
-    /// Части строки: «·», «|», «;», «, » и « / ».
+    /// Части строки: «·» и «|». Внутри части «;», «,» и « / » могут быть в самом пароле — по ним не делим.
     static func segments(_ text: String) -> [String] {
-        var parts = [text]
-        for sep in ["·", "|", ";", ", ", " / "] {
-            parts = parts.flatMap { $0.components(separatedBy: sep) }
-        }
-        return parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        text.components(separatedBy: CharacterSet(charactersIn: "·|"))
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
     static func read(_ text: String, into block: inout Block, isHeader: Bool = false) {
@@ -235,20 +308,27 @@ public enum AccessParser {
         var used = false
         for (i, part) in parts.enumerated() {
             var found = false
-            for (field, value) in labelled(part) {
+            for item in labelled(part) {
                 found = true
-                switch field {
+                let value = item.value
+                switch item.field {
                 case .login: block.add(login: value)
                 case .password: block.add(password: value)
                 case .key: if block.key == nil { block.key = value }
-                case .server: if block.server == nil, let h = host(value) ?? (block.section == .vpn ? value : nil) { block.server = h }
-                case .backup: if block.backup == nil { block.backup = host(value) ?? value }
+                case .server:
+                    // Сервер и адрес — только хост (IP или имя с точкой): «второй» из пояснения — не сервер.
+                    guard let h = host(value) else { break }
+                    if item.explicit, !block.serverExplicit { block.server = h; block.serverExplicit = true }
+                    else if block.server == nil { block.server = h }
+                case .backup: if block.backup == nil, let h = host(value) { block.backup = h }
                 case .port: if block.port == nil, value.allSatisfy(\.isNumber) { block.port = value }
                 }
             }
             if found { used = true; continue }
-            // «<логин> — <пароль>»: одно слово, тире, одно слово (только в начале строки).
-            if i == 0, let pair = dashPair(part) {
+            // «<логин> — <пароль>»: одно слово, тире, одно слово (только в начале строки). В блоке без заголовка — только
+            // если строка из одной этой части и «пароль» похож на пароль, а не на модель или номер («Принтер — HP»).
+            let strict: Bool? = block.section != .none ? false : parts.count == 1 ? true : nil
+            if i == 0, let pair = dashPair(part, strict: strict) {
                 block.pairs.append(pair)
                 used = true
                 continue
@@ -271,10 +351,15 @@ public enum AccessParser {
         }
     }
 
-    /// Пары «метка: значение» в части строки. Разделитель — «:», «=», тире; без разделителя — только если за значением
-    /// конец части («user ivan»), иначе «логин и пароль в колонках» дал бы логин «и».
-    static func labelled(_ part: String) -> [(Field, String)] {
-        var out: [(Field, String)] = []
+    struct Labelled { let field: Field; let value: String; let explicit: Bool; var at = 0 }
+
+    /// Пары «метка: значение» в части строки. Разделитель — «:», «=», тире; срезается только он, символы значения — нет.
+    /// Пароль и ключ — вся часть после разделителя (до «·», «|» или конца строки: «ab;cd», «ab, cd», «-Qw1» — целиком),
+    /// остальное — первое слово. Без разделителя — только одно слово в конце короткой части («user ivan»): иначе
+    /// «логин и пароль в колонках» дал бы логин «и», а «…при недоступности первого адреса второй» — сервер «второй».
+    static func labelled(_ part: String) -> [Labelled] {
+        var out: [Labelled] = []
+        let wordCount = part.split(whereSeparator: \.isWhitespace).count
         let lower = part.lowercased()
         var taken: [Range<String.Index>] = []
         for (field, names) in labels {
@@ -289,24 +374,39 @@ public enum AccessParser {
                     let rest = part[part.index(part.startIndex, offsetBy: offset)...]
                     let afterSpace = rest.drop(while: { $0 == " " || $0 == "\t" })
                     let separated = afterSpace.first.map { ":=—–".contains($0) || ($0 == "-" && afterSpace.dropFirst().first == " ") } ?? false
-                    var tokens = afterSpace.drop(while: { " :=—–-\t".contains($0) }).split(separator: " ").map(String.init)
+                    // Только сам разделитель: «: », «= », « — ».
+                    var body = separated ? afterSpace.dropFirst() : afterSpace
+                    body = body.drop(while: { $0 == " " || $0 == "\t" })
+                    var tokens = body.split(separator: " ").map(String.init)
                     // «IP: IP: 10.0.0.1» — повтор метки пропускаем.
-                    while let t = tokens.first, t.hasSuffix(":"), names.contains(t.dropLast().lowercased()) { tokens.removeFirst() }
-                    guard let value = tokens.first, !value.isEmpty else { continue }
-                    if !separated && tokens.count > 1 { continue }
+                    while let t = tokens.first, t.hasSuffix(":"), names.contains(t.dropLast().lowercased()) {
+                        tokens.removeFirst()
+                        body = body.drop(while: { $0 != " " }).drop(while: { $0 == " " })
+                    }
+                    guard let first = tokens.first, !first.isEmpty else { continue }
+                    if !separated && (tokens.count > 1 || wordCount > 3) { continue }
+                    let secret = field == .password || field == .key
+                    let value = secret ? String(body).trimmingCharacters(in: .whitespaces)
+                                       : first.trimmingCharacters(in: CharacterSet(charactersIn: ",;"))
+                    guard !value.isEmpty else { continue }
                     taken.append(r)
-                    out.append((field, value))
+                    out.append(Labelled(field: field, value: value, explicit: separated, at: offset))
                     break
                 }
-                if out.last?.0 == field { break }
+                if out.last?.field == field { break }
             }
         }
-        return out
+        // В порядке строки: «login: a / pass: b» — сначала логин, потом пароль к нему.
+        return out.sorted { $0.at < $1.at }
     }
 
     private static func isWordChar(_ c: Character) -> Bool { c.isLetter || c.isNumber }
 
-    static func dashPair(_ part: String) -> Pair? {
+    /// «<логин> — <пароль>». «Пароль» из одних цифр (7 и больше) — номер или ID, не пароль. `strict` — блок без заголовка:
+    /// true — строка из одной этой части, тогда «пароль» должен быть похож на пароль (от 4 символов, с цифрой или знаком:
+    /// «Принтер — HP», «Склад — касса» — не учётки); nil — строка из нескольких частей: пары нет (row 39).
+    static func dashPair(_ part: String, strict: Bool? = false) -> Pair? {
+        guard let strict else { return nil }
         let words = part.split(separator: " ").map(String.init)
         guard words.count == 3, ["—", "–", "-"].contains(words[1]) else { return nil }
         let login = words[0], password = words[2]
@@ -314,8 +414,14 @@ public enum AccessParser {
             header(w) == nil && host(w) == nil && !w.contains(":")
                 && !labels.contains { $0.1.contains(w.lowercased()) }
         }
-        guard isWord(login), isWord(password) else { return nil }
+        guard isWord(login), isWord(password), !looksLikeNumber(password) else { return nil }
+        if strict, password.count < 4 || password.allSatisfy(\.isLetter) { return nil }
         return Pair(login: login, password: password)
+    }
+
+    /// Только цифры (с пробелами, «+ ( ) -»), 7 и больше: телефон или ID.
+    static func looksLikeNumber(_ s: String) -> Bool {
+        s.allSatisfy { $0.isNumber || "+()- ".contains($0) } && s.filter(\.isNumber).count >= 7
     }
 
     /// Первый IPv4[:порт] или имя вида host.domain в тексте.
@@ -409,7 +515,9 @@ public enum AccessParser {
             accounts.append(a)
         }
         card.accounts = accounts
-        if card.rdp != nil, card.rdp?.login == nil, card.rdp?.password == nil, accounts.count > 1 { card.rdp?.useAccountsBelow = true }
+        // «Войдите одной из учёток ниже» — только про учётки входа на компьютер (Windows, Server), не роутер и не VPN.
+        let logins = accounts.filter { $0.kind == .windows || $0.kind == .server }.count
+        if card.rdp != nil, card.rdp?.login == nil, card.rdp?.password == nil, logins > 1 { card.rdp?.useAccountsBelow = true }
         return card
     }
 
@@ -506,8 +614,12 @@ public enum PhoneNumber {
     /// Номер для звонка в виде +380XXXXXXXXX: «050 000 00 01» → «+380500000001». nil — не похоже на украинский номер.
     /// Другие страны с «+» — как есть, только цифры.
     public static func dialable(_ raw: String) -> String? {
-        let digits = raw.filter(\.isNumber)
-        let plus = raw.trimmingCharacters(in: .whitespaces).hasPrefix("+")
+        var digits = raw.filter(\.isNumber)
+        var plus = raw.trimmingCharacters(in: .whitespaces).hasPrefix("+")
+        // «00380…» — международный префикс вместо «+».
+        if !plus, digits.hasPrefix("00") { digits.removeFirst(2); plus = true }
+        // С кодом Украины — ровно 12 цифр: «+380 50 000 00 01 1» не номер.
+        if digits.hasPrefix("380"), digits.count != 12, plus || digits.count > 12 { return nil }
         switch digits.count {
         case 12 where digits.hasPrefix("380"): return "+" + digits
         case 11 where digits.hasPrefix("80"): return "+3" + digits
