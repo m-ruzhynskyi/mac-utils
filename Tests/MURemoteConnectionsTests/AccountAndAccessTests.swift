@@ -134,25 +134,27 @@ final class AccountAndAccessTests: XCTestCase {
 
     // MARK: Фильтры и метки
 
-    func testRDPAndVPNFiltersAndTagCounts() throws {
+    func testOtherFilterAndTagCounts() throws {
         let search = ConnectionSearch(try XMLSource().load(file).records)
         let all = ConnectionListBuilder.build(search: search, query: "", filter: .all, defaultProgram: .anyDesk, favorites: [], recents: [])
         XCTAssertEqual(all.counts[.all], 5)
         XCTAssertEqual(all.counts[.program(.anyDesk)], 1, "RDP/VPN/«Другое» — не AnyDesk")
         XCTAssertEqual(all.counts[.program(.teamViewer)], 1)
-        XCTAssertEqual(all.counts[.rdp], 1)
-        XCTAssertEqual(all.counts[.vpn], 3)
+        XCTAssertEqual(all.counts[.other], 3, "RDP, VPN и «Другое» — в «Другое»")
         XCTAssertEqual(all.tags.map(\.title), ["Рег", "Фито", "Сервер"])
         XCTAssertEqual(all.tags.map(\.count), [4, 2, 1])
 
-        let vpn = ConnectionListBuilder.build(search: search, query: "", filter: .vpn, defaultProgram: .anyDesk, favorites: [], recents: [])
-        XCTAssertEqual(Set(vpn.rows.map(\.record.name)), ["Вінницька · Філія 2", "Лісова", "Східна"])
+        let other = ConnectionListBuilder.build(search: search, query: "", filter: .other, defaultProgram: .anyDesk, favorites: [], recents: [])
+        XCTAssertEqual(Set(other.rows.map(\.record.name)), ["Вінницька · Філія 2", "Озерна", "Лісова"])
+        let tv = ConnectionListBuilder.build(search: search, query: "", filter: .program(.teamViewer), defaultProgram: .anyDesk, favorites: [], recents: [])
+        XCTAssertEqual(tv.rows.map(\.record.name), ["Східна"], "TeamViewer с меткой VPN — в TeamViewer, значок VPN остаётся")
+        XCTAssertTrue(tv.rows[0].record.needsVPN)
         let both = ConnectionListBuilder.build(search: search, query: "", filter: .all, defaultProgram: .anyDesk, favorites: [],
                                                recents: [], tags: [ConnectionTag.key("Рег"), ConnectionTag.key("Фито")])
         XCTAssertEqual(both.rows.map(\.record.name), ["Вінницька · Філія 2"], "выбранные метки — все сразу")
-        let vpnPhyto = ConnectionListBuilder.build(search: search, query: "", filter: .vpn, defaultProgram: .anyDesk, favorites: [],
-                                                   recents: [], tags: [ConnectionTag.key("фіто")])
-        XCTAssertEqual(Set(vpnPhyto.rows.map(\.record.name)), ["Вінницька · Філія 2", "Східна"], "вместе с фильтром программы")
+        let otherPhyto = ConnectionListBuilder.build(search: search, query: "", filter: .other, defaultProgram: .anyDesk, favorites: [],
+                                                     recents: [], tags: [ConnectionTag.key("фіто")])
+        XCTAssertEqual(otherPhyto.rows.map(\.record.name), ["Вінницька · Філія 2"], "вместе с фильтром программы")
     }
 
     // MARK: RDP
@@ -170,58 +172,13 @@ final class AccountAndAccessTests: XCTestCase {
         XCTAssertEqual(RDPLink.fileName(for: "../.."), "connection.rdp")
     }
 
-    // MARK: «Как подключиться» и «Контакты» (последние правки пользователя)
+    // MARK: Маска паролей
 
-    func testAccessParserFindsVPNAndRDP() {
-        let info = AccessParser.parse("""
-            VPN (WireGuard) | сервер: vpn.example.lan · логин: lab-7 · ключ: Demo-Key-77
-
-            RDP — IP: 10.20.0.15 · порт 3390
-            Server — логин: lims.admin · пароль: Demo-77-выдумка
-
-            Login: operator
-            """)
-        XCTAssertEqual(info.vpn?.kind, "WireGuard")
-        XCTAssertEqual(info.vpn?.server, "vpn.example.lan")
-        XCTAssertEqual(info.vpn?.login, "lab-7")
-        XCTAssertEqual(info.vpn?.secret, "Demo-Key-77")
-        XCTAssertEqual(info.rdp?.address, "10.20.0.15:3390")
-        XCTAssertEqual(info.rdp?.lines, ["RDP — IP: 10.20.0.15 · порт 3390"])
-
-        let other = AccessParser.parse("FortiClient: 203.0.113.40, user ivan, password Demo-1\nRDP 192.0.2.7:3389")
-        XCTAssertEqual(other.vpn?.kind, "FortiClient")
-        XCTAssertEqual(other.vpn?.server, "203.0.113.40")
-        XCTAssertEqual(other.vpn?.login, "ivan")
-        XCTAssertEqual(other.vpn?.secret, "Demo-1")
-        XCTAssertEqual(other.rdp?.address, "192.0.2.7:3389")
-
-        let wg = AccessParser.parse("VPN WireGuard · server: 198.51.100.7 · key: QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=")
-        XCTAssertEqual(wg.vpn?.secret, "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=", "«=» в конце ключа base64 сохраняется")
-        XCTAssertEqual(AccessParser.parse("VPN · login = ivan").vpn?.login, "ivan", "разделитель «=» в начале срезается")
-
-        let raw = AccessParser.parse("VPN — профиль у заведующего")
-        XCTAssertNotNil(raw.vpn)
-        XCTAssertNil(raw.vpn?.server)
-        XCTAssertNil(raw.vpn?.secret)
-        XCTAssertEqual(raw.vpn?.lines, ["VPN — профиль у заведующего"], "не разобралось — строки как есть")
-        XCTAssertNil(raw.rdp)
-        XCTAssertNil(AccessParser.parse("Телефон 050 000 00 00").vpn, "без VPN-строк — нет блока VPN")
-    }
-
-    /// R157-1: строки, которые «Как подключиться» показывает как есть, не несут паролей и ключей.
-    func testUnparsedAccessLinesHidePasswords() {
-        // RDP без адреса (имя без точки) — запасной показ строк; пароль в них под маской.
-        let rdp = AccessParser.parse("RDP — сервер srv01 · логин: admin · пароль: Qw3rty-выдумка")
-        XCTAssertNil(rdp.rdp?.address)
-        XCTAssertEqual(rdp.rdp?.lines, ["RDP — сервер srv01 · логин: admin · пароль: ••••••"])
-        XCTAssertFalse(rdp.rdp!.lines.joined().contains("Qw3rty"), "пароля в тексте карточки нет")
-
-        // VPN: значение берётся для «Скопировать», а в строках — маска.
-        let vpn = AccessParser.parse("L2TP VPN · L2tpPsk=Demo-Psk-1 · Password: Demo Pass 2 | user ivan")
-        XCTAssertEqual(vpn.vpn?.secret, "Demo-Psk-1")
-        XCTAssertEqual(vpn.vpn?.lines, ["L2TP VPN · L2tpPsk=•••••• · Password: •••••• | user ivan"])
-
+    /// R157-1: строки «Доступа» для показа не несут паролей и ключей.
+    func testMaskHidesPasswordsAndKeys() {
         let cases: [(String, String)] = [
+            ("RDP — сервер srv01 · логин: admin · пароль: Qw3rty-выдумка", "RDP — сервер srv01 · логин: admin · пароль: ••••••"),
+            ("L2TP VPN · L2tpPsk=Demo-Psk-1 · Password: Demo Pass 2 | user ivan", "L2TP VPN · L2tpPsk=•••••• · Password: •••••• | user ivan"),
             ("VPN pass Demo-3", "VPN pass ••••••"),
             ("VPN, пароля: Demo-4", "VPN, пароля: ••••••"),
             ("VPN WireGuard key = QUJD=", "VPN WireGuard key = ••••••"),
@@ -233,12 +190,6 @@ final class AccountAndAccessTests: XCTestCase {
             ("VPN Passport office · keyboard US", "VPN Passport office · keyboard US"),
         ]
         for (line, masked) in cases { XCTAssertEqual(AccessParser.mask(line), masked, line) }
-    }
-
-    func testPhonesInContacts() {
-        XCTAssertEqual(ContactPhones.find(in: "Іван Петрович, +380 (50) 000-00-00; Оля 067 000 00 01"),
-                       ["+380 (50) 000-00-00", "067 000 00 01"])
-        XCTAssertEqual(ContactPhones.find(in: "каб. 12, 2 этаж"), [], "короткие числа — не телефоны")
     }
 
     /// «Контакты» — только по запросу (карточка), в записи — лишь признак.

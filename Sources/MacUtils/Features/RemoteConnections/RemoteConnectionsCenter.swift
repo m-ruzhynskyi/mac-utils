@@ -327,7 +327,7 @@ final class RemoteConnectionsCenter: ObservableObject {
             }
             if outcome == .failed(.entryGone) { self.store.reload() }
             // Запасной путь — вставить ID вручную. Только ID: пароль в буфер обмена не попадает никогда.
-            if outcome == .unconfirmed(copyID: true) { self.copyText(record.id) }
+            if outcome == .unconfirmed(copyID: true) { self.writePlain(record.id) }
         }
     }
 
@@ -350,7 +350,7 @@ final class RemoteConnectionsCenter: ObservableObject {
             recents = prefs.recentIDs
             if notifySuccess { hud.show(RemoteHUDContent(tone: .success, title: RL("Открываю %@…", "Windows App"), detail: who)) }
         } else {
-            copyText(host)
+            writePlain(host)
             hud.show(RemoteHUDContent(tone: .neutral, title: RL("Windows App не установлен — адрес скопирован"),
                                       detail: RL("Вставьте адрес в программу удалённого рабочего стола."), actions: [.close]))
         }
@@ -372,33 +372,67 @@ final class RemoteConnectionsCenter: ObservableObject {
 
     func copyAddress(_ record: ConnectionRecord) { copyPlain(record.id, title: RL("Адрес скопирован")) }
 
+    /// HUD и обычная запись в буфер — подменяются в тестах (тесты ничего не показывают и буфер не трогают).
+    var showHUD: (RemoteHUDContent) -> Void = { RemoteHUDController.shared.show($0) }
+    var writePlain: (String) -> Void = { text in
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+    /// Звонки — через UniTalk; в тестах двойник.
+    var dialer: RemoteDialer = WorkspaceDialer()
+
     /// Не секрет (адрес, телефон) — обычной строкой.
     func copyPlain(_ text: String, title: String) {
-        copyText(text)
-        RemoteHUDController.shared.show(RemoteHUDContent(tone: .success, title: title, detail: nil))
+        writePlain(text)
+        showHUD(RemoteHUDContent(tone: .success, title: title, detail: nil))
     }
 
-    /// Секретное поле (пароль учётки, «Доступ») — из файла сейчас. Вызывающий затирает.
+    /// Позвонить через UniTalk (`tel:+380…`, обработчик по умолчанию не меняется). UniTalk не установлен или номер не
+    /// распознан — номер копируется. В журнал номер не пишется.
+    @discardableResult
+    func call(_ phone: String) -> PhoneCall.Plan {
+        let app = dialer.appURL(bundleID: PhoneCall.uniTalkBundleID)
+        let plan = PhoneCall.plan(phone, uniTalkInstalled: app != nil)
+        switch plan {
+        case .call(let url):
+            if let app { dialer.open(url, withApplicationAt: app) }
+        case .copy(let number, let reason):
+            copyPlain(number, title: reason == .noUniTalk ? RL("UniTalk не найден — номер скопирован") : RL("Номер скопирован"))
+        }
+        return plan
+    }
+
+    /// Секретное поле (пароль, пароль учётки, «Доступ», «Контакты») — из файла сейчас. Вызывающий затирает.
     func readSecret(_ field: ConnectionField, of record: ConnectionRecord) async -> SecretBuffer? {
         try? await store.lookupSecret(field, for: record).secret
+    }
+
+    func showReadFailure() {
+        showHUD(RemoteHUDContent(tone: .warning, title: RL("Не удалось прочитать файл"),
+                                 detail: RL("Проверьте, что файл на месте, и повторите."), actions: [.close]))
     }
 
     /// Скопировать секрет: скрыто от истории буфера, через 30 с буфер очищается, если в нём всё ещё он.
     func copySecret(_ field: ConnectionField, of record: ConnectionRecord) {
         Task { @MainActor [weak self] in
-            guard let self, let secret = await self.readSecret(field, of: record) else {
-                RemoteHUDController.shared.show(RemoteHUDContent(tone: .warning, title: RL("Не удалось прочитать файл"),
-                                                                 detail: RL("Проверьте, что файл на месте, и повторите."), actions: [.close]))
-                return
-            }
-            defer { secret.wipe() }
-            self.copyConcealed(secret.withBytes { String(decoding: $0, as: UTF8.self) },
-                               title: field == .access ? RL("«Доступ» скопирован") : RL("Пароль учётки скопирован"))
+            _ = await self?.copySecretValue(field, of: record,
+                                            title: field == .access ? RL("«Доступ» скопирован") : RL("Пароль учётки скопирован"))
         }
     }
 
-    /// Секрет в буфер: скрыт от истории буфера, через 30 с очищается, если в буфере всё ещё он.
-    func copyConcealed(_ text: String, title: String) {
+    /// То же с ответом; `title` nil — без HUD (подпись показывает карточка). false — файл не прочитался.
+    func copySecretValue(_ field: ConnectionField, of record: ConnectionRecord, title: String? = nil) async -> Bool {
+        guard let secret = await readSecret(field, of: record) else {
+            showReadFailure()
+            return false
+        }
+        defer { secret.wipe() }
+        copyConcealed(secret.withBytes { String(decoding: $0, as: UTF8.self) }, title: title)
+        return true
+    }
+
+    /// Секрет в буфер: скрыт от истории буфера, через 30 с очищается, если в буфере всё ещё он. `title` nil — без HUD.
+    func copyConcealed(_ text: String, title: String?) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let item = NSPasteboardItem()
@@ -407,16 +441,11 @@ final class RemoteConnectionsCenter: ObservableObject {
         item.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
         pasteboard.writeObjects([item])
         let stamp = pasteboard.changeCount
-        RemoteHUDController.shared.show(RemoteHUDContent(tone: .success, title: title, detail: RL("Буфер очистится через 30 с.")))
+        if let title { showHUD(RemoteHUDContent(tone: .success, title: title, detail: RL("Буфер очистится через 30 с."))) }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 30_000_000_000)
             if NSPasteboard.general.changeCount == stamp { NSPasteboard.general.clearContents() }
         }
-    }
-
-    private func copyText(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
     }
 
     /// Надписи окна пароля — из установленной программы, на всех её языках.
