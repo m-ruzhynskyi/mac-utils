@@ -183,6 +183,9 @@ public final class RemoteConnector {
     private var interrupted: (recordID: String, program: RemoteProgram, pid: Int32, field: AXNode)?
     /// Пароль учётки текущего подключения (читается из файла, только когда его попросят).
     private var accountPassword: (() async throws -> PasswordLookup)?
+    /// Окна программы к концу последнего подключения, если оно не подтвердилось или сеанс не выбран: только роли,
+    /// глубина, состояние галочек и ключи совпавших надписей программы (`AXTree.diagnostics`). Пусто — нечего показать.
+    public private(set) var lastDiagnostics: [String] = []
 
     public init(ax: AXAccess, launcher: AppLauncher, keyboard: KeyboardSender, clock: RemoteClock = SystemClock(),
                 logger: RemoteLogger? = nil) {
@@ -201,6 +204,7 @@ public final class RemoteConnector {
                         progress: (ConnectionPhase) -> Void) async -> ConnectionOutcome {
         let started = clock.milliseconds
         var opened = false
+        lastDiagnostics = []
         self.accountPassword = request.record.hasAccountPassword ? accountPassword : nil
         defer { self.accountPassword = nil }
         let outcome = await run(request, provider, password, progress, opened: &opened)
@@ -260,11 +264,11 @@ public final class RemoteConnector {
         switch await waitForField(request, provider, known: known, before: before, expectsPassword: true, progress) {
         case .found(let t): target = t
         case .session: return .connectedWithoutPassword
-        case .timeout: return unconfirmed
+        case .timeout: noteDiagnostics(provider); return unconfirmed
         case .neverStarted: return .failed(.launchFailed)
         case .untrusted: return .failed(.untrustedProgram)
         case .noField(let structure): return .failed(.fieldNotFound(structure: structure))
-        case .sessionNotChosen: return .sessionNotChosen
+        case .sessionNotChosen: noteDiagnostics(provider); return .sessionNotChosen
         case .cancelled: return .cancelled
         }
 
@@ -331,11 +335,19 @@ public final class RemoteConnector {
         switch await waitForField(request, provider, known: known, before: before, expectsPassword: false, progress) {
         case .found, .noField: return .openedWithoutPassword(reason)
         case .session: return .connectedWithoutPassword
-        case .sessionNotChosen: return .sessionNotChosen
-        case .timeout, .neverStarted: return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
+        case .sessionNotChosen: noteDiagnostics(provider); return .sessionNotChosen
+        case .timeout: noteDiagnostics(provider); return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
+        case .neverStarted: return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
         case .untrusted: return .failed(.untrustedProgram)
         case .cancelled: return .cancelled
         }
+    }
+
+    /// «Диагностика» для итога: окна процесса программы (только нужный bundle id), без надписей и значений.
+    private func noteDiagnostics(_ provider: RemoteProvider) {
+        guard let pid = launcher.runningProcess(bundleID: provider.program.bundleID),
+              launcher.bundleID(ofProcess: pid) == provider.program.bundleID else { return }
+        lastDiagnostics = AXTree.diagnostics(of: ax.windows(ofProcess: pid), texts: provider.texts)
     }
 
     /// Поле логина в окне пароля учётки: только если оно пустое.
@@ -546,9 +558,12 @@ public final class RemoteConnector {
         return digits.count >= 6 && title.filter(\.isNumber).contains(digits)
     }
 
-    /// «Terminal Session»: всегда «Console» (нажать, если программа запомнила другой выбор), затем «Connect».
+    /// «Terminal Session»: всегда «Console» (нажать, если он не выбран), затем «Connect».
     /// «User account» не выбираем никогда — даже если у записи есть логин учётки (решение пользователя, rc-console).
     /// Только кнопки из `promptContinueTitles` — отмену и закрытие не нажимаем никогда.
+    /// «Connect» — когда «Console» выбран или его состояние не читается (AX не отдал `AXValue`, нажатие могло не пройти:
+    /// AnyDesk ставит «Console» по умолчанию), и ни один другой выбор окна не выбран. Выбран «User account» или
+    /// «Console» точно не выбран — «Connect» не жмём: следующий опрос попробует снова (rc-console FIX 1, rc-console2).
     /// false — кнопки нет, «Console» не нашёлся или не выбрался, нажатое «Connect» не помогло: ждём пользователя.
     private func continuePrompt(_ marker: AXNode, in window: AXNode, _ texts: ProviderTexts,
                                 _ watch: inout SessionWatch, now: Int) -> Bool {
@@ -557,25 +572,41 @@ public final class RemoteConnector {
         if let done = watch.pressed.first(where: { $0.button.isSame(as: button) }) {
             return now - done.at < timing.promptGrace
         }
-        let isConsole: (AXNode) -> Bool = { node in
-            node.role == "AXRadioButton" && AXTree.names(of: node).contains { name in
-                texts.promptDefaultTitles.contains { ProviderTexts.key(name).hasPrefix($0) }
-            }
-        }
-        if let console = AXTree.nearest(to: marker, in: window, where: isConsole) {
-            // Состояние могло не прочитаться (nil) — тогда тоже жмём «Console». «Connect» — только если «Console» точно
-            // выбран или состояние не читается, а «Console» мы только что нажали успешно (иначе при AX без `AXValue`
-            // окно не прошло бы никогда). Не выбрался — «Connect» не жмём: подключил бы к другому сеансу; следующий опрос
-            // попробует снова (ревью rc-console, FIX 1).
-            let pressed = console.isChecked != true && console.press()
-            let state = console.isChecked
-            guard state == true || (state == nil && pressed) else { return false }
-        } else if AXTree.first(in: window, where: { $0.role == "AXRadioButton" }) != nil {
+        let isRadio: (AXNode) -> Bool = { $0.role == "AXRadioButton" }
+        if let console = Self.consoleChoice(near: marker, in: window, texts) {
+            if console.isChecked != true { _ = console.press() }
+            guard console.isChecked != false else { return false }
+            // Другие выборы: в той же карточке, что «Console» и надпись окна, и «User account» по подписи где угодно в окне.
+            let card = AXTree.path(to: console, in: window)?.reversed().first { ancestor in
+                AXTree.path(to: marker, in: ancestor) != nil
+            } ?? window
+            let others = AXTree.all(in: card, where: isRadio)
+                + AXTree.all(in: window) { isRadio($0) && ProviderTexts.named($0, texts.promptOtherTitles) }
+            guard !others.contains(where: { !$0.isSame(as: console) && $0.isChecked == true }) else { return false }
+        } else if AXTree.first(in: window, where: isRadio) != nil {
             return false   // выбор есть, а «Console» среди него не узнали — не жмём
         }
         guard button.press() else { return false }
         watch.pressed.append((button, now))
         return true
+    }
+
+    /// Радиокнопка «Console»: по своей подписи (заголовок, описание; «Console (active)» — тоже), иначе радиокнопка без
+    /// подписи рядом с надписью «Console». Радиокнопка с другой подписью («User account») не подходит никогда.
+    static func consoleChoice(near marker: AXNode, in window: AXNode, _ texts: ProviderTexts) -> AXNode? {
+        let isConsoleName: (String) -> Bool = { name in
+            texts.promptDefaultTitles.contains { ProviderTexts.key(name).hasPrefix($0) }
+        }
+        if let radio = AXTree.nearest(to: marker, in: window, where: { node in
+            node.role == "AXRadioButton" && AXTree.names(of: node).contains(where: isConsoleName)
+        }) { return radio }
+        guard let caption = AXTree.nearest(to: marker, in: window, where: { node in
+            node.role == "AXStaticText" && AXTree.names(of: node).contains(where: isConsoleName)
+        }) else { return nil }
+        return AXTree.nearest(to: caption, in: window, levels: 1) { node in
+            node.role == "AXRadioButton"
+                && AXTree.names(of: node).allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }
     }
 
     private struct ConnectForm {

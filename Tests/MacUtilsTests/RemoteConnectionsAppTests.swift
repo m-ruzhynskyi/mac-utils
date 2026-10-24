@@ -189,6 +189,11 @@ final class RemoteConnectionsAppTests: XCTestCase {
         let noPassword = hud(.finished(.openedWithoutPassword(.notInFile)))
         XCTAssertEqual(noPassword.detail, "В файле нет пароля AnyDesk для «Лаборатория Север» — введите его в окне AnyDesk.")
         XCTAssertNotEqual(noPassword.title, hud(.finished(.failed(.fieldNotFound(structure: [])))).title)
+        // rc-console2: «не подтверждено» с «Диагностикой» перед «Закрыть»; без строк — как было.
+        let diag = ad.withDiagnostics(["# window 1: 3 nodes, depth 2", "AXWindow"])
+        XCTAssertEqual(diag.actions, [.retry, .diagnostics, .close])
+        XCTAssertEqual(diag.structure.count, 2)
+        XCTAssertEqual(ad.withDiagnostics([]).actions, [.retry, .close])
         let tv = hud(.finished(.unconfirmed(copyID: true)), .teamViewer)
         XCTAssertEqual(tv.title, "Не удалось подключиться — ID скопирован")
         XCTAssertEqual(tv.tone, .neutral)

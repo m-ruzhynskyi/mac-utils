@@ -91,8 +91,10 @@ public final class SystemClock: RemoteClock {
 // MARK: - Поиск по дереву
 
 enum AXTree {
-    static let maxDepth = 14
-    static let maxNodes = 600
+    /// С запасом: карточка «Terminal Session» AnyDesk встроена в главное окно с вкладками, списками и плитками
+    /// (rc-console2). Узлы адаптер читает одним запросом и помнит до следующего опроса окон.
+    static let maxDepth = 40
+    static let maxNodes = 5000
 
     static func isSecureField(_ node: AXNode) -> Bool {
         node.subrole == "AXSecureTextField" || node.role == "AXSecureTextField"
@@ -159,6 +161,52 @@ enum AXTree {
             return true
         }
         return out
+    }
+
+    /// «Диагностика» окон программы: по окну — число узлов и глубина (и упёрлись ли в пределы обхода); по узлу — роль,
+    /// глубина отступом, состояние галочки/радиокнопки и ключ совпавшей надписи программы (`ad.dlg.terminal.title`).
+    /// Ни заголовков, ни значений, ни прочих текстов. Окно больше `limit` строк — только важные узлы (с ключом надписи,
+    /// выборы, галочки, поля ввода) и их предки, остальное — счётчиком пропущенного.
+    static func diagnostics(of windows: [AXNode], texts: ProviderTexts, limit: Int = 400) -> [String] {
+        var lines: [String] = []
+        for (index, window) in windows.enumerated() {
+            var nodes: [(depth: Int, line: String, important: Bool)] = []
+            visit(window) { node, depth in
+                let role = node.role ?? "?"
+                var line = String(repeating: "  ", count: depth) + role + (node.subrole.map { "/\($0)" } ?? "")
+                let checked = node.isChecked
+                if let checked { line += checked ? " [on]" : " [off]" }
+                let key = texts.matchedKey(node)
+                if let key { line += " ← " + key }
+                let important = key != nil || checked != nil || isSecureField(node) || isTextInput(node)
+                    || ["AXWindow", "AXSheet", "AXRadioButton"].contains(role)
+                nodes.append((depth, line, important))
+                return true
+            }
+            let deepest = nodes.map(\.depth).max() ?? 0
+            let full = nodes.count >= maxNodes || deepest >= maxDepth
+            lines.append("# window \(index + 1): \(nodes.count) nodes, depth \(deepest)\(full ? ", limits reached" : "")")
+            guard nodes.count > limit else { lines += nodes.map(\.line); continue }
+            // Важные узлы и цепочки их предков (предок — ближайший выше с меньшей глубиной).
+            var keep = Set<Int>()
+            for i in nodes.indices where nodes[i].important {
+                keep.insert(i)
+                var depth = nodes[i].depth
+                var j = i - 1
+                while depth > 0, j >= 0 {
+                    if nodes[j].depth < depth { keep.insert(j); depth = nodes[j].depth }
+                    j -= 1
+                }
+            }
+            var skipped = 0
+            for i in nodes.indices {
+                guard keep.contains(i), lines.count < limit * (index + 1) else { skipped += 1; continue }
+                if skipped > 0 { lines.append(String(repeating: "  ", count: nodes[i].depth) + "… \(skipped) skipped"); skipped = 0 }
+                lines.append(nodes[i].line)
+            }
+            if skipped > 0 { lines.append("… \(skipped) skipped") }
+        }
+        return lines
     }
 
     /// Структура окна для разбора «поле не найдено»: только роли и глубина, без заголовков и значений.
