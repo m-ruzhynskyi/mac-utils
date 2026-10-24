@@ -12,11 +12,10 @@ public struct ProviderTexts: Equatable, Sendable {
     public var promptTexts: Set<String>
     /// Кнопка продолжения в нём («Connect»). Отмену и закрытие не нажимаем никогда — их здесь нет.
     public var promptContinueTitles: Set<String>
-    /// Выбор по умолчанию, который оставляем («Console»).
+    /// Выбор, который ставим всегда («Console»). «User account» не выбираем никогда.
     public var promptDefaultTitles: Set<String>
-    /// Выбор «учётная запись» в том же окне («User account») — когда у записи есть логин учётки.
-    public var promptAccountTitles: Set<String>
-    /// Окно пароля просит пароль учётной записи Windows, а не программы («User account password required»).
+    /// Окно пароля просит пароль учётной записи Windows («User account password required»). Пароль учётки вводится
+    /// в такое окно, только если пароля программы в записи нет.
     public var accountPasswordTexts: Set<String>
     /// Программа соединяется или ждёт, пока та сторона примет запрос.
     public var progressTexts: Set<String>
@@ -34,7 +33,7 @@ public struct ProviderTexts: Equatable, Sendable {
                 promptTexts: Set<String> = [], promptContinueTitles: Set<String> = [], promptDefaultTitles: Set<String> = [],
                 progressTexts: Set<String> = [], sessionTexts: Set<String> = [], closedTexts: Set<String> = [],
                 connectFieldTexts: Set<String> = [], connectButtonTitles: Set<String> = [],
-                promptAccountTitles: Set<String> = [], accountPasswordTexts: Set<String> = []) {
+                accountPasswordTexts: Set<String> = []) {
         self.passwordWindowTitles = Set(passwordWindowTitles.map(Self.key))
         self.rejectionTexts = Set(rejectionTexts.map(Self.key))
         self.autologinTitles = Set(autologinTitles.map(Self.key))
@@ -47,7 +46,6 @@ public struct ProviderTexts: Equatable, Sendable {
         self.closedTexts = Set(closedTexts.map(Self.key))
         self.connectFieldTexts = Set(connectFieldTexts.map(Self.key))
         self.connectButtonTitles = Set(connectButtonTitles.map(Self.key))
-        self.promptAccountTitles = Set(promptAccountTitles.map(Self.key))
         self.accountPasswordTexts = Set(accountPasswordTexts.map(Self.key))
     }
 
@@ -60,7 +58,6 @@ public struct ProviderTexts: Equatable, Sendable {
         public var prompt: [String] = []
         public var promptContinue: [String] = []
         public var promptDefault: [String] = []
-        public var promptAccount: [String] = []
         public var accountPassword: [String] = []
         public var progress: [String] = []
         public var session: [String] = []
@@ -105,7 +102,6 @@ public struct ProviderTexts: Equatable, Sendable {
             add(keys.prompt, &texts.promptTexts)
             add(keys.promptContinue, &texts.promptContinueTitles)
             add(keys.promptDefault, &texts.promptDefaultTitles)
-            add(keys.promptAccount, &texts.promptAccountTitles)
             add(keys.accountPassword, &texts.accountPasswordTexts)
             add(keys.progress, &texts.progressTexts)
             add(keys.session, &texts.sessionTexts)
@@ -177,7 +173,7 @@ public protocol RemoteProvider {
 
 /// AnyDesk для Mac: `anydesk:<ID>`, окно «Авторизация» с `NSSecureTextField`, галочкой «Входить автоматически»
 /// и кнопкой «ОК»; отказ — окно «Пароль отклонён». До пароля может показать «Terminal Session» (выбор сеанса
-/// Windows-сервера) — оставляем «Console» и жмём «Connect». Надписи — из `Localizable.strings` AnyDesk.
+/// Windows-сервера) — всегда «Console» и «Connect». Надписи — из `Localizable.strings` AnyDesk.
 public struct AnyDeskAutomator: RemoteProvider {
     public static let keys = ProviderTexts.Keys(passwordWindow: ["ad.dlg.passwd.title"],
                                                 rejection: ["ad.dlg.closed.auth_failed.title"],
@@ -186,7 +182,6 @@ public struct AnyDeskAutomator: RemoteProvider {
                                                 prompt: ["ad.dlg.terminal.title", "ad.dlg.terminal.users_logged_on"],
                                                 promptContinue: ["ad.dlg.connect"],
                                                 promptDefault: ["ad.dlg.terminal.console"],
-                                                promptAccount: ["ad.dlg.terminal.user"],
                                                 accountPassword: ["ad.dlg.passwd.msg.pwd_required.user",
                                                                   "ad.dlg.passwd.msg.pwd_or_confirm.user",
                                                                   "ad.dlg.passwd.msg.pwd_required.admin"],
