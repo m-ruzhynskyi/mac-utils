@@ -133,7 +133,19 @@ final class FakeLauncher: AppLauncher {
         return true
     }
 
-    func runningProcess(bundleID: String) -> Int32? { running[bundleID] }
+    /// Другие процессы с тем же bundle id (у AnyDesk — `--control`, `--local-service`): без окон и старше интерфейса,
+    /// поэтому, как у `NSRunningApplication`, первые в списке.
+    var helpers: [String: [Int32]] = [:]
+
+    func runningProcess(bundleID: String) -> Int32? { helpers[bundleID]?.first ?? running[bundleID] }
+    func runningProcesses(bundleID: String) -> [Int32] { (helpers[bundleID] ?? []) + (running[bundleID].map { [$0] } ?? []) }
+
+    /// Фоновый процесс программы (настоящая подпись, без окон).
+    func addHelper(_ program: RemoteProgram, pid: Int32) {
+        helpers[program.bundleID, default: []].append(pid)
+        bundles[pid] = program.bundleID
+        teams[pid] = program.teamID
+    }
     func bundleID(ofProcess pid: Int32) -> String? { bundles[pid] }
     func teamID(ofProcess pid: Int32) -> String? { teams[pid] }
 

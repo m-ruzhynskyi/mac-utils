@@ -9,6 +9,9 @@ public enum RemoteLogEvent: Equatable, Sendable {
     case retrying(ConnectionsError.Code, attempt: Int)
     /// Исход подключения: код (`ConnectionOutcome.code`), дошло ли до ввода, длительность.
     case connection(result: String, typed: Bool, milliseconds: Int)
+    /// Шаг подключения для разбора отказа: этап и поля «имя=число|код» (процессы, окна, узлы, ключи надписей программы,
+    /// состояние). Собирает только `RemoteConnector` из чисел и кодов.
+    case trace(stage: String, fields: [String])
 
     /// Строка для журнала приложения.
     public var message: String {
@@ -21,6 +24,8 @@ public enum RemoteLogEvent: Equatable, Sendable {
             return "connections retry=\(code.rawValue) attempt=\(attempt)"
         case let .connection(result, typed, ms):
             return "connect result=\(result) typed=\(typed ? 1 : 0) ms=\(ms)"
+        case let .trace(stage, fields):
+            return (["connect stage=\(stage)"] + fields).joined(separator: " ")
         }
     }
 }
