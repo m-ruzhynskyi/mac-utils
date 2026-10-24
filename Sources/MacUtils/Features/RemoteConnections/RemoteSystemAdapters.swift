@@ -132,6 +132,12 @@ final class SystemAXAccess: AXAccess {
         return list.compactMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? SystemAXNode($0 as! AXUIElement) : nil }
     }
 
+    func windowsError(ofProcess pid: Int32) -> Int32? {
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(app(pid).element, kAXWindowsAttribute as CFString, &value)
+        return error == .success ? nil : error.rawValue
+    }
+
     func focusedElement(ofProcess pid: Int32) -> AXNode? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app(pid).element, kAXFocusedUIElementAttribute as CFString, &value) == .success,
@@ -147,8 +153,19 @@ final class WorkspaceLauncher: AppLauncher {
 
     func open(_ url: URL) -> Bool { NSWorkspace.shared.open(url) }
 
-    func runningProcess(bundleID: String) -> Int32? {
-        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first { !$0.isTerminated }?.processIdentifier
+    func runningProcess(bundleID: String) -> Int32? { runningProcesses(bundleID: bundleID).first }
+
+    /// У AnyDesk с одним bundle id работают `--local-service`, `--control` (accessory, без окон) и сам интерфейс;
+    /// `runningApplications` отдаёт старший первым. Сначала — обычные приложения, среди них — новее (rc-console3).
+    func runningProcesses(bundleID: String) -> [Int32] {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { !$0.isTerminated }
+            .sorted { a, b in
+                let ra = a.activationPolicy == .regular, rb = b.activationPolicy == .regular
+                if ra != rb { return ra }
+                return (a.launchDate ?? .distantPast) > (b.launchDate ?? .distantPast)
+            }
+            .map(\.processIdentifier)
     }
 
     func bundleID(ofProcess pid: Int32) -> String? { NSRunningApplication(processIdentifier: pid)?.bundleIdentifier }

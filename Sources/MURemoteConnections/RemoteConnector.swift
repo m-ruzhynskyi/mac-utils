@@ -248,7 +248,9 @@ public final class RemoteConnector {
             ? interrupted.flatMap { $0.recordID == request.record.id && $0.program == provider.program ? $0 : nil } : nil
         interrupted = nil
         let known = watching ? secureFields(bundleID).filter { f in !(retry.map { $0.field.isSame(as: f) } ?? false) } : []
-        let before = watching ? launcher.runningProcess(bundleID: bundleID).map(ax.windows(ofProcess:)) ?? [] : []
+        let before = watching ? uiProcess(bundleID)?.windows ?? [] : []
+        trace("start", ["typing=\(typing ? 1 : 0)", "watching=\(watching ? 1 : 0)", "secret=\(hasSecret ? 1 : 0)",
+                        "processes=\(processes(bundleID).count)", "windows=\(before.count)", "known=\(known.count)"])
         guard launcher.open(url) else { return .failed(.launchFailed) }
         let unconfirmed = ConnectionOutcome.unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
         guard request.withPassword else {
@@ -261,7 +263,9 @@ public final class RemoteConnector {
         }
 
         let target: Target
-        switch await waitForField(request, provider, known: known, before: before, expectsPassword: true, progress) {
+        let waited = await waitForField(request, provider, known: known, before: before, expectsPassword: true, progress)
+        trace("waited", ["result=\(waited.code)"])
+        switch waited {
         case .found(let t): target = t
         case .session: return .connectedWithoutPassword
         case .timeout: noteDiagnostics(provider); return unconfirmed
@@ -332,22 +336,67 @@ public final class RemoteConnector {
     /// Без ввода пароля, но с проверкой, что программа открылась на этом ID (иначе — вписать его самим).
     private func openOnly(_ reason: ConnectionOutcome.NoPasswordReason, _ request: ConnectRequest, _ provider: RemoteProvider,
                           _ known: [AXNode], _ before: [AXNode], _ progress: (ConnectionPhase) -> Void) async -> ConnectionOutcome {
-        switch await waitForField(request, provider, known: known, before: before, expectsPassword: false, progress) {
+        let waited = await waitForField(request, provider, known: known, before: before, expectsPassword: false, progress)
+        trace("waited", ["result=\(waited.code)"])
+        switch waited {
         case .found, .noField: return .openedWithoutPassword(reason)
         case .session: return .connectedWithoutPassword
         case .sessionNotChosen: noteDiagnostics(provider); return .sessionNotChosen
         case .timeout: noteDiagnostics(provider); return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
-        case .neverStarted: return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
+        case .neverStarted: noteDiagnostics(provider); return .unconfirmed(copyID: provider.copiesIDWhenUnconfirmed)
         case .untrusted: return .failed(.untrustedProgram)
         case .cancelled: return .cancelled
         }
     }
 
-    /// «Диагностика» для итога: окна процесса программы (только нужный bundle id), без надписей и значений.
+    /// «Диагностика» для итога — всегда, даже без процесса и окон: процессы программы (только нужный bundle id), у каждого
+    /// число окон и код ошибки AX, затем окна (роли, глубина, ключи надписей). Без надписей, значений, имён и ID.
+    /// Та же сводка — строкой в журнал.
     private func noteDiagnostics(_ provider: RemoteProvider) {
-        guard let pid = launcher.runningProcess(bundleID: provider.program.bundleID),
-              launcher.bundleID(ofProcess: pid) == provider.program.bundleID else { return }
-        lastDiagnostics = AXTree.diagnostics(of: ax.windows(ofProcess: pid), texts: provider.texts)
+        let bundleID = provider.program.bundleID
+        let pids = processes(bundleID)
+        var lines = ["# processes: \(pids.count)" + (pids.isEmpty ? ", pid found: no" : ", pid found: yes")]
+        var all: [AXNode] = []
+        for (index, pid) in pids.enumerated() {
+            let windows = ax.windows(ofProcess: pid)
+            let error = ax.windowsError(ofProcess: pid)
+            let team = launcher.teamID(ofProcess: pid) == provider.program.teamID
+            lines.append("# process \(index + 1): windows \(windows.count)\(error.map { ", ax error \($0)" } ?? ""), "
+                         + "signature \(team ? "ok" : "no")")
+            lines += AXTree.diagnostics(of: windows, texts: provider.texts)
+            all += windows
+        }
+        lastDiagnostics = lines
+        let scan = AXTree.summary(of: all, texts: provider.texts)
+        trace("scan", ["processes=\(pids.count)", "windows=\(all.count)", "nodes=\(scan.nodes)", "depth=\(scan.depth)",
+                       "full=\(scan.full ? 1 : 0)"] + scan.keys.prefix(16).map { "key=" + Self.logKey($0) })
+    }
+
+    /// Процессы программы с нужным bundle id: сначала обычное приложение (`AppLauncher.runningProcesses`).
+    private func processes(_ bundleID: String) -> [Int32] {
+        launcher.runningProcesses(bundleID: bundleID).filter { launcher.bundleID(ofProcess: $0) == bundleID }
+    }
+
+    /// Процесс интерфейса программы: первый с окнами (у AnyDesk процессы `--control` и `--local-service` с тем же
+    /// bundle id окон не имеют — с ними карточка «Terminal Session» не находилась, rc-console3); окон нет ни у кого —
+    /// первый. `index` — его номер среди `count` процессов (для журнала).
+    private func uiProcess(_ bundleID: String) -> (pid: Int32, windows: [AXNode], index: Int, count: Int)? {
+        let pids = processes(bundleID)
+        for (index, pid) in pids.enumerated() {
+            let windows = ax.windows(ofProcess: pid)
+            if !windows.isEmpty { return (pid, windows, index, pids.count) }
+        }
+        return pids.first.map { ($0, [], 0, pids.count) }
+    }
+
+    /// Строка журнала: этап и поля из чисел и кодов.
+    private func trace(_ stage: String, _ fields: [String]) {
+        logger?.log(.trace(stage: stage, fields: fields))
+    }
+
+    /// Ключ строки программы для журнала: только буквы, цифры и «_» (`ad.dlg.terminal.title` → `ad_dlg_terminal_title`).
+    static func logKey(_ key: String) -> String {
+        String(key.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) && $0.isASCII ? Character($0) : "_" })
     }
 
     /// Поле логина в окне пароля учётки: только если оно пустое и стоит рядом с полем пароля (не адресная строка
@@ -383,11 +432,24 @@ public final class RemoteConnector {
         /// «Terminal Session» открыто дольше `promptTimeout`.
         case sessionNotChosen
         case cancelled
+
+        var code: String {
+            switch self {
+            case .found: return "field"
+            case .session: return "session"
+            case .timeout: return "timeout"
+            case .neverStarted: return "noprocess"
+            case .noField: return "nofield"
+            case .untrusted: return "untrusted"
+            case .sessionNotChosen: return "sessionchoice"
+            case .cancelled: return "cancelled"
+            }
+        }
     }
 
+    /// Поля пароля, открытые до ссылки, — во всех процессах программы.
     private func secureFields(_ bundleID: String) -> [AXNode] {
-        guard let pid = launcher.runningProcess(bundleID: bundleID) else { return [] }
-        return ax.windows(ofProcess: pid).flatMap { AXTree.all(in: $0, where: AXTree.isSecureField) }
+        processes(bundleID).flatMap(ax.windows(ofProcess:)).flatMap { AXTree.all(in: $0, where: AXTree.isSecureField) }
     }
 
     /// Ждём окно пароля. Пока открыто промежуточное окно программы, время ожидания не идёт (но не дольше `limit`).
@@ -413,17 +475,21 @@ public final class RemoteConnector {
         var calmEnough = false
         var promptSince: Int?
         var watch = SessionWatch()
+        var traced = ""
+        var promptStep: PromptResult?
         while true {
             let now = clock.milliseconds
             if !paused { counted += now - last }
             last = now
             var intermediate: IntermediateWindow?
-            if let pid = launcher.runningProcess(bundleID: bundleID), launcher.bundleID(ofProcess: pid) == bundleID {
+            let ui = uiProcess(bundleID)
+            if let ui {
+                let pid = ui.pid
                 guard launcher.teamID(ofProcess: pid) == provider.program.teamID else { return .untrusted }
                 sawProcess = true
                 let firstSeen = processSince ?? now
                 processSince = firstSeen
-                let windows = ax.windows(ofProcess: pid)
+                let windows = ui.windows
                 var bare: AXNode?
                 var blocked = false
                 var prompted = false
@@ -433,7 +499,13 @@ public final class RemoteConnector {
                         watch.track(window)
                         blocked = true
                         prompted = true
-                        intermediate = continuePrompt(marker, in: window, texts, &watch, now: now) ? .sessionChoice : .chooseConsole
+                        let result = continuePrompt(marker, in: window, texts, &watch, now: now)
+                        if result != promptStep {
+                            promptStep = result
+                            trace("prompt", result.fields + ["key=" + Self.logKey(texts.matchedKeys[ProviderTexts.key(
+                                AXTree.names(of: marker).first ?? "")] ?? "none")])
+                        }
+                        intermediate = result.continues ? .sessionChoice : .chooseConsole
                         continue
                     }
                     let fields = AXTree.all(in: window, where: AXTree.isSecureField)
@@ -506,6 +578,12 @@ public final class RemoteConnector {
                 }
             }
             paused = intermediate != nil
+            let state = "processes=\(ui?.count ?? 0) ui=\(ui.map { $0.index + 1 } ?? 0) windows=\(ui?.windows.count ?? 0) "
+                + "state=\(intermediate.map { "\($0)" } ?? "waiting")"
+            if state != traced {
+                traced = state
+                trace("wait", [state, "ms=\(clock.milliseconds - start)", "counted=\(counted)"])
+            }
             if clock.milliseconds - start >= timing.limit || counted >= timeout {
                 if promptSince != nil { return .sessionNotChosen }
                 if expectsPassword, calmEnough { return .session }
@@ -567,8 +645,22 @@ public final class RemoteConnector {
     /// читаются невыбранными (в группе радиокнопок это и есть «Console»). Другой выбор выбран или тоже не читается,
     /// «Console» точно не выбран — «Connect» не жмём: следующий опрос попробует снова (rc-console FIX 1, rc-console2 FIX 1).
     /// false — кнопки нет, «Console» не нашёлся или не выбрался, нажатое «Connect» не помогло: ждём пользователя.
+    /// Что сделали с «Terminal Session» на этом опросе — для HUD (`continues`) и журнала (`fields`).
+    struct PromptResult: Equatable {
+        enum Step: String { case pressed, pending, notClosed, noButton, noConsole, consoleOff, othersOn, othersUnknown, pressFailed }
+        var step: Step
+        /// Состояние «Console»: 1 — выбран, 0 — нет, -1 — не читается, -2 — не найден.
+        var console = -2
+        var others = 0
+        var othersOn = 0
+
+        /// «Connect» нажат сейчас или недавно (ждём, пока окно уйдёт).
+        var continues: Bool { step == .pressed || step == .pending }
+        var fields: [String] { ["step=\(step.rawValue)", "console=\(console)", "others=\(others)", "othersOn=\(othersOn)"] }
+    }
+
     private func continuePrompt(_ marker: AXNode, in window: AXNode, _ texts: ProviderTexts,
-                                _ watch: inout SessionWatch, now: Int) -> Bool {
+                                _ watch: inout SessionWatch, now: Int) -> PromptResult {
         let isContinue: (AXNode) -> Bool = { $0.role == "AXButton" && ProviderTexts.named($0, texts.promptContinueTitles) }
         let isRadio: (AXNode) -> Bool = { $0.role == "AXRadioButton" }
         let console = Self.consoleChoice(near: marker, in: window, texts)
@@ -578,26 +670,37 @@ public final class RemoteConnector {
         }
         let button = card.flatMap { AXTree.first(in: $0, where: isContinue) }
             ?? (console == nil ? AXTree.nearest(to: marker, in: window, levels: 3, where: isContinue) : nil)
-        guard let button else { return false }
+        guard let button else { return PromptResult(step: .noButton) }
         if let done = watch.pressed.first(where: { $0.button.isSame(as: button) }) {
-            return now - done.at < timing.promptGrace
+            return PromptResult(step: now - done.at < timing.promptGrace ? .pending : .notClosed)
         }
+        var result = PromptResult(step: .pressed)
         if let console, let card {
             if console.isChecked != true { _ = console.press() }
-            let others = (AXTree.all(in: card, where: isRadio)
-                + AXTree.all(in: window) { isRadio($0) && ProviderTexts.named($0, texts.promptOtherTitles) })
-                .filter { !$0.isSame(as: console) }
-            switch console.isChecked {
-            case true?: guard !others.contains(where: { $0.isChecked == true }) else { return false }
-            case nil: guard !others.isEmpty, others.allSatisfy({ $0.isChecked == false }) else { return false }
-            case false?: return false
+            var others: [AXNode] = []
+            for radio in AXTree.all(in: card, where: isRadio)
+                + AXTree.all(in: window, where: { isRadio($0) && ProviderTexts.named($0, texts.promptOtherTitles) })
+            where !radio.isSame(as: console) && !others.contains(where: { $0.isSame(as: radio) }) {
+                others.append(radio)
+            }
+            let state = console.isChecked
+            result.console = state.map { $0 ? 1 : 0 } ?? -1
+            result.others = others.count
+            result.othersOn = others.filter { $0.isChecked == true }.count
+            switch state {
+            case true?: guard result.othersOn == 0 else { result.step = .othersOn; return result }
+            case nil:
+                guard result.othersOn == 0 else { result.step = .othersOn; return result }
+                guard !others.isEmpty, others.allSatisfy({ $0.isChecked == false }) else { result.step = .othersUnknown; return result }
+            case false?: result.step = .consoleOff; return result
             }
         } else if AXTree.first(in: window, where: isRadio) != nil {
-            return false   // выбор есть, а «Console» среди него не узнали — не жмём
+            result.step = .noConsole   // выбор есть, а «Console» среди него не узнали — не жмём
+            return result
         }
-        guard button.press() else { return false }
+        guard button.press() else { result.step = .pressFailed; return result }
         watch.pressed.append((button, now))
-        return true
+        return result
     }
 
     /// Радиокнопка «Console» — только по своей подписи (заголовок, описание; «Console (active)» — тоже). Радиокнопку

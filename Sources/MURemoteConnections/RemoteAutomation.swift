@@ -46,6 +46,12 @@ public protocol AXAccess: AnyObject {
     func windows(ofProcess pid: Int32) -> [AXNode]
     /// Элемент с фокусом клавиатуры в этом процессе.
     func focusedElement(ofProcess pid: Int32) -> AXNode?
+    /// Код ошибки AX при чтении окон процесса (`AXError.rawValue`); nil — прочитались.
+    func windowsError(ofProcess pid: Int32) -> Int32?
+}
+
+extension AXAccess {
+    public func windowsError(ofProcess pid: Int32) -> Int32? { nil }
 }
 
 /// Программы на компьютере: есть ли, открыть ссылку, какой процесс впереди.
@@ -54,11 +60,18 @@ public protocol AppLauncher: AnyObject {
     /// Открыть ссылку подключения (`anydesk:…`). Пароль в ссылке не передаётся.
     func open(_ url: URL) -> Bool
     func runningProcess(bundleID: String) -> Int32?
+    /// Все процессы с этим bundle id, сначала — обычное приложение с окнами. У AnyDesk их несколько
+    /// (`--control`, `--local-service` и сам интерфейс), и первый попавшийся — без окон (rc-console3).
+    func runningProcesses(bundleID: String) -> [Int32]
     func bundleID(ofProcess pid: Int32) -> String?
     /// Team ID действительной подписи процесса; nil — подпись не проверилась.
     func teamID(ofProcess pid: Int32) -> String?
     var frontmostProcess: Int32? { get }
     func activate(process pid: Int32)
+}
+
+extension AppLauncher {
+    public func runningProcesses(bundleID: String) -> [Int32] { runningProcess(bundleID: bundleID).map { [$0] } ?? [] }
 }
 
 /// Нажатия клавиш — только в процесс `pid`.
@@ -161,6 +174,24 @@ enum AXTree {
             return true
         }
         return out
+    }
+
+    /// Сводка окон для журнала: сколько узлов обойдено, наибольшая глубина, упёрлись ли в пределы, совпавшие ключи надписей.
+    static func summary(of windows: [AXNode], texts: ProviderTexts) -> (nodes: Int, depth: Int, full: Bool, keys: [String]) {
+        var nodes = 0, depth = 0, full = false
+        var keys: [String] = []
+        for window in windows {
+            var count = 0
+            visit(window) { node, d in
+                count += 1
+                depth = max(depth, d)
+                if let key = texts.matchedKey(node), !keys.contains(key) { keys.append(key) }
+                return true
+            }
+            nodes += count
+            full = full || count >= maxNodes || depth >= maxDepth
+        }
+        return (nodes, depth, full, keys)
     }
 
     /// «Диагностика» окон программы: по окну — число узлов и глубина (и упёрлись ли в пределы обхода); по узлу — роль,
