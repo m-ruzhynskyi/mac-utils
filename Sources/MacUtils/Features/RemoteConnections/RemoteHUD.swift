@@ -170,6 +170,16 @@ struct RemoteHUDContent: Equatable {
         }
     }
 
+    /// Итог с «Диагностикой» перед «Закрыть»: структура окон программы (роли, глубина, ключи надписей).
+    func withDiagnostics(_ lines: [String]) -> RemoteHUDContent {
+        guard !lines.isEmpty, !actions.contains(.diagnostics) else { return self }
+        var copy = self
+        copy.structure = lines
+        if let close = copy.actions.firstIndex(of: .close) { copy.actions.insert(.diagnostics, at: close) }
+        else { copy.actions.append(.diagnostics) }
+        return copy
+    }
+
     private var finalOverride: Bool?
     private func with(final: Bool) -> RemoteHUDContent {
         var copy = self

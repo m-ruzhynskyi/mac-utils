@@ -316,6 +316,11 @@ final class RemoteConnectionsCenter: ObservableObject {
             }, progress: { [weak self] phase in
                 if phase == .opening { opened = true }
                 if case .finished(let outcome) = phase, outcome.isSuccess, self?.notifySuccess == false { return hud.dismiss() }
+                // Не подтвердилось или сеанс не выбран — «Диагностика»: роли окон программы и ключи надписей, без текстов.
+                if case .finished = phase, let lines = self?.connector.lastDiagnostics, !lines.isEmpty {
+                    return hud.show(RemoteHUDContent.make(phase, program: program, record: record).withDiagnostics(lines),
+                                    program: program)
+                }
                 hud.show(phase, program: program, record: record)
             })
             guard let self, let outcome else { return }
@@ -455,7 +460,9 @@ final class RemoteConnectionsCenter: ObservableObject {
 
     /// Надписи окна пароля — из установленной программы, на всех её языках.
     private func texts(for program: RemoteProgram) -> ProviderTexts {
-        guard let url = launcher.appURL(bundleID: program.bundleID) else { return ProviderTexts() }
+        guard let url = launcher.appURL(bundleID: program.bundleID) else {
+            return ProviderTexts.builtIn(keys: RemoteProviders.keys(for: program))
+        }
         return ProviderTexts.load(appURL: url, keys: RemoteProviders.keys(for: program))
     }
 
@@ -474,6 +481,8 @@ final class RemoteConnectionsCenter: ObservableObject {
             hud.dismiss()
             if let program = last?.program { NSWorkspace.shared.open(program.downloadURL) }
         case .diagnostics:
+            // Структура — в буфер (только роли, глубина и ключи надписей программы: секретов в ней нет) и в HUD.
+            if let lines = hud.current?.structure, !lines.isEmpty { writePlain(lines.joined(separator: "\n")) }
             hud.toggleStructure()
         case .openFile:
             hud.dismiss()
