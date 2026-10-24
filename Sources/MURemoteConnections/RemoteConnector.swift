@@ -291,7 +291,7 @@ public final class RemoteConnector {
             case .success(let s): s.wipe(); return .openedWithoutPassword(.notInFile)
             case .failure(let outcome): return outcome
             }
-            fillLogin(request.record.account, in: target)
+            fillLogin(request.record.account, in: target, provider.texts)
         } else {
             return .openedWithoutPassword(.notInFile)
         }
@@ -352,9 +352,9 @@ public final class RemoteConnector {
 
     /// Поле логина в окне пароля учётки: только если оно пустое и стоит рядом с полем пароля (не адресная строка
     /// главного окна).
-    private func fillLogin(_ account: String, in target: Target) {
+    private func fillLogin(_ account: String, in target: Target, _ texts: ProviderTexts) {
         guard !account.isEmpty,
-              let login = AXTree.nearest(to: target.field, in: Self.passwordScope(target), where: AXTree.isTextInput),
+              let login = AXTree.nearest(to: target.field, in: Self.passwordScope(target, texts), where: AXTree.isTextInput),
               login.processID == target.pid, login.valueLength == 0 else { return }
         _ = login.setText(account)
     }
@@ -610,14 +610,41 @@ public final class RemoteConnector {
         }
     }
 
-    /// Где искать «ОК», галочку автологина и поле логина окна пароля: отдельное окно-диалог или лист — целиком;
-    /// диалог внутри большого окна (окно пароля во вкладке главного окна AnyDesk) — три уровня над полем, чтобы не
-    /// задеть «Connect» адресной строки и прочие кнопки главного окна (ревью rc-console2, FIX 3).
-    private static func passwordScope(_ target: Target) -> AXNode {
+    /// Где искать «ОК», галочку автологина и поле логина окна пароля (rc-console2 FIX 3 и SCOPE): отдельное окно-диалог
+    /// или лист — целиком. Иначе от поля вверх — самый высокий предок, который ещё похож на окно пароля: не больше
+    /// `passwordScopeNodes` узлов, без панели инструментов и вкладок, без поля ID главного экрана (`connectFieldTexts`).
+    /// Отдельное маленькое окно пароля (`AXStandardWindow` AnyDesk/TeamViewer) проходит целиком — как в 1.10.2, на любой
+    /// глубине «OK»; диалог во вкладке главного окна AnyDesk — только сам диалог: «Connect» адресной строки и плитки не наши.
+    private static func passwordScope(_ target: Target, _ texts: ProviderTexts) -> AXNode {
         if isDialog(target.window) { return target.window }
-        guard let path = AXTree.path(to: target.field, in: target.window) else { return target.window }
+        guard let path = AXTree.path(to: target.field, in: target.window), path.count >= 2 else { return target.window }
         if let sheet = path.last(where: { $0.role == "AXSheet" }) { return sheet }
-        return path[max(0, path.count - 1 - 3)]
+        var scope = path[path.count - 2]
+        for ancestor in path.dropLast().reversed() {
+            guard looksLikePasswordDialog(ancestor, texts) else { break }
+            scope = ancestor
+        }
+        return scope
+    }
+
+    /// Предел размера окна пароля: у AnyDesk и TeamViewer в нём десятки узлов, у главного окна — сотни и тысячи.
+    static let passwordScopeNodes = 300
+
+    /// Поддерево — ещё окно пароля, а не главное окно: мало узлов, нет панели инструментов, вкладок и поля ID.
+    private static func looksLikePasswordDialog(_ node: AXNode, _ texts: ProviderTexts) -> Bool {
+        var count = 0
+        var main = false
+        AXTree.visit(node) { n, _ in
+            count += 1
+            if count > passwordScopeNodes || ["AXToolbar", "AXTabGroup"].contains(n.role ?? "")
+                || (!texts.connectFieldTexts.isEmpty && (AXTree.isTextInput(n) || n.role == "AXStaticText")
+                    && ProviderTexts.named(n, texts.connectFieldTexts)) {
+                main = true
+                return false
+            }
+            return true
+        }
+        return !main
     }
 
     private struct ConnectForm {
@@ -692,7 +719,9 @@ public final class RemoteConnector {
         launcher.activate(process: target.pid)
         guard await waitFrontmost(target.pid) else { return .focusLost }
 
-        if request.autologin, provider.supportsAutologin { tickAutologin(in: Self.passwordScope(target), provider.texts) }
+        if request.autologin, provider.supportsAutologin {
+            tickAutologin(in: Self.passwordScope(target, provider.texts), provider.texts)
+        }
 
         let expected = Self.lengths(of: secret)
         guard isFront(target.pid, bundleID) else { return .focusLost }
@@ -803,7 +832,7 @@ public final class RemoteConnector {
     /// (`passwordScope`): «Connect» главного окна AnyDesk не наш.
     private func submit(_ target: Target, _ texts: ProviderTexts, _ bundleID: String) -> Submit {
         let isCancel: (AXNode) -> Bool = { ProviderTexts.named($0, Self.cancelTitles) }
-        let scope = Self.passwordScope(target)
+        let scope = Self.passwordScope(target, texts)
         let defaultButton = target.window.defaultButton.flatMap { AXTree.path(to: $0, in: scope) != nil ? $0 : nil }
         if let button = defaultButton, !isCancel(button), button.press() { return .pressed }
         if let ok = AXTree.nearest(to: target.field, in: scope, where: { node in
