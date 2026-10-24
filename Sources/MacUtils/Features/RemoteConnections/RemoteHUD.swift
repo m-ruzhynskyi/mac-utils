@@ -51,6 +51,17 @@ struct RemoteHUDContent: Equatable {
             return RemoteHUDContent(tone: .info, title: isAnyDesk ? RL("Жду окно пароля… %@ с", elapsed) : RL("Жду окно аутентификации… %@ с", elapsed),
                                     detail: RL("Таймаут %@ с · «Отмена» оставит окно %@ как есть", timeout, p), spinner: true,
                                     progress: Double(elapsed) / Double(max(timeout, 1)), actions: [.cancel])
+        case .intermediate(.sessionChoice):
+            return RemoteHUDContent(tone: .info, title: RL("Выбираю сеанс в %@…", p), detail: RL("Пароль введу после"),
+                                    spinner: true, actions: [.cancel])
+        case .intermediate(.remoteSide):
+            return RemoteHUDContent(tone: .info, title: RL("Жду ответа удалённого компьютера…"),
+                                    detail: RL("Пароль введу, когда %@ его попросит", p), spinner: true, actions: [.cancel])
+        case .intermediate(.unknown):
+            return RemoteHUDContent(tone: .info, title: RL("%@ показал своё окно", p),
+                                    detail: RL("Ответьте в окне %@ — пароль введу после", p), spinner: true, actions: [.cancel])
+        case .typingID:
+            return RemoteHUDContent(tone: .info, title: RL("Ввожу ID в %@…", p), detail: who, spinner: true, actions: [.cancel])
         case .entered:
             return RemoteHUDContent(tone: .success, title: RL("Пароль введён"), detail: RL("Подтверждаю вход…"), spinner: false)
                 .with(final: false)
@@ -67,12 +78,22 @@ struct RemoteHUDContent: Equatable {
         case .connected:
             return RemoteHUDContent(tone: .success, title: RL("Подключено"), detail: who)
         case .submitted:
-            return RemoteHUDContent(tone: .success, title: RL("Пароль введён"),
-                                    detail: RL("Окно %@ ещё открыто — подключение ждёт ответа той стороны.", p))
+            return RemoteHUDContent(tone: .neutral, title: RL("Пароль введён · сеанс не подтверждён"),
+                                    detail: RL("Проверьте окно %@: открылся ли сеанс.", p), actions: [.close])
+        case .sessionClosed:
+            return RemoteHUDContent(tone: .warning, title: RL("%@ закрыл сеанс", p),
+                                    detail: RL("Пароль введён, но сеанс не открылся. Причина — в окне %@.", p), actions: [.retry, .close])
         case .connectedWithoutPassword:
             return RemoteHUDContent(tone: .success, title: RL("Подключено без пароля"),
-                                    detail: isAnyDesk ? RL("Окно пароля не появилось — AnyDesk уже помнит этот компьютер")
-                                                      : RL("Окно аутентификации не появилось — TeamViewer пустил без пароля"))
+                                    detail: isAnyDesk ? RL("Сеанс открыт — AnyDesk уже помнит этот компьютер")
+                                                      : RL("Сеанс открыт — TeamViewer пустил без пароля"))
+        case .unconfirmed(copyID: true):
+            return RemoteHUDContent(tone: .neutral, title: RL("Не удалось подключиться — ID скопирован"),
+                                    detail: RL("Вставьте ID в %@ (⌘V) и нажмите «Connect».", p), actions: [.retry, .close])
+        case .unconfirmed(copyID: false):
+            return RemoteHUDContent(tone: .neutral, title: RL("Не удалось подтвердить подключение"),
+                                    detail: RL("%@ не показал ни окно пароля, ни открытый сеанс. Проверьте окно %@.", p, p),
+                                    actions: [.retry, .close])
         case .openedWithoutPassword(.userChoice):
             return RemoteHUDContent(tone: .success, title: RL("%@ открыт", p), detail: RL("%@. Пароль введите в окне %@.", who, p))
         case .openedWithoutPassword(.notInFile):

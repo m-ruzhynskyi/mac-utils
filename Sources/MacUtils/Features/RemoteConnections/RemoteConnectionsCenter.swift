@@ -303,11 +303,17 @@ final class RemoteConnectionsCenter: ObservableObject {
             })
             guard let self, let outcome else { return }
             self.isConnecting = false
-            if opened, outcome != .failed(.launchFailed) {
+            // В «Недавние» — только то, что открылось: «не подтверждено» и «сеанс закрыт» туда не попадают.
+            if opened, outcome.isSuccess {
                 ConnectionLists.noteConnected(record, in: self.prefs)
                 self.recents = self.prefs.recentIDs
             }
             if outcome == .failed(.entryGone) { self.store.reload() }
+            // Запасной путь — вставить ID вручную. Только ID: пароль в буфер обмена не попадает никогда.
+            if outcome == .unconfirmed(copyID: true) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(record.id, forType: .string)
+            }
         }
     }
 
