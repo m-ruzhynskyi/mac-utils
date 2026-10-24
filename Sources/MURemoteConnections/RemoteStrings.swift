@@ -285,6 +285,7 @@ enum RemoteStrings {
         "%@. Всё выше собрано из них; пароли скрыты": ("%@. Усе вище зібрано з них; паролі приховано", "%@. Everything above comes from them; passwords are hidden"),
         "RDP, VPN и записи без программы подключения": ("RDP, VPN і записи без програми підключення", "RDP, VPN and records without a connection program"),
         "UniTalk не найден — номер скопирован": ("UniTalk не знайдено — номер скопійовано", "UniTalk not found — number copied"),
+        "UniTalk не открылся — номер скопирован": ("UniTalk не відкрився — номер скопійовано", "UniTalk did not open — number copied"),
         "VPN, затем RDP": ("VPN, потім RDP", "VPN, then RDP"),
         "Адрес": ("Адреса", "Address"),
         "Адрес в файле не указан.": ("Адресу у файлі не вказано.", "No address in the file."),

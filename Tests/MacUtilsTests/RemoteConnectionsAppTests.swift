@@ -281,7 +281,12 @@ final class RemoteConnectionsAppTests: XCTestCase {
                 asked.append(bundleID)
                 return installed ? URL(fileURLWithPath: "/Applications/UniTalk.app") : nil
             }
-            func open(_ url: URL, withApplicationAt app: URL) { opened.append((url, app)) }
+            var opens = true
+            func open(_ url: URL, withApplicationAt app: URL, completion: @escaping @MainActor (Bool) -> Void) {
+                opened.append((url, app))
+                let ok = opens
+                MainActor.assumeIsolated { completion(ok) }
+            }
         }
         let center = RemoteConnectionsCenter(defaults: defaults)
         let dialer = FakeDialer()
@@ -307,6 +312,14 @@ final class RemoteConnectionsAppTests: XCTestCase {
         XCTAssertEqual(center.call("каб. 12-34"), .copy("каб. 12-34", reason: .notANumber))
         XCTAssertEqual(dialer.opened.count, 1)
         XCTAssertEqual(huds.last, RL("Номер скопирован"))
+
+        // UniTalk есть, но не открылся (ошибка в completion) — номер копируется, как на Windows.
+        dialer.opens = false
+        copied = []
+        XCTAssertEqual(center.call("050 000 00 01"), .call(URL(string: "tel:+380500000001")!))
+        XCTAssertEqual(dialer.opened.count, 2)
+        XCTAssertEqual(copied, ["050 000 00 01"])
+        XCTAssertEqual(huds.last, RL("UniTalk не открылся — номер скопирован"))
     }
 
     /// Фильтр в окне — только программы: «Другое» вместо RDP и VPN, и только если такие записи есть.

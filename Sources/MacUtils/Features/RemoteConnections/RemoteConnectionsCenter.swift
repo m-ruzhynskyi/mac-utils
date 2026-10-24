@@ -387,15 +387,20 @@ final class RemoteConnectionsCenter: ObservableObject {
         showHUD(RemoteHUDContent(tone: .success, title: title, detail: nil))
     }
 
-    /// Позвонить через UniTalk (`tel:+380…`, обработчик по умолчанию не меняется). UniTalk не установлен или номер не
-    /// распознан — номер копируется. В журнал номер не пишется.
+    /// Позвонить через UniTalk (`tel:+380…`, обработчик по умолчанию не меняется). UniTalk не установлен, не открылся или номер
+    /// не распознан — номер копируется. В журнал номер не пишется.
     @discardableResult
     func call(_ phone: String) -> PhoneCall.Plan {
         let app = dialer.appURL(bundleID: PhoneCall.uniTalkBundleID)
         let plan = PhoneCall.plan(phone, uniTalkInstalled: app != nil)
         switch plan {
         case .call(let url):
-            if let app { dialer.open(url, withApplicationAt: app) }
+            let number = phone.trimmingCharacters(in: .whitespaces)
+            if let app {
+                dialer.open(url, withApplicationAt: app) { [weak self] ok in
+                    if !ok { self?.copyPlain(number, title: RL("UniTalk не открылся — номер скопирован")) }
+                }
+            }
         case .copy(let number, let reason):
             copyPlain(number, title: reason == .noUniTalk ? RL("UniTalk не найден — номер скопирован") : RL("Номер скопирован"))
         }

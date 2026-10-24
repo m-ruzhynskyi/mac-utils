@@ -14,7 +14,11 @@ final class CardV2AcceptanceAppTests: XCTestCase {
             asked.append(bundleID)
             return installed ? URL(fileURLWithPath: "/Fake/UniTalk.app") : nil
         }
-        func open(_ url: URL, withApplicationAt app: URL) { opened.append((url, app)) }
+        // Правка разработчика (fix2): у протокола появился completion — «открылся ли UniTalk».
+        func open(_ url: URL, withApplicationAt app: URL, completion: @escaping @MainActor (Bool) -> Void) {
+            opened.append((url, app))
+            MainActor.assumeIsolated { completion(true) }
+        }
     }
 
     private var defaults: UserDefaults!
