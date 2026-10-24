@@ -208,6 +208,33 @@ final class AccountAndAccessTests: XCTestCase {
         XCTAssertNil(AccessParser.parse("Телефон 050 000 00 00").vpn, "без VPN-строк — нет блока VPN")
     }
 
+    /// R157-1: строки, которые «Как подключиться» показывает как есть, не несут паролей и ключей.
+    func testUnparsedAccessLinesHidePasswords() {
+        // RDP без адреса (имя без точки) — запасной показ строк; пароль в них под маской.
+        let rdp = AccessParser.parse("RDP — сервер srv01 · логин: admin · пароль: Qw3rty-выдумка")
+        XCTAssertNil(rdp.rdp?.address)
+        XCTAssertEqual(rdp.rdp?.lines, ["RDP — сервер srv01 · логин: admin · пароль: ••••••"])
+        XCTAssertFalse(rdp.rdp!.lines.joined().contains("Qw3rty"), "пароля в тексте карточки нет")
+
+        // VPN: значение берётся для «Скопировать», а в строках — маска.
+        let vpn = AccessParser.parse("L2TP VPN · L2tpPsk=Demo-Psk-1 · Password: Demo Pass 2 | user ivan")
+        XCTAssertEqual(vpn.vpn?.secret, "Demo-Psk-1")
+        XCTAssertEqual(vpn.vpn?.lines, ["L2TP VPN · L2tpPsk=•••••• · Password: •••••• | user ivan"])
+
+        let cases: [(String, String)] = [
+            ("VPN pass Demo-3", "VPN pass ••••••"),
+            ("VPN, пароля: Demo-4", "VPN, пароля: ••••••"),
+            ("VPN WireGuard key = QUJD=", "VPN WireGuard key = ••••••"),
+            ("VPN PSK: Demo-5; сервер vpn.example.lan", "VPN PSK: ••••••; сервер vpn.example.lan"),
+            ("VPN pre-shared key — Demo-6", "VPN pre-shared key — ••••••"),
+            ("RDP pwd:Demo-7", "RDP pwd:••••••"),
+            ("RDP secret Demo-8 · порт 3389", "RDP secret •••••• · порт 3389"),
+            ("RDP — пароль:", "RDP — пароль:"),
+            ("VPN Passport office · keyboard US", "VPN Passport office · keyboard US"),
+        ]
+        for (line, masked) in cases { XCTAssertEqual(AccessParser.mask(line), masked, line) }
+    }
+
     func testPhonesInContacts() {
         XCTAssertEqual(ContactPhones.find(in: "Іван Петрович, +380 (50) 000-00-00; Оля 067 000 00 01"),
                        ["+380 (50) 000-00-00", "067 000 00 01"])

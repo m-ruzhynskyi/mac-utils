@@ -1,8 +1,8 @@
 import Foundation
 
 /// «Как подключиться» из текста «Доступа»: строки про VPN и RDP. Разбор — подсказка, а не истина: что не
-/// разобралось, показывается строками «Доступа» как есть. Пароли и ключи остаются в разобранном виде только
-/// на время открытой карточки и на экран не выводятся.
+/// разобралось, показывается строками «Доступа» по «Показать», со значениями паролей и ключей под маской.
+/// Пароли и ключи остаются в разобранном виде только на время открытой карточки и на экран не выводятся.
 public struct AccessInfo: Equatable, Sendable {
     public struct VPN: Equatable, Sendable {
         /// WireGuard, PPTP, L2TP, FortiClient, OpenVPN, IPsec; nil — не назван.
@@ -11,6 +11,7 @@ public struct AccessInfo: Equatable, Sendable {
         public var login: String?
         /// Пароль, ключ или PSK — только для «Скопировать».
         public var secret: String?
+        /// Строки «Доступа» про VPN, пароли и ключи в них замаскированы (`AccessParser.mask`).
         public var lines: [String] = []
     }
 
@@ -18,6 +19,7 @@ public struct AccessInfo: Equatable, Sendable {
         /// IP или имя, с портом, если он указан.
         public var address: String?
         public var login: String?
+        /// Строки «Доступа» про RDP, пароли в них замаскированы (`AccessParser.mask`).
         public var lines: [String] = []
     }
 
@@ -36,17 +38,17 @@ public enum AccessParser {
             return l.contains("vpn") || vpnKinds.contains { l.contains($0.lowercased()) }
         }
         if !vpnLines.isEmpty {
-            var v = AccessInfo.VPN(lines: vpnLines)
+            var v = AccessInfo.VPN(lines: vpnLines.map(mask))
             let joined = vpnLines.joined(separator: "\n")
             v.kind = vpnKinds.first { joined.lowercased().contains($0.lowercased()) }
             v.server = value(after: ["сервер", "server", "адрес", "address", "host", "ip"], in: vpnLines) ?? firstHost(in: vpnLines)
             v.login = value(after: ["логин", "логін", "login", "user", "користувач", "пользователь"], in: vpnLines)
-            v.secret = value(after: ["пароль", "password", "pass", "ключ", "key", "psk", "secret"], in: vpnLines)
+            v.secret = value(after: ["пароль", "password", "pass", "ключ", "key", "l2tppsk", "psk", "secret"], in: vpnLines)
             info.vpn = v
         }
         let rdpLines = lines.filter { $0.lowercased().contains("rdp") || $0.lowercased().contains("remote desktop") }
         if !rdpLines.isEmpty {
-            var r = AccessInfo.RDP(lines: rdpLines)
+            var r = AccessInfo.RDP(lines: rdpLines.map(mask))
             r.address = value(after: ["ip", "адрес", "address", "host", "сервер", "server"], in: rdpLines).flatMap(host) ?? firstHost(in: rdpLines)
             if let a = r.address, !a.contains(":"), let port = value(after: ["порт", "port"], in: rdpLines)?.prefix(while: \.isNumber),
                !port.isEmpty { r.address = a + ":" + port }
@@ -54,6 +56,24 @@ public enum AccessParser {
             info.rdp = r
         }
         return info
+    }
+
+    static let maskDots = "••••••"
+
+    /// Метки паролей и ключей; значение после них до «·», «|», «;» или конца строки уходит под маску.
+    /// Длинные варианты раньше коротких: «password» раньше «pass».
+    private static let secretLabel = try! NSRegularExpression(pattern:
+        #"(?<![\p{L}\d])(парол\p{L}*|ключ\p{L}*|секрет\p{L}*|токен\p{L}*|пін|пин|"#
+        + #"password|passwort|passphrase|passwd|pass|pwd|pw|l2tp ?psk|pre-?shared[ -]?key|psk|private ?key|key|"#
+        + #"secret|token|pin)(?![\p{L}\d])([\s:=—–\-]*)([^\s·|;:=—–\-](?:[^·|;\n]*[^\s·|;\n])?)"#,
+        options: [.caseInsensitive])
+
+    /// Строка «Доступа» для показа: значения после меток пароля, ключа и PSK заменены точками.
+    /// «пароль: Qw3rty · логин admin» → «пароль: •••••• · логин admin».
+    public static func mask(_ line: String) -> String {
+        let ns = line as NSString
+        return secretLabel.stringByReplacingMatches(in: line, range: NSRange(location: 0, length: ns.length),
+                                                    withTemplate: "$1$2" + maskDots)
     }
 
     /// Значение после метки: «логин: admin», «Login — admin», «пароль admin123» (до «·», «|», «,» или конца строки).

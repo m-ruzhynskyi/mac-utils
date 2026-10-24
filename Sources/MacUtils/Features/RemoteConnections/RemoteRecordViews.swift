@@ -242,6 +242,8 @@ struct RemoteDetailsView: View {
     /// Разобранные строки «Доступа» про VPN/RDP — только пока открыта карточка.
     @State private var info: AccessInfo?
     @State private var contacts: String?
+    /// Неразобранные строки VPN/RDP в «Как подключиться» — по «Показать», как «Доступ».
+    @State private var rawShown = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -286,6 +288,7 @@ struct RemoteDetailsView: View {
         access = nil
         info = nil
         contacts = nil
+        rawShown = false
     }
 
     /// «Как подключиться» и «Контакты» — из файла при открытии карточки; текст «Доступа» тут же отпускается.
@@ -345,7 +348,7 @@ struct RemoteDetailsView: View {
     }
 
     /// «Как подключиться»: VPN (тип, сервер, логин, скрытый пароль или ключ) и RDP (адрес, логин, открыть).
-    /// Не разобралось — соответствующие строки «Доступа» как есть.
+    /// Не разобралось — соответствующие строки «Доступа» по «Показать», пароли в них под маской.
     private var howToConnect: some View {
         card {
             label(RL("КАК ПОДКЛЮЧИТЬСЯ"))
@@ -437,11 +440,43 @@ struct RemoteDetailsView: View {
         }
     }
 
+    /// Неразобранные строки «Доступа» — как сам «Доступ»: до «Показать» только размытые полосы, после — строки
+    /// с паролями и ключами под маской (`AccessParser.mask`). Пароль без метки может остаться — поэтому «Показать».
     private func rawLines(_ lines: [String]) -> some View {
-        Text(lines.joined(separator: "\n")).font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText)
-            .lineSpacing(5).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                if rawShown {
+                    Text(lines.joined(separator: "\n")).font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsText)
+                        .lineSpacing(5).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                } else {
+                    hiddenBars(lines.count)
+                    Text(RL("%@ · могут быть пароли", RL("строк скрыто: %@", lines.count)))
+                        .font(DS.Font.manrope(12.5, .regular, relativeTo: .caption)).foregroundStyle(.dsText)
+                        .padding(.vertical, 6).padding(.horizontal, 10)
+                        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: rawShown ? 0 : 60)
             .background(Color.dsBg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            Button { rawShown.toggle() } label: {
+                Label(rawShown ? RL("Скрыть") : RL("Показать"), systemImage: rawShown ? "eye.slash" : "eye")
+            }
+            .buttonStyle(.graphite(.secondary, size: .compact))
+        }
+    }
+
+    /// Размытые полосы вместо скрытого текста: самого текста в окне нет.
+    private func hiddenBars(_ count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ForEach(0..<min(count, 8), id: \.self) { i in
+                Capsule().fill(Color.dsMute.opacity(0.45))
+                    .frame(width: [190, 240, 150, 120, 210, 230, 170, 140][i % 8], height: 8)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).padding(14)
+        .blur(radius: 3)
     }
 
     private var accountCard: some View {
@@ -486,14 +521,7 @@ struct RemoteDetailsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading).padding(12)
                 } else {
                     // Вместо текста — размытые полосы: самого «Доступа» до «Показать» в окне нет.
-                    VStack(alignment: .leading, spacing: 9) {
-                        ForEach(0..<min(record.accessLines, 8), id: \.self) { i in
-                            Capsule().fill(Color.dsMute.opacity(0.45))
-                                .frame(width: [190, 240, 150, 120, 210, 230, 170, 140][i % 8], height: 8)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                    .blur(radius: 3)
+                    hiddenBars(record.accessLines)
                     Text(accessError ?? RL("%@ · могут быть пароли", RL("строк скрыто: %@", record.accessLines)))
                         .font(DS.Font.manrope(12.5, .regular, relativeTo: .caption)).foregroundStyle(.dsText)
                         .padding(.vertical, 6).padding(.horizontal, 10)
