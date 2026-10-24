@@ -365,7 +365,9 @@ final class TerminalCardTests: XCTestCase {
         let (outcome, c) = await connect(try texts(installed: nil), timeout: 3)
         XCTAssertEqual(outcome, .unconfirmed(copyID: false))
         let lines = c.lastDiagnostics
-        XCTAssertTrue(lines.first?.hasPrefix("# window 1:") == true, "\(lines.prefix(1))")
+        XCTAssertEqual(lines.first, "# processes: 1, pid found: yes")
+        XCTAssertEqual(lines.dropFirst().first, "# process 1: windows 1, signature ok")
+        XCTAssertTrue(lines.contains { $0.hasPrefix("# window 1:") }, "\(lines.prefix(3))")
         XCTAssertTrue(lines.contains { $0.hasSuffix("AXButton ← ad.dlg.connect") })
         XCTAssertTrue(lines.contains { $0.contains("AXRadioButton") && $0.hasSuffix("← ad.dlg.terminal.console") })
         let joined = lines.joined(separator: "\n")

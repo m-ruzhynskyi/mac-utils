@@ -75,7 +75,8 @@ final class RemoteConnectorTests: XCTestCase {
         XCTAssertTrue(phases.contains(.entered))
         XCTAssertEqual(phases.last, .finished(.connected))
         XCTAssertEqual(lastSecret?.isEmpty, true, "пароль затёрт")
-        XCTAssertEqual(logger.events, [.connection(result: "connected", typed: true, milliseconds: clock.milliseconds)])
+        XCTAssertEqual(logger.events.filter { if case .connection = $0 { return true } else { return false } },
+                       [.connection(result: "connected", typed: true, milliseconds: clock.milliseconds)])
     }
 
     /// Окна пароля нет и сеанса не видно — не «подключено без пароля», а «не подтверждено».
