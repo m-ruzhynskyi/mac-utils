@@ -11,10 +11,11 @@ const { needsVPN, usesRDP } = require("./models");
 const MASK = "••••••";
 // Метки паролей и ключей (1:1 с Mac `AccessParser.mask`); всё после них до конца строки уходит под маску («Password: a · b · c» —
 // все три). Длинные варианты раньше коротких: «password» раньше «pass». Сразу за меткой — пробел, «:», «=» или тире: «с общим
-// ключом.» в пояснении — не значение.
+// ключом.» в пояснении — не значение. Разделитель — «:», «=», тире или пробелы; символы самого значения (в том числе ведущий «-») —
+// под маской.
 const SECRET_LABEL = new RegExp("(?<![\\p{L}\\d])(парол\\p{L}*|ключ\\p{L}*|секрет\\p{L}*|токен\\p{L}*|пін|пин|"
   + "password|passwort|passphrase|passwd|pass|pwd|pw|l2tp ?psk|pre-?shared[ -]?key|psk|private ?key|key|"
-  + "secret|token|pin)(?![\\p{L}\\d])([ \\t:=—–\\-]+)([^\\s:=—–\\-][^\\n]*)", "giu");
+  + "secret|token|pin)(?![\\p{L}\\d])([ \\t]*[:=—–][ \\t]*|[ \\t]+-[ \\t]+|[ \\t]+)(\\S[^\\n]*)", "giu");
 
 // Строка «Доступа»: всё после метки пароля, ключа или PSK до конца строки заменено точками.
 // «логин admin · пароль: Qw3rty · ещё» → «логин admin · пароль: ••••••».
@@ -315,6 +316,9 @@ function replaceWord(value, line) {
 function maskLoosePieces(line) {
   const trimmed = line.trim();
   if (!/\s/.test(trimmed) && isPlainWord(trimmed)) return line.replace(trimmed, MASK);
+  // «VPN Qw1» (row 13): заголовок блока, пробел и одно слово — больше ничего. Слово может быть паролем — как «RDP — Qw1».
+  const two = trimmed.split(/\s+/);
+  if (two.length === 2 && header(two[0]) && header(two[0]) !== "program" && isPlainWord(two[1])) return line.replace(two[1], MASK);
   const pieces = line.split(/([·|])/);
   let index = 0;
   return pieces.map((piece) => {

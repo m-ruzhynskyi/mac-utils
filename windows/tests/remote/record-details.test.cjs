@@ -929,3 +929,20 @@ test("fix2: id учётки стабилен при правке файла; у�
   assert.deepEqual(a.log, ["copy fail field=account changed"], "в журнале — код, без логина и хэша");
   a.rc.dispose();
 });
+
+test("ревью v2b: одно слово сразу после заголовка блока (row 13 «VPN …») и ведущий «-» пароля — под маской; строки AnyDesk не трогаются", () => {
+  const lone = [["VPN Qw3rty-13", "VPN ••••••"], ["RDP Demo17", "RDP ••••••"], ["Router Demo-R", "Router ••••••"], ["Server Srv-1", "Server ••••••"],
+    ["FortiClient fc-pass", "FortiClient ••••••"], ["L2TP l2", "L2TP ••••••"], ["PPTP pp9", "PPTP ••••••"], ["RDP — Demo-17", "RDP — ••••••"],
+    ["VPN WireGuard", "VPN WireGuard"], ["RDP 10.0.13.1", "RDP 10.0.13.1"], ["VPN включено сегодня", "VPN включено сегодня"],
+    ["AnyDesk: 123456789 demo-pc office", "AnyDesk: 123456789 demo-pc office"], ["AnyDesk demo-pc", "AnyDesk demo-pc"]];
+  for (const [line, want] of lone) assert.equal(access.maskedAccess(line, []), want, line);
+  const shown = access.maskedAccess("VPN Demo-Name-11\nRDP — 10.0.13.2", []);
+  assert.ok(!shown.includes("Demo-Name-11"));
+  assert.ok(shown.includes("RDP — 10.0.13.2"));
+  const dash = [["пароль: -Qw1", "пароль: ••••••"], ["pass -Qw2", "pass ••••••"], ["password = -=Qw3", "password = ••••••"], ["L2tpPsk=-k1", "L2tpPsk=••••••"],
+    ["пароль — -Qw4", "пароль — ••••••"], ["pwd:Demo-7", "pwd:••••••"], ["RDP — пароль:", "RDP — пароль:"], ["с общим ключом. Если", "с общим ключом. Если"]];
+  for (const [line, want] of dash) {
+    assert.equal(access.maskSecrets(line), want, line);
+    assert.ok(!access.maskedAccess(line, []).includes("Qw"), line);
+  }
+});
