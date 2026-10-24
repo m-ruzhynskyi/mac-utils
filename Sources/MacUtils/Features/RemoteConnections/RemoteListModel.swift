@@ -35,12 +35,13 @@ final class RemoteListModel: ObservableObject {
         if let i = listing.rows.firstIndex(of: row) { selection = i }
     }
 
-    /// Чипы программ: «Все», AnyDesk, TeamViewer и — если такие записи есть — RDP и VPN.
+    /// Чипы — только программа подключения: «Все», AnyDesk, TeamViewer и — если такие записи есть — «Другое»
+    /// (RDP, VPN и записи не через программу; значки VPN/RDP остаются в строке).
     func filters(_ counts: [ProgramFilter: Int]) -> [ProgramFilter] {
-        [.all] + RemoteProgram.allCases.map { .program($0) } + [ProgramFilter.rdp, .vpn].filter { (counts[$0] ?? 0) > 0 || filter == $0 }
+        [.all] + RemoteProgram.allCases.map { .program($0) } + [ProgramFilter.other].filter { (counts[$0] ?? 0) > 0 || filter == $0 }
     }
 
-    /// ⇥ в палитре: Все → AnyDesk → TeamViewer (→ RDP → VPN) → Все.
+    /// ⇥ в палитре: Все → AnyDesk → TeamViewer (→ Другое) → Все.
     func cycleFilter() {
         let order = filters(listing.counts)
         filter = order[((order.firstIndex(of: filter) ?? 0) + 1) % order.count]
@@ -64,8 +65,7 @@ final class RemoteListModel: ObservableObject {
         switch filter {
         case .all: return RL("Все %@", n)
         case .program(let p): return "\(p.title) \(n)"
-        case .rdp: return "RDP \(n)"
-        case .vpn: return "VPN \(n)"
+        case .other: return RL("Другое %@", n)
         }
     }
 }

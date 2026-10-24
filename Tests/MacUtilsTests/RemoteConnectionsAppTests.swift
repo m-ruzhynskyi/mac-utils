@@ -270,4 +270,70 @@ final class RemoteConnectionsAppTests: XCTestCase {
         center.notifySuccess = false
         XCTAssertFalse(RemoteConnectionsCenter(defaults: defaults).notifySuccess)
     }
+
+    /// Звонок: только через двойник — UniTalk не запускается, буфер и HUD не трогаются.
+    func testCallOpensTelInUniTalkOrCopiesNumber() {
+        final class FakeDialer: RemoteDialer {
+            var installed = true
+            var opened: [(URL, URL)] = []
+            var asked: [String] = []
+            func appURL(bundleID: String) -> URL? {
+                asked.append(bundleID)
+                return installed ? URL(fileURLWithPath: "/Applications/UniTalk.app") : nil
+            }
+            var opens = true
+            func open(_ url: URL, withApplicationAt app: URL, completion: @escaping @MainActor (Bool) -> Void) {
+                opened.append((url, app))
+                let ok = opens
+                MainActor.assumeIsolated { completion(ok) }
+            }
+        }
+        let center = RemoteConnectionsCenter(defaults: defaults)
+        let dialer = FakeDialer()
+        var copied: [String] = []
+        var huds: [String] = []
+        center.dialer = dialer
+        center.writePlain = { copied.append($0) }
+        center.showHUD = { huds.append($0.title) }
+
+        XCTAssertEqual(center.call("050 000 00 01"), .call(URL(string: "tel:+380500000001")!))
+        XCTAssertEqual(dialer.asked, ["com.unitalk.desktop"])
+        XCTAssertEqual(dialer.opened.map(\.0.absoluteString), ["tel:+380500000001"])
+        XCTAssertEqual(dialer.opened.map(\.1.lastPathComponent), ["UniTalk.app"], "именно в UniTalk, обработчик по умолчанию не меняется")
+        XCTAssertEqual(copied, [])
+
+        dialer.installed = false
+        XCTAssertEqual(center.call("050 000 00 01"), .copy("050 000 00 01", reason: .noUniTalk))
+        XCTAssertEqual(copied, ["050 000 00 01"])
+        XCTAssertEqual(huds, [RL("UniTalk не найден — номер скопирован")])
+        XCTAssertEqual(dialer.opened.count, 1, "без UniTalk ничего не открывается")
+
+        dialer.installed = true
+        XCTAssertEqual(center.call("каб. 12-34"), .copy("каб. 12-34", reason: .notANumber))
+        XCTAssertEqual(dialer.opened.count, 1)
+        XCTAssertEqual(huds.last, RL("Номер скопирован"))
+
+        // UniTalk есть, но не открылся (ошибка в completion) — номер копируется, как на Windows.
+        dialer.opens = false
+        copied = []
+        XCTAssertEqual(center.call("050 000 00 01"), .call(URL(string: "tel:+380500000001")!))
+        XCTAssertEqual(dialer.opened.count, 2)
+        XCTAssertEqual(copied, ["050 000 00 01"])
+        XCTAssertEqual(huds.last, RL("UniTalk не открылся — номер скопирован"))
+    }
+
+    /// Фильтр в окне — только программы: «Другое» вместо RDP и VPN, и только если такие записи есть.
+    func testFilterChipsAreProgramsAndOther() {
+        let model = RemoteListModel(center: RemoteConnectionsCenter(defaults: defaults))
+        XCTAssertEqual(model.filters([.all: 3, .program(.anyDesk): 3, .program(.teamViewer): 0, .other: 0]),
+                       [.all, .program(.anyDesk), .program(.teamViewer)])
+        let counts: [ProgramFilter: Int] = [.all: 37, .program(.anyDesk): 17, .program(.teamViewer): 12, .other: 8]
+        XCTAssertEqual(model.filters(counts), [.all, .program(.anyDesk), .program(.teamViewer), .other])
+        XCTAssertEqual(model.filters(counts).map { model.chipTitle($0, counts: counts) },
+                       [RL("Все %@", 37), "AnyDesk 17", "TeamViewer 12", RL("Другое %@", 8)])
+        model.filter = .other
+        XCTAssertEqual(model.filters([.all: 1, .other: 0]).last, .other, "выбранный чип не пропадает")
+        model.cycleFilter()
+        XCTAssertEqual(model.filter, .all)
+    }
 }

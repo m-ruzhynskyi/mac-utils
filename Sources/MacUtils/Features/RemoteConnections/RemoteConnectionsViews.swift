@@ -581,9 +581,8 @@ if center.detailsRecord == nil {
             } else if center.state == .ready {
                 FlowLayout(spacing: 6) {
                     ForEach(model.filters(listing.counts), id: \.self) { f in
-                        RemoteFilterChip(title: model.chipTitle(f, counts: listing.counts),
-                                         badge: f == .rdp ? .rdp : f == .vpn ? .vpn : nil,
-                                         selected: model.filter == f) { model.filter = f }
+                        Chip(model.chipTitle(f, counts: listing.counts), selected: model.filter == f) { model.filter = f }
+                            .help(f == .other ? RL("RDP, VPN и записи без программы подключения") : "")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
