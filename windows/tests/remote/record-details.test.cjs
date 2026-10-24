@@ -281,9 +281,12 @@ test("учётка Windows при подключении: пароль учёт�
 // ---------- буфер обмена ----------
 
 function fakeClipboard() {
-  const cb = { text: "", writes: 0, clears: 0, writeText(t) { this.text = t; this.writes++; }, readText() { return this.text; }, clear() { this.text = ""; this.clears++; } };
+  const cb = { text: "", writes: 0, clears: 0, concealed: 0, writeText(t) { this.text = t; this.writes++; }, readText() { return this.text; }, clear() { this.text = ""; this.clears++; } };
   return cb;
 }
+// Двойник помощника clip-conceal.ps1 (путь секретов на Windows, W2-5): кладёт текст в тот же двойник буфера, мимо writeText.
+// Подставляется всегда — иначе на win32 (CI) тест запускает настоящий PowerShell и пишет секрет в настоящий буфер.
+const concealedInto = (cb) => async (secret) => { cb.text = Buffer.from(secret.bytes).toString("utf8"); cb.concealed++; return true; };
 function fakeTimers() {
   const timers = [];
   return { timers, setTimer: (fn, ms) => { const t = { fn, ms }; timers.push(t); return t; }, clearTimer: (t) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); }, fire() { for (const t of timers.splice(0)) t.fn(); } };
@@ -344,7 +347,7 @@ async function app({ file = FILE, ext = "xml", extra = {} } = {}) {
     connectRecord: async (rec) => (rec.method && !(rec.method === "rdp" && rdp.isValidHost(rec.id)) ? { ok: false, error: "details" } : { ok: true }),
     openRDP: async (rec) => { rdpOpened.push({ method: rec.method, id: rec.id }); return { ok: true }; } };
   const rc = init(fake.electron, { userData: dir, timing: { debounceMs: 20, retryMs: 20, pollMs: 30 }, connector, hud: { show: (s) => huds.push(s) }, log: (l) => log.push(l),
-    clipboard: cb, copyText: (t) => { copied.push(t); return true; }, ...extra });
+    clipboard: cb, writeConcealed: concealedInto(cb), copyText: (t) => { copied.push(t); return true; }, ...extra });
   for (let i = 0; i < 200 && rc.store.state.status !== "ready"; i++) await new Promise((r) => setTimeout(r, 10));
   const trust = () => { rc.openWindow(); return { sender: fake.windows.find((w) => w.file === "remote.html" && !w.hash).webContents }; };
   const call = (name, ...args) => fake.handles.get(name)(trust(), ...args);
@@ -390,6 +393,7 @@ test("подробности: запись по ключу; «Показать»
   assert.deepEqual(await a.call("rc:revealAccess", a.key("Озерна")), { ok: false });
   assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: "accountPassword" }), { ok: true });
   assert.equal(a.cb.text, "Win-pass-2");
+  assert.deepEqual([a.cb.concealed, a.cb.writes], [1, 0], "секрет — через помощник мимо журнала буфера, не writeText");
   assert.match(a.huds.at(-1).title, /Пароль учётки скопирован/);
   assert.match(a.huds.at(-1).detail, /30 с/);
   assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Лісова"), field: "access" }), { ok: true });
@@ -421,6 +425,7 @@ test("меню строки: «Скопировать пароль учётки�
   const items = a.rc.rowMenuTemplate(a.key("Північна лабораторія"), { send: (...m) => sent.push(m) });
   await items.find((i) => i.label === "Скопировать пароль учётки").click();
   assert.equal(a.cb.text, "Win-pass-1");
+  assert.deepEqual([a.cb.concealed, a.cb.writes], [1, 0], "пункт меню — тем же путём мимо журнала буфера");
   items.find((i) => i.label === "Подробности").click();
   assert.deepEqual(sent, [["rc:menu", { action: "details", key: a.key("Північна лабораторія") }]]);
   assert.equal(await a.call("rc:rowMenu", a.key("Лісова")), true);
