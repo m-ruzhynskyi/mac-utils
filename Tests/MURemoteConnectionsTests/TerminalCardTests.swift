@@ -52,18 +52,17 @@ final class TerminalCardTests: XCTestCase {
         let cancel: FakeNode
         var log: [String] = []
 
-        init(_ l: Language, consoleChecked: Bool? = true, userChecked: Bool? = false, consoleTitled: Bool = true) {
-            console = FakeNode("AXRadioButton", label: consoleTitled ? l.console : nil)
+        init(_ l: Language, consoleChecked: Bool? = true, userChecked: Bool? = false) {
+            console = FakeNode("AXRadioButton", label: l.console)
             console.isChecked = consoleChecked
             user = FakeNode("AXRadioButton", label: l.user)
             user.isChecked = userChecked
             login = FakeNode("AXTextField")
             connect = FakeNode("AXButton", label: l.connect)
             cancel = FakeNode("AXButton", label: l.cancel)
-            let consoleRow = consoleTitled ? [console] : [console, FakeNode("AXStaticText", label: l.console)]
             root = FakeNode("AXGroup", children: [
                 FakeNode("AXStaticText", label: l.title), FakeNode("AXStaticText", label: l.description),
-                FakeNode("AXGroup", children: [FakeNode("AXGroup", children: consoleRow),
+                FakeNode("AXGroup", children: [FakeNode("AXGroup", children: [console]),
                                                FakeNode("AXGroup", children: [user, login])]),
                 cancel, connect])
             console.onPress = { [unowned self] in log.append("console"); user.isChecked = user.isChecked.map { _ in false } }
@@ -88,10 +87,20 @@ final class TerminalCardTests: XCTestCase {
         })])
     }
 
-    /// Главное окно AnyDesk (было открыто до ссылки): вкладки, плитки, место для диалога сеанса.
+    /// «Connect» адресной строки главного окна (как `ad.connect.connect.btn`): не наш, не нажимается никогда.
+    private var toolbarConnect = FakeNode("AXButton", label: "Connect")
+    private var toolbarPresses = 0
+
+    /// Главное окно AnyDesk (было открыто до ссылки): адресная строка с «Connect» (она же кнопка по умолчанию окна),
+    /// вкладки, плитки, место для диалога сеанса.
     private func mainWindow(_ slot: FakeNode) -> FakeNode {
-        FakeNode("AXWindow", subrole: "AXStandardWindow", label: "AnyDesk",
-                 children: [FakeNode("AXToolbar", children: [FakeNode("AXTabGroup")]), tiles(400), slot])
+        toolbarConnect = FakeNode("AXButton", label: "Connect")
+        toolbarConnect.onPress = { [unowned self] in toolbarPresses += 1 }
+        let window = FakeNode("AXWindow", subrole: "AXStandardWindow", label: "AnyDesk",
+                              children: [FakeNode("AXToolbar", children: [FakeNode("AXTextField"), toolbarConnect,
+                                                                          FakeNode("AXTabGroup")]), tiles(400), slot])
+        window.defaultButtonNode = toolbarConnect
+        return window
     }
 
     /// Окно пароля в той же вкладке: надпись, сообщение, защищённое поле, «OK».
@@ -132,7 +141,7 @@ final class TerminalCardTests: XCTestCase {
 
     /// Сценарий пользователя: главное окно открыто, через 0,5 с в нём карточка на глубине `depth`; «Connect» уводит её,
     /// через 1 с на её месте окно пароля.
-    private func run(_ l: Language, texts: ProviderTexts, depth: Int = 12, card: Card? = nil,
+    private func run(_ l: Language, texts: ProviderTexts, depth: Int = 12, card: Card? = nil, onOK: @escaping () -> Void = {},
                      _ adjust: (inout RemoteConnector.Timing) -> Void = { _ in }) async -> (ConnectionOutcome, Card, FakeNode, RemoteConnector) {
         let card = card ?? Card(l)
         let slot = FakeNode("AXGroup")
@@ -141,7 +150,7 @@ final class TerminalCardTests: XCTestCase {
         ax.show(main, pid: pid)
         let (dialog, field) = passwordDialog(l)
         let ok = dialog.kids.last!
-        ok.onPress = { [unowned self] in slot.kids = [FakeNode("AXStaticText", label: "Waiting for image.")]; ax.show(FakeNode("AXGroup"), pid: pid) }
+        ok.onPress = { [unowned self] in onOK(); slot.kids = [FakeNode("AXStaticText", label: "Waiting for image.")]; ax.show(FakeNode("AXGroup"), pid: pid) }
         let connectPress = card.connect.onPress
         card.connect.onPress = { [unowned self] in
             connectPress?()
@@ -190,6 +199,11 @@ final class TerminalCardTests: XCTestCase {
 
     private func setUpFakes() {
         ax = FakeAX(); launcher = FakeLauncher(); keyboard = FakeKeyboard(ax: ax); clock = FakeClock(); phases = []; secrets = []
+        toolbarPresses = 0
+    }
+
+    override func tearDown() async throws {
+        XCTAssertEqual(toolbarPresses, 0, "«Connect» адресной строки главного окна не нажимается никогда")
     }
 
     // MARK: Языки: en/ru/uk при любом языке программы и системы
@@ -237,20 +251,42 @@ final class TerminalCardTests: XCTestCase {
 
     // MARK: Состояние «Console»
 
-    /// Console выбрана, но состояние не читается (nil), нажатие не проходит, «User account» не выбран (false или nil) —
-    /// «Connect» нажат, пароль введён.
-    func testUnreadableConsoleWithUserAccountNotSelectedConnects() async throws {
-        let builtIn = try texts(installed: nil)
-        for userState in [false, nil] as [Bool?] {
-            setUpFakes()
-            let card = Card(english, consoleChecked: nil, userChecked: userState)
-            card.console.pressFails = true
-            let (outcome, _, field, _) = await run(english, texts: builtIn, card: card)
-            XCTAssertEqual(card.log.filter { $0 == "connect" }.count, 1, "User account: \(String(describing: userState))")
-            XCTAssertFalse(card.log.contains("user"))
-            XCTAssertEqual(field.text, password)
-            XCTAssertEqual(outcome, .connected)
-        }
+    /// Console выбрана, но состояние не читается (nil), нажатие не проходит, «User account» читается невыбранным —
+    /// в группе радиокнопок это «Console»: «Connect» нажат один раз, пароль введён.
+    func testUnreadableConsoleWithUserAccountReadAsOffConnects() async throws {
+        let card = Card(english, consoleChecked: nil, userChecked: false)
+        card.console.pressFails = true
+        let (outcome, _, field, _) = await run(english, texts: try texts(installed: nil), card: card)
+        XCTAssertEqual(card.log, ["connect"])
+        XCTAssertEqual(field.text, password)
+        XCTAssertEqual(outcome, .connected)
+    }
+
+    /// Ревью rc-console2, FIX 1: оба состояния не читаются (AX занят) — «Connect» не нажат: AnyDesk мог запомнить
+    /// «User account». HUD «Выберите Console…», следующий опрос пробует снова, итог «сеанс не выбран».
+    func testUnreadableConsoleAndUnreadableUserAccountNeverConnects() async throws {
+        let card = Card(english, consoleChecked: nil, userChecked: nil)
+        card.console.pressFails = true
+        let (outcome, _, field, _) = await run(english, texts: try texts(installed: nil), card: card) { $0.promptTimeout = 10_000 }
+        XCTAssertFalse(card.log.contains("connect"))
+        XCTAssertFalse(card.log.contains("user"))
+        XCTAssertTrue(phases.contains(.intermediate(.chooseConsole)))
+        XCTAssertFalse(phases.contains(.intermediate(.sessionChoice)))
+        XCTAssertEqual(outcome, .sessionNotChosen)
+        XCTAssertEqual(field.text, "")
+        XCTAssertTrue(keyboard.typed.isEmpty)
+    }
+
+    /// Временный сбой AX: на первом опросе состояние не читается, на следующем — читается («Console» выбрана) →
+    /// «Connect» нажат один раз.
+    func testUnreadableStatesRecoverOnNextPoll() async throws {
+        let card = Card(english, consoleChecked: nil, userChecked: nil)
+        card.console.pressFails = true
+        clock.at(3000) { card.console.isChecked = true; card.user.isChecked = false }
+        let (outcome, _, field, _) = await run(english, texts: try texts(installed: nil), card: card)
+        XCTAssertEqual(card.log, ["connect"])
+        XCTAssertEqual(field.text, password)
+        XCTAssertEqual(outcome, .connected)
     }
 
     /// «User account» выбран, «Console» не нажимается — «Connect» не нажат никогда; итог «сеанс не выбран».
@@ -271,12 +307,48 @@ final class TerminalCardTests: XCTestCase {
         }
     }
 
-    /// Подпись «Console» не у радиокнопки, а в соседней надписи — радиокнопка находится, выбирается, затем «Connect».
-    func testConsoleCaptionInNeighbouringStaticText() async throws {
-        let card = Card(english, consoleChecked: false, userChecked: true, consoleTitled: false)
-        let (outcome, _, field, _) = await run(english, texts: try texts(installed: nil), card: card)
-        XCTAssertEqual(card.log, ["console", "connect"])
+    /// Ревью rc-console2, FIX 2 (проба untitledFlat): радиокнопки без подписи, надписи «User account»/«Console»
+    /// рядом в одной группе, в любом порядке, выбран «User account» — «Console» по надписи не угадывается,
+    /// «Connect» не нажат.
+    func testUntitledRadiosNextToCaptionsNeverConnect() async throws {
+        let builtIn = try texts(installed: nil)
+        for userFirst in [true, false] {
+            setUpFakes()
+            let card = Card(english, consoleChecked: false, userChecked: true)
+            card.console.label = nil
+            card.user.label = nil
+            let user = [card.user, FakeNode("AXStaticText", label: english.user)]
+            let console = [card.console, FakeNode("AXStaticText", label: english.console)]
+            card.root.kids[2] = FakeNode("AXGroup", children: (userFirst ? user + console : console + user) + [card.login])
+            let (outcome, _, field, _) = await run(english, texts: builtIn, card: card) { $0.promptTimeout = 10_000 }
+            XCTAssertEqual(card.log, [], "порядок: \(userFirst ? "User account, Console" : "Console, User account")")
+            XCTAssertEqual(card.user.isChecked, true)
+            XCTAssertEqual(outcome, .sessionNotChosen)
+            XCTAssertEqual(field.text, "")
+        }
+    }
+
+    // MARK: Ревью rc-console2, FIX 3: кнопки главного окна
+
+    /// У «Connect» карточки нет подписи, в адресной строке главного окна есть «Connect» — чужой не нажимается.
+    func testUntitledCardConnectNeverPressesMainWindowConnect() async throws {
+        let card = Card(english)
+        card.connect.label = nil
+        let (outcome, _, field, _) = await run(english, texts: try texts(installed: nil), card: card) { $0.promptTimeout = 10_000 }
+        XCTAssertEqual(card.log, [])
+        XCTAssertEqual(outcome, .sessionNotChosen)
+        XCTAssertEqual(field.text, "")
+    }
+
+    /// Окно пароля во вкладке главного окна (по умолчанию в окне — «Connect» адресной строки): после ввода пароля
+    /// нажат «OK» диалога, а не «Connect» главного окна.
+    func testPasswordDialogInMainWindowPressesItsOwnOK() async throws {
+        var okPresses = 0
+        let card = Card(english)
+        let (outcome, _, field, _) = await run(english, texts: try texts(installed: nil), card: card, onOK: { okPresses += 1 })
+        XCTAssertEqual(card.log, ["connect"])
         XCTAssertEqual(field.text, password)
+        XCTAssertEqual(okPresses, 1, "нажат «OK» окна пароля")
         XCTAssertEqual(outcome, .connected)
     }
 
