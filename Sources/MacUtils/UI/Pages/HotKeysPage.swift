@@ -4,6 +4,7 @@ import MUCore
 import MUDesign
 import MUAudio
 import MUWindowSnap
+import MUScreenShare
 
 /// Что показать о сочетании: работает, выключено, занято, совпадает с другим.
 struct HotKeyStatus: Equatable {

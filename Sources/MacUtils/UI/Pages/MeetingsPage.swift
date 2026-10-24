@@ -3,6 +3,7 @@ import SwiftUI
 import MUCore
 import MUDesign
 import MUMeetings
+import MUScreenShare
 
 // MARK: - Записи встреч
 

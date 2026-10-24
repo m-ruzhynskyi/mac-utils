@@ -8,21 +8,21 @@ import MUAudio
 private func responsibility_get_pid_responsible_for_pid(_ pid: pid_t) -> pid_t
 
 /// Процесс, звук которого может попасть в трансляцию.
-struct ShareAudioProcess: Equatable {
+package struct ShareAudioProcess: Equatable {
     /// Объект процесса Core Audio (0 — процесс из списка ScreenCaptureKit).
-    let object: AudioObjectID
-    let pid: pid_t
-    let bundleID: String?
+    package let object: AudioObjectID
+    package let pid: pid_t
+    package let bundleID: String?
     /// Программа, «ответственная» за процесс (Discord для Discord Helper); nil — не узнали.
-    let ownerBundleID: String?
+    package let ownerBundleID: String?
 }
 
 /// Что не передавать в трансляцию: заглушённые программы вместе с их помощниками и сам Mac Utils.
 /// Звук звонка Discord играет не сама программа, а `com.hnc.Discord.helper*` без окон — ScreenCaptureKit
 /// таких процессов в списке программ не знает, поэтому исключаем по процессам Core Audio.
-enum ShareAudioExclusion {
+package enum ShareAudioExclusion {
     /// Программы звонков для «Не передавать звонки»: иначе собеседник слышит себя с задержкой.
-    static let callApps: [String] = [
+    package static let callApps: [String] = [
         "com.hnc.Discord", "com.hnc.DiscordPTB", "com.hnc.DiscordCanary",
         "ru.keepcoder.Telegram", "com.tdesktop.Telegram", "com.viber.osx", "net.whatsapp.WhatsApp", "desktop.WhatsApp",
         "us.zoom.xos", "com.microsoft.teams2", "com.microsoft.teams", "com.skype.skype", "com.tinyspeck.slackmacgap",
@@ -30,23 +30,23 @@ enum ShareAudioExclusion {
     ]
 
     /// Заглушённые bundle id: выбранные вручную и, если включено, программы звонков.
-    static func muted(apps: Set<String>, calls: Bool) -> Set<String> {
+    package static func muted(apps: Set<String>, calls: Bool) -> Set<String> {
         calls ? apps.union(callApps) : apps
     }
 
-    static var currentMuted: Set<String> {
+    package static var currentMuted: Set<String> {
         muted(apps: Set(UserDefaults.standard.stringArray(forKey: Pref.shareMutedApps) ?? []),
               calls: UserDefaults.standard.bool(forKey: Pref.shareMuteCalls))
     }
 
     /// Совпадение по bundle id: сама программа или её помощник (`com.hnc.Discord.helper`), но не другая
     /// программа с тем же началом (`com.hnc.DiscordPTB` — не Discord).
-    static func matches(_ bundleID: String?, _ muted: Set<String>) -> Bool {
+    package static func matches(_ bundleID: String?, _ muted: Set<String>) -> Bool {
         guard let bundleID, !bundleID.isEmpty else { return false }
         return muted.contains { bundleID == $0 || bundleID.hasPrefix($0 + ".") }
     }
 
-    static func excluded(_ processes: [ShareAudioProcess], muted: Set<String>, ownPID: pid_t,
+    package static func excluded(_ processes: [ShareAudioProcess], muted: Set<String>, ownPID: pid_t,
                          ownBundleID: String? = Bundle.main.bundleIdentifier) -> [ShareAudioProcess] {
         let own: Set<String> = ownBundleID.map { [$0] } ?? []
         return processes.filter { process in
@@ -56,14 +56,14 @@ enum ShareAudioExclusion {
     }
 
     /// Программа, отвечающая за процесс (`responsibility_get_pid_responsible_for_pid`), — её bundle id.
-    static func ownerBundleID(of pid: pid_t) -> String? {
+    package static func ownerBundleID(of pid: pid_t) -> String? {
         let owner = responsibility_get_pid_responsible_for_pid(pid)
         guard owner > 0, owner != pid else { return nil }
         return NSRunningApplication(processIdentifier: owner)?.bundleIdentifier
     }
 
     /// Все процессы, которые сейчас открыли звук в Core Audio (с помощниками и системными службами).
-    static func audioProcesses() -> [ShareAudioProcess] {
+    package static func audioProcesses() -> [ShareAudioProcess] {
         CoreAudioHelper.readArray(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyProcessObjectList).compactMap { object in
             let pid: pid_t = CoreAudioHelper.read(object, kAudioProcessPropertyPID, default: -1)
             guard pid > 0 else { return nil }
@@ -74,7 +74,7 @@ enum ShareAudioExclusion {
     }
 
     /// Строка для журнала: только число и bundle id (это не личные данные).
-    static func summary(_ excluded: [ShareAudioProcess]) -> String {
+    package static func summary(_ excluded: [ShareAudioProcess]) -> String {
         let ids = Set(excluded.map { $0.bundleID ?? "pid" }).sorted()
         return "\(excluded.count): \(ids.joined(separator: ", "))"
     }
@@ -82,14 +82,14 @@ enum ShareAudioExclusion {
 
 /// Формат, по которому строится конвертер перехвата: фактический формат входного потока агрегата (после drift
 /// compensation он может отличаться от формата самого перехвата), без него — формат перехвата.
-enum ShareTapFormat {
-    static func chosen(tap: AudioStreamBasicDescription, stream: AudioStreamBasicDescription?) -> AudioStreamBasicDescription {
+package enum ShareTapFormat {
+    package static func chosen(tap: AudioStreamBasicDescription, stream: AudioStreamBasicDescription?) -> AudioStreamBasicDescription {
         if let stream, stream.mSampleRate > 0, stream.mChannelsPerFrame > 0 { return stream }
         return tap
     }
 
     /// Частота сменилась (AirPods + звонок → HFP 16/24 кГц, «Настройка Audio-MIDI») — конвертер устарел, пересобрать.
-    static func needsRebuild(converterRate: Double, tap: AudioStreamBasicDescription, stream: AudioStreamBasicDescription?) -> Bool {
+    package static func needsRebuild(converterRate: Double, tap: AudioStreamBasicDescription, stream: AudioStreamBasicDescription?) -> Bool {
         let rate = chosen(tap: tap, stream: stream).mSampleRate
         return rate > 0 && abs(rate - converterRate) > 0.5
     }
@@ -99,26 +99,26 @@ enum ShareTapFormat {
 /// Ни одного колбэка или ни одного буфера с данными (NULL, нулевой размер, раскладка не сошлась) — это ошибка Core Audio
 /// (у агрегата нет часов, HAL не запустил IOProc), и звук идёт запасным способом. Тишина в буферах — не ошибка: программы
 /// могут молчать.
-struct ShareTapWatchdog: Equatable {
-    static let window: TimeInterval = 3
+package struct ShareTapWatchdog: Equatable {
+    package static let window: TimeInterval = 3
 
-    enum Verdict: Equatable { case ok, noCallbacks, noData }
+    package enum Verdict: Equatable { case ok, noCallbacks, noData }
 
-    private(set) var callbacks = 0
-    private(set) var withData = 0
+    package private(set) var callbacks = 0
+    package private(set) var withData = 0
     /// Сколько входных буферов было в последнем колбэке (для журнала).
-    private(set) var inputBuffers = 0
+    package private(set) var inputBuffers = 0
 
-    mutating func record(inputBuffers count: Int, tapData: Bool) {
+    package mutating func record(inputBuffers count: Int, tapData: Bool) {
         callbacks += 1
         inputBuffers = count
         if tapData { withData += 1 }
     }
 
-    var verdict: Verdict { callbacks == 0 ? .noCallbacks : withData == 0 ? .noData : .ok }
+    package var verdict: Verdict { callbacks == 0 ? .noCallbacks : withData == 0 ? .noData : .ok }
 
     /// Строка журнала — только числа.
-    func summary(tapRate: Double, streamRate: Double, outputRate: Double) -> String {
+    package func summary(tapRate: Double, streamRate: Double, outputRate: Double) -> String {
         "колбэков за \(Int(Self.window)) с: \(callbacks), с данными перехвата: \(withData), входных буферов: \(inputBuffers), " +
             "частоты: перехват \(Int(tapRate)), вход агрегата \(Int(streamRate)), выход \(Int(outputRate)) Гц"
     }
@@ -126,8 +126,8 @@ struct ShareTapWatchdog: Equatable {
 
 /// Звук пошёл запасным способом (ScreenCaptureKit): помощников программ он не исключает. Включено «Не передавать
 /// звонки» или есть заглушённые программы — ведущему прямо говорим, что звонок или они могут попасть в трансляцию.
-enum ShareAudioFallback {
-    static func message(muteCalls: Bool, mutedApps: Int) -> String {
+package enum ShareAudioFallback {
+    package static func message(muteCalls: Bool, mutedApps: Int) -> String {
         if muteCalls { return "Звук трансляции — запасным способом: звонок (Discord, FaceTime…) может попасть в трансляцию, зрители его услышат" }
         if mutedApps > 0 { return "Звук трансляции — запасным способом: заглушённые программы могут быть слышны зрителям" }
         return "Звук трансляции — запасным способом"
@@ -138,27 +138,27 @@ enum ShareAudioFallback {
 /// нельзя вложить в другой агрегат: HAL молча отбрасывает такое подустройство, у агрегата не остаётся часов, IOProc не
 /// вызывается ни разу, а `AudioDeviceStart` возвращает успех (журнал пользователя: «колбэков за 3 с: 0»). Тогда часы —
 /// от его настоящего подустройства, нет его — от встроенного выхода. Выходу трансляция пишет только тишину.
-enum ShareTapClock {
-    struct Output: Equatable {
-        let id: AudioObjectID
-        let transport: UInt32
+package enum ShareTapClock {
+    package struct Output: Equatable {
+        package let id: AudioObjectID
+        package let transport: UInt32
         /// Первое активное подустройство, если выход — агрегат.
-        let subdevice: AudioObjectID?
+        package let subdevice: AudioObjectID?
     }
 
-    static func choose(output: Output, builtIn: AudioObjectID?) -> AudioObjectID? {
+    package static func choose(output: Output, builtIn: AudioObjectID?) -> AudioObjectID? {
         guard output.transport == kAudioDeviceTransportTypeAggregate else { return output.id }
         return output.subdevice ?? builtIn
     }
 
     /// Код транспорта для журнала (четыре буквы Core Audio: bltn, grup, virt, blue, usb …), без имён устройств.
-    static func code(_ transport: UInt32) -> String {
+    package static func code(_ transport: UInt32) -> String {
         let bytes = [24, 16, 8, 0].map { UInt8((transport >> UInt32($0)) & 0xff) }
         guard bytes.allSatisfy({ $0 >= 0x20 && $0 < 0x7f }) else { return String(transport) }
         return String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespaces)
     }
 
-    static func output(_ device: AudioObjectID) -> Output {
+    package static func output(_ device: AudioObjectID) -> Output {
         let transport = CoreAudioHelper.read(device, kAudioDevicePropertyTransportType, default: UInt32(0))
         let subdevices = transport == kAudioDeviceTransportTypeAggregate
             ? CoreAudioHelper.readArray(device, kAudioAggregateDevicePropertyActiveSubDeviceList)
@@ -168,7 +168,7 @@ enum ShareTapClock {
     }
 
     /// Встроенный выход (динамики или разъём), если есть.
-    static func builtInOutput() -> AudioObjectID? {
+    package static func builtInOutput() -> AudioObjectID? {
         CoreAudioHelper.readArray(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDevices).first {
             CoreAudioHelper.read($0, kAudioDevicePropertyTransportType, default: UInt32(0)) == kAudioDeviceTransportTypeBuiltIn
                 && !CoreAudioHelper.readArray($0, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeOutput).isEmpty
@@ -178,14 +178,14 @@ enum ShareTapClock {
 
 /// Повтор перехвата после явной ошибки Core Audio: при постоянной ошибке не создавать и не разрушать перехват
 /// и агрегат на каждой пересборке, а пробовать раз на новую обстановку — сменился выход или набор программ.
-struct ShareTapRetry: Equatable {
-    private(set) var failedIn: String?
+package struct ShareTapRetry: Equatable {
+    package private(set) var failedIn: String?
 
-    func shouldTry(_ situation: String) -> Bool { situation != failedIn }
-    mutating func failed(in situation: String) { failedIn = situation }
+    package func shouldTry(_ situation: String) -> Bool { situation != failedIn }
+    package mutating func failed(in situation: String) { failedIn = situation }
 
     /// Обстановка: устройство вывода и запущенные программы.
-    @MainActor static func situation() -> String {
+    @MainActor package static func situation() -> String {
         "\(CoreAudioHelper.defaultOutputDevice)-\(NSWorkspace.shared.runningApplications.count)"
     }
 }
@@ -195,14 +195,14 @@ struct ShareTapRetry: Equatable {
 /// сменился выход звука (перехват пересобирается на часах нового устройства).
 /// Без опроса: только события, и только пока идёт трансляция со звуком.
 @MainActor
-final class ShareAudioWatcher {
+package final class ShareAudioWatcher {
     private let workspace: NotificationCenter
     private var observers: [NSObjectProtocol] = []
     private var listeners: [(AudioObjectPropertySelector, AudioObjectPropertyListenerBlock)] = []
     private var scheduled = false
     private let onChange: @MainActor () -> Void
 
-    init(workspace: NotificationCenter = NSWorkspace.shared.notificationCenter, coreAudio: Bool = true,
+    package init(workspace: NotificationCenter = NSWorkspace.shared.notificationCenter, coreAudio: Bool = true,
          onChange: @escaping @MainActor () -> Void) {
         self.workspace = workspace
         self.onChange = onChange
@@ -224,7 +224,7 @@ final class ShareAudioWatcher {
     }
 
     /// Снять подписки (до освобождения: блок Core Audio держит систему, а не нас).
-    func stop() {
+    package func stop() {
         for observer in observers { workspace.removeObserver(observer) }
         observers = []
         for (selector, listener) in listeners {
@@ -251,7 +251,7 @@ final class ShareAudioWatcher {
 /// Звук системы для трансляции через Core Audio process tap (macOS 14.2+): весь вывод, кроме исключённых
 /// процессов, моно; на выходе — тот же формат, что и у ScreenCaptureKit (24 кГц, Float → Int16 в пакете).
 @available(macOS 14.2, *)
-final class ShareAudioTap: @unchecked Sendable {
+package final class ShareAudioTap: @unchecked Sendable {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
@@ -260,19 +260,19 @@ final class ShareAudioTap: @unchecked Sendable {
     private let onSamples: @Sendable ([Float]) -> Void
     private var converter: AVAudioConverter?
     /// Частота, на которую построен конвертер (главный поток).
-    private(set) var converterRate: Double = 0
+    package private(set) var converterRate: Double = 0
     /// Частота перехвата или агрегата сменилась и конвертер устарел — пересобрать (зовётся в главном потоке).
-    var onFormatChange: (@MainActor () -> Void)?
+    package var onFormatChange: (@MainActor () -> Void)?
     private var listeners: [(AudioObjectID, AudioObjectPropertySelector, AudioObjectPropertyListenerBlock)] = []
     private let output = AVAudioFormat(standardFormatWithSampleRate: ShareProtocol.sampleRate, channels: 1)!
     /// Пик входа с прошлого чтения: пишется в `queue`, читается из главного потока (Float — без разрывов).
     private let peak = UnsafeMutablePointer<Float>.allocate(capacity: 1)
-    private(set) var excluded: [AudioObjectID]
+    package private(set) var excluded: [AudioObjectID]
     /// Выход при сборке перехвата: сменился — собираем заново.
-    private(set) var outputDevice = AudioObjectID(kAudioObjectUnknown)
+    package private(set) var outputDevice = AudioObjectID(kAudioObjectUnknown)
     /// Устройство часов агрегата (`ShareTapClock`); `builtInClock` — после «0 колбэков» взять встроенный выход.
-    private(set) var clockDevice = AudioObjectID(kAudioObjectUnknown)
-    private(set) var builtInClock = false
+    package private(set) var clockDevice = AudioObjectID(kAudioObjectUnknown)
+    package private(set) var builtInClock = false
     /// Раскладка входа не сошлась — уже записано в журнал (только в `queue`).
     private var layoutLogged = false
     /// Входы выхода (микрофон AirPods/гарнитуры) — их число и выключены ли они для IOProc; пишутся до `AudioDeviceStart`.
@@ -282,9 +282,9 @@ final class ShareAudioTap: @unchecked Sendable {
     private let watchLock = NSLock()
     private var watchdog = ShareTapWatchdog()
     /// Номер запуска: сторож из главного потока проверяет тот запуск, после которого был поставлен (`restart` — новый).
-    private(set) var generation = 0
+    package private(set) var generation = 0
 
-    init(excluding objects: [AudioObjectID], onSamples: @escaping @Sendable ([Float]) -> Void) throws {
+    package init(excluding objects: [AudioObjectID], onSamples: @escaping @Sendable ([Float]) -> Void) throws {
         excluded = objects
         self.onSamples = onSamples
         peak.initialize(to: 0)
@@ -301,7 +301,7 @@ final class ShareAudioTap: @unchecked Sendable {
         peak.deallocate()
     }
 
-    func takePeak() -> Float {
+    package func takePeak() -> Float {
         let value = peak.pointee
         peak.pointee = 0
         return value
@@ -373,7 +373,7 @@ final class ShareAudioTap: @unchecked Sendable {
     }
 
     /// «0 колбэков» на выбранных часах: ещё раз на встроенном выходе (если он есть и ещё не пробовали). false — нечего пробовать.
-    func retryWithBuiltInClock() throws -> Bool {
+    package func retryWithBuiltInClock() throws -> Bool {
         guard !builtInClock, let builtIn = ShareTapClock.builtInOutput(), builtIn != clockDevice else { return false }
         builtInClock = true
         try restart()
@@ -383,7 +383,7 @@ final class ShareAudioTap: @unchecked Sendable {
     /// Агрегат трансляции: выход — основное подустройство (часы агрегата; без него IOProc может не вызываться вовсе —
     /// 1.9.2: зрители без звука), перехват — в списке перехватов. Входы выхода выключаются для IOProc после создания
     /// (`disableSubdeviceInputs`), сам выход получает только тишину. Так же собирают пример Apple и «Громкость приложений».
-    static func aggregateDescription(outputUID: String, tapUUID: String, unique: String) -> [String: Any] {
+    package static func aggregateDescription(outputUID: String, tapUUID: String, unique: String) -> [String: Any] {
         [
             kAudioAggregateDeviceNameKey: "Mac Utils Share",
             kAudioAggregateDeviceUIDKey: "com.mruzhynskyi.macutils.share.\(unique)",
@@ -397,7 +397,7 @@ final class ShareAudioTap: @unchecked Sendable {
     }
 
     /// Итог сторожа запуска и строка журнала (только числа) — для главного потока через `ShareTapWatchdog.window` после запуска.
-    func watchdogReport() -> (verdict: ShareTapWatchdog.Verdict, summary: String) {
+    package func watchdogReport() -> (verdict: ShareTapWatchdog.Verdict, summary: String) {
         watchLock.lock()
         let state = watchdog
         watchLock.unlock()
@@ -407,7 +407,7 @@ final class ShareAudioTap: @unchecked Sendable {
     }
 
     /// Выход сменился — тот же перехват (с тем же списком исключённых) на часах нового устройства.
-    func restart() throws {
+    package func restart() throws {
         stop()
         do {
             try start()
@@ -418,27 +418,27 @@ final class ShareAudioTap: @unchecked Sendable {
     }
 
     /// Колбэки IOProc пошли (сторож запуска): только теперь можно менять описание перехвата на ходу.
-    private(set) var ioProven = false
+    package private(set) var ioProven = false
     /// Смена описания на ходу остановила колбэки — дальше список меняем пересборкой перехвата.
-    private(set) var rebuildOnChange = false
+    package private(set) var rebuildOnChange = false
     /// Список, который ждёт подтверждения колбэков.
     private var pendingExclusion: [AudioObjectID]?
 
-    enum UpdateResult: Equatable { case unchanged, deferred, applied, rebuilt }
+    package enum UpdateResult: Equatable { case unchanged, deferred, applied, rebuilt }
 
     /// Новый список исключённых. Пока колбэки не подтверждены — откладывается: смена описания работающего перехвата сразу
     /// после `AudioDeviceStart` — главное отличие от «Громкости приложений» (там описание не меняется), и у пользователя
     /// с этим путём IOProc не вызывался ни разу. Подтверждены — на лету тем же перехватом (без разрыва звука); если так уже
     /// останавливало колбэки — пересборкой перехвата с новым списком.
     /// Что делать со сменой списка (чистое правило, проверяется тестами).
-    static func plan(changed: Bool, ioProven: Bool, rebuildOnChange: Bool) -> UpdateResult {
+    package static func plan(changed: Bool, ioProven: Bool, rebuildOnChange: Bool) -> UpdateResult {
         guard changed else { return .unchanged }
         guard ioProven else { return .deferred }
         return rebuildOnChange ? .rebuilt : .applied
     }
 
     @discardableResult
-    func update(excluding objects: [AudioObjectID]) throws -> UpdateResult {
+    package func update(excluding objects: [AudioObjectID]) throws -> UpdateResult {
         switch Self.plan(changed: objects != excluded, ioProven: ioProven, rebuildOnChange: rebuildOnChange) {
         case .unchanged:
             pendingExclusion = nil
@@ -464,7 +464,7 @@ final class ShareAudioTap: @unchecked Sendable {
     }
 
     /// Сторож: колбэки идут. Отложенный список — применить (результат — для проверки, не встали ли колбэки).
-    func confirmIO() throws -> UpdateResult {
+    package func confirmIO() throws -> UpdateResult {
         ioProven = true
         guard let pending = pendingExclusion else { return .unchanged }
         pendingExclusion = nil
@@ -472,21 +472,21 @@ final class ShareAudioTap: @unchecked Sendable {
     }
 
     /// Перехват собран и запущен (неудачная пересборка его останавливает).
-    var isRunning: Bool { aggregateID != kAudioObjectUnknown && procID != nil }
+    package var isRunning: Bool { aggregateID != kAudioObjectUnknown && procID != nil }
 
     /// Сколько колбэков IOProc с последнего запуска (для проверки после смены описания).
-    var callbackCount: Int {
+    package var callbackCount: Int {
         watchLock.lock(); defer { watchLock.unlock() }
         return watchdog.callbacks
     }
 
     /// После смены описания колбэки встали: дальше — пересборкой; сейчас — пересобрать с новым списком.
-    func rebuildAfterStalledUpdate() throws {
+    package func rebuildAfterStalledUpdate() throws {
         rebuildOnChange = true
         try restart()
     }
 
-    func stop() {
+    package func stop() {
         for (object, selector, block) in listeners {
             var address = CoreAudioHelper.address(selector)
             AudioObjectRemovePropertyListenerBlock(object, &address, .main, block)
@@ -508,7 +508,7 @@ final class ShareAudioTap: @unchecked Sendable {
     }
 
     /// Частота перехвата или входа агрегата уже не та, на которую построен конвертер.
-    var formatChanged: Bool {
+    package var formatChanged: Bool {
         guard tapID != kAudioObjectUnknown, aggregateID != kAudioObjectUnknown else { return false }
         return ShareTapFormat.needsRebuild(converterRate: converterRate, tap: Self.tapFormat(tapID), stream: Self.streamFormat(aggregateID))
     }

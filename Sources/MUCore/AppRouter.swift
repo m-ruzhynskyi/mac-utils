@@ -38,5 +38,8 @@ package final class AppRouter {
     /// Записать готовый снимок в «Мои снимки» (если они включены).
     package var addShot: (_ url: URL, _ image: CGImage, _ app: String) -> Void = { _, _, _ in }
 
+    /// Запись экрана идёт: обновить, какие окна в неё попадают (после появления или исчезновения рисунков).
+    package var refreshRecordingFilter: () -> Void = {}
+
     private init() {}
 }

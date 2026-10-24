@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUScreenShare
 
 /// Чистая логика протокола mu-share-2 на Mac: правило решения хоста, разбор сообщений, рукопожатие, тексты ошибок.
 @MainActor

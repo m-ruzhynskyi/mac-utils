@@ -6,71 +6,71 @@ import MUAudio
 
 /// Крестики-нолики: поле и правила. Ходят по очереди, первым — крестики.
 /// Кто пригласил — играет крестиками в первой партии, дальше начинают по очереди.
-struct TicTacToe: Equatable {
-    enum Mark: Equatable { case x, o }
+package struct TicTacToe: Equatable {
+    package enum Mark: Equatable { case x, o }
 
-    private(set) var cells: [Mark?] = Array(repeating: nil, count: 9)
-    private(set) var round = 0
+    package private(set) var cells: [Mark?] = Array(repeating: nil, count: 9)
+    package private(set) var round = 0
 
-    static let lines = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]]
+    package static let lines = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]]
 
-    var turn: Mark { cells.compactMap { $0 }.count % 2 == 0 ? .x : .o }
-    var winLine: [Int]? {
+    package var turn: Mark { cells.compactMap { $0 }.count % 2 == 0 ? .x : .o }
+    package var winLine: [Int]? {
         Self.lines.first { line in
             guard let mark = cells[line[0]] else { return false }
             return cells[line[1]] == mark && cells[line[2]] == mark
         }
     }
-    var winner: Mark? { winLine.flatMap { cells[$0[0]] } }
-    var isDraw: Bool { winner == nil && !cells.contains(nil) }
-    var isOver: Bool { winner != nil || isDraw }
+    package var winner: Mark? { winLine.flatMap { cells[$0[0]] } }
+    package var isDraw: Bool { winner == nil && !cells.contains(nil) }
+    package var isOver: Bool { winner != nil || isDraw }
 
     @discardableResult
-    mutating func play(_ cell: Int) -> Bool {
+    package mutating func play(_ cell: Int) -> Bool {
         guard (0..<9).contains(cell), cells[cell] == nil, !isOver else { return false }
         cells[cell] = turn
         return true
     }
 
     /// Новая партия с номером `round` (номер приходит в сообщении — так обе стороны не разойдутся).
-    mutating func start(round: Int) {
+    package mutating func start(round: Int) {
         cells = Array(repeating: nil, count: 9)
         self.round = round
     }
 
     /// Каким знаком играет пригласивший (или приглашённый) в этой партии.
-    func mark(inviter: Bool) -> Mark { (round % 2 == 0) == inviter ? .x : .o }
+    package func mark(inviter: Bool) -> Mark { (round % 2 == 0) == inviter ? .x : .o }
 }
 
 /// Партия между ведущим и одним зрителем во время трансляции.
 /// Сообщения идут через ретранслятор: {"type":"game","action":"invite|accept|decline|move|again|quit", "cell", "round"};
 /// ретранслятор доставляет их только собеседнику (ведущему — с ID зрителя в "from").
 @MainActor
-final class ShareGame: ObservableObject {
-    static let shared = ShareGame()
+package final class ShareGame: ObservableObject {
+    package static let shared = ShareGame()
 
-    enum Phase: Equatable { case none, inviting, invited, playing, ended(String) }
+    package enum Phase: Equatable { case none, inviting, invited, playing, ended(String) }
 
-    @Published private(set) var phase: Phase = .none
-    @Published private(set) var board = TicTacToe()
-    @Published private(set) var peerName = ""
-    @Published private(set) var score = (me: 0, peer: 0)
+    @Published package private(set) var phase: Phase = .none
+    @Published package private(set) var board = TicTacToe()
+    @Published package private(set) var peerName = ""
+    @Published package private(set) var score = (me: 0, peer: 0)
 
     /// ID зрителя (у ведущего) или "host" (у зрителя).
-    private(set) var peer = ""
+    package private(set) var peer = ""
     private var iInvited = false
     private var transport: (([String: Any]) -> Void)?
 
-    var myMark: TicTacToe.Mark { board.mark(inviter: iInvited) }
-    var myTurn: Bool { phase == .playing && !board.isOver && board.turn == myMark }
-    var isActive: Bool {
+    package var myMark: TicTacToe.Mark { board.mark(inviter: iInvited) }
+    package var myTurn: Bool { phase == .playing && !board.isOver && board.turn == myMark }
+    package var isActive: Bool {
         switch phase {
         case .inviting, .invited, .playing: true
         default: false
         }
     }
 
-    func invite(peer: String, name: String, transport: @escaping ([String: Any]) -> Void) {
+    package func invite(peer: String, name: String, transport: @escaping ([String: Any]) -> Void) {
         if isActive { quit() }
         begin(peer: peer, name: name, transport: transport, inviter: true)
         phase = .inviting
@@ -79,7 +79,7 @@ final class ShareGame: ObservableObject {
     }
 
     /// Сообщение игры от собеседника.
-    func receive(_ json: [String: Any], peer: String, name: String, transport: @escaping ([String: Any]) -> Void) {
+    package func receive(_ json: [String: Any], peer: String, name: String, transport: @escaping ([String: Any]) -> Void) {
         let action = json["action"] as? String ?? ""
         // Уже играем с другим — новому вежливо отказываем, остальное от него не наше.
         if isActive, peer != self.peer {
@@ -108,39 +108,39 @@ final class ShareGame: ObservableObject {
         }
     }
 
-    func accept() {
+    package func accept() {
         guard phase == .invited else { return }
         phase = .playing
         send(["action": "accept"])
     }
 
-    func decline() {
+    package func decline() {
         guard phase == .invited else { return }
         send(["action": "decline"])
         phase = .none
         ShareGameWindow.shared.close()
     }
 
-    func play(_ cell: Int) {
+    package func play(_ cell: Int) {
         guard myTurn, board.play(cell) else { return }
         send(["action": "move", "cell": cell, "round": board.round])
         tally()
     }
 
-    func again() {
+    package func again() {
         guard phase == .playing else { return }
         board.start(round: board.round + 1)
         send(["action": "again", "round": board.round])
     }
 
-    func quit() {
+    package func quit() {
         if isActive { send(["action": "quit"]) }
         phase = .none
         transport = nil
     }
 
     /// Собеседник ушёл из трансляции или эфир закончился.
-    func peerGone(_ peer: String? = nil) {
+    package func peerGone(_ peer: String? = nil) {
         guard isActive, peer == nil || peer == self.peer else { return }
         phase = .ended("Игра закончилась: \(peerName) больше не в трансляции")
         transport = nil
@@ -165,7 +165,7 @@ final class ShareGame: ObservableObject {
     }
 
     /// JSON для сокета.
-    static func text(_ fields: [String: Any]) -> String? {
+    package static func text(_ fields: [String: Any]) -> String? {
         guard let data = try? JSONSerialization.data(withJSONObject: fields) else { return nil }
         return String(data: data, encoding: .utf8)
     }
@@ -174,17 +174,17 @@ final class ShareGame: ObservableObject {
 // MARK: - Окно игры
 
 @MainActor
-final class ShareGameWindow {
-    static let shared = ShareGameWindow()
+package final class ShareGameWindow {
+    package static let shared = ShareGameWindow()
     private var panel: NSPanel?
 
-    func show() {
+    package func show() {
         let panel = self.panel ?? make()
         panel.orderFrontRegardlessOnScreen()
         panel.makeKey()
     }
 
-    func close() {
+    package func close() {
         panel?.orderOut(nil)
     }
 
@@ -210,10 +210,10 @@ final class ShareGameWindow {
     }
 }
 
-struct TicTacToeView: View {
-    @ObservedObject var game: ShareGame
+package struct TicTacToeView: View {
+    @ObservedObject package var game: ShareGame
 
-    var body: some View {
+    package var body: some View {
         VStack(spacing: 14) {
             Text("С \(game.peerName)").font(.headline)
             switch game.phase {

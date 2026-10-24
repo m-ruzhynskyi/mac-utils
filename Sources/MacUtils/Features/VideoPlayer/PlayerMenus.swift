@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import MUCore
 import MUDesign
 import MUAudio
+import MUScreenShare
 
 // MARK: - Пункт меню
 

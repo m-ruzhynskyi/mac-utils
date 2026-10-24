@@ -1,47 +1,46 @@
 import AppKit
 import MUDesign
-import MUAudio
 
 /// Штрих на холсте одного экрана. Координаты — в точках холста этого экрана (начало внизу слева).
-struct AnnotationStroke: Equatable {
-    var display: CGDirectDisplayID
-    var tool: ScreenAnnotator.Tool
-    var color: NSColor
-    var points: [NSPoint]
-    var born = Date()
+package struct AnnotationStroke: Equatable {
+    package var display: CGDirectDisplayID
+    package var tool: ScreenAnnotator.Tool
+    package var color: NSColor
+    package var points: [NSPoint]
+    package var born = Date()
 }
 
 /// Все штрихи рисования на всех экранах, в порядке создания: одна «отмена» и один «стереть всё» на весь набор.
-struct AnnotationStore {
-    static let fadeAfter: TimeInterval = 3
-    static let fadeDuration: TimeInterval = 0.6
+package struct AnnotationStore {
+    package static let fadeAfter: TimeInterval = 3
+    package static let fadeDuration: TimeInterval = 0.6
 
-    private(set) var strokes: [AnnotationStroke] = []
+    package private(set) var strokes: [AnnotationStroke] = []
 
-    var isEmpty: Bool { strokes.isEmpty }
+    package var isEmpty: Bool { strokes.isEmpty }
 
-    mutating func add(_ stroke: AnnotationStroke) { strokes.append(stroke) }
+    package mutating func add(_ stroke: AnnotationStroke) { strokes.append(stroke) }
 
     /// Убирает последний нарисованный штрих (на любом экране). nil — рисовать было нечего.
     @discardableResult
-    mutating func undo() -> AnnotationStroke? { strokes.popLast() }
+    package mutating func undo() -> AnnotationStroke? { strokes.popLast() }
 
-    mutating func clear() { strokes.removeAll() }
+    package mutating func clear() { strokes.removeAll() }
 
-    func strokes(on display: CGDirectDisplayID) -> [AnnotationStroke] { strokes.filter { $0.display == display } }
+    package func strokes(on display: CGDirectDisplayID) -> [AnnotationStroke] { strokes.filter { $0.display == display } }
 
     /// Экран пропал (или сменил размер): его штрихи больше не имеют смысла.
-    mutating func drop(displays: Set<CGDirectDisplayID>) { strokes.removeAll { displays.contains($0.display) } }
+    package mutating func drop(displays: Set<CGDirectDisplayID>) { strokes.removeAll { displays.contains($0.display) } }
 
     /// Непрозрачность штриха: пока он свежий — 1, затем плавно гаснет.
-    static func alpha(age: TimeInterval, fading: Bool) -> CGFloat {
+    package static func alpha(age: TimeInterval, fading: Bool) -> CGFloat {
         guard fading else { return 1 }
         return age < fadeAfter ? 1 : max(0, 1 - CGFloat(age - fadeAfter) / CGFloat(fadeDuration))
     }
 
     /// Удаляет угасшие штрихи; true, если что-то убрано.
     @discardableResult
-    mutating func removeExpired(now: Date) -> Bool {
+    package mutating func removeExpired(now: Date) -> Bool {
         let before = strokes.count
         strokes.removeAll { now.timeIntervalSince($0.born) > Self.fadeAfter + Self.fadeDuration }
         return strokes.count != before
@@ -49,21 +48,21 @@ struct AnnotationStore {
 }
 
 /// Что делать с оверлеями при изменении набора экранов.
-enum AnnotationScreens {
-    struct Plan: Equatable {
+package enum AnnotationScreens {
+    package struct Plan: Equatable {
         /// Новые экраны: нужен оверлей.
-        var add: [CGDirectDisplayID] = []
+        package var add: [CGDirectDisplayID] = []
         /// Пропавшие экраны: оверлей убрать.
-        var remove: [CGDirectDisplayID] = []
+        package var remove: [CGDirectDisplayID] = []
         /// Остались, но рамка изменилась (разрешение, расположение): оверлей подогнать, штрихи этого экрана сбросить.
-        var resize: [CGDirectDisplayID] = []
+        package var resize: [CGDirectDisplayID] = []
         /// Остались без изменений.
-        var keep: [CGDirectDisplayID] = []
+        package var keep: [CGDirectDisplayID] = []
 
-        var isEmpty: Bool { add.isEmpty && remove.isEmpty && resize.isEmpty }
+        package var isEmpty: Bool { add.isEmpty && remove.isEmpty && resize.isEmpty }
     }
 
-    static func plan(existing: [CGDirectDisplayID: CGRect], current: [CGDirectDisplayID: CGRect]) -> Plan {
+    package static func plan(existing: [CGDirectDisplayID: CGRect], current: [CGDirectDisplayID: CGRect]) -> Plan {
         var plan = Plan()
         for id in current.keys.sorted() {
             guard let old = existing[id] else { plan.add.append(id); continue }
@@ -75,15 +74,15 @@ enum AnnotationScreens {
 }
 
 /// Режим «сквозь клики»: рисунок остаётся на экране, а мышь работает с программами под ним.
-enum AnnotationMode {
+package enum AnnotationMode {
     /// Удержание ⌥ на время переворачивает режим: в «сквозь клики» — можно порисовать, при рисовании — можно кликнуть.
-    static func ignoresMouse(clickThrough: Bool, optionHeld: Bool) -> Bool { clickThrough != optionHeld }
+    package static func ignoresMouse(clickThrough: Bool, optionHeld: Bool) -> Bool { clickThrough != optionHeld }
 }
 
 /// Рисование штрихов и склейка с кадром экрана.
-enum AnnotationRenderer {
+package enum AnnotationRenderer {
     /// Рисует штрих в текущем графическом контексте.
-    static func draw(_ stroke: AnnotationStroke, alpha: CGFloat) {
+    package static func draw(_ stroke: AnnotationStroke, alpha: CGFloat) {
         guard let first = stroke.points.first, let last = stroke.points.last else { return }
         let path = NSBezierPath()
         path.lineCapStyle = .round
@@ -124,7 +123,7 @@ enum AnnotationRenderer {
 
     /// Кадр экрана с нарисованным поверх: `pointSize` — размер экрана в точках (штрихи заданы в них),
     /// кадр может быть крупнее (Retina). Размер результата равен размеру кадра.
-    static func compose(base: CGImage, strokes: [(stroke: AnnotationStroke, alpha: CGFloat)], pointSize: CGSize) -> CGImage? {
+    package static func compose(base: CGImage, strokes: [(stroke: AnnotationStroke, alpha: CGFloat)], pointSize: CGSize) -> CGImage? {
         let width = base.width, height = base.height
         guard width > 0, height > 0, pointSize.width > 0, pointSize.height > 0,
               let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
@@ -141,12 +140,12 @@ enum AnnotationRenderer {
         return rep.cgImage
     }
 
-    static func png(_ image: CGImage) -> Data? {
+    package static func png(_ image: CGImage) -> Data? {
         NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
     }
 
     /// Пишет файл, не затирая существующий: занятое имя получает номер «(2)», «(3)».
-    static func writeUnique(_ data: Data, to url: URL, limit: Int = 1000) throws -> URL {
+    package static func writeUnique(_ data: Data, to url: URL, limit: Int = 1000) throws -> URL {
         let folder = url.deletingLastPathComponent()
         let ext = url.pathExtension, base = url.deletingPathExtension().lastPathComponent
         guard limit >= 1 else { throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: url.path]) }
@@ -164,7 +163,7 @@ enum AnnotationRenderer {
     }
 
     /// Имя файла снимка с рисунком.
-    static func snapshotName(date: Date = Date()) -> String {
+    package static func snapshotName(date: Date = Date()) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd 'в' HH.mm.ss"
         return "Снимок с рисунком \(formatter.string(from: date)).png"

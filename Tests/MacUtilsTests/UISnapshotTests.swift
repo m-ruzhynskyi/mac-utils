@@ -13,6 +13,7 @@ import XCTest
 @testable import MUAudio
 @testable import MUDropShelf
 @testable import MUCheatSheet
+@testable import MUScreenShare
 
 /// Снимки интерфейса в PNG, чтобы дизайн можно было посмотреть без запуска приложения.
 /// Работает только с `MU_SNAPSHOTS=<папка>`; без неё тест пропускается.

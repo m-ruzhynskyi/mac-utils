@@ -1,6 +1,7 @@
 import CoreMedia
 import XCTest
 @testable import MacUtils
+@testable import MUScreenShare
 
 /// Трансляция: отмена и таймаут подключения (SH3), пауза кодера без зрителей (SH4), переподключение зрителя (SH5).
 final class ScreenShareReliabilityTests: XCTestCase {

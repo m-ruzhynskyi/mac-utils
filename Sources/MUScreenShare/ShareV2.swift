@@ -8,17 +8,17 @@ import MUAudio
 // MARK: - Возможности ретранслятора
 
 /// Токен протокола в заголовке и проверка, понимает ли ретранслятор mu-share-2 (`GET /version`).
-enum ShareRelay {
-    static let legacyToken = "mu-share-1"
-    static let keyedToken = "mu-share-2"
+package enum ShareRelay {
+    package static let legacyToken = "mu-share-1"
+    package static let keyedToken = "mu-share-2"
 
-    enum Capability: Equatable { case keyed, legacy }
+    package enum Capability: Equatable { case keyed, legacy }
 
     private final class Cache: @unchecked Sendable {
         private let lock = NSLock()
         private var values: [String: Capability] = [:]
         private var expiry: [String: Date] = [:]
-        func get(_ key: String) -> Capability? {
+        package func get(_ key: String) -> Capability? {
             lock.lock(); defer { lock.unlock() }
             if let until = expiry[key], until < Date() {
                 values[key] = nil
@@ -27,34 +27,34 @@ enum ShareRelay {
             return values[key]
         }
         /// `ttl` — запомнить ненадолго (ответ был неуверенный); nil — до сброса или перезапуска.
-        func set(_ key: String, _ value: Capability, ttl: TimeInterval? = nil) {
+        package func set(_ key: String, _ value: Capability, ttl: TimeInterval? = nil) {
             lock.lock(); defer { lock.unlock() }
             values[key] = value
             expiry[key] = ttl.map { Date().addingTimeInterval($0) }
         }
-        func remove(_ key: String) { lock.lock(); defer { lock.unlock() }; values[key] = nil; expiry[key] = nil }
-        func clear() { lock.lock(); defer { lock.unlock() }; values = [:]; expiry = [:] }
+        package func remove(_ key: String) { lock.lock(); defer { lock.unlock() }; values[key] = nil; expiry[key] = nil }
+        package func clear() { lock.lock(); defer { lock.unlock() }; values = [:]; expiry = [:] }
     }
     private static let cache = Cache()
 
     /// Хост и порт сервера: ключ кэша; одинаково для `https://x`, `wss://x/` и адреса запроса.
-    static func key(forServer server: String) -> String? {
+    package static func key(forServer server: String) -> String? {
         var text = server.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.contains("://") { text = "https://" + text }
         return key(for: URL(string: text))
     }
 
-    static func key(for url: URL?) -> String? {
+    package static func key(for url: URL?) -> String? {
         guard let host = url?.host?.lowercased(), !host.isEmpty else { return nil }
         return "\(host):\(url?.port ?? 0)"
     }
 
     /// Токен для адреса: mu-share-2 только если этот ретранслятор его объявил.
-    static func token(for url: URL) -> String {
+    package static func token(for url: URL) -> String {
         key(for: url).flatMap(cache.get) == .keyed ? keyedToken : legacyToken
     }
 
-    static func versionURL(server: String) -> URL? {
+    package static func versionURL(server: String) -> URL? {
         var base = server.trimmingCharacters(in: .whitespacesAndNewlines)
         while base.hasSuffix("/") { base.removeLast() }
         if base.hasPrefix("wss://") { base = "https://" + base.dropFirst(6) }
@@ -64,14 +64,14 @@ enum ShareRelay {
     }
 
     /// Ответ `/version`: `protocols` содержит mu-share-2 — ключи поддерживаются. nil — это не ответ ретранслятора.
-    static func parseVersion(_ data: Data) -> Capability? {
+    package static func parseVersion(_ data: Data) -> Capability? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let protocols = json["protocols"] as? [String] else { return nil }
         return protocols.contains(keyedToken) ? .keyed : .legacy
     }
 
     /// nil — нет связи или временная ошибка сервера (не запоминаем, повторим при следующем подключении).
-    static func capability(server: String) async -> Capability? {
+    package static func capability(server: String) async -> Capability? {
         guard let key = key(forServer: server) else { return nil }
         if let known = cache.get(key) { return known }
         guard let url = versionURL(server: server) else { return nil }
@@ -91,17 +91,17 @@ enum ShareRelay {
     }
 
     /// Сколько помним «старый ретранслятор» без внятного ответа `/version`.
-    static let unsureTTL: TimeInterval = 300
+    package static let unsureTTL: TimeInterval = 300
 
     /// Ретранслятор отказал по токену (403/426) — прежнее знание о нём неверно (откат, смена сервера): спросим заново.
-    static func invalidate(server: String) {
+    package static func invalidate(server: String) {
         if let key = key(forServer: server) { cache.remove(key) }
     }
 
     /// Для тестов.
-    static func resetCache() { cache.clear() }
-    static func cached(server: String) -> Capability? { key(forServer: server).flatMap(cache.get) }
-    static func remember(_ capability: Capability, server: String) {
+    package static func resetCache() { cache.clear() }
+    package static func cached(server: String) -> Capability? { key(forServer: server).flatMap(cache.get) }
+    package static func remember(_ capability: Capability, server: String) {
         if let key = key(forServer: server) { cache.set(key, capability) }
     }
 }
@@ -110,22 +110,22 @@ enum ShareRelay {
 
 /// Запрос зрителя, как его присылает ретранслятор. Без поля `auth` (старый ретранслятор или зритель)
 /// запрос считается непроверенным.
-struct ShareRequest: Equatable {
-    enum Auth: Equatable { case key, none }
+package struct ShareRequest: Equatable {
+    package enum Auth: Equatable { case key, none }
 
-    var viewer: String
-    var name: String
-    var rid: String?
-    var auth: Auth
-    var pub: String?
-    var fp: String?
-    var idVerified: Bool
-    var isSelf: Bool
+    package var viewer: String
+    package var name: String
+    package var rid: String?
+    package var auth: Auth
+    package var pub: String?
+    package var fp: String?
+    package var idVerified: Bool
+    package var isSelf: Bool
 
     /// Один запрос = один ключ очереди (по rid; без него — по ID).
-    var queueKey: String { rid ?? "id:" + viewer }
+    package var queueKey: String { rid ?? "id:" + viewer }
 
-    @MainActor static func parse(_ json: [String: Any]) -> ShareRequest? {
+    @MainActor package static func parse(_ json: [String: Any]) -> ShareRequest? {
         guard json["type"] as? String == "request" else { return nil }
         let name = String((json["name"] as? String ?? "").prefix(60))
         var auth = Auth.none
@@ -143,34 +143,34 @@ struct ShareRequest: Equatable {
     }
 }
 
-enum ShareAnswer: Equatable { case allowOnce, allowAlways, decline }
+package enum ShareAnswer: Equatable { case allowOnce, allowAlways, decline }
 
 /// Что делать с запросом (раздел 4.2 дизайна): принять сразу или спросить.
-enum ShareDecision: Equatable {
+package enum ShareDecision: Equatable {
     case accept
     case ask(Prompt)
 
-    enum Kind: Equatable {
+    package enum Kind: Equatable {
         case normal      // обычный запрос
         case confirmKey  // ID в доверенных по-старому, ключ ещё не подтверждён
         case legacy      // у зрителя нет ключа: личность не проверена
     }
 
-    struct Prompt: Equatable {
-        var kind: Kind
+    package struct Prompt: Equatable {
+        package var kind: Kind
         /// Показывать «Всегда разрешать» (для confirmKey — «Разрешить и запомнить ключ»).
-        var allowAlways: Bool
-        var notes: [String]
+        package var allowAlways: Bool
+        package var notes: [String]
     }
 }
 
 /// Доверие, от которого зависит решение (в приложении — `ShareHistory.shared`).
-struct ShareTrust {
-    var isTrusted: (_ id: String, _ pub: String) -> Bool
-    var needsKeyConfirmation: (_ id: String) -> Bool
-    var canTrust: (_ id: String) -> Bool
+package struct ShareTrust {
+    package var isTrusted: (_ id: String, _ pub: String) -> Bool
+    package var needsKeyConfirmation: (_ id: String) -> Bool
+    package var canTrust: (_ id: String) -> Bool
 
-    @MainActor static func live() -> ShareTrust {
+    @MainActor package static func live() -> ShareTrust {
         let history = ShareHistory.shared
         return ShareTrust(isTrusted: { history.isTrusted(id: $0, pub: $1) },
                           needsKeyConfirmation: { history.needsKeyConfirmation(id: $0) },
@@ -178,8 +178,8 @@ struct ShareTrust {
     }
 }
 
-enum ShareRules {
-    static func decide(_ request: ShareRequest, trust: ShareTrust) -> ShareDecision {
+package enum ShareRules {
+    package static func decide(_ request: ShareRequest, trust: ShareTrust) -> ShareDecision {
         // 1. Своё же устройство: relay поставил self только после проверки подписи приватным ключом.
         if request.auth == .key, request.isSelf { return .accept }
         // 2. Доверие по ключу: один ID недостаточно, нужен и тот же ключ. И ID должен принадлежать этому ключу:
@@ -210,7 +210,7 @@ enum ShareRules {
     }
 
     /// Принять ли запрос по ответу. «Всегда разрешать» запоминает ключ только когда это разрешено правилом.
-    static func apply(_ answer: ShareAnswer, to request: ShareRequest, prompt: ShareDecision.Prompt,
+    package static func apply(_ answer: ShareAnswer, to request: ShareRequest, prompt: ShareDecision.Prompt,
                       remember: (_ id: String, _ name: String, _ pub: String) -> Void) -> Bool {
         switch answer {
         case .decline: return false
@@ -224,7 +224,7 @@ enum ShareRules {
     }
 
     /// Подпись принятия: ведущий подтверждает зрителю, что пустил его именно он (проверяется по hostKey).
-    static func hostSignature(for request: ShareRequest, roomId: String, identity: ShareIdentity) -> String? {
+    package static func hostSignature(for request: ShareRequest, roomId: String, identity: ShareIdentity) -> String? {
         guard identity.isPersistent, request.auth == .key, let pub = request.pub, let rid = request.rid else { return nil }
         return identity.sign(accept: roomId, viewerPub: pub, rid: rid)
     }
@@ -232,9 +232,9 @@ enum ShareRules {
 
 // MARK: - Тексты ошибок
 
-enum ShareErrorText {
+package enum ShareErrorText {
     /// Понятное сообщение по коду ошибки ретранслятора; незнакомый код — текст самого ретранслятора.
-    static func message(code: String, relayMessage: String? = nil) -> String {
+    package static func message(code: String, relayMessage: String? = nil) -> String {
         switch code {
         case "id-claimed": return "Этот ID занят другим устройством. Нажмите «Получить новый ID»."
         case "id-format": return "Этот ID не подходит для проверки устройства. Нажмите «Получить новый ID»."
@@ -250,27 +250,27 @@ enum ShareErrorText {
     }
 
     /// Отказ при подключении ведущего: `rate-limited` здесь — лимит новых ID с этой сети, а не «подождите минуту».
-    static func hostRefusal(code: String, message: String) -> String {
+    package static func hostRefusal(code: String, message: String) -> String {
         code == "rate-limited"
             ? "Сервер временно ограничил новые ID с вашей сети. Попробуйте позже или из другой сети."
             : message
     }
 
     /// «Занято» (409) у ведущего: если ключ недоступен, а ID привязан к нему раньше, причина в Связке ключей, а не в другом окне.
-    static func busyMessage(keychainUnavailable: Bool) -> String {
+    package static func busyMessage(keychainUnavailable: Bool) -> String {
         keychainUnavailable
             ? "Нет доступа к ключу трансляции: этот ID привязан к нему, без него трансляция не начнётся. Если Mac Utils спрашивал пароль связки ключей, разрешите доступ и повторите."
             : "С вашим ID уже идёт трансляция (может, в другом окне)"
     }
 
     /// Ошибка, которую лечит только новый ID.
-    static func needsNewID(_ code: String) -> Bool { code == "id-claimed" || code == "id-format" }
+    package static func needsNewID(_ code: String) -> Bool { code == "id-claimed" || code == "id-format" }
 }
 
 // MARK: - Рукопожатие (challenge → auth)
 
-enum ShareHandshake {
-    enum Outcome: Equatable {
+package enum ShareHandshake {
+    package enum Outcome: Equatable {
         /// `keyed` — устройство проверено ключом; false — relay в режиме off (проверки нет).
         case authed(fp: String?, keyed: Bool)
         case refused(code: String, message: String)
@@ -280,23 +280,23 @@ enum ShareHandshake {
 
     /// Можно ли говорить с relay по mu-share-2: он объявил протокол, и ключ лежит в Keychain.
     /// Временный ключ relay не показываем никогда: он закрепил бы ID за ключом, которого после перезапуска не будет.
-    static func useKeys(capability: ShareRelay.Capability?, identity: ShareIdentity) -> Bool {
+    package static func useKeys(capability: ShareRelay.Capability?, identity: ShareIdentity) -> Bool {
         capability == .keyed && identity.isPersistent
     }
 
-    static func hostAuthMessage(identity: ShareIdentity, roomId: String, nonce: String) -> String? {
+    package static func hostAuthMessage(identity: ShareIdentity, roomId: String, nonce: String) -> String? {
         guard identity.isPersistent else { return nil }
         return json(["type": "auth", "v": 2, "alg": "ed25519", "pub": identity.publicKey,
               "sig": identity.sign(host: roomId, nonce: nonce)])
     }
 
-    static func viewerAuthMessage(identity: ShareIdentity, roomId: String, viewerId: String, rid: String, nonce: String) -> String? {
+    package static func viewerAuthMessage(identity: ShareIdentity, roomId: String, viewerId: String, rid: String, nonce: String) -> String? {
         guard identity.isPersistent else { return nil }
         return json(["type": "auth", "v": 2, "alg": "ed25519", "pub": identity.publicKey,
               "sig": identity.sign(viewer: roomId, viewerId: viewerId, rid: rid, nonce: nonce)])
     }
 
-    static let releaseMessage = #"{"type":"release"}"#
+    package static let releaseMessage = #"{"type":"release"}"#
 
     private static func json(_ object: [String: Any]) -> String? {
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
@@ -304,13 +304,13 @@ enum ShareHandshake {
     }
 
     /// Разбор сообщений до `authed`: что ответить на очередное сообщение relay.
-    enum Step: Equatable {
+    package enum Step: Equatable {
         case sendAuth(nonce: String)
         case done(Outcome)
         case ignore
     }
 
-    static func step(_ json: [String: Any]) -> Step {
+    package static func step(_ json: [String: Any]) -> Step {
         switch json["type"] as? String {
         case "challenge":
             guard let nonce = json["nonce"] as? String else { return .done(.refused(code: "bad-signature", message: ShareErrorText.message(code: "bad-signature"))) }
@@ -328,7 +328,7 @@ enum ShareHandshake {
 
     /// Ждём challenge, отвечаем подписью, ждём authed. Для хоста; зритель отвечает на challenge в своём цикле приёма.
     @MainActor
-    static func authenticateHost(_ socket: URLSessionWebSocketTask, roomId: String, identity: ShareIdentity) async -> Outcome {
+    package static func authenticateHost(_ socket: URLSessionWebSocketTask, roomId: String, identity: ShareIdentity) async -> Outcome {
         for _ in 0..<6 {
             guard let message = await receiveOnce(socket, timeout: 12) else {
                 return .failed(status: (socket.response as? HTTPURLResponse)?.statusCode ?? 0)
@@ -351,7 +351,7 @@ enum ShareHandshake {
     private final class Once: @unchecked Sendable {
         private let lock = NSLock()
         private var done = false
-        func run(_ body: () -> Void) {
+        package func run(_ body: () -> Void) {
             lock.lock()
             let first = !done
             done = true
@@ -361,7 +361,7 @@ enum ShareHandshake {
     }
 
     /// Одно входящее сообщение с таймаутом; по таймауту сокет закрывается. nil — ошибка или таймаут.
-    static func receiveOnce(_ socket: URLSessionWebSocketTask, timeout: TimeInterval) async -> URLSessionWebSocketTask.Message? {
+    package static func receiveOnce(_ socket: URLSessionWebSocketTask, timeout: TimeInterval) async -> URLSessionWebSocketTask.Message? {
         await withCheckedContinuation { continuation in
             let once = Once()
             // Таймер не отменяем: сработав после ответа, он ничего не делает (Once), сокет остаётся открытым.

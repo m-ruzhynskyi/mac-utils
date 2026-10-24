@@ -36,7 +36,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     private var filterDisplayID: CGDirectDisplayID?
 
     /// Заголовок своих окон, которые должны попасть в запись (рисунки поверх экрана).
-    static let recordedWindowTitle = "MacUtils.Recorded"
+    static let recordedWindowTitle = RecordingWindow.title
 
     /// Свои окна (рамка, HUD, уведомления) в запись не попадают — кроме рисунков поверх экрана.
     private static func filter(content: SCShareableContent, display: SCDisplay) -> SCContentFilter {

@@ -9,13 +9,13 @@ import MUDesign
 import MUAudio
 
 /// Код комнаты и адрес (без сети — для тестов).
-enum ShareCode {
-    static func random() -> String {
+package enum ShareCode {
+    package static func random() -> String {
         String(format: "%06d", Int.random(in: 0...999_999))
     }
 
     /// Постоянный 10-значный ID этого Mac (как в AnyDesk): по нему к вам подключаются.
-    static var myID: String {
+    package static var myID: String {
         if let saved = UserDefaults.standard.string(forKey: Pref.shareID), saved.count == 10 { return saved }
         let id = String(Int.random(in: 1...9)) + (0..<9).map { _ in String(Int.random(in: 0...9)) }.joined()
         UserDefaults.standard.set(id, forKey: Pref.shareID)
@@ -23,23 +23,23 @@ enum ShareCode {
     }
 
     /// Имя компьютера — его видит ведущий в запросе на подключение.
-    static var myName: String { Host.current().localizedName ?? "Mac" }
+    package static var myName: String { Host.current().localizedName ?? "Mac" }
 
     /// «123 456 7890» → «1234567890»; nil — не 10 (или старые 6) цифр.
-    static func normalized(_ text: String) -> String? {
+    package static func normalized(_ text: String) -> String? {
         let digits = text.filter(\.isNumber)
         return digits.count == 10 || digits.count == 6 ? digits : nil
     }
 
     /// Ретранслятор пускает только приложения Mac Utils — по этому заголовку. Токен mu-share-2 ставится,
     /// только если ретранслятор сам объявил его в `/version`; иначе mu-share-1 (старый протокол).
-    static func request(_ url: URL, token: String? = nil) -> URLRequest {
+    package static func request(_ url: URL, token: String? = nil) -> URLRequest {
         var request = URLRequest(url: url)
         request.setValue(token ?? ShareRelay.token(for: url), forHTTPHeaderField: "X-MacUtils-Client")
         return request
     }
 
-    static func display(_ code: String) -> String {
+    package static func display(_ code: String) -> String {
         if code.count == 10 {
             let chars = Array(code)
             return "\(String(chars[0..<3])) \(String(chars[3..<6])) \(String(chars[6..<10]))"
@@ -48,7 +48,7 @@ enum ShareCode {
     }
 
     /// https://relay.example.dev → wss://relay.example.dev/room/123456?role=host
-    static func url(server: String, code: String, role: String) -> URL? {
+    package static func url(server: String, code: String, role: String) -> URL? {
         var base = server.trimmingCharacters(in: .whitespacesAndNewlines)
         while base.hasSuffix("/") { base.removeLast() }
         if base.hasPrefix("https://") { base = "wss://" + base.dropFirst(8) }
@@ -65,7 +65,7 @@ enum ShareCode {
     }
 
     /// https://relay… → https://relay…/status?ids=…
-    static func statusURL(server: String, ids: [String]) -> URL? {
+    package static func statusURL(server: String, ids: [String]) -> URL? {
         var base = server.trimmingCharacters(in: .whitespacesAndNewlines)
         while base.hasSuffix("/") { base.removeLast() }
         if base.hasPrefix("wss://") { base = "https://" + base.dropFirst(6) }
@@ -77,27 +77,27 @@ enum ShareCode {
 /// Трансляция экрана по коду: ведущий шлёт кадры через ретранслятор (relay/), зрители по коду смотрят.
 /// Только просмотр, без управления.
 @MainActor
-final class ScreenShare: NSObject, ObservableObject {
-    static let shared = ScreenShare()
+package final class ScreenShare: NSObject, ObservableObject {
+    package static let shared = ScreenShare()
 
-    enum State: Equatable {
+    package enum State: Equatable {
         case idle
         case connecting
         case live(code: String, viewers: Int)
         case failed(String)
     }
 
-    @Published private(set) var state: State = .idle
+    @Published package private(set) var state: State = .idle
     /// Ретранслятор не объявил mu-share-2: работаем по-старому, личность зрителей не проверяется.
-    @Published private(set) var relayWithoutKeys = false
+    @Published package private(set) var relayWithoutKeys = false
     /// Keychain недоступен: ключ не сохранить, трансляция и просмотр идут по mu-share-1 без проверки ключом.
-    @Published private(set) var keychainUnavailable = false
+    @Published package private(set) var keychainUnavailable = false
     /// Отпечаток этого Mac, как его вернул ретранслятор при последней проверке.
-    @Published private(set) var myFingerprint: String?
+    @Published package private(set) var myFingerprint: String?
     /// Нужен новый ID: этот закреплён за другим устройством.
-    @Published private(set) var needsNewID = false
+    @Published package private(set) var needsNewID = false
     /// Меняется при смене ID — чтобы страница перечитала его.
-    @Published private(set) var idVersion = 0
+    @Published package private(set) var idVersion = 0
     /// Подключение к ведущему прошло проверку ключом (а не старым протоколом).
     private var hostKeyed = false
     /// Попытки подключения: «Отмена», «Стоп» и таймаут делают запоздавший результат недействительным (SH3).
@@ -122,9 +122,9 @@ final class ScreenShare: NSObject, ObservableObject {
     private var sender: FrameSender?
     private var hud: NSPanel?
 
-    static var server: String { UserDefaults.standard.string(forKey: Pref.shareServer) ?? "" }
+    package static var server: String { UserDefaults.standard.string(forKey: Pref.shareServer) ?? "" }
 
-    var isLive: Bool {
+    package var isLive: Bool {
         if case .live = state { return true }
         return false
     }
@@ -132,7 +132,7 @@ final class ScreenShare: NSObject, ObservableObject {
     // MARK: - Ведущий
 
     /// screen — сразу весь экран под курсором, без окна выбора (для «Команд»: macutils://share?screen).
-    func start(screen: Bool = false) {
+    package func start(screen: Bool = false) {
         guard state == .idle || isFailed else { return }
         guard !Self.server.isEmpty else {
             state = .failed("Сервер трансляции не настроен")
@@ -168,7 +168,7 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// «Отмена» во время подключения: выбор экрана, рукопожатие и начало захвата прерываются, эфир не начнётся.
-    func cancelConnecting() {
+    package func cancelConnecting() {
         guard state == .connecting else { return }
         stop()
     }
@@ -240,7 +240,7 @@ final class ScreenShare: NSObject, ObservableObject {
         }
     }
 
-    static func connectionMessage(_ status: Int) -> String {
+    package static func connectionMessage(_ status: Int) -> String {
         switch status {
         case 0: return "Нет связи с сервером трансляции"
         case 429: return ShareErrorText.message(code: "rate-limited")
@@ -250,7 +250,7 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Возможности ретранслятора (mu-share-2 или нет); nil — нет связи.
-    func probeRelay() async -> ShareRelay.Capability? {
+    package func probeRelay() async -> ShareRelay.Capability? {
         let capability = await ShareRelay.capability(server: Self.server)
         if let capability { relayWithoutKeys = capability == .legacy }
         return capability
@@ -264,7 +264,7 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Выбор протокола: mu-share-2 только если relay его объявил и ключ лежит в Keychain; иначе — как mu-share-1 с понятным сообщением.
-    func shouldUseKeys(_ capability: ShareRelay.Capability?) -> Bool {
+    package func shouldUseKeys(_ capability: ShareRelay.Capability?) -> Bool {
         let keyed = ShareHandshake.useKeys(capability: capability, identity: .shared)
         if capability == .keyed && !keyed {
             if !keychainUnavailable { Toast.show(ShareIdentity.keychainUnavailableMessage, symbol: "key.slash", tint: .orange) }
@@ -389,7 +389,7 @@ final class ScreenShare: NSObject, ObservableObject {
 
     /// Список заглушённых изменился, программа запустилась или закрылась, процесс открыл звук (начался звонок) —
     /// пересобираем список исключённых.
-    func refreshAudioFilter() {
+    package func refreshAudioFilter() {
         // Откатились на SCK из-за ошибки перехвата — пробуем перехват снова, когда сменился выход или набор программ.
         if #available(macOS 14.2, *), audioTap == nil, let stream = audioStream, let sender,
            tapRetry.shouldTry(ShareTapRetry.situation()), retryTap(sender: sender) {
@@ -636,7 +636,7 @@ final class ScreenShare: NSObject, ObservableObject {
 
     /// Транслируемое окно изменило размер (рамку следит панель меток): поток — под новый размер. Иначе кадр остаётся
     /// прежнего размера, окно в нём обрезано или с полями, и точки зрителей у ведущего ложатся не туда.
-    func sharedWindowResized(to points: CGSize) {
+    package func sharedWindowResized(to points: CGSize) {
         guard let stream, let filter = videoFilter, filter.style == .window else { return }
         let scale = CGFloat(filter.pointPixelScale)
         let current = streamSizeOverride
@@ -653,7 +653,7 @@ final class ScreenShare: NSObject, ObservableObject {
     private var streamSizeOverride: (width: Int, height: Int)?
 
     /// Сменить, что показываем, не прерывая трансляцию.
-    func changeSource() {
+    package func changeSource() {
         guard isLive, let stream else { return }
         Picker.shared.choose(for: stream) { filter in
             guard let filter else { return }
@@ -677,12 +677,12 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Весь экран: виден и интерфейс Mac Utils, кроме служебных окон эфира (метки зрителей, индикатор «Эфир»).
-    static func displayFilter(_ display: SCDisplay, content: SCShareableContent) -> SCContentFilter {
+    package static func displayFilter(_ display: SCDisplay, content: SCShareableContent) -> SCContentFilter {
         let hidden = hiddenWindowNumbers
         return SCContentFilter(display: display, excludingWindows: content.windows.filter { hidden.contains(Int($0.windowID)) })
     }
 
-    static var hiddenWindowNumbers: Set<Int> {
+    package static var hiddenWindowNumbers: Set<Int> {
         Set([ShareMarksOverlay.shared.windowNumber, ScreenShare.shared.hud?.windowNumber, ShareRequestQueue.shared.windowNumber].compactMap { $0 })
     }
 
@@ -690,7 +690,7 @@ final class ScreenShare: NSObject, ObservableObject {
     private var videoDisplayID: CGDirectDisplayID?
 
     /// Экран трансляции: на нём показываем панель запросов, чтобы ведущий её увидел.
-    var broadcastScreen: NSScreen? {
+    package var broadcastScreen: NSScreen? {
         videoDisplayID.flatMap { id in NSScreen.screens.first { $0.displayID == id } }
     }
 
@@ -731,7 +731,7 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Мониторы — всем зрителям. Переключение выключено или показывается окно — пустой список: кнопки у зрителей нет.
-    func announceDisplays() {
+    package func announceDisplays() {
         guard isLive, let socket else { return }
         hostDisplays = ShareDisplays.list(ShareDisplays.screens())
         let list = hostDisplays.map(\.display)
@@ -757,7 +757,7 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// После пробуждения поток обычно жив: пересоздаём, только если экран молчит (даже «пустых» кадров нет) дольше 3 с.
-    func checkCaptureAfterWake() {
+    package func checkCaptureAfterWake() {
         guard isLive, let sender else { return }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -768,7 +768,7 @@ final class ScreenShare: NSObject, ObservableObject {
 
     /// Захват экрана остановился (сон, выдернули монитор): для экрана пробуем собрать поток заново, для окна и программы
     /// такого экрана нет — эфир заканчивается с понятной причиной.
-    func captureStopped(_ stopped: SCStream) {
+    package func captureStopped(_ stopped: SCStream) {
         // Остановился не текущий поток (старый, уже заменённый) или пересборка уже идёт — ничего не делаем.
         guard isLive, !recoveringCapture, stream == nil || stream === stopped else { return }
         guard videoDisplayID != nil else { return stop(reason: "Захват остановлен: окно закрыто или недоступно") }
@@ -777,7 +777,7 @@ final class ScreenShare: NSObject, ObservableObject {
 
     /// Пересоздать поток экрана: тот же монитор, если он есть, иначе основной. Попытки с паузой 1, 2, 4, 8, 15 с;
     /// звук, сокет и кодер остаются, ключевой кадр уходит сразу после запуска.
-    func recoverCapture(afterSleep: Bool) {
+    package func recoverCapture(afterSleep: Bool) {
         guard isLive, let sender, videoDisplayID != nil, !recoveringCapture else { return }
         recoveringCapture = true
         let old = stream
@@ -909,7 +909,7 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Появилось или пропало служебное окно — обновляем, что исключено из картинки.
-    func refreshVideoFilter() {
+    package func refreshVideoFilter() {
         guard let id = videoDisplayID, let stream else { return }
         Task {
             guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
@@ -1025,18 +1025,18 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Кто сейчас смотрит (имена компьютеров).
-    @Published private(set) var watchers: [String] = []
-    struct Watcher: Identifiable, Equatable { let id: String; let name: String }
+    @Published package private(set) var watchers: [String] = []
+    package struct Watcher: Identifiable, Equatable { package let id: String; let name: String }
     /// Зрители с ID — для приглашения в игру.
-    @Published private(set) var audience: [Watcher] = []
+    @Published package private(set) var audience: [Watcher] = []
 
     /// Сыграть в крестики-нолики с этим зрителем.
-    func playGame(with watcher: Watcher) {
+    package func playGame(with watcher: Watcher) {
         ShareGame.shared.invite(peer: watcher.id, name: watcher.name, transport: gameTransport(to: watcher.id))
     }
 
     /// Сообщения игры ведущего — ретранслятор доставит только этому зрителю.
-    func gameTransport(to viewer: String) -> ([String: Any]) -> Void {
+    package func gameTransport(to viewer: String) -> ([String: Any]) -> Void {
         { [weak self] fields in
             var fields = fields
             fields["to"] = viewer
@@ -1071,7 +1071,7 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// JSON ответа ведущего; значения экранирует JSONSerialization, а не подстановка в строку.
-    static func answerMessage(viewer: String, accept: Bool, rid: String? = nil, hostSig: String? = nil) -> String? {
+    package static func answerMessage(viewer: String, accept: Bool, rid: String? = nil, hostSig: String? = nil) -> String? {
         var object: [String: Any] = ["type": accept ? "accept" : "decline", "viewer": viewer, "name": ShareCode.myName]
         if let rid { object["rid"] = rid }
         if let hostSig { object["hostSig"] = hostSig }
@@ -1080,11 +1080,11 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Идёт переподключение к серверу (трансляция не остановлена).
-    @Published private(set) var reconnecting = false
+    @Published package private(set) var reconnecting = false
 
     /// Связь оборвалась: захват не останавливаем, переподключаемся с тем же ID.
     /// Зрители остаются на месте — сервер ждёт ведущего до 45 секунд.
-    func connectionLost(_ socket: URLSessionWebSocketTask) {
+    package func connectionLost(_ socket: URLSessionWebSocketTask) {
         guard isLive, self.socket === socket, !reconnecting else { return }
         reconnecting = true
         heartbeat?.invalidate()
@@ -1124,11 +1124,11 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Для проверки: оборвать связь, как при сбое сети (macutils://share-drop).
-    func simulateDrop() {
+    package func simulateDrop() {
         socket?.cancel(with: .goingAway, reason: nil)
     }
 
-    func stop(reason: String? = nil) {
+    package func stop(reason: String? = nil) {
         attempts.cancel()
         reconnecting = false
         watchers = []
@@ -1172,7 +1172,7 @@ final class ScreenShare: NSObject, ObservableObject {
 
     /// «Получить новый ID»: освобождаем старый на сервере (если соединение с ключом), меняем ключ и ID.
     /// Старый ID перестаёт работать — друзьям нужно сообщить новый.
-    func renewID() {
+    package func renewID() {
         let old = hostKeyed ? socket : nil
         Task {
             if let old {
@@ -1195,7 +1195,7 @@ final class ScreenShare: NSObject, ObservableObject {
     }
 
     /// Подтверждение перед сменой ID (действие необратимо).
-    func confirmRenewID() {
+    package func confirmRenewID() {
         let alert = NSAlert()
         alert.messageText = "Получить новый ID?"
         alert.informativeText = "Трансляция остановится, ключ этого Mac и ID будут заменены. Старый ID перестанет работать: друзьям нужно сообщить новый."
@@ -1205,7 +1205,7 @@ final class ScreenShare: NSObject, ObservableObject {
         if alert.runModal() == .alertFirstButtonReturn { renewID() }
     }
 
-    func copyCode() {
+    package func copyCode() {
         guard case .live(let code, _) = state else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(code, forType: .string)
@@ -1237,11 +1237,11 @@ final class ScreenShare: NSObject, ObservableObject {
 /// Маленький индикатор эфира в углу (в саму трансляцию не попадает): точка и «Эфир»;
 /// при наведении — код, зрители и «Стоп».
 private struct ShareHUD: View {
-    @ObservedObject var share: ScreenShare
+    @ObservedObject package var share: ScreenShare
     @ObservedObject private var queue = ShareRequestQueue.shared
     @State private var expanded = false
 
-    var body: some View {
+    package var body: some View {
         Group {
             if case .live(let code, let viewers) = share.state {
                 ShareHUDPill(code: code, viewers: viewers, requests: queue.items.count, reconnecting: share.reconnecting,
@@ -1260,18 +1260,18 @@ private struct ShareHUD: View {
 
 /// Капсула эфира (вид из `MacHost.dc.html`): пульсирующая точка и «Эфир · N»; в развёрнутом виде — код, зрители,
 /// счётчик запросов, «Другой экран», «Стоп». Значения готовые, без модели.
-struct ShareHUDPill: View {
-    let code: String?
-    let viewers: Int
-    let requests: Int
-    let reconnecting: Bool
-    let expanded: Bool
-    let copy: () -> Void
-    let showRequests: () -> Void
-    let changeSource: () -> Void
-    let stop: () -> Void
+package struct ShareHUDPill: View {
+    package let code: String?
+    package let viewers: Int
+    package let requests: Int
+    package let reconnecting: Bool
+    package let expanded: Bool
+    package let copy: () -> Void
+    package let showRequests: () -> Void
+    package let changeSource: () -> Void
+    package let stop: () -> Void
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 10) {
             PulsingDot(color: .dsRec)
             if let code {
@@ -1314,28 +1314,28 @@ struct ShareHUDPill: View {
 
 /// Отправка звука с пределом очереди: считает байты, отданные сокету и ещё не подтверждённые. Больше предела —
 /// новый пакет отбрасывается (короткий провал в звуке лучше, чем очередь, которая растёт, пока не кончится память).
-final class ShareAudioSender: @unchecked Sendable {
+package final class ShareAudioSender: @unchecked Sendable {
     /// ≈ 2 с звука трансляции (24 кГц, моно, Int16 — 48 000 байт в секунду).
-    static let defaultLimit = 96_000
+    package static let defaultLimit = 96_000
 
     private let lock = NSLock()
     private let limit: Int
     private let transport: (Data, @escaping () -> Void) -> Void
     private var pendingBytes = 0
-    private(set) var dropped = 0
+    package private(set) var dropped = 0
 
     /// `transport(данные, готово)` — отправить и вызвать `готово`, когда сокет закончил с пакетом (успешно или нет).
-    init(limit: Int = ShareAudioSender.defaultLimit, send transport: @escaping (Data, @escaping () -> Void) -> Void) {
+    package init(limit: Int = ShareAudioSender.defaultLimit, send transport: @escaping (Data, @escaping () -> Void) -> Void) {
         self.limit = limit
         self.transport = transport
     }
 
-    var pending: Int {
+    package var pending: Int {
         lock.lock(); defer { lock.unlock() }
         return pendingBytes
     }
 
-    func send(_ packet: Data) {
+    package func send(_ packet: Data) {
         let size = packet.count
         lock.lock()
         guard pendingBytes + size <= limit else {
@@ -1355,8 +1355,8 @@ final class ShareAudioSender: @unchecked Sendable {
 }
 
 /// Кадры ScreenCaptureKit → JPEG → отправка (пока предыдущий кадр не ушёл, новые пропускаем).
-final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    let queue = DispatchQueue(label: "macutils.share")
+package final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    package let queue = DispatchQueue(label: "macutils.share")
     /// URLSessionWebSocketTask сохраняет порядок отправки — звук не перемешивается.
     /// При переподключении сокет подменяется, захват экрана не прерывается.
     private var currentSocket: URLSessionWebSocketTask
@@ -1369,12 +1369,12 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     private var lastSampleAt = ProcessInfo.processInfo.systemUptime
     private func noteScreenSample() { lock.lock(); lastSampleAt = ProcessInfo.processInfo.systemUptime; lock.unlock() }
     /// Сколько секунд от экрана не было ни одного кадра (в том числе «без изменений»).
-    var secondsSinceScreenSample: Double { lock.lock(); defer { lock.unlock() }; return ProcessInfo.processInfo.systemUptime - lastSampleAt }
+    package var secondsSinceScreenSample: Double { lock.lock(); defer { lock.unlock() }; return ProcessInfo.processInfo.systemUptime - lastSampleAt }
 
     /// Захват пересоздан: ключевой кадр сразу, чтобы зрители не ждали следующего.
-    func requestKeyFrame() { queue.async { self.encoder.requestKeyFrame() } }
+    package func requestKeyFrame() { queue.async { self.encoder.requestKeyFrame() } }
 
-    func replace(_ socket: URLSessionWebSocketTask) {
+    package func replace(_ socket: URLSessionWebSocketTask) {
         lock.lock()
         currentSocket = socket
         // Новый сокет — свой счёт неотправленного звука: хвост старого больше не держит очередь.
@@ -1421,13 +1421,13 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     private var pendingBytes = 0
     private var skipping = false
     /// Для зрителей старых версий: раз в ~0.25 с ещё и кадр JPEG.
-    var legacyFrames = false
+    package var legacyFrames = false
     private var lastLegacy = Date.distantPast
     private let context = CIContext()
     /// Никто не смотрит — не кодируем и не шлём видео и звук (SH4). До первого числа зрителей от сервера — не на паузе.
     private let pauseLock = NSLock()
     private var pausedValue = false
-    var isPaused: Bool {
+    package var isPaused: Bool {
         pauseLock.lock(); defer { pauseLock.unlock() }
         return pausedValue
     }
@@ -1452,7 +1452,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     /// Как кодируется видео — зрителям в `displays` (`video`): hw — видеокарта, sw — программно.
     private let modeLock = NSLock()
     private var mode: String?
-    var videoMode: String? { modeLock.lock(); defer { modeLock.unlock() }; return mode }
+    package var videoMode: String? { modeLock.lock(); defer { modeLock.unlock() }; return mode }
     private func noteVideoMode(_ hardware: Bool?) {
         let next = hardware.map { $0 ? "hw" : "sw" }
         modeLock.lock()
@@ -1463,7 +1463,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         DispatchQueue.main.async { MainActor.assumeIsolated { ScreenShare.shared.announceDisplays() } }
     }
 
-    init(socket: URLSessionWebSocketTask) {
+    package init(socket: URLSessionWebSocketTask) {
         currentSocket = socket
         audio = Self.audioSender(socket)
     }
@@ -1479,10 +1479,10 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         return audio
     }
 
-    let audioQueue = DispatchQueue(label: "macutils.share.audio")
+    package let audioQueue = DispatchQueue(label: "macutils.share.audio")
 
     /// Число зрителей пришло от сервера: 0 — пауза, иначе работаем.
-    func setViewers(_ count: Int) {
+    package func setViewers(_ count: Int) {
         let pause = ShareEncoderGate.shouldPause(viewers: count)
         pauseLock.lock()
         let changed = pausedValue != pause
@@ -1492,12 +1492,12 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
     }
 
     /// Звук перехвата Core Audio (24 кГц моно) — тем же пакетом и через ту же очередь с пределом, что и от ScreenCaptureKit.
-    func sendAudio(_ samples: [Float]) {
+    package func sendAudio(_ samples: [Float]) {
         guard !isPaused, !samples.isEmpty else { return }
         currentAudio.send(ShareProtocol.audioPacket(samples))
     }
 
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    package func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         if type == .audio {
             if !isPaused, let packet = ShareProtocol.audioPacket(sampleBuffer) {
                 currentAudio.send(packet)
@@ -1533,7 +1533,7 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
 
     /// Новый зритель, конец паузы или переподключение: ключевой кадр сразу, из последнего кадра экрана
     /// (статичный экран новых кадров не даёт), дальше — обычный поток.
-    func resendLast() {
+    package func resendLast() {
         queue.async {
             self.encoder.requestKeyFrame()
             guard !self.isPaused, let pixels = self.lastPixels else { return }
@@ -1574,14 +1574,14 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
         }
     }
 
-    static func jpeg(_ image: CGImage) -> Data? {
+    package static func jpeg(_ image: CGImage) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.55] as CFDictionary)
         return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
+    package func stream(_ stream: SCStream, didStopWithError error: Error) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated { ScreenShare.shared.captureStopped(stream) }
         }
@@ -1591,33 +1591,33 @@ final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked 
 // MARK: - Зритель
 
 @MainActor
-final class ShareViewer: ObservableObject {
-    static let shared = ShareViewer()
+package final class ShareViewer: ObservableObject {
+    package static let shared = ShareViewer()
 
-    enum State: Equatable {
+    package enum State: Equatable {
         case idle, connecting, waiting, watching, ended(String)
         /// Связь оборвалась во время просмотра: переподключаемся сами (SH5).
         case reconnecting(attempt: Int)
     }
 
-    @Published private(set) var state: State = .idle
-    @Published private(set) var frame: NSImage?
+    @Published package private(set) var state: State = .idle
+    @Published package private(set) var frame: NSImage?
     /// Кадров JPEG с начала просмотра (для журнала, когда картинки нет).
     private var jpegFrames = 0
-    @Published private(set) var code = ""
+    @Published package private(set) var code = ""
     /// Ключ ведущего не совпал с запомненным: ждём решения пользователя (раздел 4.3 дизайна).
-    @Published private(set) var keyChange: KeyChange?
+    @Published package private(set) var keyChange: KeyChange?
 
-    struct KeyChange: Equatable {
-        let code: String
-        let oldFingerprint: String
-        let newFingerprint: String
-        let newKey: String?
+    package struct KeyChange: Equatable {
+        package let code: String
+        package let oldFingerprint: String
+        package let newFingerprint: String
+        package let newKey: String?
 
         /// Ведущий больше не подтверждает ключ (ID освобождён или на нём ведущий без проверки ключей).
-        var keyRemoved: Bool { newKey == nil }
+        package var keyRemoved: Bool { newKey == nil }
 
-        var warning: String {
+        package var warning: String {
             keyRemoved
                 ? "Ведущий больше не подтверждает ключ (раньше был \(oldFingerprint)): его ID освобождён или на нём теперь старая версия. Если вы не ждали этого, это может быть подмена."
                 : "Ключ этого компьютера изменился (был \(oldFingerprint), стал \(newFingerprint)). Если ведущий не менял ID вручную, это может быть подмена."
@@ -1641,40 +1641,40 @@ final class ShareViewer: ObservableObject {
     private var window: NSWindow?
     fileprivate let player = SharePlayer()
     /// Видео H.264 (новые версии) — аппаратное декодирование.
-    let video = H264Player()
+    package let video = H264Player()
     /// Ведущий потерял связь и переподключается — показываем последний кадр с подписью.
-    @Published var hostReconnecting = false
+    @Published package var hostReconnecting = false
     /// Что приходит: true — картинки JPEG, false — видео H.264, nil — кадров ещё нет. Показывается то, что пришло последним:
     /// ведущий Windows на время пересоздания кодера шлёт картинки, и застывший кадр видео их бы закрывал.
-    @Published private(set) var pictures: Bool?
+    @Published package private(set) var pictures: Bool?
     /// Как кодирует ведущий (`video` из displays: hw / sw / jpeg); nil — не сообщил (старая версия).
-    @Published private(set) var hostVideo: String?
+    @Published package private(set) var hostVideo: String?
     /// Когда пришёл последний кадр H.264 (главный поток): по нему отличаем мост картинками от кадров для старых зрителей.
     private var lastVideoAt: Date?
     /// Подпись «Видео · видеокарта / без видеокарты / Картинки».
-    var videoModeLabel: String? { ShareVideoMode.label(pictures: pictures, host: hostVideo) }
+    package var videoModeLabel: String? { ShareVideoMode.label(pictures: pictures, host: hostVideo) }
     /// Метки зрителей (свои и чужие) поверх картинки.
-    let marks = ShareMarkStore()
+    package let marks = ShareMarkStore()
 
-    enum Tool: String { case ping, draw, off }
-    @Published var tool: Tool = .ping
-    @Published var color = "red"
+    package enum Tool: String { case ping, draw, off }
+    @Published package var tool: Tool = .ping
+    @Published package var color = "red"
 
     /// Своя метка: показываем сразу и отправляем ведущему и остальным зрителям.
-    func sendPing(_ point: CGPoint) {
+    package func sendPing(_ point: CGPoint) {
         guard let mark = ShareMark.parse(ShareMark.message(ping: point, color: color)) else { return }
         marks.add(mark, local: true)
         socket?.send(.string(ShareMark.message(ping: point, color: color))) { _ in }
     }
 
-    func sendStroke(_ points: [CGPoint]) {
+    package func sendStroke(_ points: [CGPoint]) {
         let message = ShareMark.message(stroke: points, color: color)
         guard let mark = ShareMark.parse(message) else { return }
         marks.add(mark, local: true)
         socket?.send(.string(message)) { _ in }
     }
 
-    func watch(code input: String) {
+    package func watch(code input: String) {
         guard let code = ShareCode.normalized(input) else {
             state = .ended("ID — 10 цифр")
             return
@@ -1786,7 +1786,7 @@ final class ShareViewer: ObservableObject {
     }
 
     /// Ключ ведущего изменился — пользователь подтвердил: запоминаем новый и подключаемся заново.
-    func acceptKeyChange() {
+    package func acceptKeyChange() {
         guard let change = keyChange else { return }
         keyChange = nil
         // Ведущий больше не подтверждает ключ (newKey == nil): забываем старый, иначе подключиться к этому ID не получится.
@@ -1795,7 +1795,7 @@ final class ShareViewer: ObservableObject {
         watch(code: change.code)
     }
 
-    func dismissKeyChange() { keyChange = nil }
+    package func dismissKeyChange() { keyChange = nil }
 
     /// Ответ на challenge: сверяем ключ ведущего с запомненным и подписываем (комната и свой ID — наши, не из сообщения).
     private func handle(challenge json: [String: Any], on socket: URLSessionWebSocketTask) {
@@ -1841,7 +1841,7 @@ final class ShareViewer: ObservableObject {
     }
 
     /// Счёт видеопакетов для подтверждения relay (`ack`): по нему relay не копит очередь на медленном зрителе.
-    let acks = ShareVideoAck()
+    package let acks = ShareVideoAck()
 
     /// Чтение сокета. Видео H.264 уходит в проигрыватель прямо из колбэка, и следующее чтение взводится сразу:
     /// занятый главный поток не тормозит картинку. На главный — только учёт и остальные сообщения.
@@ -1994,7 +1994,7 @@ final class ShareViewer: ObservableObject {
 
     /// Ведущий принял, а картинки нет через `pictureWait`: в журнал — что пришло (только числа). Так видно, где поток
     /// теряется: пакетов нет совсем (ведущий не кодирует) или ключевые кадры без SPS/PPS (декодер не настроить).
-    static let pictureWait: TimeInterval = 10
+    package static let pictureWait: TimeInterval = 10
 
     private func watchForPicture(_ socket: URLSessionWebSocketTask) {
         Log.capture.info("Просмотр: ведущий принял, жду картинку")
@@ -2013,10 +2013,10 @@ final class ShareViewer: ObservableObject {
     // MARK: Мониторы ведущего (SHARE-PROTOCOL §4.1)
 
     /// Мониторы ведущего и запрос в пути; пусто — ведущий их не объявил (старая версия, выключено, показывает окно).
-    @Published private(set) var monitors = ShareMonitorPicker()
+    @Published package private(set) var monitors = ShareMonitorPicker()
     /// Плашка сверху окна: идёт переключение или короткое сообщение (3–4 с).
-    @Published private(set) var monitorNotice: MonitorNotice?
-    enum MonitorNotice: Equatable { case switching(Int), info(String) }
+    @Published package private(set) var monitorNotice: MonitorNotice?
+    package enum MonitorNotice: Equatable { case switching(Int), info(String) }
     private var monitorNoticeTask: Task<Void, Never>?
     private var monitorWaitTask: Task<Void, Never>?
     private var keyMonitor: Any?
@@ -2024,7 +2024,7 @@ final class ShareViewer: ObservableObject {
     private var hostLabel: String { hostName.isEmpty ? ShareCode.display(code) : hostName }
 
     /// Клик по плитке или клавиша 1…9: переключить монитор ведущего (сразу, без вопроса — если ведущий разрешил).
-    func requestDisplay(_ n: Int) {
+    package func requestDisplay(_ n: Int) {
         guard state == .watching, let socket, let message = monitors.request(n, now: Date()) else { return }
         socket.send(.string(message)) { _ in }
         showMonitorNotice(.switching(n), seconds: nil)
@@ -2084,17 +2084,17 @@ final class ShareViewer: ObservableObject {
     }
 
     /// Пользователь прервал переподключение.
-    func endManually() { state = .ended("Отключено") }
+    package func endManually() { state = .ended("Отключено") }
 
     /// Имя компьютера ведущего (для игры).
-    var hostName = ""
+    package var hostName = ""
 
     /// Сыграть с ведущим в крестики-нолики.
-    func playGame() {
+    package func playGame() {
         ShareGame.shared.invite(peer: "host", name: hostName.isEmpty ? ShareCode.display(code) : hostName, transport: gameTransport)
     }
 
-    var gameTransport: ([String: Any]) -> Void {
+    package var gameTransport: ([String: Any]) -> Void {
         { [weak self] fields in
             guard let text = ShareGame.text(fields) else { return }
             self?.socket?.send(.string(text)) { _ in }
@@ -2102,7 +2102,7 @@ final class ShareViewer: ObservableObject {
     }
 
     /// Закончить просмотр (окно закрыли, «Отключиться», конец трансляции): и переподключение тоже прекращается.
-    func disconnect() {
+    package func disconnect() {
         generation += 1
         reconnectsMade = 0
         silenceWatch?.invalidate()
@@ -2115,16 +2115,16 @@ final class ShareViewer: ObservableObject {
     }
 
     /// Остановить просмотр при выходе: подключение закрывается, состояние уходит из «идёт» (окно остаётся до закрытия).
-    func stopWatching() {
-        if BusyRegistry.viewerIsConnected(state) { state = .ended("Просмотр остановлен") }
+    package func stopWatching() {
+        if state.isConnected { state = .ended("Просмотр остановлен") }
         disconnect()
     }
 
     /// Окно просмотра открыто — Mac Utils виден в Dock и в ⌘Tab.
-    private(set) var isWindowOpen = false
+    package private(set) var isWindowOpen = false
 
     /// Окно просмотра закрыли: просмотр закончен, клавиши 1…9 больше не перехватываются (закрыто — не работает).
-    func windowClosed() {
+    package func windowClosed() {
         disconnect()
         state = .idle
         isWindowOpen = false
@@ -2132,7 +2132,7 @@ final class ShareViewer: ObservableObject {
     }
 
     /// Клавиши 1…9 в окне просмотра — монитор ведущего с этим номером. Только пока окно открыто.
-    func installMonitorKeys() {
+    package func installMonitorKeys() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let number = event.windowNumber, key = event.charactersIgnoringModifiers ?? ""
@@ -2154,9 +2154,9 @@ final class ShareViewer: ObservableObject {
     }
 
     /// Перехват клавиш 1…9 стоит (для проверки «закрыто — не работает»).
-    var monitorKeysInstalled: Bool { keyMonitor != nil }
+    package var monitorKeysInstalled: Bool { keyMonitor != nil }
 
-    func showWindow() {
+    package func showWindow() {
         isWindowOpen = true
         AppRouter.shared.syncDock(nil, nil)
         let window = self.window ?? {
@@ -2184,7 +2184,7 @@ final class ShareViewer: ObservableObject {
 }
 
 private struct ShareViewerView: View {
-    @ObservedObject var viewer: ShareViewer
+    @ObservedObject package var viewer: ShareViewer
     @ObservedObject private var video = ShareViewer.shared.video
     @State private var stroke: [CGPoint] = []
 
@@ -2193,7 +2193,7 @@ private struct ShareViewerView: View {
     /// Размер кадра: видео H.264 или картинка.
     private var frameSize: CGSize? { showsPictures ? viewer.frame?.size : video.size ?? viewer.frame?.size }
 
-    var body: some View {
+    package var body: some View {
         GeometryReader { proxy in
             let rect = imageRect(in: proxy.size)
             ZStack {
@@ -2317,7 +2317,7 @@ private struct ShareViewerView: View {
 }
 
 /// Что показать поверх картинки у зрителя (подключение, ожидание, переподключение, конец).
-enum ViewerStatusContent {
+package enum ViewerStatusContent {
     case progress(String)
     case notice(String)
     case reconnecting(String, disconnect: () -> Void)
@@ -2325,12 +2325,12 @@ enum ViewerStatusContent {
 }
 
 /// Карточка состояния по центру окна зрителя: `panel`, обводка `line`, радиус 20 (раньше — белый текст на чёрном).
-struct ViewerStatusCard: View {
-    let content: ViewerStatusContent
+package struct ViewerStatusCard: View {
+    package let content: ViewerStatusContent
 
-    init(_ content: ViewerStatusContent) { self.content = content }
+    package init(_ content: ViewerStatusContent) { self.content = content }
 
-    var body: some View {
+    package var body: some View {
         card.accessibilityElement(children: .contain)
     }
 
@@ -2379,12 +2379,12 @@ struct ViewerStatusCard: View {
 }
 
 /// «В ЭФИРЕ · 1080p» в углу окна зрителя (качество — в нижнем регистре, как принято).
-struct ShareViewerBadge: View {
-    var height: Int?
+package struct ShareViewerBadge: View {
+    package var height: Int?
     /// «Видео · видеокарта», «Видео · без видеокарты», «Картинки» (`ShareVideoMode`); nil — не показываем.
-    var mode: String?
+    package var mode: String?
 
-    var body: some View {
+    package var body: some View {
         VStack(alignment: .trailing, spacing: DS.Space.xs) {
             HStack(spacing: 0) {
                 Text("В ЭФИРЕ").tracking(DS.Font.tracking(0.06, size: 11))
@@ -2414,15 +2414,15 @@ struct ShareViewerBadge: View {
 /// Панель инструментов зрителя (как в `MacWatch.dc.html`): метка, рисование, выкл — значками (активный — лайм), цвет,
 /// «Сыграть». Подписи — во всплывающих подсказках. Цвета те же, что понимает ведущий (`ShareMark.palette`).
 /// Толщины линии в протоколе нет — её в панели нет.
-struct ShareViewerToolbar: View {
-    @Binding var tool: ShareViewer.Tool
-    @Binding var color: String
+package struct ShareViewerToolbar: View {
+    @Binding package var tool: ShareViewer.Tool
+    @Binding package var color: String
     /// Мониторы ведущего: раздел есть, только если ведущий их объявил.
-    let monitors: ShareMonitorPicker
-    let requestDisplay: (Int) -> Void
-    let playGame: () -> Void
+    package let monitors: ShareMonitorPicker
+    package let requestDisplay: (Int) -> Void
+    package let playGame: () -> Void
 
-    init(tool: Binding<ShareViewer.Tool>, color: Binding<String>, monitors: ShareMonitorPicker = ShareMonitorPicker(),
+    package init(tool: Binding<ShareViewer.Tool>, color: Binding<String>, monitors: ShareMonitorPicker = ShareMonitorPicker(),
          requestDisplay: @escaping (Int) -> Void = { _ in }, playGame: @escaping () -> Void) {
         _tool = tool
         _color = color
@@ -2431,7 +2431,7 @@ struct ShareViewerToolbar: View {
         self.playGame = playGame
     }
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 4) {
             toolButton(.ping, symbol: "scope", title: "Метка")
             toolButton(.draw, symbol: "pencil", title: "Рисовать")
@@ -2472,7 +2472,7 @@ struct ShareViewerToolbar: View {
         ViewerToolButton(symbol: symbol, title: title, selected: tool == value) { tool = value }
     }
 
-    static func colorTitle(_ name: String) -> String {
+    package static func colorTitle(_ name: String) -> String {
         switch name {
         case "red": return "Красный"
         case "yellow": return "Жёлтый"
@@ -2486,14 +2486,14 @@ struct ShareViewerToolbar: View {
 
 /// Кнопка-значок панели зрителя: 44×44, радиус 12; выбранная — лайм.
 private struct ViewerToolButton: View {
-    let symbol: String
-    let title: String
-    let selected: Bool
-    let action: () -> Void
+    package let symbol: String
+    package let title: String
+    package let selected: Bool
+    package let action: () -> Void
 
     @State private var hovered = false
 
-    var body: some View {
+    package var body: some View {
         let shape = RoundedRectangle(cornerRadius: DS.Radius.iconButton, style: .continuous)
         Button(action: action) {
             Image(systemName: symbol)
@@ -2513,12 +2513,17 @@ private struct ViewerToolButton: View {
 
 // MARK: - Страница
 
-struct ScreenSharePage: View {
-    static let windowsLink = "https://github.com/m-ruzhynskyi/mac-utils/releases/download/windows-latest/MacUtilsShare-Setup.exe"
+package struct ScreenSharePage: View {
+    package init(compact: Bool = false, demo: Bool = false) {
+        self.compact = compact
+        self.demo = demo
+    }
 
-    var compact = false
+    package static let windowsLink = "https://github.com/m-ruzhynskyi/mac-utils/releases/download/windows-latest/MacUtilsShare-Setup.exe"
+
+    package var compact = false
     /// Демо для снимков интерфейса: без сети, личного ID и истории этого Mac.
-    var demo = false
+    package var demo = false
     @ObservedObject private var share = ScreenShare.shared
     @ObservedObject private var viewer = ShareViewer.shared
     @AppStorage(Pref.shareServer) private var server = ""
@@ -2534,7 +2539,7 @@ struct ScreenSharePage: View {
 
     private var fingerprint: String? { demo ? "65b6-0673-d6ed-884b" : share.myFingerprint }
 
-    var body: some View {
+    package var body: some View {
         Group {
             if compact {
                 ScrollView {
@@ -2777,7 +2782,7 @@ private struct ShareHistoryRows: View {
     @State private var renaming: ShareHistory.Entry?
     @State private var newLabel = ""
 
-    var body: some View {
+    package var body: some View {
         Group {
             if history.visitedEntries.isEmpty {
                 EmptyState("Здесь появятся те, к кому вы подключались.", systemImage: "clock.arrow.circlepath", compact: true)
@@ -2823,7 +2828,7 @@ private struct ShareHistoryRows: View {
 private struct TrustedRows: View {
     @ObservedObject private var history = ShareHistory.shared
 
-    var body: some View {
+    package var body: some View {
         if !history.trustedEntries.isEmpty {
             GroupLabel("Пускать без вопроса")
             ListCard {
@@ -2840,18 +2845,18 @@ private struct TrustedRows: View {
 // MARK: - Протокол и звук
 
 /// Двоичные сообщения: первый байт — тип. 1 — кадр JPEG, 2 — звук PCM Int16, 24 кГц, моно.
-enum ShareProtocol {
-    static let frame: UInt8 = 1
-    static let audio: UInt8 = 2
-    static let sampleRate = 24_000.0
+package enum ShareProtocol {
+    package static let frame: UInt8 = 1
+    package static let audio: UInt8 = 2
+    package static let sampleRate = 24_000.0
 
-    static func framePacket(_ jpeg: Data) -> Data {
+    package static func framePacket(_ jpeg: Data) -> Data {
         var packet = Data([frame])
         packet.append(jpeg)
         return packet
     }
 
-    static func audioPacket(_ samples: [Float]) -> Data {
+    package static func audioPacket(_ samples: [Float]) -> Data {
         var packet = Data([audio])
         packet.reserveCapacity(1 + samples.count * 2)
         for sample in samples {
@@ -2861,7 +2866,7 @@ enum ShareProtocol {
         return packet
     }
 
-    static func samples(_ payload: Data) -> [Float] {
+    package static func samples(_ payload: Data) -> [Float] {
         let count = payload.count / 2
         var result = [Float](repeating: 0, count: count)
         payload.withUnsafeBytes { raw in
@@ -2874,7 +2879,7 @@ enum ShareProtocol {
     }
 
     /// Звук ScreenCaptureKit (Float32) → пакет.
-    static func audioPacket(_ sampleBuffer: CMSampleBuffer) -> Data? {
+    package static func audioPacket(_ sampleBuffer: CMSampleBuffer) -> Data? {
         guard sampleBuffer.isValid, let description = sampleBuffer.formatDescription else { return nil }
         let format = AVAudioFormat(cmAudioFormatDescription: description)
         let frames = AVAudioFrameCount(sampleBuffer.numSamples)
@@ -2889,14 +2894,14 @@ enum ShareProtocol {
 
 /// Подтверждение приёма видео: каждые `every` пакетов (H.264 и картинки) зритель сообщает relay, сколько получил за
 /// соединение. Старый relay сообщение игнорирует.
-final class ShareVideoAck: @unchecked Sendable {
-    static let every = 10
+package final class ShareVideoAck: @unchecked Sendable {
+    package static let every = 10
     private let lock = NSLock()
     private var owner: ObjectIdentifier?
     private var count = 0
 
     /// Пакет пришёл по `socket`; число, если пора подтверждать. Новый сокет — счёт заново (как у relay).
-    func received(on socket: AnyObject) -> Int? {
+    package func received(on socket: AnyObject) -> Int? {
         lock.lock(); defer { lock.unlock() }
         let id = ObjectIdentifier(socket)
         if owner != id { owner = id; count = 0 }
@@ -2904,12 +2909,12 @@ final class ShareVideoAck: @unchecked Sendable {
         return count % Self.every == 0 ? count : nil
     }
 
-    static func message(_ n: Int) -> String { "{\"type\":\"ack\",\"n\":\(n)}" }
+    package static func message(_ n: Int) -> String { "{\"type\":\"ack\",\"n\":\(n)}" }
 }
 
 /// Картинка JPEG → NSImage сразу полностью (не отложенно при первой отрисовке), чтобы разбор шёл не на главном потоке.
-enum ShareJPEG {
-    static func decode(_ data: Data) -> NSImage? {
+package enum ShareJPEG {
+    package static func decode(_ data: Data) -> NSImage? {
         let options = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let cg = CGImageSourceCreateImageAtIndex(source, 0, options) else { return nil }
@@ -2919,15 +2924,15 @@ enum ShareJPEG {
 
 /// Паузы между попытками ведущего вернуться на сервер: 44 с частых попыток (relay ждёт ведущего 45 с, потом зрителей
 /// отключает), затем раз в 30 с ещё 10 минут — захват не останавливается, после возврата эфир идёт под тем же ID.
-enum ShareHostReconnect {
-    static let quick: [UInt64] = [1, 2, 3, 5, 8, 10, 15]
-    static let slow: [UInt64] = Array(repeating: 30, count: 20)
-    static var delays: [UInt64] { quick + slow }
+package enum ShareHostReconnect {
+    package static let quick: [UInt64] = [1, 2, 3, 5, 8, 10, 15]
+    package static let slow: [UInt64] = Array(repeating: 30, count: 20)
+    package static var delays: [UInt64] { quick + slow }
 }
 
 /// Проигрывание звука трансляции у зрителя.
-final class SharePlayer: @unchecked Sendable {
-    let engine = AVAudioEngine()
+package final class SharePlayer: @unchecked Sendable {
+    package let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
     private let format = AVAudioFormat(standardFormatWithSampleRate: ShareProtocol.sampleRate, channels: 1)!
     private var started = false
@@ -2943,9 +2948,9 @@ final class SharePlayer: @unchecked Sendable {
     private let limit: Int
     /// Очередь длиннее — сбрасываем (звук догоняет картинку).
     private let catchUp: Int
-    private(set) var dropped = 0
-    private(set) var catchUps = 0
-    private(set) var restarts = 0
+    package private(set) var dropped = 0
+    package private(set) var catchUps = 0
+    package private(set) var restarts = 0
     private var observer: NSObjectProtocol?
     /// Сокет, чей звук сейчас играет: после `stop()` (выход, переподключение) пакеты старого сокета ничего не запускают.
     private var owner: ObjectIdentifier?
@@ -2955,14 +2960,14 @@ final class SharePlayer: @unchecked Sendable {
     private let restartQueue = DispatchQueue(label: "macutils.share.player.restart")
 
     /// ≈ 1 с звука трансляции.
-    static let defaultLimit = Int(ShareProtocol.sampleRate)
+    package static let defaultLimit = Int(ShareProtocol.sampleRate)
     /// ≈ 0,5 с: больше звук заметно отстаёт от картинки.
-    static let defaultCatchUp = Int(ShareProtocol.sampleRate / 2)
+    package static let defaultCatchUp = Int(ShareProtocol.sampleRate / 2)
 
     /// `silent` — для тестов и стендов: движок рендерит вручную, в динамики ничего не идёт и ничего не потребляется
     /// (как остановленный системой движок).
     /// `center` — откуда приходит `.AVAudioEngineConfigurationChange` (в тестах свой центр уведомлений).
-    init(silent: Bool = false, limit: Int = SharePlayer.defaultLimit, catchUp: Int = SharePlayer.defaultCatchUp, center: NotificationCenter = .default) {
+    package init(silent: Bool = false, limit: Int = SharePlayer.defaultLimit, catchUp: Int = SharePlayer.defaultCatchUp, center: NotificationCenter = .default) {
         self.limit = limit
         self.catchUp = catchUp
         self.center = center
@@ -2981,9 +2986,9 @@ final class SharePlayer: @unchecked Sendable {
     /// Сменилось устройство вывода (наушники, AirPods, HDMI): система останавливает движок, и без перезапуска звук
     /// пропадает. Старую очередь бросаем — в ней звук на секунду позади — и продолжаем со свежих пакетов.
     /// Для тестов: дождаться перезапуска, поставленного уведомлением.
-    func waitForRestart() { restartQueue.sync {} }
+    package func waitForRestart() { restartQueue.sync {} }
 
-    func outputChanged() {
+    package func outputChanged() {
         engineLock.lock(); defer { engineLock.unlock() }
         guard started else { return }
         node.stop()
@@ -3000,19 +3005,19 @@ final class SharePlayer: @unchecked Sendable {
     }
 
     /// Сколько секунд звука ждёт проигрывания.
-    var queuedSeconds: Double {
+    package var queuedSeconds: Double {
         lock.lock(); defer { lock.unlock() }
         return Double(queuedFrames) / ShareProtocol.sampleRate
     }
 
     /// Новый сокет просмотра — его звук разрешён, прежнего — нет.
-    func attach(_ socket: AnyObject) {
+    package func attach(_ socket: AnyObject) {
         engineLock.lock(); defer { engineLock.unlock() }
         owner = ObjectIdentifier(socket)
     }
 
     /// `socket` — откуда пакет (nil — без проверки, для тестов и стендов).
-    func play(_ payload: Data, from socket: AnyObject? = nil) {
+    package func play(_ payload: Data, from socket: AnyObject? = nil) {
         let count = payload.count / 2
         guard count > 0 else { return }
         let samples = ShareProtocol.samples(payload)
@@ -3058,7 +3063,7 @@ final class SharePlayer: @unchecked Sendable {
         }
     }
 
-    func stop() {
+    package func stop() {
         engineLock.lock(); defer { engineLock.unlock() }
         owner = nil
         guard started else { return }
@@ -3078,11 +3083,11 @@ final class SharePlayer: @unchecked Sendable {
 /// Системное окно выбора ScreenCaptureKit: экран, окно или программа.
 @MainActor
 private final class Picker: NSObject, SCContentSharingPickerObserver {
-    static let shared = Picker()
+    package static let shared = Picker()
     private var completion: ((SCContentFilter?) -> Void)?
     private var observing = false
 
-    func choose(for stream: SCStream? = nil, completion: @escaping (SCContentFilter?) -> Void) {
+    package func choose(for stream: SCStream? = nil, completion: @escaping (SCContentFilter?) -> Void) {
         let picker = SCContentSharingPicker.shared
         if !observing {
             picker.add(self)
@@ -3097,7 +3102,7 @@ private final class Picker: NSObject, SCContentSharingPickerObserver {
         if let stream { picker.present(for: stream) } else { picker.present() }
     }
 
-    func reset() {
+    package func reset() {
         completion = nil
         SCContentSharingPicker.shared.isActive = false
     }
@@ -3108,15 +3113,15 @@ private final class Picker: NSObject, SCContentSharingPickerObserver {
         completion?(filter)
     }
 
-    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
+    package nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
         DispatchQueue.main.async { MainActor.assumeIsolated { Picker.shared.finish(filter) } }
     }
 
-    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
+    package nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
         DispatchQueue.main.async { MainActor.assumeIsolated { Picker.shared.finish(nil) } }
     }
 
-    nonisolated func contentSharingPickerStartDidFailWithError(_ error: Error) {
+    package nonisolated func contentSharingPickerStartDidFailWithError(_ error: Error) {
         DispatchQueue.main.async { MainActor.assumeIsolated { Picker.shared.finish(nil) } }
     }
 }
@@ -3124,11 +3129,11 @@ private final class Picker: NSObject, SCContentSharingPickerObserver {
 /// «Не передавать звук этих программ» — например, созвон, чтобы собеседники не слышали себя дважды.
 /// Заглушённая программа — красный чип (как в окне зрителя и на Windows).
 private struct MutedAppsList: View {
-    var demo = false
+    package var demo = false
     @State private var muted: Set<String> = []
     @State private var apps: [(id: String, name: String, icon: NSImage)] = []
 
-    var body: some View {
+    package var body: some View {
         Card {
             Text("Не передавать звук программ:").font(DS.Font.rowTitle).foregroundStyle(.dsText)
             FlowLayout(spacing: DS.Space.s, lineSpacing: DS.Space.s) {
