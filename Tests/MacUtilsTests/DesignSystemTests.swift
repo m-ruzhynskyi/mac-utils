@@ -5,6 +5,7 @@ import XCTest
 @testable import MUCore
 @testable import MUDesign
 @testable import MUAudio
+@testable import MUTextEditor
 
 /// Дизайн-система Graphite (волна 0 редизайна v2): группы боковой панели, контраст токенов в обеих темах, шрифты.
 @MainActor

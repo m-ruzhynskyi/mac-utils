@@ -4,6 +4,7 @@ import SwiftUI
 import MUCore
 import MUDesign
 import MUAudio
+import MUTextEditor
 
 /// Процесс в «Диспетчере задач».
 struct ProcessRow: Identifiable, Equatable {

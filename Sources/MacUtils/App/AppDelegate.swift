@@ -15,6 +15,15 @@ import MUAudio
 import MULayoutFix
 import MUAppVolume
 import MUWindowSnap
+import MUAI
+import MUDownloadsSorter
+import MUDropShelf
+import MUCheatSheet
+import MUAnnotate
+import MUScreenShare
+import MUScreenshot
+import MUVideoPlayer
+import MUTextEditor
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения
@@ -32,6 +41,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsSection.installAppSubtitles()
         AppRouter.shared.showWhatsNewIfUpdated = { WhatsNewWindowController.shared.showIfUpdated() }
         AppRouter.shared.prepareForRelaunch = { AppSwitcher.shared.shutdown() }
+        AppRouter.shared.settingsVisible = { SettingsWindowController.shared.isVisible }
+        AppRouter.shared.syncDock = { AppDelegate.syncDock(editorOpen: $0, playerOpen: $1) }
+        AppRouter.shared.openMedia = { PlayerWindowController.open($0) }
+        AppRouter.shared.playerIsKey = { PlayerWindowController.isKey }
+        AppRouter.shared.openPlayerPanel = { PlayerWindowController.openPanel() }
+        AppRouter.shared.showShotsLibrary = { ToolsWindowController.shared.show(.shots) }
+        AppRouter.shared.addShot = { ScreenshotLibrary.shared.add($0, image: $1, app: $2) }
+        AppRouter.shared.refreshRecordingFilter = { ScreenRecorder.current?.refreshFilter() }
+        AppRouter.shared.cheatFrontGroups = { PlayerWindowController.isKey ? [PlayerShortcuts.cheatGroup] : [] }
+        AppRouter.shared.cheatMacUtilsGroup = { MainActor.assumeIsolated { CheatSheetGroups.macUtilsGroup() } }
         AppRouter.shared.isInApplications = { MoveToApplications.isInApplications }
         AppRouter.shared.runHotKey = { id in HotKeyAction.action(forHotKeyID: id).map { AppAction(hotKey: $0).run() } }
         KeepAwake.shared.observeWake()

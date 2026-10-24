@@ -3,6 +3,8 @@ import XCTest
 @testable import MacUtils
 @testable import MUDesign
 @testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Правка текста в «Документе» (D-3): каждая команда — точечные правки исходника. Проверки «без потерь»:
 /// правки только в окне затронутых абзацев, скобок не хуже, наш разбор и Cocoa открывают, видимый текст ожидаемый,

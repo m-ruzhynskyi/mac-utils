@@ -92,15 +92,60 @@ let package = Package(
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUWindowSnap"
         ),
+        .target(
+            name: "MUAI",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUAI"
+        ),
+        .target(
+            name: "MUDownloadsSorter",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUDownloadsSorter"
+        ),
+        .target(
+            name: "MUDropShelf",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUDropShelf"
+        ),
         // Удалённые подключения: вся логика без зависимости от приложения и других модулей
         // (см. .audit/task-remote-connections.md).
         .target(
             name: "MURemoteConnections",
             path: "Sources/MURemoteConnections"
         ),
+        .target(
+            name: "MUCheatSheet",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUCheatSheet"
+        ),
+        .target(
+            name: "MUAnnotate",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUAnnotate"
+        ),
+        .target(
+            name: "MUScreenShare",
+            dependencies: ["MUCore", "MUDesign", "MUAudio"],
+            path: "Sources/MUScreenShare"
+        ),
+        .target(
+            name: "MUScreenshot",
+            dependencies: ["MUCore", "MUDesign", "MUDownloadsSorter", "MUSmoothScroll"],
+            path: "Sources/MUScreenshot"
+        ),
+        .target(
+            name: "MUVideoPlayer",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUVideoPlayer"
+        ),
+        .target(
+            name: "MUTextEditor",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUTextEditor"
+        ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MURemoteConnections"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -114,7 +159,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MURemoteConnections"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
             path: "Tests/MacUtilsTests"
         ),
     ]

@@ -16,6 +16,8 @@ import os, re, sys
 BASE = {"MUCore", "MUDesign", "MUAudio"}
 # Нижние слои: от кого каждый из них может зависеть.
 LAYER = {"MUCore": set(), "MUDesign": {"MUCore"}, "MUAudio": {"MUCore"}}
+# Связи, которые уже были до разбивки (шаги 1–16). Новых функциональных связей не добавлять.
+LAYER["MUScreenshot"] = BASE | {"MUDownloadsSorter", "MUSmoothScroll"}
 APP = {"MacUtils", "ToolsLauncher"}  # исполняемые: могут зависеть от любых модулей
 IMPORT = re.compile(r'^\s*(?:@\w+(?:\([^)]*\))?\s+)*import\s+(?:(?:struct|class|enum|protocol|func|var|let|typealias)\s+)?([A-Za-z_]\w*)', re.M)
 KINDS = (".executableTarget(", ".testTarget(", ".target(")

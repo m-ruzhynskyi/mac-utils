@@ -1,6 +1,11 @@
 import AppIntents
 import Foundation
 import MUCore
+import MUAI
+import MUDownloadsSorter
+import MUScreenShare
+import MUScreenshot
+import MUTextEditor
 
 // Действия Mac Utils в приложении «Команды» (App Intents). Каждое зовёт `AppAction.run()` — ту же функцию, что горячая
 // клавиша, панель и ссылка `macutils://…`; действия с файлами — `FileTools`, без окна редактора.
@@ -69,22 +74,35 @@ enum WarmScreenCommand: String, AppEnum {
     ]
 }
 
-extension TextEncoding: AppEnum {
+/// Кодировка и перевод строки для Команд: `AppEnum` обязан жить в исполняемом модуле, сами типы — в `MUCore`.
+enum TextEncodingChoice: String, AppEnum {
+    case utf8, utf8BOM, utf16LE, utf16BE
+    case windows1251, windows1252, windows1250
+    case koi8R, koi8U
+    case iso8859_1, iso8859_2, iso8859_5
+    case macRoman, cp866
+
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Кодировка"
-    static let caseDisplayRepresentations: [TextEncoding: DisplayRepresentation] = [
+    static let caseDisplayRepresentations: [TextEncodingChoice: DisplayRepresentation] = [
         .utf8: "UTF-8", .utf8BOM: "UTF-8 с BOM", .utf16LE: "UTF-16 LE", .utf16BE: "UTF-16 BE",
         .windows1251: "Windows-1251 (кириллица)", .windows1252: "Windows-1252 (Западная Европа)",
         .windows1250: "Windows-1250 (Центральная Европа)", .koi8R: "KOI8-R", .koi8U: "KOI8-U",
         .iso8859_1: "ISO 8859-1", .iso8859_2: "ISO 8859-2", .iso8859_5: "ISO 8859-5",
         .macRoman: "Mac Roman", .cp866: "CP866 (DOS)",
     ]
+
+    var encoding: TextEncoding { TextEncoding(rawValue: rawValue) ?? .utf8 }
 }
 
-extension LineEnding: AppEnum {
+enum LineEndingChoice: String, AppEnum {
+    case crlf, lf, cr
+
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Перевод строки"
-    static let caseDisplayRepresentations: [LineEnding: DisplayRepresentation] = [
+    static let caseDisplayRepresentations: [LineEndingChoice: DisplayRepresentation] = [
         .crlf: "CRLF (Windows)", .lf: "LF (macOS и Linux)", .cr: "CR (старый Mac OS)",
     ]
+
+    var ending: LineEnding { LineEnding(rawValue: rawValue) ?? .lf }
 }
 
 // MARK: - Общее
@@ -267,14 +285,14 @@ struct ConvertEncodingIntent: AppIntent {
     static let title: LocalizedStringResource = "Сменить кодировку файла"
     static let description = IntentDescription("Тот же текст в другой кодировке (как «Преобразовать в…»). Символов, которых нет в новой кодировке, — ошибка, файл не меняется.")
     @Parameter(title: "Файл") var file: IntentFile
-    @Parameter(title: "Кодировка", default: .utf8) var encoding: TextEncoding
+    @Parameter(title: "Кодировка", default: .utf8) var encoding: TextEncodingChoice
     @Parameter(title: "Сейчас файл в кодировке", description: "Если автоопределение ошибается (например, Windows-1251 без \\ansicpg читается как Windows-1252). Пусто — определить самому.")
-    var source: TextEncoding?
+    var source: TextEncodingChoice?
     static var parameterSummary: some ParameterSummary {
         Summary("Перевести \(\.$file) в \(\.$encoding)") { \.$source }
     }
     func perform() async throws -> some IntentResult & ReturnsValue<Bool> {
-        do { return .result(value: try FileTools.convertEncoding(of: try path(of: file), to: encoding, from: source)) }
+        do { return .result(value: try FileTools.convertEncoding(of: try path(of: file), to: encoding.encoding, from: source?.encoding)) }
         catch let error as ShortcutError { throw error }
         catch { throw ShortcutError(message: error.localizedDescription) }
     }
@@ -284,10 +302,10 @@ struct ConvertLineEndingsIntent: AppIntent {
     static let title: LocalizedStringResource = "Переводы строк файла"
     static let description = IntentDescription("Все переводы строк файла одного вида: CRLF, LF или CR.")
     @Parameter(title: "Файл") var file: IntentFile
-    @Parameter(title: "Перевод строки", default: .crlf) var ending: LineEnding
+    @Parameter(title: "Перевод строки", default: .crlf) var ending: LineEndingChoice
     static var parameterSummary: some ParameterSummary { Summary("Переводы строк \(\.$file): \(\.$ending)") }
     func perform() async throws -> some IntentResult & ReturnsValue<Bool> {
-        do { return .result(value: try FileTools.convertLineEndings(of: try path(of: file), to: ending)) }
+        do { return .result(value: try FileTools.convertLineEndings(of: try path(of: file), to: ending.ending)) }
         catch let error as ShortcutError { throw error }
         catch { throw ShortcutError(message: error.localizedDescription) }
     }

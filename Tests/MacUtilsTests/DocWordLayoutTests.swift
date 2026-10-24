@@ -4,6 +4,8 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Вертикаль «Документа» как у Word (`DocLineMetrics`): высота строк без округления TextKit, `\sl`, `\sb`/`\sa`,
 /// `\contextualspace`, строки таблиц без лишних полей, знак конца пустой ячейки, плавающие фигуры без места в тексте,

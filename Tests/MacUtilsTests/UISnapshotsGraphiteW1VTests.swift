@@ -5,6 +5,8 @@ import XCTest
 @testable import MUCore
 @testable import MUMusic
 @testable import MUAudio
+@testable import MUScreenShare
+@testable import MUTextEditor
 
 /// Снимки демо-вариантов страниц волны 1 (исполнитель В): трансляция, ИИ, музыка, записи встреч — без сети,
 /// личного ID, истории и записей этого Mac. Работает только с `MU_SNAPSHOTS=<папка>`.

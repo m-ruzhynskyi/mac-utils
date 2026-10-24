@@ -3,6 +3,8 @@ import SwiftUI
 import MUCore
 import MUDesign
 import MUUpdate
+import MUScreenshot
+import MUTextEditor
 
 // MARK: - Общие
 

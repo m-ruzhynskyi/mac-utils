@@ -1,6 +1,6 @@
 # Протокол трансляции экрана: mu-share-1 и mu-share-2
 
-Как устроено на самом деле (relay `relay/src/index.js`, `limits.js`, `auth.js`; Mac `Features/ScreenShare/*`; страница `relay/src/index.html`).
+Как устроено на самом деле (relay `relay/src/index.js`, `limits.js`, `auth.js`; Mac `Sources/MUScreenShare/*`; страница `relay/src/index.html`).
 Мониторы ведущего (§4.1) — общая фикстура `relay/tests/fixtures/displays.json`.
 Дизайн и обоснования: `.audit/auth-design.md`. Правила версий протокола: [VERSIONING.md](VERSIONING.md), раздел 3.
 

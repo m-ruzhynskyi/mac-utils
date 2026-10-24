@@ -2,6 +2,8 @@ import AVFoundation
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUVideoPlayer
+@testable import MUTextEditor
 
 /// Этап 4 плеера: «Пропустить интро / титры» по главам и «Следующая серия» (§ 8.2–8.3, 8.8).
 final class ChapterClassifierTests: XCTestCase {

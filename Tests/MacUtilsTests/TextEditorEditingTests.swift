@@ -2,6 +2,7 @@ import AppKit
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUTextEditor
 
 /// Этап 2.6: сортировка, повторы, табы ↔ пробелы, закладки, ввод в прямоугольное выделение.
 final class LineCommandsMoreTests: XCTestCase {

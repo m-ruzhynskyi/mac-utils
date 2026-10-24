@@ -5,6 +5,8 @@ import OSLog
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
+import MUScreenshot
+import MUTextEditor
 
 /// Ключи настроек «Удалённых подключений». Паролей среди них нет и быть не может: только путь, лист, программа
 /// по умолчанию и ID в избранном и недавних.

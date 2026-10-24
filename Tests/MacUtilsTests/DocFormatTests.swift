@@ -3,6 +3,8 @@ import XCTest
 @testable import MacUtils
 @testable import MUDesign
 @testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Форматирование в режиме «Документ» (D-4): точечные правки свойств символов и абзацев. Главное правило — байты вне
 /// правок не меняются, а всё, кроме цели, читается как раньше. Документы выдуманные, в стиле Word.

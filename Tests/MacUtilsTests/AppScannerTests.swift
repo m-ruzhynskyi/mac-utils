@@ -3,6 +3,7 @@ import XCTest
 @testable import MUDesign
 @testable import MUUninstaller
 @testable import MUAudio
+@testable import MUTextEditor
 
 @MainActor
 final class AppScannerTests: XCTestCase {

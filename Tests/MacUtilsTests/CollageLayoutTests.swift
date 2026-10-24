@@ -2,6 +2,8 @@ import CoreGraphics
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 @MainActor
 final class CollageLayoutTests: XCTestCase {

@@ -1,5 +1,7 @@
 import XCTest
 @testable import MacUtils
+@testable import MUVideoPlayer
+@testable import MUTextEditor
 
 /// Этап 2 плеера: разбор SRT, ASS-подмножества и WebVTT, кодировки, поиск реплик и файлов рядом с видео.
 final class SubtitleParserTests: XCTestCase {
