@@ -81,11 +81,12 @@ public enum AccessParser {
     static let maskDots = "••••••"
 
     /// Метки паролей и ключей; всё после них до конца строки уходит под маску («Password: a · b · c» — все три).
+    /// Разделитель — «:», «=», тире или пробелы; символы самого значения (в том числе ведущий «-») — под маской.
     /// Длинные варианты раньше коротких: «password» раньше «pass».
     private static let secretLabel = try! NSRegularExpression(pattern:
         #"(?<![\p{L}\d])(парол\p{L}*|ключ\p{L}*|секрет\p{L}*|токен\p{L}*|пін|пин|"#
         + #"password|passwort|passphrase|passwd|pass|pwd|pw|l2tp ?psk|pre-?shared[ -]?key|psk|private ?key|key|"#
-        + #"secret|token|pin)(?![\p{L}\d])([ \t:=—–\-]+)([^\s:=—–\-][^\n]*)"#,
+        + #"secret|token|pin)(?![\p{L}\d])([ \t]*[:=—–][ \t]*|[ \t]+-[ \t]+|[ \t]+)(\S[^\n]*)"#,
         options: [.caseInsensitive])
 
     /// Строка «Доступа»: всё после метки пароля, ключа или PSK до конца строки заменено точками.
@@ -127,6 +128,11 @@ public enum AccessParser {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if !trimmed.contains(where: \.isWhitespace), isPlainWord(trimmed) {
             return line.replacingOccurrences(of: trimmed, with: maskDots)
+        }
+        // «VPN Qw1» (row 13): заголовок блока, пробел и одно слово — больше ничего. Слово может быть паролем — как «RDP — Qw1».
+        let words = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        if words.count == 2, let section = header(words[0]), section != .program, isPlainWord(words[1]) {
+            return line.replacingOccurrences(of: words[1], with: maskDots)
         }
         var out = ""
         var index = 0

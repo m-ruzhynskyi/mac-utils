@@ -383,4 +383,34 @@ final class ConnectionCardTests: XCTestCase {
         XCTAssertEqual(PhoneNumber.dialable("00380 50 000 00 01"), "+380500000001")
         XCTAssertEqual(PhoneNumber.dialable("0048 600 000 000"), "+48600000000")
     }
+
+    // MARK: Повторное ревью (.audit/review-rc-card-v2b.md)
+
+    /// Row 13: одно слово сразу после заголовка блока — под маской, как «RDP — «17»». Строки AnyDesk не трогаются.
+    func testLoneWordAfterBlockHeaderIsMasked() {
+        let cases: [(String, String)] = [
+            ("VPN Qw3rty-13", "VPN ••••••"), ("RDP Demo17", "RDP ••••••"), ("Router Demo-R", "Router ••••••"),
+            ("Server Srv-1", "Server ••••••"), ("FortiClient fc-pass", "FortiClient ••••••"), ("L2TP l2", "L2TP ••••••"),
+            ("PPTP pp9", "PPTP ••••••"), ("RDP — Demo-17", "RDP — ••••••"),
+            ("VPN WireGuard", "VPN WireGuard"), ("RDP 10.0.13.1", "RDP 10.0.13.1"), ("VPN включено сегодня", "VPN включено сегодня"),
+            ("AnyDesk: 123456789 demo-pc office", "AnyDesk: 123456789 demo-pc office"), ("AnyDesk demo-pc", "AnyDesk demo-pc"),
+        ]
+        for (line, want) in cases { XCTAssertEqual(AccessParser.masked(line, secrets: []), want, line) }
+        let shown = AccessParser.masked("VPN Demo-Name-11\nRDP — 10.0.13.2", secrets: [])
+        XCTAssertFalse(shown.contains("Demo-Name-11"))
+        XCTAssertTrue(shown.contains("RDP — 10.0.13.2"))
+    }
+
+    /// Ведущий «-» — часть значения: под маской и он.
+    func testLeadingDashOfPasswordIsMasked() {
+        let cases: [(String, String)] = [
+            ("пароль: -Qw1", "пароль: ••••••"), ("pass -Qw2", "pass ••••••"), ("password = -=Qw3", "password = ••••••"),
+            ("L2tpPsk=-k1", "L2tpPsk=••••••"), ("пароль — -Qw4", "пароль — ••••••"), ("pwd:Demo-7", "pwd:••••••"),
+            ("RDP — пароль:", "RDP — пароль:"), ("с общим ключом. Если", "с общим ключом. Если"),
+        ]
+        for (line, want) in cases {
+            XCTAssertEqual(AccessParser.mask(line), want, line)
+            XCTAssertFalse(AccessParser.masked(line, secrets: []).contains("Qw"), line)
+        }
+    }
 }
