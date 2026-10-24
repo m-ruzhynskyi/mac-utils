@@ -1,0 +1,658 @@
+import AppKit
+import SwiftUI
+import MUCore
+import MUDesign
+
+/// Правила раскладки (без UI — для тестов).
+package enum DownloadsRules {
+    package enum Category: String, CaseIterable {
+        case images = "Images"
+        case documents = "Documents"
+        case archives = "Archives"
+        case installers = "Installers"
+        case video = "Video"
+        case audio = "Audio"
+        case code = "Code"
+
+        /// Старые русские названия папок (до 1.2.88) — их содержимое переносится.
+        package var legacyName: String {
+            switch self {
+            case .images: return "Изображения"
+            case .documents: return "Документы"
+            case .archives: return "Архивы"
+            case .installers: return "Установщики"
+            case .video: return "Видео"
+            case .audio: return "Аудио"
+            case .code: return "Код"
+            }
+        }
+    }
+
+    /// Расширение без точки, в нижнем регистре: «.Sketch» → «sketch».
+    package static func normalizedExtension(_ ext: String) -> String {
+        ext.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+    }
+
+    /// Папка из правила в безопасном виде: имя внутри «Загрузок» или полный путь. nil — значение недопустимо
+    /// (пусто, «.», «..», «~» без пути, корень, «..» внутри пути): иначе файлы ушли бы за пределы «Загрузок» (в домашнюю папку).
+    package static func validatedFolder(_ value: String, downloads: URL? = nil) -> String? {
+        var folder = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !folder.isEmpty, !folder.contains("\0") else { return nil }
+        if folder == "~" || folder.hasPrefix("~/") {
+            folder = (folder as NSString).expandingTildeInPath
+            // Сама домашняя папка — не папка для файлов.
+            if folder == NSHomeDirectory() || folder == NSHomeDirectory() + "/" { return nil }
+        }
+        if folder.hasPrefix("/") {
+            let parts = folder.split(separator: "/", omittingEmptySubsequences: true)
+            guard !parts.isEmpty, !parts.contains(".."), !parts.contains(".") else { return nil }
+            let path = "/" + parts.joined(separator: "/")
+            // Сами «Загрузки» и их родители: файл «переехал» бы в ту же папку и получал бы всё более длинное имя.
+            if let downloads {
+                let own = downloads.standardizedFileURL.path
+                if own == path || own.hasPrefix(path + "/") { return nil }
+            }
+            return path
+        }
+        // Относительное имя — одна папка в «Загрузках»; «/» внутри заменяется, как и раньше.
+        let name = folder.replacingOccurrences(of: "/", with: "-")
+        guard name != ".", name != "..", name != "~", !name.allSatisfy({ $0 == "." }) else { return nil }
+        return name
+    }
+
+    /// Папка для файла: своё правило важнее встроенной категории. Недопустимое правило игнорируется.
+    package static func folderName(for url: URL, custom: [String: String]) -> String? {
+        let ext = url.pathExtension.lowercased()
+        if !ext.isEmpty, let rule = custom[ext], let folder = validatedFolder(rule) {
+            // Полный путь — любая папка на диске; иначе — папка внутри «Загрузок».
+            return folder
+        }
+        return category(for: url)?.rawValue
+    }
+
+    private static let extensions: [Category: Set<String>] = [
+        .images: ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "svg", "bmp", "tif", "tiff", "raw", "psd", "ico"],
+        .documents: ["pdf", "doc", "docx", "txt", "rtf", "pages", "xls", "xlsx", "csv", "numbers", "key", "ppt", "pptx",
+                     "md", "odt", "ods", "epub", "fb2", "djvu"],
+        .archives: ["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz"],
+        .installers: ["dmg", "pkg", "mpkg", "iso", "app"],
+        .video: ["mp4", "mov", "mkv", "avi", "webm", "m4v", "wmv", "flv"],
+        .audio: ["mp3", "wav", "m4a", "flac", "aac", "ogg", "aiff", "opus"],
+        .code: ["swift", "py", "js", "ts", "json", "html", "css", "sh", "java", "kt", "c", "cpp", "h", "go", "rs", "rb",
+                "php", "sql", "yml", "yaml", "xml", "ipynb"],
+    ]
+
+    package static func category(for url: URL) -> Category? {
+        let ext = url.pathExtension.lowercased()
+        guard !ext.isEmpty else { return nil }
+        return Category.allCases.first { extensions[$0]?.contains(ext) == true }
+    }
+
+    /// Недокачанные файлы браузеров и служебные — не трогаем.
+    package static func isPartial(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        if name.hasPrefix(".") || name.hasPrefix("~$") { return true }
+        let partial: Set<String> = ["crdownload", "download", "part", "partial", "opdownload", "tmp"]
+        return partial.contains(url.pathExtension.lowercased())
+    }
+
+    /// Свободное имя в папке: «файл.pdf», «файл (2).pdf», «файл (3).pdf»…
+    package static func uniqueName(_ name: String, existing: Set<String>) -> String {
+        guard existing.contains(name) else { return name }
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        var index = 2
+        while true {
+            let candidate = ext.isEmpty ? "\(base) (\(index))" : "\(base) (\(index)).\(ext)"
+            if !existing.contains(candidate) { return candidate }
+            index += 1
+        }
+    }
+
+    // MARK: - Корзина: согласие и кандидаты
+
+    /// Согласие на отправку в Корзину запоминается вместе со сроком: другой срок — новое подтверждение.
+    package static let trashConfirmedKey = "downloadsTrashConfirmedDays"
+
+    package static func isTrashConfirmed(days: Int, defaults: UserDefaults = .standard) -> Bool {
+        days > 0 && defaults.integer(forKey: trashConfirmedKey) == days
+    }
+
+    package static func confirmTrash(days: Int, defaults: UserDefaults = .standard) {
+        defaults.set(days, forKey: trashConfirmedKey)
+    }
+
+    /// Что уйдёт в Корзину: просроченные файлы во встроенных папках категорий, кроме `excluding`
+    /// (разложенное в этом же проходе). Папки по своим правилам не чистятся: это ваши папки.
+    package static func trashCandidates(in folder: URL, days: Int, excluding: Set<URL> = [], now: Date = Date()) -> [URL] {
+        guard days > 0 else { return [] }
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .contentAccessDateKey, .addedToDirectoryDateKey]
+        var result: [URL] = []
+        for category in Category.allCases {
+            let dir = folder.appendingPathComponent(category.rawValue, isDirectory: true)
+            for url in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys,
+                                                                     options: [.skipsHiddenFiles])) ?? [] {
+                guard !excluding.contains(url.standardizedFileURL) else { continue }
+                let values = try? url.resourceValues(forKeys: Set(keys))
+                if isExpired(modified: values?.contentModificationDate, accessed: values?.contentAccessDate,
+                             added: values?.addedToDirectoryDate, days: days, now: now) {
+                    result.append(url)
+                }
+            }
+        }
+        return result
+    }
+
+    /// Пора ли в Корзину: не менялся и не открывался дольше `days` дней.
+    /// `added` — когда файл попал в эту папку: файлы из архивов и AirDrop приходят со старыми датами изменения и открытия,
+    /// но только что разложенный файл не должен сразу уходить в Корзину.
+    package static func isExpired(modified: Date?, accessed: Date?, added: Date? = nil, days: Int, now: Date = Date()) -> Bool {
+        guard days > 0 else { return false }
+        let last = [modified, accessed, added].compactMap { $0 }.max() ?? now
+        return now.timeIntervalSince(last) > Double(days) * 86_400
+    }
+}
+
+/// «Загрузки»: новые файлы раскладываются по папкам по типу, старые
+/// (через N дней) уходят в Корзину. Безвозвратно ничего не удаляется.
+@MainActor
+package final class DownloadsSorter: ObservableObject {
+    package static let shared = DownloadsSorter()
+
+    @Published package private(set) var isRunning = false
+    @Published package private(set) var lastResult: String?
+    /// Что ушло бы в Корзину, но ждёт вашего согласия (срок выбран, подтверждения ещё не было).
+    @Published package private(set) var trashPreview: [URL] = []
+    @Published package private(set) var customRules: [String: String] = DownloadsSorter.customRules
+
+    /// Свои правила: расширение → папка.
+    package nonisolated static var customRules: [String: String] {
+        UserDefaults.standard.dictionary(forKey: Pref.downloadsCustomRules) as? [String: String] ?? [:]
+    }
+
+    /// false — папка недопустима (`..`, `.`, `~`, корень) и правило не сохранено.
+    @discardableResult
+    package func setRule(extension ext: String, folder: String?) -> Bool {
+        var rules = Self.customRules
+        let key = DownloadsRules.normalizedExtension(ext)
+        guard !key.isEmpty else { return false }
+        if let folder, !folder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let valid = DownloadsRules.validatedFolder(folder, downloads: self.folder) else { return false }
+            rules[key] = valid
+        } else {
+            rules[key] = nil
+        }
+        UserDefaults.standard.set(rules, forKey: Pref.downloadsCustomRules)
+        customRules = rules
+        return true
+    }
+
+    /// Типы файлов в «Загрузках», для которых нет ни категории, ни своего правила.
+    package func unknownExtensions() -> [(ext: String, count: Int)] {
+        let custom = Self.customRules
+        var counts: [String: Int] = [:]
+        for url in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil,
+                                                                 options: [.skipsHiddenFiles])) ?? [] {
+            let ext = url.pathExtension.lowercased()
+            guard !ext.isEmpty, !DownloadsRules.isPartial(url),
+                  DownloadsRules.folderName(for: url, custom: custom) == nil else { continue }
+            counts[ext, default: 0] += 1
+        }
+        return counts.map { ($0.key, $0.value) }.sorted { $0.count > $1.count }
+    }
+
+    /// Русские папки прежних версий → английские (содержимое переносится).
+    private static func migrateLegacyFolders(in folder: URL) {
+        let manager = FileManager.default
+        for category in DownloadsRules.Category.allCases {
+            let legacy = folder.appendingPathComponent(category.legacyName, isDirectory: true)
+            guard manager.fileExists(atPath: legacy.path) else { continue }
+            let target = folder.appendingPathComponent(category.rawValue, isDirectory: true)
+            if !manager.fileExists(atPath: target.path) {
+                try? manager.moveItem(at: legacy, to: target)
+                continue
+            }
+            for item in (try? manager.contentsOfDirectory(at: legacy, includingPropertiesForKeys: nil)) ?? [] {
+                let existing = Set((try? manager.contentsOfDirectory(atPath: target.path)) ?? [])
+                let name = DownloadsRules.uniqueName(item.lastPathComponent, existing: existing)
+                try? manager.moveItem(at: item, to: target.appendingPathComponent(name))
+            }
+            if ((try? manager.contentsOfDirectory(atPath: legacy.path)) ?? []).filter({ !$0.hasPrefix(".") }).isEmpty {
+                try? manager.removeItem(at: legacy)
+            }
+        }
+    }
+
+    private var source: DispatchSourceFileSystemObject?
+    private var timer: Timer?
+    private var pending: DispatchWorkItem?
+
+    package var folder: URL {
+        FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+    }
+
+    package func sync() {
+        let enabled = UserDefaults.standard.bool(forKey: Pref.downloadsSort)
+        source?.cancel()
+        source = nil
+        timer?.invalidate()
+        timer = nil
+        guard enabled else {
+            isRunning = false
+            return
+        }
+        // Следим за папкой: любое изменение — разложить через несколько секунд.
+        let fd = open(folder.path, O_EVTONLY)
+        if fd >= 0 {
+            let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
+            source.setEventHandler { MainActor.assumeIsolated { DownloadsSorter.shared.schedule() } }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            self.source = source
+        }
+        // И раз в 10 минут — для тех, что докачались, и для чистки старых.
+        let timer = Timer(timeInterval: 600, repeats: true) { _ in
+            MainActor.assumeIsolated { _ = DownloadsSorter.shared.run() }
+        }
+        timer.tolerance = 60
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+        isRunning = source != nil
+        schedule()
+    }
+
+    private func schedule() {
+        pending?.cancel()
+        let work = DispatchWorkItem { MainActor.assumeIsolated { _ = DownloadsSorter.shared.run() } }
+        pending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
+    }
+
+    /// Разложить новые файлы и убрать старые. Возвращает (перемещено, в Корзину).
+    /// `trashDays` задан явно (тесты, ручной вызов) — это и есть согласие; иначе срок берётся из настроек
+    /// и в Корзину идёт только после подтверждения этого срока (`DownloadsRules.confirmTrash`).
+    @discardableResult
+    /// `only` — в Корзину можно только эти файлы (то, что пользователь видел в предпросмотре при подтверждении).
+    package func run(in root: URL? = nil, trashDays: Int? = nil, only: Set<URL>? = nil,
+             trash: ((URL) -> Bool)? = nil) -> (moved: Int, trashed: Int) {
+        let folder = root ?? self.folder
+        let manager = FileManager.default
+        let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey, .contentAccessDateKey, .isPackageKey]
+        let custom = Self.customRules
+        Self.migrateLegacyFolders(in: folder)
+        let categoryNames = Set(DownloadsRules.Category.allCases.map(\.rawValue))
+            .union(custom.values.compactMap { DownloadsRules.validatedFolder($0) }.filter { !$0.hasPrefix("/") })
+        let now = Date()
+        var moved = 0, trashed = 0
+        var placed: Set<URL> = []
+        var folderContents: [URL: Set<String>] = [:]
+
+        let entries = (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys,
+                                                         options: [.skipsHiddenFiles])) ?? []
+        for url in entries {
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            guard !DownloadsRules.isPartial(url) else { continue }
+            // Папки (кроме .app) не трогаем; свои папки категорий — тем более.
+            if values?.isDirectory == true, values?.isPackage != true { continue }
+            if categoryNames.contains(url.lastPathComponent) { continue }
+            // Ещё пишется — подождём следующего раза.
+            if let modified = values?.contentModificationDate, now.timeIntervalSince(modified) < 5 { continue }
+            guard let folderName = DownloadsRules.folderName(for: url, custom: custom) else { continue }
+            let target = folderName.hasPrefix("/")
+                ? URL(fileURLWithPath: folderName, isDirectory: true)
+                : folder.appendingPathComponent(folderName, isDirectory: true)
+            // Правило, указывающее на сами «Загрузки», ничего не перекладывает.
+            if target.standardizedFileURL.path == folder.standardizedFileURL.path { continue }
+            do {
+                try manager.createDirectory(at: target, withIntermediateDirectories: true)
+                // Содержимое папки читаем один раз и дополняем: раньше — заново на каждый файл (O(n²)).
+                var existing = folderContents[target] ?? Set((try? manager.contentsOfDirectory(atPath: target.path)) ?? [])
+                let name = DownloadsRules.uniqueName(url.lastPathComponent, existing: existing)
+                try manager.moveItem(at: url, to: target.appendingPathComponent(name))
+                existing.insert(name)
+                folderContents[target] = existing
+                placed.insert(target.appendingPathComponent(name).standardizedFileURL)
+                moved += 1
+                if root == nil { DocumentTagger.shared.enqueue(target.appendingPathComponent(name)) }
+            } catch {
+                Log.window.error("Загрузки: не удалось переместить \(url.lastPathComponent, privacy: .public)")
+            }
+        }
+
+        let days = trashDays ?? UserDefaults.standard.integer(forKey: Pref.downloadsTrashDays)
+        if days > 0 {
+            // Разложенное в этом же проходе в Корзину не идёт: у файла старая дата, но человек его только что получил.
+            var candidates = DownloadsRules.trashCandidates(in: folder, days: days, excluding: placed, now: now)
+            if let only { candidates = candidates.filter { only.contains($0.standardizedFileURL) } }
+            if trashDays != nil || DownloadsRules.isTrashConfirmed(days: days) {
+                for url in candidates {
+                    let done = trash?(url) ?? ((try? manager.trashItem(at: url, resultingItemURL: nil)) != nil)
+                    if done { trashed += 1 } else { Log.window.error("Загрузки: не удалось отправить в Корзину \(url.lastPathComponent, privacy: .public)") }
+                }
+                trashPreview = []
+            } else {
+                trashPreview = candidates
+            }
+        } else {
+            trashPreview = []
+        }
+        if moved > 0 || trashed > 0 {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            lastResult = "\(formatter.string(from: now)): разложено \(moved), в Корзину \(trashed)"
+        }
+        return (moved, trashed)
+    }
+
+    /// Пользователь увидел список и согласился: запоминаем срок и убираем старое.
+    package func confirmTrash(days: Int) {
+        DownloadsRules.confirmTrash(days: days)
+        // Ровно то, что показывали: файлы, разложенные после предпросмотра, в этот раз не уходят.
+        let shown = Set(trashPreview.map(\.standardizedFileURL))
+        let result = run(only: shown)
+        Toast.show("В Корзину: \(result.trashed)", symbol: "trash.fill", tint: .green)
+    }
+
+    /// Пересчитать предпросмотр (срок изменили в настройках).
+    package func refreshTrashPreview() {
+        let days = UserDefaults.standard.integer(forKey: Pref.downloadsTrashDays)
+        trashPreview = days > 0 && !DownloadsRules.isTrashConfirmed(days: days)
+            ? DownloadsRules.trashCandidates(in: folder, days: days) : []
+    }
+}
+
+package struct DownloadsPage: View {
+    package init() {
+    }
+
+    @AppStorage(Pref.downloadsSort) private var enabled = false
+    @AppStorage(Pref.downloadsTrashDays) private var days = 0
+    @ObservedObject private var sorter = DownloadsSorter.shared
+    @State private var newExtension = ""
+    @State private var newFolder = ""
+    @ObservedObject private var tagger = DocumentTagger.shared
+    @State private var suggesting = false
+    @State private var aiNote: String?
+    @AppStorage(Pref.ai) private var aiEnabled = true
+    @AppStorage(Pref.aiDownloads) private var aiDownloads = true
+
+    private var aiOn: Bool { aiEnabled && aiDownloads }
+
+    private func suggest() {
+        let ext = DownloadsRules.normalizedExtension(newExtension)
+        let samples = ((try? FileManager.default.contentsOfDirectory(atPath: sorter.folder.path)) ?? [])
+            .filter { ($0 as NSString).pathExtension.lowercased() == ext }
+        let existing = DownloadsRules.Category.allCases.map(\.rawValue) + Array(Set(sorter.customRules.values))
+        suggesting = true
+        aiNote = nil
+        Task {
+            defer { suggesting = false }
+            do {
+                newFolder = try await DownloadsAI.suggestFolder(ext: ext, samples: samples.isEmpty ? ["file.\(ext)"] : samples,
+                                                                existing: existing)
+                aiNote = "Предложено ИИ — проверьте и нажмите «Добавить»"
+            } catch {
+                aiNote = error.localizedDescription
+            }
+        }
+    }
+
+    /// «Lab» — папка в «Загрузках»; полный путь показываем как «~/Projects/Lab».
+    package static func folderTitle(_ value: String) -> String {
+        guard value.hasPrefix("/") else { return "Загрузки/\(value)" }
+        return (value as NSString).abbreviatingWithTildeInPath
+    }
+
+    package static func askFolderName() -> String? {
+        let alert = NSAlert()
+        alert.messageText = "Новая папка в «Загрузках»"
+        alert.informativeText = "Как назвать папку?"
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.placeholderString = "Например, Lab"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Готово")
+        alert.addButton(withTitle: "Отмена")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/", with: "-")
+        return name.isEmpty ? nil : name
+    }
+
+    package static func chooseFolder(start: URL) -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Выбрать"
+        panel.directoryURL = start
+        return panel.runModal() == .OK ? panel.url?.path : nil
+    }
+
+    package var body: some View {
+        SettingsPage(.downloads, isOn: $enabled, toggleLabel: "Раскладывать «Загрузки» по папкам") {
+            VStack(alignment: .leading, spacing: DS.Space.section) {
+                rulesGroup
+                if aiEnabled && UserDefaults.standard.bool(forKey: Pref.aiDownloadsTags) { tagsGroup }
+                oldFilesGroup
+                actions
+            }
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : DS.State.disabledOpacity)
+        }
+        .onAppear { sorter.refreshTrashPreview() }
+        .onChange(of: days) { sorter.refreshTrashPreview() }
+    }
+
+    // MARK: Свои правила
+
+    private var rulesGroup: some View {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
+            GroupLabel("Свои правила")
+            Text("Куда класть файлы других типов. Правило важнее встроенных категорий.")
+                .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+            let rules = sorter.customRules.keys.sorted()
+            if !rules.isEmpty {
+                ListCard {
+                    ForEach(rules, id: \.self) { ext in
+                        Row(".\(ext)", subtitle: Self.folderTitle(sorter.customRules[ext] ?? ""), systemImage: "folder") {
+                            IconButton("Удалить правило", systemImage: "trash", compact: true) { sorter.setRule(extension: ext, folder: nil) }
+                        }
+                    }
+                }
+            }
+            Card {
+                HStack(spacing: DS.Space.s) {
+                    DownloadsField(prompt: "mdz", text: $newExtension)
+                        .frame(width: 96)
+                        .help("Расширение файла, без точки")
+                    Image(systemName: "arrow.right").foregroundStyle(.dsMute).accessibilityHidden(true)
+                    Menu {
+                        ForEach(DownloadsRules.Category.allCases, id: \.self) { category in
+                            Button(category.rawValue) { newFolder = category.rawValue }
+                        }
+                        Divider()
+                        Button("Новая папка в «Загрузках»…") {
+                            if let name = Self.askFolderName() { newFolder = name }
+                        }
+                        Button("Выбрать папку…") {
+                            if let path = Self.chooseFolder(start: sorter.folder) { newFolder = path }
+                        }
+                    } label: {
+                        DownloadsMenuLabel(text: newFolder.isEmpty ? "Папка…" : Self.folderTitle(newFolder), symbol: "folder")
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+                    .frame(maxWidth: 260)
+                    Spacer(minLength: DS.Space.s)
+                    Button("Добавить") {
+                        if sorter.setRule(extension: newExtension, folder: newFolder) {
+                            newExtension = ""
+                            newFolder = ""
+                        } else {
+                            Toast.show("Такая папка не подходит (., .., ~ или корень)", symbol: "exclamationmark.triangle.fill", tint: .orange)
+                        }
+                    }
+                    .buttonStyle(.graphite(.primary, size: .compact))
+                    .disabled(DownloadsRules.normalizedExtension(newExtension).isEmpty || newFolder.isEmpty)
+                }
+                let unknown = sorter.unknownExtensions()
+                if !unknown.isEmpty {
+                    HStack(spacing: DS.Space.s) {
+                        Text("Сейчас без правила:").font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                        ForEach(unknown.prefix(6), id: \.ext) { item in
+                            Chip(".\(item.ext) (\(item.count))", selected: false) { newExtension = item.ext }
+                                .help("Подставить в поле")
+                        }
+                    }
+                }
+                if aiOn {
+                    HStack(spacing: DS.Space.s) {
+                        Button {
+                            suggest()
+                        } label: {
+                            Label("Предложить папку", systemImage: "sparkles")
+                        }
+                        .buttonStyle(.graphite(.secondary, size: .compact))
+                        .disabled(suggesting || DownloadsRules.normalizedExtension(newExtension).isEmpty)
+                        .help("Локальная модель посмотрит на имена таких файлов и предложит папку")
+                        if suggesting { ProgressView().controlSize(.small) }
+                        if let aiNote {
+                            Text(aiNote).font(DS.Font.rowSub).foregroundStyle(.dsMute).lineLimit(2)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Подписи файлов (ИИ)
+
+    private var tagsGroup: some View {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
+            GroupLabel("Подписи файлов (ИИ)")
+            Card {
+                Text("Каждому новому файлу при сортировке — короткая подпись по-английски в комментарии Spotlight: «📋 Spec — notch app for AI agents», «💿 Installer — Docker Desktop». Видно в ⌘I и в колонке «Комментарии», ищется через ⌘Пробел.")
+                    .font(DS.Font.rowSub).foregroundStyle(.dsMute).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: DS.Space.s) {
+                    if tagger.pending > 0 {
+                        ProgressView().controlSize(.small)
+                        Text("Осталось \(tagger.pending), помечено \(tagger.tagged)").font(DS.Font.body).foregroundStyle(.dsMute)
+                    } else if tagger.tagged > 0 {
+                        Text("Помечено документов: \(tagger.tagged)").font(DS.Font.body).foregroundStyle(.dsMute)
+                    }
+                    Spacer()
+                    Button("Подписать уже лежащие") { tagger.tagExisting(in: sorter.folder) }
+                        .buttonStyle(.graphite(.secondary, size: .compact))
+                        .disabled(tagger.pending > 0)
+                }
+            }
+        }
+    }
+
+    // MARK: Старые файлы
+
+    private var oldFilesGroup: some View {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
+            GroupLabel("Старые файлы")
+            ListCard {
+                Row("Убирать в Корзину", systemImage: "trash") {
+                    Menu {
+                        ForEach([(0, "Никогда"), (7, "Через 7 дней"), (30, "Через 30 дней"), (90, "Через 90 дней")], id: \.0) { option in
+                            Button(option.1) { days = option.0 }
+                        }
+                    } label: {
+                        DownloadsMenuLabel(text: Self.daysTitle(days), symbol: nil)
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+                    .frame(width: 200)
+                }
+            }
+            Text("Файлы во встроенных папках категорий, которые не открывали и не меняли дольше этого срока, перемещаются в Корзину — безвозвратно ничего не удаляется. Сначала вы видите список и подтверждаете.")
+                .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                .fixedSize(horizontal: false, vertical: true)
+            if !sorter.trashPreview.isEmpty {
+                let names = sorter.trashPreview.prefix(5).map(\.lastPathComponent).joined(separator: "\n")
+                    + (sorter.trashPreview.count > 5 ? "\n…и ещё \(sorter.trashPreview.count - 5)" : "")
+                Banner(.warning, title: "В Корзину готово \(sorter.trashPreview.count) файл(ов) старше \(days) дн.", message: names) {
+                    Button("Переместить в Корзину") { sorter.confirmTrash(days: days) }
+                        .buttonStyle(.graphite(.primary, size: .compact))
+                }
+            }
+        }
+    }
+
+    private static func daysTitle(_ days: Int) -> String {
+        switch days {
+        case 7: return "Через 7 дней"
+        case 30: return "Через 30 дней"
+        case 90: return "Через 90 дней"
+        default: return "Никогда"
+        }
+    }
+
+    // MARK: Действия
+
+    private var actions: some View {
+        HStack(spacing: DS.Space.s) {
+            Button("Разложить сейчас") {
+                let result = sorter.run()
+                Toast.show("Разложено: \(result.moved), в Корзину: \(result.trashed)", symbol: "folder.fill", tint: .green)
+            }
+            .buttonStyle(.graphite(.primary))
+            .disabled(!enabled)
+            Button("Открыть «Загрузки»") { NSWorkspace.shared.open(sorter.folder) }
+                .buttonStyle(.graphite(.secondary))
+            Spacer()
+            if let result = sorter.lastResult {
+                Text(result).font(DS.Font.rowSub).foregroundStyle(.dsMute)
+            }
+        }
+    }
+}
+
+/// Поле ввода Graphite: `field`, обводка `line`, радиус 10.
+private struct DownloadsField: View {
+    package let prompt: String
+    @Binding package var text: String
+    @FocusState private var focused: Bool
+
+    package var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+        TextField("", text: $text, prompt: Text(prompt).foregroundStyle(Color.dsMute))
+            .textFieldStyle(.plain)
+            .font(DS.Font.mono(13, relativeTo: .callout))
+            .foregroundStyle(.dsText)
+            .focused($focused)
+            .accessibilityLabel("Расширение файла")
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(Color.dsField, in: shape)
+            .overlay(shape.strokeBorder(focused ? Color.dsAccLine : Color.dsLine, lineWidth: focused ? DS.State.focusRing : 1))
+    }
+}
+
+/// Вид выпадающего списка: плашка `field` с обводкой и стрелками.
+private struct DownloadsMenuLabel: View {
+    package let text: String
+    package let symbol: String?
+
+    package var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+        HStack(spacing: DS.Space.s) {
+            if let symbol { Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(.dsMute) }
+            Text(text).font(DS.Font.manrope(13, .semibold, relativeTo: .callout)).foregroundStyle(.dsText)
+                .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: DS.Space.xs)
+            Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(.dsMute)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .background(Color.dsField, in: shape)
+        .overlay(shape.strokeBorder(Color.dsLine, lineWidth: 1))
+        .contentShape(shape)
+    }
+}

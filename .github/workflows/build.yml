@@ -33,10 +33,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # push в main = merge PR development → main. Если дерево этого коммита уже прошло все тесты
-  # в прогоне того же PR, тесты второй раз не гоняются. Любое сомнение — тесты как обычно.
+  # push в main или development = merge PR. Если дерево этого коммита уже прошло все тесты
+  # в прогоне того же PR (в ту же ветку), тесты второй раз не гоняются. Любое сомнение — тесты как обычно.
   tested-tree:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -52,16 +52,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
         run: |
           # Шаг не падает: ошибка API = «не доказано», и тесты идут как обычно.
           set +e
           echo "tested=false" >> "$GITHUB_OUTPUT"
           TREE=$(gh api "repos/$REPO/git/commits/$SHA" --jq .tree.sha)
           PR=$(gh api "repos/$REPO/commits/$SHA/pulls" \
-            --jq "[.[] | select(.merge_commit_sha == \"$SHA\" and .base.ref == \"main\" and .head.repo.full_name == \"$REPO\")][0] | \"\(.number) \(.head.sha)\"")
+            --jq "[.[] | select(.merge_commit_sha == \"$SHA\" and .base.ref == \"$BRANCH\" and .head.repo.full_name == \"$REPO\")][0] | \"\(.number) \(.head.sha)\"")
           read -r PR_NUMBER HEAD_SHA <<< "$PR"
           if [[ -z "$TREE" || -z "$HEAD_SHA" || "$HEAD_SHA" == "null" ]]; then
-            echo "::notice::Коммит $SHA не merge PR в main — тесты как обычно."; exit 0
+            echo "::notice::Коммит $SHA не merge PR в $BRANCH — тесты как обычно."; exit 0
           fi
           # Артефакт tested-tree-<дерево> кладёт задача test только после того, как прошли все шарды.
           for RUN in $(gh api "repos/$REPO/actions/artifacts?name=tested-tree-$TREE&per_page=100" \
@@ -76,10 +77,22 @@ jobs:
           done
           echo "::notice::Нет успешного прогона PR #$PR_NUMBER с деревом $TREE — тесты как обычно."
 
+  # Секунды, до macOS-раннеров: импорты MU* против dependencies в Package.swift и слои модулей.
+  # Локальная инкрементальная сборка пропускает отсутствующую зависимость, чистая — падает.
+  module-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Self-test
+        run: python3 scripts/check-module-deps.py --self-test
+      - name: Module dependencies
+        run: python3 scripts/check-module-deps.py
+
   test-shard:
-    needs: tested-tree
-    # tested-tree пропущена (не push в main) или упала — outputs пустые, тесты идут.
-    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    needs: [tested-tree, module-deps]
+    # tested-tree пропущена (не push в main/development) или упала — outputs пустые, тесты идут.
+    if: ${{ !cancelled() && needs.module-deps.result == 'success' && needs.tested-tree.outputs.tested != 'true' }}
     name: test-shard ${{ matrix.shard }}
     runs-on: macos-15
     timeout-minutes: 35
@@ -124,8 +137,9 @@ jobs:
   # Тесты скриптов и relay, сборка приложения и кэш .build — рядом с шардами, не в одном из них:
   # так все четыре шарда делят только тесты.
   app:
-    needs: tested-tree
-    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    needs: [tested-tree, module-deps]
+    # При push в development работает и когда тесты переиспользованы: сборка кладёт кэш для следующих прогонов.
+    if: ${{ !cancelled() && needs.module-deps.result == 'success' && (needs.tested-tree.outputs.tested != 'true' || github.ref == 'refs/heads/development') }}
     runs-on: macos-15
     timeout-minutes: 35
     steps:
@@ -180,16 +194,19 @@ jobs:
   # Обязательная проверка «test» в правилах main: зелёная, только если все шарды прошли и вместе
   # выполнили все тесты одного дерева, либо это дерево уже прошло тесты в PR (tested-tree).
   test:
-    needs: [tested-tree, test-shard, app]
+    needs: [tested-tree, module-deps, test-shard, app]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Module dependencies
+        if: needs.module-deps.result != 'success'
+        run: echo "::error::Проверка зависимостей модулей (module-deps) не прошла"; exit 1
       - name: Reused PR result
-        if: needs.tested-tree.outputs.tested == 'true' && needs.test-shard.result == 'skipped' && needs.app.result == 'skipped'
+        if: needs.tested-tree.outputs.tested == 'true' && needs.test-shard.result == 'skipped' && (needs.app.result == 'skipped' || needs.app.result == 'success')
         run: echo "Тесты этого дерева прошли в прогоне PR — см. задачу tested-tree."
       - name: Shards
-        if: needs.tested-tree.outputs.tested != 'true' || needs.test-shard.result != 'skipped' || needs.app.result != 'skipped'
+        if: needs.tested-tree.outputs.tested != 'true' || needs.test-shard.result != 'skipped' || (needs.app.result != 'skipped' && needs.app.result != 'success')
         run: |
           if [[ "${{ needs.test-shard.result }}" != "success" || "${{ needs.app.result }}" != "success" ]]; then
             echo "::error::Шарды тестов: ${{ needs.test-shard.result }}, сборка и скрипты: ${{ needs.app.result }}"; exit 1
@@ -222,9 +239,9 @@ jobs:
           [[ "$SCOPE" == "all" ]] && TREE=$(field tree | head -1)
           echo "tree=$TREE" >> "$GITHUB_OUTPUT"
           echo "$TREE" > tested-tree.txt
-      # Метка для push в main после merge: это дерево уже прошло все тесты (см. tested-tree).
+      # Метка для push в main/development после merge: это дерево уже прошло все тесты (см. tested-tree).
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: github.event_name == 'pull_request' && github.base_ref == 'main' && steps.sum.outputs.tree != ''
+        if: github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'development') && steps.sum.outputs.tree != ''
         with:
           name: tested-tree-${{ steps.sum.outputs.tree }}
           path: tested-tree.txt

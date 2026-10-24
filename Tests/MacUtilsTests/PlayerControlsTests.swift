@@ -2,6 +2,13 @@ import AppKit
 import Carbon.HIToolbox
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUDesign
+@testable import MUAudio
+@testable import MUWindowSnap
+@testable import MUScreenshot
+@testable import MUVideoPlayer
+@testable import MUTextEditor
 
 /// Этап 3 плеера: клавиши (§ 8.1), удержание →, клики по третям, точки входа.
 final class PlayerShortcutsTests: XCTestCase {
@@ -194,7 +201,8 @@ final class PlayerEntryPointTests: XCTestCase {
         let videoIndex = all.firstIndex(of: "videoPlayer")
         XCTAssertNotNil(videoIndex)
         XCTAssertEqual(videoIndex.map { all[..<$0].suffix(1) }, ["textEditor"], "плеер — сразу после прежних разделов")
-        XCTAssertEqual(all.last, "videoPlayer")
+        // После плеера — только разделы, появившиеся позже («Удалённые подключения»).
+        XCTAssertEqual(videoIndex.map { Array(all[($0 + 1)...]) }, ["remote"])
         // Сохранённые вкладки панели — по именам разделов, а не по номерам: порядок allCases их не сдвигает.
         XCTAssertEqual(PanelTabs.sections("videoPlayer,textEditor"), [.videoPlayer, .textEditor])
     }

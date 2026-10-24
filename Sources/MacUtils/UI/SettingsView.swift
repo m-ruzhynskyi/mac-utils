@@ -1,6 +1,13 @@
 import AppKit
 import ServiceManagement
 import SwiftUI
+import MUDesign
+import MUFocus
+import MUMusic
+import MUDownloadsSorter
+import MUScreenShare
+import MUScreenshot
+import MUTextEditor
 
 // MARK: - Модель разрешений
 
@@ -258,6 +265,9 @@ struct SettingsSectionPage: View {
             case .shots: ScreenshotLibraryView(library: .shared, compact: compact).navigationTitle("Мои снимки")
             case .textEditor: TextEditorPage()
             case .videoPlayer: VideoPlayerPage()
+            case .remote:
+                // Вкладка панели — список компьютеров, окно настроек — параметры (m15).
+                if compact { RemoteConnectionsPanel() } else { RemoteSettingsPage() }
         }
     }
 }

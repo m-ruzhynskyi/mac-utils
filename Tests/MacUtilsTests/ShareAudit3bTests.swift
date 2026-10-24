@@ -1,5 +1,5 @@
 import XCTest
-@testable import MacUtils
+@testable import MUScreenShare
 
 @MainActor
 final class ShareAudit3bTests: XCTestCase {
@@ -31,7 +31,7 @@ final class ShareAudit3bTests: XCTestCase {
     /// Ключевой кадр просит сам `resendLast`; отдельный `requestKeyFrame()` в обработчике `viewers` не возвращается.
     func testViewersHandlerDoesNotRequestKeyFrameSeparately() throws {
         let source = try String(contentsOfFile: #filePath.replacingOccurrences(of: "Tests/MacUtilsTests/ShareAudit3bTests.swift",
-                                                                              with: "Sources/MacUtils/Features/ScreenShare/ScreenShare.swift"))
+                                                                              with: "Sources/MUScreenShare/ScreenShare.swift"))
         let start = try XCTUnwrap(source.range(of: "ShareViewersSignal(json: json).resendsLast"))
         let before = String(source[source.index(start.lowerBound, offsetBy: -600)..<start.lowerBound])
         XCTAssertFalse(before.contains("requestKeyFrame()"), "лишний requestKeyFrame перед resendLast")
@@ -70,7 +70,7 @@ final class ShareAudit3bTests: XCTestCase {
     /// сбой перехвата Core Audio) сразу считается «чужим эфиром» и гасится — эфир идёт без звука.
     func testBeginCaptureAssignsSenderBeforeStartingAudio() throws {
         let source = try String(contentsOfFile: #filePath.replacingOccurrences(of: "Tests/MacUtilsTests/ShareAudit3bTests.swift",
-                                                                              with: "Sources/MacUtils/Features/ScreenShare/ScreenShare.swift"))
+                                                                              with: "Sources/MUScreenShare/ScreenShare.swift"))
         let begin = try XCTUnwrap(source.range(of: "private func beginCapture(filter: SCContentFilter) async throws {"))
         let body = String(source[begin.upperBound...].prefix(2500))
         let assigned = try XCTUnwrap(body.range(of: "self.sender = sender"))

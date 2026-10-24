@@ -1,6 +1,10 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUAudio
+@testable import MUAnnotate
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Рисование на экране: чистая логика (хранилище штрихов, план оверлеев по экранам, режим «сквозь клики», снимок с рисунком).
 final class AnnotateTests: XCTestCase {

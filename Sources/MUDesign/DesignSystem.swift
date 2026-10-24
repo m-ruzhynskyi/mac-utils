@@ -1,0 +1,350 @@
+import AppKit
+import CoreText
+import os
+import SwiftUI
+
+/// Дизайн-система «Graphite» (`.audit/design-spec-v2.md` §1): графит, один лаймовый акцент, Manrope и JetBrains Mono.
+/// Компоненты из `UI/Components` берут значения только отсюда. Тема — системная (светлая или тёмная).
+package enum DS {
+    // MARK: - Цвета
+
+    /// Токены концепта (`renderVals()` в `.audit/concept/*.dc.html`): у каждого — значение для тёмной и светлой темы.
+    package enum Palette {
+        package static let bg = DS.color(dark: 0x0E1013, light: 0xF4F5F2)
+        package static let side = DS.color(dark: 0x13161A, light: 0xECEEE9)
+        package static let panel = DS.color(dark: 0x171A1F, light: 0xFFFFFF)
+        package static let field = DS.color(dark: 0x1F2329, light: 0xEEF0EA)
+        package static let line = DS.color(dark: 0x2A2F37, light: 0xD9DDD3)
+        package static let off = DS.color(dark: 0x2F353E, light: 0xC9CEC4)
+        package static let text = DS.color(dark: 0xEDEFF2, light: 0x14171A)
+        package static let mute = DS.color(dark: 0x9AA3AF, light: 0x59626E)
+        /// Лаймовая заливка акцента (одинакова в обеих темах).
+        package static let acc = DS.color(dark: 0xC8F05A, light: 0xC8F05A)
+        /// Текст и значок на `acc`.
+        package static let accInk = DS.color(dark: 0x10140A, light: 0x10140A)
+        /// Акцент текстом (в светлой теме — тёмно-зелёный, иначе лайм на светлом не читается).
+        package static let accText = DS.color(dark: 0xC8F05A, light: 0x3D6600)
+        /// Точка заголовка группы, рамка выбранного, кольцо фокуса, обводка лаймовых заливок в светлой теме.
+        package static let accLine = DS.color(dark: 0xC8F05A, light: 0x6E9A00)
+        package static let blue = DS.color(dark: 0x6EA8FF, light: 0x1F6FDB)
+        package static let blueInk = DS.color(dark: 0x08111F, light: 0xFFFFFF)
+        package static let rec = DS.color(dark: 0xFF7A6B, light: 0xD93A2B)
+        package static let recInk = DS.color(dark: 0x240C08, light: 0xFFFFFF)
+        /// Тон «внимание» — в концепте его нет (§1.1 спецификации v2).
+        package static let warn = DS.color(dark: 0xF5B83D, light: 0x8A5300)
+        package static let warnInk = DS.color(dark: 0x241800, light: 0xFFFFFF)
+    }
+
+    /// Тон статуса: заливка и текст на ней, цвет текста на `panel`, значок.
+    package enum Tone: CaseIterable {
+        case success, warning, danger, info, neutral
+
+        package var symbol: String {
+            switch self {
+            case .success: return "checkmark.circle.fill"
+            case .warning: return "exclamationmark.triangle.fill"
+            case .danger: return "xmark.octagon.fill"
+            case .info: return "info.circle.fill"
+            case .neutral: return "circle.dashed"
+            }
+        }
+
+        package var fillColor: NSColor {
+            switch self {
+            case .success: return Palette.acc
+            case .warning: return Palette.warn
+            case .danger: return Palette.rec
+            case .info: return Palette.blue
+            case .neutral: return Palette.field
+            }
+        }
+
+        package var inkColor: NSColor {
+            switch self {
+            case .success: return Palette.accInk
+            case .warning: return Palette.warnInk
+            case .danger: return Palette.recInk
+            case .info: return Palette.blueInk
+            case .neutral: return Palette.mute
+            }
+        }
+
+        /// Текст тона на `panel` (на `field` цветной текст не ставим: §1.1).
+        package var textColor: NSColor {
+            switch self {
+            case .success: return Palette.accText
+            case .warning: return Palette.warn
+            case .danger: return Palette.rec
+            case .info: return Palette.blue
+            case .neutral: return Palette.mute
+            }
+        }
+
+        /// Рамка тона: у баннера и выделенной карточки.
+        package var lineColor: NSColor { self == .success ? Palette.accLine : textColor }
+
+        package var fill: Color { Color(nsColor: fillColor) }
+        package var ink: Color { Color(nsColor: inkColor) }
+        package var text: Color { Color(nsColor: textColor) }
+        package var line: Color { Color(nsColor: lineColor) }
+
+        /// Тон по прежнему цвету `tint` (для старых вызовов Toast и подобных).
+        package static func from(tint: SwiftUI.Color) -> Tone {
+            switch tint {
+            case .green: return .success
+            case .orange, .yellow: return .warning
+            case .red: return .danger
+            case .blue, .accentColor: return .info
+            default: return .neutral
+            }
+        }
+    }
+
+    // MARK: - Форма
+
+    /// Отступы кратны 4.
+    package enum Space {
+        package static let xxs: CGFloat = 2
+        package static let xs: CGFloat = 4
+        package static let s: CGFloat = 8
+        package static let m: CGFloat = 12
+        package static let l: CGFloat = 16
+        package static let xl: CGFloat = 20
+        package static let xxl: CGFloat = 24
+        /// Поля страницы настроек.
+        package static let pageVertical: CGFloat = 30
+        package static let pageHorizontal: CGFloat = 36
+        /// Промежуток между блоками страницы.
+        package static let section: CGFloat = 18
+    }
+
+    package enum Radius {
+        package static let keycap: CGFloat = 7
+        /// Кнопка, плитка строки, строка навигации.
+        package static let control: CGFloat = 10
+        /// Кнопка-иконка 40, сегмент.
+        package static let iconButton: CGFloat = 12
+        /// Плитка шапки, ряд вкладок, сегментный контрол.
+        package static let tile: CGFloat = 14
+        /// Карточка-список.
+        package static let card: CGFloat = 16
+        /// Диалог, HUD-панель, панель инструментов снимка.
+        package static let floating: CGFloat = 20
+        package static let popover: CGFloat = 22
+    }
+
+    package enum Size {
+        /// Концепт — 250, но «Переключатель приложений» (198 pt в Manrope 14/600) там не помещается: 264 вмещает все названия.
+        package static let sidebar: CGFloat = 264
+        package static let rowTile: CGFloat = 34
+        package static let rowIcon: CGFloat = 18
+        package static let headerTile: CGFloat = 46
+        package static let headerIcon: CGFloat = 24
+        package static let toggleTrack = CGSize(width: 42, height: 24)
+        package static let toggleKnob: CGFloat = 18
+        package static let button: CGFloat = 36
+        package static let buttonLarge: CGFloat = 44
+        package static let iconButton: CGFloat = 40
+        package static let contentMaxWidth: CGFloat = 760
+        package static let settingsWindow = CGSize(width: 1040, height: 760)
+        package static let settingsWindowMin = CGSize(width: 860, height: 560)
+        /// Поповер в строке меню (концепт — 520; 460 вмещает вкладки и строки с кейкапами и не слишком широк для строки меню).
+        package static let popover = CGSize(width: 460, height: 620)
+        /// Высота под «светофор» над боковой панелью (окно `fullSizeContentView`).
+        package static let titlebar: CGFloat = 44
+        /// Колонка сочетания в строке шпаргалки.
+        package static let shortcutColumn: CGFloat = 72
+    }
+
+    // MARK: - Шрифты
+
+    /// Шкала §1.2: Manrope и JetBrains Mono, масштабируются вместе с размером текста системы.
+    /// Если шрифты не зарегистрированы, — системный шрифт того же размера и веса.
+    package enum Font {
+        package static let display = manrope(26, .heavy, relativeTo: .largeTitle)
+        package static let dialogTitle = manrope(19, .heavy, relativeTo: .title2)
+        package static let welcomeTitle = manrope(30, .heavy, relativeTo: .largeTitle)
+        package static let headline = manrope(17, .heavy, relativeTo: .headline)
+        package static let rowTitle = manrope(15, .semibold, relativeTo: .body)
+        package static let body = manrope(14, .regular, relativeTo: .body)
+        package static let bodyStrong = manrope(14, .semibold, relativeTo: .body)
+        package static let button = manrope(14, .bold, relativeTo: .body)
+        package static let buttonPrimary = manrope(14, .heavy, relativeTo: .body)
+        package static let rowSub = manrope(12, .regular, relativeTo: .subheadline)
+        package static let caption = manrope(12, .semibold, relativeTo: .caption)
+        package static let groupLabel = manrope(11, .heavy, relativeTo: .caption2)
+        package static let chip = manrope(13, .bold, relativeTo: .callout)
+        package static let keycap = mono(13, relativeTo: .callout)
+        package static let keycapCompact = mono(12, relativeTo: .caption)
+        package static let mono = DS.Font.mono(14, relativeTo: .body)
+        package static let monoLarge = DS.Font.mono(18, relativeTo: .title3)
+
+        /// Трекинг (pt) для размера `size` и доли em.
+        package static func tracking(_ em: CGFloat, size: CGFloat) -> CGFloat { em * size }
+
+        package static func manrope(_ size: CGFloat, _ weight: SwiftUI.Font.Weight, relativeTo style: SwiftUI.Font.TextStyle) -> SwiftUI.Font {
+            guard DSFonts.isAvailable(DSFonts.manrope) else { return .system(size: size, weight: weight) }
+            return .custom(DSFonts.manropeName(weight), size: size, relativeTo: style)
+        }
+
+        package static func mono(_ size: CGFloat, relativeTo style: SwiftUI.Font.TextStyle) -> SwiftUI.Font {
+            guard DSFonts.isAvailable(DSFonts.jetBrainsMono) else { return .system(size: size, weight: .medium, design: .monospaced) }
+            return .custom("JetBrainsMonoRoman-Medium", size: size, relativeTo: style)
+        }
+    }
+
+    package enum Motion {
+        package static let quick = Animation.easeOut(duration: 0.15)
+        package static let standard = Animation.easeInOut(duration: 0.2)
+        package static let toggle = Animation.spring(response: 0.2, dampingFraction: 0.85)
+
+        /// nil при «Уменьшить движение».
+        package static func animation(_ animation: Animation, reduceMotion: Bool) -> Animation? { reduceMotion ? nil : animation }
+    }
+
+    /// Состояния интерактивных элементов (§2 спецификации v2).
+    package enum State {
+        package static let disabledOpacity: Double = 0.45
+        package static let pressedOpacity: Double = 0.92
+        package static let pressedScale: CGFloat = 0.98
+        package static let hoverOverlay: Double = 0.06
+        package static let focusRing: CGFloat = 2
+    }
+
+    package enum Format {
+        /// Байты без «Zero KB»: нечисловые подписи выключены.
+        package static func bytes(_ value: Int64, style: ByteCountFormatter.CountStyle = .file) -> String {
+            let formatter = ByteCountFormatter()
+            formatter.countStyle = style
+            formatter.allowsNonnumericFormatting = false
+            return formatter.string(fromByteCount: value)
+        }
+
+        /// Скорость: «12,4 МБ/с».
+        package static func rate(_ bytesPerSecond: Double) -> String {
+            bytes(Int64(max(0, bytesPerSecond).rounded()), style: .file) + "/с"
+        }
+    }
+
+    // MARK: - Помощники цвета
+
+    package static func isDark(_ appearance: NSAppearance) -> Bool {
+        appearance.bestMatch(from: [.aqua, .darkAqua, .vibrantLight, .vibrantDark, .accessibilityHighContrastAqua,
+                                    .accessibilityHighContrastDarkAqua])
+            .map { [.darkAqua, .vibrantDark, .accessibilityHighContrastDarkAqua].contains($0) } ?? false
+    }
+
+    /// Цвет с двумя значениями (0xRRGGBB): меняется вместе с темой системы без перезапуска.
+    package static func color(dark: UInt32, light: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in isDark(appearance) ? rgb(dark) : rgb(light) }
+    }
+
+    package static func rgb(_ hex: UInt32, alpha: CGFloat = 1) -> NSColor {
+        NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
+    }
+}
+
+/// Цвета дизайн-системы для SwiftUI: `.foregroundStyle(.dsMute)`, `.background(Color.dsPanel)`.
+extension Color {
+    package static let dsBg = Color(nsColor: DS.Palette.bg)
+    package static let dsSide = Color(nsColor: DS.Palette.side)
+    package static let dsPanel = Color(nsColor: DS.Palette.panel)
+    package static let dsField = Color(nsColor: DS.Palette.field)
+    package static let dsLine = Color(nsColor: DS.Palette.line)
+    package static let dsOff = Color(nsColor: DS.Palette.off)
+    package static let dsText = Color(nsColor: DS.Palette.text)
+    package static let dsMute = Color(nsColor: DS.Palette.mute)
+    package static let dsAcc = Color(nsColor: DS.Palette.acc)
+    package static let dsAccInk = Color(nsColor: DS.Palette.accInk)
+    package static let dsAccText = Color(nsColor: DS.Palette.accText)
+    package static let dsAccLine = Color(nsColor: DS.Palette.accLine)
+    package static let dsBlue = Color(nsColor: DS.Palette.blue)
+    package static let dsRec = Color(nsColor: DS.Palette.rec)
+    package static let dsRecInk = Color(nsColor: DS.Palette.recInk)
+}
+
+/// Те же цвета в местах, где ждут `ShapeStyle`: `.foregroundStyle(.dsMute)`.
+extension ShapeStyle where Self == Color {
+    package static var dsBg: Color { Color.dsBg }
+    package static var dsSide: Color { Color.dsSide }
+    package static var dsPanel: Color { Color.dsPanel }
+    package static var dsField: Color { Color.dsField }
+    package static var dsLine: Color { Color.dsLine }
+    package static var dsOff: Color { Color.dsOff }
+    package static var dsText: Color { Color.dsText }
+    package static var dsMute: Color { Color.dsMute }
+    package static var dsAcc: Color { Color.dsAcc }
+    package static var dsAccInk: Color { Color.dsAccInk }
+    package static var dsAccText: Color { Color.dsAccText }
+    package static var dsAccLine: Color { Color.dsAccLine }
+    package static var dsBlue: Color { Color.dsBlue }
+    package static var dsRec: Color { Color.dsRec }
+    package static var dsRecInk: Color { Color.dsRecInk }
+}
+
+// MARK: - Регистрация шрифтов
+
+/// Встроенные шрифты (`Resources/Fonts`, SIL OFL 1.1): регистрируются для процесса при запуске.
+package enum DSFonts {
+    package static let manrope = "Manrope"
+    package static let jetBrainsMono = "JetBrains Mono"
+    package static let files = ["Manrope[wght].ttf", "JetBrainsMono[wght].ttf"]
+
+    private static var registered = false
+    private static let log = Logger(subsystem: "com.mruzhynskyi.macutils", category: "ui")
+
+    /// Папки, где могут лежать шрифты: ресурсы приложения, а в отладочной сборке и тестах — `Resources/Fonts` репозитория.
+    package static var searchFolders: [URL] {
+        var folders: [URL] = []
+        if let resources = Bundle.main.resourceURL { folders.append(resources.appendingPathComponent("Fonts")) }
+        #if DEBUG
+        // Sources/MUDesign/DesignSystem.swift → корень репозитория.
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        folders.append(repo.appendingPathComponent("Resources/Fonts"))
+        #endif
+        return folders
+    }
+
+    /// Регистрирует шрифты один раз; повторный вызов ничего не делает. Возвращает имена зарегистрированных файлов.
+    @discardableResult
+    package static func registerAll() -> [String] {
+        guard !registered else { return [] }
+        registered = true
+        var done: [String] = []
+        for name in files {
+            guard let url = searchFolders.map({ $0.appendingPathComponent(name) })
+                .first(where: { FileManager.default.fileExists(atPath: $0.path) }) else { continue }
+            var error: Unmanaged<CFError>?
+            if CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
+                done.append(name)
+            } else if let error = error?.takeRetainedValue(),
+                      CFErrorGetCode(error) == CTFontManagerError.alreadyRegistered.rawValue {
+                done.append(name)
+            } else {
+                log.error("Шрифт \(name, privacy: .public) не зарегистрирован — будет системный")
+            }
+        }
+        return done
+    }
+
+    /// Семейство доступно (зарегистрировано или установлено в системе).
+    package static func isAvailable(_ family: String) -> Bool {
+        registerAll()
+        return NSFontManager.shared.availableMembers(ofFontFamily: family) != nil
+    }
+
+    /// PostScript-имя начертания Manrope для веса SwiftUI (у переменного шрифта есть именованные начертания).
+    package static func manropeName(_ weight: SwiftUI.Font.Weight) -> String {
+        switch weight {
+        case .ultraLight, .thin: return "Manrope-ExtraLight"
+        case .light: return "Manrope-Light"
+        case .medium: return "Manrope-Medium"
+        case .semibold: return "Manrope-SemiBold"
+        case .bold: return "Manrope-Bold"
+        case .heavy, .black: return "Manrope-ExtraBold"
+        default: return "Manrope-Regular"
+        }
+    }
+}
