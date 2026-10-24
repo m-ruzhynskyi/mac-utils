@@ -2,6 +2,9 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUWellbeing
+import MUScreenShare
+import MUTextEditor
 
 // MARK: - Перерывы и тёплый экран
 

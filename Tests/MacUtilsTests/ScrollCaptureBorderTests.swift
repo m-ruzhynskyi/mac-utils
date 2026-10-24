@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUScreenshot
 
 /// Рамка длинного снимка (1.6.6: красная пунктирная рамка в нижнем куске снимка). Панель — далеко за экраном;
 /// рисуется только её собственный вид, экран не снимается.

@@ -78,10 +78,11 @@ final class RemoteConnectorTests: XCTestCase {
         XCTAssertEqual(logger.events, [.connection(result: "connected", typed: true, milliseconds: clock.milliseconds)])
     }
 
-    func testNoPasswordWindowMeansAutologin() async {
+    /// Окна пароля нет и сеанса не видно — не «подключено без пароля», а «не подтверждено».
+    func testNoPasswordWindowAndNoSessionIsUnconfirmed() async {
         launcher.onOpen = { [unowned self] _ in launcher.launch(.anyDesk, pid: anyDeskPID) }
         let outcome = await connect(ConnectRequest(record: record, program: .anyDesk, timeoutSeconds: 5))
-        XCTAssertEqual(outcome, .connectedWithoutPassword)
+        XCTAssertEqual(outcome, .unconfirmed(copyID: false))
         XCTAssertEqual(phases.compactMap { if case .waiting(let e, _) = $0 { return e } else { return nil } }, [0, 1, 2, 3, 4])
         XCTAssertEqual(lastSecret?.isEmpty, true)
     }
@@ -160,7 +161,7 @@ final class RemoteConnectorTests: XCTestCase {
         let foreign = FakePasswordWindow()
         ax.show(foreign.window, pid: anyDeskPID)
         let outcome = await connect(ConnectRequest(record: record, program: .anyDesk, timeoutSeconds: 2, reuseOpenWindow: true))
-        XCTAssertEqual(outcome, .connectedWithoutPassword, "своего окна не появилось")
+        XCTAssertEqual(outcome, .unconfirmed(copyID: false), "своего окна не появилось")
         XCTAssertEqual(foreign.field.text, "", "в чужое окно ничего не введено")
         XCTAssertTrue(keyboard.typed.isEmpty)
     }
@@ -178,7 +179,7 @@ final class RemoteConnectorTests: XCTestCase {
         let outcome = await connector.connect(ConnectRequest(record: other, program: .anyDesk, timeoutSeconds: 2, reuseOpenWindow: true),
                                               provider: AnyDeskAutomator(texts: texts),
                                               password: { .found(SecretBuffer("другой".utf8)) }, progress: { _ in })
-        XCTAssertEqual(outcome, .connectedWithoutPassword)
+        XCTAssertEqual(outcome, .unconfirmed(copyID: false))
         XCTAssertEqual(w.field.text, "")
     }
 

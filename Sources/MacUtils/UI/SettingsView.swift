@@ -2,6 +2,12 @@ import AppKit
 import ServiceManagement
 import SwiftUI
 import MUDesign
+import MUFocus
+import MUMusic
+import MUDownloadsSorter
+import MUScreenShare
+import MUScreenshot
+import MUTextEditor
 
 // MARK: - Модель разрешений
 

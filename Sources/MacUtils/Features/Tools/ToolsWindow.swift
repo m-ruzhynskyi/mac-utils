@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUWellbeing
+import MUUpdate
 
 /// Окно «Инструменты»: удаление программ, монитор системы, диспетчер задач
 /// и очистка диска — вкладками в одном окне (⌃⌥⌘T).
@@ -92,7 +94,7 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        if !SettingsWindowController.shared.isVisible { FocusReturn.restore() }
+        if !AppRouter.shared.settingsVisible() { FocusReturn.restore() }
     }
 }
 

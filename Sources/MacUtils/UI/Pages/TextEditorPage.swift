@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUScreenShare
+import MUTextEditor
 
 // MARK: - Текстовый редактор
 

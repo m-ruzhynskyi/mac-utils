@@ -1,6 +1,9 @@
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUAudio
+@testable import MUScreenShare
+@testable import MUTextEditor
 
 /// B1: «Всегда разрешать» не должно делать доверенными свой ID, пустой и невалидные ID (иначе возвращается C1).
 ///
@@ -197,6 +200,20 @@ final class ShareHistoryTrustTests: XCTestCase {
         XCTAssertTrue(history.needsKeyConfirmation(id: ids[0]), "битый ключ = доверие без ключа, нужно подтверждение")
         XCTAssertTrue(history.isTrusted(id: ids[1], pub: pub))
         XCTAssertEqual(history.hostKey(for: ids[1]), otherPub)
+    }
+
+    func testHostSignatureDowngradeProtection() {
+        let history = ShareHistory()
+        history.visited(ids[0], name: "Ведущий")
+        history.pinHost(id: ids[0], key: pub)
+        XCTAssertFalse(history.requiresHostSignature(id: ids[0], key: pub), "пока подписи не видели — старый ведущий принимается")
+        history.noteHostSigned(id: ids[0], key: pub)
+        XCTAssertTrue(history.requiresHostSignature(id: ids[0], key: pub))
+        XCTAssertFalse(history.requiresHostSignature(id: ids[0], key: otherPub), "другой ключ — своя история")
+        history.noteHostSigned(id: "123456", key: pub)
+        XCTAssertFalse(history.entries.contains { $0.id == "123456" })
+        history.unpinHost(id: ids[0])
+        XCTAssertFalse(history.requiresHostSignature(id: ids[0], key: pub), "пользователь согласился забыть ключ — подпись снова не обязательна")
     }
 
     func testPinHost() {

@@ -481,12 +481,14 @@ function authError(code, relayMessage) { return AUTH_ERRORS[code] || esc(relayMe
 // ---- История и доверенные ----
 function history() { return store.get("mu-history", []); }
 function saveHistory(list) { store.set("mu-history", list); renderHistory(); }
-function visited(id, name, hostKey) {
+function visited(id, name, hostKey, signed = false) {
   const list = history(); let entry = list.find((e) => e.id === id);
   if (!entry) { entry = { id, name: "", label: "" }; list.push(entry); }
   if (name) entry.name = name; entry.last = Date.now();
   // Ключ ведущего (pinning §4.3): при следующем подключении другой ключ — предупреждение.
-  if (typeof hostKey === "string" && B64U_KEY.test(hostKey)) entry.hostKey = hostKey;
+  if (typeof hostKey === "string" && B64U_KEY.test(hostKey)) { if (entry.hostKey !== hostKey) delete entry.hostSignedKey; entry.hostKey = hostKey; }
+  // Ведущий с этим ключом подписал принятие, подпись сошлась: дальше без подписи он не принимается.
+  if (signed && entry.hostKey) entry.hostSignedKey = entry.hostKey;
   saveHistory(list);
 }
 // Доверенные — `mu-trusted-v2`: [{id, pub, fp}]. pub null — доверие только по ID (старые зрители и ведущий без ключа);
@@ -957,7 +959,7 @@ function openView(id) {
       }
       else if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
       else if (m.type === "game") gameReceive(m, "host", hostName || display(id), viewGameSend);
-      else if (m.type === "accepted") { viewRetries = 0; hostName = m.name || ""; visited(id, m.name, viewHostKey); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; renderMonitors(); }
+      else if (m.type === "accepted") onAccepted(ws, id, m);
       else if (m.type === "declined") { status("Вам не разрешили подключиться"); stopWatch(true); }
       else if (m.type === "ended") { status("Трансляция завершена"); stopWatch(true); }
       else if (m.type === "reconnecting") status("Ведущий переподключается…");
@@ -1001,8 +1003,60 @@ function openView(id) {
   };
 }
 
+// Ведущий пустил: подпись принятия (если есть) должна сойтись с его ключом; ключ, который уже подписывал, без подписи не принимается.
+async function onAccepted(ws, id, m) {
+  let result = "none";
+  if (typeof m.hostSig === "string") {
+    result = viewHostKey && viewRid && viewMyPub && window.crypto && window.crypto.subtle
+      ? await verifyHostSig(window.crypto.subtle, viewHostKey, m.hostSig, acceptMessage(id, viewMyPub, viewRid)) : "bad";
+  }
+  if (ws !== viewSocket) return;
+  const signedBefore = !!viewHostKey && history().find((e) => e.id === id)?.hostSignedKey === viewHostKey;
+  const decision = hostSigDecision(result, signedBefore);
+  if (decision.startsWith("reject")) { status(decision === "reject-bad" ? "Подпись ведущего не сошлась: подключение отменено" : "Ведущий раньше подписывал принятие, а теперь нет: подключение отменено"); return stopWatch(true); }
+  viewRetries = 0; hostName = m.name || ""; visited(id, m.name, viewHostKey, decision === "accept-signed");
+  status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; renderMonitors();
+}
+
+// <host-sig>
+// Подпись принятия (`hostSig`, SHARE-PROTOCOL §3): ведущий с ключом подтверждает, что пустил зрителя именно он. Строка — как у Mac
+// (`ShareIdentity.acceptMessage`). Страница-ведущий подписывает ключом страницы (P-256); зритель-страница проверяет подпись ключом
+// ведущего из challenge: P-256 — всегда, Ed25519 (ведущий Mac) — если браузер умеет (в Chromium 130 нет — тогда без проверки).
+const acceptMessage = (room, viewerPub, rid) => `mu-share/v2\naccept\n${room}\n${viewerPub}\n${rid}`;
+function b64uBytes(text) {
+  const t = String(text);
+  const bin = atob(t.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - t.length % 4) % 4));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+// "ok" | "bad" | "unsupported".
+async function verifyHostSig(subtle, hostKey, sig, message) {
+  try {
+    const key = b64uBytes(hostKey), signature = b64uBytes(sig), data = new TextEncoder().encode(message);
+    if (signature.length !== 64) return "bad";
+    if (key.length === 65 && key[0] === 4) {
+      const imported = await subtle.importKey("raw", key, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+      return (await subtle.verify({ name: "ECDSA", hash: "SHA-256" }, imported, signature, data)) ? "ok" : "bad";
+    }
+    if (key.length === 32) {
+      let imported;
+      try { imported = await subtle.importKey("raw", key, { name: "Ed25519" }, false, ["verify"]); } catch (_) { return "unsupported"; }
+      return (await subtle.verify({ name: "Ed25519" }, imported, signature, data)) ? "ok" : "bad";
+    }
+    return "bad";
+  } catch (_) { return "bad"; }
+}
+// Решение зрителя по `accepted`: result — итог проверки подписи ("none" — подписи нет); signedBefore — этот ключ ведущего уже
+// подписывал. → "accept" | "accept-signed" (запомнить «подписывает») | "reject-bad" | "reject-downgrade".
+function hostSigDecision(result, signedBefore) {
+  if (result === "ok") return "accept-signed";
+  if (result === "bad") return "reject-bad";
+  if (result === "none") return signedBefore ? "reject-downgrade" : "accept";
+  return "accept";   // unsupported: проверить нечем — как раньше
+}
+// </host-sig>
+
 // Зритель v2: relay прислал challenge — подписываем; ключ ведущего сверяем с запомненным.
-let viewHostKey = null, viewError = null;
+let viewHostKey = null, viewError = null, viewRid = null, viewMyPub = null;
 async function viewerChallenge(ws, id, m) {
   if (ws !== viewSocket) return;
   if (!canSign("signViewer") || typeof m.nonce !== "string" || typeof m.rid !== "string") { status(AUTH_ERRORS["no-key"]); return stopWatch(true); }
@@ -1014,7 +1068,8 @@ async function viewerChallenge(ws, id, m) {
     return;
   }
   if (ws !== viewSocket) return;
-  viewHostKey = hostKey;
+  viewHostKey = hostKey; viewRid = m.rid;
+  try { viewMyPub = appSigns("signViewer") ? (await myIdentity()).pub : (pageKey ? pageKey.pub : null); } catch (_) { viewMyPub = null; }
   if (!(await sendAuth(ws, "signViewer", [id, myId, m.rid, m.nonce])) && ws === viewSocket) { status(AUTH_ERRORS["no-key"]); stopWatch(true); }
 }
 
@@ -1430,9 +1485,9 @@ function onRequest(msg) {
   const entry = canTrust(viewer) ? trustedList().find((e) => e.id === viewer) : null;
   if (kind === "legacy" && entry) return answer(viewer, true, rid);
   // Окно «сам себе»: relay сверил ключ зрителя с ключом владельца этого ID.
-  if (kind === "key" && pub && msg.self === true && hostAuth?.keyed) return answer(viewer, true, rid);
+  if (kind === "key" && pub && msg.self === true && hostAuth?.keyed) return answer(viewer, true, rid, pub);
   // Автоприём только если ID принадлежит этому ключу: при idVerified:false он закреплён за другим устройством.
-  if (kind === "key" && pub && entry && entry.pub === pub && msg.idVerified !== false) return answer(viewer, true, rid);
+  if (kind === "key" && pub && entry && entry.pub === pub && msg.idVerified !== false) return answer(viewer, true, rid, pub);
   requests.push({ viewer, name, rid, kind, pub, entry, idVerified: msg.idVerified,
                   fp: typeof msg.fp === "string" ? msg.fp.slice(0, 19) : null });
   showRequest();
@@ -1464,13 +1519,17 @@ function showRequest() {
   $("request").style.display = "flex";
   if (window.mu && window.mu.attention) window.mu.attention();
 }
-function answer(viewer, accept, rid) {
+async function answer(viewer, accept, rid, viewerPub) {
   const reply = { type: accept ? "accept" : "decline", viewer, name: getMyName() };
   if (typeof rid === "string") reply.rid = rid;
+  // Принятие подписывается ключом страницы (приложение для Windows ключа не даёт): зритель сверит подпись с ключом ведущего.
+  if (accept && typeof rid === "string" && typeof viewerPub === "string" && B64U_KEY.test(viewerPub) && pageKey && !appSigns("signHost") && hostAuth?.keyed) {
+    try { reply.hostSig = await pageKey.sign(acceptMessage(myId, viewerPub, rid)); } catch (_) {}
+  }
   if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify(reply));
 }
-$("allow").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, true, r.rid); showRequest(); };
-$("always").onclick = () => { const r = requests.shift(); if (r) { trust(r.viewer, r.kind === "key" ? r.pub : null, r.fp); answer(r.viewer, true, r.rid); } showRequest(); };
+$("allow").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, true, r.rid, r.kind === "key" ? r.pub : null); showRequest(); };
+$("always").onclick = () => { const r = requests.shift(); if (r) { trust(r.viewer, r.kind === "key" ? r.pub : null, r.fp); answer(r.viewer, true, r.rid, r.kind === "key" ? r.pub : null); } showRequest(); };
 $("decline").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, false, r.rid); showRequest(); };
 
 // ---- Кодер ведущего: запасные пути (relay/tests/page-video.test.cjs берёт код между метками) ----
@@ -2111,14 +2170,14 @@ function onHostMessage(ws, event) {
     if (game.peer !== "host" && !audience.some((v) => v.id === game.peer)) gamePeerGone(game.peer);
     if (game.phase === "pick") renderGame();
   }
-  if (msg.type === "viewers") forceKey = true; // новый зритель — сразу ключевой кадр
+  if (msg.type === "viewers" && msg.tick !== true) forceKey = true; // новый зритель — сразу ключевой кадр (периодическое напоминание — нет)
   if (msg.type === "cancelled") { const i = requests.findIndex((r) => typeof msg.rid === "string" ? r.rid === msg.rid : r.viewer === msg.viewer); if (i >= 0) { requests.splice(i, 1); showRequest(); } }
   if (msg.type === "viewers") {
     liveViewers = msg.count ? (msg.list || []) : [];
     renderLiveText();
     $("liveText").title = (msg.list || []).map((v) => v.fp ? `${v.name}: ключ ${v.fp}` : v.name).join("\n");
-    // Новый зритель (или тот же после переподключения) получает список мониторов без хранения на relay.
-    announceDisplays();
+    // Новый зритель (или тот же после переподключения) получает список мониторов без хранения на relay (по напоминанию — нет).
+    if (msg.tick !== true) announceDisplays();
   }
 }
 

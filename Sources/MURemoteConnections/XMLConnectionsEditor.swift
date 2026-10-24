@@ -10,22 +10,32 @@ public struct ConnectionDraft: Equatable, Sendable {
     public var program: RemoteProgram?
     /// nil — пароль в файле не трогаем (в окне правки его не видно); "" — убрать; иначе — новый.
     public var password: String?
+    /// RDP/VPN/«Другое» вместо программы: ID тогда не обязателен.
+    public var method: ConnectionMethod?
+    /// Логин учётки Windows.
+    public var account: String
+    /// Как `password`: nil — не трогаем, "" — убрать, иначе — новый.
+    public var accountPassword: String?
 
     public init(name: String = "", id: String = "", group: String = "", tags: String = "", note: String = "",
-                program: RemoteProgram? = nil, password: String? = nil) {
+                program: RemoteProgram? = nil, password: String? = nil, method: ConnectionMethod? = nil,
+                account: String = "", accountPassword: String? = nil) {
         self.name = name
         self.id = id
         self.group = group
         self.tags = tags
         self.note = note
-        self.program = program
+        self.program = method == nil ? program : nil
         self.password = password
+        self.method = method
+        self.account = account
+        self.accountPassword = accountPassword
     }
 
-    /// Черновик из записи списка: пароля в записи нет, поэтому он не меняется.
+    /// Черновик из записи списка: паролей в записи нет, поэтому они не меняются.
     public init(_ record: ConnectionRecord) {
         self.init(name: record.name, id: record.displayID, group: record.group, tags: record.tags.joined(separator: ", "),
-                  note: record.note, program: record.program)
+                  note: record.note, program: record.program, method: record.method, account: record.account)
     }
 
     public enum Problem: String, Equatable, Sendable {
@@ -38,6 +48,7 @@ public struct ConnectionDraft: Equatable, Sendable {
     public var problems: [Problem] {
         var out: [Problem] = []
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { out.append(.missingName) }
+        if method != nil { return out }
         if let n = ConnectionID.normalize(id) {
             if n.isAlias, let program, !program.supportsAliases { out.append(.aliasNotSupported) }
         } else {
@@ -47,7 +58,7 @@ public struct ConnectionDraft: Equatable, Sendable {
     }
 
     /// ID в том виде, как он пишется в файл: цифры без пробелов или алиас.
-    var normalizedID: String { ConnectionID.normalize(id)?.value ?? id }
+    var normalizedID: String { method == nil ? ConnectionID.normalize(id)?.value ?? id : ConnectionsBuilder.idKey(id) }
 }
 
 public enum XMLEditError: Error, Equatable, Sendable {
@@ -71,6 +82,7 @@ public enum XMLConnectionsEditor {
         let indent = doc.connections.last.map { doc.lineIndent(before: $0.range.lowerBound) } ?? "  "
         var fields = values(draft)
         if let pw = draft.password, !pw.isEmpty { fields.insert((.password, pw), at: 2) }
+        if let pw = draft.accountPassword, !pw.isEmpty { fields.append((.accountPassword, pw)) }
         var element = "<connection>"
         for (field, value) in fields where !value.isEmpty {
             element += "<\(tag(field))>\(escape(value))</\(tag(field))>"
@@ -107,6 +119,7 @@ public enum XMLConnectionsEditor {
         var missing: [(ConnectionField, String)] = []
         var all = values(draft)
         if let pw = draft.password { all.append((.password, pw)) }
+        if let pw = draft.accountPassword { all.append((.accountPassword, pw)) }
         for (field, value) in all {
             if let child = element.children.first(where: { $0.field == field }) {
                 if let content = child.content {
@@ -217,7 +230,8 @@ public enum XMLConnectionsEditor {
             (.tags, tags),
             (.note, draft.note.trimmingCharacters(in: .whitespacesAndNewlines)),
         ]
-        out.append((.program, draft.program?.title ?? ""))
+        out.append((.program, draft.method?.title ?? draft.program?.title ?? ""))
+        out.append((.account, draft.account.trimmingCharacters(in: .whitespacesAndNewlines)))
         return out
     }
 
@@ -227,8 +241,9 @@ public enum XMLConnectionsEditor {
         switch field {
         case .id: return ConnectionID.normalize(old)?.value == new
         case .tags: return XMLConnectionsEditorTags.split(old) == XMLConnectionsEditorTags.split(new)
-        case .program: return RemoteProgram.parse(old) == RemoteProgram.parse(new) && trimmed.isEmpty == new.isEmpty
-        case .password: return old == new
+        case .program: return RemoteProgram.parse(old) == RemoteProgram.parse(new)
+            && ConnectionMethod.parse(old) == ConnectionMethod.parse(new) && trimmed.isEmpty == new.isEmpty
+        case .password, .accountPassword, .access: return old == new
         default: return trimmed == new
         }
     }
@@ -242,6 +257,10 @@ public enum XMLConnectionsEditor {
         case .tags: return "tags"
         case .note: return "note"
         case .program: return "app"
+        case .account: return "account"
+        case .accountPassword: return "accountPassword"
+        case .access: return "access"
+        case .contacts: return "contacts"
         }
     }
 
@@ -276,20 +295,22 @@ public enum XMLConnectionsEditor {
         let matches = records.filter {
             $0.id == draft.normalizedID && $0.name == trimmed(draft.name) && $0.group == trimmed(draft.group)
                 && $0.tags == ConnectionsBuilder.splitTags(draft.tags) && $0.note == trimmed(draft.note)
-                && $0.program == draft.program
+                && $0.program == draft.program && $0.method == draft.method && $0.account == trimmed(draft.account)
         }
         guard !matches.isEmpty else { throw XMLEditError.corrupt }
-        guard let password = draft.password else { return }
-        let ok = matches.contains { record in
-            switch try? source.lookupPassword(for: record, in: out) {
-            case .found(let secret)?:
-                defer { secret.wipe() }
-                return secret.withBytes { $0.elementsEqual(password.utf8) }
-            case .noPassword?: return password.isEmpty
-            default: return false
+        for (field, value) in [(ConnectionField.password, draft.password), (.accountPassword, draft.accountPassword)] {
+            guard let value else { continue }
+            let ok = matches.contains { record in
+                switch try? source.lookupSecret(field, for: record, in: out) {
+                case .found(let secret)?:
+                    defer { secret.wipe() }
+                    return secret.withBytes { $0.elementsEqual(value.utf8) }
+                case .noPassword?: return value.isEmpty
+                default: return false
+                }
             }
+            guard ok else { throw XMLEditError.corrupt }
         }
-        guard ok else { throw XMLEditError.corrupt }
     }
 
     /// После правки файл должен читаться, а записей — стать на `expectedDelta` больше.

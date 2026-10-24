@@ -2,6 +2,7 @@ import MURemoteConnections
 import SwiftUI
 import MUCore
 import MUDesign
+import MUTextEditor
 
 /// Что правим: новая запись или существующая.
 struct RemoteEditTarget: Identifiable {
@@ -9,7 +10,8 @@ struct RemoteEditTarget: Identifiable {
     var id: String { record?.identity ?? "new" }
 }
 
-/// «Правка записи» и «Добавить запись» (m16/m17). Только для .xml: правки сразу пишутся в файл.
+/// «Правка записи» и «Добавить запись» (m16/m17). Для .xml правки сразу пишутся в файл; для .xlsx/.xlsm —
+/// та же карточка только для просмотра: правка — в Excel, в книгу ничего не пишется.
 /// Пароль существующей записи не читается и не показывается: поле пустое — пароль в файле не меняется.
 struct RemoteEditSheet: View {
     let center: RemoteConnectionsCenter
@@ -31,6 +33,8 @@ struct RemoteEditSheet: View {
         _draft = State(initialValue: draft)
     }
 
+    /// Таблица Excel: смотреть можно, записывать — нет.
+    private var readOnly: Bool { !center.canEdit }
     private var program: RemoteProgram { draft.program ?? center.defaultProgram }
     private var problems: [ConnectionDraft.Problem] { draft.problems }
     private var fileName: String { center.fileURL?.lastPathComponent ?? "connections.xml" }
@@ -38,13 +42,25 @@ struct RemoteEditSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 14) {
-                HeaderTile(systemImage: record == nil ? "plus" : "pencil")
+                HeaderTile(systemImage: readOnly ? "doc.text.magnifyingglass" : record == nil ? "plus" : "pencil")
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(record == nil ? RL("Добавить запись") : RL("Правка записи"))
+                    Text(readOnly ? RL("Запись") : record == nil ? RL("Добавить запись") : RL("Правка записи"))
                         .font(DS.Font.dialogTitle).foregroundStyle(.dsText).accessibilityAddTraits(.isHeader)
-                    Text(RL("%@ · правки записываются сразу в файл", fileName)).font(DS.Font.rowSub).foregroundStyle(.dsMute)
+                    Text(readOnly ? RL("%@ · правка — в Excel", fileName) : RL("%@ · правки записываются сразу в файл", fileName))
+                        .font(DS.Font.rowSub).foregroundStyle(.dsMute)
                 }
             }
+            form.disabled(readOnly)
+            if readOnly { viewerFooter } else { editorFooter }
+        }
+        .padding(20)
+        .frame(width: 480)
+        .background(Color.dsBg)
+        .onDisappear { password = "" }
+    }
+
+    @ViewBuilder private var form: some View {
+        VStack(alignment: .leading, spacing: 14) {
             field(RL("Название"), problem: showProblems && problems.contains(.missingName) ? RL("Укажите название") : nil) {
                 TextField(RL("Название"), text: $draft.name).textFieldStyle(.graphite)
             }
@@ -58,7 +74,7 @@ struct RemoteEditSheet: View {
             field(RL("Пароль")) {
                 VStack(alignment: .leading, spacing: 6) {
                     SecureField(passwordPlaceholder, text: $password).textFieldStyle(.graphite).disabled(removePassword)
-                    if record?.hasPassword == true {
+                    if record?.hasPassword == true, !readOnly {
                         Toggle(RL("Убрать пароль из файла"), isOn: $removePassword).toggleStyle(.checkbox)
                             .font(DS.Font.rowSub)
                     }
@@ -68,7 +84,28 @@ struct RemoteEditSheet: View {
                 field(RL("Группа")) { TextField(RL("Группа"), text: $draft.group).textFieldStyle(.graphite) }
                 field(RL("Теги")) { TextField(RL("через запятую"), text: $draft.tags).textFieldStyle(.graphite) }
             }
-            field(RL("Заметка")) { TextField("—", text: $draft.note).textFieldStyle(.graphite) }
+            field(RL("Заметка")) {
+                TextField("—", text: $draft.note, axis: .vertical).lineLimit(1...4).textFieldStyle(.graphite)
+            }
+        }
+    }
+
+    /// .xlsx: подсказка и «Открыть в Excel»; записи в книгу нет.
+    private var viewerFooter: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(RL("Правка — в Excel: изменения в таблице появятся здесь сами."), systemImage: "tablecells")
+                .font(DS.Font.rowSub).foregroundStyle(.dsMute)
+            HStack(spacing: DS.Space.s) {
+                Spacer()
+                Button(RL("Закрыть")) { close() }.buttonStyle(.graphite(.secondary)).keyboardShortcut(.cancelAction)
+                Button(RL("Открыть в Excel")) { center.openFile(); close() }
+                    .buttonStyle(.graphite(.primary)).keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private var editorFooter: some View {
+        VStack(alignment: .leading, spacing: 14) {
             Label(RL("Перед записью создаётся %@.bak с теми же правами.", fileName), systemImage: "doc.on.doc")
                 .font(DS.Font.rowSub).foregroundStyle(.dsMute)
             if let error {
@@ -87,13 +124,10 @@ struct RemoteEditSheet: View {
                     .buttonStyle(.graphite(.primary)).keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(width: 480)
-        .background(Color.dsBg)
-        .onDisappear { password = "" }
     }
 
     private var passwordPlaceholder: String {
+        if readOnly { return record?.hasPassword == true ? RL("Есть в файле") : RL("В файле нет") }
         if record?.hasPassword == true { return RL("Не меняется") }
         return RL("Постоянный пароль %@", program.title)
     }
@@ -125,6 +159,7 @@ struct RemoteEditSheet: View {
     }
 
     private func save() {
+        guard !readOnly else { return }
         showProblems = true
         guard problems.isEmpty else { return }
         var draft = self.draft

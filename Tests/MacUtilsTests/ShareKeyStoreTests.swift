@@ -1,5 +1,7 @@
 import XCTest
 @testable import MacUtils
+@testable import MUScreenShare
+@testable import MUTextEditor
 
 /// Ключ трансляции в файле и однократный перенос из Keychain (1.5.2: Keychain просил пароль после каждого обновления).
 final class ShareKeyStoreTests: XCTestCase {

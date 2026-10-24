@@ -1,6 +1,7 @@
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUAudio
 
 final class OnboardingTests: XCTestCase {
     private func defaults() -> UserDefaults {

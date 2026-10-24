@@ -4,6 +4,18 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUDesign
+@testable import MUCutPaste
+@testable import MUAppSwitcher
+@testable import MUUninstaller
+@testable import MUWellbeing
+@testable import MUMeetings
+@testable import MUQR
+@testable import MUAudio
+@testable import MUDropShelf
+@testable import MUCheatSheet
+@testable import MUScreenShare
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Снимки интерфейса в PNG, чтобы дизайн можно было посмотреть без запуска приложения.
 /// Работает только с `MU_SNAPSHOTS=<папка>`; без неё тест пропускается.

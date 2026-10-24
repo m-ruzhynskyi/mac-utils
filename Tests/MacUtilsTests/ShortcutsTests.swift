@@ -3,6 +3,9 @@ import CryptoKit
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Mac Utils в «Командах» и ссылках `macutils://`: каждое действие зовёт ту же функцию, что горячая клавиша и панель
 /// (`AppAction.run`); действия с файлами — без окна, с теми же гарантиями байтов, что «Убрать значения» в редакторе.
@@ -83,7 +86,7 @@ final class ShortcutsTests: XCTestCase {
     /// Регистрация каждой горячей клавиши зовёт `AppAction(hotKey:)` (функции — через `AppRouter`) — то же, что ссылка и «Команды».
     func testEveryHotKeyRunsTheSameAction() throws {
         let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Sources/MacUtils")
+            .deletingLastPathComponent().appendingPathComponent("Sources")
         var text = ""
         for case let url as URL in try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
             where url.pathExtension == "swift" { text += try String(contentsOf: url, encoding: .utf8) }

@@ -3,6 +3,8 @@ import XCTest
 @testable import MacUtils
 @testable import MUCore
 @testable import MUDesign
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Замеры редактора на файле 10 МБ (как `Tests/Fixtures/TextEditor/generate-big.sh`; файл создаётся во временной папке).
 /// Числа печатаются в лог; тест падает, если порог превышен больше чем в полтора раза (запас под CI и отладочную сборку).

@@ -1,5 +1,7 @@
 import AppKit
 import MUCore
+import MUUpdate
+import MUScreenshot
 
 /// Если Mac Utils запущен не из «Программ» (из «Загрузок», с образа или из карантинной копии
 /// AppTranslocation), предлагаем перенести его туда: иначе он не может обновляться сам.

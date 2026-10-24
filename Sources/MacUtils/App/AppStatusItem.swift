@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 import MUCore
 import MUDesign
+import MUWellbeing
+import MUScreenshot
 
 /// Значок Mac Utils в строке меню: клик — панель «Инструменты» со вкладками
 /// прямо под значком (настройки и выход — в её шапке). Можно выключить в настройках.

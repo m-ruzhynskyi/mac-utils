@@ -3,6 +3,7 @@ import MURemoteConnections
 import SwiftUI
 import MUCore
 import MUDesign
+import MUTextEditor
 
 /// Палитра (⌃⌥⌘A): как Spotlight — набрал, Enter. Плавающая панель по центру экрана с курсором,
 /// не активирует Mac Utils (фокус возвращается в прежнюю программу), закрывается по Esc и при потере фокуса.

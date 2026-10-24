@@ -2,6 +2,9 @@ import CryptoKit
 import XCTest
 @testable import MacUtils
 @testable import MUCore
+@testable import MUAudio
+@testable import MUScreenShare
+@testable import MUTextEditor
 
 /// Ключ P-256 страницы ретранслятора (браузер, клиент для Windows без своего ключа): формат WebCrypto, проверка подписи
 /// и «Всегда разрешать» для такого зрителя. Векторы получены WebCrypto в node (`subtle.generateKey ECDSA P-256`,

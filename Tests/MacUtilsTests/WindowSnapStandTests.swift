@@ -3,6 +3,7 @@ import ApplicationServices
 import XCTest
 @testable import MacUtils
 @testable import MUDesign
+@testable import MUWindowSnap
 
 /// Стенд прилипания окон (1.6.8 на macOS 27: «по клавишам работает, перетаскиванием — нет и нет подсказки»).
 /// Своё окно в отдельном процессе (Tests/Stands/WindowSnapStand.swift); перетаскивание ведём точками в WindowTiler,

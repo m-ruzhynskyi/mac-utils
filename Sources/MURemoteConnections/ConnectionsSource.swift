@@ -12,6 +12,13 @@ struct RawEntry {
     var tags = ""
     var note = ""
     var program = ""
+    var account = ""
+    var accountPassword = ""
+    var hasAccountPassword = false
+    var access = ""
+    var accessLines = 0
+    var contacts = ""
+    var hasContacts = false
 
     init(row: Int) { self.row = row }
 
@@ -26,11 +33,33 @@ struct RawEntry {
         case .tags: tags = value
         case .note: note = value
         case .program: program = value
+        case .account: account = value
+        case .accountPassword:
+            hasAccountPassword = !value.isEmpty
+            if mode == .passwords { accountPassword = value }
+        case .access:
+            let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            accessLines = text.isEmpty ? 0 : text.split(whereSeparator: \.isNewline).filter { !$0.allSatisfy(\.isWhitespace) }.count
+            if mode == .passwords { access = text }
+        case .contacts:
+            let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            hasContacts = !text.isEmpty
+            if mode == .passwords { contacts = text }
+        }
+    }
+
+    /// Секретное поле (только в режиме `.passwords`).
+    func secret(_ field: ConnectionField) -> String {
+        switch field {
+        case .accountPassword: return accountPassword
+        case .access: return access
+        case .contacts: return contacts
+        default: return password
         }
     }
 
     var isEmpty: Bool {
-        !hasPassword && [name, id, group, tags, note, program].allSatisfy {
+        !hasPassword && !hasAccountPassword && accessLines == 0 && [name, id, group, tags, note, program, account].allSatisfy {
             $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
@@ -65,13 +94,21 @@ extension ConnectionsSource {
     /// Угадывать среди нескольких строк с одним ID не будем. Строки разбора (`String`) затереть нельзя —
     /// они живут только до конца этого вызова.
     func lookupPassword(for record: ConnectionRecord, in data: Data) throws -> PasswordLookup {
-        let sameID = try parse(data, mode: .passwords).entries.filter { ConnectionID.normalize($0.id)?.value == record.id }
-        var match = sameID.first { $0.row == record.sourceRow }
-        if match == nil { match = sameID.first { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == record.name } }
-        if match == nil, sameID.count == 1 { match = sameID[0] }
+        try lookupSecret(.password, for: record, in: data)
+    }
+
+    /// Секретное поле записи (пароль, пароль учётки, «Доступ») — так же, как пароль. Записи без ID ищутся
+    /// по номеру строки и названию.
+    func lookupSecret(_ field: ConnectionField, for record: ConnectionRecord, in data: Data) throws -> PasswordLookup {
+        let sameID = try parse(data, mode: .passwords).entries.filter { ConnectionsBuilder.idKey($0.id) == record.id }
+        let name = { (e: RawEntry) in e.name.trimmingCharacters(in: .whitespacesAndNewlines) }
+        var match = sameID.first { $0.row == record.sourceRow && (!record.id.isEmpty || name($0) == record.name) }
+        if match == nil { match = sameID.first { name($0) == record.name } }
+        if match == nil, sameID.count == 1, !record.id.isEmpty { match = sameID[0] }
         guard let match else { return .entryGone }
-        guard !match.password.isEmpty else { return .noPassword }
-        return .found(SecretBuffer(match.password.utf8))
+        let value = match.secret(field)
+        guard !value.isEmpty else { return .noPassword }
+        return .found(SecretBuffer(value.utf8))
     }
 
     /// nil — записи или пароля нет.

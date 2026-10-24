@@ -2,19 +2,22 @@ import MURemoteConnections
 import SwiftUI
 import MUCore
 import MUDesign
+import MUTextEditor
 
 /// Состояние списка для вкладки и палитры: запрос, фильтр по программе, выбранная строка.
 @MainActor
 final class RemoteListModel: ObservableObject {
     @Published var query = "" { didSet { if query != oldValue { selection = 0 } } }
     @Published var filter: ProgramFilter = .all { didSet { if filter != oldValue { selection = 0 } } }
+    /// Выбранные метки (ключи `ConnectionTag.key`): записи со всеми ими.
+    @Published var tags: Set<String> = [] { didSet { if tags != oldValue { selection = 0 } } }
     @Published var selection = 0
 
     let center: RemoteConnectionsCenter
 
     init(center: RemoteConnectionsCenter? = nil) { self.center = center ?? .shared }
 
-    var listing: ConnectionListing { center.listing(query: query, filter: filter) }
+    var listing: ConnectionListing { center.listing(query: query, filter: filter, tags: tags) }
 
     func selectedRow(in listing: ConnectionListing) -> ConnectionRow? {
         let rows = listing.rows
@@ -32,9 +35,14 @@ final class RemoteListModel: ObservableObject {
         if let i = listing.rows.firstIndex(of: row) { selection = i }
     }
 
-    /// ⇥ в палитре: Все → AnyDesk → TeamViewer → Все.
+    /// Чипы программ: «Все», AnyDesk, TeamViewer и — если такие записи есть — RDP и VPN.
+    func filters(_ counts: [ProgramFilter: Int]) -> [ProgramFilter] {
+        [.all] + RemoteProgram.allCases.map { .program($0) } + [ProgramFilter.rdp, .vpn].filter { (counts[$0] ?? 0) > 0 || filter == $0 }
+    }
+
+    /// ⇥ в палитре: Все → AnyDesk → TeamViewer (→ RDP → VPN) → Все.
     func cycleFilter() {
-        let order: [ProgramFilter] = [.all] + RemoteProgram.allCases.map { .program($0) }
+        let order = filters(listing.counts)
         filter = order[((order.firstIndex(of: filter) ?? 0) + 1) % order.count]
     }
 
@@ -56,6 +64,8 @@ final class RemoteListModel: ObservableObject {
         switch filter {
         case .all: return RL("Все %@", n)
         case .program(let p): return "\(p.title) \(n)"
+        case .rdp: return "RDP \(n)"
+        case .vpn: return "VPN \(n)"
         }
     }
 }

@@ -1,6 +1,7 @@
 import SwiftUI
 import MUCore
 import MUDesign
+import MUScreenshot
 
 /// Первый запуск (`.audit/concept/Onboarding*.dc.html`): слева — знак, приветствие и прогресс, справа — шаг.
 /// Три шага: приветствие → разрешения → готово. «Назад» и «Продолжить» ничего не меняют в настройках,
