@@ -4,6 +4,7 @@ import XCTest
 @testable import MUCore
 @testable import MUAudio
 @testable import MUScreenshot
+@testable import MUVideoPlayer
 
 /// Этап 2 плеера: модель на демо-видео. Звука нет (`silent`), позиции — в памяти.
 @MainActor

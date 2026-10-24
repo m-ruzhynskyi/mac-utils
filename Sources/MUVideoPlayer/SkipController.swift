@@ -5,28 +5,28 @@ import MUDesign
 /// «Пропустить интро / титры» и «Следующая серия» по главам файла (MVP, § 8.2–8.3).
 /// Решает `SkipPlanner` на каждом тике времени; без файла и без отрезков ничего не делает.
 @MainActor
-final class SkipController: ObservableObject {
+package final class SkipController: ObservableObject {
     /// Главы файла — зазоры на шкале и подписи при наведении.
-    @Published private(set) var chapters: [ChapterClassifier.Chapter] = []
-    @Published private(set) var segments: [SkipSegment] = []
-    @Published private(set) var decision: SkipPlanner.Decision = .none
+    @Published package private(set) var chapters: [ChapterClassifier.Chapter] = []
+    @Published package private(set) var segments: [SkipSegment] = []
+    @Published package private(set) var decision: SkipPlanner.Decision = .none
     /// Тост после авто-пропуска (v14c): отрезок и куда вернуться.
-    @Published var skippedToast: SkipSegment?
+    @Published package var skippedToast: SkipSegment?
 
     private var state = SkipPlanner.State()
     private var folder: String?
     private weak var model: PlayerModel?
     private var toastWork: DispatchWorkItem?
 
-    init(model: PlayerModel) { self.model = model }
+    package init(model: PlayerModel) { self.model = model }
 
     /// Текущий отрезок, внутри которого играет видео.
-    var currentSegment: SkipSegment? {
+    package var currentSegment: SkipSegment? {
         guard let index = state.inside, index < segments.count else { return nil }
         return segments[index]
     }
 
-    func reset() {
+    package func reset() {
         chapters = []
         segments = []
         decision = .none
@@ -36,7 +36,7 @@ final class SkipController: ObservableObject {
     }
 
     /// Главы QuickTime (`chap`) или Nero (`chpl`) → отрезки.
-    func load(asset: AVURLAsset, url: URL, duration: Double) async {
+    package func load(asset: AVURLAsset, url: URL, duration: Double) async {
         let chapters = await Self.readChapters(asset: asset, url: url, duration: duration)
         guard model?.currentURL == url else { return }
         self.chapters = chapters
@@ -44,7 +44,7 @@ final class SkipController: ObservableObject {
         segments = SkipSources.resolve(ChapterClassifier.segments(from: chapters, fileDuration: duration))
     }
 
-    static func readChapters(asset: AVURLAsset, url: URL, duration: Double) async -> [ChapterClassifier.Chapter] {
+    package static func readChapters(asset: AVURLAsset, url: URL, duration: Double) async -> [ChapterClassifier.Chapter] {
         var groups = (try? await asset.loadChapterMetadataGroups(bestMatchingPreferredLanguages: Locale.preferredLanguages + ["und"])) ?? []
         if groups.isEmpty, let locale = (try? await asset.load(.availableChapterLocales))?.first {
             groups = (try? await asset.loadChapterMetadataGroups(withTitleLocale: locale, containingItemsWithCommonKeys: [])) ?? []
@@ -68,13 +68,13 @@ final class SkipController: ObservableObject {
 
     // MARK: - Тик и события
 
-    var context: SkipPlanner.Context {
+    package var context: SkipPlanner.Context {
         SkipPlanner.Context(duration: model?.duration ?? 0, hasNext: model?.playlist.hasNext ?? false,
                             autoSkip: PlayerPrefs.skipAutomatically, autoNext: PlayerPrefs.nextEpisode,
                             hidden: folder.map { PlayerPrefs.skipHiddenFolders.contains($0) } ?? false)
     }
 
-    func tick(_ time: Double) {
+    package func tick(_ time: Double) {
         guard !segments.isEmpty else { return }
         let decision = SkipPlanner.decide(time: time, segments: segments, context: context, state: &state)
         switch decision {
@@ -89,17 +89,17 @@ final class SkipController: ObservableObject {
     }
 
     /// Перемотка (пользователем или пропуском): авто-пропуска после неё нет, отсчёт отменяется.
-    func noteSeek() {
+    package func noteSeek() {
         state.seeked = true
         cancelCountdown()
     }
 
     /// Пауза отменяет отсчёт «Следующей серии».
-    func notePause() { _ = cancelCountdown() }
+    package func notePause() { _ = cancelCountdown() }
 
     /// Esc или «Смотреть титры»: отсчёт стоп, остаётся кнопка «Следующая серия». `true` — было что отменять.
     @discardableResult
-    func cancelCountdown() -> Bool {
+    package func cancelCountdown() -> Bool {
         guard case .countdown(let index, _) = decision else { return false }
         state.countdownCancelled = true
         let segment = segments[index]
@@ -110,7 +110,7 @@ final class SkipController: ObservableObject {
     // MARK: - Действия
 
     /// S / ↩ / кнопка: работают весь отрезок, даже когда кнопки не видно. Вне отрезка — ничего.
-    func skipCurrent() {
+    package func skipCurrent() {
         guard let model, model.phase == .ready, let index = SkipPlanner.segmentIndex(at: model.currentTime, in: segments),
               !context.hidden else { return }
         perform(index, automatic: false)
@@ -130,7 +130,7 @@ final class SkipController: ObservableObject {
     }
 
     /// «Вернуть ⌘Z»: на начало отрезка, повторного авто-пропуска в этом открытии нет.
-    func undo() {
+    package func undo() {
         guard let segment = skippedToast, let index = segments.firstIndex(of: segment) else { return }
         state.undone.insert(index)
         dismissToast()
@@ -138,13 +138,13 @@ final class SkipController: ObservableObject {
     }
 
     /// «Дальше ↩» на карточке следующей серии.
-    func playNext() {
+    package func playNext() {
         decision = .none
         model?.next()
     }
 
     /// «Не показывать в этой папке».
-    func hideInFolder() {
+    package func hideInFolder() {
         guard let folder else { return }
         PlayerPrefs.hideSkip(inFolder: folder)
         decision = .none
@@ -158,7 +158,7 @@ final class SkipController: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
     }
 
-    func dismissToast() {
+    package func dismissToast() {
         toastWork?.cancel()
         skippedToast = nil
     }

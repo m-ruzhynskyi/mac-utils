@@ -3,6 +3,7 @@ import SwiftUI
 import MUCore
 import MUDesign
 import MUScreenShare
+import MUVideoPlayer
 
 // MARK: - Видеоплеер
 

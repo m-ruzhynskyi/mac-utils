@@ -15,6 +15,7 @@ import MUDropShelf
 import MUAnnotate
 import MUScreenShare
 import MUScreenshot
+import MUVideoPlayer
 
 /// Где прилипает окно (действие «Команд», ссылка `macutils://snap?…`, сочетания ⌃⌥ + стрелки).
 enum WindowPlacement: String, CaseIterable, Sendable {

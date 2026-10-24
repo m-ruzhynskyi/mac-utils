@@ -5,14 +5,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 import MUCore
 import MUDesign
-import MUScreenshot
 
 /// Состояние интерфейса одного окна: режимы, меню, подсказки поверх видео, тосты.
 @MainActor
-final class PlayerUIState: ObservableObject {
-    enum Menu: Equatable { case subtitles, audio, speed }
+package final class PlayerUIState: ObservableObject {
+    package enum Menu: Equatable { case subtitles, audio, speed }
 
-    enum HUD: Equatable {
+    package enum HUD: Equatable {
         /// Шаг по кадрам (v08b): «Кадр 33 365 · 00:23:10:05 · пауза».
         case frame(number: Int, timecode: String)
         /// Удержание → (v14b): «2× ▸▸ пока держите →».
@@ -23,22 +22,22 @@ final class PlayerUIState: ObservableObject {
         case message(String)
     }
 
-    @Published var playlistVisible = false
-    @Published var videoOnly = false
-    @Published var fullScreen = false
+    @Published package var playlistVisible = false
+    @Published package var videoOnly = false
+    @Published package var fullScreen = false
     /// Плавающая панель и курсор в полном экране и в режиме «Только видео».
-    @Published var chromeVisible = true
-    @Published var menu: Menu?
-    @Published var hud: HUD?
+    @Published package var chromeVisible = true
+    @Published package var menu: Menu?
+    @Published package var hud: HUD?
     /// Подсказка двойного клика у края (v14b): «‹‹ 20 с».
-    @Published var seekHint: (zone: ClickZone, seconds: Int)?
+    @Published package var seekHint: (zone: ClickZone, seconds: Int)?
     /// Шаг назад на длинном GOP идёт дольше 200 мс — индикатор.
-    @Published var stepping = false
+    @Published package var stepping = false
 
     /// Тост «Кадр сохранён» (v08c).
-    @Published var snapshot: PlayerSnapshot.Result?
+    @Published package var snapshot: PlayerSnapshot.Result?
     /// Мышь недавно двигалась над видео: кнопка «Пропустить…» возвращается вместе с панелью.
-    @Published var pointerActive = false
+    @Published package var pointerActive = false
 
     private var hudWork: DispatchWorkItem?
     private var hintWork: DispatchWorkItem?
@@ -46,9 +45,9 @@ final class PlayerUIState: ObservableObject {
     private var pointerWork: DispatchWorkItem?
 
     /// Панель прикреплена под видео (окно) или плавает поверх (полный экран, «Только видео»).
-    var floatingChrome: Bool { fullScreen || videoOnly }
+    package var floatingChrome: Bool { fullScreen || videoOnly }
 
-    func flash(_ hud: HUD, for seconds: Double = 1.4) {
+    package func flash(_ hud: HUD, for seconds: Double = 1.4) {
         self.hud = hud
         hudWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.hud = nil }
@@ -57,18 +56,18 @@ final class PlayerUIState: ObservableObject {
     }
 
     /// Подсказка без срока (удержание →) — снимается `clearHUD`.
-    func show(_ hud: HUD) {
+    package func show(_ hud: HUD) {
         hudWork?.cancel()
         self.hud = hud
     }
 
-    func clearHUD(_ hud: HUD? = nil) {
+    package func clearHUD(_ hud: HUD? = nil) {
         guard hud == nil || self.hud == hud else { return }
         hudWork?.cancel()
         self.hud = nil
     }
 
-    func hint(_ zone: ClickZone, seconds: Int) {
+    package func hint(_ zone: ClickZone, seconds: Int) {
         seekHint = (zone, seconds)
         hintWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.seekHint = nil }
@@ -76,7 +75,7 @@ final class PlayerUIState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
     }
 
-    func pointerMoved() {
+    package func pointerMoved() {
         if !pointerActive { pointerActive = true }
         pointerWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.pointerActive = false }
@@ -84,7 +83,7 @@ final class PlayerUIState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
     }
 
-    func showSnapshot(_ result: PlayerSnapshot.Result) {
+    package func showSnapshot(_ result: PlayerSnapshot.Result) {
         snapshot = result
         snapshotWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.snapshot = nil }
@@ -93,7 +92,7 @@ final class PlayerUIState: ObservableObject {
     }
 
     /// Отменить отложенное (окно закрыли): после закрытия ничего не срабатывает.
-    func reset() {
+    package func reset() {
         hudWork?.cancel()
         hintWork?.cancel()
         snapshotWork?.cancel()
@@ -111,19 +110,19 @@ final class PlayerUIState: ObservableObject {
 /// Пока открыто хоть одно окно, Mac Utils — обычное приложение со значком в Dock; закрыли последнее — снова фоновое.
 /// Всё, что окно запустило (наблюдатели, отложенные подсказки, утверждения питания), снимается при закрытии.
 @MainActor
-final class PlayerWindowController: NSObject, NSWindowDelegate {
+package final class PlayerWindowController: NSObject, NSWindowDelegate {
     /// Открытые окна; последнее активное — в конце.
-    private(set) static var windows: [PlayerWindowController] = []
+    package private(set) static var windows: [PlayerWindowController] = []
 
-    static var anyOpen: Bool { windows.contains { $0.window.isVisible } }
-    static var isKey: Bool { windows.contains { $0.window.isKeyWindow } }
-    static var current: PlayerWindowController? { windows.first { $0.window.isKeyWindow } ?? windows.last }
+    package static var anyOpen: Bool { windows.contains { $0.window.isVisible } }
+    package static var isKey: Bool { windows.contains { $0.window.isKeyWindow } }
+    package static var current: PlayerWindowController? { windows.first { $0.window.isKeyWindow } ?? windows.last }
     /// Значок в Dock (подменяется в тестах: процесс тестов не трогает свою политику активации).
-    static var syncDock: (Bool) -> Void = { AppRouter.shared.syncDock(nil, $0) }
+    package static var syncDock: (Bool) -> Void = { AppRouter.shared.syncDock(nil, $0) }
 
-    let model: PlayerModel
-    let ui = PlayerUIState()
-    let window: PlayerWindow
+    package let model: PlayerModel
+    package let ui = PlayerUIState()
+    package let window: PlayerWindow
     private var hold = HoldToFastForward()
     private var holdWork: DispatchWorkItem?
     private var holdWasPaused = false
@@ -134,12 +133,12 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     // MARK: - Точки входа
 
     /// Показать плеер: последнее окно или новое пустое (v07).
-    static func show() {
+    package static func show() {
         (current ?? PlayerWindowController()).present()
     }
 
     /// Открыть файлы: в текущем окне (после текущего файла) или в новом.
-    static func open(_ urls: [URL], newWindow: Bool = false) {
+    package static func open(_ urls: [URL], newWindow: Bool = false) {
         let media = PlayerMedia.expand(urls)
         let subtitles = urls.filter(PlayerMedia.isSubtitle)
         guard !media.isEmpty || !subtitles.isEmpty else { return }
@@ -150,18 +149,18 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     }
 
     /// «Открыть…» (⌘O) или «Открыть в новом окне…» (⌥⌘O).
-    static func openPanel(newWindow: Bool = false) {
+    package static func openPanel(newWindow: Bool = false) {
         let controller = newWindow ? PlayerWindowController() : (current ?? PlayerWindowController())
         controller.present()
         controller.runOpenPanel { controller.model.open($0) }
     }
 
     /// Перетаскивание на вкладку панели 🔧.
-    static func openDropped(_ providers: [NSItemProvider]) {
+    package static func openDropped(_ providers: [NSItemProvider]) {
         loadURLs(providers) { open($0) }
     }
 
-    static func loadURLs(_ providers: [NSItemProvider], completion: @escaping @MainActor ([URL]) -> Void) {
+    package static func loadURLs(_ providers: [NSItemProvider], completion: @escaping @MainActor ([URL]) -> Void) {
         let group = DispatchGroup()
         let collected = UncheckedBox<[Int: URL]>([:])
         for (index, provider) in providers.enumerated() where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
@@ -181,11 +180,11 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
 
     // MARK: - Окно
 
-    override convenience init() {
+    package override convenience init() {
         self.init(model: PlayerModel())
     }
 
-    init(model: PlayerModel) {
+    package init(model: PlayerModel) {
         self.model = model
         window = PlayerWindow.make()
         super.init()
@@ -209,7 +208,7 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         Self.windows.append(self)
     }
 
-    func present() {
+    package func present() {
         // Закрытое окно не возвращаем (его виды уже отпущены) — показываем другое или новое.
         guard !closing else { return Self.show() }
         let wasVisible = window.isVisible
@@ -249,36 +248,36 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         if !playing { showChrome(autoHide: false) }
     }
 
-    func windowDidBecomeKey(_ notification: Notification) {
+    package func windowDidBecomeKey(_ notification: Notification) {
         window.centerTrafficLights()
         Self.windows.removeAll { $0 === self }
         Self.windows.append(self)
         PlayerSystem.shared.update()
     }
 
-    func windowDidResignKey(_ notification: Notification) {
+    package func windowDidResignKey(_ notification: Notification) {
         endHold()
         window.centerTrafficLights()
     }
 
-    func windowDidResize(_ notification: Notification) { window.centerTrafficLights() }
+    package func windowDidResize(_ notification: Notification) { window.centerTrafficLights() }
 
-    func windowWillEnterFullScreen(_ notification: Notification) {
+    package func windowWillEnterFullScreen(_ notification: Notification) {
         ui.fullScreen = true
         ui.menu = nil
         scheduleChromeHide()
     }
 
-    func windowDidExitFullScreen(_ notification: Notification) {
+    package func windowDidExitFullScreen(_ notification: Notification) {
         ui.fullScreen = false
         showChrome(autoHide: false)
         window.centerTrafficLights()
     }
 
     /// Окно закрыто насовсем: контроллер больше не показывается (возврат из PiP его не оживит).
-    var isClosed: Bool { closing }
+    package var isClosed: Bool { closing }
 
-    func windowWillClose(_ notification: Notification) {
+    package func windowWillClose(_ notification: Notification) {
         guard !closing else { return }
         closing = true
         // PiP не переживает окно: иначе в нём остался бы пустой плеер, а возврат из PiP открыл бы закрытое окно.
@@ -305,13 +304,13 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     // MARK: - Полоса и курсор
 
     /// Мышь двинулась над видео: показать плавающую панель (и курсор); в полном экране — спрятать через 2 с.
-    func mouseMoved() {
+    package func mouseMoved() {
         ui.pointerMoved()
         guard ui.floatingChrome else { return }
         showChrome(autoHide: true)
     }
 
-    func showChrome(autoHide: Bool) {
+    package func showChrome(autoHide: Bool) {
         if !ui.chromeVisible { ui.chromeVisible = true }
         window.setTrafficLightsHidden(ui.videoOnly && !ui.fullScreen && !ui.chromeVisible)
         chromeWork?.cancel()
@@ -331,7 +330,7 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
     }
 
-    func toggleVideoOnly() {
+    package func toggleVideoOnly() {
         guard !ui.fullScreen else { return }
         ui.videoOnly.toggle()
         ui.chromeVisible = !ui.videoOnly
@@ -339,11 +338,11 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         if ui.videoOnly { scheduleChromeHide() } else { chromeWork?.cancel() }
     }
 
-    func toggleFullScreen() { window.toggleFullScreen(nil) }
+    package func toggleFullScreen() { window.toggleFullScreen(nil) }
 
     // MARK: - Клики по видео
 
-    func videoClicked(count: Int, x: CGFloat, width: CGFloat) {
+    package func videoClicked(count: Int, x: CGFloat, width: CGFloat) {
         guard model.phase == .ready else { return }
         if ui.menu != nil {
             ui.menu = nil
@@ -364,7 +363,7 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     // MARK: - Клавиши
 
     /// Клавиша в окне плеера; `false` — не наша, пусть идёт дальше.
-    func handleKey(_ event: NSEvent) -> Bool {
+    package func handleKey(_ event: NSEvent) -> Bool {
         let keyCode = Int(event.keyCode)
         let modifiers = event.modifierFlags.intersection(PlayerShortcuts.relevantModifiers)
         let now = event.timestamp
@@ -420,7 +419,7 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         handleHold(hold.cancel())
     }
 
-    func perform(_ action: PlayerAction) {
+    package func perform(_ action: PlayerAction) {
         let ready = model.phase == .ready
         switch action {
         case .togglePlay: model.togglePlay()
@@ -466,7 +465,7 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         if ui.floatingChrome, action != .togglePlay { showChrome(autoHide: true) }
     }
 
-    func toggleMenu(_ menu: PlayerUIState.Menu) {
+    package func toggleMenu(_ menu: PlayerUIState.Menu) {
         guard model.phase == .ready else { return }
         ui.menu = ui.menu == menu ? nil : menu
         if ui.floatingChrome { showChrome(autoHide: false) }
@@ -498,14 +497,14 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
 
     /// Файлы на окно: видео — в плейлист после текущего, субтитры — к текущему видео.
     /// Сначала видео (его открытие сбрасывает субтитры прежнего файла), потом субтитры — к нему.
-    func dropped(_ urls: [URL]) {
+    package func dropped(_ urls: [URL]) {
         let media = PlayerMedia.expand(urls.filter { !PlayerMedia.isSubtitle($0) })
         if !media.isEmpty { model.open(media) }
         for url in urls.filter(PlayerMedia.isSubtitle) { model.subtitles.addExternal(url) }
     }
 
     /// «Открыть в другой программе…» на экране неподдерживаемого формата.
-    func openElsewhere(_ url: URL) {
+    package func openElsewhere(_ url: URL) {
         let panel = NSOpenPanel()
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.allowedContentTypes = [.application]
@@ -519,25 +518,25 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
 }
 
 /// Значение, которое меняется из колбэков на главной очереди.
-final class UncheckedBox<Value>: @unchecked Sendable {
-    var value: Value
-    init(_ value: Value) { self.value = value }
+package final class UncheckedBox<Value>: @unchecked Sendable {
+    package var value: Value
+    package init(_ value: Value) { self.value = value }
 }
 
 // MARK: - Окно
 
 /// Окно плеера: без полосы заголовка (её рисует `PlayerRootView`), «светофор» по центру полосы 50 pt.
 /// Клавиши плеера разбираются здесь, до SwiftUI: так они работают, на чём бы ни стоял фокус (кроме полей ввода).
-final class PlayerWindow: NSWindow {
-    static let autosaveName = "MacUtilsPlayer"
-    static let titleBarHeight: CGFloat = 50
+package final class PlayerWindow: NSWindow {
+    package static let autosaveName = "MacUtilsPlayer"
+    package static let titleBarHeight: CGFloat = 50
 
-    weak var controller: PlayerWindowController?
-    weak var videoView: PlayerVideoView?
+    package weak var controller: PlayerWindowController?
+    package weak var videoView: PlayerVideoView?
     /// Курсор над плавающей панелью: её не прячем.
-    var isMouseOverControls = false
+    package var isMouseOverControls = false
 
-    static func make() -> PlayerWindow {
+    package static func make() -> PlayerWindow {
         let window = PlayerWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 600),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                                   backing: .buffered, defer: false)
@@ -553,7 +552,7 @@ final class PlayerWindow: NSWindow {
         return window
     }
 
-    func focusVideo() {
+    package func focusVideo() {
         if let videoView { makeFirstResponder(videoView) }
     }
 
@@ -569,7 +568,7 @@ final class PlayerWindow: NSWindow {
         return !(responder === self || responder === contentView || responder === videoView)
     }
 
-    override func sendEvent(_ event: NSEvent) {
+    package override func sendEvent(_ event: NSEvent) {
         switch event.type {
         case .keyDown, .keyUp:
             let activatesControl = [kVK_Return, kVK_Space, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode))
@@ -588,7 +587,7 @@ final class PlayerWindow: NSWindow {
     }
 
     /// ⌘-сочетания плеера (⌘L, ⌘O, ⌥⌘O, ⌘Z, ⌃⌘T) — раньше главного меню: там ⌘O открывает редактор.
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    package override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.type == .keyDown, !typing, event.modifierFlags.contains(.command),
            MainActor.assumeIsolated({ controller?.handleKey(event) ?? false }) {
             return true
@@ -607,7 +606,7 @@ final class PlayerWindow: NSWindow {
     }
 
     /// Кнопки окна — по центру полосы заголовка (как у редактора), а не у верхнего края.
-    func centerTrafficLights() {
+    package func centerTrafficLights() {
         guard !styleMask.contains(.fullScreen), let close = standardWindowButton(.closeButton),
               let titlebar = close.superview, let container = titlebar.superview else { return }
         let height = Self.titleBarHeight
@@ -622,7 +621,7 @@ final class PlayerWindow: NSWindow {
         }
     }
 
-    func setTrafficLightsHidden(_ hidden: Bool) {
+    package func setTrafficLightsHidden(_ hidden: Bool) {
         for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             standardWindowButton(type)?.isHidden = hidden
         }

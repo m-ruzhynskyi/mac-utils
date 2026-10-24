@@ -3,26 +3,26 @@ import Foundation
 // MARK: - Отрезки
 
 /// Отрезок «Пропустить…» (§ 8.2): вид, время, откуда он взялся.
-struct SkipSegment: Equatable {
-    enum Kind: String, Equatable {
+package struct SkipSegment: Equatable {
+    package enum Kind: String, Equatable {
         case intro, recap, credits
     }
 
     /// Порядок — приоритет: ручная метка файла → метка папки → главы → SponsorBlock → звук.
-    enum Source: Int, Comparable {
+    package enum Source: Int, Comparable {
         case manualFile, manualFolder, chapter, sponsorBlock, audio
 
-        static func < (a: Source, b: Source) -> Bool { a.rawValue < b.rawValue }
+        package static func < (a: Source, b: Source) -> Bool { a.rawValue < b.rawValue }
     }
 
-    var kind: Kind
-    var range: ClosedRange<Double>
-    var source: Source
+    package var kind: Kind
+    package var range: ClosedRange<Double>
+    package var source: Source
     /// Название главы («Opening») — для подписи источника и тоста.
-    var label: String = ""
+    package var label: String = ""
 
     /// Подпись кнопки.
-    func title(nextEpisode: Bool) -> String {
+    package func title(nextEpisode: Bool) -> String {
         switch kind {
         case .intro: return "Пропустить интро"
         case .recap: return "Пропустить пересказ"
@@ -31,7 +31,7 @@ struct SkipSegment: Equatable {
     }
 
     /// «интро · глава „Opening“» — подпись под шкалой.
-    var sourceTitle: String {
+    package var sourceTitle: String {
         let what: String
         switch kind {
         case .intro: what = "интро"
@@ -42,10 +42,10 @@ struct SkipSegment: Equatable {
     }
 }
 
-enum SkipSources {
+package enum SkipSources {
     /// Из отрезков разных источников для каждого вида оставить самый приоритетный источник.
     /// `suppressed` — виды с ручной меткой «нет» («Не показывать в этой папке»): их не показываем совсем.
-    static func resolve(_ segments: [SkipSegment], suppressed: Set<SkipSegment.Kind> = []) -> [SkipSegment] {
+    package static func resolve(_ segments: [SkipSegment], suppressed: Set<SkipSegment.Kind> = []) -> [SkipSegment] {
         var result: [SkipSegment] = []
         for kind in [SkipSegment.Kind.intro, .recap, .credits] where !suppressed.contains(kind) {
             let candidates = segments.filter { $0.kind == kind }
@@ -60,8 +60,8 @@ enum SkipSources {
 
 /// Вид главы по названию и месту (§ 8.3). Кнопка по ошибке — не беда, авто-пропуск по ошибке — беда:
 /// поэтому название должно начинаться со слова из словаря, быть не длиннее 3 слов и стоять там, где такие главы бывают.
-enum ChapterClassifier {
-    enum Kind: Equatable { case intro, recap, credits, preview }
+package enum ChapterClassifier {
+    package enum Kind: Equatable { case intro, recap, credits, preview }
 
     private static let dictionary: [(Kind, [String])] = [
         (.intro, ["intro", "opening", "op", "opening credits", "opening theme", "title sequence", "заставка", "вступление",
@@ -76,12 +76,12 @@ enum ChapterClassifier {
     private static let phrasesWithTail: Set<String> = ["previously on"]
 
     /// Слова в нижнем регистре: ё → е, апострофы удаляются («Ed's» → «eds»), прочая пунктуация и цифры — пробел.
-    static func words(_ title: String) -> [String] {
+    package static func words(_ title: String) -> [String] {
         tokens(title).filter { !$0.allSatisfy(\.isNumber) }
     }
 
     /// Слова и числа по отдельности: «OP1» → [«op», «1»], «Op. 27 No. 2» → [«op», «27», «no», «2»].
-    static func tokens(_ title: String) -> [String] {
+    package static func tokens(_ title: String) -> [String] {
         var text = title.lowercased().replacingOccurrences(of: "ё", with: "е")
         for apostrophe in ["'", "’", "ʼ", "`", "‘"] { text = text.replacingOccurrences(of: apostrophe, with: "") }
         var tokens: [String] = []
@@ -104,7 +104,7 @@ enum ChapterClassifier {
     }
 
     /// Вид по названию (без учёта места): название — это фраза из словаря, после неё — разве что номер.
-    static func kind(title: String) -> Kind? {
+    package static func kind(title: String) -> Kind? {
         let tokens = tokens(title)
         guard !tokens.isEmpty else { return nil }
         var best: (kind: Kind, length: Int)?
@@ -123,7 +123,7 @@ enum ChapterClassifier {
     }
 
     /// Вид с учётом места и длины; nil — обычная глава.
-    static func kind(title: String, start: Double, length: Double, fileDuration: Double) -> Kind? {
+    package static func kind(title: String, start: Double, length: Double, fileDuration: Double) -> Kind? {
         guard let kind = kind(title: title), fileDuration > 0, length > 0 else { return nil }
         switch kind {
         case .intro, .recap:
@@ -133,14 +133,14 @@ enum ChapterClassifier {
         }
     }
 
-    struct Chapter: Equatable {
-        let title: String
-        let start: Double
-        let end: Double
+    package struct Chapter: Equatable {
+        package let title: String
+        package let start: Double
+        package let end: Double
     }
 
     /// Главы → отрезки: соседние главы одного вида склеиваются, анонс сразу после титров — их хвост.
-    static func segments(from chapters: [Chapter], fileDuration: Double) -> [SkipSegment] {
+    package static func segments(from chapters: [Chapter], fileDuration: Double) -> [SkipSegment] {
         var result: [SkipSegment] = []
         for chapter in chapters.sorted(by: { $0.start < $1.start }) {
             guard let kind = kind(title: chapter.title, start: chapter.start, length: chapter.end - chapter.start,
@@ -169,37 +169,37 @@ enum ChapterClassifier {
 
 /// Что показать сейчас: ничего, кнопку, пропустить сразу или отсчёт до следующей серии. Чистая функция:
 /// всё состояние — в `SkipState`, время и настройки — на входе (табличные тесты `SkipPlannerTests`).
-enum SkipPlanner {
-    static let buttonSeconds: Double = 10
-    static let countdownSeconds: Double = 5
+package enum SkipPlanner {
+    package static let buttonSeconds: Double = 10
+    package static let countdownSeconds: Double = 5
     /// Отрезок кончается так близко к концу файла — это «конец серии».
-    static let endSlack: Double = 3
+    package static let endSlack: Double = 3
 
-    struct Context: Equatable {
-        var duration: Double
-        var hasNext: Bool
-        var autoSkip: Bool
-        var autoNext: Bool
+    package struct Context: Equatable {
+        package var duration: Double
+        package var hasNext: Bool
+        package var autoSkip: Bool
+        package var autoNext: Bool
         /// «Не показывать в этой папке».
-        var hidden = false
+        package var hidden = false
     }
 
-    struct State: Equatable {
+    package struct State: Equatable {
         /// Отрезок, внутри которого мы сейчас, и как в него попали.
-        var inside: Int?
-        var enteredAt: Double = 0
-        var enteredNaturally = false
+        package var inside: Int?
+        package var enteredAt: Double = 0
+        package var enteredNaturally = false
         /// Авто-пропуск — один раз за открытие файла.
-        var autoSkipped: Set<Int> = []
+        package var autoSkipped: Set<Int> = []
         /// «Вернуть» — этот отрезок больше не пропускаем сами.
-        var undone: Set<Int> = []
-        var countdownCancelled = false
-        var lastTime: Double?
+        package var undone: Set<Int> = []
+        package var countdownCancelled = false
+        package var lastTime: Double?
         /// С прошлого тика была перемотка (пользователем или пропуском).
-        var seeked = false
+        package var seeked = false
     }
 
-    enum Decision: Equatable {
+    package enum Decision: Equatable {
         case none
         /// Кнопка «Пропустить …» (видна `fresh` первые 10 с или пока видна панель).
         case button(segment: Int, title: String, fresh: Bool)
@@ -211,16 +211,16 @@ enum SkipPlanner {
         case playNext
     }
 
-    static func segmentIndex(at time: Double, in segments: [SkipSegment]) -> Int? {
+    package static func segmentIndex(at time: Double, in segments: [SkipSegment]) -> Int? {
         segments.firstIndex { time >= $0.range.lowerBound && time < $0.range.upperBound }
     }
 
     /// Отрезок доходит до конца файла (титры в конце серии).
-    static func endsFile(_ segment: SkipSegment, duration: Double) -> Bool {
+    package static func endsFile(_ segment: SkipSegment, duration: Double) -> Bool {
         segment.range.upperBound >= duration - endSlack
     }
 
-    static func decide(time: Double, segments: [SkipSegment], context: Context, state: inout State) -> Decision {
+    package static func decide(time: Double, segments: [SkipSegment], context: Context, state: inout State) -> Decision {
         defer {
             state.lastTime = time
             state.seeked = false
@@ -259,7 +259,7 @@ enum SkipPlanner {
     }
 
     /// Куда перематывать при пропуске: конец отрезка; у конца файла — следующий файл (`nil`).
-    static func target(for segment: SkipSegment, duration: Double, hasNext: Bool) -> Double? {
+    package static func target(for segment: SkipSegment, duration: Double, hasNext: Bool) -> Double? {
         if endsFile(segment, duration: duration), hasNext { return nil }
         return min(segment.range.upperBound, duration)
     }
@@ -270,10 +270,10 @@ enum SkipPlanner {
 /// Атом `moov/udta/chpl`: AVFoundation его не читает (проверено фикстурой этапа 1), разбираем сами.
 /// Формат: версия (1 байт), флаги (3), при версии ≥ 1 — 4 байта резерва, число глав (1), для каждой — начало
 /// (u64, единицы 100 нс), длина названия (1) и название в UTF-8.
-enum NeroChapters {
-    static let maxMoovBytes = 64 * 1024 * 1024
+package enum NeroChapters {
+    package static let maxMoovBytes = 64 * 1024 * 1024
 
-    static func parse(chpl data: Data) -> [(title: String, start: Double)] {
+    package static func parse(chpl data: Data) -> [(title: String, start: Double)] {
         let bytes = [UInt8](data)
         guard bytes.count >= 5 else { return [] }
         var offset = 4 + (bytes[0] >= 1 ? 4 : 0)
@@ -297,7 +297,7 @@ enum NeroChapters {
     /// Атомы подряд: (тип, полезная нагрузка). 64-битный размер и «до конца» поддерживаются.
     /// Размеры из файла сравниваются с остатком данных вычитанием: `offset + size` на мусорном размере переполнился бы.
     /// Разбирает и полезную нагрузку образцов WebVTT, которую AVFoundation не проверяет, — поэтому без доверия к данным.
-    static func boxes(in data: Data) -> [(type: String, payload: Data)] {
+    package static func boxes(in data: Data) -> [(type: String, payload: Data)] {
         var result: [(String, Data)] = []
         var offset = data.startIndex
         while data.endIndex - offset >= 8 {
@@ -321,7 +321,7 @@ enum NeroChapters {
     }
 
     /// Главы из файла: ищем `moov` среди атомов верхнего уровня, не читая `mdat`.
-    static func read(_ url: URL) -> [(title: String, start: Double)] {
+    package static func read(_ url: URL) -> [(title: String, start: Double)] {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
         defer { try? handle.close() }
         var offset: UInt64 = 0
@@ -351,7 +351,7 @@ enum NeroChapters {
         return []
     }
 
-    static func chapters(inMoov moov: Data) -> [(title: String, start: Double)] {
+    package static func chapters(inMoov moov: Data) -> [(title: String, start: Double)] {
         for box in boxes(in: moov) where box.type == "udta" {
             for child in boxes(in: box.payload) where child.type == "chpl" {
                 return parse(chpl: Data(child.payload))

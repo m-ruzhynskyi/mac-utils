@@ -22,6 +22,7 @@ import MUCheatSheet
 import MUAnnotate
 import MUScreenShare
 import MUScreenshot
+import MUVideoPlayer
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения

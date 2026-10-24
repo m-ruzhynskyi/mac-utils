@@ -4,53 +4,53 @@ import MUCore
 /// Где остановились: `Application Support/Mac Utils/Player/positions.json`. Ключ — путь + размер + время изменения:
 /// перезаписанный файл начинается сначала. Не запоминаем меньше 30 с и больше 95 % (досмотрели); старые записи
 /// уходят первыми, всего — 500.
-final class PositionStore {
-    struct Entry: Codable, Equatable {
-        var key: String
-        var path: String
-        var position: Double
-        var duration: Double
-        var updated: Date
+package final class PositionStore {
+    package struct Entry: Codable, Equatable {
+        package var key: String
+        package var path: String
+        package var position: Double
+        package var duration: Double
+        package var updated: Date
     }
 
-    static let limit = 500
-    static let minimumPosition: Double = 30
-    static let finishedFraction = 0.95
+    package static let limit = 500
+    package static let minimumPosition: Double = 30
+    package static let finishedFraction = 0.95
 
-    @MainActor static let shared = PositionStore(file: defaultFile)
+    @MainActor package static let shared = PositionStore(file: defaultFile)
 
-    static var defaultFile: URL {
+    package static var defaultFile: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Mac Utils/Player/positions.json")
     }
 
     /// Новые — первыми.
-    private(set) var entries: [Entry] = []
+    package private(set) var entries: [Entry] = []
     private let file: URL?
     private var loaded = false
 
     /// `file == nil` — только в памяти (тесты).
-    init(file: URL?) { self.file = file }
+    package init(file: URL?) { self.file = file }
 
     // MARK: - Правила
 
     /// Стоит ли запоминать это место.
-    static func shouldRemember(position: Double, duration: Double) -> Bool {
+    package static func shouldRemember(position: Double, duration: Double) -> Bool {
         guard position.isFinite, duration.isFinite, duration > 0 else { return false }
         return position >= minimumPosition && position <= duration * finishedFraction
     }
 
     /// Досмотрели (больше 95 %) — для «просмотрено» в недавних.
-    static func isFinished(position: Double, duration: Double) -> Bool {
+    package static func isFinished(position: Double, duration: Double) -> Bool {
         duration > 0 && position > duration * finishedFraction
     }
 
-    static func key(path: String, size: Int64, modified: Date) -> String {
+    package static func key(path: String, size: Int64, modified: Date) -> String {
         "\(path)|\(size)|\(Int64((modified.timeIntervalSince1970 * 1000).rounded()))"
     }
 
     /// Ключ файла на диске; nil — файла нет (или это не файл).
-    static func key(for url: URL) -> String? {
+    package static func key(for url: URL) -> String? {
         let standard = url.standardizedFileURL
         guard let values = try? standard.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
               let size = values.fileSize, let modified = values.contentModificationDate else { return nil }
@@ -60,21 +60,21 @@ final class PositionStore {
     // MARK: - Чтение и запись
 
     /// Откуда продолжать; nil — сначала.
-    func resumePosition(for key: String) -> Double? {
+    package func resumePosition(for key: String) -> Double? {
         load()
         guard let entry = entries.first(where: { $0.key == key }),
               Self.shouldRemember(position: entry.position, duration: entry.duration) else { return nil }
         return entry.position
     }
 
-    func entry(forPath path: String) -> Entry? {
+    package func entry(forPath path: String) -> Entry? {
         load()
         let path = URL(fileURLWithPath: path).standardizedFileURL.path
         return entries.first { $0.path == path }
     }
 
     /// Запомнить место. Меньше 30 с или досмотрели — прежняя запись убирается (в следующий раз — сначала).
-    func record(key: String, path: String, position: Double, duration: Double, now: Date = Date()) {
+    package func record(key: String, path: String, position: Double, duration: Double, now: Date = Date()) {
         load()
         let before = entries
         entries.removeAll { $0.key == key || $0.path == path }
@@ -85,14 +85,14 @@ final class PositionStore {
         if entries != before { save() }
     }
 
-    func remove(path: String) {
+    package func remove(path: String) {
         load()
         let count = entries.count
         entries.removeAll { $0.path == path }
         if entries.count != count { save() }
     }
 
-    func removeAll() {
+    package func removeAll() {
         entries = []
         loaded = true
         if let file { try? FileManager.default.removeItem(at: file) }
@@ -118,14 +118,14 @@ final class PositionStore {
 }
 
 /// «Продолжить просмотр» в пустом окне: последние открытые файлы и какие из них досмотрены.
-enum PlayerRecent {
-    static let limit = 12
+package enum PlayerRecent {
+    package static let limit = 12
 
-    static var paths: [String] { UserDefaults.standard.stringArray(forKey: Pref.playerRecent) ?? [] }
-    static var urls: [URL] { paths.map { URL(fileURLWithPath: $0) } }
-    static var finished: Set<String> { Set(UserDefaults.standard.stringArray(forKey: Pref.playerFinished) ?? []) }
+    package static var paths: [String] { UserDefaults.standard.stringArray(forKey: Pref.playerRecent) ?? [] }
+    package static var urls: [URL] { paths.map { URL(fileURLWithPath: $0) } }
+    package static var finished: Set<String> { Set(UserDefaults.standard.stringArray(forKey: Pref.playerFinished) ?? []) }
 
-    static func add(_ url: URL, finished isFinished: Bool) {
+    package static func add(_ url: URL, finished isFinished: Bool) {
         let path = url.standardizedFileURL.path
         var list = paths.filter { $0 != path }
         list.insert(path, at: 0)
@@ -138,12 +138,12 @@ enum PlayerRecent {
         if (defaults.stringArray(forKey: Pref.playerFinished) ?? []).sorted() != sorted { defaults.set(sorted, forKey: Pref.playerFinished) }
     }
 
-    static func remove(_ url: URL) {
+    package static func remove(_ url: URL) {
         let path = url.standardizedFileURL.path
         UserDefaults.standard.set(paths.filter { $0 != path }, forKey: Pref.playerRecent)
     }
 
-    static func clear() {
+    package static func clear() {
         UserDefaults.standard.removeObject(forKey: Pref.playerRecent)
         UserDefaults.standard.removeObject(forKey: Pref.playerFinished)
     }

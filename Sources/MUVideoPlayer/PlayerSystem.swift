@@ -5,30 +5,30 @@ import MediaPlayer
 /// Связь плеера с системой: экран не гаснет во время просмотра (своё утверждение, не «Не засыпать»),
 /// медиаклавиши и «Сейчас играет». Всё это есть, только пока открыто окно плеера: закрыли последнее — снято.
 @MainActor
-final class PlayerSystem {
-    static let shared = PlayerSystem()
-    static let assertionReason = "Mac Utils: просмотр видео"
+package final class PlayerSystem {
+    package static let shared = PlayerSystem()
+    package static let assertionReason = "Mac Utils: просмотр видео"
 
-    private(set) var assertionID: IOPMAssertionID?
-    private(set) var commandTargets: [(MPRemoteCommand, Any)] = []
-    private(set) var publishesNowPlaying = false
+    package private(set) var assertionID: IOPMAssertionID?
+    package private(set) var commandTargets: [(MPRemoteCommand, Any)] = []
+    package private(set) var publishesNowPlaying = false
 
     /// Тесты: план считается, а система (утверждения, медиаклавиши, «Сейчас играет») не трогается.
-    var integratesWithSystem = true
+    package var integratesWithSystem = true
     /// Последний применённый план.
-    private(set) var lastPlan = Plan(preventDisplaySleep: false, remoteCommands: false)
+    package private(set) var lastPlan = Plan(preventDisplaySleep: false, remoteCommands: false)
 
-    var holdsAssertion: Bool { assertionID != nil }
-    var handlesRemoteCommands: Bool { !commandTargets.isEmpty }
+    package var holdsAssertion: Bool { assertionID != nil }
+    package var handlesRemoteCommands: Bool { !commandTargets.isEmpty }
 
-    struct Plan: Equatable {
-        var preventDisplaySleep: Bool
-        var remoteCommands: Bool
+    package struct Plan: Equatable {
+        package var preventDisplaySleep: Bool
+        package var remoteCommands: Bool
     }
 
     /// Что должно быть включено: утверждение — только пока что-то играет (и включена настройка),
     /// медиаклавиши — пока открыто хоть одно окно.
-    static func plan(openWindows: Int, playing: Bool, keepAwake: Bool) -> Plan {
+    package static func plan(openWindows: Int, playing: Bool, keepAwake: Bool) -> Plan {
         Plan(preventDisplaySleep: openWindows > 0 && playing && keepAwake, remoteCommands: openWindows > 0)
     }
 
@@ -38,7 +38,7 @@ final class PlayerSystem {
     }
 
     /// Привести в соответствие с окнами (открытие, закрытие, пауза, смена файла, перемотка).
-    func update() {
+    package func update() {
         let windows = PlayerWindowController.windows
         let playing = windows.contains { $0.model.isPlaying }
         let plan = Self.plan(openWindows: windows.count, playing: playing, keepAwake: PlayerPrefs.keepAwake)
