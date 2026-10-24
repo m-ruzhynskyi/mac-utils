@@ -627,9 +627,9 @@ test("карточка v2 для окна: без паролей и ключей
   assert.ok(!JSON.stringify(pub).includes(DEMO_KEY));
   assert.equal(access.cardSecret(full, "vpn.key"), DEMO_KEY, "ключ целиком, с «=» в конце");
   assert.equal(access.cardSecret(full, "vpn.password"), null);
-  assert.equal(access.cardSecret(full, "account.7"), null);
-  for (const id of ["vpn.key", "vpn.password", "rdp.password", "account.0", "account.12"]) assert.ok(access.CARD_SECRETS.test(id), id);
-  for (const id of ["password", "access", "account.", "account.x", "vpn.key2"]) assert.ok(!access.CARD_SECRETS.test(id), id);
+  assert.equal(access.cardSecret(full, "account.0123456789ab.0"), null);
+  for (const id of ["vpn.key", "vpn.password", "rdp.password", "account.0123456789ab.0", "account.0123456789ab.12"]) assert.ok(access.CARD_SECRETS.test(id), id);
+  for (const id of ["password", "access", "account.", "account.x", "account.0", "vpn.key2"]) assert.ok(!access.CARD_SECRETS.test(id), id);
 });
 
 test("контакты v2: многострочная должность — одна строка; телефон — кнопка; нет телефона — «Телефона в файле нет»; номер — +380…", () => {
@@ -709,13 +709,16 @@ test("карточка через IPC: шаги, учётки и контакт�
   const branch = await a.call("rc:cardInfo", a.key("Вінницька · Філія 2"));
   assert.equal(branch.card.rdp.address, "10.20.0.15");
   assert.equal(branch.card.rdp.useAccountsBelow, true);
-  assert.deepEqual(branch.card.accounts, [
-    { id: "account.0", kind: "windows", source: "columns", login: "lims.admin", hasPassword: true },
-    { id: "account.1", kind: "server", source: "access", login: "lims.admin", hasPassword: true },
-    { id: "account.2", kind: "windows", source: "access", login: "operator", hasPassword: false }]);
+  const ids = branch.card.accounts.map((x) => x.id);
+  assert.deepEqual(branch.card.accounts.map(({ id, ...rest }) => rest), [
+    { kind: "windows", source: "columns", login: "lims.admin", hasPassword: true },
+    { kind: "server", source: "access", login: "lims.admin", hasPassword: true },
+    { kind: "windows", source: "access", login: "operator", hasPassword: false }]);
+  assert.deepEqual(ids, access.accountIds(access.buildCard({ account: "lims.admin", tags: [] }, null, null).accounts.concat(
+    [{ kind: "server", login: "lims.admin" }, { kind: "windows", login: "operator" }])), "id — от подписи и логина, не от места в списке");
   assert.ok(!JSON.stringify(branch).includes("Win-pass-2") && !JSON.stringify(branch).includes("Demo-77"));
-  assert.deepEqual(await a.call("rc:revealSecret", { key: a.key("Вінницька · Філія 2"), field: "account.1" }), { ok: true, value: "Demo-77-выдумка" });
-  assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: "account.0", quiet: true }), { ok: true });
+  assert.deepEqual(await a.call("rc:revealSecret", { key: a.key("Вінницька · Філія 2"), field: ids[1] }), { ok: true, value: "Demo-77-выдумка" });
+  assert.deepEqual(await a.call("rc:copySecret", { key: a.key("Вінницька · Філія 2"), field: ids[0], quiet: true }), { ok: true });
   assert.equal(a.cb.text, "Win-pass-2");
   // Без «Доступа» и «Контактов» — пусто; метка VPN без строк — пустой шаг VPN.
   const plain = await a.call("rc:cardInfo", a.key("Східна"));
@@ -889,5 +892,40 @@ test("ревью v2, п. 5 и мелочи: «одной из учёток» —
   assert.deepEqual(await a.call("rc:call", "067 000 11 22"), { ok: true, call: false, reason: "openFailed" });
   assert.deepEqual(a.copied, ["067 000 11 22"]);
   assert.equal(a.huds.at(-1).title, "UniTalk не открылся — номер скопирован");
+  a.rc.dispose();
+});
+
+test("fix2: id учётки стабилен при правке файла; учётки с таким id нет — «Файл изменился — откройте карточку заново», ничего не показано и не скопировано", async () => {
+  // Одинаковые подпись и логин — номер среди одинаковых; другая учётка выше в списке id не сдвигает.
+  const ids = access.accountIds([{ kind: "windows", login: "a" }, { kind: "router", login: null }, { kind: "windows", login: "a" }]);
+  assert.equal(ids[0].replace(/\.\d+$/, ""), ids[2].replace(/\.\d+$/, ""));
+  assert.deepEqual([ids[0].endsWith(".0"), ids[2].endsWith(".1")], [true, true]);
+  assert.equal(access.accountIds([{ kind: "router", login: null }])[0], ids[1], "id роутера не зависит от того, что выше");
+  assert.notEqual(access.accountIds([{ kind: "server", login: "a" }])[0].replace(/\.\d+$/, ""), ids[0].replace(/\.\d+$/, ""), "подпись входит в id");
+
+  const row = (accessText) => xml([`<connection><name>Сервер</name><id>333444555</id><tags>RDP</tags><access>${esc(accessText)}</access><app>AnyDesk</app></connection>`]);
+  const a = await app({ file: row("Router\npass: Demo-R-1\n\nadmin — Demo-Adm-1") });
+  const key = a.key("Сервер");
+  const before = (await a.call("rc:cardInfo", key)).card.accounts;
+  assert.deepEqual(before.map((x) => [x.kind, x.login]), [["router", null], ["windows", "admin"]]);
+  // В файл выше дописана ещё одна учётка: по индексу «account.1» открылась бы она; по стабильному id — та же «admin».
+  fs.writeFileSync(a.list, row("oper — Demo-Op-9\n\nRouter\npass: Demo-R-1\n\nadmin — Demo-Adm-1"));
+  await a.rc.store.reload?.();
+  for (let i = 0; i < 100 && !(await a.call("rc:cardInfo", a.key("Сервер"))).card?.accounts.some((x) => x.login === "oper"); i++) await new Promise((r) => setTimeout(r, 10));
+  const key2 = a.key("Сервер");
+  assert.deepEqual(await a.call("rc:revealSecret", { key: key2, field: before[1].id }), { ok: true, value: "Demo-Adm-1" });
+  // Учётку удалили из файла: тот же id — «Файл изменился», ни показа, ни копии.
+  fs.writeFileSync(a.list, row("Router\npass: Demo-R-1"));
+  await a.rc.store.reload?.();
+  for (let i = 0; i < 100 && (await a.call("rc:cardInfo", a.key("Сервер"))).card?.accounts.length !== 1; i++) await new Promise((r) => setTimeout(r, 10));
+  const key3 = a.key("Сервер");
+  const writesBefore = a.cb.writes + a.cb.concealed;
+  assert.deepEqual(await a.call("rc:revealSecret", { key: key3, field: before[1].id }), { ok: false, error: "changed" });
+  assert.equal(a.huds.at(-1).title, "Файл изменился — откройте карточку заново");
+  assert.deepEqual(await a.call("rc:copySecret", { key: key3, field: before[1].id, quiet: true }), { ok: false, error: "changed" });
+  assert.equal(a.cb.writes + a.cb.concealed, writesBefore, "ничего не скопировано");
+  assert.equal(a.huds.at(-1).title, "Файл изменился — откройте карточку заново");
+  assert.deepEqual(await a.call("rc:revealSecret", { key: key3, field: before[0].id }), { ok: true, value: "Demo-R-1" }, "оставшаяся учётка — по своему id");
+  assert.deepEqual(a.log, ["copy fail field=account changed"], "в журнале — код, без логина и хэша");
   a.rc.dispose();
 });

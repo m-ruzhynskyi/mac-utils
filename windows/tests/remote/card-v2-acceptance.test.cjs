@@ -135,16 +135,21 @@ test("publicCard: ни пароля, ни ключа, ни логина-пары
   assert.equal(pub.vpn.hasKey, true);
   assert.equal(pub.vpn.hasPassword, true);
   assert.equal(pub.rdp.hasPassword, true);
-  assert.deepEqual(pub.accounts.map((a) => a.id), ["account.0", "account.1"]);
+  // Правка разработчика (fix2): id учётки — стабильный «account.<хэш подписи и логина>.<n>», а не индекс «account.N».
+  const [win, router] = pub.accounts.map((a) => a.id);
+  for (const id of [win, router]) assert.match(id, /^account\.[0-9a-f]{12}\.\d+$/);
   assert.equal(access.cardSecret(card, "vpn.key"), "Demo-Psk-001");
   assert.equal(access.cardSecret(card, "vpn.password"), "Demo-VpnPass-1");
   assert.equal(access.cardSecret(card, "rdp.password"), "Demo-RdpPass-2");
-  assert.equal(access.cardSecret(card, "account.0"), "Demo-Win-1");
-  assert.equal(access.cardSecret(card, "account.1"), "Demo-RouterPass-3");
-  assert.equal(access.cardSecret(card, "account.9"), null);
+  assert.equal(access.cardSecret(card, win), "Demo-Win-1");
+  assert.equal(access.cardSecret(card, router), "Demo-RouterPass-3");
+  assert.equal(access.cardSecret(card, "account.0"), null, "старый индексный id больше не работает");
+  assert.equal(access.cardSecret(card, "account.000000000000.9"), null);
   assert.equal(access.cardSecret(card, "access"), null, "произвольный id не выдаёт ничего");
-  for (const ok of ["vpn.key", "vpn.password", "rdp.password", "account.0", "account.12"]) assert.ok(access.CARD_SECRETS.test(ok), ok);
-  for (const bad of ["password", "account.", "account.1x", "../account.1", "vpn.login", "account.1234"]) assert.ok(!access.CARD_SECRETS.test(bad), bad);
+  for (const ok of ["vpn.key", "vpn.password", "rdp.password", win, "account.0123456789ab.12"]) assert.ok(access.CARD_SECRETS.test(ok), ok);
+  for (const bad of ["password", "account.", "account.0", "account.1x", "../account.1", "vpn.login", "account.0123456789ab.1234", "account.0123456789AB.1"]) {
+    assert.ok(!access.CARD_SECRETS.test(bad), bad);
+  }
 });
 
 // ---------- 1. Фильтр ----------

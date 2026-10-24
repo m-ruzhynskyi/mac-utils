@@ -4,6 +4,7 @@
 // (publicCard), значение — по 👁 или ⧉ отдельным запросом (файл читается заново).
 "use strict";
 
+const crypto = require("node:crypto");
 const { isValidHost } = require("./rdp");
 const { needsVPN, usesRDP } = require("./models");
 
@@ -345,8 +346,21 @@ function maskedAccess(text, secrets = []) {
   }).join("\n");
 }
 
+// Стабильные id учёток: «account.<хэш подписи и логина>.<номер среди одинаковых>». Карточка перестраивается из файла на каждый 👁/⧉;
+// индекс в списке после правки файла указал бы на соседнюю учётку, а такой id — на ту же или ни на какую. Хэш — не логин: в журнал
+// и окно сам логин через id не попадает (логин окно и так показывает).
+function accountIds(accounts) {
+  const seen = new Map();
+  return accounts.map((a) => {
+    const h = crypto.createHash("sha256").update(`${a.kind}\u0001${a.login ?? ""}`).digest("hex").slice(0, 12);
+    const n = seen.get(h) || 0;
+    seen.set(h, n + 1);
+    return `account.${h}.${n}`;
+  });
+}
+
 // Карточка для окна: без паролей и ключей — только признаки и id секрета для 👁/⧉ (vpn.key, vpn.password, rdp.password,
-// account.N). Адрес RDP из «Доступа» помечен fromAccess: окно его обратно не передаёт — файл читается заново.
+// account.<хэш>.<n>). Адрес RDP из «Доступа» помечен fromAccess: окно его обратно не передаёт — файл читается заново.
 function publicCard(record, card) {
   const out = { vpn: null, rdp: null, accounts: [] };
   if (card.vpn) {
@@ -358,19 +372,23 @@ function publicCard(record, card) {
     out.rdp = { address, login, useAccountsBelow, hasPassword: card.rdp.password != null, canOpen: !!address && isValidHost(address),
       fromAccess: !(record.method === "rdp" && record.id) && !!address };
   }
-  out.accounts = card.accounts.map((a, i) => ({ id: `account.${i}`, kind: a.kind, source: a.source, login: a.login, hasPassword: a.password != null }));
+  const ids = accountIds(card.accounts);
+  out.accounts = card.accounts.map((a, i) => ({ id: ids[i], kind: a.kind, source: a.source, login: a.login, hasPassword: a.password != null }));
   return out;
 }
 
-// Значение секрета карточки по id; null — нет такого.
+// Учётка с таким id есть в карточке (после перечитывания файла её может не быть).
+const hasAccount = (card, id) => accountIds(card.accounts).includes(id);
+// Значение секрета карточки по id; null — нет такого (или у учётки нет пароля).
 function cardSecret(card, id) {
   if (id === "vpn.key") return card.vpn?.key ?? null;
   if (id === "vpn.password") return card.vpn?.password ?? null;
   if (id === "rdp.password") return card.rdp?.password ?? null;
-  const m = /^account\.(\d{1,3})$/.exec(id);
-  return m ? card.accounts[Number(m[1])]?.password ?? null : null;
+  const i = ACCOUNT_ID.test(id) ? accountIds(card.accounts).indexOf(id) : -1;
+  return i >= 0 ? card.accounts[i].password ?? null : null;
 }
-const CARD_SECRETS = /^(vpn\.key|vpn\.password|rdp\.password|account\.\d{1,3})$/;
+const ACCOUNT_ID = /^account\.[0-9a-f]{12}\.\d{1,3}$/;
+const CARD_SECRETS = /^(vpn\.key|vpn\.password|rdp\.password|account\.[0-9a-f]{12}\.\d{1,3})$/;
 
 // ---------- контакты ----------
 
@@ -451,5 +469,5 @@ function dialable(raw) {
 }
 const telURL = (raw) => { const n = dialable(raw); return n ? `tel:${n}` : null; };
 
-module.exports = { maskSecrets, maskedAccess, cardSecrets, buildCard, publicCard, cardSecret, CARD_SECRETS, blocksOf, labelled, dashPair, host, VPN_KINDS,
+module.exports = { maskSecrets, maskedAccess, cardSecrets, buildCard, publicCard, cardSecret, hasAccount, accountIds, ACCOUNT_ID, CARD_SECRETS, blocksOf, labelled, dashPair, host, VPN_KINDS,
   parseContacts, findPhones, isPhone, dialable, telURL };

@@ -12,7 +12,7 @@ const { TITLES, downloadURL, programOf } = require("./models");
 const { createConnector } = require("./connect");
 const { createUia } = require("./uia");
 const { createConcealedWriter } = require("./concealed");
-const { buildCard, publicCard, cardSecret, cardSecrets, CARD_SECRETS, maskedAccess, parseContacts, isPhone } = require("./access");
+const { buildCard, publicCard, cardSecret, cardSecrets, hasAccount, ACCOUNT_ID, CARD_SECRETS, maskedAccess, parseContacts, isPhone } = require("./access");
 const { createHandlerLookup, callPlan } = require("./dialer");
 const { SecretBuffer } = require("./secret");
 const { createHud } = require("./hud");
@@ -220,14 +220,18 @@ function init(electron, options = {}) {
   }
 
   // Секрет по полю: пароль программы, пароль учётки, «Доступ» — из файла; секрет карточки (vpn.key, vpn.password, rdp.password,
-  // account.N) — из «Доступа» и колонок, файл читается заново. SecretBuffer или null.
+  // account.<хэш>.<n>) — из «Доступа» и колонок, файл читается заново. { secret: SecretBuffer | null, changed } — changed: учётки
+  // с таким id в перечитанном файле нет (файл изменился после открытия карточки), ничего не отдаём.
   async function secretOf(key, field) {
     if (CARD_SECRETS.test(field)) {
-      const value = cardSecret((await fullCard(key))?.card || { accounts: [] }, field);
-      return value ? new SecretBuffer(value) : null;
+      const card = (await fullCard(key))?.card || { accounts: [] };
+      if (ACCOUNT_ID.test(field) && !hasAccount(card, field)) return { secret: null, changed: true };
+      const value = cardSecret(card, field);
+      return { secret: value ? new SecretBuffer(value) : null, changed: false };
     }
-    return service.secret(key, field);
+    return { secret: await service.secret(key, field), changed: false };
   }
+  const CHANGED = { kind: "warning", title: "Файл изменился — откройте карточку заново", actions: [{ id: "close", label: "Закрыть" }] };
 
   const COPY_TITLES = { password: "Пароль скопирован", accountPassword: "Пароль учётки скопирован", access: "«Доступ» скопирован" };
   const copyable = (field) => Object.hasOwn(COPY_TITLES, field) || CARD_SECRETS.test(field);
@@ -235,10 +239,15 @@ function init(electron, options = {}) {
   // только код поля.
   async function copySecret(key, field, quiet = false) {
     if (!copyable(field)) return { ok: false, error: "field" };
-    const code = CARD_SECRETS.test(field) ? field.replace(/\.\d+$/, "") : field;
-    let secret = null;
-    try { secret = await secretOf(key, field); } catch (_) { secret = null; }
+    const code = ACCOUNT_ID.test(field) ? "account" : field;
+    let secret = null, changed = false;
+    try { ({ secret, changed } = await secretOf(key, field)); } catch (_) { secret = null; }
     try {
+      if (changed) {
+        hud.show(CHANGED);
+        log(`copy fail field=${code} changed`);
+        return { ok: false, error: "changed" };
+      }
       if (!secret) {
         hud.show({ kind: "warning", title: "Не удалось прочитать файл", detail: "Проверьте, что файл на месте, и повторите.", actions: [{ id: "close", label: "Закрыть" }] });
         log(`copy fail field=${code}`);
@@ -255,8 +264,9 @@ function init(electron, options = {}) {
   // 👁 в карточке: значение уходит только в окно подробностей, на 10 с (скрывает окно). В журнал — ничего.
   async function revealSecret(key, field) {
     if (field !== "password" && !CARD_SECRETS.test(field)) return { ok: false };
-    let secret = null;
-    try { secret = await secretOf(key, field); } catch (_) { secret = null; }
+    let secret = null, changed = false;
+    try { ({ secret, changed } = await secretOf(key, field)); } catch (_) { secret = null; }
+    if (changed) { hud.show(CHANGED); return { ok: false, error: "changed" }; }
     if (!secret) return { ok: false };
     try { return { ok: true, value: secret.bytes.toString("utf8") }; } finally { secret.wipe(); }
   }

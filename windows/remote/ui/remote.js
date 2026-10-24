@@ -419,7 +419,7 @@ function tickSecrets() {
 }
 function startTick() { if (!secretTimer) secretTimer = setInterval(tickSecrets, 500); }
 
-// Секрет: id — "password" (пароль программы) или id карточки (vpn.key, vpn.password, rdp.password, account.N); what — для подписей
+// Секрет: id — "password" (пароль программы) или id карточки (vpn.key, vpn.password, rdp.password, account.<хэш>.<n>); what — для подписей
 // кнопок. Возвращает { value, buttons, caption } — части, которые строка раскладывает сама.
 function secretParts(r, id, what) {
   const value = el("span", "dots", "••••••••");
