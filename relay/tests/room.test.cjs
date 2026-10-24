@@ -1217,3 +1217,40 @@ test('вид кадров: JPEG — зрителю без H.264, H.264 — зр�
   f.room.webSocketMessage(host, jpeg);
   assert.deepEqual(got.modern, [3, 2, 1]);
 });
+
+test('viewers: периодическое напоминание помечено tick, просьба о ключевом кадре — key, смена состава — без флагов', async () => {
+  const f = fixture(), host = hostLive(f);
+  f.socket('viewer', { id: '1', approved: true, h264: true, lastSeen: 1_000_000 });
+  f.room.notifyHost();
+  assert.equal(host.messages.at(-1).tick, undefined);
+  assert.equal(host.messages.at(-1).key, undefined);
+  f.room.notifyHost(undefined, { tick: true });
+  assert.equal(host.messages.at(-1).tick, true);
+  assert.equal(host.messages.at(-1).count, 1);
+  f.room.notifyHost(undefined, { key: true });
+  assert.equal(host.messages.at(-1).key, true);
+  // Будильник: периодическое напоминание идёт с tick.
+  f.advance(31_000);
+  await f.room.alarm();
+  assert.ok(host.messages.some((m) => m.type === 'viewers' && m.tick === true), 'тревога шлёт tick');
+});
+
+test('B2: зритель пропускал кадры, экран замер — ключевой кадр просится по ack без новых кадров от ведущего, не чаще KEY_ASK_MS', () => {
+  const f = fixture(), host = hostLive(f);
+  const slow = f.socket('viewer', { id: '1', approved: true, h264: true, lastSeen: 1_000_000 });
+  slow.send = () => {};
+  const frame = (key) => new Uint8Array([3, key ? 1 : 0, 0, 0, 1]).buffer;
+  const ack = (n) => f.room.webSocketMessage(slow, JSON.stringify({ type: 'ack', n }));
+  const asks = () => host.messages.filter((m) => m.type === 'viewers' && m.key === true).length;
+  f.room.webSocketMessage(host, frame(true));
+  ack(1);
+  for (let i = 0; i < 100; i++) f.room.webSocketMessage(host, frame(false));   // долг вырос, зритель в пропуске; дальше экран стоит
+  assert.equal(f.room.flow.get(slow).skipping, true);
+  const before = asks();
+  ack(30);
+  assert.equal(asks(), before, 'долг ещё велик — не просим');
+  ack(62);
+  assert.equal(asks(), before + 1, 'долг спал, кадров от ведущего нет — просьба ключевого по ack');
+  ack(62);
+  assert.equal(asks(), before + 1, 'не чаще раза в KEY_ASK_MS');
+});

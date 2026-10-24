@@ -442,7 +442,12 @@ package final class ScreenShare: NSObject, ObservableObject {
         audioSilenceShown = false
         tapRetry = ShareTapRetry()
         if #available(macOS 14.2, *), !retryTap(sender: sender) { showAudioFallback() }
-        if audioTap == nil { audioStream = try await makeAudioStream(sender: sender) }
+        if audioTap == nil {
+            let stream = try await makeAudioStream(sender: sender)
+            // Эфир остановили (или звук уже пересоздала другая ветка), пока поток создавался: лишний сразу гасим.
+            guard fallbackAudioGate.mayAttach(sameBroadcast: self.sender === sender) else { try? await stream.stopCapture(); return }
+            audioStream = stream
+        }
         audioWatcher = ShareAudioWatcher { ScreenShare.shared.refreshAudioFilter() }
         // Свой процесс появляется в Core Audio только с началом перехвата — сразу и его в исключённые.
         refreshAudioFilter()
@@ -769,10 +774,34 @@ package final class ScreenShare: NSObject, ObservableObject {
     /// Захват экрана остановился (сон, выдернули монитор): для экрана пробуем собрать поток заново, для окна и программы
     /// такого экрана нет — эфир заканчивается с понятной причиной.
     package func captureStopped(_ stopped: SCStream) {
+        // Остановился запасной звуковой поток ScreenCaptureKit (делегат общий с видео): эфир идёт дальше, звук пересоздаётся.
+        if isLive, let audio = audioStream, audio === stopped { return restartFallbackAudio() }
         // Остановился не текущий поток (старый, уже заменённый) или пересборка уже идёт — ничего не делаем.
         guard isLive, !recoveringCapture, stream == nil || stream === stopped else { return }
         guard videoDisplayID != nil else { return stop(reason: "Захват остановлен: окно закрыто или недоступно") }
         recoverCapture(afterSleep: false)
+    }
+
+    /// Запасной звук (без tap) остановился сам: до 3 попыток с паузой 1, 2, 4 с; не вышло — эфир идёт без звука (в журнал код).
+    private var restartingAudio = false
+    private var fallbackAudioGate: ShareFallbackAudioGate {
+        ShareFallbackAudioGate(restarting: restartingAudio, hasStream: audioStream != nil, hasTap: audioTap != nil)
+    }
+    private func restartFallbackAudio() {
+        guard let sender, fallbackAudioGate.mayRestart else { return }
+        restartingAudio = true
+        audioStream = nil
+        Task { [weak self] in
+            for delay in [1.0, 2, 4] {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard let self, self.isLive, self.sender === sender else { self?.restartingAudio = false; return }
+                // Звук уже пересоздала пересборка захвата после сна — второй запуск дал бы эхо и бесхозный поток.
+                guard self.fallbackAudioGate.mayStartAfterDelay else { self.restartingAudio = false; return }
+                do { try await self.startAudio(sender: sender); self.restartingAudio = false; return }
+                catch { Log.capture.error("Трансляция: звук не пересоздан, код \((error as NSError).code)") }
+            }
+            self?.restartingAudio = false
+        }
     }
 
     /// Пересоздать поток экрана: тот же монитор, если он есть, иначе основной. Попытки с паузой 1, 2, 4, 8, 15 с;
@@ -789,7 +818,7 @@ package final class ScreenShare: NSObject, ObservableObject {
             // Запасной звук ScreenCaptureKit (без tap) живёт на том же делегате: после сна пересоздаём и его.
             if let oldAudio {
                 try? await oldAudio.stopCapture()
-                if let self, self.isLive, self.sender === sender { self.audioStream = nil; try? await self.startAudio(sender: sender) }
+                if let self, self.isLive, self.sender === sender, self.fallbackAudioGate.recoverMayStartAudio { self.audioStream = nil; try? await self.startAudio(sender: sender) }
             }
             for delay in [1.0, 2, 4, 8, 15] {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -929,8 +958,10 @@ package final class ScreenShare: NSObject, ObservableObject {
         let stream = SCStream(filter: filter, configuration: config, delegate: sender)
         try stream.addStreamOutput(sender, type: .screen, sampleHandlerQueue: sender.queue)
         // Звук — отдельным потоком: из него можно убрать выбранные программы (чтобы не дублировать лишнее).
-        if UserDefaults.standard.bool(forKey: Pref.shareAudio) { try await startAudio(sender: sender) }
+        // sender назначается до запуска звука: startAudio сверяет по нему, что эфир тот же (иначе запасной звук гасился бы сразу).
+        // Если видео не пойдёт, teardownCapture в вызывающем гасит и sender, и звук (SH2).
         self.sender = sender
+        if UserDefaults.standard.bool(forKey: Pref.shareAudio) { try await startAudio(sender: sender) }
         // Видео не пошло, а звук уже идёт — его останавливает teardownCapture в вызывающем (SH2).
         try await stream.startCapture()
         self.stream = stream
@@ -998,7 +1029,8 @@ package final class ScreenShare: NSObject, ObservableObject {
                                 // Смотрит старая версия (без H.264) — дополнительно шлём ей кадры JPEG.
                                 self.sender?.legacyFrames = raw.contains { ($0["h264"] as? Bool) != true }
                                 // Новый зритель (или тот же после переподключения) получает мониторы без хранения на relay.
-                                self.announceDisplays()
+                                // Периодическое напоминание relay (`tick`) состав не меняло — список мониторов заново не шлём.
+                                if ShareViewersSignal(json: json).announcesDisplays { self.announceDisplays() }
                             default:
                                 break
                             }
@@ -1009,8 +1041,9 @@ package final class ScreenShare: NSObject, ObservableObject {
                             self.state = .live(code: code, viewers: count)
                             // Никто не смотрит — кодер на паузе; появился зритель — сразу ключевой кадр (SH4).
                             self.sender?.setViewers(count)
-                            // Новый зритель сразу получает картинку, даже если экран не меняется.
-                            if count > 0 { self.sender?.resendLast() }
+                            // Новый зритель сразу получает картинку, даже если экран не меняется. Периодическое напоминание (`tick`) —
+                            // нет: состав не менялся, повторять кадр незачем. `key` — медленный зритель просит ключевой кадр.
+                            if ShareViewersSignal(json: json).resendsLast(viewers: count) { self.sender?.resendLast() }   // resendLast сам просит ключевой кадр
                         }
                         self.listen(socket)
                     case .success:
@@ -1830,11 +1863,31 @@ package final class ShareViewer: ObservableObject {
 
     /// `accepted`: если ведущий подписал принятие, подпись должна сойтись с его ключом из challenge.
     private func hostSignatureIsValid(_ sig: String?) -> Bool {
-        guard let sig else { return true }  // старый ведущий не подписывает
+        hostSigVerified = false
+        hostSigDowngrade = false
+        guard let sig else {
+            // Старый ведущий не подписывает. Но ведущий, чью подпись с этим ключом уже видели, перестать подписывать не может:
+            // иначе подменённый сервер выдавал бы себя за него (откат защиты).
+            if let hostKey, ShareHistory.shared.requiresHostSignature(id: code, key: hostKey) { hostSigDowngrade = true; return false }
+            return true
+        }
         guard let hostKey, let rid else { return false }
-        return ShareIdentity.verify(pub: hostKey, sig: sig,
-                                    message: ShareIdentity.acceptMessage(roomId: code, viewerPub: ShareIdentity.publicKey, rid: rid))
+        let ok = ShareIdentity.verify(pub: hostKey, sig: sig,
+                                      message: ShareIdentity.acceptMessage(roomId: code, viewerPub: ShareIdentity.publicKey, rid: rid))
+        hostSigVerified = ok
+        return ok
     }
+
+    /// Текст отказа при неверной подписи; для отката защиты — тот же, что на странице relay.
+    var hostSignatureFailure: String { Self.signatureFailureText(downgrade: hostSigDowngrade) }
+    static func signatureFailureText(downgrade: Bool) -> String {
+        downgrade ? "Ведущий раньше подписывал принятие, а теперь нет: подключение отменено" : "Подпись ведущего не сошлась: подключение отменено"
+    }
+
+    /// Подпись принятия в этом подключении сошлась с ключом ведущего (для запоминания «ведущий подписывает»).
+    private var hostSigVerified = false
+    /// Подпись не пришла, хотя этот ведущий с этим ключом раньше подписывал (откат защиты) — отдельный текст отказа, как на странице.
+    private var hostSigDowngrade = false
 
     private func receive(_ socket: URLSessionWebSocketTask) {
         Self.listen(socket, video: video, acks: acks, player: player)
@@ -1941,7 +1994,7 @@ package final class ShareViewer: ObservableObject {
                             viewer.disconnect()
                         } else if type == "accepted" {
                             guard viewer.hostSignatureIsValid(json?["hostSig"] as? String) else {
-                                viewer.state = .ended("Подпись ведущего не сошлась: подключение отменено")
+                                viewer.state = .ended(viewer.hostSignatureFailure)
                                 viewer.disconnect()
                                 return
                             }
@@ -1950,7 +2003,10 @@ package final class ShareViewer: ObservableObject {
                             viewer.watchForPicture(socket)
                             viewer.hostName = json?["name"] as? String ?? ""
                             ShareHistory.shared.visited(viewer.code, name: json?["name"] as? String ?? "")
-                            if let key = viewer.hostKey { ShareHistory.shared.pinHost(id: viewer.code, key: key) }
+                            if let key = viewer.hostKey {
+                                ShareHistory.shared.pinHost(id: viewer.code, key: key)
+                                if viewer.hostSigVerified { ShareHistory.shared.noteHostSigned(id: viewer.code, key: key) }
+                            }
                             viewer.receive(socket)
                         } else if type == "displays" {
                             viewer.received(displays: json ?? [:])

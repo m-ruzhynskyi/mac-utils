@@ -581,3 +581,37 @@ package final class ShareAudioTap: @unchecked Sendable {
         onSamples(samples)
     }
 }
+
+
+/// Что делать ведущему с сообщением relay `viewers`. `tick` — периодическое напоминание (состав не менялся), `key` — медленный
+/// зритель просит ключевой кадр. Мониторы объявляются только при смене состава (`!tick && !key`); кадр шлётся новому зрителю и по
+/// просьбе ключевого, но не по напоминанию. Ключевой кадр просит сам `resendLast`, отдельного запроса не нужно.
+struct ShareViewersSignal: Equatable {
+    let tick: Bool
+    let key: Bool
+
+    init(json: [String: Any]) {
+        tick = json["tick"] as? Bool == true
+        key = json["key"] as? Bool == true
+    }
+
+    var announcesDisplays: Bool { !tick && !key }
+    func resendsLast(viewers count: Int) -> Bool { count > 0 && (!tick || key) }
+}
+
+/// Условия запуска запасного звука ScreenCaptureKit (без tap): после сна его пересоздают и пересборка захвата, и перезапуск по
+/// `captureStopped` звука. Запуск допустим, только если звук ещё никто не поднял — иначе эхо у зрителей и бесхозный поток.
+struct ShareFallbackAudioGate: Equatable {
+    var restarting = false
+    var hasStream = false
+    var hasTap = false
+
+    /// Перезапуск после остановки звука: не уже идущий и не второй параллельный.
+    var mayRestart: Bool { !restarting }
+    /// Перед самим запуском (после паузы между попытками): звук уже пересоздала пересборка захвата.
+    var mayStartAfterDelay: Bool { !hasStream && !hasTap }
+    /// Пересборка захвата пересоздаёт звук сама, только если его не перезапускает отдельная попытка.
+    var recoverMayStartAudio: Bool { !restarting }
+    /// Поток создан (после `await`): присвоить можно, если эфир тот же и звук не поднят другой веткой.
+    func mayAttach(sameBroadcast: Bool) -> Bool { sameBroadcast && !hasStream && !hasTap }
+}
