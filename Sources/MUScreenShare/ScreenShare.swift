@@ -1413,8 +1413,9 @@ package final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @un
     /// Зритель сообщил, что не успевает декодировать (`viewers` с `slow`): та же перегрузка, что и своя — 30 кадров/с.
     package func viewerSlow() {
         queue.async {
+            // Своя перегрузка (`congestion`) не прибавляется: в журнале сигнал зрителя — отдельный счётчик.
             self.videoStats.viewerSlow += 1
-            self.noteCongestion()
+            if self.governor.congested(now: ProcessInfo.processInfo.systemUptime) { self.rateChanged() }
         }
     }
 

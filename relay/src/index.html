@@ -1084,7 +1084,7 @@ const VIEW_LAG_DROP_MS = 500, VIEW_LAG_SLOW_MS = 200, VIEW_SLOW_HOLD_MS = 2000, 
 const VIEW_KEY_ASK_MS = 1000, VIEW_SLOW_ASK_MS = 5000, VIEW_STATS_MS = 60_000;
 let decoder = null, decoderSps = "", decoderConfig = null, decoderHwFailed = false;
 let waitKey = false, latestFrame = null, paintQueued = false;
-let viewPending = [], viewLagSince = null, viewKeyAskAt = -Infinity, viewSlowAskAt = -Infinity, viewFreezeAt = null, viewDropAt = -Infinity;
+let viewPending = [], viewLastInput = -Infinity, viewLagSince = null, viewKeyAskAt = -Infinity, viewSlowAskAt = -Infinity, viewFreezeAt = null, viewDropAt = -Infinity;
 const viewStatsNew = (now) => ({ since: now, received: 0, decoded: 0, painted: 0, dropped: 0, maxQueue: 0, maxLagMs: 0,
                                  freezes: 0, freezeMs: 0, keyAsks: 0, slowAsks: 0, errors: 0, size: "-" });
 let viewStats = viewStatsNew(0);
@@ -1111,8 +1111,9 @@ function viewTrouble(now, slow) {
   if (slowNow) { viewSlowAskAt = now; viewStats.slowAsks++; }
   if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify({ type: "video-trouble", key, slow: slowNow }));
 }
-// Сколько ждёт самый старый кадр в декодере, мс.
-const viewLag = (now) => (viewPending.length ? now - viewPending[0] : 0);
+// Сколько ждёт самый старый кадр в декодере, мс — только пока в декодере есть очередь: декодер может держать последний
+// кадр до следующего входа (задержка вывода на кадр), и на статичном экране (ведущий молчит секундами) это не отставание.
+const viewLag = (now) => (viewPending.length && decoder && decoder.decodeQueueSize > 0 ? now - viewPending[0].since : 0);
 // Ждать ключевой кадр: недекодированное выбрасывается (reset), ключевой просим сразу; заморозка считается до первого кадра.
 function viewWaitKey(now) {
   const slow = now - viewDropAt < VIEW_DROP_REPEAT_MS;
@@ -1151,7 +1152,7 @@ function createDecoder(sps, now) {
       outputs++;
       if (instance !== decoder) { frame.close(); return; }
       const ts = frame.timestamp / 1000;
-      while (viewPending.length && viewPending[0] <= ts) viewPending.shift();
+      while (viewPending.length && viewPending[0].ts <= ts) viewPending.shift();
       viewStats.decoded++; viewStats.size = `${frame.displayWidth}x${frame.displayHeight}`;
       if (viewFreezeAt !== null && !waitKey) { const t = performance.now(); viewStats.freezes++; viewStats.freezeMs += t - viewFreezeAt; viewFreezeAt = null; }
       if (latestFrame) latestFrame.close();
@@ -1192,6 +1193,9 @@ function playH264(bytes, now = performance.now()) {
     if (!createDecoder(sps, now)) return;
     waitKey = false;
   }
+  // Перерыв входа (статичный экран, сеть): кадры, ждавшие в декодере, ждали входа, а не декодера — отсчёт заново.
+  if (now - viewLastInput > VIEW_LAG_SLOW_MS) for (const entry of viewPending) entry.since = now;
+  viewLastInput = now;
   // Отстаёт: дольше VIEW_LAG_DROP_MS (или очередь непомерная) — сброс и ключевой; дольше VIEW_LAG_SLOW_MS подряд — «не успеваю».
   const lag = viewLag(now), queue = decoder.decodeQueueSize;
   if (queue > viewStats.maxQueue) viewStats.maxQueue = queue;
@@ -1203,7 +1207,7 @@ function playH264(bytes, now = performance.now()) {
     if (!key) { viewStats.dropped++; viewTrouble(now, false); return; }
     waitKey = false;
   }
-  viewPending.push(now);
+  viewPending.push({ ts: Math.round(now * 1000) / 1000, since: now });
   if (viewPending.length > 600) viewPending.shift();
   decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: Math.round(now * 1000), data }));
 }

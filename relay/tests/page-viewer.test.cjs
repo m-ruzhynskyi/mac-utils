@@ -19,9 +19,10 @@ const DELTA = annexB([0x41, 0x9a, 0x02]);
 
 // options: decodeMs — кадр в декодере; stalls: [[от, до]] мс — декодер стоит; fps — с какой частотой начинает ведущий;
 // hostSlow — ведущий понимает `slow` (новый Mac/страница); hostKey — отвечает ключевым кадром на просьбу (через relay);
-// hardware — есть аппаратный декодер (иначе configure с prefer-hardware — ошибка после configure).
+// hardware — есть аппаратный декодер (иначе configure с prefer-hardware — ошибка после configure); holdOne — декодер держит
+// последний кадр до следующего входа (задержка вывода на кадр); pauses: [[от, до]] мс — ведущий молчит (статичный экран).
 function run(seconds, options = {}) {
-  const { decodeMs = 4, stalls = [], hostSlow = true, hostKey = true, hardware = true } = options;
+  const { decodeMs = 4, stalls = [], hostSlow = true, hostKey = true, hardware = true, holdOne = false, pauses = [] } = options;
   let clock = 0;
   const logs = [], sentToRelay = [], configs = [], decodeErrors = [];
   const raf = [];
@@ -49,8 +50,8 @@ function run(seconds, options = {}) {
       this.needKey = false;
       this.queue.push(chunk);
     }
-    reset() { this.queue = []; this.state = 'unconfigured'; this.needKey = true; }
-    close() { this.queue = []; this.state = 'closed'; }
+    reset() { this.queue = []; this.held = null; this.state = 'unconfigured'; this.needKey = true; }
+    close() { this.queue = []; this.held = null; this.state = 'closed'; }
     // Шаг часов: декодер стоит во время stalls, иначе отдаёт кадр за decodeMs.
     step() {
       if (this.state !== 'configured' || !this.queue.length) return;
@@ -59,7 +60,8 @@ function run(seconds, options = {}) {
       while (this.queue.length && this.busyUntil + decodeMs <= clock) {
         this.busyUntil += decodeMs;
         const chunk = this.queue.shift();
-        this.output(new VideoFrame({ timestamp: chunk.timestamp, displayWidth: 1920, displayHeight: 1080 }));
+        const frame = new VideoFrame({ timestamp: chunk.timestamp, displayWidth: 1920, displayHeight: 1080 });
+        if (holdOne) { const out = this.held; this.held = frame; if (out) this.output(out); } else this.output(frame);
       }
     }
   }
@@ -86,7 +88,8 @@ function run(seconds, options = {}) {
         if (message.slow && hostSlow && fps === 60) { fps = 30; slowAt = clock; }
         (run.history ??= []).push(message);
       }
-      if (clock >= nextFrame) {
+      if (pauses.some(([a, b]) => clock >= a && clock < b)) nextFrame = clock + 1;
+      else if (clock >= nextFrame) {
         nextFrame += 1000 / fps;
         const key = wantKey || clock - lastKey >= 4000;
         if (key) { lastKey = clock; wantKey = false; }
@@ -165,4 +168,25 @@ test('нет аппаратного декодера: prefer-hardware падае
   assert.match(stats, /decoder=auto/);
   assert.ok(field(stats, 'painted') > 250, stats);
   assert.equal(field(stats, 'errors'), 1);
+});
+
+test('декодер держит один кадр, ведущий молчит (статичный экран: паузы 2 / 1,5 / 3 / 0,8 / 3 с) — ни выброса, ни просьб, частота 60', async () => {
+  const pauses = [[2000, 4000], [6000, 7500], [10000, 13000], [16000, 16800], [20000, 23000]];
+  for (const holdOne of [false, true]) {
+    const r = await run(30, { holdOne, pauses });
+    const stats = r.stats.at(-1);
+    assert.equal(field(stats, 'dropped'), 0, `holdOne=${holdOne}: ${stats}`);
+    assert.equal(field(stats, 'freezes'), 0, stats);
+    assert.equal(field(stats, 'keyAsks'), 0, stats);
+    assert.equal(field(stats, 'slowAsks'), 0, stats);
+    assert.equal(r.fps, 60, 'ведущий остаётся на 60');
+    assert.ok(field(stats, 'maxLagMs') < 100, `отставание ${field(stats, 'maxLagMs')} мс — паузы входа не считаются`);
+    assert.deepEqual(r.decodeErrors, []);
+  }
+});
+
+test('декодер держит один кадр и не успевает (22 мс): отставание всё равно замечается — slow и 30 кадров/с', async () => {
+  const r = await run(20, { holdOne: true, decodeMs: 22 });
+  assert.equal(r.fps, 30);
+  assert.deepEqual(r.decodeErrors, []);
 });
