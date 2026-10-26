@@ -401,6 +401,8 @@ package final class ScreenShare: NSObject, ObservableObject {
             // …или у того же выхода сменилась частота (AirPods + звонок → HFP): конвертер устарел.
             if tap.outputDevice != CoreAudioHelper.defaultOutputDevice || tap.formatChanged {
                 do {
+                    let outputNow = CoreAudioHelper.read(tap.clockDevice, kAudioDevicePropertyNominalSampleRate, default: Float64(0))
+                    Log.capture.info("\(ShareAudioRateLog.change(path: "перехват", outputBefore: tap.clockRate, outputNow: outputNow, buffers: tap.converterRate, sent: ShareProtocol.sampleRate), privacy: .public)")
                     try tap.restart()
                     Log.capture.info("Звук трансляции: выход или частота сменились, перехват пересобран")
                     watchTapStart(tap)

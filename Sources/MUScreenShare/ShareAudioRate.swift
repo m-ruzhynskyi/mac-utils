@@ -19,34 +19,47 @@ package enum ShareRates {
     }
 }
 
-/// Измеряет настоящую частоту потока по числу кадров за время: заявленная форматом перехвата может отставать от настоящей
-/// (выход ушёл с 48 на 24 кГц при звонке, а перехват всё ещё «говорит» 48). Окно — не меньше секунды; поправка — когда два окна
-/// подряд дали одну и ту же частоту (один затор не считается).
+/// Частоты, которые сообщает система: номинальная частота устройства часов, агрегата, формат перехвата. Пишется из главного
+/// потока (слушатели `NominalSampleRate`, сборка), читается в очереди IOProc.
+package final class ShareReportedRates: @unchecked Sendable {
+    private let lock = NSLock()
+    private var rates: [Double] = []
+
+    package init() {}
+
+    package func set(_ values: [Double]) {
+        lock.lock(); rates = values.filter { $0 > 0 }; lock.unlock()
+    }
+
+    package var values: [Double] {
+        lock.lock(); defer { lock.unlock() }
+        return rates
+    }
+}
+
+/// Проверяет частоту потока по часам устройства: `mSampleTime` из `inInputTime` IOProc за время `mHostTime`. Пропущенный цикл IO
+/// даёт скачок `mSampleTime`, а не «медленную частоту», поэтому пропуски буферов частоту не меняют (кадры за время считать
+/// нельзя: пропуски 6–10 % выглядели бы как 44,1 кГц, 50 % — как 24 кГц). Поправка принимается только на частоту, которую
+/// сообщает система (`reported`), и когда два окна подряд (не меньше секунды) дали одну и ту же.
 package struct ShareRateMeter: Equatable {
     package static let window: TimeInterval = 1
 
-    private var start: TimeInterval?
-    private var frames = 0
-    private var lastTime: TimeInterval = 0
+    private var start: (sample: Double, time: TimeInterval)?
     private var candidate: Double?
 
     package init() {}
 
-    /// Кадры очередного буфера, пришедшего в момент `time` (секунды). Возвращает частоту, когда её пора исправить.
-    package mutating func add(frames count: Int, at time: TimeInterval, converterRate: Double) -> Double? {
+    /// `sampleTime` — `inInputTime.mSampleTime`, `time` — `mHostTime` в секундах. Возвращает частоту, когда её пора исправить.
+    package mutating func add(sampleTime: Double, at time: TimeInterval, converterRate: Double, reported: [Double]) -> Double? {
         guard let begin = start else {
-            start = time
-            lastTime = time
+            start = (sampleTime, time)
             return nil
         }
-        // Кадры первого буфера пришли до его метки времени — считаем только следующие.
-        frames += count
-        lastTime = time
-        guard time - begin >= Self.window else { return nil }
-        let measured = Double(frames) / (time - begin)
-        start = time
-        frames = 0
-        guard let rate = ShareRates.correction(converterRate: converterRate, measured: measured) else {
+        guard time - begin.time >= Self.window else { return nil }
+        let measured = (sampleTime - begin.sample) / (time - begin.time)
+        start = (sampleTime, time)
+        guard let rate = ShareRates.correction(converterRate: converterRate, measured: measured),
+              reported.contains(where: { abs($0 - rate) < 0.5 }) else {
             candidate = nil
             return nil
         }
@@ -59,6 +72,10 @@ package struct ShareRateMeter: Equatable {
     }
 
     package mutating func reset() { self = ShareRateMeter() }
+
+    package static func == (lhs: ShareRateMeter, rhs: ShareRateMeter) -> Bool {
+        lhs.start?.sample == rhs.start?.sample && lhs.start?.time == rhs.start?.time && lhs.candidate == rhs.candidate
+    }
 }
 
 /// Приведение моно-потока любой частоты к частоте трансляции. Частота может меняться посреди потока (звонок, смена выхода):

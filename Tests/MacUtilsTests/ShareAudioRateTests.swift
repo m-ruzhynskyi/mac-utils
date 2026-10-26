@@ -47,35 +47,48 @@ final class ShareAudioRateTests: XCTestCase {
         }
     }
 
-    func testMeterFindsRealRateWhenDeclaredIsStale() {
-        // Перехват заявляет 48 кГц, а кадры идут по 24 кГц: 10 мс = 240 кадров.
+    /// Часы устройства: mSampleTime растёт со скоростью их частоты, `skip` — доля пропущенных циклов IO (колбэка нет, время идёт).
+    private func run(deviceRate: Double, converterRate: Double, reported: [Double], skip: Double = 0, seconds: Double = 20) -> [Double] {
         var meter = ShareRateMeter()
-        var corrected: Double?
+        var found: [Double] = []
+        let frames = 512.0
+        var cycle = 0
         var time = 0.0
-        for _ in 0..<400 {
-            time += 0.01
-            if let rate = meter.add(frames: 240, at: time, converterRate: 48_000) { corrected = rate; break }
+        var sample = 0.0
+        while time < seconds {
+            cycle += 1
+            time += frames / deviceRate
+            sample += frames
+            // Каждый N-й цикл пропущен: колбэка нет вовсе.
+            if skip > 0, Double(cycle).truncatingRemainder(dividingBy: 1 / skip) < 1 { continue }
+            if let rate = meter.add(sampleTime: sample, at: time, converterRate: converterRate, reported: reported) { found.append(rate) }
         }
-        XCTAssertEqual(corrected, 24_000)
-        XCTAssertGreaterThan(time, 1.9, "нужны два согласных окна подряд")
+        return found
     }
 
-    func testMeterIgnoresStallAndCorrectRate() {
+    func testRealSwitchToHeadsetRateIsCorrected() {
+        // Часы выхода ушли на 24 кГц и сообщают это, а перехват всё ещё заявляет 48 кГц.
+        XCTAssertEqual(run(deviceRate: 24_000, converterRate: 48_000, reported: [24_000, 48_000]).first, 24_000)
+    }
+
+    func testSkippedBuffersAreNotARateChange() {
+        for skip in [0.03, 0.06, 0.08, 0.10, 0.12, 0.20, 0.33, 0.50] {
+            XCTAssertEqual(run(deviceRate: 48_000, converterRate: 48_000, reported: [48_000]), [], "пропущено \(skip)")
+            // Даже если бы измерение ушло, поправка не на частоту, которую система не сообщает.
+            XCTAssertEqual(run(deviceRate: 48_000 * (1 - skip), converterRate: 48_000, reported: [48_000]), [], "\(skip)")
+        }
+    }
+
+    func testMeterNeedsTwoAgreeingWindows() {
         var meter = ShareRateMeter()
-        var time = 0.0
-        for _ in 0..<500 {
-            time += 0.01
-            XCTAssertNil(meter.add(frames: 480, at: time, converterRate: 48_000))
+        var time = 0.0, sample = 0.0
+        var firstFound: Double?
+        for _ in 0..<400 {
+            time += 0.01; sample += 240
+            if let rate = meter.add(sampleTime: sample, at: time, converterRate: 48_000, reported: [24_000]) { firstFound = firstFound ?? rate; break }
         }
-        // Затор на полсекунды в одном окне не должен менять частоту.
-        var meter2 = ShareRateMeter()
-        time = 0
-        var results: [Double?] = []
-        for index in 0..<400 {
-            time += (index == 50 ? 0.5 : 0.01)
-            results.append(meter2.add(frames: 480, at: time, converterRate: 48_000))
-        }
-        XCTAssertTrue(results.allSatisfy { $0 == nil })
+        XCTAssertEqual(firstFound, 24_000)
+        XCTAssertGreaterThan(time, 1.9)
     }
 
     func testSnapAndCorrection() {

@@ -264,8 +264,10 @@ package final class ShareAudioTap: @unchecked Sendable {
     private let convLock = NSLock()
     /// Измеритель настоящей частоты буферов (только в `queue`).
     private var meter = ShareRateMeter()
+    /// Частоты, которые сообщает система (часы, агрегат, перехват): поправка по измерению — только на одну из них.
+    private let reported = ShareReportedRates()
     /// Частота выхода (часов агрегата) при сборке; сменилась — пересобрать.
-    private var clockRate: Double = 0
+    package private(set) var clockRate: Double = 0
     /// Частота, на которую построен конвертер (главный поток).
     package private(set) var converterRate: Double = 0
     /// Частота перехвата или агрегата сменилась и конвертер устарел — пересобрать (зовётся в главном потоке).
@@ -354,7 +356,8 @@ package final class ShareAudioTap: @unchecked Sendable {
         converter = AVAudioConverter(from: input, to: output)
         inputFormat = input
         convLock.unlock()
-        meter.reset()
+        queue.sync { meter.reset() }
+        refreshReportedRates()
         clockRate = CoreAudioHelper.read(clockDevice, kAudioDevicePropertyNominalSampleRate, default: Float64(0))
         converterRate = format.mSampleRate
         Log.capture.info("Звук трансляции: частота перехвата \(tapFormat.mSampleRate, privacy: .public) Гц, вход агрегата \(format.mSampleRate, privacy: .public) Гц, выход \(self.clockRate, privacy: .public) Гц, отправка \(ShareProtocol.sampleRate, privacy: .public) Гц")
@@ -364,11 +367,11 @@ package final class ShareAudioTap: @unchecked Sendable {
         // Входы выхода (микрофон AirPods/гарнитуры) — свойство самого устройства; буфер перехвата — после них.
         subdeviceInputs = AggregateStreams.inputStreamCount(clockDevice)
         subdeviceInputsOff = false
-        status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) { [weak self] _, inputData, _, outputData, _ in
+        status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) { [weak self] _, inputData, inputTime, outputData, _ in
             for buffer in UnsafeMutableAudioBufferListPointer(outputData) {
                 if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
             }
-            self?.convert(inputData)
+            self?.convert(inputData, inputTime: inputTime.pointee)
         }
         guard status == noErr, let procID else { throw AppVolumeTap.TapError.status("Обработчик звука", status) }
         // Входы подустройства IOProc не нужны: иначе у AirPods включается микрофон и звук становится «телефонным» (HFP).
@@ -520,17 +523,24 @@ package final class ShareAudioTap: @unchecked Sendable {
         }
     }
 
+    /// Что система сообщает сейчас: номинальные частоты часов и агрегата, формат перехвата и потока агрегата.
+    private func refreshReportedRates() {
+        guard tapID != kAudioObjectUnknown, aggregateID != kAudioObjectUnknown else { return }
+        reported.set([
+            CoreAudioHelper.read(clockDevice, kAudioDevicePropertyNominalSampleRate, default: Float64(0)),
+            CoreAudioHelper.read(aggregateID, kAudioDevicePropertyNominalSampleRate, default: Float64(0)),
+            Self.tapFormat(tapID).mSampleRate,
+            Self.streamFormat(aggregateID)?.mSampleRate ?? 0,
+        ])
+    }
+
     /// Частота перехвата или входа агрегата уже не та, на которую построен конвертер.
     package var formatChanged: Bool {
         guard tapID != kAudioObjectUnknown, aggregateID != kAudioObjectUnknown else { return false }
         if ShareTapFormat.needsRebuild(converterRate: converterRate, tap: Self.tapFormat(tapID), stream: Self.streamFormat(aggregateID)) { return true }
         // Выход сменил частоту (звонок: 48 → 24 кГц), а перехват об этом ещё не сообщил: поток уже идёт на новой частоте.
         let now = CoreAudioHelper.read(clockDevice, kAudioDevicePropertyNominalSampleRate, default: Float64(0))
-        if now > 0, clockRate > 0, abs(now - clockRate) > 0.5 {
-            Log.capture.info("\(ShareAudioRateLog.change(path: "перехват", outputBefore: self.clockRate, outputNow: now, buffers: self.converterRate, sent: ShareProtocol.sampleRate), privacy: .public)")
-            return true
-        }
-        return false
+        return now > 0 && clockRate > 0 && abs(now - clockRate) > 0.5
     }
 
     private static func tapFormat(_ tap: AudioObjectID) -> AudioStreamBasicDescription {
@@ -550,7 +560,9 @@ package final class ShareAudioTap: @unchecked Sendable {
     private func listen(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) {
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             MainActor.assumeIsolated {
-                guard let self, self.formatChanged else { return }
+                guard let self else { return }
+                self.refreshReportedRates()
+                guard self.formatChanged else { return }
                 self.onFormatChange?()
             }
         }
@@ -559,7 +571,7 @@ package final class ShareAudioTap: @unchecked Sendable {
     }
 
     /// Вызывается в `queue`: вход перехвата → 24 кГц моно. Берётся только буфер перехвата, не весь вход агрегата.
-    private func convert(_ inputData: UnsafePointer<AudioBufferList>) {
+    private func convert(_ inputData: UnsafePointer<AudioBufferList>, inputTime: AudioTimeStamp) {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
         // Буфер перехвата — последний после входов выхода; входы выключены и HAL их опустил — единственный. Иначе
         // (состав ещё собирается) звук не берём: так можно взять микрофон.
@@ -580,7 +592,7 @@ package final class ShareAudioTap: @unchecked Sendable {
         var single = AudioBufferList(mNumberBuffers: 1, mBuffers: list[tapBuffer])
         let frames = AVAudioFrameCount(single.mBuffers.mDataByteSize / max(1, format.streamDescription.pointee.mBytesPerFrame))
         // Заявленная частота может устареть раньше, чем перехват об этом сообщит: сверяем с настоящей по кадрам за время.
-        if frames > 0, let rate = meter.add(frames: Int(frames), at: Self.now(), converterRate: format.sampleRate),
+        if frames > 0, let rate = meter.add(sampleTime: inputTime.mSampleTime, at: Self.seconds(inputTime), converterRate: format.sampleRate, reported: reported.values),
            let corrected = Self.format(format, rate: rate) {
             Log.capture.info("\(ShareAudioRateLog.change(path: "перехват, по буферам", outputBefore: self.clockRate, outputNow: CoreAudioHelper.read(self.clockDevice, kAudioDevicePropertyNominalSampleRate, default: Float64(0)), buffers: rate, sent: ShareProtocol.sampleRate), privacy: .public)")
             convLock.lock()
@@ -594,11 +606,11 @@ package final class ShareAudioTap: @unchecked Sendable {
         convert(single: &single, frames: frames, format: format, converter: converter)
     }
 
-    /// Секунды (монотонные) — для измерителя частоты.
-    private static func now() -> TimeInterval {
+    /// `mHostTime` метки входа в секундах (монотонных) — для измерителя частоты.
+    private static func seconds(_ stamp: AudioTimeStamp) -> TimeInterval {
         var base = mach_timebase_info_data_t()
         mach_timebase_info(&base)
-        return Double(mach_absolute_time()) * Double(base.numer) / Double(base.denom) / 1e9
+        return Double(stamp.mHostTime) * Double(base.numer) / Double(base.denom) / 1e9
     }
 
     /// Тот же формат буфера, но с другой частотой.
