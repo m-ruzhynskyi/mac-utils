@@ -651,13 +651,16 @@ package final class ShareAudioTap: @unchecked Sendable {
 /// Что делать ведущему с сообщением relay `viewers`. `tick` — периодическое напоминание (состав не менялся), `key` — медленный
 /// зритель просит ключевой кадр. Мониторы объявляются только при смене состава (`!tick && !key`); кадр шлётся новому зрителю и по
 /// просьбе ключевого, но не по напоминанию. Ключевой кадр просит сам `resendLast`, отдельного запроса не нужно.
+/// `slow` — зритель не успевает декодировать (`video-trouble`, SHARE-PROTOCOL): ведущий снижает частоту до 30 кадров/с.
 struct ShareViewersSignal: Equatable {
     let tick: Bool
     let key: Bool
+    let slow: Bool
 
     init(json: [String: Any]) {
         tick = json["tick"] as? Bool == true
         key = json["key"] as? Bool == true
+        slow = json["slow"] as? Bool == true
     }
 
     var announcesDisplays: Bool { !tick && !key }

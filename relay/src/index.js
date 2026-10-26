@@ -36,6 +36,8 @@ const VIEWER_TIMEOUT_MS = 120_000;
 const DEBT_LIMIT = 60;
 const DEBT_RESUME = 15;
 const KEY_ASK_MS = 1000;
+// Зритель не успевает декодировать (`video-trouble` со `slow`): ведущему — `slow` в `viewers`, не чаще раза в SLOW_ASK_MS.
+const SLOW_ASK_MS = 5000;
 // H.264 от ведущего шёл не дольше этого назад — картинки JPEG зрителям с H.264 не нужны (не мост).
 const H264_ACTIVE_MS = 700;
 const ID = /^\d{6}$|^\d{10}$/;
@@ -300,6 +302,7 @@ export class Room {
     // Поток видео к каждому зрителю: { sent, acked, acking, skipping, skipped } (в памяти, после выгрузки — заново).
     this.flow = new WeakMap();
     this.lastKeyAsk = 0;
+    this.lastSlowAsk = 0;
     // Цепочка для операций «прочитать — сравнить — записать» в storage (владелец ID, квота привязок).
     this.chain = Promise.resolve();
   }
@@ -872,6 +875,17 @@ export class Room {
     this.notifyHost(undefined, { key: true });
   }
 
+  // Просьба зрителя: не чаще KEY_ASK_MS (ключевой, общий счёт с askKeyFrame) и SLOW_ASK_MS (slow) на комнату.
+  // Всегда с `key: true`: ведущий, не знающий `slow`, отвечает ключевым кадром и не считает это сменой состава.
+  videoTrouble(key, slow, now) {
+    const askKey = key && now - this.lastKeyAsk >= KEY_ASK_MS;
+    const askSlow = slow && now - this.lastSlowAsk >= SLOW_ASK_MS;
+    if (!askKey && !askSlow) return;
+    if (askKey) this.lastKeyAsk = now;
+    if (askSlow) this.lastSlowAsk = now;
+    this.notifyHost(undefined, { key: true, ...(askSlow ? { slow: true } : {}) });
+  }
+
   toHost(message) {
     for (const host of this.activeHosts()) {
       try { host.send(JSON.stringify(message)); } catch (_) {}
@@ -939,6 +953,13 @@ export class Room {
       for (const host of this.activeHosts()) {
         try { host.send(game); } catch (_) {}
       }
+      return;
+    }
+    // Зритель не успевает показывать видео (необязательное, SHARE-PROTOCOL §3.6): key — выбросил кадры до ключевого и просит
+    // его; slow — декодер отстаёт, ведущему снизить частоту. Ведущему уходит `viewers` с флагами; старые ведущие по `key`
+    // просто шлют ключевой кадр (как по просьбе relay для медленного зрителя).
+    if (command.type === "video-trouble") {
+      this.videoTrouble(command.key === true, command.slow === true, Date.now());
       return;
     }
     // Переключить монитор ведущего — только ведущему, как игра: ID и имя зрителя ставит relay.
@@ -1100,7 +1121,8 @@ export class Room {
     }
   }
 
-  // flags: tick — периодическое напоминание, key — просьба о ключевом кадре (медленный зритель); без флагов — состав изменился.
+  // flags: tick — периодическое напоминание, key — просьба о ключевом кадре (медленный зритель), slow — зритель не успевает
+  // декодировать (ведущему снизить частоту кадров); без флагов — состав изменился.
   notifyHost(leaving, flags = {}) {
     const watching = this.approvedViewers().filter((s) => s !== leaving);
     // Count viewer devices, not overlapping sockets after a reconnect.

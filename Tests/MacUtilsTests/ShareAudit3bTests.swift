@@ -32,7 +32,7 @@ final class ShareAudit3bTests: XCTestCase {
     func testViewersHandlerDoesNotRequestKeyFrameSeparately() throws {
         let source = try String(contentsOfFile: #filePath.replacingOccurrences(of: "Tests/MacUtilsTests/ShareAudit3bTests.swift",
                                                                               with: "Sources/MUScreenShare/ScreenShare.swift"))
-        let start = try XCTUnwrap(source.range(of: "ShareViewersSignal(json: json).resendsLast"))
+        let start = try XCTUnwrap(source.range(of: "if signal.resendsLast(viewers: count)"))
         let before = String(source[source.index(start.lowerBound, offsetBy: -600)..<start.lowerBound])
         XCTAssertFalse(before.contains("requestKeyFrame()"), "лишний requestKeyFrame перед resendLast")
         let resend = try XCTUnwrap(source.range(of: "func resendLast()"))

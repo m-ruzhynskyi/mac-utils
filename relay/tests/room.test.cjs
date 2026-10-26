@@ -1254,3 +1254,30 @@ test('B2: зритель пропускал кадры, экран замер �
   ack(62);
   assert.equal(asks(), before + 1, 'не чаще раза в KEY_ASK_MS');
 });
+
+test('video-trouble: зритель просит ключевой и «не успеваю» — ведущему viewers с key (и slow), с пределом частоты; не пущенный — ничего', () => {
+  const f = fixture(), host = hostLive(f);
+  const viewer = f.socket('viewer', { id: '1', approved: true, h264: true, lastSeen: 1_000_000 });
+  const stranger = f.socket('viewer', { id: '2', approved: false, h264: true, lastSeen: 1_000_000 });
+  const asks = () => host.messages.filter((m) => m.type === 'viewers' && m.key === true);
+  const send = (s, body) => f.room.webSocketMessage(s, JSON.stringify({ type: 'video-trouble', ...body }));
+  send(stranger, { key: true, slow: true });
+  assert.equal(asks().length, 0, 'не пущенный зритель не может дёргать ведущего');
+  send(viewer, { key: true, slow: false });
+  assert.equal(asks().length, 1);
+  assert.equal(asks()[0].slow, undefined, 'без slow — только ключевой');
+  assert.equal(asks()[0].count, 1, 'обычное viewers: состав на месте');
+  f.advance(300); send(viewer, { key: true });
+  assert.equal(asks().length, 1, 'ключевой не чаще раза в секунду');
+  f.advance(300); send(viewer, { key: false, slow: true });
+  assert.equal(asks().length, 2, 'slow проходит отдельно от предела ключевого');
+  assert.equal(asks()[1].slow, true);
+  f.advance(1500); send(viewer, { key: false, slow: true });
+  assert.equal(asks().length, 2, 'slow не чаще раза в 5 с');
+  f.advance(4000); send(viewer, { slow: true, key: true });
+  assert.equal(asks().length, 3);
+  assert.deepEqual([asks()[2].key, asks()[2].slow], [true, true]);
+  send(viewer, { key: 'yes', slow: 1 });
+  assert.equal(asks().length, 3, 'не Bool — как отсутствие');
+  assert.equal(host.messages.filter((m) => m.type === 'video-trouble').length, 0, 'само сообщение ведущему не пересылается');
+});
