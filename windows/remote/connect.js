@@ -35,6 +35,8 @@ function defaultPaths(env = process.env) {
 }
 
 const MESSAGES = {
+  // Файл с именем программы нашёлся, но подписи её издателя нет (или она недействительна): ни запуска, ни пароля.
+  unsigned: (p) => ({ kind: "warning", title: `${TITLES[p]} без подписи — пароль не передан`, detail: `Найден файл ${TITLES[p]}.exe без действительной подписи издателя ${TITLES[p]}. Скачайте программу с официального сайта или укажите установленную.`, actions: [{ id: "download", label: `Скачать ${TITLES[p]}` }, { id: "close", label: "Закрыть" }] }),
   notInstalled: (p) => ({ kind: "danger", title: `${TITLES[p]} не найден`, detail: "Установите программу или укажите путь к ней в настройках.", actions: [{ id: "download", label: `Скачать ${TITLES[p]}` }] }),
   fieldNotFound: (p) => ({ kind: "warning", title: "Введите пароль вручную", detail: `Не нашёл поле пароля в окне ${TITLES[p]}. Пароль не копировался.`, actions: [{ id: "close", label: "Закрыть" }] }),
   wrongPassword: () => ({ kind: "danger", title: "Проверьте пароль в файле", detail: "Программа не приняла пароль.", actions: [{ id: "openFile", label: "Открыть файл" }, { id: "close", label: "Закрыть" }] }),
@@ -67,21 +69,41 @@ const TV_LIMIT_MS = 180_000;
 
 // deps: { exists(path), env, spawn(file, args, opts), uia: { enter(opts, password: async () => SecretBuffer, onEvent) → Promise<result> }, hud: { show(state) }, openExternal(url),
 //         log(line), copyText(text) — запасной путь TeamViewer: кладёт в буфер обмена ID (никогда не пароль), locate(program) → пути-кандидаты
-//         вне Program Files (портативный exe в «Загрузках», обработчик ссылок и App Paths из реестра, запущенный процесс: locate.js) }
+//         вне Program Files (обработчик ссылок и App Paths из реестра, портативный exe в «Загрузках», запущенный процесс: locate.js),
+//         trust { trusted(program, file), verify(program, file) → Promise<boolean> } — можно ли верить файлу: Program Files или
+//         действительная подпись издателя программы (locate.js). Без trust (старые тесты) верим всем найденным файлам. }
 function createConnector(deps) {
   const { exists = () => false, customPaths = () => ({}), env = process.env, spawn, uia = null, hud = { show() {} }, openExternal = () => {}, log = () => {}, clock = Date, copyText = null,
-    locate = () => [] } = deps;
+    locate = () => [], trust = null } = deps;
   // ID в буфер: только ID записи, только строкой. Нет функции или она упала — честно говорим, что не скопирован.
   const copyID = (id) => { if (typeof copyText !== "function") return false; try { return copyText(String(id)) !== false; } catch (_) { return false; } };
   const defaults = defaultPaths(env);
 
-  // Свой путь из настроек, затем Program Files и %LOCALAPPDATA%, затем портативный exe и прочие находки locate().
-  function find(program, custom) {
-    if (custom && exists(custom)) return custom;
+  // Порядок (ревью rc-win-entry, FIX 1): свой путь → Program Files и %LOCALAPPDATA% → реестр и App Paths → «Загрузки» и Рабочий стол
+  // → запущенный процесс. Берётся первый существующий файл, которому можно верить.
+  function ordered(program, custom) {
     const located = (() => { try { return locate(program) || []; } catch (_) { return []; } })();
-    return [...defaults[program], ...located].find((p) => exists(p)) || null;
+    return [...new Set([custom, ...defaults[program], ...located].filter(Boolean))];
+  }
+  const trustedNow = (program, file) => !trust || trust.trusted(program, file);
+  // Без ожидания (для «установлен»): только уже проверенные файлы.
+  function find(program, custom) {
+    return ordered(program, custom).find((file) => exists(file) && trustedNow(program, file)) || null;
   }
   const installed = (program) => !!find(program, customPaths()[program]);
+  // Для запуска: непроверенный файл проверяется сейчас. { exe } или { exe: null, unsigned } — нашёлся только файл без подписи.
+  async function findForLaunch(program, custom) {
+    let unsigned = false;
+    for (const file of ordered(program, custom)) {
+      if (!exists(file)) continue;
+      if (trustedNow(program, file)) return { exe: file };
+      let ok = false;
+      try { ok = await trust.verify(program, file); } catch (_) { ok = false; }
+      if (ok) return { exe: file };
+      unsigned = true;
+    }
+    return { exe: null, unsigned };
+  }
 
   // AnyDesk: пароль через stdin. Процесс отвязан от нашего: подключение живёт своей жизнью.
   function launchAnyDesk(exe, id, secret) {
@@ -155,7 +177,8 @@ function createConnector(deps) {
     if (record.method) return openRDP(record);
     const program = programOf(record, settings.defaultProgram);
     const title = TITLES[program];
-    const exe = find(program, settings.programPaths?.[program]);
+    const { exe, unsigned } = await findForLaunch(program, settings.programPaths?.[program]);
+    if (!exe && unsigned) { hud.show(MESSAGES.unsigned(program)); log(`connect fail code=unsigned program=${program}`); return { ok: false, error: "unsigned" }; }
     if (!exe) { hud.show(MESSAGES.notInstalled(program)); log(`connect fail code=notInstalled`); return { ok: false, error: "notInstalled" }; }
     // ID, начинающийся с «-», программа приняла бы за параметр командной строки.
     if (record.id.startsWith("-")) { hud.show(MESSAGES.launchFailed(program)); log(`connect fail code=badID`); return { ok: false, error: "badID" }; }

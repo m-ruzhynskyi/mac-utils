@@ -10,13 +10,13 @@ const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const F = require("./fixtures");
 const { init, paletteBounds } = require("../../remote");
-const { createLocator, commandExe, isProgramFile } = require("../../remote/locate");
+const { createLocator, commandExe, isProgramFile, inProgramFiles, signatureOK, SIGNATURE_COMMAND } = require("../../remote/locate");
 const { createConnector } = require("../../remote/connect");
 const { createHud, hudBounds } = require("../../remote/hud");
 const { createUia, guardMs } = require("../../remote/uia");
 const { SecretBuffer } = require("../../remote/secret");
 
-const NO_LOCATOR = { candidates: () => [], refresh: async () => false };
+const NO_LOCATOR = { candidates: () => [], refresh: async () => false, trusted: () => false, verify: async () => false };
 
 function fakeElectron({ appMenu = null } = {}) {
   const handles = new Map(), listeners = new Map(), registered = [], windows = [], trays = [], menus = [];
@@ -143,44 +143,142 @@ function fakeFs(tree) {
     existsSync: (file) => files.has(file),
   };
 }
-// Фейковый реестр и PowerShell: execFile(file, args, opts, cb). Пишущих команд не бывает — всё записывается.
-function fakeSystem({ reg = {}, processes = "" } = {}) {
-  const calls = [];
+// Фейковый реестр и PowerShell: execFile(file, args, opts, cb) → child со stdin. Проверка подписи отвечает по пути из stdin
+// (`signed`: путь → Subject сертификата; нет — NotSigned). Пишущих команд не бывает — всё записывается.
+function fakeSystem({ reg = {}, processes = "", signed = {} } = {}) {
+  const calls = [], checked = [];
   const execFile = (file, args, _opts, cb) => {
     calls.push([path.win32.basename(file), ...args]);
-    if (/reg\.exe$/i.test(file)) {
-      const value = reg[args[1]];
-      return setImmediate(() => (value ? cb(null, `\r\n${args[1]}\r\n    (Default)    REG_SZ    ${value}\r\n`) : cb(new Error("not found"))));
-    }
-    setImmediate(() => cb(null, processes));
+    let stdin = "";
+    const child = { stdin: { end: (b) => { stdin += b ? Buffer.from(b).toString("utf8") : ""; } } };
+    setImmediate(() => {
+      if (/reg\.exe$/i.test(file)) {
+        const value = reg[args[1]];
+        return value ? cb(null, `\r\n${args[1]}\r\n    (Default)    REG_SZ    ${value}\r\n`) : cb(new Error("not found"));
+      }
+      if (args.includes(SIGNATURE_COMMAND)) {
+        const target = stdin.replace(/\n$/, "");
+        checked.push(target);
+        return cb(null, signed[target] ? `Valid|${signed[target]}\r\n` : "NotSigned|\r\n");
+      }
+      cb(null, processes);
+    });
+    return child;
   };
-  return { execFile, calls };
+  return { execFile, calls, checked };
 }
 const ENV = { USERPROFILE: "C:\\Users\\demo", SystemRoot: "C:\\Windows", ProgramFiles: "C:\\Program Files", "ProgramFiles(x86)": "C:\\Program Files (x86)", LOCALAPPDATA: "C:\\Users\\demo\\AppData\\Local" };
-
-test("портативный AnyDesk в «Загрузках» («AnyDesk (1).exe» — новее, выбирается первым) и на Рабочем столе; установщик TeamViewer — нет", () => {
-  const files = fakeFs({
-    "C:\\Users\\demo\\Downloads": { "AnyDesk.exe": 100, "AnyDesk (1).exe": 200, "TeamViewer_Setup.exe": 300, "report.xlsx": 1 },
-    "C:\\Users\\demo\\Desktop": { "TeamViewerQS.exe": 50 },
-  });
-  const locator = createLocator({ fs: files, env: ENV, execFile: null });
-  assert.deepEqual(locator.candidates("anyDesk"), ["C:\\Users\\demo\\Downloads\\AnyDesk (1).exe", "C:\\Users\\demo\\Downloads\\AnyDesk.exe"]);
-  assert.deepEqual(locator.candidates("teamViewer"), ["C:\\Users\\demo\\Desktop\\TeamViewerQS.exe"]);
-  for (const [program, name, ok] of [["anyDesk", "AnyDesk (1).exe", true], ["anyDesk", "anydesk.EXE", true], ["anyDesk", "calc.exe", false], ["anyDesk", "AnyDesk.exe.lnk", false],
-    ["teamViewer", "TeamViewer.exe", true], ["teamViewer", "TeamViewer_Setup.exe", false], ["teamViewer", "TeamViewerSetup.exe", false], ["teamViewer", "TeamViewerQS.exe", true]]) {
-    assert.equal(isProgramFile(program, `D:\\x\\${name}`), ok, name);
-  }
-  // Подключение: портативный exe → CLI `AnyDesk.exe <ID> --with-password` (документация AnyDesk: путь к exe, установка не нужна).
+const AD_CERT = "CN=AnyDesk Software GmbH, O=AnyDesk Software GmbH, L=Stuttgart, S=Baden-Württemberg, C=DE";
+const TV_CERT = "CN=TeamViewer Germany GmbH, O=TeamViewer Germany GmbH, L=Göppingen, C=DE";
+// Двойник AnyDesk: что запущено и что ушло в stdin (пароль).
+function fakeSpawn() {
   const spawned = [];
-  const connector = createConnector({ exists: files.existsSync, env: ENV, locate: (p) => locator.candidates(p),
-    spawn: (file, args) => { const c = new EventEmitter(); c.stdin = { on() {}, write: (_b, cb) => cb?.(), end() {} }; c.unref = () => {}; spawned.push([file, args]); setImmediate(() => c.emit("exit", 0)); return c; } });
-  assert.equal(connector.installed("anyDesk"), true, "плашки «не найден» нет, записи не приглушены");
-  assert.equal(connector.find("anyDesk", ""), "C:\\Users\\demo\\Downloads\\AnyDesk (1).exe");
-  return connector.connectRecord({ name: "Демо", id: "123456789", hasPassword: true, program: "anyDesk" },
-    { settings: { defaultProgram: "anyDesk", programPaths: {} }, store: { password: async () => new SecretBuffer("Demo-Pw-1") } }).then((r) => {
-    assert.deepEqual(r, { ok: true });
-    assert.deepEqual(spawned[0], ["C:\\Users\\demo\\Downloads\\AnyDesk (1).exe", ["123456789", "--with-password"]]);
-  });
+  const spawn = (file, args) => {
+    const c = new EventEmitter(); const entry = { file, args, stdin: "" }; spawned.push(entry);
+    c.stdin = { on() {}, write: (b, cb) => { entry.stdin += Buffer.from(b).toString("utf8"); cb?.(); }, end() {} }; c.unref = () => {};
+    setImmediate(() => c.emit("exit", 0)); return c;
+  };
+  return { spawn, spawned };
+}
+
+test("имена (таблица ревью FIX 1): только сам AnyDesk/TeamViewer; установщики, деинсталляторы, MSI, службы, Host_Setup, crack и QuickSupport — нет", () => {
+  const table = [
+    ["anyDesk", ["AnyDesk.exe", "AnyDesk (1).exe", "anydesk.EXE", "AnyDesk-portable.exe", "AnyDesk_portable (2).exe"], true],
+    ["anyDesk", ["AnyDesk-installer.exe", "AnyDesk_Setup.exe", "AnyDeskSetup.exe", "AnyDesk-uninstall.exe", "AnyDeskMSI.exe", "AnyDesk_crack.exe",
+      "AnyDesk Install.exe", "AnyDesk.msi", "AnyDesk.exe.lnk", "calc.exe", "My AnyDesk.exe"], false],
+    ["teamViewer", ["TeamViewer.exe", "TeamViewer (1).exe", "TeamViewer_Portable.exe"], true],
+    ["teamViewer", ["TeamViewer_Setup.exe", "TeamViewer_Setup_x64.exe", "TeamViewerSetup.exe", "TeamViewer_setup (1).exe", "TeamViewer-Setup.exe",
+      "TeamViewer Setup.exe", "TeamViewer_Host_Setup.exe", "TeamViewer_Service.exe", "TeamViewer_Desktop.exe", "TeamViewer_Assignment.exe",
+      "TeamViewerQS.exe", "TeamViewerQS (1).exe", "TeamViewer_Host.exe", "TeamViewer.msi"], false],
+  ];
+  for (const [program, names, ok] of table) for (const name of names) assert.equal(isProgramFile(program, `D:\\x\\${name}`), ok, `${program}: ${name}`);
+});
+
+test("подпись: Valid и издатель программы (CN или O); NotSigned, HashMismatch, чужой издатель, подпись TeamViewer у «AnyDesk.exe» — нет", () => {
+  assert.equal(signatureOK("anyDesk", `Valid|${AD_CERT}`), true);
+  assert.equal(signatureOK("anyDesk", "Valid|CN=philandro Software GmbH, O=philandro Software GmbH, C=DE"), true);
+  assert.equal(signatureOK("teamViewer", `Valid|${TV_CERT}`), true);
+  assert.equal(signatureOK("teamViewer", "Valid|CN=TeamViewer GmbH, O=TeamViewer GmbH, C=DE"), true);
+  for (const [program, out] of [["anyDesk", "NotSigned|"], ["anyDesk", `HashMismatch|${AD_CERT}`], ["anyDesk", "Valid|CN=Evil Ltd, O=Evil Ltd"],
+    ["anyDesk", `Valid|${TV_CERT}`], ["anyDesk", "Valid|CN=AnyDesk Software GmbH Fake, O=Other"], ["anyDesk", "Error|"], ["anyDesk", ""],
+    ["teamViewer", "Valid|CN=Not TeamViewer GmbH, O=x"]]) {
+    assert.equal(signatureOK(program, out), false, `${program}: ${out}`);
+  }
+  assert.ok(!/\$args|\{0\}|-Path\s+['"]/.test(SIGNATURE_COMMAND), "команда — константа, путь не подставляется");
+  assert.match(SIGNATURE_COMMAND, /OpenStandardInput\(\), \(New-Object System\.Text\.UTF8Encoding\(\$false\)\)/, "путь — из stdin в UTF-8");
+  assert.match(SIGNATURE_COMMAND, /Get-AuthenticodeSignature -LiteralPath \$p/);
+  assert.equal(inProgramFiles("C:\\Program Files\\AnyDesk\\AnyDesk.exe", ENV), true);
+  assert.equal(inProgramFiles("C:\\Program Files (x86)\\TeamViewer\\TeamViewer.exe", ENV), true);
+  for (const f of ["C:\\Users\\demo\\Downloads\\AnyDesk.exe", "C:\\Users\\demo\\AppData\\Local\\Programs\\AnyDesk\\AnyDesk.exe", "C:\\Program Files Evil\\AnyDesk.exe",
+    "C:\\Program Files\\..\\Users\\demo\\AnyDesk.exe", "AnyDesk.exe"]) assert.equal(inProgramFiles(f, ENV), false, f);
+});
+
+test("«Загрузки»: подписанный портативный AnyDesk — «установлен» и получает пароль (CLI <ID> --with-password); путь — в stdin PowerShell; итог по пути+mtime", async () => {
+  const files = fakeFs({ "C:\\Users\\demo\\Downloads": { "AnyDesk.exe": 100, "AnyDesk (1).exe": 200, "AnyDesk-installer.exe": 300, "TeamViewerQS.exe": 50 } });
+  const sys = fakeSystem({ signed: { "C:\\Users\\demo\\Downloads\\AnyDesk (1).exe": AD_CERT } });
+  const locator = createLocator({ fs: files, env: ENV, execFile: sys.execFile });
+  assert.deepEqual(locator.candidates("anyDesk"), ["C:\\Users\\demo\\Downloads\\AnyDesk (1).exe", "C:\\Users\\demo\\Downloads\\AnyDesk.exe"], "новые первыми, установщик — нет");
+  assert.deepEqual(locator.candidates("teamViewer"), [], "QuickSupport — нет");
+  const { spawn, spawned } = fakeSpawn();
+  const connector = createConnector({ exists: files.existsSync, env: ENV, locate: (p) => locator.candidates(p), trust: locator, spawn });
+  assert.equal(connector.installed("anyDesk"), false, "до проверки подписи — не «установлен»");
+  assert.equal(await locator.refresh(), true);
+  assert.equal(connector.installed("anyDesk"), true);
+  assert.ok(sys.checked.includes("C:\\Users\\demo\\Downloads\\AnyDesk (1).exe"), "путь ушёл в stdin");
+  assert.ok(sys.calls.filter((c) => c[0] === "powershell.exe" && c.includes(SIGNATURE_COMMAND)).every((c) => !c.join(" ").includes("Downloads")), "путь не в строке команды");
+  const r = await connector.connectRecord({ name: "Демо", id: "123456789", hasPassword: true, program: "anyDesk" },
+    { settings: { defaultProgram: "anyDesk", programPaths: {} }, store: { password: async () => new SecretBuffer("Demo-Pw-1") } });
+  assert.deepEqual(r, { ok: true });
+  assert.deepEqual([spawned[0].file, spawned[0].args, spawned[0].stdin], ["C:\\Users\\demo\\Downloads\\AnyDesk (1).exe", ["123456789", "--with-password"], "Demo-Pw-1\n"]);
+  const before = sys.checked.length;
+  await locator.verify("anyDesk", "C:\\Users\\demo\\Downloads\\AnyDesk (1).exe");
+  assert.equal(sys.checked.length, before, "тот же файл (путь и mtime) — без повторной проверки");
+});
+
+test("неподписанный двойник AnyDesk.exe в «Загрузках» не запускается и пароль не получает: «без подписи — пароль не передан»", async () => {
+  const files = fakeFs({ "C:\\Users\\demo\\Downloads": { "AnyDesk.exe": 100 }, "C:\\Users\\demo\\Desktop": { "AnyDesk (2).exe": 50 } });
+  const sys = fakeSystem({ signed: { "C:\\Users\\demo\\Desktop\\AnyDesk (2).exe": "CN=Evil Ltd, O=Evil Ltd" } });
+  const locator = createLocator({ fs: files, env: ENV, execFile: sys.execFile });
+  await locator.refresh();
+  const { spawn, spawned } = fakeSpawn();
+  const states = [], log = [];
+  let reads = 0;
+  const connector = createConnector({ exists: files.existsSync, env: ENV, locate: (p) => locator.candidates(p), trust: locator, spawn,
+    hud: { show: (s) => states.push(s) }, log: (l) => log.push(l) });
+  assert.equal(connector.installed("anyDesk"), false, "плашка «не найден» остаётся, записи приглушены");
+  const r = await connector.connectRecord({ name: "Демо", id: "123456789", hasPassword: true, program: "anyDesk" },
+    { settings: { defaultProgram: "anyDesk", programPaths: {} }, store: { password: async () => { reads++; return new SecretBuffer("Demo-Pw-1"); } } });
+  assert.deepEqual(r, { ok: false, error: "unsigned" });
+  assert.equal(spawned.length, 0, "ничего не запущено");
+  assert.equal(reads, 0, "пароль даже не читался");
+  assert.equal(states.at(-1).title, "AnyDesk без подписи — пароль не передан");
+  assert.deepEqual(log, ["connect fail code=unsigned program=anyDesk"]);
+  // Свой путь из настроек вне Program Files — тоже только с подписью.
+  const custom = await connector.connectRecord({ name: "Демо", id: "123456789", hasPassword: true, program: "anyDesk" },
+    { settings: { defaultProgram: "anyDesk", programPaths: { anyDesk: "C:\\Users\\demo\\Downloads\\AnyDesk.exe" } }, store: { password: async () => { reads++; return null; } } });
+  assert.equal(custom.error, "unsigned");
+  assert.equal(spawned.length, 0);
+});
+
+test("порядок: свой путь → Program Files/%LOCALAPPDATA% → реестр/App Paths → «Загрузки»/Рабочий стол → процесс", async () => {
+  const pf = "C:\\Program Files\\AnyDesk\\AnyDesk.exe", local = "C:\\Users\\demo\\AppData\\Local\\Programs\\AnyDesk\\AnyDesk.exe";
+  const regExe = "D:\\Apps\\AnyDesk\\AnyDesk.exe", dl = "C:\\Users\\demo\\Downloads\\AnyDesk.exe", own = "E:\\Mine\\AnyDesk.exe";
+  const all = { [own]: 1, [pf]: 1, [local]: 1, [regExe]: 1, [dl]: 1 };
+  const signed = Object.fromEntries([own, local, regExe, dl].map((f) => [f, AD_CERT]));
+  const make = (present) => {
+    const tree = {};
+    for (const f of Object.keys(all).filter((f) => present.includes(f))) { const dir = path.win32.dirname(f); (tree[dir] ||= {})[path.win32.basename(f)] = 1; }
+    const files = fakeFs(tree);
+    const sys = fakeSystem({ reg: { "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\AnyDesk.exe": `"${regExe}"` }, signed });
+    const locator = createLocator({ fs: files, env: ENV, execFile: sys.execFile });
+    return { locator, connector: createConnector({ exists: files.existsSync, env: ENV, locate: (p) => locator.candidates(p), trust: locator, spawn: fakeSpawn().spawn }) };
+  };
+  for (const [present, custom, expected] of [
+    [[own, pf, local, regExe, dl], own, own], [[pf, local, regExe, dl], "", pf], [[local, regExe, dl], "", local], [[regExe, dl], "", regExe], [[dl], "", dl]]) {
+    const { locator, connector } = make(present);
+    await locator.refresh({ anyDesk: [custom, local].filter(Boolean) });
+    assert.equal(connector.find("anyDesk", custom), expected, `${present.length}: ${expected}`);
+  }
 });
 
 test("реестр (только reg query): обработчик anydesk: и App Paths; teamviewer10:/tvcontrol1:; процесс — только если остальное пусто", async () => {
@@ -191,40 +289,53 @@ test("реестр (только reg query): обработчик anydesk: и Ap
     "HKCU\\Software\\Classes\\anydesk\\shell\\open\\command": '"C:\\Users\\demo\\Tools\\AnyDesk.exe" "%1"',
     "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\TeamViewer.exe": "%ProgramFiles%\\TV15\\TeamViewer.exe",
   } });
-  const locator = createLocator({ fs: fakeFs({}), env: ENV, execFile: sys.execFile });
-  assert.equal(await locator.refresh(), true);
+  const locator = createLocator({ fs: fakeFs({ "C:\\Users\\demo\\Tools": { "AnyDesk.exe": 1 }, "C:\\Program Files\\TV15": { "TeamViewer.exe": 1 } }), env: ENV, execFile: sys.execFile });
+  await locator.refresh();
   assert.deepEqual(locator.candidates("anyDesk"), ["C:\\Users\\demo\\Tools\\AnyDesk.exe"]);
   assert.deepEqual(locator.candidates("teamViewer"), ["C:\\Program Files\\TV15\\TeamViewer.exe"]);
+  assert.equal(locator.trusted("teamViewer", "C:\\Program Files\\TV15\\TeamViewer.exe"), true, "Program Files — без проверки подписи");
+  assert.equal(locator.trusted("anyDesk", "C:\\Users\\demo\\Tools\\AnyDesk.exe"), false, "HKCU указывает в профиль — подпись не подтверждена");
   for (const call of sys.calls.filter((c) => c[0] === "reg.exe")) assert.equal(call[1], "query", "в реестр не пишем");
   assert.ok(sys.calls.some((c) => c[0] === "reg.exe" && c[2] === "HKCU\\Software\\Classes\\tvcontrol1\\shell\\open\\command"));
-  // Обработчик указывает не на программу — не берём. Ничего не найдено — путь запущенного процесса (PowerShell Get-Process).
-  const proc = fakeSystem({ reg: { "HKCR\\anydesk\\shell\\open\\command": '"C:\\evil\\calc.exe" "%1"' }, processes: "C:\\Users\\demo\\Desktop\\Old\\AnyDesk.exe\r\n" });
+  // Обработчик указывает не на программу (или на службу TeamViewer) — не берём. Ничего не найдено — путь запущенного процесса.
+  const proc = fakeSystem({ reg: { "HKCR\\anydesk\\shell\\open\\command": '"C:\\evil\\calc.exe" "%1"' },
+    processes: "C:\\Users\\demo\\Desktop\\Old\\AnyDesk.exe\r\nC:\\Program Files\\TeamViewer\\TeamViewer_Service.exe\r\n" });
   const byProcess = createLocator({ fs: fakeFs({}), env: ENV, execFile: proc.execFile });
   await byProcess.refresh();
   assert.deepEqual(byProcess.candidates("anyDesk"), ["C:\\Users\\demo\\Desktop\\Old\\AnyDesk.exe"]);
+  assert.deepEqual(byProcess.candidates("teamViewer"), [], "служба TeamViewer_Service — не программа");
   assert.ok(proc.calls.some((c) => c[0] === "powershell.exe" && c.join(" ").includes("Get-Process -Name 'AnyDesk*'")));
-  assert.ok(!proc.calls.some((c) => /Set-|New-|Remove-|reg add|reg delete/i.test(c.join(" "))), "только чтение");
-  assert.equal(await byProcess.refresh(), false, "без изменений — без лишнего обновления окна");
+  assert.ok(!proc.calls.some((c) => /Set-|New-Item|Remove-|reg add|reg delete/i.test(c.join(" "))), "только чтение");
 });
 
-test("«Указать AnyDesk.exe…» в плашке: выбранный exe сохраняется в programPaths, чужой файл — нет; путь «AnyDesk (1).exe» принимается и из настроек", async () => {
+test("«Указать AnyDesk.exe…»: файл с подписью AnyDesk — сохраняется; без подписи — честное предупреждение, путь не сохранён; не тот файл — тоже", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rc-entry-"));
   const fake = fakeElectron();
-  const rc = init(fake.electron, { userData: dir, locator: NO_LOCATOR });
-  fake.setPick("C:\\Users\\demo\\Downloads\\AnyDesk (1).exe");
-  assert.equal(await fake.handles.get("rc:pickProgram")(sender(fake, rc), "anyDesk"), true);
-  assert.equal(rc.settings.data.programPaths.anyDesk, "C:\\Users\\demo\\Downloads\\AnyDesk (1).exe");
-  fake.setPick("C:\\Windows\\System32\\calc.exe");
-  assert.equal(await fake.handles.get("rc:pickProgram")(sender(fake, rc), "anyDesk"), false);
-  assert.equal(rc.settings.data.programPaths.anyDesk, "C:\\Users\\demo\\Downloads\\AnyDesk (1).exe");
-  assert.equal(await fake.handles.get("rc:pickProgram")({ sender: { id: 99 } }, "anyDesk"), false, "только от окон модуля");
-  assert.equal(await fake.handles.get("rc:pickProgram")(sender(fake, rc), "../../evil"), false);
-  const r = await fake.handles.get("rc:setSettings")(sender(fake, rc), { programPaths: { anyDesk: "D:\\Soft\\AnyDesk-portable.exe", teamViewer: "D:\\x\\notepad.exe" } });
+  const good = "C:\\Users\\demo\\Downloads\\AnyDesk (1).exe", bad = "C:\\Users\\demo\\Downloads\\AnyDesk.exe";
+  const verified = [];
+  const locator = { ...NO_LOCATOR, verify: async (program, file) => { verified.push([program, file]); return file === good; } };
+  const huds = [];
+  const rc = init(fake.electron, { userData: dir, locator, hud: { show: (s) => huds.push(s) } });
+  fake.setPick(good);
+  assert.deepEqual(await fake.handles.get("rc:pickProgram")(sender(fake, rc), "anyDesk"), { ok: true });
+  assert.equal(rc.settings.data.programPaths.anyDesk, good);
+  fake.setPick(bad);
+  assert.deepEqual(await fake.handles.get("rc:pickProgram")(sender(fake, rc), "anyDesk"), { ok: false, error: "signature" });
+  assert.equal(rc.settings.data.programPaths.anyDesk, good, "путь без подписи не сохранён");
+  assert.equal(huds.at(-1).title, "Подпись AnyDesk не подтверждена");
+  assert.match(huds.at(-1).detail, /пароль ему не передаётся, путь не сохранён/);
+  fake.setPick("C:\\Users\\demo\\Downloads\\AnyDesk-installer.exe");
+  assert.deepEqual(await fake.handles.get("rc:pickProgram")(sender(fake, rc), "anyDesk"), { ok: false, error: "name" });
+  assert.equal(huds.at(-1).title, "Это не AnyDesk");
+  assert.deepEqual(verified, [["anyDesk", good], ["anyDesk", bad]], "установщик даже не проверялся");
+  assert.deepEqual(await fake.handles.get("rc:pickProgram")({ sender: { id: 99 } }, "anyDesk"), { ok: false, error: "denied" }, "только от окон модуля");
+  assert.deepEqual(await fake.handles.get("rc:pickProgram")(sender(fake, rc), "../../evil"), { ok: false, error: "program" });
+  const r = await fake.handles.get("rc:setSettings")(sender(fake, rc), { programPaths: { anyDesk: "D:\\Soft\\AnyDesk-portable.exe", teamViewer: "D:\\x\\TeamViewerQS.exe" } });
   assert.equal(r.programPaths.anyDesk, "D:\\Soft\\AnyDesk-portable.exe");
-  assert.equal(r.programPaths.teamViewer, "");
+  assert.equal(r.programPaths.teamViewer, "", "QuickSupport в настройки не принимается");
   rc.dispose();
   const js = fs.readFileSync(path.join(__dirname, "../../remote/ui/remote.js"), "utf8");
-  assert.match(js, /el\("button", "btn c", `Указать \$\{v\.titles\[p\]\}\.exe…`\); pick\.onclick = async \(\) => \{ if \(await window\.rc\.pickProgram\(p\)\) refresh\(\); \}/);
+  assert.match(js, /pick\.onclick = async \(\) => \{ if \(\(await window\.rc\.pickProgram\(p\)\)\?\.ok\) refresh\(\); \}/);
 });
 
 // ---------- C: HUD ----------

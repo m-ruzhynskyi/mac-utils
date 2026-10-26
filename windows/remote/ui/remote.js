@@ -160,7 +160,7 @@ function render() {
     if (!v.installed[p] && (v.counts[p] || 0) > 0) {
       const b = el("div", "banner warning slim");
       const text = el("div", "tx", `${v.titles[p]} не найден — записи приглушены`); text.title = `${v.titles[p]} не найден ни в Program Files, ни в «Загрузках» и на Рабочем столе. Записи этой программы приглушены.`;
-      const pick = el("button", "btn c", `Указать ${v.titles[p]}.exe…`); pick.onclick = async () => { if (await window.rc.pickProgram(p)) refresh(); };
+      const pick = el("button", "btn c", `Указать ${v.titles[p]}.exe…`); pick.onclick = async () => { if ((await window.rc.pickProgram(p))?.ok) refresh(); };
       const get = el("button", "btn c", "Скачать"); get.onclick = () => window.rc.edit("download", p);
       b.append(text, pick, get); banner.append(b);
     }

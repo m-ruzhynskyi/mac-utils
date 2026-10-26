@@ -9,7 +9,7 @@ const { RemoteService } = require("./service");
 const fs = require("node:fs");
 const { spawn, execFile } = require("node:child_process");
 const { TITLES, downloadURL, programOf } = require("./models");
-const { createConnector } = require("./connect");
+const { createConnector, defaultPaths } = require("./connect");
 const { createUia } = require("./uia");
 const { createConcealedWriter } = require("./concealed");
 const { buildCard, publicCard, cardSecret, cardSecrets, hasAccount, ACCOUNT_ID, CARD_SECRETS, maskedAccess, parseContacts, isPhone } = require("./access");
@@ -75,7 +75,14 @@ function init(electron, options = {}) {
   // запущенный процесс (только чтение). Реестр и процессы — только на Windows.
   const locator = options.locator || createLocator({ fs, env: process.env, execFile: process.platform === "win32" ? execFile : null });
   const connector = options.connector || createConnector({ exists: fs.existsSync, customPaths: () => settings.data.programPaths, spawn,
-    uia: createUia(spawn), hud, openExternal: (url) => shell.openExternal(url), log, copyText: options.copyText, locate: (p) => locator.candidates(p) });
+    uia: createUia(spawn), hud, openExternal: (url) => shell.openExternal(url), log, copyText: options.copyText, locate: (p) => locator.candidates(p), trust: locator });
+  // Находки и подписи: реестр, процессы, подписи файлов вне Program Files — свой путь и %LOCALAPPDATA% тоже. Поменялось — окно
+  // перерисует плашку «не найден».
+  const refreshPrograms = () => {
+    const local = defaultPaths(process.env);
+    const extra = Object.fromEntries(["anyDesk", "teamViewer"].map((p) => [p, [settings.data.programPaths?.[p], ...local[p]].filter(Boolean)]));
+    return Promise.resolve(locator.refresh(extra)).then((changed) => { if (changed) notifyViews(); }).catch(() => {});
+  };
   // Секреты (пароль учётки, «Доступ», пароль или ключ VPN) — в буфер только мимо журнала буфера Windows и облачной синхронизации
   // (W2-5). Не Windows — журнала Win+V нет, помощника тоже (null): там секрет пишется обычным текстом (сборка для разработки).
   const writeConcealed = options.writeConcealed || (process.platform === "win32" ? createConcealedWriter(spawn) : null);
@@ -206,7 +213,7 @@ function init(electron, options = {}) {
   // Перечитать файл и заново поискать программы (портативный AnyDesk могли скачать только что).
   function reload() {
     store.reload();
-    locator.refresh().then((changed) => { if (changed) notifyViews(); }).catch(() => {});
+    refreshPrograms();
   }
 
   const notifyViews = () => {
@@ -461,17 +468,32 @@ function init(electron, options = {}) {
     return picked.filePaths[0];
   }
 
-  // «Указать AnyDesk.exe…» в плашке «не установлен»: выбранный exe (по имени — программа) сохраняется в programPaths.
+  // «Указать AnyDesk.exe…» в плашке «не установлен»: выбранный exe с именем программы и действительной подписью её издателя
+  // (или из Program Files) сохраняется в programPaths. Подпись не та — честное предупреждение, путь не сохраняется: пароль такому
+  // файлу не уходит. { ok } или { ok: false, error: "name" | "signature" | "cancel" }.
   async function pickProgram(program) {
-    if (!Object.hasOwn(PROGRAM_FILE, program)) return false;
+    if (!Object.hasOwn(PROGRAM_FILE, program)) return { ok: false, error: "program" };
     const picked = await dialog.showOpenDialog(alive(windowRef) ? windowRef : undefined, { title: `Где ${TITLES[program]}?`, properties: ["openFile"],
       defaultPath: process.env.USERPROFILE ? path.win32.join(process.env.USERPROFILE, "Downloads") : undefined,
       filters: [{ name: TITLES[program], extensions: ["exe"] }] });
     const file = !picked.canceled && picked.filePaths[0];
-    if (!file || !PROGRAM_FILE[program].test(file)) return false;
+    if (!file) return { ok: false, error: "cancel" };
+    const title = TITLES[program];
+    if (!PROGRAM_FILE[program].test(file)) {
+      hud.show({ kind: "warning", title: `Это не ${title}`, detail: `Выберите сам ${title}.exe — не установщик, не службу и не QuickSupport.`, actions: [{ id: "close", label: "Закрыть" }] });
+      return { ok: false, error: "name" };
+    }
+    let signed = false;
+    try { signed = await locator.verify(program, file); } catch (_) { signed = false; }
+    if (!signed) {
+      hud.show({ kind: "warning", title: `Подпись ${title} не подтверждена`, detail: `У файла нет действительной подписи издателя ${title} — пароль ему не передаётся, путь не сохранён. Скачайте ${title} с официального сайта.`,
+        actions: [{ id: "close", label: "Закрыть" }] });
+      log(`program pick fail program=${program} code=signature`);
+      return { ok: false, error: "signature" };
+    }
     settings.update({ programPaths: { ...settings.data.programPaths, [program]: file } });
     notifyViews();
-    return true;
+    return { ok: true };
   }
 
   function setSettings(rawPatch) {
@@ -511,7 +533,7 @@ function init(electron, options = {}) {
   ipcMain.handle("rc:connect", guarded((_e, q) => connect(String(q?.key), !!q?.noPassword), { ok: false, error: "denied" }));
   ipcMain.handle("rc:openFile", guarded(() => openFile()));
   ipcMain.handle("rc:reload", guarded(() => reload()));
-  ipcMain.handle("rc:pickProgram", guarded((_e, program) => pickProgram(String(program)), false));
+  ipcMain.handle("rc:pickProgram", guarded((_e, program) => pickProgram(String(program)), { ok: false, error: "denied" }));
   ipcMain.handle("rc:chooseFile", guarded(chooseFile, ""));
   ipcMain.handle("rc:getSettings", guarded(() => ({ ...settings.data }), null));
   ipcMain.handle("rc:setSettings", guarded((_e, patch) => setSettings(patch), null));
@@ -543,7 +565,7 @@ function init(electron, options = {}) {
   service.onChange(notifyViews);
   service.start();
   applyEnabled();
-  locator.refresh().then((changed) => { if (changed) notifyViews(); }).catch(() => {});
+  refreshPrograms();
   ensureWindowMenu();
   // Первый запуск без файла — один раз подсказка в трее (без модальных окон): где вход в подключения.
   if (!settings.data.file && !settings.data.entryHintShown && typeof tray?.displayBalloon === "function") {
