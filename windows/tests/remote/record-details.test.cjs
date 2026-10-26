@@ -802,7 +802,8 @@ test("телефон — «Скопировать» (только строка �
 
 test("палитра: «Обновить» (↻) — справа в строке подсказок; Excel, папка, «Добавить», настройки и «Загружено N · …» — в окне списка; контакты — только в карточке", () => {
   const ui = path.join(__dirname, "..", "..", "remote", "ui");
-  const js = fs.readFileSync(path.join(ui, "remote.js"), "utf8"), html = fs.readFileSync(path.join(ui, "remote.html"), "utf8");
+  // CRLF при выгрузке на Windows (autocrlf) — сравниваем с LF.
+  const js = fs.readFileSync(path.join(ui, "remote.js"), "utf8").replace(/\r\n/g, "\n"), html = fs.readFileSync(path.join(ui, "remote.html"), "utf8");
   for (const id of ["openFile", "folderBtn", "reload", "addBtn", "settingsBtn", "summary"]) assert.match(html, new RegExp(`id="${id}"`), id);
   assert.match(html, /id="reload"[^>]*aria-label="Обновить">↻</);
   // rc-win-entry A: панель палитры не висит отдельной строкой — «Обновить» в строке подсказок справа.
