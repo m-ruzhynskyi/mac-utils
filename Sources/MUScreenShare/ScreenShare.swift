@@ -1530,9 +1530,17 @@ package final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @un
         currentAudio.send(ShareProtocol.audioPacket(samples))
     }
 
+    /// Приведение звука ScreenCaptureKit к частоте трансляции, если он пришёл не на 24 кГц (запас на смену выхода посреди эфира).
+    private let sckResampler = ShareAudioResampler()
+    private var sckRate: Double = 0
+
     package func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         if type == .audio {
-            if !isPaused, let packet = ShareProtocol.audioPacket(sampleBuffer) {
+            if !isPaused, let packet = ShareProtocol.audioPacket(sampleBuffer, resampler: sckResampler, onRate: { [weak self] rate in
+                guard let self, abs(rate - self.sckRate) > 0.5 else { return }
+                Log.capture.info("\(ShareAudioRateLog.change(path: "ScreenCaptureKit", outputBefore: self.sckRate, outputNow: CoreAudioHelper.read(CoreAudioHelper.defaultOutputDevice, kAudioDevicePropertyNominalSampleRate, default: Float64(0)), buffers: rate, sent: ShareProtocol.sampleRate), privacy: .public)")
+                self.sckRate = rate
+            }) {
                 currentAudio.send(packet)
             }
             return
@@ -2934,8 +2942,9 @@ package enum ShareProtocol {
         return result
     }
 
-    /// Звук ScreenCaptureKit (Float32) → пакет.
-    package static func audioPacket(_ sampleBuffer: CMSampleBuffer) -> Data? {
+    /// Звук ScreenCaptureKit (Float32) → пакет. Берётся настоящий формат буфера: частота — из него, каналы сводятся в моно,
+    /// всё, что не 24 кГц, приводится к 24 кГц (иначе звук идёт быстрее или медленнее).
+    package static func audioPacket(_ sampleBuffer: CMSampleBuffer, resampler: ShareAudioResampler, onRate: (Double) -> Void = { _ in }) -> Data? {
         guard sampleBuffer.isValid, let description = sampleBuffer.formatDescription else { return nil }
         let format = AVAudioFormat(cmAudioFormatDescription: description)
         let frames = AVAudioFrameCount(sampleBuffer.numSamples)
@@ -2943,8 +2952,29 @@ package enum ShareProtocol {
         buffer.frameLength = frames
         guard CMSampleBufferCopyPCMDataIntoAudioBufferList(sampleBuffer, at: 0, frameCount: Int32(frames),
                                                           into: buffer.mutableAudioBufferList) == noErr,
-              let channel = buffer.floatChannelData?[0] else { return nil }
-        return audioPacket(Array(UnsafeBufferPointer(start: channel, count: Int(frames))))
+              let mono = monoSamples(buffer) else { return nil }
+        onRate(format.sampleRate)
+        let samples = resampler.process(mono, rate: format.sampleRate)
+        return samples.isEmpty ? nil : audioPacket(samples)
+    }
+
+    /// Все каналы буфера (раздельные или вперемешку) → один: среднее.
+    package static func monoSamples(_ buffer: AVAudioPCMBuffer) -> [Float]? {
+        guard let data = buffer.floatChannelData else { return nil }
+        let frames = Int(buffer.frameLength)
+        let channels = Int(buffer.format.channelCount)
+        guard frames > 0, channels > 0 else { return nil }
+        if channels == 1 { return Array(UnsafeBufferPointer(start: data[0], count: frames)) }
+        var result = [Float](repeating: 0, count: frames)
+        let stride = buffer.stride
+        for channel in 0..<channels {
+            let pointer = data[buffer.format.isInterleaved ? 0 : channel]
+            let offset = buffer.format.isInterleaved ? channel : 0
+            for frame in 0..<frames { result[frame] += pointer[frame * stride + offset] }
+        }
+        let scale = 1 / Float(channels)
+        for frame in 0..<frames { result[frame] *= scale }
+        return result
     }
 }
 
