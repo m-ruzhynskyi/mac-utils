@@ -201,3 +201,14 @@ body.palette .bar { border-top:none; padding:6px 2px 0; justify-content:flex-end
 .phones { display:flex; flex-direction:column; align-items:flex-end; gap:6px; } .phone { display:flex; align-items:center; gap:6px; }
 .callbtn { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 10px; border-radius:8px; border:0; background:var(--acc); color:var(--acc-ink); font-size:13.5px; font-weight:600; white-space:nowrap; cursor:pointer; }
 .callbtn svg { width:14px; height:14px; stroke-width:2.2; }
+
+/* rc-win-entry: палитра по экрану — список забирает всё место; плашка «не найден» — одна строка; подсказки — одна строка без переноса,
+   «Обновить» в ней справа; на узкой ширине лишние подсказки скрыты */
+body.palette .scroller { min-height:0; }
+body.palette .hints { flex-wrap:nowrap; white-space:nowrap; overflow:hidden; align-items:center; padding:8px 2px 0; gap:16px; }
+body.palette .hints > span { flex:none; }
+body.palette .hints > button { margin-left:auto; flex:none; }
+@media (max-width: 740px) { body.palette .hints .opt { display:none; } }
+.banner.slim { align-items:center; gap:8px; padding:6px 8px 6px 12px; border-radius:12px; border-width:1.5px; }
+.banner.slim .tx { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:600; }
+body.palette .banner { margin:0 0 8px; }

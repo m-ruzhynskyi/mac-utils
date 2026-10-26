@@ -60,17 +60,26 @@ const MESSAGES = {
   passwordNeeded: (p) => ({ kind: "info", title: `Введите пароль в окне ${TITLES[p]}`, detail: `${TITLES[p]} спрашивает пароль, а в файле его нет.`, actions: [{ id: "close", label: "Закрыть" }] }),
 };
 
+// Ожидание окна пароля TeamViewer (1:1 с Mac): база 60 с (или больше из настроек); пока TeamViewer соединяется («Connecting…»,
+// индикатор хода, промежуточное окно), срок сдвигается — но не дальше общего предела 180 с от начала.
+const TV_BASE_MS = 60_000;
+const TV_LIMIT_MS = 180_000;
+
 // deps: { exists(path), env, spawn(file, args, opts), uia: { enter(opts, password: async () => SecretBuffer, onEvent) → Promise<result> }, hud: { show(state) }, openExternal(url),
-//         log(line), copyText(text) — запасной путь TeamViewer: кладёт в буфер обмена ID (никогда не пароль) }
+//         log(line), copyText(text) — запасной путь TeamViewer: кладёт в буфер обмена ID (никогда не пароль), locate(program) → пути-кандидаты
+//         вне Program Files (портативный exe в «Загрузках», обработчик ссылок и App Paths из реестра, запущенный процесс: locate.js) }
 function createConnector(deps) {
-  const { exists = () => false, customPaths = () => ({}), env = process.env, spawn, uia = null, hud = { show() {} }, openExternal = () => {}, log = () => {}, clock = Date, copyText = null } = deps;
+  const { exists = () => false, customPaths = () => ({}), env = process.env, spawn, uia = null, hud = { show() {} }, openExternal = () => {}, log = () => {}, clock = Date, copyText = null,
+    locate = () => [] } = deps;
   // ID в буфер: только ID записи, только строкой. Нет функции или она упала — честно говорим, что не скопирован.
   const copyID = (id) => { if (typeof copyText !== "function") return false; try { return copyText(String(id)) !== false; } catch (_) { return false; } };
   const defaults = defaultPaths(env);
 
+  // Свой путь из настроек, затем Program Files и %LOCALAPPDATA%, затем портативный exe и прочие находки locate().
   function find(program, custom) {
     if (custom && exists(custom)) return custom;
-    return defaults[program].find((p) => exists(p)) || null;
+    const located = (() => { try { return locate(program) || []; } catch (_) { return []; } })();
+    return [...defaults[program], ...located].find((p) => exists(p)) || null;
   }
   const installed = (program) => !!find(program, customPaths()[program]);
 
@@ -185,8 +194,12 @@ function createConnector(deps) {
         }
         hud.show(MESSAGES.fieldNotFound(program)); return { ok: false, error: "fieldNotFound" };
       }
-      const timeoutMs = Math.max(5, settings.timeoutSeconds || 20) * 1000;
+      const timeoutMs = Math.max(TV_BASE_MS, (settings.timeoutSeconds || 0) * 1000);
+      const limitMs = Math.max(TV_LIMIT_MS, timeoutMs);
       const started = clock.now();
+      // Журнал (только коды): что видели, пока ждали — ход подключения (progress), окно пароля, ничего.
+      let sawProgress = false;
+      const tvLog = (line, saw) => log(`${line} waited=${Math.round((clock.now() - started) / 1000)} saw=${saw || (sawProgress ? "progress" : "none")}`);
       // TeamViewer запускается, когда скрипт запомнил уже открытые окна: пароль не уйдёт в окно прежнего подключения, а окно
       // прежнего сеанса не сойдёт за подтверждение нового. ID нужен скрипту для запасного пути (ввести в поле главного окна и нажать
       // «Connect») и чтобы узнать окно сеанса; пароля в параметрах нет.
@@ -194,10 +207,10 @@ function createConnector(deps) {
       const waiting = (title) => hud.show({ kind: "info", title, detail: `${Math.round((clock.now() - started) / 1000)} с`, progress: Math.min(1, (clock.now() - started) / timeoutMs), actions: [{ id: "cancel", label: "Отмена" }] });
       // Пароль — только по запросу скрипта (поле найдено и проверено); каждая прочитанная копия затирается в finally.
       const readPassword = async () => { const s = await store.password(record); if (s) secrets.push(s); return s; };
-      const result = await uia.enter({ timeoutMs, id: record.id, ...(wantsPassword ? {} : { noPassword: true }), afterReady: async () => { launched = await launchTeamViewer(exe, record.id); } },
+      const result = await uia.enter({ timeoutMs, limitMs, id: record.id, ...(wantsPassword ? {} : { noPassword: true }), afterReady: async () => { launched = await launchTeamViewer(exe, record.id); } },
         wantsPassword ? readPassword : null, (event) => {
         if (event.state === "idSubmitted") { typed = true; waiting(`Ввёл ID в ${title}, жду подключение…`); }
-        else if (event.state === "intermediate") waiting(`${title} подключается…`);
+        else if (event.state === "intermediate") { sawProgress = true; waiting(`${title} подключается…`); }
         else if (event.state === "confirming") waiting("Пароль введён, жду сеанс…");
         else if (event.state === "waiting") waiting(typed ? `Ввёл ID в ${title}, жду подключение…` : (wantsPassword ? "Жду окно пароля…" : "Жду подключение…"));
       });
@@ -205,24 +218,24 @@ function createConnector(deps) {
       const t = typed ? 1 : 0;
       switch (result.state) {
         case "connected":    // пароль введён, и окно сеанса с ID партнёра открылось и устоялось
-          hud.show({ kind: "success", title: "Подключено", detail: `${record.name} · сеанс ${title} открыт`, autoHideMs: 2500 }); log(`connect ok program=${program} password=1 confirmed=1 typed=${t}`); return { ok: true };
+          hud.show({ kind: "success", title: "Подключено", detail: `${record.name} · сеанс ${title} открыт`, autoHideMs: 2500 }); tvLog(`connect ok program=${program} password=1 confirmed=1 typed=${t}`, "passwordWindow"); return { ok: true };
         case "entered":      // прежний итог скрипта (пароль ушёл, сеанс не проверялся) — не «подключено»
         case "submitted":    // пароль введён, окна сеанса к сроку нет — не успех
-          hud.show(MESSAGES.submitted(program)); log(`connect fail code=submitted program=${program} typed=${t}`); return { ok: false, error: "submitted" };
+          hud.show(MESSAGES.submitted(program)); tvLog(`connect fail code=submitted program=${program} typed=${t}`, "passwordWindow"); return { ok: false, error: "submitted" };
         case "sessionClosed":
-          hud.show(MESSAGES.sessionClosed(program)); log(`connect fail code=sessionClosed program=${program} typed=${t}`); return { ok: false, error: "sessionClosed" };
+          hud.show(MESSAGES.sessionClosed(program)); tvLog(`connect fail code=sessionClosed program=${program} typed=${t}`, "passwordWindow"); return { ok: false, error: "sessionClosed" };
         case "session":      // окно сеанса найдено и устоялось, окна пароля не было — вход без пароля подтверждён
-          hud.show({ kind: "success", title: "Подключено без пароля", detail: `${record.name} · сеанс открыт — ${title} пустил без пароля`, autoHideMs: 2500 }); log(`connect ok program=${program} password=0 confirmed=1 typed=${t}`); return { ok: true };
+          hud.show({ kind: "success", title: "Подключено без пароля", detail: `${record.name} · сеанс открыт — ${title} пустил без пароля`, autoHideMs: 2500 }); tvLog(`connect ok program=${program} password=0 confirmed=1 typed=${t}`, "session"); return { ok: true };
         case "passwordNeeded":   // TeamViewer спрашивает пароль, а в файле его нет (или запись пропала к моменту ввода)
           if (result.secretError) { hud.show(MESSAGES.gone()); log(`connect fail code=gone`); return { ok: false, error: "gone" }; }
-          hud.show(MESSAGES.passwordNeeded(program)); log(`connect ok program=${program} password=0 prompt=1 typed=${t}`); return { ok: true };
+          hud.show(MESSAGES.passwordNeeded(program)); tvLog(`connect ok program=${program} password=0 prompt=1 typed=${t}`, "passwordWindow"); return { ok: true };
         case "noPrompt": {   // окно TeamViewer было, но ни окна пароля, ни окна сеанса к сроку — не «подключено»: нейтрально, ID в буфер
           const copied = copyID(record.id);
-          hud.show(MESSAGES.unconfirmed(program, copied)); log(`connect fail code=unconfirmed program=${program} typed=${t} copied=${copied ? 1 : 0}`); return { ok: false, error: "unconfirmed" };
+          hud.show(MESSAGES.unconfirmed(program, copied)); tvLog(`connect fail code=unconfirmed program=${program} typed=${t} copied=${copied ? 1 : 0}`); return { ok: false, error: "unconfirmed" };
         }
         case "noWindow": {   // ни одного окна TeamViewer за срок — клиент не открылся (служба не в счёт): пароль не вводился
           const copied = copyID(record.id);
-          hud.show(MESSAGES.noTeamViewerWindow(program, copied)); log(`connect fail code=noWindow program=${program} copied=${copied ? 1 : 0}`); return { ok: false, error: "noWindow" };
+          hud.show(MESSAGES.noTeamViewerWindow(program, copied)); tvLog(`connect fail code=noWindow program=${program} copied=${copied ? 1 : 0}`); return { ok: false, error: "noWindow" };
         }
         case "idMismatch": hud.show(MESSAGES.idMismatch(program)); log(`connect fail code=idMismatch`); return { ok: false, error: "idMismatch" };
         case "wrongPassword": hud.show(MESSAGES.wrongPassword()); log(`connect fail code=wrongPassword`); return { ok: false, error: "wrongPassword" };
@@ -246,4 +259,4 @@ function createConnector(deps) {
   return { installed, find, connectRecord, openRDP, hudAction, MESSAGES };
 }
 
-module.exports = { createConnector, defaultPaths, MESSAGES };
+module.exports = { createConnector, defaultPaths, MESSAGES, TV_BASE_MS, TV_LIMIT_MS };

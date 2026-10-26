@@ -102,7 +102,8 @@ test("TeamViewer: запуск с -i ID без пароля в аргумент�
   assert.equal(r.spawned[0].file, TV);
   assert.deepEqual(r.spawned[0].args, ["-i", "123456789"]);
   assert.equal(r.uiaCalls[0].bytes.toString(), PASSWORD);
-  assert.equal(r.uiaCalls[0].opts.timeoutMs, 20_000);
+  assert.equal(r.uiaCalls[0].opts.timeoutMs, 60_000);
+  assert.equal(r.uiaCalls[0].opts.limitMs, 180_000);
   assert.ok(!everything(r).includes(PASSWORD));
   assert.ok(r.secret.isWiped);
   assert.ok(r.states.some((s) => /Жду окно пароля/.test(s.title)));

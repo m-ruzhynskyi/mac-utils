@@ -50,11 +50,13 @@ $options = $reader.ReadLine() | ConvertFrom-Json
 # Пароля здесь ещё нет: его вторая строка придёт только после "passwordField".
 $password = $null
 $timeoutMs = [double]$options.timeoutMs
+$limitMs = if ($options.limitMs) { [double]$options.limitMs } else { $timeoutMs * 2 }
 $started = [DateTime]::UtcNow
 $deadline = $started.AddMilliseconds($timeoutMs)
-# Ожидание окна пароля продлевается не дольше двух сроков; проверка сеанса после ввода пароля — ещё не дольше срока сверх того.
-$limit = $started.AddMilliseconds($timeoutMs * 2)
-$hardLimit = $started.AddMilliseconds($timeoutMs * 3)
+# Ожидание окна пароля продлевается, пока TeamViewer соединяется, но не дальше предела limitMs (модуль: 180 с; без него — двух
+# сроков); проверка сеанса после ввода пароля — ещё не дольше срока сверх предела (сторож uia.js это покрывает).
+$limit = $started.AddMilliseconds([Math]::Max($timeoutMs, $limitMs))
+$hardLimit = $limit.AddMilliseconds($timeoutMs)
 $partnerId = [string]$options.id
 $digits = $partnerId -replace '\D', ''
 $noPassword = [bool]$options.noPassword
@@ -104,7 +106,7 @@ function Find-PasswordField($ids, $skipKnown = $true) {
   return $null
 }
 
-# Продление срока: не раньше текущего и не позже двух исходных сроков.
+# Продление срока: не раньше текущего и не позже предела $limit.
 function Get-Extended($until) {
   if ($until -le $deadline) { return $deadline }
   if ($until -gt $limit) { return $limit }
@@ -277,7 +279,7 @@ try {
       $intermediate = Test-Intermediate $ids
       if ($intermediate) {
         if (-not $wasIntermediate) { Emit 'intermediate' }
-        $deadline = Get-Extended $now.AddMilliseconds(3000)
+        $deadline = Get-Extended $now.AddMilliseconds(10000)
       }
       $wasIntermediate = $intermediate
       # Ни окна пароля, ни хода подключения, ни окна сеанса после запуска — TeamViewer открылся без ID: вводим сами, один раз.

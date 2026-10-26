@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("rc", {
   connect: (key, noPassword) => ipcRenderer.invoke("rc:connect", { key, noPassword: !!noPassword }),
   openFile: () => ipcRenderer.invoke("rc:openFile"),
   reload: () => ipcRenderer.invoke("rc:reload"),
+  pickProgram: (program) => ipcRenderer.invoke("rc:pickProgram", String(program)),
   chooseFile: () => ipcRenderer.invoke("rc:chooseFile"),
   getSettings: () => ipcRenderer.invoke("rc:getSettings"),
   setSettings: (patch) => ipcRenderer.invoke("rc:setSettings", patch),

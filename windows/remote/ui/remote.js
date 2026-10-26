@@ -70,7 +70,7 @@ const PROGRAM_FILTERS = [["all", "Все"], ["anyDesk", "AnyDesk"], ["teamViewer
 function emptyState(v) {
   const box = el("div", "empty");
   const [title, body] = {
-    noFile: ["Файл подключений не выбран", "Выберите .xlsx или .xml со списком компьютеров или создайте шаблон."],
+    noFile: ["Выберите файл подключений", "Выберите .xlsx или .xml со списком компьютеров или создайте шаблон."],
     unavailable: ["Файл подключений недоступен", "Проверьте путь, диск или сетевую папку. Список появится, как только файл станет доступен."],
     locked: ["Файл занят другой программой", "Закройте файл или нажмите «Перечитать» чуть позже."],
     type: ["Не тот формат файла", "Поддерживаются .xlsx и .xml."],
@@ -81,10 +81,10 @@ function emptyState(v) {
   }[v.error ? v.error.code : "noFile"] || ["Нет данных", ""];
   box.append(el("h2", null, title), el("div", null, body));
   const actions = el("div"); actions.style.cssText = "margin-top:14px;display:flex;gap:8px;justify-content:center";
-  const choose = el("button", "btn pri", "Выбрать файл"); choose.onclick = async () => { await window.rc.chooseFile(); refresh(); };
+  const choose = el("button", "btn pri", "Выбрать файл…"); choose.onclick = async () => { await window.rc.chooseFile(); refresh(); };
   actions.append(choose);
   if (!v.error || v.error.code === "noFile") {
-    for (const kind of ["xlsx", "xml"]) { const t = el("button", "btn", `Создать шаблон .${kind}`); t.onclick = async () => { await window.rc.createTemplate(kind); refresh(); }; actions.append(t); }
+    for (const kind of ["xlsx", "xml"]) { const t = el("button", "btn", `Создать шаблон .${kind}…`); t.onclick = async () => { await window.rc.createTemplate(kind); refresh(); }; actions.append(t); }
   }
   box.append(actions);
   return box;
@@ -153,12 +153,16 @@ function render() {
   const hint = $("layoutHint");
   hint.hidden = !v.hint;
   if (v.hint) { hint.textContent = ""; hint.append(`${v.hint.typed} → `, Object.assign(el("b"), { textContent: v.hint.converted })); }
-  // Баннер: программы нет на компьютере
+  // Плашка в одну строку: программы нет на компьютере (ни в Program Files, ни портативной в «Загрузках»/на Рабочем столе, ни по
+  // реестру). «Указать …exe…» — свой путь (programPaths): плашка уходит, записи не приглушены.
   const banner = $("banner"); banner.textContent = "";
   for (const p of ["anyDesk", "teamViewer"]) {
     if (!v.installed[p] && (v.counts[p] || 0) > 0) {
-      const b = el("div", "banner warning"); b.append(el("div", null, `${v.titles[p]} не установлен. Записи этой программы приглушены.`));
-      const get = el("button", "btn c", "Скачать"); get.onclick = () => window.rc.edit("download", p); b.append(get); banner.append(b);
+      const b = el("div", "banner warning slim");
+      const text = el("div", "tx", `${v.titles[p]} не найден — записи приглушены`); text.title = `${v.titles[p]} не найден ни в Program Files, ни в «Загрузках» и на Рабочем столе. Записи этой программы приглушены.`;
+      const pick = el("button", "btn c", `Указать ${v.titles[p]}.exe…`); pick.onclick = async () => { if (await window.rc.pickProgram(p)) refresh(); };
+      const get = el("button", "btn c", "Скачать"); get.onclick = () => window.rc.edit("download", p);
+      b.append(text, pick, get); banner.append(b);
     }
   }
   const list = $("list"); list.textContent = "";
@@ -712,7 +716,7 @@ async function openSettings() {
       : r.hotkeyProblem === "altgr" ? "Осторожно: Ctrl+Alt — это AltGr на польской, венгерской и других раскладках, сочетание перехватит ввод букв. Лучше Win+Shift+буква."
       : HOTKEY_NOTE;
   });
-  const HOTKEY_NOTE = "По умолчанию Win+Shift+A. Клавиша и значок в трее включаются после выбора файла. Не используйте Ctrl+Alt+буква: на раскладках с AltGr оно перехватит ввод.";
+  const HOTKEY_NOTE = "По умолчанию Win+Shift+A. Клавиша и значок в трее работают всегда; без файла открывают выбор файла. Не используйте Ctrl+Alt+буква: на раскладках с AltGr оно перехватит ввод.";
   const note = el("div", "muted"); note.textContent = HOTKEY_NOTE;
   const timeout = text(String(s.timeoutSeconds), (v) => window.rc.setSettings({ timeoutSeconds: Number(v) }), "number");
   const check = (label, key, value) => { const l = el("label", "inline"); const c = el("input"); c.type = "checkbox"; c.checked = value; c.onchange = () => window.rc.setSettings({ [key]: c.checked }); l.append(c, document.createTextNode(label)); return l; };
@@ -721,7 +725,7 @@ async function openSettings() {
   for (const kind of ["xlsx", "xml"]) { const b = el("button", "btn c", `Создать шаблон .${kind}`); b.onclick = async () => { const f = await window.rc.createTemplate(kind); if (f) path.value = f; }; tpl.append(b); }
   const back = el("button", "btn pri", "Готово"); back.onclick = () => { box.remove(); page.hidden = false; mode = "list"; refresh(); $("query").focus(); };
   box.append(el("h2", null, "Удалённые подключения · настройки"), warn, field("Файл подключений (.xlsx или .xml)", row), tpl, field("Лист", sheetSel), field("Программа по умолчанию", program),
-    field("Горячая клавиша", hot), note, field("Ожидание окна пароля, с", timeout), check("Входить автоматически (AnyDesk)", "autoLogin", s.autoLogin),
+    field("Горячая клавиша", hot), note, field("Ожидание окна пароля TeamViewer, с (не меньше 60; пока он соединяется — до 180)", timeout), check("Входить автоматически (AnyDesk)", "autoLogin", s.autoLogin),
     check("Уведомление после подключения", "notify", s.notify), ...paths, back);
   loadSheets();
 }
@@ -744,6 +748,13 @@ window.rc.onMenu((m) => {
 // Подробности из трея (VPN, «Другое»): окно забирает ключ, когда готово.
 const takePending = async () => { const key = await window.rc.pendingDetails(); if (key && mode !== "settings" && mode !== "edit") openDetails(key); };
 window.rc.onDetails(takePending);
-// Палитра: внизу только «Обновить» (↻). Excel, папка, «Добавить», настройки и строка «Загружено …» — в окне списка.
-if (palette) { $("hints").hidden = false; for (const id of ["openFile", "folderBtn", "addBtn", "settingsBtn", "summary"]) $(id).hidden = true; }
+// Палитра: подсказки одной строкой, «Обновить» (↻) — справа в ней, без отдельной строки. Excel, папка, «Добавить», настройки и
+// строка «Загружено …» — в окне списка.
+if (palette) {
+  $("hints").hidden = false;
+  $("bar").hidden = true;
+  const again = el("button", "btn c ic", "↻"); again.title = "Обновить — перечитать файл"; again.setAttribute("aria-label", "Обновить");
+  again.onclick = () => window.rc.reload();
+  $("hints").append(again);
+}
 refresh().then(() => { $("query").focus(); if (!palette) takePending(); });

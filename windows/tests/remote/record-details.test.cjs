@@ -800,13 +800,15 @@ test("телефон — «Скопировать» (только строка �
   a.rc.dispose();
 });
 
-test("палитра: внизу только «Обновить» (↻); Excel, папка, «Добавить», настройки и «Загружено N · …» — в окне списка; контакты — только в карточке", () => {
+test("палитра: «Обновить» (↻) — справа в строке подсказок; Excel, папка, «Добавить», настройки и «Загружено N · …» — в окне списка; контакты — только в карточке", () => {
   const ui = path.join(__dirname, "..", "..", "remote", "ui");
   const js = fs.readFileSync(path.join(ui, "remote.js"), "utf8"), html = fs.readFileSync(path.join(ui, "remote.html"), "utf8");
   for (const id of ["openFile", "folderBtn", "reload", "addBtn", "settingsBtn", "summary"]) assert.match(html, new RegExp(`id="${id}"`), id);
   assert.match(html, /id="reload"[^>]*aria-label="Обновить">↻</);
-  assert.match(js, /if \(palette\) \{ \$\("hints"\)\.hidden = false; for \(const id of \["openFile", "folderBtn", "addBtn", "settingsBtn", "summary"\]\) \$\(id\)\.hidden = true; \}/);
-  assert.ok(!/\$\("bar"\)\.hidden = true/.test(js), "панель палитры не прячется целиком — на ней «Обновить»");
+  // rc-win-entry A: панель палитры не висит отдельной строкой — «Обновить» в строке подсказок справа.
+  const pal = js.slice(js.indexOf("if (palette) {\n  $(\"hints\").hidden = false;"));
+  assert.match(pal, /\$\("bar"\)\.hidden = true;/);
+  assert.match(pal, /el\("button", "btn c ic", "↻"\)[\s\S]{0,200}window\.rc\.reload\(\)[\s\S]{0,40}\$\("hints"\)\.append\(again\)/);
   assert.match(js, /function renderSummary\(\) \{[^}]*if \(palette\) \{ s\.textContent = ""; return; \}/);
   assert.match(js, /\$\("addBtn"\)\.hidden = palette \|\|/);
   assert.match(js, /\$\("folderBtn"\)\.onclick = \(\) => window\.rc\.showFolder\(\)/);

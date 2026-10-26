@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { EventEmitter } = require("node:events");
 const { createConnector } = require("../../remote/connect");
-const { createUia, SCRIPT, MAX_EXTENSION, MAX_TOTAL } = require("../../remote/uia");
+const { createUia, SCRIPT, guardMs } = require("../../remote/uia");
 const { SecretBuffer } = require("../../remote/secret");
 
 const AD = "C:\\Program Files (x86)\\AnyDesk\\AnyDesk.exe", TV = "C:\\Program Files\\TeamViewer\\TeamViewer.exe";
@@ -98,9 +98,9 @@ test("TeamViewer открылся на главном экране без ID: с
   // W2-3: пароль читается из файла только по «passwordField» и дописывается в stdin до продолжения скрипта.
   assert.ok(r.order.indexOf("readPassword") > r.order.indexOf("passwordField"), r.order.join(","));
   assert.ok(r.order.indexOf("readPassword") < r.order.indexOf("password"), r.order.join(","));
-  assert.equal(r.inputAtField, JSON.stringify({ timeoutMs: 20_000, id: "123456789" }) + "\n", "до поля пароля в stdin — только параметры");
+  assert.equal(r.inputAtField, JSON.stringify({ timeoutMs: 60_000, limitMs: 180_000, id: "123456789" }) + "\n", "до поля пароля в stdin — только параметры");
   const [options, password] = r.input();
-  assert.deepEqual(JSON.parse(options), { timeoutMs: 20_000, id: "123456789" }, "ID — в параметрах скрипта (для поля ID и окна сеанса)");
+  assert.deepEqual(JSON.parse(options), { timeoutMs: 60_000, limitMs: 180_000, id: "123456789" }, "ID — в параметрах скрипта (для поля ID и окна сеанса)");
   assert.equal(password, PW, "пароль — второй строкой stdin, не в параметрах");
   assert.ok(!JSON.stringify(r.spawned.map((s) => s.args)).includes("КАНАРЕЙКА"));
   assert.ok(r.states.some((s) => /Ввёл ID в TeamViewer/.test(s.title)), "ход виден: ID введён");
@@ -122,7 +122,7 @@ test("TeamViewer: окно сеанса подтверждено без окна
   const b = rig({ lines: ["waiting", "idSubmitted", "session"] });
   assert.deepEqual(await b.run(record({ hasPassword: false })), { ok: true });
   const [options, password] = b.input();
-  assert.deepEqual(JSON.parse(options), { timeoutMs: 20_000, id: "123456789", noPassword: true });
+  assert.deepEqual(JSON.parse(options), { timeoutMs: 60_000, limitMs: 180_000, id: "123456789", noPassword: true });
   assert.equal(password, "", "пароля нет — пустая строка");
   const c = rig({ lines: ["noPrompt"] });
   assert.deepEqual(await c.run(record({ hasPassword: false })), { ok: false, error: "unconfirmed" });
@@ -231,8 +231,12 @@ test("скрипт: «session» — только новое окно с ID в з
   const loop = PS.slice(PS.indexOf("Emit 'ready'"), PS.indexOf("if (-not $found) { if ($sawWindow)"));
   assert.ok(loop.indexOf("Find-PasswordField") < loop.indexOf("Find-SessionWindow"), "окно пароля важнее");
   assert.match(loop, /TotalMilliseconds -ge \$SettleMs\) \{ Emit 'session'/);
-  assert.equal(Number(PS.match(/\$limit = \$started\.AddMilliseconds\(\$timeoutMs \* (\d+)\)/)[1]), MAX_EXTENSION);
-  assert.equal(Number(PS.match(/\$hardLimit = \$started\.AddMilliseconds\(\$timeoutMs \* (\d+)\)/)[1]), MAX_TOTAL, "сторож uia.js покрывает и проверку сеанса");
+  // rc-win-entry D: продление — до предела limitMs (модуль даёт 180 с; без него — два срока), проверка сеанса — срок сверх предела.
+  assert.match(PS, /\$limitMs = if \(\$options\.limitMs\) \{ \[double\]\$options\.limitMs \} else \{ \$timeoutMs \* 2 \}/);
+  assert.match(PS, /\$limit = \$started\.AddMilliseconds\(\[Math\]::Max\(\$timeoutMs, \$limitMs\)\)/);
+  assert.match(PS, /\$hardLimit = \$limit\.AddMilliseconds\(\$timeoutMs\)/);
+  assert.ok(guardMs(60_000, 180_000) > 180_000 + 60_000, "сторож uia.js покрывает и проверку сеанса после предела");
+  assert.ok(guardMs(20_000) > 20_000 * 3, "без предела — как прежде: три срока");
   assert.match(PS, /if \(\$noPassword\) \{ Emit 'passwordNeeded'; return \}/);
   assert.ok(PS.indexOf("Emit 'passwordNeeded'") < PS.indexOf("SetValue($password)"));
   assert.ok(!/Clipboard|SetText/i.test(PS), "скрипт буфер обмена не трогает");

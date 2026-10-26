@@ -20,6 +20,7 @@ const editor = require("./editor");
 const templates = require("./templates");
 const lists = require("./lists");
 const { createSecretClipboard } = require("./clipboard");
+const { createLocator, isProgramFile } = require("./locate");
 
 const UI = path.join(__dirname, "ui");
 const PRELOAD = path.join(UI, "preload.js");
@@ -27,9 +28,19 @@ const PRELOAD = path.join(UI, "preload.js");
 // "Win+Shift+A" → ускоритель Electron "Super+Shift+A"; "Ctrl+Alt+A" → "Control+Alt+A".
 const accelerator = (hotkey) => String(hotkey).replace(/\bctrl\b/i, "Control").replace(/\bwin\b/i, "Super");
 
-// Только файлы списка и сами программы: окно и страницы не могут направить приложение на произвольный путь.
+// Только файлы списка и сами программы: окно и страницы не могут направить приложение на произвольный путь. Программа — по
+// имени файла: «AnyDesk.exe», портативный «AnyDesk (1).exe» из «Загрузок»; «TeamViewer.exe», «TeamViewerQS.exe» (locate.js).
 const LIST_FILE = /\.(xlsx|xlsm|xml)$/i;
-const PROGRAM_FILE = { anyDesk: /(^|[\\/])AnyDesk\.exe$/i, teamViewer: /(^|[\\/])TeamViewer\.exe$/i };
+const PROGRAM_FILE = { anyDesk: { test: (v) => isProgramFile("anyDesk", v) }, teamViewer: { test: (v) => isProgramFile("teamViewer", v) } };
+
+// Палитра — по экрану (DIP, масштаб Windows Electron учитывает): ширина ~800, высота ~62 % рабочей области (не меньше 600),
+// всегда целиком в workArea; по центру, чуть выше середины.
+function paletteBounds(workArea) {
+  const width = Math.min(800, workArea.width - 32);
+  const height = Math.min(workArea.height - 32, Math.max(600, Math.round(workArea.height * 0.62)));
+  const y = workArea.y + Math.max(16, Math.round((workArea.height - height) * 0.35));
+  return { x: Math.round(workArea.x + (workArea.width - width) / 2), y, width, height };
+}
 function sanitizePatch(patch) {
   const out = { ...patch };
   if (typeof out.file === "string" && out.file !== "" && !LIST_FILE.test(out.file)) delete out.file;
@@ -60,8 +71,11 @@ function init(electron, options = {}) {
   // Тост хода подключения; «успех» можно отключить в настройках (уведомление после подключения).
   const realHud = options.hud || createHud({ BrowserWindow, screen, ipcMain }, (id) => hudAction(id));
   const hud = { show(state) { if (state.kind === "success" && !settings.data.notify) return; realHud.show(state); } };
+  // Программы вне Program Files: портативный exe в «Загрузках» и на Рабочем столе, обработчик ссылок и App Paths из реестра,
+  // запущенный процесс (только чтение). Реестр и процессы — только на Windows.
+  const locator = options.locator || createLocator({ fs, env: process.env, execFile: process.platform === "win32" ? execFile : null });
   const connector = options.connector || createConnector({ exists: fs.existsSync, customPaths: () => settings.data.programPaths, spawn,
-    uia: createUia(spawn), hud, openExternal: (url) => shell.openExternal(url), log, copyText: options.copyText });
+    uia: createUia(spawn), hud, openExternal: (url) => shell.openExternal(url), log, copyText: options.copyText, locate: (p) => locator.candidates(p) });
   // Секреты (пароль учётки, «Доступ», пароль или ключ VPN) — в буфер только мимо журнала буфера Windows и облачной синхронизации
   // (W2-5). Не Windows — журнала Win+V нет, помощника тоже (null): там секрет пишется обычным текстом (сборка для разработки).
   const writeConcealed = options.writeConcealed || (process.platform === "win32" ? createConcealedWriter(spawn) : null);
@@ -100,38 +114,34 @@ function init(electron, options = {}) {
 
   function openPalette() {
     if (!alive(paletteRef)) {
-      paletteRef = new BrowserWindow({ width: 700, height: 460, frame: false, resizable: false, show: false, alwaysOnTop: true, skipTaskbar: true,
+      paletteRef = new BrowserWindow({ width: 800, height: 600, frame: false, resizable: false, show: false, alwaysOnTop: true, skipTaskbar: true,
         transparent: true, hasShadow: false, webPreferences: secure });
       lock(paletteRef);
       paletteRef.loadFile(path.join(UI, "remote.html"), { hash: "palette" });
       paletteRef.on("blur", () => { if (alive(paletteRef)) paletteRef.hide(); });
       paletteRef.on("closed", () => { paletteRef = null; });
     }
-    // По центру экрана с курсором.
-    try {
-      const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()), b = display.workArea;
-      paletteRef.setBounds({ x: Math.round(b.x + (b.width - 700) / 2), y: Math.round(b.y + b.height * 0.2), width: 700, height: 460 });
-    } catch (_) {}
+    // По центру экрана с курсором, размер — по его рабочей области.
+    try { paletteRef.setBounds(paletteBounds(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea)); } catch (_) {}
     paletteRef.show(); paletteRef.focus();
     paletteRef.webContents.send("rc:show");
   }
 
-  // Клавиша и значок в трее живут, только пока выбран файл: без него функции не видно, и сочетание ни у кого не отнимается.
+  // Клавиша и значок в трее — всегда, и без файла (rc-win-entry: иначе вход в модуль не найти). Без файла клавиша открывает окно
+  // списка с пустым состоянием «Выберите файл подключений», с файлом — палитру.
+  const hotkeyAction = () => (settings.data.file ? openPalette() : openWindow());
   function applyEnabled() {
     if (registered) { try { globalShortcut.unregister(registered); } catch (_) {} registered = ""; }
-    const on = !!settings.data.file;
     hotkeyOk = true;
-    if (on) {
-      const problem = hotkeyProblem(settings.data.hotkey);
-      if (problem === "noModifier" || problem === "noKey") hotkeyOk = false;
-      else {
-        const want = accelerator(settings.data.hotkey);
-        try { hotkeyOk = !!globalShortcut.register(want, openPalette); } catch (_) { hotkeyOk = false; }
-        if (hotkeyOk) registered = want;
-      }
-      if (!hotkeyOk) log("горячая клавиша не зарегистрирована");
-      buildTray();
-    } else if (tray) { try { tray.destroy?.(); } catch (_) {} tray = null; }
+    const problem = hotkeyProblem(settings.data.hotkey);
+    if (problem === "noModifier" || problem === "noKey") hotkeyOk = false;
+    else {
+      const want = accelerator(settings.data.hotkey);
+      try { hotkeyOk = !!globalShortcut.register(want, hotkeyAction); } catch (_) { hotkeyOk = false; }
+      if (hotkeyOk) registered = want;
+    }
+    if (!hotkeyOk) log("горячая клавиша не зарегистрирована");
+    buildTray();
     return hotkeyOk;
   }
   const registerHotkey = applyEnabled;
@@ -146,9 +156,41 @@ function init(electron, options = {}) {
     tray.setContextMenu(Menu.buildFromTemplate(trayTemplate()));
   }
 
+  // Вход без файла (меню трея и окна): выбрать файл или создать шаблон — после этого открывается список; или открыть список.
+  function entryItems() {
+    return [
+      { label: "Выбрать файл…", click: async () => { if (await chooseFile()) openWindow(); } },
+      { label: "Создать шаблон .xlsx…", click: async () => { if (await createTemplate("xlsx")) openWindow(); } },
+      { label: "Создать шаблон .xml…", click: async () => { if (await createTemplate("xml")) openWindow(); } },
+      { type: "separator" },
+      { label: "Открыть список…", click: openWindow },
+    ];
+  }
+  // Пункт «Удалённые подключения» в меню окон: всегда, с файлом и без. Меню приложения может ещё не быть (null) — тогда своё.
+  const entryMenu = () => [
+    { label: "Открыть список…", click: openWindow },
+    { label: `Поиск (${settings.data.hotkey})`, click: hotkeyAction },
+    { type: "separator" },
+    ...entryItems().slice(0, 3),
+  ];
+  function ensureWindowMenu() {
+    try {
+      const item = { label: "Удалённые подключения", submenu: entryMenu() };
+      const menu = Menu.getApplicationMenu?.();
+      if (menu && MenuItem && typeof menu.append === "function") {
+        if (!(menu.items || []).some((i) => i.label === item.label)) menu.append(new MenuItem(item));
+        Menu.setApplicationMenu(menu);
+      } else {
+        Menu.setApplicationMenu(Menu.buildFromTemplate([item]));
+      }
+    } catch (_) {}
+  }
+
   // Меню в трее: избранное, недавние (названия — из файла, показываются только в меню), «Открыть список», внизу — только «Обновить».
   // «Открыть в Excel», папка, «Добавить» и строка «Загружено N · пропущено …» с диагностикой — в окне списка и его настройках.
+  // Без файла — вход: выбрать файл, создать шаблон, открыть список.
   function trayTemplate() {
+    if (!settings.data.file) return entryItems();
     const view = service.view();
     const items = [{ label: "Открыть список…", click: openWindow }, { label: `Поиск (${settings.data.hotkey})`, click: openPalette }, { type: "separator" }];
     const flat = view.sections.filter((s) => s.kind === "favorites" || s.kind === "recents");
@@ -157,8 +199,14 @@ function init(electron, options = {}) {
       for (const r of s.records) items.push({ label: r.id ? `${r.name} · ${r.id}` : r.name, click: () => connect(r.key, false, true) });
     }
     if (flat.length) items.push({ type: "separator" });
-    items.push({ label: "↻ Обновить", click: () => store.reload() });
+    items.push({ label: "↻ Обновить", click: reload });
     return items;
+  }
+
+  // Перечитать файл и заново поискать программы (портативный AnyDesk могли скачать только что).
+  function reload() {
+    store.reload();
+    locator.refresh().then((changed) => { if (changed) notifyViews(); }).catch(() => {});
   }
 
   const notifyViews = () => {
@@ -413,6 +461,19 @@ function init(electron, options = {}) {
     return picked.filePaths[0];
   }
 
+  // «Указать AnyDesk.exe…» в плашке «не установлен»: выбранный exe (по имени — программа) сохраняется в programPaths.
+  async function pickProgram(program) {
+    if (!Object.hasOwn(PROGRAM_FILE, program)) return false;
+    const picked = await dialog.showOpenDialog(alive(windowRef) ? windowRef : undefined, { title: `Где ${TITLES[program]}?`, properties: ["openFile"],
+      defaultPath: process.env.USERPROFILE ? path.win32.join(process.env.USERPROFILE, "Downloads") : undefined,
+      filters: [{ name: TITLES[program], extensions: ["exe"] }] });
+    const file = !picked.canceled && picked.filePaths[0];
+    if (!file || !PROGRAM_FILE[program].test(file)) return false;
+    settings.update({ programPaths: { ...settings.data.programPaths, [program]: file } });
+    notifyViews();
+    return true;
+  }
+
   function setSettings(rawPatch) {
     const patch = sanitizePatch(rawPatch && typeof rawPatch === "object" ? rawPatch : {});
     // Сочетание без модификатора («A», «Shift+A») нельзя: оно отняло бы ввод. Ctrl+Alt допустимо, но с предупреждением про AltGr.
@@ -449,7 +510,8 @@ function init(electron, options = {}) {
   ipcMain.handle("rc:toggleFavorite", guarded((_e, key) => service.toggleFavorite(String(key)), false));
   ipcMain.handle("rc:connect", guarded((_e, q) => connect(String(q?.key), !!q?.noPassword), { ok: false, error: "denied" }));
   ipcMain.handle("rc:openFile", guarded(() => openFile()));
-  ipcMain.handle("rc:reload", guarded(() => store.reload()));
+  ipcMain.handle("rc:reload", guarded(() => reload()));
+  ipcMain.handle("rc:pickProgram", guarded((_e, program) => pickProgram(String(program)), false));
   ipcMain.handle("rc:chooseFile", guarded(chooseFile, ""));
   ipcMain.handle("rc:getSettings", guarded(() => ({ ...settings.data }), null));
   ipcMain.handle("rc:setSettings", guarded((_e, patch) => setSettings(patch), null));
@@ -481,25 +543,21 @@ function init(electron, options = {}) {
   service.onChange(notifyViews);
   service.start();
   applyEnabled();
-  // Вход без файла (трея и горячей клавиши ещё нет): пункт «Удалённые подключения» в меню окна Share (меню скрыто, видно по Alt).
-  // Из него сразу выбирают файл или создают шаблон; после выбора открывается список.
-  const entryMenu = () => [
-    { label: "Открыть список…", click: openWindow },
-    { type: "separator" },
-    { label: "Выбрать файл…", click: async () => { if (await chooseFile()) openWindow(); } },
-    { label: "Создать шаблон .xlsx…", click: async () => { if (await createTemplate("xlsx")) openWindow(); } },
-    { label: "Создать шаблон .xml…", click: async () => { if (await createTemplate("xml")) openWindow(); } },
-  ];
-  try {
-    const menu = Menu.getApplicationMenu?.();
-    if (menu && MenuItem) { menu.append(new MenuItem({ label: "Удалённые подключения", submenu: entryMenu() })); Menu.setApplicationMenu(menu); }
-  } catch (_) {}
+  locator.refresh().then((changed) => { if (changed) notifyViews(); }).catch(() => {});
+  ensureWindowMenu();
+  // Первый запуск без файла — один раз подсказка в трее (без модальных окон): где вход в подключения.
+  if (!settings.data.file && !settings.data.entryHintShown && typeof tray?.displayBalloon === "function") {
+    try {
+      tray.displayBalloon?.({ title: "Удалённые подключения", content: `Подключения: ${settings.data.hotkey} или значок в трее`, iconType: "info", noSound: true });
+      settings.update({ entryHintShown: true });
+    } catch (_) {}
+  }
 
   return {
-    service, settings, store, entryMenu, openWindow, openPalette, registerHotkey, trayTemplate, rowMenuTemplate, connect, openRDP, copySecret, revealSecret, copyAddress, copyText, copyPhone, call, cardInfo, revealAccess, hudAction, writeConcealed, titles: TITLES,
+    service, settings, store, entryMenu, entryItems, openWindow, openPalette, pickProgram, locator, registerHotkey, trayTemplate, rowMenuTemplate, connect, openRDP, copySecret, revealSecret, copyAddress, copyText, copyPhone, call, cardInfo, revealAccess, hudAction, writeConcealed, titles: TITLES,
     get hotkeyOk() { return hotkeyOk; },
     dispose() { try { globalShortcut.unregisterAll?.(); } catch (_) {} secretClipboard.flush(); store.stop(); tray?.destroy?.(); },
   };
 }
 
-module.exports = { init, accelerator };
+module.exports = { init, accelerator, paletteBounds };

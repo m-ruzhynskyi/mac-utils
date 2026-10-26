@@ -70,7 +70,8 @@ test("палитра: по клавише — окно без рамки по ц
   assert.equal(palette.opts.frame, false);
   assert.equal(palette.opts.alwaysOnTop, true);
   assert.equal(palette.hash, "palette");
-  assert.deepEqual(palette.bounds, { x: 610, y: 208, width: 700, height: 460 });
+  // rc-win-entry A: по экрану — ширина 800, высота 62 % рабочей области (не меньше 600), целиком в workArea.
+  assert.deepEqual(palette.bounds, { x: 560, y: 138, width: 800, height: 645 });
   assert.ok(palette.shown);
   assert.ok(palette.sent.some(([c]) => c === "rc:show"));
   fake.listeners.get("rc:closePalette")({ sender: palette.webContents });
@@ -159,20 +160,31 @@ test("правка через IPC: .xlsx — только чтение; .xml —
   rc.dispose();
 });
 
-test("клавиша и значок в трее — только когда выбран файл; без файла сочетание ни у кого не отнимается", async () => {
+// rc-win-entry (решение пользователя): вход в модуль должен находиться и без файла — значок в трее и клавиша всегда.
+test("клавиша и значок в трее — всегда, и без файла: без файла клавиша открывает окно списка, меню трея — выбрать файл / шаблон", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rc-glue-"));
   const fake = fakeElectron();
-  const rc = init(fake.electron, { userData: dir, icon: "icon.png" });
-  assert.equal(fake.registered.length, 0, "без файла клавиша не регистрируется");
-  assert.equal(fake.trays.length, 0, "и значка в трее нет");
+  const rc = init(fake.electron, { userData: dir, icon: "icon.png", locator: { candidates: () => [], refresh: async () => false } });
+  assert.equal(fake.registered.length, 1, "без файла клавиша зарегистрирована");
+  assert.equal(fake.registered[0][0], "Super+Shift+A");
+  assert.equal(fake.trays.length, 1, "и значок в трее есть");
+  assert.deepEqual(fake.trays[0].menu.filter((i) => i.label).map((i) => i.label), ["Выбрать файл…", "Создать шаблон .xlsx…", "Создать шаблон .xml…", "Открыть список…"]);
+  fake.registered[0][1]();
+  const list = fake.windows.at(-1);
+  assert.equal(list.file, "remote.html");
+  assert.equal(list.hash, undefined, "без файла — окно списка (пустое состояние «Выберите файл подключений»), не палитра");
   const sender = () => { rc.openWindow(); return { sender: fake.windows.filter((w) => w.file === "remote.html" && !w.hash).at(-1).webContents }; };
   const file = path.join(dir, "list.xml");
   fs.writeFileSync(file, F.xmlRows(F.cleanRows(2)));
   await fake.handles.get("rc:setSettings")(sender(), { file });
-  assert.equal(fake.registered.length, 1);
-  assert.equal(fake.trays.length, 1);
+  assert.equal(fake.registered.at(-1)[0], "Super+Shift+A");
+  assert.equal(fake.trays.length, 1, "значок тот же");
+  assert.ok(fake.trays[0].menu.some((i) => i.label === "↻ Обновить"), "с файлом — меню как раньше");
+  fake.registered.at(-1)[1]();
+  assert.equal(fake.windows.at(-1).hash, "palette", "с файлом клавиша — палитра");
   await fake.handles.get("rc:setSettings")(sender(), { file: "" });
-  assert.equal(fake.trays[0].destroyed, true, "файл снят — значок убран");
+  assert.ok(!fake.trays[0].destroyed, "файл снят — значок остаётся");
+  assert.equal(fake.trays[0].menu[0].label, "Выбрать файл…");
   rc.dispose();
 });
 
@@ -214,12 +226,12 @@ test("вход без файла: пункт меню окна Share — выб�
   const templates = { create: async ({ kind, setSettings }) => { made.push(kind); const file = path.join(dir, `t.${kind}`); fs.writeFileSync(file, kind === "xml" ? F.xmlRows(F.cleanRows(2)) : F.xlsxRows(F.cleanRows(2))); setSettings({ file, sheet: "" }); return file; } };
   const rc = init(fake.electron, { userData: dir, icon: "icon.png", templates });
   assert.equal(appended?.label, "Удалённые подключения");
-  assert.deepEqual(appended.submenu.filter((i) => i.label).map((i) => i.label), ["Открыть список…", "Выбрать файл…", "Создать шаблон .xlsx…", "Создать шаблон .xml…"]);
+  assert.deepEqual(appended.submenu.filter((i) => i.label).map((i) => i.label), ["Открыть список…", "Поиск (Win+Shift+A)", "Выбрать файл…", "Создать шаблон .xlsx…", "Создать шаблон .xml…"]);
   assert.equal(fake.windows.length, 0);
   await appended.submenu.find((i) => i.label === "Создать шаблон .xml…").click();
   assert.deepEqual(made, ["xml"]);
   assert.ok(fake.windows.some((w) => w.file === "remote.html"), "после шаблона открыт список");
-  assert.equal(fake.registered.length, 1, "файл выбран — клавиша включилась");
+  assert.equal(fake.registered.at(-1)[0], "Super+Shift+A", "клавиша на месте и после выбора файла");
   rc.dispose();
   const ui = fs.readFileSync(path.join(__dirname, "../../remote/ui/remote.js"), "utf8");
   assert.match(ui, /rc\.createTemplate\(kind\)[\s\S]{0,40}refresh/, "пустой экран создаёт шаблон сразу, а не отправляет в настройки");

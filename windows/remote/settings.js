@@ -12,12 +12,13 @@ const DEFAULTS = Object.freeze({
   defaultProgram: "anyDesk",
   // Win+Shift+A: без Ctrl+Alt (AltGr на польской, венгерской и др. раскладках) и без Ctrl+Shift+Space (в Excel выделяет лист).
   hotkey: "Win+Shift+A",
-  timeoutSeconds: 20,    // ожидание окна пароля
+  timeoutSeconds: 60,    // ожидание окна пароля TeamViewer (не меньше 60 с; пока он соединяется — дольше, до 180 с)
   autoLogin: false,      // отметка «входить автоматически» (AnyDesk)
   notify: true,          // уведомление после подключения
   programPaths: { anyDesk: "", teamViewer: "" },   // путь к программе, если не в стандартном месте
   favoriteIDs: [],
   recentIDs: [],
+  entryHintShown: false, // подсказка «Win+Shift+A или значок в трее» уже показана (один раз, при первом запуске без файла)
 });
 
 // Сочетание годится для глобальной клавиши: есть Ctrl, Alt или Win и одна обычная клавиша. "altgr" — Ctrl+Alt без Win: на раскладках
@@ -52,6 +53,7 @@ function normalize(raw) {
     programPaths: { anyDesk: str(raw.programPaths?.anyDesk, ""), teamViewer: str(raw.programPaths?.teamViewer, "") },
     favoriteIDs: ids(raw.favoriteIDs),
     recentIDs: ids(raw.recentIDs).slice(0, 5),
+    entryHintShown: raw.entryHintShown === true,
   };
 }
 

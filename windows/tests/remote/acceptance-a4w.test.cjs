@@ -132,7 +132,8 @@ test("TeamViewer: запуск только с ID, пароль — только
   assert.equal(r.spawned[0].chunks.length, 0, "в stdin TeamViewer пароль не пишем");
   assert.equal(r.uiaCalls.length, 1);
   assert.equal(r.uiaCalls[0].bytes.toString("utf8"), PW);
-  assert.equal(r.uiaCalls[0].opts.timeoutMs, 20_000);
+  assert.equal(r.uiaCalls[0].opts.timeoutMs, 60_000, "rc-win-entry D: база 60 с, как на Mac");
+  assert.equal(r.uiaCalls[0].opts.limitMs, 180_000);
   assert.ok(!r.dump().includes("КАНАРЕЙКА"));
   assert.ok(wiped(r));
 });
@@ -177,11 +178,13 @@ test("TeamViewer: UI Automation упал — пароль всё равно за
   assert.ok(wiped(r));
 });
 
-test("TeamViewer: таймаут из настроек (не меньше 5 с), по умолчанию 20 с; кнопка «Отмена» отменяет", async () => {
-  for (const [timeoutSeconds, ms] of [[undefined, 20_000], [30, 30_000], [1, 5_000], [60, 60_000]]) {
+// rc-win-entry D (решение пользователя): ожидание окна пароля TeamViewer — не меньше 60 с (больше — из настроек), продление до 180 с.
+test("TeamViewer: таймаут — не меньше 60 с (больше — из настроек), предел 180 с; кнопка «Отмена» отменяет", async () => {
+  for (const [timeoutSeconds, ms] of [[undefined, 60_000], [30, 60_000], [1, 60_000], [60, 60_000], [120, 120_000]]) {
     const r = rig();
     await r.run(record({ program: "teamViewer" }), { settings: { ...settings, timeoutSeconds } });
     assert.equal(r.uiaCalls[0].opts.timeoutMs, ms, `timeout=${timeoutSeconds}`);
+    assert.equal(r.uiaCalls[0].opts.limitMs, 180_000, `timeout=${timeoutSeconds}`);
     assert.ok(r.states.some((s) => s.actions?.some((a) => a.id === "cancel")), "в ожидании есть «Отмена»");
   }
   const r = rig();

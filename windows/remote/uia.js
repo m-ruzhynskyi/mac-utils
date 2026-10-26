@@ -12,12 +12,12 @@ const STATES = new Set(["ready", "waiting", "idSubmitted", "intermediate", "pass
   "sessionClosed", "passwordNeeded", "noPrompt", "noWindow", "idMismatch", "elevated", "focusLost", "fieldNotFound", "wrongPassword"]);
 // Промежуточные события: скрипт продолжает работу. Остальные состояния — итог.
 const EVENTS = new Set(["waiting", "idSubmitted", "intermediate", "confirming"]);
-// Скрипт продлевает ожидание окна пароля не дольше двух сроков, а проверка сеанса после ввода пароля кончается не позже трёх.
-const MAX_EXTENSION = 2;
-const MAX_TOTAL = 3;
+// Скрипт продлевает ожидание окна пароля, пока TeamViewer соединяется, но не дальше предела limitMs (без него — двух сроков);
+// проверка сеанса после ввода пароля кончается не позже чем через срок после предела. Сторож ниже покрывает и это.
+const guardMs = (timeoutMs, limitMs) => Math.max(timeoutMs * 2, limitMs || 0) + timeoutMs + 10_000;
 
 // spawn — child_process.spawn (в тестах двойник). Возвращает { enter(options, password, onEvent), cancel() }.
-// options: { timeoutMs, id?, noPassword?, afterReady? } — afterReady вызывается, когда скрипт запомнил уже открытые окна и готов
+// options: { timeoutMs, limitMs?, id?, noPassword?, afterReady? } — afterReady вызывается, когда скрипт запомнил уже открытые окна и готов
 // ждать новое: запускать TeamViewer нужно только после этого, иначе пароль уйдёт в окно прежнего подключения. id — ID партнёра
 // (запасной ввод в главное окно, сверка с окном пароля и опознание окна сеанса); noPassword — пароля нет: окно пароля только
 // обнаруживается. password — async () => SecretBuffer | null: вызывается ЛИШЬ по событию скрипта «passwordField» (поле найдено и
@@ -25,7 +25,7 @@ const MAX_TOTAL = 3;
 function createUia(spawn, { script = SCRIPT, powershell = POWERSHELL } = {}) {
   const active = new Set();   // идущие вызовы: у каждого свой процесс и свой признак отмены
   return {
-    enter({ timeoutMs, id, noPassword, afterReady }, password, onEvent = () => {}) {
+    enter({ timeoutMs, limitMs, id, noPassword, afterReady }, password, onEvent = () => {}) {
       const getSecret = typeof password === "function" ? password : async () => password || null;
       const withoutPassword = !!noPassword || password == null;
       return new Promise((resolve) => {
@@ -79,10 +79,10 @@ function createUia(spawn, { script = SCRIPT, powershell = POWERSHELL } = {}) {
         child.on("exit", () => done(run.cancelled ? "cancelled" : last));
         // Параметры — первой строкой stdin. Без пароля вход закрывается сразу; с паролем — остаётся открытым до «passwordField».
         try {
-          child.stdin.write(JSON.stringify({ timeoutMs, id: id == null ? undefined : String(id), noPassword: withoutPassword ? true : undefined }) + "\n");
+          child.stdin.write(JSON.stringify({ timeoutMs, limitMs: limitMs || undefined, id: id == null ? undefined : String(id), noPassword: withoutPassword ? true : undefined }) + "\n");
           if (withoutPassword) endInput();
         } catch (_) { return done("fieldNotFound"); }
-        guard = setTimeout(() => { try { child.kill(); } catch (_) {} done("fieldNotFound"); }, timeoutMs * MAX_TOTAL + 10_000);
+        guard = setTimeout(() => { try { child.kill(); } catch (_) {} done("fieldNotFound"); }, guardMs(timeoutMs, limitMs));
         guard.unref?.();
       });
     },
@@ -90,4 +90,4 @@ function createUia(spawn, { script = SCRIPT, powershell = POWERSHELL } = {}) {
   };
 }
 
-module.exports = { createUia, SCRIPT, POWERSHELL, MAX_EXTENSION, MAX_TOTAL };
+module.exports = { createUia, SCRIPT, POWERSHELL, guardMs };
