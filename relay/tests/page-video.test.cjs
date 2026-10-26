@@ -128,6 +128,8 @@ function page(behaviour) {
       return context.capture.replaceVideo({ getVideoTracks: () => [next], getAudioTracks: () => [] });
     },
     viewerJoined() { context.forceKey = true; },
+    // Relay передал ведущему `viewers` с `slow` (зритель не успевает декодировать).
+    viewerSlow() { vm.runInContext('viewerSlowAt = performance.now()', context); },
     // Кадры захвата 1920×1080 по 60 в секунду: каждый — в цикл чтения страницы, затем все обещания кодера.
     // Захват ничего не присылает (неподвижный экран), часы идут.
     async idle(seconds) { clock += seconds * 1000; await new Promise(setImmediate); },
@@ -403,4 +405,17 @@ test('повторная попытка аппаратного кодера: н�
   assert.ok(!p.logs.slice(p.logs.findIndex((l) => l.startsWith('encoder trial'))).some((l) => /^encoder mode reason=retry/.test(l)), 'эфир не перезапускался');
   await p.run(20);
   assert.equal(p.logs.filter((l) => l.startsWith('encoder trial')).length, probesAfter, 'следующая проба не раньше, чем через 60 с');
+});
+
+test('зритель не успевает декодировать (viewers.slow): ведущий-страница переходит на 30 кадров/с, в журнале viewerSlow', async () => {
+  const p = page({});
+  await p.run(4);
+  const rate = async (seconds) => { const from = p.sent.length; await p.run(seconds); return viewer(p.sent, from).h264 / seconds; };
+  assert.ok(await rate(1) > 50, '60 кадров/с до сигнала');
+  p.viewerSlow();
+  await p.run(1);
+  const slow = await rate(2);
+  assert.ok(slow > 20 && slow < 40, `после slow ~30 кадров/с, было ${slow}`);
+  await p.run(60);
+  assert.ok(p.logs.some((l) => /viewerSlow=1\b/.test(l)), 'сигнал зрителя посчитан в журнале кодера');
 });

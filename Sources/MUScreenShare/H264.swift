@@ -204,6 +204,34 @@ package struct ShareRateGovernor {
     }
 }
 
+/// Статистика видео ведущего для журнала: раз в минуту — частота, скорость, ключевые (всего и по просьбе), перегрузки,
+/// сигналы зрителей «не успеваю», пропуски. Только числа. Время — секунды, чистая логика для тестов.
+package struct ShareVideoStats: Equatable {
+    package static let interval: TimeInterval = 60
+    package var frames = 0, bytes = 0, keys = 0
+    package var keyRequests = 0, congestion = 0, viewerSlow = 0, skipped = 0
+    private var since: TimeInterval
+
+    package init(now: TimeInterval) { since = now }
+
+    package mutating func sent(bytes count: Int, key: Bool) {
+        frames += 1
+        bytes += count
+        if key { keys += 1 }
+    }
+
+    /// Прошла минута — строка для журнала и новый отсчёт; иначе nil.
+    package mutating func line(now: TimeInterval, fps: Int, bitrate: Int, mode: String?) -> String? {
+        let seconds = now - since
+        guard seconds >= Self.interval else { return nil }
+        let line = "Трансляция: видео за \(Int(seconds.rounded())) с — кадров \(frames) (\(Int((Double(frames) / seconds).rounded())) в с), "
+            + "передано \(Int((Double(bytes) * 8 / seconds / 1000).rounded())) кбит/с, кодер \(bitrate / 1000) кбит/с, режим \(fps) кадров/с \(mode ?? "-"), "
+            + "ключевых \(keys), по просьбе \(keyRequests), перегрузок \(congestion), зритель не успевает \(viewerSlow), пропущено \(skipped)"
+        self = ShareVideoStats(now: now)
+        return line
+    }
+}
+
 /// Аппаратное кодирование кадров экрана в H.264.
 package final class H264Encoder: @unchecked Sendable {
     private var session: VTCompressionSession?
@@ -351,6 +379,19 @@ package final class H264Player: ObservableObject, @unchecked Sendable {
     private var waitingForKey = false
     /// Сколько пакетов отброшено (для журнала и стендов).
     package private(set) var dropped = 0
+    /// Пропускаем до ключевого — попросить его у ведущего сразу (`video-trouble`), не ждать планового (раз в 4 с).
+    /// Вызывается на `queue`, не чаще раза в `keyAskInterval`. Задаётся до начала просмотра.
+    package var onNeedKey: (() -> Void)?
+    package static let keyAskInterval: TimeInterval = 1
+    private var lastKeyAsk = -TimeInterval.infinity
+    package private(set) var keyAsks = 0
+    /// Вызывается на `queue`.
+    private func askKey(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        guard now - lastKeyAsk >= Self.keyAskInterval else { return }
+        lastKeyAsk = now
+        keyAsks += 1
+        onNeedKey?()
+    }
 
     /// ≈ 1 с видео при 60 кадрах в секунду.
     package static let defaultLimit = 60
@@ -397,7 +438,7 @@ package final class H264Player: ObservableObject, @unchecked Sendable {
         if !full { pending += 1 }
         pendingLock.unlock()
         guard !full else {
-            queue.async { self.waitingForKey = true; self.dropped += 1 }
+            queue.async { self.waitingForKey = true; self.dropped += 1; self.askKey() }
             return
         }
         queue.async {
@@ -418,10 +459,11 @@ package final class H264Player: ObservableObject, @unchecked Sendable {
         if !layer.isReadyForMoreMediaData {
             waitingForKey = true
             dropped += 1
+            askKey()
             return
         }
         if waitingForKey {
-            guard key else { dropped += 1; return }
+            guard key else { dropped += 1; askKey(); return }
             waitingForKey = false
             layer.flush()
         }

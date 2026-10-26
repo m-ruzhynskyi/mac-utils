@@ -1043,7 +1043,10 @@ package final class ScreenShare: NSObject, ObservableObject {
                             self.sender?.setViewers(count)
                             // Новый зритель сразу получает картинку, даже если экран не меняется. Периодическое напоминание (`tick`) —
                             // нет: состав не менялся, повторять кадр незачем. `key` — медленный зритель просит ключевой кадр.
-                            if ShareViewersSignal(json: json).resendsLast(viewers: count) { self.sender?.resendLast() }   // resendLast сам просит ключевой кадр
+                            let signal = ShareViewersSignal(json: json)
+                            if signal.resendsLast(viewers: count) { self.sender?.resendLast() }   // resendLast сам просит ключевой кадр
+                            // Зритель не успевает декодировать — 30 кадров/с, как при своей перегрузке (обратно — после спокойного окна).
+                            if signal.slow { self.sender?.viewerSlow() }
                         }
                         self.listen(socket)
                     case .success:
@@ -1407,6 +1410,17 @@ package final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @un
     /// Захват пересоздан: ключевой кадр сразу, чтобы зрители не ждали следующего.
     package func requestKeyFrame() { queue.async { self.encoder.requestKeyFrame() } }
 
+    /// Зритель сообщил, что не успевает декодировать (`viewers` с `slow`): та же перегрузка, что и своя — 30 кадров/с.
+    package func viewerSlow() {
+        queue.async {
+            self.videoStats.viewerSlow += 1
+            self.noteCongestion()
+        }
+    }
+
+    /// Статистика видео в журнал раз в минуту (только числа, на queue).
+    private var videoStats = ShareVideoStats(now: ProcessInfo.processInfo.systemUptime)
+
     package func replace(_ socket: URLSessionWebSocketTask) {
         lock.lock()
         currentSocket = socket
@@ -1440,6 +1454,7 @@ package final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @un
         return governor
     }()
     private func noteCongestion() {
+        videoStats.congestion += 1
         if governor.congested(now: ProcessInfo.processInfo.systemUptime) { rateChanged() }
     }
     private func noteCalm() {
@@ -1568,6 +1583,7 @@ package final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @un
     /// (статичный экран новых кадров не даёт), дальше — обычный поток.
     package func resendLast() {
         queue.async {
+            self.videoStats.keyRequests += 1
             self.encoder.requestKeyFrame()
             guard !self.isPaused, let pixels = self.lastPixels else { return }
             self.encoder.encode(pixels, at: self.clock.next(CMClockGetTime(CMClockGetHostTimeClock())))
@@ -1580,6 +1596,7 @@ package final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @un
         adaptBitrate()
         // Больше ~1 с в очереди — старые кадры уже не нужны: пропускаем до ключевого, чтобы не копить задержку.
         if pendingBytes > max(400_000, encoder.bitrate / 8) {
+            videoStats.skipped += 1
             skipping = true
             encoder.requestKeyFrame()
             noteCongestion()
@@ -1588,11 +1605,15 @@ package final class FrameSender: NSObject, SCStreamOutput, SCStreamDelegate, @un
         if governor.bitrateSample(encoder.bitrate, now: ProcessInfo.processInfo.systemUptime) { rateChanged() }
         if pendingBytes < max(60_000, encoder.bitrate / 64) { noteCalm() }
         if skipping {
-            guard key else { return }
+            guard key else { videoStats.skipped += 1; return }
             skipping = false
         }
         var packet = Data([H264Packet.type, key ? 1 : 0])
         packet.append(data)
+        videoStats.sent(bytes: packet.count, key: key)
+        if let line = videoStats.line(now: ProcessInfo.processInfo.systemUptime, fps: governor.fps, bitrate: encoder.bitrate, mode: videoMode) {
+            Log.capture.info("\(line, privacy: .public)")
+        }
         pendingBytes += packet.count
         let socket = self.socket
         let size = packet.count
@@ -1673,8 +1694,17 @@ package final class ShareViewer: ObservableObject {
     private var socket: URLSessionWebSocketTask? { didSet { video.attach(socket) } }
     private var window: NSWindow?
     fileprivate let player = SharePlayer()
-    /// Видео H.264 (новые версии) — аппаратное декодирование.
-    package let video = H264Player()
+    /// Видео H.264 (новые версии) — аппаратное декодирование. Отстал и ждёт ключевой — просит его у ведущего сразу.
+    package let video: H264Player = {
+        let video = H264Player()
+        video.onNeedKey = { DispatchQueue.main.async { MainActor.assumeIsolated { ShareViewer.shared.requestKeyFrame() } } }
+        return video
+    }()
+
+    private func requestKeyFrame() {
+        guard state == .watching, let socket else { return }
+        socket.send(.string(ShareVideoAck.keyRequest)) { _ in }
+    }
     /// Ведущий потерял связь и переподключается — показываем последний кадр с подписью.
     @Published package var hostReconnecting = false
     /// Что приходит: true — картинки JPEG, false — видео H.264, nil — кадров ещё нет. Показывается то, что пришло последним:
@@ -2966,6 +2996,9 @@ package final class ShareVideoAck: @unchecked Sendable {
     }
 
     package static func message(_ n: Int) -> String { "{\"type\":\"ack\",\"n\":\(n)}" }
+    /// Проигрыватель отстал и ждёт ключевой кадр — просьба ведущему через relay (`video-trouble`, необязательное;
+    /// старый relay его отбрасывает).
+    package static let keyRequest = "{\"type\":\"video-trouble\",\"key\":true,\"slow\":false}"
 }
 
 /// Картинка JPEG → NSImage сразу полностью (не отложенно при первой отрисовке), чтобы разбор шёл не на главном потоке.

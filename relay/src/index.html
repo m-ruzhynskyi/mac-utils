@@ -1074,8 +1074,60 @@ async function viewerChallenge(ws, id, m) {
 }
 
 // ---- Видео H.264: аппаратное декодирование WebCodecs ----
-let decoder = null;
+// <view-video>
+// Отставание декодера считается по времени (сколько ждёт самый старый кадр, отданный в декодер), а не по числу кадров:
+// на 60 кадрах/с 4 кадра — это 66 мс, и короткий всплеск (сборка мусора, перетаскивание окна) выбрасывал всё до ключевого
+// кадра — заморозка до 4 с. Теперь: отстал больше VIEW_LAG_DROP_MS — очередь сбрасывается, ключевой кадр просим у
+// ведущего сразу; отстаёт больше VIEW_LAG_SLOW_MS дольше VIEW_SLOW_HOLD_MS или выбрасывать пришлось второй раз за
+// VIEW_DROP_REPEAT_MS — просим ведущего снизить частоту (30 кадров/с). Разовая заминка частоту не трогает.
+const VIEW_LAG_DROP_MS = 500, VIEW_LAG_SLOW_MS = 200, VIEW_SLOW_HOLD_MS = 2000, VIEW_DROP_REPEAT_MS = 10_000, VIEW_QUEUE_MAX = 120;
+const VIEW_KEY_ASK_MS = 1000, VIEW_SLOW_ASK_MS = 5000, VIEW_STATS_MS = 60_000;
+let decoder = null, decoderSps = "", decoderConfig = null, decoderHwFailed = false;
 let waitKey = false, latestFrame = null, paintQueued = false;
+let viewPending = [], viewLagSince = null, viewKeyAskAt = -Infinity, viewSlowAskAt = -Infinity, viewFreezeAt = null, viewDropAt = -Infinity;
+const viewStatsNew = (now) => ({ since: now, received: 0, decoded: 0, painted: 0, dropped: 0, maxQueue: 0, maxLagMs: 0,
+                                 freezes: 0, freezeMs: 0, keyAsks: 0, slowAsks: 0, errors: 0, size: "-" });
+let viewStats = viewStatsNew(0);
+function viewerLog(line) {
+  try { console.info(`[share] viewer ${line}`); } catch (_) {}
+  try { window.mu?.log?.(`viewer ${line}`); } catch (_) {}
+}
+// Раз в минуту (и в конце просмотра) — только числа: декодер, кадры, выбросы, очередь, заморозки, просьбы ведущему.
+function viewStatsFlush(now, force) {
+  const s = viewStats;
+  if (!s.received || (!force && now - s.since < VIEW_STATS_MS)) return;
+  const accel = !decoderConfig ? "-" : decoderConfig.hardwareAcceleration === "prefer-hardware" ? "hw" : "auto";
+  viewerLog(`stats decoder=${accel} size=${s.size} sec=${Math.round((now - s.since) / 1000)} in=${s.received} decoded=${s.decoded} ` +
+    `painted=${s.painted} dropped=${s.dropped} maxQueue=${s.maxQueue} maxLagMs=${Math.round(s.maxLagMs)} freezes=${s.freezes} ` +
+    `freezeMs=${Math.round(s.freezeMs)} keyAsks=${s.keyAsks} slowAsks=${s.slowAsks} errors=${s.errors}`);
+  viewStats = viewStatsNew(now);
+  viewStats.size = s.size;
+}
+function viewTrouble(now, slow) {
+  const key = waitKey && now - viewKeyAskAt >= VIEW_KEY_ASK_MS;
+  const slowNow = slow && now - viewSlowAskAt >= VIEW_SLOW_ASK_MS;
+  if (!key && !slowNow) return;
+  if (key) { viewKeyAskAt = now; viewStats.keyAsks++; }
+  if (slowNow) { viewSlowAskAt = now; viewStats.slowAsks++; }
+  if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify({ type: "video-trouble", key, slow: slowNow }));
+}
+// Сколько ждёт самый старый кадр в декодере, мс.
+const viewLag = (now) => (viewPending.length ? now - viewPending[0] : 0);
+// Ждать ключевой кадр: недекодированное выбрасывается (reset), ключевой просим сразу; заморозка считается до первого кадра.
+function viewWaitKey(now) {
+  const slow = now - viewDropAt < VIEW_DROP_REPEAT_MS;
+  viewDropAt = now;
+  if (!waitKey) { waitKey = true; viewFreezeAt ??= now; }
+  if (decoder && decoder.state === "configured") {
+    try { decoder.reset(); decoder.configure(decoderConfig); } catch (_) { closeDecoder(); }
+  }
+  viewPending = []; viewLagSince = null;
+  viewTrouble(now, slow);
+}
+function closeDecoder() {
+  if (decoder && decoder.state !== "closed") { try { decoder.close(); } catch (_) {} }
+  decoder = null; decoderConfig = null; viewPending = []; viewLagSince = null;
+}
 function paintFrame() {
   paintQueued = false;
   const frame = latestFrame; latestFrame = null;
@@ -1083,37 +1135,79 @@ function paintFrame() {
   const canvas = $("video");
   if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
   canvas.getContext("2d").drawImage(frame, 0, 0); frame.close();
+  viewStats.painted++;
   if (canvas.style.display !== "block") { canvas.style.display = "block"; $("screen").style.display = "none"; status(""); }
 }
-let decoderSps = "";
-function playH264(bytes) {
+// Аппаратный декодер, если есть («prefer-hardware»); нет — тот, что выберет браузер. Отказ аппаратного (ошибка до первого
+// кадра или isConfigSupported) запоминается до конца страницы, ключевой кадр просим заново.
+function createDecoder(sps, now) {
+  const hex = (n) => n.toString(16).padStart(2, "0");
+  const config = { codec: `avc1.${hex(sps[1])}${hex(sps[2])}${hex(sps[3])}`, optimizeForLatency: true,
+                   hardwareAcceleration: decoderHwFailed ? "no-preference" : "prefer-hardware" };
+  let outputs = 0;
+  const instance = new VideoDecoder({
+    // Кадр ждёт ближайшего requestAnimationFrame; пришло два за такт — старый не рисуем (на 60 Гц кадр = такт).
+    output: (frame) => {
+      outputs++;
+      if (instance !== decoder) { frame.close(); return; }
+      const ts = frame.timestamp / 1000;
+      while (viewPending.length && viewPending[0] <= ts) viewPending.shift();
+      viewStats.decoded++; viewStats.size = `${frame.displayWidth}x${frame.displayHeight}`;
+      if (viewFreezeAt !== null && !waitKey) { const t = performance.now(); viewStats.freezes++; viewStats.freezeMs += t - viewFreezeAt; viewFreezeAt = null; }
+      if (latestFrame) latestFrame.close();
+      latestFrame = frame;
+      if (!paintQueued) { paintQueued = true; requestAnimationFrame(paintFrame); }
+    },
+    error: () => {
+      if (instance !== decoder) return;
+      viewStats.errors++;
+      if (config.hardwareAcceleration === "prefer-hardware" && outputs === 0) decoderHwFailed = true;
+      closeDecoder();
+      waitKey = true; viewFreezeAt ??= performance.now();
+      viewTrouble(performance.now(), false);
+    },
+  });
+  try { instance.configure(config); } catch (_) {
+    if (config.hardwareAcceleration !== "prefer-hardware") return false;
+    decoderHwFailed = true;
+    return createDecoder(sps, now);
+  }
+  decoder = instance; decoderConfig = config; decoderSps = sps.join();
+  if (!decoderHwFailed && typeof VideoDecoder.isConfigSupported === "function") {
+    VideoDecoder.isConfigSupported(config).then((r) => { if (!r?.supported) decoderHwFailed = true; }, () => {});
+  }
+  return true;
+}
+function playH264(bytes, now = performance.now()) {
   const key = bytes[0] === 1, data = bytes.subarray(1);
+  viewStats.received++;
+  viewStatsFlush(now, false);
   const sps = key ? nalUnits(data).find((u) => (u[0] & 0x1f) === 7) : null;
   // Другие SPS (ведущий переключил монитор, другой размер) — новый декодер с этого ключевого кадра: надёжнее, чем
   // рассчитывать на смену разрешения внутри одного VideoDecoder.
-  if (sps && decoder && decoder.state !== "closed" && sps.join() !== decoderSps) { try { decoder.close(); } catch (_) {} decoder = null; waitKey = false; }
+  if (sps && decoder && decoder.state !== "closed" && sps.join() !== decoderSps) closeDecoder();
   if (!decoder || decoder.state === "closed") {
-    if (!key || typeof VideoDecoder === "undefined") return;
-    if (!sps) return;
-    decoderSps = sps.join();
-    const hex = (n) => n.toString(16).padStart(2, "0");
-    const canvas = $("video"), ctx = canvas.getContext("2d");
-    decoder = new VideoDecoder({
-      // Кадр ждёт ближайшего requestAnimationFrame; пришло два за такт — старый не рисуем (на 60 Гц кадр = такт).
-      output: (frame) => {
-        if (latestFrame) latestFrame.close();
-        latestFrame = frame;
-        if (!paintQueued) { paintQueued = true; requestAnimationFrame(paintFrame); }
-      },
-      error: () => { decoder = null; },
-    });
-    decoder.configure({ codec: `avc1.${hex(sps[1])}${hex(sps[2])}${hex(sps[3])}`, optimizeForLatency: true });
+    if (typeof VideoDecoder === "undefined") return;
+    if (!key || !sps) { viewStats.dropped++; if (waitKey) viewTrouble(now, false); return; }
+    if (!createDecoder(sps, now)) return;
+    waitKey = false;
   }
-  // Очередь растёт — компьютер не успевает: пропускаем до следующего ключевого кадра.
-  if (decoder.decodeQueueSize > 4) waitKey = true;
-  if (waitKey) { if (!key) return; waitKey = false; }
-  decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: Math.round(performance.now() * 1000), data }));
+  // Отстаёт: дольше VIEW_LAG_DROP_MS (или очередь непомерная) — сброс и ключевой; дольше VIEW_LAG_SLOW_MS подряд — «не успеваю».
+  const lag = viewLag(now), queue = decoder.decodeQueueSize;
+  if (queue > viewStats.maxQueue) viewStats.maxQueue = queue;
+  if (lag > viewStats.maxLagMs) viewStats.maxLagMs = lag;
+  if (!waitKey && (lag > VIEW_LAG_DROP_MS || queue > VIEW_QUEUE_MAX)) viewWaitKey(now);
+  else if (lag > VIEW_LAG_SLOW_MS) { viewLagSince ??= now; if (now - viewLagSince >= VIEW_SLOW_HOLD_MS) viewTrouble(now, true); }
+  else viewLagSince = null;
+  if (waitKey) {
+    if (!key) { viewStats.dropped++; viewTrouble(now, false); return; }
+    waitKey = false;
+  }
+  viewPending.push(now);
+  if (viewPending.length > 600) viewPending.shift();
+  decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: Math.round(now * 1000), data }));
 }
+// </view-video>
 
 $("leave").onclick = () => { stopWatch(); status("Вы отключились от трансляции"); };
 // Подпись «Видео · видеокарта / без видеокарты / Картинки» у зрителя: тип кадров — по пакетам, режим — от ведущего.
@@ -1129,8 +1223,8 @@ function stopWatch(keepStatus) {
   $("leave").style.display = "none";
   setViewVideo("", ""); lastH264At = -Infinity;
   if (game.peer === "host") gamePeerGone("host");
-  if (decoder && decoder.state !== "closed") { try { decoder.close(); } catch (_) {} }
-  decoder = null;
+  viewStatsFlush(performance.now(), true);
+  closeDecoder(); waitKey = false; viewFreezeAt = null;
   if (latestFrame) { latestFrame.close(); latestFrame = null; }
   $("video").style.display = "none"; $("screen").style.display = "";
   clearTimeout(viewRetryTimer); viewRetries = 0;
@@ -1534,6 +1628,8 @@ $("decline").onclick = () => { const r = requests.shift(); if (r) answer(r.viewe
 
 // ---- Кодер ведущего: запасные пути (relay/tests/page-video.test.cjs берёт код между метками) ----
 // <host-video>
+// Зритель не успевает декодировать (`viewers` с `slow`, SHARE-PROTOCOL): когда пришло — кодер переходит на 30 кадров/с.
+let viewerSlowAt = -Infinity;
 // Режимы кодера по порядку: аппаратный H.264; программный H.264 (OpenH264 в Chromium и Electron) — явно `prefer-software`:
 // `no-preference` на Windows снова берёт аппаратный Media Foundation, и после его сбоя оставался только JPEG; JPEG — мост
 // на время повторной попытки и единственный путь, только если H.264 нет вообще. Аппаратного кодера может не быть или он
@@ -1729,11 +1825,13 @@ function startCapture(stream, code) {
   forceKey = true;
   let canEncode = typeof VideoEncoder !== "undefined";
   // Для журнала (только числа и коды): ошибки кодера, пропуски кадров (очередь кодера, JPEG занят), размер источника.
-  const counts = { errors: 0, queueSkips: 0, jpegSkips: 0, outputs: 0, statsOutputs: 0 };
+  const counts = { errors: 0, queueSkips: 0, jpegSkips: 0, outputs: 0, statsOutputs: 0, viewerSlow: 0 };
+  let slowSeen = viewerSlowAt;
   let sourceSize = "-", lastStatsAt = performance.now();
   const logEncoder = (event) => encoderLog(`${event} mode=${ladder.name} src=${sourceSize} size=${encodedSize || "-"} ` +
     `fps=${ladder.jpeg ? 8 : fps} bitrate=${Math.round(bitrate / 1000)}k queued=${Math.round(hostSocket?.bufferedAmount ?? 0)} ` +
     `encodeQueue=${encoder?.encodeQueueSize ?? 0} errors=${counts.errors} queueSkips=${counts.queueSkips} jpegSkips=${counts.jpegSkips} ` +
+    `viewerSlow=${counts.viewerSlow} ` +
     `outFps=${Math.round((counts.outputs - counts.statsOutputs) / Math.max(1, (performance.now() - lastStatsAt) / 1000))}`);
   // Режим сменился: прежний кодер закрыт, новый создаст следующий кадр. Программный — 30 кадров/с без возврата на 60.
   const applyMode = () => {
@@ -1781,6 +1879,7 @@ function startCapture(stream, code) {
   const tick = (source, sourceWidth, sourceHeight) => {
     if (!hostSocket || hostSocket.readyState !== 1 || !sourceWidth) { forceKey = true; return; }
     const now = performance.now(), queued = hostSocket.bufferedAmount;
+    if (viewerSlowAt > slowSeen) { slowSeen = viewerSlowAt; counts.viewerSlow++; trouble(now); }
     sourceSize = `${sourceWidth}x${sourceHeight}`;
     hostSourceAspect = sourceWidth / sourceHeight;
     // Лучший режим пробуем отдельным кодером, не останавливая эфир: неработающий аппаратный кодер раньше замораживал картинку
@@ -2171,13 +2270,14 @@ function onHostMessage(ws, event) {
     if (game.phase === "pick") renderGame();
   }
   if (msg.type === "viewers" && msg.tick !== true) forceKey = true; // новый зритель — сразу ключевой кадр (периодическое напоминание — нет)
+  if (msg.type === "viewers" && msg.slow === true) viewerSlowAt = performance.now(); // зритель не успевает — 30 кадров/с
   if (msg.type === "cancelled") { const i = requests.findIndex((r) => typeof msg.rid === "string" ? r.rid === msg.rid : r.viewer === msg.viewer); if (i >= 0) { requests.splice(i, 1); showRequest(); } }
   if (msg.type === "viewers") {
     liveViewers = msg.count ? (msg.list || []) : [];
     renderLiveText();
     $("liveText").title = (msg.list || []).map((v) => v.fp ? `${v.name}: ключ ${v.fp}` : v.name).join("\n");
     // Новый зритель (или тот же после переподключения) получает список мониторов без хранения на relay (по напоминанию — нет).
-    if (msg.tick !== true) announceDisplays();
+    if (msg.tick !== true && msg.key !== true) announceDisplays();
   }
 }
 
