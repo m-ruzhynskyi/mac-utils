@@ -181,6 +181,10 @@ jobs:
             env -u SIGN_IDENTITY ./build.sh --universal
           fi
           codesign --verify --deep --strict "build/Mac Utils.app"
+          # Hardened Runtime на приложении и вложенном коде: без него другая программа может внедрить библиотеку в Mac Utils.
+          for item in "build/Mac Utils.app" "build/Mac Utils.app/Contents/Resources/Инструменты.app" "build/Mac Utils.app/Contents/Resources/MUNowPlaying.dylib"; do
+            codesign -dv "$item" 2>&1 | grep -Eq "flags=0x[0-9a-f]+\([^)]*runtime" || { echo "::error::Нет Hardened Runtime: $item"; exit 1; }
+          done
       - name: Trim build cache
         if: ${{ success() && github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.no_cache) }}
         run: rm -rf .build/index-build .build/arm64-apple-macosx/release .build/x86_64-apple-macosx/release
@@ -380,6 +384,7 @@ jobs:
         run: |
           APP="build/Mac Utils.app"
           codesign --verify --deep --strict "$APP"
+          codesign -dv "$APP" 2>&1 | grep -Eq "flags=0x[0-9a-f]+\([^)]*runtime" || { echo "::error::Релиз без Hardened Runtime"; exit 1; }
           if ! codesign -dr - "$APP" 2>&1 | grep -q "certificate leaf = H\"$EXPECTED_LEAF_SHA1\""; then
             echo "::error::Релиз не подписан сертификатом «Mac Utils Signing» ($EXPECTED_LEAF_SHA1)"
             codesign -dr - "$APP" 2>&1 || true
