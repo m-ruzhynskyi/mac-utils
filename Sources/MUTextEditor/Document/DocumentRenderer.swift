@@ -174,6 +174,10 @@ package final class DocRenderer {
         package var height: Int
         /// В строке есть вертикально объединённые ячейки (`\clvmgf`/`\clvmrg`).
         package var rowMerged = false
+        /// В ячейке стоит вложенная таблица.
+        package var holdsNested = false
+        /// Оценка высоты содержимого ячейки со вложенной таблицей, пункты (для выравнивания по вертикали).
+        package var nestedContent: CGFloat?
         package var columns: Int
         package var tableWidth: Int
         /// Поля ячейки для показа, твипы: поля по RTF, уменьшенные на отрицательные отступы её абзацев (в Word абзац ячейки
@@ -887,6 +891,12 @@ package final class DocRenderer {
                         var placed = place
                         if let parent { placed.outer = parent.outer + [parent] }
                         placed.rowMerged = row.cells.contains { $0.verticalMergeFirst || $0.verticalMerged }
+                        let ref = RTFCellRef(table: ordinal, row: rowIndex, cell: cellIndex)
+                        placed.holdsNested = story.tables.contains { $0.parent == ref }
+                        if placed.holdsNested {
+                            placed.nestedContent = nestedCellContent(ref, width: CGFloat(right - left - margins.left - margins.right) / 20,
+                                                                     story: story, model: model)
+                        }
                         if offset > 0 { placed.skip = true }
                         places[RTFCellRef(table: ordinal, row: rowIndex, cell: cellIndex + offset)] = placed
                     }
@@ -903,30 +913,54 @@ package final class DocRenderer {
     private func nestedRowHeight(_ row: RTFRow, story: RTFStory, model: RTFDocumentModel) -> Int? {
         guard row.height != 0 else { return nil }
         guard row.height > 0 else { return -row.height }
+        return cellTextHeights(row, story: story, model: model).allSatisfy { $0 * 20 <= CGFloat(row.height) } ? row.height : nil
+    }
+
+    /// Оценка высоты текста ячеек строки, пункты (по шрифтам и ширине ячейки).
+    private func cellTextHeights(_ row: RTFRow, story: RTFStory, model: RTFDocumentModel) -> [CGFloat] {
         var left = row.left
-        for (index, cell) in row.cells.enumerated() {
+        return row.cells.enumerated().map { index, cell in
             let margins = row.margins(cell)
             let width = CGFloat(max(cell.right, left) - left - margins.left - margins.right) / 20
             left = max(cell.right, left)
-            var height = CGFloat(row.padTop + row.padBottom) / 20
-            for number in row.paragraphs[safe: index] ?? [] {
-                guard let paragraph = story.paragraphs[safe: number] else { continue }
-                let text = NSMutableAttributedString()
-                for run in paragraph.runs where run.isEditableText && (!run.props.hidden || showsHidden) {
-                    text.append(NSAttributedString(string: run.text, attributes: characterAttributes(run.props, model: model)))
-                }
-                if text.length == 0 { text.append(NSAttributedString(string: " ", attributes: characterAttributes(paragraph.endProps, model: model))) }
-                let indent = CGFloat(max(0, paragraph.props.left) + max(0, paragraph.props.right)) / 20
-                var lines = text.boundingRect(with: NSSize(width: max(4, width - indent), height: 10_000),
-                                              options: [.usesLineFragmentOrigin, .usesFontLeading]).height
-                let spacing = paragraph.props.lineSpacing
-                if spacing > 0, paragraph.props.lineMultiple { lines *= CGFloat(spacing) / 240 }
-                if spacing < 0 { lines = max(lines, CGFloat(-spacing) / 20) }
-                height += lines + CGFloat(paragraph.props.spaceBefore + paragraph.props.spaceAfter) / 20
-            }
-            if height * 20 > CGFloat(row.height) { return nil }
+            return CGFloat(row.padTop + row.padBottom) / 20 + textHeight(row.paragraphs[safe: index] ?? [], width: width, story: story, model: model)
         }
-        return row.height
+    }
+
+    /// Оценка высоты абзацев в ширину `width`, пункты: строки по шрифтам, `\sl`, `\sb`/`\sa`.
+    private func textHeight(_ numbers: [Int], width: CGFloat, story: RTFStory, model: RTFDocumentModel) -> CGFloat {
+        var height: CGFloat = 0
+        for number in numbers {
+            guard let paragraph = story.paragraphs[safe: number] else { continue }
+            let text = NSMutableAttributedString()
+            for run in paragraph.runs where run.isEditableText && (!run.props.hidden || showsHidden) {
+                text.append(NSAttributedString(string: run.text, attributes: characterAttributes(run.props, model: model)))
+            }
+            if text.length == 0 { text.append(NSAttributedString(string: " ", attributes: characterAttributes(paragraph.endProps, model: model))) }
+            let indent = CGFloat(max(0, paragraph.props.left) + max(0, paragraph.props.right)) / 20
+            var lines = text.boundingRect(with: NSSize(width: max(4, width - indent), height: 10_000),
+                                          options: [.usesLineFragmentOrigin, .usesFontLeading]).height
+            let spacing = paragraph.props.lineSpacing
+            if spacing > 0, paragraph.props.lineMultiple { lines *= CGFloat(spacing) / 240 }
+            if spacing < 0 { lines = max(lines, CGFloat(-spacing) / 20) }
+            height += lines + CGFloat(paragraph.props.spaceBefore + paragraph.props.spaceAfter) / 20
+        }
+        return height
+    }
+
+    /// Высота содержимого ячейки со вложенной таблицей, пункты: строки вложенной (`\trrh` «не меньше» или по тексту)
+    /// и свои абзацы ячейки. Для выравнивания по вертикали (`DocCellBlock.contentHeight`).
+    private func nestedCellContent(_ ref: RTFCellRef, width: CGFloat, story: RTFStory, model: RTFDocumentModel) -> CGFloat {
+        var height: CGFloat = 0
+        for table in story.tables where table.nested && table.parent == ref {
+            for row in table.rows {
+                let text = cellTextHeights(row, story: story, model: model).max() ?? 0
+                height += row.height < 0 ? CGFloat(-row.height) / 20 : max(CGFloat(row.height) / 20, text)
+            }
+        }
+        let own = (story.tables[safe: ref.table]?.rows[safe: ref.row]?.paragraphs[safe: ref.cell] ?? [])
+            .filter { story.paragraphs[safe: $0]?.outerCell == nil }
+        return height + textHeight(own, width: width, story: story, model: model)
     }
 
     private static func cell(in row: RTFRow, left: Int, right: Int) -> RTFCellDef? {
@@ -956,7 +990,9 @@ package final class DocRenderer {
             table = NSTextTable()
             table.numberOfColumns = place.columns
             table.layoutAlgorithm = .fixedLayoutAlgorithm
-            table.collapsesBorders = true
+            // Вложенная таблица со слиянием рамок у `NSTextTable` встаёт на полпункта ниже верха ячейки, и строка внешней таблицы
+            // вырастает (f077: +1,9 pt на строку); линии рисует `DocCellBlock`, слияние ей не нужно.
+            table.collapsesBorders = place.outer.isEmpty
             table.hidesEmptyCells = false
             // Ширина таблицы у `NSTextTable` — вместе с отступом слева (полем блока). Всё в целых пунктах: дробные ширины
             // и поля `NSTextTable` округляет внутрь, и текст ячейки становится уже, чем в Word (до 2 pt).
@@ -1009,6 +1045,9 @@ package final class DocRenderer {
         case .bottom: block.verticalAlignment = .bottomAlignment
         }
         // В строке с `\trrh` ячейка выравнивается сама (см. `DocCellBlock.ownAlignment`).
+        // Высоту текста для своего выравнивания `DocCellBlock` оценивает без блоков: вложенная таблица в такой оценке — столбик
+        // строк, и сдвиг выходил больше, чем у Word (f078: +12,9 pt на строку); для неё — оценка по строкам вложенной.
+        block.contentHeight = place.nestedContent
         if block.rowHeight != 0, cell.verticalAlign != .top {
             block.ownAlignment = cell.verticalAlign == .center ? 0.5 : 1
             block.verticalAlignment = .topAlignment
@@ -1089,6 +1128,8 @@ package final class DocCellBlock: NSTextTableBlock {
     /// Выравнивание по вертикали в строке с `\trrh` (0 — сверху, 0,5 — по центру, 1 — снизу) — своё: `NSTextTable`
     /// выравнивает ячейки по высоте их текста, а не по рамке, и строку, которую задаёт `\trrh`, не видит.
     package var ownAlignment: CGFloat = 0
+    /// Высота содержимого, если её посчитали заранее (ячейка со вложенной таблицей), пункты.
+    package var contentHeight: CGFloat?
 
     package override func rectForLayout(at startingPoint: NSPoint, in rect: NSRect, textContainer: NSTextContainer,
                                 characterRange charRange: NSRange) -> NSRect {
@@ -1097,7 +1138,7 @@ package final class DocCellBlock: NSTextTableBlock {
         if ownAlignment > 0, rowHeight != 0, let storage = textContainer.layoutManager?.textStorage, charRange.length > 0,
            NSMaxRange(charRange) <= storage.length {
             let inner = abs(rowHeight) - width(for: .padding, edge: .minY) - width(for: .padding, edge: .maxY)
-            let content = MainActor.assumeIsolated { Self.height(of: storage.attributedSubstring(from: charRange), width: layout.width) }
+            let content = contentHeight ?? MainActor.assumeIsolated { Self.height(of: storage.attributedSubstring(from: charRange), width: layout.width) }
             shift = max(0, (inner - content) * ownAlignment)
         }
         layout.origin.y += shift

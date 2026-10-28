@@ -231,4 +231,29 @@ final class DocWordLayoutTests: XCTestCase {
         let top = try XCTUnwrap(lines(document, "EEE").first).minY, next = try XCTUnwrap(lines(document, "FFF").first).minY
         XCTAssertLessThan(next - top, 50, "строка с объединением — по тексту")
     }
+
+    /// Вложенная таблица (P-4): начинается у верха ячейки (без слияния рамок `NSTextTable` не сдвигает её на полпункта),
+    /// строка внешней с `\trrh` — ровно своей высоты; ячейка по центру выравнивается по оценке строк вложенной.
+    func testNestedTableTopAndOuterRowHeight() throws {
+        let outer = #"\trowd\trgaph108\trleft0\trrh3272\clbrdrt\brdrs\brdrw10 \cellx3000\clvertalc\clbrdrt\brdrs\brdrw10 \cellx9000 "#
+        let nprops = { (h: Int) in #"{\*\nesttableprops\trowd\trgaph28\trleft0\trrh"# + String(h) + #"\clbrdrt\brdrs\brdrw10 \cellx3000\clbrdrt\brdrs\brdrw10 \cellx6000\nestrow}{\nonesttables\par }"# }
+        let nrow = { (a: String, h: Int) in #"\pard\plain\intbl\itap2\fs20 "# + a + #"1\nestcell\pard\plain\intbl\itap2\fs20 "# + a + #"2\nestcell\pard\plain\intbl\itap2\fs20 "# + nprops(h) }
+        let top = outer.replacingOccurrences(of: #"\clvertalc"#, with: "")
+        for (row, centered) in [(top, false), (outer, true)] {
+            let body = #"\pard before\par "# + row + #"\pard\plain\intbl\itap1\fs20 LEFT\cell"# + nrow("NA", 480) + nrow("NB", 566)
+                + #"\pard\plain\intbl\itap1\fs20 \cell"# + row + #"\row "# + row + #"\pard\plain\intbl\itap1\fs20 SECOND\cell\pard\plain\intbl\itap1\fs20 X\cell"#
+                + row + #"\row\pard AFTER\par"#
+            let document = try open(body)
+            let left = try XCTUnwrap(lines(document, "LEFT").first).minY, nested = try XCTUnwrap(lines(document, "NA1").first).minY
+            let second = try XCTUnwrap(lines(document, "SECOND").first).minY
+            XCTAssertEqual(second - left, 163.6, accuracy: 0.05, "строка внешней — ровно \\trrh3272")
+            if centered {
+                // Содержимое: 24 + 28,3 pt вложенной и пустая строка — сдвиг по центру примерно (163,6 − ~64) / 2.
+                XCTAssertGreaterThan(nested - left, 40)
+                XCTAssertLessThan(nested - left, 60)
+            } else {
+                XCTAssertEqual(nested - left, 0, accuracy: 0.05, "вложенная — у верха ячейки")
+            }
+        }
+    }
 }
