@@ -133,7 +133,8 @@ package struct RTFFrame: Hashable {
     /// `\posxl`/`\posxc`/`\posxr` (`\posxi`/`\posxo` — как слева/справа), `\posxN` — слева.
     package var x: RTFAlignment?
 
-    package var besideNext: Bool { isSet && fromParagraph && y == 0 }
+    /// Рамка у правого края на месте абзаца (номер, штамп): текст идёт рядом слева, места она не занимает. Рамка по центру (f152) текст раздвигает.
+    package var besideNext: Bool { isSet && fromParagraph && y == 0 && x == .right }
 }
 
 /// Свойства раздела (страница, поля, колонтитулы).
