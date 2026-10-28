@@ -733,6 +733,7 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         }
         let info = selectionInfo(selection)
         if info != self.selection { self.selection = info }
+        if tab?.mode == .document { tab?.dollars.caretMoved(to: sourceSelection) }  // статус «правится» в панели «$»
     }
 
     private func selectionInfo(_ selection: NSRange) -> DocSelectionInfo {

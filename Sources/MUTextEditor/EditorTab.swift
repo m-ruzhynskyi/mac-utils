@@ -424,6 +424,7 @@ package final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextV
             next.selectedLines = endLine > position.line ? endLine - position.line + 1 : 0
         }
         if next != caret { caret = next }
+        if mode == .code { dollars.caretMoved(to: selection) }
     }
 
     private var lineEndingWork: DispatchWorkItem?
