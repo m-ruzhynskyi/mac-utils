@@ -348,6 +348,7 @@ package struct EditorStatusBar: View {
                 .accessibilityLabel("Строка \(tab.caret.line), столбец \(tab.caret.column)")
             item(selectionText)
             item("\(EditorSearch.number(tab.length)) симв. · \(EditorSearch.number(tab.lineCount)) стр.")
+            DollarFillItem(tab: tab, model: tab.dollars, mode: tab.mode, panelVisible: workspace.dollarPanelVisible).equatable()
             Spacer(minLength: 0)
             Menu {
                 ForEach(EditorLanguage.allCases, id: \.self) { language in
@@ -409,6 +410,36 @@ package struct EditorStatusBar: View {
         .background(open ? Color.dsField : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay { if open { RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.dsAccLine, lineWidth: 1.5) } }
         .contentShape(Rectangle())
+    }
+}
+
+/// «● Заполнено N из M» в строке состояния, пока открыта панель «$»: те же значения, что статусы строк панели.
+/// Следит только за списком знаков и режимом, не за всей вкладкой: курсор и набор текста счётчик не пересчитывают.
+private struct DollarFillItem: View, Equatable {
+    let tab: EditorTab
+    @ObservedObject var model: DollarPanelModel
+    let mode: EditorViewMode
+    let panelVisible: Bool
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.tab === b.tab && a.mode == b.mode && a.panelVisible == b.panelVisible
+    }
+
+    var body: some View {
+        if let fill = tab.dollarFill(panelVisible: panelVisible) {
+            HStack(spacing: 5) {
+                Circle().fill(Color.dsAccLine).frame(width: 6, height: 6).accessibilityHidden(true)
+                Text("Заполнено \(EditorSearch.number(fill.filled)) из \(EditorSearch.number(fill.total))")
+                    .font(DS.Font.manrope(12, .semibold, relativeTo: .caption))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.dsAccText)
+            .padding(.horizontal, 8)
+            .frame(height: 22)
+            .help("Подсвеченные знаки $ со значением — из всех подсвеченных")
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Заполнено \(fill.filled) из \(fill.total) знаков $")
+        }
     }
 }
 
