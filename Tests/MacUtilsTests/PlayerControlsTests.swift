@@ -200,12 +200,13 @@ final class PlayerEntryPointTests: XCTestCase {
             }
         }
         let editor = ["com.mruzhynskyi.macutils.frm", "public.plain-text", "public.rtf", "public.json", "public.xml",
-                      "public.comma-separated-values-text", "public.log", "com.apple.log", ".frm"]
+                      "public.comma-separated-values-text", "public.log", "com.apple.log", ".frm",
+                      "com.mruzhynskyi.macutils.dsl", ".dsl"]
         let viewer = ["public.mpeg-4", "com.apple.quicktime-movie", "com.apple.m4v-video",
                       "public.mp3", "com.apple.m4a-audio", "com.microsoft.waveform-audio", "public.aac-audio"]
         let expected = editor.map { "Editor \($0)" } + viewer.map { "Viewer \($0)" }
         XCTAssertEqual(claimed.count, Set(claimed).count, "без повторов")
-        XCTAssertEqual(Set(claimed), Set(expected), "15 UTI + .frm, роли прежние")
+        XCTAssertEqual(Set(claimed), Set(expected), "16 UTI + .frm и .dsl, роли прежние")
     }
 
     /// Значки документов: у каждого типа свой `DocIcon-<ext>.icns`, и это ровно список `scripts/make-doc-icons.swift`
@@ -218,11 +219,12 @@ final class PlayerEntryPointTests: XCTestCase {
         let types = try XCTUnwrap(info["CFBundleDocumentTypes"] as? [[String: Any]])
         let icons = types.compactMap { $0["CFBundleTypeIconFile"] as? String }
         XCTAssertEqual(icons.count, types.count, "у каждой записи есть значок")
-        // Значок повторяется только у `.frm`: запись по типу и запись по расширению — один и тот же DocIcon-frm.
+        // Значок повторяется только у наших типов `.frm` и `.dsl`: запись по типу и запись по расширению — один и тот же значок.
         var unique: [String] = []
         for icon in icons where !unique.contains(icon) { unique.append(icon) }
         XCTAssertEqual(icons.filter { $0 == "DocIcon-frm.icns" }.count, 2)
-        XCTAssertEqual(icons.count - unique.count, 1, "кроме .frm, значки не повторяются")
+        XCTAssertEqual(icons.filter { $0 == "DocIcon-dsl.icns" }.count, 2)
+        XCTAssertEqual(icons.count - unique.count, 2, "кроме .frm и .dsl, значки не повторяются")
         for type in types { XCTAssertEqual(type["LSHandlerRank"] as? String, "Alternate", "\(type["CFBundleTypeName"] ?? "?")") }
 
         let script = try String(contentsOf: root.appendingPathComponent("scripts/make-doc-icons.swift"), encoding: .utf8)
@@ -233,10 +235,16 @@ final class PlayerEntryPointTests: XCTestCase {
         XCTAssertEqual(generated, unique, "порядок и состав — как в Info.plist")
 
         XCTAssertNil(info["UTImportedTypeDeclarations"], ".frm объявлен нашим типом, импортированного больше нет")
-        let exported = try XCTUnwrap((info["UTExportedTypeDeclarations"] as? [[String: Any]])?.first)
-        XCTAssertEqual(exported["UTTypeIdentifier"] as? String, "com.mruzhynskyi.macutils.frm")
-        XCTAssertEqual(exported["UTTypeIconFile"] as? String, "DocIcon-frm.icns")
-        XCTAssertEqual(exported["UTTypeConformsTo"] as? [String], ["public.plain-text"], "Quick Look и Spotlight — как раньше")
+        // Наши типы: .frm и .dsl (словарь ABBYY Lingvo) — со значком, наследуют простой текст (Quick Look и Spotlight — как текст).
+        let exported = try XCTUnwrap(info["UTExportedTypeDeclarations"] as? [[String: Any]])
+        XCTAssertEqual(exported.compactMap { $0["UTTypeIdentifier"] as? String }, ["com.mruzhynskyi.macutils.frm", "com.mruzhynskyi.macutils.dsl"])
+        for (declaration, ext) in zip(exported, ["frm", "dsl"]) {
+            XCTAssertEqual(declaration["UTTypeIconFile"] as? String, "DocIcon-\(ext).icns")
+            XCTAssertEqual(declaration["UTTypeConformsTo"] as? [String], ["public.plain-text"])
+            let tags = declaration["UTTypeTagSpecification"] as? [String: Any]
+            XCTAssertEqual(tags?["public.filename-extension"] as? [String], [ext])
+        }
+        XCTAssertEqual(exported.last?["UTTypeDescription"] as? String, "Словарь DSL")
     }
 
     /// Видеоплеер выходит в 1.9 (вместе с режимом «Документ»): пункты — в записи «1.9», без номеров версий в тексте.

@@ -126,9 +126,10 @@ package struct EditorDocument {
         language = .plain
     }
 
-    /// Открыть байты: автоопределение кодировки (BOM → UTF-8 → `\ansicpgNNNN` → Windows-1252).
+    /// Открыть байты: автоопределение кодировки (BOM → UTF-8 → `\ansicpgNNNN` → Windows-1252; словарь `.dsl` — ещё по языку
+    /// заголовка, `TextEncoding.detectDSL`).
     package init(data: Data, url: URL? = nil) {
-        let detected = TextEncoding.detect(data)
+        let detected = url?.pathExtension.lowercased() == "dsl" ? TextEncoding.detectDSL(data) : TextEncoding.detect(data)
         self.url = url
         original = data
         decodedEncoding = detected.encoding
