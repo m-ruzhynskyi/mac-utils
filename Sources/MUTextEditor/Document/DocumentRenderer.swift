@@ -1026,9 +1026,15 @@ package final class DocRenderer {
         block.setWidth(padLeft, type: .absoluteValueType, for: .padding, edge: .minX)
         block.setWidth(padRight, type: .absoluteValueType, for: .padding, edge: .maxX)
         // Сверху и снизу — поля строки `\trpaddt`/`\trpaddb` (у Word по умолчанию 0: текст у самой линии сетки).
+        let cell = place.def
+        // Рамки ячейки у Word занимают место в высоте строки (по половине линии сверху и снизу), у нас их только рисует блок.
+        // Поля блока `NSTextTable` округляет до целых пунктов — полоса рамки (доли пункта) добавляется в `DocCellBlock`.
+        if ProcessInfo.processInfo.environment["MU_DIAG_BAND"] != nil {
+            block.band = (cell.borderTop.isVisible ? DocCellBlock.wordWidth(cell.borderTop.width) / 2 : 0,
+                          cell.borderBottom.isVisible ? DocCellBlock.wordWidth(cell.borderBottom.width) / 2 : 0)
+        }
         block.setWidth(CGFloat(place.padTop) / 20, type: .absoluteValueType, for: .padding, edge: .minY)
         block.setWidth(CGFloat(place.padBottom) / 20, type: .absoluteValueType, for: .padding, edge: .maxY)
-        let cell = place.def
         for (edge, border) in [(NSRectEdge.minY, cell.borderTop), (.maxY, cell.borderBottom), (.minX, cell.borderLeft), (.maxX, cell.borderRight)] {
             guard border.isVisible else { continue }
             block.lines.append(DocCellBlock.Line(edge: edge, width: DocCellBlock.wordWidth(border.width),
@@ -1144,6 +1150,8 @@ package final class DocCellBlock: NSTextTableBlock {
     package var ownAlignment: CGFloat = 0
     /// Высота содержимого, если её посчитали заранее (ячейка со вложенной таблицей), пункты.
     package var contentHeight: CGFloat?
+    /// Полосы рамок сверху и снизу, пункты: у Word рамка ячейки занимает место в высоте строки.
+    package var band: (top: CGFloat, bottom: CGFloat) = (0, 0)
 
     package override func rectForLayout(at startingPoint: NSPoint, in rect: NSRect, textContainer: NSTextContainer,
                                 characterRange charRange: NSRange) -> NSRect {
@@ -1155,8 +1163,8 @@ package final class DocCellBlock: NSTextTableBlock {
             let content = contentHeight ?? MainActor.assumeIsolated { Self.height(of: storage.attributedSubstring(from: charRange), width: layout.width) }
             shift = max(0, (inner - content) * ownAlignment)
         }
-        layout.origin.y += shift
-        appliedShift = shift
+        layout.origin.y += shift + band.top
+        appliedShift = shift + band.top
         return layout
     }
 
@@ -1196,7 +1204,7 @@ package final class DocCellBlock: NSTextTableBlock {
                              characterRange charRange: NSRange) -> NSRect {
         var bounds = super.boundsRect(forContentRect: contentRect, in: rect, textContainer: textContainer, characterRange: charRange)
         bounds.origin.y -= appliedShift
-        bounds.size.height += appliedShift
+        bounds.size.height += appliedShift + band.bottom
         if rowHeight != 0 { bounds.size.height = max(bounds.height, abs(rowHeight)) }
         return bounds
     }

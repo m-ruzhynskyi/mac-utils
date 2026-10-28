@@ -93,8 +93,12 @@ package enum DocLineMetrics {
             return true
         }
         var above: CGFloat = 0, below: CGFloat = 0
+        // Пробелы, табуляции и метка абзаца — запасной вариант: высоту строки задают её символы (как у Word).
+        var blankAbove: CGFloat = 0, blankBelow: CGFloat = 0
+        let rule1 = ProcessInfo.processInfo.environment["MU_DIAG_V1"] != nil
+        let whole = storage.string as NSString
         var object = false
-        storage.enumerateAttributes(in: characters) { attributes, _, stop in
+        storage.enumerateAttributes(in: characters) { attributes, range, stop in
             if let attachment = attributes[.attachment] as? NSTextAttachment, !(attachment.attachmentCell is DocFloatingCell) {
                 object = true
                 stop.pointee = true
@@ -106,9 +110,15 @@ package enum DocLineMetrics {
                 font = NSFont(descriptor: font.fontDescriptor, size: CGFloat(char.halfPoints) / 2) ?? font
             }
             let metrics = metrics(font)
+            if rule1, Self.blank(whole, range) {
+                blankAbove = max(blankAbove, metrics.above)
+                blankBelow = max(blankBelow, metrics.below)
+                return
+            }
             above = max(above, metrics.above)
             below = max(below, metrics.below)
         }
+        if above + below == 0 { above = blankAbove; below = blankBelow }
         guard !object, above + below > 0 else { return false }
         let text = storage.string as NSString
         let paragraph = text.paragraphRange(for: NSRange(location: characters.location, length: 0))
@@ -136,6 +146,21 @@ package enum DocLineMetrics {
         used.origin.y = rect.minY + before
         used.size.height = height
         baseline = before + height - below
+        // `\slmult`: добавок множителя — под текстом, базовая линия на ascent × min(m, 1) от верха строки (как у Word).
+        if ProcessInfo.processInfo.environment["MU_DIAG_V2"] != nil, let props, props.lineSpacing > 0, props.lineMultiple {
+            baseline = before + above * min(1, CGFloat(props.lineSpacing) / 240)
+        }
+        return true
+    }
+
+    /// Только пробелы, табуляции, метки абзаца и знаки нулевой ширины.
+    private static func blank(_ text: NSString, _ range: NSRange) -> Bool {
+        for index in range.location..<NSMaxRange(range) {
+            switch text.character(at: index) {
+            case 0x20, 0x09, 0x0A, 0x0D, 0x2028, 0x2029, 0x200B, 0xFEFF, 0x0C: continue
+            default: return false
+            }
+        }
         return true
     }
 }
