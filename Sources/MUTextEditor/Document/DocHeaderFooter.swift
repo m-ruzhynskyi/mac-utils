@@ -124,6 +124,8 @@ package final class DocHeaderSession: NSObject, NSTextViewDelegate {
         textView.setSelectedRange(NSRange(location: location, length: min(units.length, storage.length - location)))
     }
 
+    static let fieldShade = NSColor(white: 0.5, alpha: 0.16)
+
     /// Показанный текст колонтитула по модели контроллера; `selectSource` — выделение после правки.
     package func reload(selectSource: NSRange?) {
         guard let controller, let page else { return }
@@ -146,6 +148,15 @@ package final class DocHeaderSession: NSObject, NSTextViewDelegate {
         let (string, map) = (rendering.string, rendering.map)
         self.map = map
         storage.setAttributedString(string)
+        // Поля — серым фоном, как у Word в правке колонтитула: видно, что это поле, а не набранный текст.
+        // Вычисляемые (номер страницы) — единицы вида `.field`; остальные (дата, время, имя файла) — текст внутри группы поля.
+        let groups = controller.model.fields.map(\.group).filter { NSIntersectionRange($0, header.group).length > 0 }
+        for unit in 0..<min(map.count, storage.length) {
+            let inGroup = groups.contains { NSLocationInRange(map.range(at: unit).location, $0) }
+            if map.kind(at: unit) == .field || inGroup {
+                storage.addAttribute(.backgroundColor, value: Self.fieldShade, range: NSRange(location: unit, length: 1))
+            }
+        }
         layoutManager.showsInvisibles = controller.showsInvisibles
         layout()
         if let selectSource {
@@ -345,6 +356,16 @@ extension DocFormatter {
         let result = DocHeaderFooterEdits.insertPageNumber(number, story: session.story, unit: unit, map: session.map, source: tab.text,
                                                            model: controller.model)
         perform(result, name: "Номер страницы")
+    }
+
+    /// Поле у курсора: дата, время, число страниц, имя файла… (`HeaderField.catalog`).
+    package func insertField(_ field: HeaderField) {
+        guard let controller, let tab = controller.tab, let session = headerSession else { return }
+        let unit = session.textView.selectedRange().location
+        let name = tab.document.url?.lastPathComponent ?? ""
+        let result = DocHeaderFooterEdits.insertField(field, story: session.story, unit: unit, map: session.map, source: tab.text,
+                                                      model: controller.model, fileName: name)
+        perform(result, name: field.title)
     }
 
     package func removeHeader() {

@@ -125,34 +125,54 @@ package enum DocHeaderFooterEdits {
     /// колонтитула). Поля неделимы: внутрь поля не вставляется.
     package static func insertPageNumber(_ number: PageNumber, story ref: DocStoryRef, unit: Int, map: DocSourceMap, source: NSString,
                                  model: RTFDocumentModel) -> Result<FormatPlan, FormatFailure> {
+        insertField(number == .page ? .page : .pageOfTotal, story: ref, unit: unit, map: map, source: source, model: model)
+    }
+
+    /// Что и как пишется для поля: текст RTF, показанные единицы с их видом и виды вставленных полей.
+    private static func piece(_ field: HeaderField, encoding: TextEncoding, uc: Int, now: Date, fileName: String) -> (text: String, shown: [(String, RTFRun.Kind)], kinds: [RTFFieldKind]) {
+        func wrap(_ instruction: String, _ result: String) -> String {
+            "{\\field{\\*\\fldinst " + FormatText.encode(instruction, encoding: encoding, uc: uc) + " }{\\fldrslt " + FormatText.encode(result, encoding: encoding, uc: uc) + "}}"
+        }
+        switch field {
+        case .page:
+            return (wrap("PAGE", "1"), [("1", .field(.page))], [.page])
+        case .numPages:
+            return (wrap("NUMPAGES", "1"), [("1", .field(.numPages))], [.numPages])
+        case .sectionPages:
+            return (wrap("SECTIONPAGES", "1"), [("1", .field(.sectionPages))], [.sectionPages])
+        case .pageOfTotal:
+            let text = FormatText.encode("Стр. ", encoding: encoding, uc: uc) + wrap("PAGE", "1") + FormatText.encode(" из ", encoding: encoding, uc: uc) + wrap("NUMPAGES", "1")
+            return (text, [("Стр. ", .text), ("1", .field(.page)), (" из ", .text), ("1", .field(.numPages))], [.page, .numPages])
+        case .date(let picture):
+            let result = DocFieldFormat.text(picture: picture, date: now)
+            return (wrap("DATE \\@ \"\(picture)\"", result), [(result, .text)], [.other("DATE")])
+        case .time(let picture):
+            let result = DocFieldFormat.text(picture: picture, date: now)
+            return (wrap("TIME \\@ \"\(picture)\"", result), [(result, .text)], [.other("TIME")])
+        case .fileName:
+            return (wrap("FILENAME", fileName), [(fileName, .text)], [.other("FILENAME")])
+        }
+    }
+
+    /// Любое поле колонтитула у курсора: точечная правка, проверенная `FormatCheck` (в абзаце те же единицы плюс вставленные).
+    package static func insertField(_ field: HeaderField, story ref: DocStoryRef, unit: Int, map: DocSourceMap, source: NSString,
+                                    model: RTFDocumentModel, now: Date = Date(), fileName: String = "") -> Result<FormatPlan, FormatFailure> {
         guard let story = model.story(ref) else { return .failure(FormatFailure(reason: "Нет такого колонтитула")) }
         guard unit <= map.count else { return .failure(FormatFailure(reason: "Курсор вне колонтитула")) }
         if unit < map.count, map.kind(at: unit) == .field, unit > 0, map.kind(at: unit - 1) == .field, map.range(at: unit) == map.range(at: unit - 1) {
             return .failure(FormatFailure(reason: "Курсор внутри поля"))
         }
+        if field == .fileName, fileName.isEmpty { return .failure(FormatFailure(reason: "У документа ещё нет имени файла")) }
         let location = map.sourceLocation(beforeUnit: unit)
         // Кодировка и `\ucN` — у текста в этом месте.
         let (paragraphIndex, offset, run) = position(of: location, in: story)
         let encoding = FormatTables.encoding(of: model.font(run?.props.font), model: model)
         let uc = run?.uc ?? 1
-        let page = "{\\field{\\*\\fldinst PAGE }{\\fldrslt 1}}"
-        let text: String
-        let inserted: [(String, RTFRun.Kind)]
-        var fields: [RTFFieldKind] = [.page]
-        switch number {
-        case .page:
-            text = page
-            inserted = [("1", .field(.page))]
-        case .pageOfTotal:
-            text = FormatText.encode("Стр. ", encoding: encoding, uc: uc) + page + FormatText.encode(" из ", encoding: encoding, uc: uc)
-                + "{\\field{\\*\\fldinst NUMPAGES }{\\fldrslt 1}}"
-            inserted = [("Стр. ", .text), ("1", .field(.page)), (" из ", .text), ("1", .field(.numPages))]
-            fields.append(.numPages)
-        }
+        let built = piece(field, encoding: encoding, uc: uc, now: now, fileName: fileName)
         var plan = FormatPlan()
-        plan.edits = [FormatEdit(range: NSRange(location: location, length: 0), string: text, order: 1)]
-        let expectedUnits = inserted.flatMap { piece in piece.0.utf16.map { ($0, piece.1) } }
-        let allowance = FormatCheck.Allowance(extraFields: fields, story: ref) { before, after in
+        plan.edits = [FormatEdit(range: NSRange(location: location, length: 0), string: built.text, order: 1)]
+        let expectedUnits = built.shown.flatMap { piece in piece.0.utf16.map { ($0, piece.1) } }
+        let allowance = FormatCheck.Allowance(extraFields: built.kinds, story: ref) { before, after in
             insertionCheck(before, after, paragraph: paragraphIndex, offset: offset, units: expectedUnits)
         }
         if let problem = FormatCheck.verify(plan, source: source, model: model, allowing: allowance) { return .failure(FormatFailure(reason: problem)) }
@@ -194,7 +214,7 @@ package enum DocHeaderFooterEdits {
             }
             for (k, unit) in units.enumerated() {
                 let other = rhs[offset + k]
-                guard other.unit == unit.0, other.kind == unit.1 else { return "Номер страницы вставился не так" }
+                guard other.unit == unit.0, other.kind == unit.1 else { return "Поле вставилось не так" }
             }
         }
         return nil

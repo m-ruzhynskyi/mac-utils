@@ -572,6 +572,7 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         MainActor.assumeIsolated {
             if composing { return true }
             guard ranges.count == 1, let replacement = replacementStrings?.first else {
+                show(notice: "Правка нескольких мест сразу не поддерживается — выделите одно")
                 Feedback.beep()
                 return false
             }
@@ -595,7 +596,13 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
             return false
         }
         guard !result.edits.isEmpty else {
-            if units.length > 0 || !text.isEmpty { Feedback.beep() }
+            if units.length > 0 || !text.isEmpty {
+                // Границу ячейки, как в Word, Delete/⌫ не трогают и без подсказки (она вылезала бы на каждом ⌫ в начале ячейки);
+                // всё остальное — не тишина.
+                let onlyCellEnds = units.length > 0 && (units.location..<NSMaxRange(units)).allSatisfy { rendering.map.kind(at: $0) == .cellEnd }
+                if !onlyCellEnds { show(notice: text.isEmpty ? "Здесь нечего удалять. " + DocTextEditor.codeHint : "Здесь нельзя набирать. " + DocTextEditor.codeHint) }
+                Feedback.beep()
+            }
             return false
         }
         // Новые и сдвинутые пункты списков — готовый номер `{\listtext}` переписывается вместе с правкой.
@@ -614,6 +621,8 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
             let done = apply([DocEdit(range: NSRange(location: burst.source, length: 0), text: combined)], actionName: "Ввод") { rendering in
                 NSRange(location: rendering.caretUnit(atSource: end), length: 0)
             }
+            // Не вышло — возвращаем отменённый символ, а не теряем его.
+            if !done, tab.undo.canRedo { tab.undo.redo() }
             typingBurst = done ? TypingBurst(source: burst.source, text: combined, revision: tab.sourceRevision, time: Date()) : nil
             return done
         }

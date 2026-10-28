@@ -37,10 +37,10 @@ extension DocumentController {
         guard let tab else { return }
         let sections = Dictionary(grouping: pagesView.pages, by: \.section).mapValues(\.count)
         let values = DocFieldUpdate.Values(page: { [weak self] in self?.page(ofSource: $0) }, total: max(1, pagesView.pages.count),
-                                           sectionPages: { sections[$0] })
+                                           sectionPages: { sections[$0] }, now: Date())
         let result = DocFieldUpdate.edits(model: model, source: tab.text, values: values)
         guard !result.edits.isEmpty else {
-            return show(notice: result.fields == 0 ? "В документе нет полей номера страницы" : "Поля уже показывают верные номера")
+            return show(notice: result.fields == 0 ? "В документе нет полей номера страницы, даты и времени" : "Поля уже показывают верные номера")
         }
         let selection = selectedUnits
         if apply(result.edits, actionName: "Обновить поля", select: { _ in selection }) {

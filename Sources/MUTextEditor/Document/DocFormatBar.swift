@@ -422,11 +422,37 @@ package struct DocHeaderFooterBar: View {
             Menu {
                 Button("Номер страницы") { formatter.insertPageNumber(.page) }
                 Button("Стр. X из Y") { formatter.insertPageNumber(.pageOfTotal) }
+                Button("Число страниц") { formatter.insertField(.numPages) }
             } label: {
                 Label(short ? "Номер" : "Номер страницы", systemImage: "number")
             }
             .menuStyle(.borderlessButton).fixedSize()
             .help("Вставить номер страницы у курсора")
+            Menu {
+                Section("Дата") {
+                    ForEach(HeaderField.datePictures, id: \.self) { picture in
+                        Button(HeaderField.date(picture).title.replacingOccurrences(of: "Дата · ", with: "")) { formatter.insertField(.date(picture)) }
+                    }
+                }
+                Section("Время") {
+                    ForEach(HeaderField.timePictures, id: \.self) { picture in
+                        Button(HeaderField.time(picture).title.replacingOccurrences(of: "Время · ", with: "")) { formatter.insertField(.time(picture)) }
+                    }
+                }
+            } label: {
+                Label(short ? "Дата" : "Дата и время", systemImage: "calendar")
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("Вставить дату или время (поле DATE / TIME) у курсора")
+            Menu {
+                ForEach(Array(HeaderField.catalog.enumerated()), id: \.offset) { _, field in
+                    Button(field.title) { formatter.insertField(field) }
+                }
+            } label: {
+                Label(short ? "Поле" : "Поле…", systemImage: "textformat.123")
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("Вставить поле у курсора: числа страниц, дата, время, имя файла")
             Button { formatter.removeHeader() } label: { Label("Удалить", systemImage: "trash") }
                 .buttonStyle(.borderless).fixedSize()
                 .help("Удалить этот колонтитул из файла")

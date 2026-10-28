@@ -38,6 +38,7 @@ extension DocumentController {
         } else if forward {
             insertTableRow(below: true)
         } else {
+            show(notice: "Это первая ячейка таблицы")
             Feedback.beep()
         }
         return true
