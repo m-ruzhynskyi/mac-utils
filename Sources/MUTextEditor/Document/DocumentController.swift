@@ -61,6 +61,8 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     @Published package private(set) var pageCount = 1
     @Published package private(set) var currentPage = 1
     @Published package private(set) var currentSection = 1
+    /// Язык текста у курсора (`\lang`), для строки состояния.
+    @Published package private(set) var languageName: String?
     @Published package private(set) var wordCount = 0
     @Published package private(set) var selection = DocSelectionInfo()
 
@@ -202,9 +204,12 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         var count = 0
         var inWord = false
         for paragraph in story.paragraphs {
-            for run in paragraph.runs where !run.props.hidden && (run.kind == .text) {
+            for run in paragraph.runs where !run.props.hidden {
+                // Перевод строки, табуляция, поле, рисунок разделяют слова (`слово\lineслово` — два слова), в счёт не входят.
+                // Результат поля (номер страницы) Word считает словом, как и текст.
+                if case .field = run.kind {} else { guard run.kind == .text else { inWord = false; continue } }
                 for scalar in run.text.unicodeScalars {
-                    let letter = !scalar.properties.isWhitespace
+                    let letter = !scalar.properties.isWhitespace || scalar.value == 0xA0
                     if letter, !inWord { count += 1 }
                     inWord = letter
                 }
@@ -589,6 +594,13 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         if let list = DocListEdit.intercept(units, text: text, model: model, rendering: rendering, source: tab.text) {
             return perform(list)
         }
+        // Автозамена (выключена по умолчанию): один набранный знак может заменить и знак слева («--» → «—»).
+        var units = units, text = text
+        if UserDefaults.standard.bool(forKey: Pref.docAutocorrect), !composing,
+           let fix = DocAutoCorrect.resolve(units: units, typed: text, shown: storage.string as NSString, isPlainText: { [rendering] in rendering.map.kind(at: $0) == .text }) {
+            units = fix.units
+            text = fix.text
+        }
         var result = DocTextEditor.replace(units, with: text, model: model, map: rendering.map, source: tab.text)
         if let refusal = result.refusal {
             show(notice: refusal)
@@ -740,9 +752,20 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
             if currentPage != index + 1 { currentPage = index + 1 }
             if currentSection != page.section + 1 { currentSection = page.section + 1 }
         }
+        let language = languageAtCaret(selection)
+        if language != languageName { languageName = language }
         let info = selectionInfo(selection)
         if info != self.selection { self.selection = info }
         if tab?.mode == .document { tab?.dollars.caretMoved(to: sourceSelection) }  // статус «правится» в панели «$»
+    }
+
+    private func languageAtCaret(_ selection: NSRange) -> String? {
+        guard let tab, storage.length > 0 else { return nil }
+        let unit = min(selection.location, storage.length)
+        let location = rendering.map.sourceLocation(beforeUnit: unit)
+        let paragraph = rendering.paragraph(atUnit: min(unit, max(0, storage.length - 1))).flatMap { model.body.paragraphs[safe: $0] }
+        let start = paragraph?.regionStart ?? max(0, location - 2000)
+        return DocLanguage.name(lcid: DocLanguage.lcid(atSource: location, from: start, in: tab.text))
     }
 
     private func selectionInfo(_ selection: NSRange) -> DocSelectionInfo {

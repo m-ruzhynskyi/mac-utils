@@ -699,6 +699,9 @@ package final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuIt
         case #selector(editorToggleInvisibles(_:)):
             item.state = workspace.showsInvisibles ? .on : .off
             return tab != nil
+        case #selector(editorToggleAutocorrect(_:)):
+            item.state = UserDefaults.standard.bool(forKey: Pref.docAutocorrect) ? .on : .off
+            return tab?.mode == .document
         case #selector(editorToggleBrackets(_:)):
             item.state = workspace.matchesBrackets ? .on : .off
             return tab != nil
@@ -755,6 +758,9 @@ package final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuIt
     @objc package func editorToggleDocument(_ sender: Any?) { if let tab { tab.setMode(tab.mode == .document ? .code : .document) } }
     @objc package func editorShowCode(_ sender: Any?) { tab?.setMode(.code) }
     @objc package func editorToggleInvisibles(_ sender: Any?) { workspace.showsInvisibles.toggle() }
+    @objc package func editorToggleAutocorrect(_ sender: Any?) {
+        UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: Pref.docAutocorrect), forKey: Pref.docAutocorrect)
+    }
     @objc package func editorToggleBrackets(_ sender: Any?) { workspace.matchesBrackets.toggle() }
     @objc package func editorZoomIn(_ sender: Any?) {
         if let document = documentInFront { return document.step(zoom: 1) }
