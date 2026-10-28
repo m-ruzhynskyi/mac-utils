@@ -18,6 +18,9 @@ package enum FontSubstitution {
         "Cambria Math": "STIX Two Math",
     ]
 
+    /// Метрически совместимые замены (те же ширины знаков): из ресурсов приложения, когда нет Word (`WordFonts`).
+    static let twins: [String: String] = ["Calibri": "Carlito", "Cambria": "Caladea"]
+
     /// Имя без приставок старых кириллических шрифтов Windows («Times New Roman Cyr» → «Times New Roman»).
     package static func baseName(_ name: String) -> String {
         var name = name.trimmingCharacters(in: .whitespaces)
@@ -27,11 +30,12 @@ package enum FontSubstitution {
         return name
     }
 
-    /// Семейство для показа: само (если есть), из таблицы замен, по семейству `\fonttbl` или по `\panose`.
+    /// Семейство для показа: само (если есть), метрически совместимая замена, из таблицы замен, по семейству `\fonttbl` или по `\panose`.
     package static func display(for name: String, family: RTFFont.Family = .nil_, panose: String? = nil,
                         available: (String) -> Bool = FontCatalog.isInstalled) -> String {
         let base = baseName(name)
         if !base.isEmpty, available(base) { return base }
+        if let twin = twins[base], available(twin) { return twin }
         if let replacement = table[base], available(replacement) { return replacement }
         let byFamily: String
         switch family {
@@ -78,7 +82,9 @@ package enum FontCatalog {
 
     package static var installedFamilies: Set<String> {
         if let installedCache { return installedCache }
-        let families = Set(NSFontManager.shared.availableFontFamilies)
+        // CoreText, а не `NSFontManager`: тот видит шрифты, зарегистрированные для процесса (`WordFonts`), только после
+        // прохода цикла событий, а раскладка идёт сразу.
+        let families = Set(CTFontManagerCopyAvailableFontFamilyNames() as? [String] ?? NSFontManager.shared.availableFontFamilies)
         installedCache = families
         return families
     }

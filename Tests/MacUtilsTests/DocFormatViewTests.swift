@@ -96,7 +96,9 @@ final class DocFormatViewTests: XCTestCase {
         formatter.updateState()
         XCTAssertEqual(formatter.state.fontName, "Calibri", "в файле — исходное имя")
         if !FontCatalog.isInstalled("Calibri") {
-            XCTAssertEqual(formatter.state.displayFont, "Helvetica Neue", "на экране — замена")
+            // Нет Word — замена той же ширины из ресурсов (Carlito), без неё — по таблице.
+            XCTAssertEqual(formatter.state.displayFont, FontSubstitution.display(for: "Calibri"), "на экране — замена")
+            XCTAssertNotEqual(formatter.state.displayFont, "Calibri")
         }
         XCTAssertTrue(tab.text.contains("Calibri;}"))
         // Размер −/+ по списку Word, поле принимает 10,5.

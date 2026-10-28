@@ -143,6 +143,8 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         let sourceStart = rendering.map.sourceLocation(beforeUnit: oldSelection.location)
         let sourceEnd = rendering.map.sourceLocation(beforeUnit: NSMaxRange(oldSelection))
         let fresh = RTFReader.read(tab.text, fallback: tab.document.encoding)
+        // Шрифты Word (Calibri, Cambria…) — до раскладки, чтобы ширины строк были как у Word.
+        WordFonts.prepare(fresh.fonts.values.map(\.name))
         renderer.contentWidth = DocPageView.bodyRect(fresh.sections.first?.props ?? RTFSectionProps()).width
         // Полная перерисовка (первый показ, ¶) — весь текст заново; иначе заплатка на изменившиеся абзацы.
         let (next, patch) = renderer.render(fresh, previous: force ? nil : rendering)
@@ -260,6 +262,14 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         MainActor.assumeIsolated {
             DocLineMetrics.completed(layoutManager)
             completedLayout(container, atEnd: atEnd)
+        }
+    }
+
+    /// Перенос по словам — только там, где его делает Word (`WordLineBreaks`).
+    package nonisolated func layoutManager(_ layoutManager: NSLayoutManager, shouldBreakLineByWordBeforeCharacterAt charIndex: Int) -> Bool {
+        MainActor.assumeIsolated {
+            guard let text = layoutManager.textStorage?.mutableString else { return true }
+            return WordLineBreaks.allowsBreak(before: charIndex, in: text)
         }
     }
 
