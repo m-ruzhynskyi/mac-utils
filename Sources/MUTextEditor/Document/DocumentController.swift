@@ -59,6 +59,8 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     /// Совпадения поиска (показанные единицы) и текущее — `DocFind.swift`.
     package internal(set) var findMatches: [NSRange] = []
     package internal(set) var findCurrent: Int?
+    /// Орфография (`DocSpelling.swift`).
+    package lazy var spelling = DocSpelling(controller: self)
     private var observers: [NSObjectProtocol] = []
 
     @Published package private(set) var pageCount = 1
@@ -157,6 +159,7 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         let string = patch.string
         model = fresh
         rendering = next
+        if spelling.isEnabled { spelling.schedule() }
         // Колонтитулы перерисовываются, только если изменились их группы (иначе — по кэшу).
         var hasher = Hasher()
         let source = tab.text

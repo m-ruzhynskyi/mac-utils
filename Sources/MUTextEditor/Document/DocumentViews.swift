@@ -116,7 +116,7 @@ package struct DocStatusBar: View {
                 .accessibilityLabel("Страница \(document.currentPage) из \(document.pageCount)")
             item("Раздел \(document.currentSection)")
             item("\(EditorSearch.number(document.wordCount)) \(plural(document.wordCount, "слово", "слова", "слов"))")
-            if let language = document.languageName { item(language).help("Язык текста у курсора (\\lang)") }
+            languageMenu
             if let name = document.selection.fontName, let shown = document.selection.displayFont,
                FontSubstitution.baseName(name) != shown {
                 item("\(name) → \(shown)").help("Шрифта «\(name)» нет на Mac: показан заменой, в файле остаётся «\(name)»")
@@ -154,6 +154,22 @@ package struct DocStatusBar: View {
         .background(Color.dsSide.ignoresSafeArea())
         .overlay(alignment: .top) { Rectangle().fill(Color.dsLine).frame(height: 1) }
         .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
+    }
+
+    /// Язык у курсора (`\lang`) и проверка орфографии: по языку текста, одним языком на весь документ или выключена. Выбор — на время сеанса, в файл не пишется.
+    @ViewBuilder private var languageMenu: some View {
+        let on = UserDefaults.standard.bool(forKey: Pref.docSpelling)
+        Menu {
+            Toggle("Проверять орфографию", isOn: Binding(get: { on }, set: { _ in EditorWindowController.shared.editorToggleSpelling(nil) }))
+            Divider()
+            Button("Язык по тексту (\\lang)") { document.spelling.choice = .automatic }
+            Button("Русский") { document.spelling.choice = .fixed("ru") }
+            Button("Украинский") { document.spelling.choice = .fixed("uk") }
+            Button("Английский") { document.spelling.choice = .fixed("en_US") }
+            Button("Не проверять") { document.spelling.choice = .off }
+        } label: { label(document.languageName ?? "Язык", menu: true) }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .help("Язык текста у курсора (\\lang) и проверка орфографии")
     }
 
     private var zoomTitle: String {
