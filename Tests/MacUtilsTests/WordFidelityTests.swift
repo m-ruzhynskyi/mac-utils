@@ -3,6 +3,10 @@ import PDFKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUDesign
+@testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// «Документ» против эталона Word. Эталон — PDF, которые сделал сам Word из копий форм (`pdf/fNNN.pdf` к `rtf/fNNN.rtf`).
 /// Наша сторона раскладывается тем же путём, что в приложении (вкладка в «Документе», `DocPageView`, колонтитулы),
@@ -99,6 +103,40 @@ final class WordFidelityTests: XCTestCase {
         XCTAssertEqual(WordFidelity.top(a, b).1 - WordFidelity.top(a, b).0, 0.5, accuracy: 0.001, "другой шрифт, та же базовая линия")
     }
 
+    /// Растр своего же PDF против себя — 0 %; против пустого листа — доля закрашенного; старая база без колонок читается.
+    func testVisualComparison() throws {
+        var rtf = #"{\rtf1\ansi\deff0{\fonttbl{\f0\froman Times New Roman;}}{\colortbl;\red200\green0\blue0;}\paperw11906\paperh16838"#
+        for number in 1...30 { rtf += #"\pard\plain\fs24 Line "# + "\(number)" + #" of demo text\par "# }
+        rtf += #"\pard\plain\cf1\fs24 Red line\par}"#
+        let pdf = try render(try open(Data(rtf.utf8), name: "visual.rtf"))
+        let lines = WordFidelity.lines(pdf)
+        let same = WordVisual.compare(word: pdf, ours: pdf, wordLines: lines, ourLines: lines, wordSegments: [], ourSegments: [])
+        XCTAssertEqual(same.maxDifference, 0)
+        XCTAssertTrue(same.identical)
+        XCTAssertGreaterThan(same.inked[.text] ?? 0, 1000, "текст попал в область «текст»")
+        XCTAssertEqual(same.color(.text), 0)
+
+        let blank = WordVisual.compare(word: pdf, ours: PDFDocument(), wordLines: lines, ourLines: [], wordSegments: [], ourSegments: [])
+        XCTAssertEqual(blank.pages.count, pdf.pageCount, "нет нашей страницы — против пустого листа")
+        XCTAssertGreaterThan(blank.maxDifference, 0.005)
+        XCTAssertFalse(blank.identical)
+
+        // Тот же текст другим цветом: пикселей почти не меньше, а «цвет другой» в тексте — почти весь.
+        let red = try render(try open(Data(rtf.replacingOccurrences(of: #"\cf1"#, with: "").replacingOccurrences(of: #"\fs24 Line"#, with: #"\cf1\fs24 Line"#).utf8), name: "red.rtf"))
+        let colored = WordVisual.compare(word: pdf, ours: red, wordLines: lines, ourLines: WordFidelity.lines(red), wordSegments: [], ourSegments: [])
+        XCTAssertGreaterThan(colored.color(.text), 0.5, "чёрный против красного")
+
+        var row = WordGate.Row(name: "f001")
+        row.add(same)
+        XCTAssertEqual(WordGate.rows(WordGate.tsv([row])).first?.visualIdentical, true)
+        let old = WordGate.Row.header.prefix(WordGate.Row.headerWithoutVisual).joined(separator: "\t") + "\n"
+            + WordGate.Row(name: "f002").fields.prefix(WordGate.Row.headerWithoutVisual).joined(separator: "\t")
+        XCTAssertEqual(WordGate.rows(old).first.map { ($0.name, $0.hasVisual) }?.1, false)
+        var worse = row
+        worse.visualMax = 0.01
+        XCTAssertEqual(WordGate.worse(worse, than: row), ["пиксели 0,00 % → 1,00 %"])
+    }
+
     func testGateRulesAndTSV() {
         var base = WordGate.Row(name: "f001")
         base.pagesWord = 2; base.pagesOurs = 3; base.breaks = 0.9; base.shiftP95 = 4; base.cellWraps = 2; base.extraWords = 5
@@ -165,6 +203,7 @@ final class WordFidelityTests: XCTestCase {
         let manager = FileManager.default
         var names = try manager.contentsOfDirectory(atPath: base.appendingPathComponent("rtf").path)
             .filter { $0.hasSuffix(".rtf") && !$0.hasPrefix("~") }.map { ($0 as NSString).deletingPathExtension }.sorted()
+        XCTAssertFalse(names.isEmpty, "нет fNNN.rtf")
         if let only = environment["MU_WORD_REF_ONLY"], !only.isEmpty {
             let wanted = Set(only.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) })
             names = names.filter(wanted.contains)
@@ -174,7 +213,9 @@ final class WordFidelityTests: XCTestCase {
             guard parts.count == 2, parts[1] > 0, (0..<parts[1]).contains(parts[0]) else { throw XCTSkip("MU_WORD_REF_SHARD=i/n") }
             names = names.enumerated().filter { $0.offset % parts[1] == parts[0] }.map(\.element)
         }
-        XCTAssertFalse(names.isEmpty, "нет fNNN.rtf")
+        // Уже сделанные и зависшие формы (сторож scripts/word-gate.sh перезапускает долю без них).
+        let skipped = Set((environment["MU_WORD_REF_SKIP"] ?? "").split(separator: ",").map(String.init))
+        names = names.filter { !skipped.contains($0) }
         var report = FidelityReport()
         var rows: [WordGate.Row] = []
         if let subset = environment["MU_WORD_REF_SUBSET_DIR"], !subset.isEmpty {
@@ -191,31 +232,42 @@ final class WordFidelityTests: XCTestCase {
             guard let data = try? Data(contentsOf: rtf), let wordPDF = PDFDocument(url: wordURL) else {
                 report.failed.append(name)
                 rows.append(WordGate.Row(name: name, failed: true))
+                Self.append(rows[rows.count - 1])
                 continue
             }
             let started = Date()
+            // Сторож скрипта смотрит на эти строки: нет новой дольше таймаута — форма зависла (раскладка не кончается).
+            Self.progress("word-fidelity start \(name)")
             autoreleasepool {
                 do {
                     let document = try open(data, name: "\(name).rtf")
                     let ours = try render(document)
                     let geometry = PageGeometry(document)
-                    let ourLines = WordFidelity.lines(ours)
-                    var result = WordFidelity.compare(word: WordFidelity.lines(wordPDF), ours: ourLines,
+                    let ourLines = WordFidelity.lines(ours), wordLines = WordFidelity.lines(wordPDF)
+                    let wordSegments = WordFidelity.segments(wordPDF), ourSegments = WordFidelity.segments(ours)
+                    var result = WordFidelity.compare(word: wordLines, ours: ourLines,
                                                       pagesWord: wordPDF.pageCount, pagesOurs: ours.pageCount,
-                                                      category: geometry.category, wordSegments: WordFidelity.segments(wordPDF),
-                                                      ourSegments: WordFidelity.segments(ours))
+                                                      category: geometry.category, wordSegments: wordSegments, ourSegments: ourSegments)
                     let sizes = zip(WordFidelity.pageSizes(wordPDF), WordFidelity.pageSizes(ours))
                     result.sizeMismatch = sizes.contains { abs($0.width - $1.width) > 1 || abs($0.height - $1.height) > 1 }
                     report.add(name, result, lines: ourLines, category: geometry.category, constructs: geometry.constructs)
-                    rows.append(WordGate.Row(name: name, result))
+                    var row = WordGate.Row(name: name, result)
+                    // Растры только в памяти (реальные формы): ни файлов, ни снимков. MU_WORD_VISUAL=0 — без них.
+                    if environment["MU_WORD_VISUAL"] != "0" {
+                        // Строка на каждую страницу — сторож скрипта видит, что длинная форма не зависла.
+                        row.add(WordVisual.compare(word: wordPDF, ours: ours, wordLines: wordLines, ourLines: ourLines,
+                                                   wordSegments: wordSegments, ourSegments: ourSegments) { Self.progress("word-fidelity \(name) пиксели, стр. \($0 + 1)") })
+                    }
+                    rows.append(row)
                 } catch {
                     report.failed.append(name)
                     rows.append(WordGate.Row(name: name, failed: true))
                 }
+                if let row = rows.last, row.name == name { Self.append(row) }
                 for window in windows { window.contentView = nil; window.close() }
                 windows = []
             }
-            print("word-fidelity \(name): \(String(format: "%.1f", Date().timeIntervalSince(started))) с")
+            Self.progress("word-fidelity \(name): \(String(format: "%.1f", Date().timeIntervalSince(started))) с")
         }
         let text = report.markdown()
         print(text)
@@ -225,15 +277,31 @@ final class WordFidelityTests: XCTestCase {
         if environment["MU_WORD_FIDELITY_STRICT"] == "1" {
             XCTAssertEqual(report.identical, report.files.count, "идентично Word: \(report.identical) из \(report.files.count)")
         }
-        if let out = environment["MU_WORD_FIDELITY_TSV"], !out.isEmpty {
-            try WordGate.tsv(rows).write(toFile: (out as NSString).expandingTildeInPath, atomically: true, encoding: .utf8)
-        }
         let baseline = Self.baselinePath(base)
         if environment["MU_WORD_FIDELITY_GATE"] == "1" { try gate(rows, baseline: baseline) }
         if environment["MU_WORD_FIDELITY_WRITE_BASELINE"] == "1" {
             try WordGate.tsv(rows).write(toFile: baseline, atomically: true, encoding: .utf8)
             print("word-gate: база записана, форм \(rows.count)")
         }
+    }
+
+    /// Строка прогресса сразу в вывод (без буфера: по ней сторож ловит зависание).
+    private static func progress(_ line: String) {
+        print(line)
+        fflush(stdout)
+    }
+
+    /// Числа формы — сразу в MU_WORD_FIDELITY_TSV (дописываем): если процесс снимут, готовое не теряется.
+    private static func append(_ row: WordGate.Row) {
+        guard let out = ProcessInfo.processInfo.environment["MU_WORD_FIDELITY_TSV"], !out.isEmpty else { return }
+        let path = (out as NSString).expandingTildeInPath
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: Data((WordGate.Row.header.joined(separator: "\t") + "\n").utf8))
+        }
+        guard let handle = FileHandle(forWritingAtPath: path) else { return }
+        handle.seekToEndOfFile()
+        handle.write(Data((row.fields.joined(separator: "\t") + "\n").utf8))
+        handle.closeFile()
     }
 
     /// Гейт по готовым числам прогона (склейка TSV шардов из `scripts/word-gate.sh`): раскладки здесь нет.

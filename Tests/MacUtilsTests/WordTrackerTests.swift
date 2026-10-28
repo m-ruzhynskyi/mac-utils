@@ -1,6 +1,8 @@
 import Carbon.HIToolbox
 import XCTest
 @testable import MacUtils
+@testable import MULayoutFix
+@testable import MUTextEditor
 
 final class WordTrackerTests: XCTestCase {
     private func type(_ tracker: inout WordTracker, _ text: String, modifiers: WordTracker.Modifiers = []) {

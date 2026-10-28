@@ -1,5 +1,9 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUWellbeing
+import MUUpdate
 
 /// Окно «Инструменты»: удаление программ, монитор системы, диспетчер задач
 /// и очистка диска — вкладками в одном окне (⌃⌥⌘T).
@@ -90,7 +94,7 @@ final class ToolsWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        if !SettingsWindowController.shared.isVisible { FocusReturn.restore() }
+        if !AppRouter.shared.settingsVisible() { FocusReturn.restore() }
     }
 }
 
@@ -172,7 +176,8 @@ struct ToolsView: View {
             Group {
                 if PanelSectionView.usesPage(section) {
                     // Инструменты и разделы со своей страницей — в полном виде, как в окне раньше.
-                    SettingsSectionPage(section: section)
+                    // «Удалённые» и в окне — список компьютеров, параметры — в настройках.
+                    SettingsSectionPage(section: section, compact: section == .remote)
                 } else {
                     PanelSectionView(section: section)
                         .frame(maxWidth: 640)

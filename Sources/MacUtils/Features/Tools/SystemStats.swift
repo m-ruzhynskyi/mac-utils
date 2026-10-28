@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import IOKit.ps
+import MUTextEditor
 
 /// Снимки системных счётчиков и расчёты по ним (без UI — для тестов).
 enum SystemStats {

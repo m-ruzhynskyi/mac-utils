@@ -1,5 +1,7 @@
 import XCTest
 @testable import MacUtils
+@testable import MUMeetings
+@testable import MUAudio
 
 final class MeetingFilesTests: XCTestCase {
     private var root: URL!

@@ -1,5 +1,10 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUUninstaller
+import MUAudio
+import MUTextEditor
 
 /// Группа того, что можно убрать, и правила отбора (без UI — для тестов).
 struct CleanupCategory: Identifiable {

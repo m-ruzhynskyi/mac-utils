@@ -1,4 +1,5 @@
 import AppKit
+@testable import MUDesign
 
 // Стенд для WindowSnapStandTests: своё окно с объединённой панелью инструментов (как Finder, Safari, Заметки на
 // macOS 27) в отдельном процессе. Печатает pid, рамку окна в координатах AX и высоту полосы над содержимым — только
