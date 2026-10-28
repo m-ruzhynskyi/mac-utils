@@ -21,7 +21,7 @@ let audio = Group(tint: 0xFFF5DF, fold: 0xF5B83D, edge: 0xD39A26, ink: 0x8A5300)
 
 // Тот же список, что CFBundleTypeIconFile в Resources/Info.plist (сверяет scripts/check-doc-icons.sh).
 let types: [(ext: String, group: Group)] = [
-    ("frm", docs), ("txt", docs), ("rtf", docs), ("json", docs), ("xml", docs), ("csv", docs), ("log", docs),
+    ("frm", docs), ("dsl", docs), ("txt", docs), ("rtf", docs), ("json", docs), ("xml", docs), ("csv", docs), ("log", docs),
     ("mp4", video), ("mov", video), ("m4v", video),
     ("mp3", audio), ("m4a", audio), ("wav", audio), ("aac", audio),
 ]

@@ -214,6 +214,8 @@ package enum TextEncoding: String, CaseIterable, Codable, Sendable {
 
     package enum Reason: Equatable {
         case bom, validUTF8, rtfCodePage(Int), fallback, manual
+        /// Словарь DSL без BOM и не UTF-8: по языку из заголовка (`#INDEX_LANGUAGE "Russian"`).
+        case dslLanguage(String)
 
         package var title: String {
             switch self {
@@ -222,6 +224,7 @@ package enum TextEncoding: String, CaseIterable, Codable, Sendable {
             case .rtfCodePage(let page): return "по \\ansicpg\(page)"
             case .fallback: return "по умолчанию"
             case .manual: return "выбрана вручную"
+            case .dslLanguage(let language): return "по языку словаря (\(language))"
             }
         }
     }
@@ -242,6 +245,34 @@ package enum TextEncoding: String, CaseIterable, Codable, Sendable {
         }
         if ascii { return (.utf8, .validUTF8) }
         return (.windows1252, .fallback)
+    }
+
+    /// Языки ABBYY Lingvo на кириллице: словарь DSL без BOM с таким языком — Windows-1251.
+    package static let cyrillicDSLLanguages: Set<String> = ["russian", "ukrainian", "belarusian", "bulgarian", "serbian", "macedonian",
+                                                             "kazakh", "tatar", "kyrgyz", "bashkir", "chuvash", "mongolian", "tajik"]
+
+    /// Словарь ABBYY Lingvo (`.dsl`): обычно UTF-16 LE с BOM, бывает UTF-8; без BOM и не UTF-8 — однобайтовая кодировка, которую
+    /// подсказывает язык заголовка (`#INDEX_LANGUAGE` / `#CONTENTS_LANGUAGE`): кириллица — Windows-1251, иначе как обычно.
+    package static func detectDSL(_ data: Data) -> (encoding: TextEncoding, reason: Reason) {
+        let detected = detect(data)
+        guard detected.reason == .fallback else { return detected }
+        if let language = dslLanguages(data).first(where: { cyrillicDSLLanguages.contains($0.lowercased()) }) {
+            return (.windows1251, .dslLanguage(language))
+        }
+        return detected
+    }
+
+    /// Языки из заголовка DSL: значения `#INDEX_LANGUAGE "…"` и `#CONTENTS_LANGUAGE "…"` (ASCII в начале файла).
+    package static func dslLanguages(_ data: Data) -> [String] {
+        let head = String(decoding: data.prefix(4096).map { $0 < 0x80 ? $0 : 0x20 }, as: UTF8.self)
+        var languages: [String] = []
+        for line in head.split(whereSeparator: \.isNewline) {
+            let text = line.trimmingCharacters(in: .whitespaces)
+            guard text.hasPrefix("#INDEX_LANGUAGE") || text.hasPrefix("#CONTENTS_LANGUAGE") else { continue }
+            let parts = text.split(separator: "\"")
+            if parts.count >= 2 { languages.append(String(parts[1]).trimmingCharacters(in: .whitespaces)) }
+        }
+        return languages
     }
 
     /// Номер из `\ansicpgNNNN` в начале файла (RTF пишет его в заголовке).
