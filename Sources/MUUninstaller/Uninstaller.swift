@@ -192,7 +192,7 @@ package final class UninstallerModel: ObservableObject {
             do {
                 try FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
             } catch {
-                Log.uninstall.error("Не удалось в Корзину: \(item.url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                Log.uninstall.error("Не удалось в Корзину: \(item.url.path, privacy: .private): \(error.localizedDescription, privacy: .private)")
                 failed.append(item)
             }
         }
@@ -261,20 +261,20 @@ package final class UninstallerModel: ObservableObject {
         do {
             items = try manager.contentsOfDirectory(at: staging, includingPropertiesForKeys: nil)
         } catch {
-            Log.uninstall.error("Не удалось прочитать \(staging.path, privacy: .public), файлы могут остаться в нём: \(error.localizedDescription, privacy: .public)")
+            Log.uninstall.error("Не удалось прочитать \(staging.path, privacy: .private), файлы могут остаться в нём: \(error.localizedDescription, privacy: .private)")
             return false
         }
         var ok = true
         for item in items {
             do { try manager.trashItem(at: item, resultingItemURL: nil) } catch {
-                Log.uninstall.error("Не удалось в Корзину: \(item.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                Log.uninstall.error("Не удалось в Корзину: \(item.path, privacy: .private): \(error.localizedDescription, privacy: .private)")
                 ok = false
             }
         }
         // Если что-то осталось, каталог не трогаем: файлы остаются доступны пользователю.
         guard ok else { return false }
         do { try manager.removeItem(at: staging) } catch {
-            Log.uninstall.error("Не удалось удалить \(staging.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            Log.uninstall.error("Не удалось удалить \(staging.path, privacy: .private): \(error.localizedDescription, privacy: .private)")
             return false
         }
         return true

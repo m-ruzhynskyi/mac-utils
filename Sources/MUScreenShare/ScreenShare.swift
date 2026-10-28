@@ -10,10 +10,6 @@ import MUAudio
 
 /// Код комнаты и адрес (без сети — для тестов).
 package enum ShareCode {
-    package static func random() -> String {
-        String(format: "%06d", Int.random(in: 0...999_999))
-    }
-
     /// Постоянный 10-значный ID этого Mac (как в AnyDesk): по нему к вам подключаются.
     package static var myID: String {
         if let saved = UserDefaults.standard.string(forKey: Pref.shareID), saved.count == 10 { return saved }
@@ -23,12 +19,20 @@ package enum ShareCode {
     }
 
     /// Имя компьютера — его видит ведущий в запросе на подключение.
-    package static var myName: String { Host.current().localizedName ?? "Mac" }
+    /// Имя в трансляции: заданное в настройках (`shareName`), иначе общее «Mac». Имя компьютера (часто с именем владельца) не отправляем.
+    package static var myName: String { displayName(setting: UserDefaults.standard.string(forKey: Pref.shareName)) }
 
-    /// «123 456 7890» → «1234567890»; nil — не 10 (или старые 6) цифр.
+    package static let maxNameLength = 60
+
+    package static func displayName(setting: String?) -> String {
+        let name = (setting ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "Mac" : String(name.prefix(maxNameLength))
+    }
+
+    /// «123 456 7890» → «1234567890»; nil — не 10 цифр (6-значные ID ретранслятор больше не принимает).
     package static func normalized(_ text: String) -> String? {
         let digits = text.filter(\.isNumber)
-        return digits.count == 10 || digits.count == 6 ? digits : nil
+        return digits.count == 10 ? digits : nil
     }
 
     /// Ретранслятор пускает только приложения Mac Utils — по этому заголовку. Токен mu-share-2 ставится,
@@ -195,7 +199,8 @@ package final class ScreenShare: NSObject, ObservableObject {
                 state = .failed(ShareErrorText.hostRefusal(code: errorCode, message: message))
                 return
             case .failed(let status):
-                state = .failed(Self.connectionMessage(status))
+                // Строгий relay отвечает 426 и клиенту, который не смог показать ключ (Связка ключей недоступна): причина не в версии.
+                state = .failed(status == 426 && keychainUnavailable ? ShareIdentity.keychainUnavailableMessage : Self.connectionMessage(status))
                 return
             case .ok(let socket, let keyed):
                 self.socket = socket
@@ -1094,25 +1099,26 @@ package final class ScreenShare: NSObject, ObservableObject {
                 let accept = ShareRules.apply(reply, to: request, prompt: prompt) { id, name, pub in
                     ShareHistory.shared.trust(id, name: name, pub: pub)
                 }
-                self.answer(request, accept: accept)
+                self.answer(request, accept: accept, timedOut: reply == .timeout)
             }
             ShareRequestQueue.shared.add(item)
         }
     }
 
-    private func answer(_ request: ShareRequest, accept: Bool) {
+    private func answer(_ request: ShareRequest, accept: Bool, timedOut: Bool = false) {
         let hostSig = accept && hostKeyed ? ShareRules.hostSignature(for: request, roomId: ShareCode.myID, identity: .shared) : nil
-        if let message = Self.answerMessage(viewer: request.viewer, accept: accept, rid: request.rid, hostSig: hostSig) {
+        if let message = Self.answerMessage(viewer: request.viewer, accept: accept, rid: request.rid, hostSig: hostSig, timedOut: timedOut) {
             socket?.send(.string(message)) { _ in }
         }
         if accept { sender?.resendLast() }
     }
 
     /// JSON ответа ведущего; значения экранирует JSONSerialization, а не подстановка в строку.
-    package static func answerMessage(viewer: String, accept: Bool, rid: String? = nil, hostSig: String? = nil) -> String? {
+    package static func answerMessage(viewer: String, accept: Bool, rid: String? = nil, hostSig: String? = nil, timedOut: Bool = false) -> String? {
         var object: [String: Any] = ["type": accept ? "accept" : "decline", "viewer": viewer, "name": ShareCode.myName]
         if let rid { object["rid"] = rid }
         if let hostSig { object["hostSig"] = hostSig }
+        if timedOut, !accept { object["reason"] = "timeout" }
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
         return String(data: data, encoding: .utf8)
     }
@@ -2625,6 +2631,7 @@ package struct ScreenSharePage: View {
     @ObservedObject private var viewer = ShareViewer.shared
     @AppStorage(Pref.shareServer) private var server = ""
     @AppStorage(Pref.shareAudio) private var shareAudio = true
+    @AppStorage(Pref.shareName) private var shareName = ""
     @AppStorage(Pref.shareMuteCalls) private var muteCalls = false
     @AppStorage(Pref.shareAllowMarks) private var allowMarks = true
     @AppStorage(Pref.shareAllowMonitorSwitch) private var allowMonitorSwitch = false
@@ -2687,6 +2694,18 @@ package struct ScreenSharePage: View {
             }
         }
         if !compact && !demo { TrustedRows() }
+
+        GroupLabel("Имя в трансляции")
+        // Подпись над полем: в узкой панели поле справа от подписи сжимало её до столбика.
+        Card {
+            Text("Как вас видят зрители и ведущий").font(DS.Font.rowTitle).foregroundStyle(.dsText)
+            TextField("", text: $shareName, prompt: Text("Mac"))
+                .textFieldStyle(.graphite)
+                .frame(maxWidth: 420, alignment: .leading)
+                .accessibilityLabel("Имя в трансляции")
+                .onChange(of: shareName) { if shareName.count > ShareCode.maxNameLength { shareName = String(shareName.prefix(ShareCode.maxNameLength)) } }
+        }
+        Footnote("Имя уходит на сервер и зрителям. Пусто — «Mac»: имя компьютера (часто с вашим именем) не передаётся.")
 
         GroupLabel("Что могут зрители")
         ListCard {
