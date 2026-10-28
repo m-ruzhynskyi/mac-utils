@@ -154,8 +154,7 @@ final class ChangelogTests: XCTestCase {
 
 final class ShareCodeTests: XCTestCase {
     func testCodeAndURL() {
-        XCTAssertEqual(ShareCode.random().count, 6)
-        XCTAssertEqual(ShareCode.normalized("123 456"), "123456")
+        XCTAssertNil(ShareCode.normalized("123 456"), "6-значные ID строгий relay не принимает")
         XCTAssertNil(ShareCode.normalized("12345"))
         XCTAssertEqual(ShareCode.display("123456"), "123 456")
         XCTAssertEqual(ShareCode.url(server: "https://relay.example.dev/", code: "123456", role: "host")?.absoluteString,
