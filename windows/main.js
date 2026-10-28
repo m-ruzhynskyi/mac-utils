@@ -1,7 +1,7 @@
 // Mac Utils Share для Windows: трансляция экрана по коду и просмотр чужих трансляций.
 // Интерфейс — страница ретранслятора (та же, что в браузере), приложение добавляет:
 // выбор экрана или окна с превью, системный звук (loopback) и автообновление.
-const { app, BrowserWindow, desktopCapturer, ipcMain, session, dialog, shell, screen } = require("electron");
+const { app, BrowserWindow, desktopCapturer, ipcMain, session, dialog, shell, screen, clipboard } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const { spawn, execFile } = require("child_process");
@@ -538,6 +538,17 @@ function createWindow() {
   });
 }
 
+// Окна самого приложения (главное, «Удалённые подключения», палитра, HUD, окно меток): Electron 35+ на Windows больше не прячет их
+// из desktopCapturer.getSources. В список выбора и в choose они не попадают — главное окно в эфире дало бы картинку в картинке.
+const sourceHwnd = (id) => (/^window:(\d+):/.exec(String(id || "")) || [])[1] || null;
+function withoutOwnWindows(sources) {
+  const own = new Set();
+  for (const win of BrowserWindow.getAllWindows?.() || []) {
+    try { const hwnd = sourceHwnd(win.getMediaSourceId()); if (hwnd) own.add(hwnd); } catch (_) {}
+  }
+  return sources.filter((s) => !own.has(sourceHwnd(s.id)));
+}
+
 // IPC главного окна — только из кадра страницы ретранслятора (event.senderFrame.url); остальным — отказ (denied).
 const relayOnly = (fn, denied) => (event, ...args) => (guard.fromRelay(event) ? fn(event, ...args) : denied);
 
@@ -674,7 +685,7 @@ app.whenReady().then(() => {
   // у окна значок (picker.js). Снимки не нужны и не запрашиваются (thumbnailSize 0).
   ipcMain.handle("sources", relayOnly(async () => {
     if (Date.now() - lastInput > USER_ACTION_MS) { appendOverlayLog("sources denied reason=no-input"); return []; }
-    const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } });
+    const sources = withoutOwnWindows(await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } }));
     listed = { ids: new Set(sources.map((s) => s.id)), inputs };
     return picker.entries(sources, screen.getAllDisplays(), screen.getPrimaryDisplay());
   }, []));
@@ -685,7 +696,7 @@ app.whenReady().then(() => {
     const now = Date.now();
     const reason = !listed || !listed.ids.has(id) ? "not-listed" : inputs === listed.inputs || now - lastInput > USER_ACTION_MS ? "no-input" : null;
     if (reason) { appendOverlayLog(`choose denied reason=${reason}`); forgetChoice(); return false; }
-    const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } });
+    const sources = withoutOwnWindows(await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } }));
     const source = sources.find((s) => s.id === id);
     chosen = source ? { source, audio: !!audio, muted: cleanNames(muted), calls: muteCalls !== false } : null;
     listed = null; armedUntil = source ? now + ARM_MS : 0;
@@ -740,8 +751,10 @@ app.whenReady().then(() => {
 
   createWindow();
   // «Удалённые подключения» — отдельный модуль (remote/): окно, палитра Ctrl+Alt+A, меню в трее. Его сбой не мешает трансляции.
-  // copyText — только для ID TeamViewer, когда подключение не подтвердилось; пароли через буфер не идут.
-  try { remoteConnections = require("./remote").init(require("electron"), { icon: path.join(__dirname, "assets", "icon.png"), copyText: (text) => { require("electron").clipboard.writeText(String(text)); return true; } }); } catch (_) {}
+  // copyText — только для ID TeamViewer, когда подключение не подтвердилось; пароли через буфер не идут. Запись в буфер в Electron 44
+  // асинхронная: Promise<boolean>, ошибка — false.
+  const copyText = (text) => Promise.resolve().then(() => clipboard.writeText(String(text))).then(() => true, () => false);
+  try { remoteConnections = require("./remote").init(require("electron"), { icon: path.join(__dirname, "assets", "icon.png"), copyText }); } catch (_) {}
   checkForUpdates();
   setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
 });
@@ -754,7 +767,19 @@ app.on("second-instance", () => {
 });
 
 app.on("window-all-closed", () => app.quit());
-app.on("will-quit", () => { stopAudio(); hideOverlay(); try { remoteConnections?.dispose(); } catch (_) {} });
+// Выход: секреты «Удалённых подключений» стираются из буфера до конца процесса. Чтение буфера в Electron 44 асинхронное — выход
+// откладывается (preventDefault), пока очистка не закончится (не дольше QUIT_WAIT_MS), затем app.quit() ещё раз.
+const QUIT_WAIT_MS = 3000;
+let disposed = false;
+app.on("will-quit", (event) => {
+  stopAudio(); hideOverlay();
+  if (disposed || !remoteConnections) return;
+  disposed = true;
+  event.preventDefault();
+  let cleared;
+  try { cleared = Promise.resolve(remoteConnections.dispose()); } catch (_) { cleared = Promise.resolve(); }
+  Promise.race([cleared.catch(() => {}), new Promise((resolve) => setTimeout(resolve, QUIT_WAIT_MS))]).then(() => app.quit());
+});
 
 // Автообновление: новые версии публикуются в релизе «windows-latest» репозитория.
 function checkForUpdates() {

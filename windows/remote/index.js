@@ -91,9 +91,10 @@ function init(electron, options = {}) {
   const dialer = options.dialer || { isUniTalk: createHandlerLookup(process.platform === "win32" ? execFile : null).isUniTalk,
     open: (url) => shell.openExternal(url) };
   const secretClipboard = createSecretClipboard({ clipboard: options.clipboard || electron.clipboard, writeConcealed });
-  const copyPlain = (text) => {
-    if (typeof options.copyText === "function") { try { return options.copyText(String(text)) !== false; } catch (_) { return false; } }
-    try { electron.clipboard.writeText(String(text)); return true; } catch (_) { return false; }
+  // Запись в буфер в Electron 44 асинхронная: Promise<boolean>, ошибка записи — false.
+  const copyPlain = async (text) => {
+    if (typeof options.copyText === "function") { try { return (await options.copyText(String(text))) !== false; } catch (_) { return false; } }
+    try { await electron.clipboard.writeText(String(text)); return true; } catch (_) { return false; }
   };
   // Подробности, которые надо открыть в окне (из трея или меню): окно забирает ключ, когда готово.
   let pendingDetails = null;
@@ -350,26 +351,26 @@ function init(electron, options = {}) {
     if (!record) return { ok: false };
     const address = fromAccess ? await accessRDPAddress(key) : record.id;
     if (!address) return { ok: false };
-    const ok = copyPlain(address);
+    const ok = await copyPlain(address);
     hud.show(ok ? { kind: "success", title: "Адрес скопирован", detail: record.name, autoHideMs: 2000 } : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен.", actions: [{ id: "close", label: "Закрыть" }] });
     log(`copy ${ok ? "ok" : "fail"} field=address`);
     return { ok };
   }
 
   // Не секрет из карточки (сервер, логин) — обычной копией; окно присылает только то, что само показывает.
-  function copyText(text) {
+  async function copyText(text) {
     const value = String(text ?? "");
     if (!value || value.length > 256 || /[\r\n]/.test(value)) return { ok: false };
-    const ok = copyPlain(value);
+    const ok = await copyPlain(value);
     hud.show(ok ? { kind: "success", title: "Скопировано", autoHideMs: 1500 } : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен.", actions: [{ id: "close", label: "Закрыть" }] });
     log(`copy ${ok ? "ok" : "fail"} field=text`);
     return { ok };
   }
 
   // Телефон из «Контактов» (карточка подробностей): только строка вида телефона. В журнал — только код.
-  function copyPhone(text) {
+  async function copyPhone(text) {
     if (!isPhone(text)) return { ok: false, error: "phone" };
-    const ok = copyPlain(String(text).trim());
+    const ok = await copyPlain(String(text).trim());
     hud.show(ok ? { kind: "success", title: "Телефон скопирован", autoHideMs: 2000 } : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен.", actions: [{ id: "close", label: "Закрыть" }] });
     log(`copy ${ok ? "ok" : "fail"} field=phone`);
     return { ok };
@@ -389,7 +390,7 @@ function init(electron, options = {}) {
       // UniTalk не открылся — номер всё равно не теряется: копируется.
       plan.copy = String(text).trim(); plan.reason = "openFailed";
     }
-    const ok = copyPlain(plan.copy);
+    const ok = await copyPlain(plan.copy);
     const title = { noUniTalk: "UniTalk не найден — номер скопирован", openFailed: "UniTalk не открылся — номер скопирован" }[plan.reason] || "Номер скопирован";
     hud.show(ok ? { kind: "success", title, autoHideMs: 2500 }
                 : { kind: "warning", title: "Не удалось скопировать", detail: "Буфер обмена недоступен.", actions: [{ id: "close", label: "Закрыть" }] });
@@ -457,7 +458,9 @@ function init(electron, options = {}) {
   }
 
   async function chooseFile() {
+    // Electron 43+: без defaultPath диалог открывается в «Загрузках» и не помнит прошлую папку — открываем папку текущего файла.
     const picked = await dialog.showOpenDialog(alive(windowRef) ? windowRef : undefined, { title: "Файл подключений", properties: ["openFile"],
+      ...(settings.data.file ? { defaultPath: path.dirname(settings.data.file) } : {}),
       filters: [{ name: "Список подключений", extensions: ["xlsx", "xml"] }] });
     if (picked.canceled || !picked.filePaths[0]) return "";
     if (!LIST_FILE.test(picked.filePaths[0])) return "";
@@ -578,7 +581,8 @@ function init(electron, options = {}) {
   return {
     service, settings, store, entryMenu, entryItems, openWindow, openPalette, pickProgram, locator, registerHotkey, trayTemplate, rowMenuTemplate, connect, openRDP, copySecret, revealSecret, copyAddress, copyText, copyPhone, call, cardInfo, revealAccess, hudAction, writeConcealed, titles: TITLES,
     get hotkeyOk() { return hotkeyOk; },
-    dispose() { try { globalShortcut.unregisterAll?.(); } catch (_) {} secretClipboard.flush(); store.stop(); tray?.destroy?.(); },
+    // Promise: секреты в буфере стёрты (выход его дожидается, main.js).
+    dispose() { try { globalShortcut.unregisterAll?.(); } catch (_) {} const cleared = secretClipboard.flush(); store.stop(); tray?.destroy?.(); return cleared; },
   };
 }
 

@@ -73,6 +73,8 @@ function electron(world) {
     setBounds(b) { this.calls.push("setBounds"); this.bounds = { ...b }; const d = world.displays.find((m) => contains(m.bounds, b.x, b.y)) || world.displays[0];
       const [x, y] = toPhys(d, b.x, b.y); this.scale = d.scaleFactor;
       this.phys = { x: Math.round(x), y: Math.round(y), width: Math.round(b.width * d.scaleFactor), height: Math.round(b.height * d.scaleFactor) }; }
+    static getAllWindows() { return windows.filter((w) => !w.destroyed); }
+    getMediaSourceId() { return `window:${this.hwnd}:0`; }
     getNativeWindowHandle() { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(this.hwnd)); return b; }
     // Electron считает DIP окна по его DPI, а не по монитору (журнал: overlay=-1098,… вместо -1920,…).
     getBounds() { return { x: Math.round(this.phys.x / this.scale), y: Math.round(this.phys.y / this.scale), width: this.page.w, height: this.page.h }; }
@@ -150,11 +152,13 @@ function electron(world) {
   return {
     windows, ipc, handles, helper, helperCalls, permissions, get displayMedia() { return displayMedia; },
     module: {
-      app: { requestSingleInstanceLock: () => true, quit() {}, whenReady: () => Promise.resolve(), on() {}, isPackaged: false,
+      app: { requestSingleInstanceLock: () => true, quit() { world.quits = (world.quits || 0) + 1; }, whenReady: () => Promise.resolve(),
+             on: (name, fn) => { (world.appEvents ||= {})[name] = fn; }, isPackaged: false,
              getVersion: () => "1.1.0", getPath: () => world.logs,
              getGPUInfo: async (kind) => (world.gpu ? world.gpu[kind] : {}), getGPUFeatureStatus: () => world.gpu?.status || {},
              commandLine: { hasSwitch: (f) => !!world.gpu?.switches?.[f], getSwitchValue: (f) => world.gpu?.switches?.[f] || "" } },
       BrowserWindow, screen,
+      clipboard: { writeText: (text) => (world.clipboardFails ? Promise.reject(new Error("busy")) : Promise.resolve(void (world.clipboardText = text))) },
       desktopCapturer: { getSources: async () => world.sources },
       ipcMain: { on: (name, fn) => ipc.set(name, fn), handle: (name, fn) => handles.set(name, fn) },
       session: { defaultSession: { webRequest: { onBeforeSendHeaders() {} }, setDisplayMediaRequestHandler: (fn) => { displayMedia = fn; },
@@ -182,6 +186,7 @@ async function start(world) {
     if (request === "electron-updater") return { autoUpdater: { on: (name, fn) => updater.set(name, fn), checkForUpdates: async () => {} } };
     if (request === "child_process") return childProcess;
     if (request === "fs") return fakeFs;
+    if (request === "./remote" && world.remote) return world.remote;
     return load.call(this, request, ...rest);
   };
   global.setInterval = (...args) => { const id = realInterval(...args); intervals.push(id); return id; };
@@ -1127,5 +1132,46 @@ test("буфер обмена (пароли «Удалённых подключ�
     const ask = (permission) => new Promise((resolve) => host.fake.permissions.request(host.main.webContents, permission, resolve, { requestingUrl: RELAY_FRAME.url }));
     assert.equal(await ask("clipboard-read"), false);
     assert.equal(await ask("deprecated-sync-clipboard-read"), false);
+  } finally { host.stop(); }
+});
+
+test("выход: секреты «Удалённых подключений» стираются из буфера до конца процесса — выход ждёт асинхронную очистку (Electron 44)", async () => {
+  let options = null, finish = null, disposes = 0;
+  const w = oneScreen();
+  w.remote = { init: (_electron, opts) => { options = opts; return { dispose: () => { disposes++; return new Promise((resolve) => { finish = resolve; }); } }; } };
+  const host = await start(w);
+  try {
+    let prevented = 0;
+    w.appEvents["will-quit"]({ preventDefault: () => { prevented++; } });
+    assert.equal(prevented, 1, "выход отложен");
+    assert.equal(disposes, 1);
+    await tick(20);
+    assert.equal(w.quits || 0, 0, "пока буфер не стёрт — не выходим");
+    finish();
+    await tick(20);
+    assert.equal(w.quits, 1, "стёрт — app.quit() ещё раз");
+    w.appEvents["will-quit"]({ preventDefault: () => { prevented++; } });
+    assert.equal(prevented, 1, "второй will-quit не задерживается");
+    assert.equal(disposes, 1);
+    // copyText (ID TeamViewer): запись в буфер асинхронная, ошибка — false, без необработанного отказа.
+    assert.equal(await options.copyText("123 456 789"), true);
+    assert.equal(w.clipboardText, "123 456 789");
+    w.clipboardFails = true;
+    assert.equal(await options.copyText("1"), false);
+  } finally { host.stop(); }
+});
+
+test("окна самого приложения (Electron 35+ их не прячет) — не в списке выбора и не выбираются", async () => {
+  const w = oneScreen();
+  const host = await start(w);
+  try {
+    const own = `window:${host.main.hwnd}:0`;
+    w.sources.push({ id: own, name: "Mac Utils Share" });
+    host.click();
+    const list = await host.fake.handles.get("sources")(page());
+    assert.deepEqual(list.map((s) => s.id), ["screen:1:0", "window:4242:0"], "главного окна в списке нет");
+    host.click();
+    assert.equal(await host.fake.handles.get("choose")(page(), own, false, []), false, "и выбрать его нельзя");
+    assert.match(host.log(), /choose denied reason=not-listed/);
   } finally { host.stop(); }
 });

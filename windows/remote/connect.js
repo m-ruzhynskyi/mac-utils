@@ -77,7 +77,8 @@ function createConnector(deps) {
   const { exists = () => false, customPaths = () => ({}), env = process.env, spawn, uia = null, hud = { show() {} }, openExternal = () => {}, log = () => {}, clock = Date, copyText = null,
     locate = () => [], trust = null } = deps;
   // ID в буфер: только ID записи, только строкой. Нет функции или она упала — честно говорим, что не скопирован.
-  const copyID = (id) => { if (typeof copyText !== "function") return false; try { return copyText(String(id)) !== false; } catch (_) { return false; } };
+  // copyText может быть асинхронным (буфер Electron 44): Promise<boolean>, ошибка записи — false.
+  const copyID = async (id) => { if (typeof copyText !== "function") return false; try { return (await copyText(String(id))) !== false; } catch (_) { return false; } };
   const defaults = defaultPaths(env);
 
   // Порядок (ревью rc-win-entry, FIX 1): свой путь → Program Files и %LOCALAPPDATA% → реестр и App Paths → «Загрузки» и Рабочий стол
@@ -146,12 +147,12 @@ function createConnector(deps) {
 
   // RDP: mstsc.exe /v:<адрес> — без логина и пароля (их Windows спросит сама). Подключилось ли — не знаем: тост нейтральный.
   // mstsc нет — адрес (только адрес) в буфер. Адрес не годится — {error: "details"}: открыть подробности.
-  function openRDP(record) {
+  async function openRDP(record) {
     const args = record.method === "rdp" ? mstscArgs(record.id) : null;
     if (!args) return Promise.resolve({ ok: false, error: "details" });
     const exe = mstscPath(env);
     if (!exists(exe)) {
-      const copied = copyID(record.id.trim());
+      const copied = await copyID(record.id.trim());
       hud.show(MESSAGES.rdpMissing(copied)); log(`rdp fail code=notInstalled copied=${copied ? 1 : 0}`);
       return Promise.resolve({ ok: false, error: "notInstalled" });
     }
@@ -213,7 +214,7 @@ function createConnector(deps) {
         // Без UI Automation подключение не проверить: ID — в буфер на случай, если TeamViewer открылся без него.
         if (!(await launchTeamViewer(exe, record.id))) { hud.show(MESSAGES.launchFailed(program)); log(`connect fail code=launch program=${program}`); return { ok: false, error: "launch" }; }
         if (!wantsPassword) {
-          const copied = copyID(record.id);
+          const copied = await copyID(record.id);
           hud.show({ kind: "info", title: `Открыт ${title}`, detail: copied ? `${record.name} · ID скопирован — если подключение не началось, вставьте его` : record.name, autoHideMs: 4000 });
           log(`connect ok program=${program} password=0 confirmed=0 copied=${copied ? 1 : 0}`); return { ok: true };
         }
@@ -256,11 +257,11 @@ function createConnector(deps) {
           if (result.secretError) { hud.show(MESSAGES.gone()); log(`connect fail code=gone`); return { ok: false, error: "gone" }; }
           hud.show(MESSAGES.passwordNeeded(program)); tvLog(`connect ok program=${program} password=0 prompt=1 typed=${t}`, "passwordWindow"); return { ok: true };
         case "noPrompt": {   // окно TeamViewer было, но ни окна пароля, ни окна сеанса к сроку — не «подключено»: нейтрально, ID в буфер
-          const copied = copyID(record.id);
+          const copied = await copyID(record.id);
           hud.show(MESSAGES.unconfirmed(program, copied)); tvLog(`connect fail code=unconfirmed program=${program} typed=${t} copied=${copied ? 1 : 0}`); return { ok: false, error: "unconfirmed" };
         }
         case "noWindow": {   // ни одного окна TeamViewer за срок — клиент не открылся (служба не в счёт): пароль не вводился
-          const copied = copyID(record.id);
+          const copied = await copyID(record.id);
           hud.show(MESSAGES.noTeamViewerWindow(program, copied)); tvLog(`connect fail code=noWindow program=${program} copied=${copied ? 1 : 0}`); return { ok: false, error: "noWindow" };
         }
         case "idMismatch": hud.show(MESSAGES.idMismatch(program)); log(`connect fail code=idMismatch`); return { ok: false, error: "idMismatch" };

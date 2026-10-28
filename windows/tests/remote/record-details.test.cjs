@@ -281,10 +281,15 @@ test("учётка Windows при подключении: пароль учёт�
 
 // ---------- буфер обмена ----------
 
+// Буфер Electron 44: writeText и readText асинхронные (ответ — на следующем обороте цикла), clear — синхронный.
 function fakeClipboard() {
-  const cb = { text: "", writes: 0, clears: 0, concealed: 0, writeText(t) { this.text = t; this.writes++; }, readText() { return this.text; }, clear() { this.text = ""; this.clears++; } };
+  const later = (fn) => new Promise((resolve) => setImmediate(() => resolve(fn())));
+  const cb = { text: "", writes: 0, clears: 0, concealed: 0, writeText(t) { return later(() => { this.text = t; this.writes++; }); },
+    readText() { return later(() => this.text); }, clear() { this.text = ""; this.clears++; } };
   return cb;
 }
+// Дать асинхронной очистке (чтение буфера → clear) закончиться.
+const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve)); };
 // Двойник помощника clip-conceal.ps1 (путь секретов на Windows, W2-5): кладёт текст в тот же двойник буфера, мимо writeText.
 // Подставляется всегда — иначе на win32 (CI) тест запускает настоящий PowerShell и пишет секрет в настоящий буфер.
 const concealedInto = (cb) => async (secret) => { cb.text = Buffer.from(secret.bytes).toString("utf8"); cb.concealed++; return true; };
@@ -301,18 +306,21 @@ test("секрет в буфер: через 30 с очищается, если 
   assert.equal(cb.text, "Win-pass-1");
   assert.equal(t.timers[0].ms, 30_000);
   t.fire();
-  assert.equal(cb.text, "");
+  assert.equal(cb.text, "Win-pass-1", "чтение буфера асинхронное: до ответа ничего не стёрто");
+  await settle();
+  assert.equal(cb.text, "", "через 30 с секрет стёрт");
   assert.equal(cb.clears, 1);
 
   await sc.copy(new SecretBuffer("Win-pass-2"));
   cb.text = "пользователь скопировал своё";
   t.fire();
+  await settle();
   assert.equal(cb.text, "пользователь скопировал своё", "чужое не стирается");
 
   await sc.copy(new SecretBuffer("Win-pass-3"));
   assert.equal(sc.pending, 1);
-  sc.flush();   // выход из приложения
-  assert.equal(cb.text, "");
+  await sc.flush();   // выход из приложения: flush дожидается очистки
+  assert.equal(cb.text, "", "при выходе стёрт");
   assert.equal(sc.pending, 0);
   assert.equal(t.timers.length, 0);
   assert.equal(await sc.copy(new SecretBuffer("")), false, "пустое не копируется");
@@ -382,7 +390,7 @@ test("вид окна: строка с метками, значками, лог�
   assert.deepEqual(login.sections[0].records[0].accountMarks, [{ start: 0, end: 4 }]);
   const note = await a.call("rc:view", { query: "телефон" });
   assert.deepEqual(note.sections[0].records.map((r) => r.noteLine), ["Только по телефону"]);
-  a.rc.dispose();
+  await a.rc.dispose();
 });
 
 test("подробности: запись по ключу; «Показать» — «Доступ» из файла с пустыми строками, пароли под маской; копия паролей и «Доступа» — в буфер на 30 с; в журнале — только код поля", async () => {
@@ -416,7 +424,7 @@ test("подробности: запись по ключу; «Показать»
   assert.deepEqual(a.copied, ["10.20.0.15"]);
   // Выход из приложения: секрет не остаётся в буфере.
   await a.call("rc:copySecret", { key: a.key("Лісова"), field: "access" });
-  a.rc.dispose();
+  await a.rc.dispose();
   assert.equal(a.cb.text, "");
 });
 
@@ -437,7 +445,7 @@ test("меню строки: «Скопировать пароль учётки�
   assert.equal(await a.call("rc:rowMenu", a.key("Лісова")), true);
   assert.equal(a.fake.menus.length, 1);
   assert.equal(await a.call("rc:rowMenu", "999:x"), false);
-  a.rc.dispose();
+  await a.rc.dispose();
   // .xlsx: тот же пункт — карточка только для просмотра (canEdit false, canView true); запись в .xlsx — отказ.
   const rows = [["Название", "ID", "Программа", "Учётная запись"], ["Касса", "123456789", "AnyDesk", "admin"]];
   const x = await app({ file: F.xlsxRows(rows), ext: "xlsx" });
@@ -448,7 +456,7 @@ test("меню строки: «Скопировать пароль учётки�
   const before = fs.readFileSync(x.list);
   assert.deepEqual(await x.call("rc:edit", { action: "update", payload: { key: x.key("Касса"), fields: { name: "Новое", id: "123456789" } } }), { ok: false, error: "xlsxReadOnly" });
   assert.equal(fs.readFileSync(x.list).compare(before), 0, "книга не изменилась");
-  x.rc.dispose();
+  await x.rc.dispose();
 });
 
 test("трей: запись VPN — подробности в окне списка; RDP — mstsc; IPC новых вызовов — только от окон модуля", async () => {
@@ -468,7 +476,7 @@ test("трей: запись VPN — подробности в окне спис
     assert.ok(r == null || r === false || r.ok === false, `${name}: ${JSON.stringify(r)}`);
   }
   assert.equal(a.cb.writes, 0, "чужому окну ничего не скопировано");
-  a.rc.dispose();
+  await a.rc.dispose();
 });
 
 // ---------- правка XML ----------
@@ -690,7 +698,7 @@ test("звонок: обработчик tel:/callto: — по реестру, �
   assert.deepEqual(await a.call("rc:call", "calc.exe & 0670001122"), { ok: false, error: "phone" });
   assert.equal(opened.length, 1);
   assert.deepEqual(a.log, ["call ok", "call copy reason=noUniTalk"], "номер в журнал не пишется");
-  a.rc.dispose();
+  await a.rc.dispose();
 });
 
 test("карточка через IPC: шаги, учётки и контакты — из файла по запросу; паролей и ключей в ответе нет; 👁 и ⧉ — по id, файл читается заново", async () => {
@@ -735,7 +743,7 @@ test("карточка через IPC: шаги, учётки и контакт�
     assert.ok(!v.sections.flatMap((s) => s.records).some((r) => r.name === "Демо-лаборатория"), `поиск «${q}» не по «Контактам»/«Доступу»`);
   }
   assert.deepEqual(a.log, ["copy ok field=account"], "чтение карточки и 👁 в журнал не пишутся; копия — только код поля");
-  a.rc.dispose();
+  await a.rc.dispose();
 });
 
 test("RW-1 / v2: «Доступ · как в файле» — после метки пароля маска до конца строки, ещё в основном процессе; пояснение «Из файла» — тоже", async () => {
@@ -755,7 +763,7 @@ test("RW-1 / v2: «Доступ · как в файле» — после мет�
   assert.deepEqual((await a.call("rc:revealAccess", key)).text.split("\n"),
     ["RDP — сервер srv01 · логин: admin · пароль: ••••••", "L2TP VPN · L2tpPsk=••••••"]);
   for (const x of ["Qw3rty", "Demo-Psk-1", "Demo Pass 2"]) assert.ok(!JSON.stringify([info, await a.call("rc:revealAccess", key)]).includes(x), x);
-  a.rc.dispose();
+  await a.rc.dispose();
 });
 
 test("W2-5: ключ VPN, пароль учётки и «Доступ» — в буфер через помощник мимо журнала Win+V и облака; не вышло — ничего не скопировано", async () => {
@@ -779,7 +787,7 @@ test("W2-5: ключ VPN, пароль учётки и «Доступ» — в �
   assert.equal(a.huds.at(-1).kind, "warning");
   assert.deepEqual(a.log, ["copy ok field=vpn.key", "copy ok field=accountPassword", "copy fail field=vpn.key", "copy fail field=access"]);
   for (const x of [...DEMO_SECRETS, "Win-pass-2"]) assert.ok(!JSON.stringify([a.huds, a.log]).includes(x), x);
-  a.rc.dispose();
+  await a.rc.dispose();
 });
 
 test("телефон — «Скопировать» (только строка вида телефона); RDP из «Доступа» — адрес берётся из файла, не из окна", async () => {
@@ -797,7 +805,7 @@ test("телефон — «Скопировать» (только строка �
   assert.deepEqual(await a.call("rc:openRDP", { key: a.key("Лісова"), fromAccess: true }), { ok: false, error: "details" });
   assert.equal(a.rdpOpened.length, 1);
   assert.deepEqual(a.log, ["copy ok field=phone", "copy ok field=address"], "в журнале только коды");
-  a.rc.dispose();
+  await a.rc.dispose();
 });
 
 test("палитра: «Обновить» (↻) — справа в строке подсказок; Excel, папка, «Добавить», настройки и «Загружено N · …» — в окне списка; контакты — только в карточке", () => {
@@ -851,7 +859,7 @@ test("ревью v2, FIX 1: «Доступ · как в файле» — ни о
   assert.equal(res.ok, true);
   for (const x of ["Demo-ID-77", "Demo-Win-77"]) assert.ok(!res.text.includes(x), x);
   assert.deepEqual(a.log, [], "показ «Доступа» в журнал не пишется");
-  a.rc.dispose();
+  await a.rc.dispose();
   const js = fs.readFileSync(path.join(__dirname, "..", "..", "remote", "ui", "remote.js"), "utf8");
   const card2 = js.slice(js.indexOf("function accessCard"), js.indexOf("function contactsCard"));
   assert.match(card2, /until = Date\.now\(\) \+ REVEAL_MS;/, "«Доступ» показывается 10 с");
@@ -895,7 +903,7 @@ test("ревью v2, п. 5 и мелочи: «одной из учёток» —
   assert.deepEqual(await a.call("rc:call", "067 000 11 22"), { ok: true, call: false, reason: "openFailed" });
   assert.deepEqual(a.copied, ["067 000 11 22"]);
   assert.equal(a.huds.at(-1).title, "UniTalk не открылся — номер скопирован");
-  a.rc.dispose();
+  await a.rc.dispose();
 });
 
 test("fix2: id учётки стабилен при правке файла; учётки с таким id нет — «Файл изменился — откройте карточку заново», ничего не показано и не скопировано", async () => {
@@ -930,7 +938,7 @@ test("fix2: id учётки стабилен при правке файла; у�
   assert.equal(a.huds.at(-1).title, "Файл изменился — откройте карточку заново");
   assert.deepEqual(await a.call("rc:revealSecret", { key: key3, field: before[0].id }), { ok: true, value: "Demo-R-1" }, "оставшаяся учётка — по своему id");
   assert.deepEqual(a.log, ["copy fail field=account changed"], "в журнале — код, без логина и хэша");
-  a.rc.dispose();
+  await a.rc.dispose();
 });
 
 test("ревью v2b: одно слово сразу после заголовка блока (row 13 «VPN …») и ведущий «-» пароля — под маской; строки AnyDesk не трогаются", () => {

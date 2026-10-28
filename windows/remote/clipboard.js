@@ -9,19 +9,31 @@ const crypto = require("node:crypto");
 const CLEAR_MS = 30_000;
 const digest = (bytes) => crypto.createHash("sha256").update(bytes).digest();
 
-// clipboard: { writeText(text), readText() → string, clear() } (Electron clipboard или двойник в тестах); writeConcealed(secret) →
+// clipboard: { writeText(text) → Promise, readText() → Promise<string>, clear() } — Electron 44 (запись и чтение асинхронные, clear —
+// нет; await годится и для синхронного двойника); writeConcealed(secret) →
 // Promise<boolean> — запись мимо журнала буфера (на Windows обязательна; без неё, не на Windows, — обычный writeText).
 function createSecretClipboard({ clipboard, writeConcealed = null, setTimer = setTimeout, clearTimer = clearTimeout, clearMs = CLEAR_MS } = {}) {
   const pending = new Map();   // таймер → хеш
 
-  const stillOurs = (hash) => {
+  const clearing = new Set();  // идущие очистки (чтение буфера асинхронное): выход их дожидается
+
+  const stillOurs = async (hash) => {
     let now;
-    try { now = clipboard.readText(); } catch (_) { return false; }
+    try { now = await clipboard.readText(); } catch (_) { return false; }
     if (typeof now !== "string" || !now) return false;
     const bytes = Buffer.from(now, "utf8");
     try { return crypto.timingSafeEqual(digest(bytes), hash); } finally { bytes.fill(0); }
   };
-  const clearIfOurs = (hash) => { if (stillOurs(hash)) { try { clipboard.clear(); } catch (_) {} } };
+  // Promise без отказа: стёрт ли буфер.
+  const clearIfOurs = (hash) => {
+    const run = (async () => {
+      if (!(await stillOurs(hash))) return false;
+      try { await clipboard.clear(); return true; } catch (_) { return false; }
+    })();
+    clearing.add(run);
+    run.finally(() => clearing.delete(run));
+    return run;
+  };
 
   // secret — SecretBuffer; затирает его вызывающий (после того, как промис выполнится). Promise<true> — записано.
   async function copy(secret) {
@@ -32,7 +44,7 @@ function createSecretClipboard({ clipboard, writeConcealed = null, setTimer = se
       try { ok = (await writeConcealed(secret)) === true; } catch (_) { ok = false; }
       if (!ok) return false;
     } else {
-      try { clipboard.writeText(secret.bytes.toString("utf8")); } catch (_) { return false; }
+      try { await clipboard.writeText(secret.bytes.toString("utf8")); } catch (_) { return false; }
     }
     const timer = setTimer(() => { pending.delete(timer); clearIfOurs(hash); }, clearMs);
     timer?.unref?.();
@@ -40,10 +52,12 @@ function createSecretClipboard({ clipboard, writeConcealed = null, setTimer = se
     return true;
   }
 
-  // Выход из приложения: не оставлять секрет в буфере дольше обещанного.
-  function flush() {
+  // Выход из приложения: не оставлять секрет в буфере дольше обещанного. Promise — когда все очистки (и уже идущие по таймеру)
+  // закончились: выход их дожидается (main.js, will-quit).
+  async function flush() {
     for (const [timer, hash] of pending) { clearTimer(timer); clearIfOurs(hash); }
     pending.clear();
+    await Promise.all([...clearing]);
   }
 
   return { copy, flush, get pending() { return pending.size; } };
