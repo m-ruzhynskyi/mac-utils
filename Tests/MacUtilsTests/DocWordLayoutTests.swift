@@ -211,4 +211,24 @@ final class DocWordLayoutTests: XCTestCase {
         // Правка по-прежнему в исходнике: показ заглавными его не меняет.
         XCTAssertTrue(document.tab?.text.contains("upper words") == true)
     }
+
+    /// `\trrh` > 0 — строка не ниже заданного (у `NSTextTable` `minimumHeight` блока не действует), и в ячейке из нескольких
+    /// абзацев высота не удваивается; в строке с вертикальным объединением высота — по тексту (гейт, .audit/doc-resume.md).
+    func testRowHeightAtLeastLikeWord() throws {
+        let row = #"\trowd\trgaph108\trleft0\trrh1000\cellx3000\cellx6000 "#
+        for cell in [#"\pard\intbl AAA\cell"#, #"\pard\intbl A1\par\pard\intbl A2\par\pard\intbl A3\cell"#] {
+            let body = #"\pard before\par "# + row + cell + #"\pard\intbl BBB\cell"# + row + #"\row "# + row
+                + #"\pard\intbl CCC\cell\pard\intbl DDD\cell"# + row + #"\row\pard after\par"#
+            let document = try open(body)
+            let top = try XCTUnwrap(lines(document, "BBB").first).minY, next = try XCTUnwrap(lines(document, "CCC").first).minY
+            XCTAssertEqual(next - top, 50, accuracy: 0.01, "\\trrh1000 = 50 pt")
+        }
+        let merged = #"\trowd\trgaph108\trleft0\trrh1000\clvmgf\cellx3000\cellx6000 "#
+        let below = #"\trowd\trgaph108\trleft0\trrh1000\clvmrg\cellx3000\cellx6000 "#
+        let body = merged + #"\pard\intbl MMM\cell\pard\intbl EEE\cell"# + merged + #"\row "# + below
+            + #"\pard\intbl \cell\pard\intbl FFF\cell"# + below + #"\row\pard after\par"#
+        let document = try open(body)
+        let top = try XCTUnwrap(lines(document, "EEE").first).minY, next = try XCTUnwrap(lines(document, "FFF").first).minY
+        XCTAssertLessThan(next - top, 50, "строка с объединением — по тексту")
+    }
 }
