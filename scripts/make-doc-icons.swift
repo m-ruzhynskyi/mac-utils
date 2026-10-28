@@ -161,16 +161,18 @@ func render(ext: String, group: Group, pixels: Int, small: Bool) -> CGImage {
     return ctx.makeImage()!
 }
 
-func writePNG(_ image: CGImage, to url: URL) {
-    let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)!
-    CGImageDestinationAddImage(dest, image, nil)
-    guard CGImageDestinationFinalize(dest) else { fatalError("не записан \(url.path)") }
+/// Сбой генерации: текст — в stderr, код выхода 1 (build.sh с `set -e` останавливает сборку).
+struct Failure: Error {
+    let message: String
 }
 
-let fm = FileManager.default
-try fm.createDirectory(at: outDir, withIntermediateDirectories: true)
-let work = fm.temporaryDirectory.appendingPathComponent("mu-doc-icons-\(getpid())", isDirectory: true)
-defer { try? fm.removeItem(at: work) }
+func writePNG(_ image: CGImage, to url: URL) throws {
+    guard let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+        throw Failure(message: "не создан \(url.path)")
+    }
+    CGImageDestinationAddImage(dest, image, nil)
+    guard CGImageDestinationFinalize(dest) else { throw Failure(message: "не записан \(url.path)") }
+}
 
 // Размеры iconset: pt × масштаб; 16 и 32 pt — упрощённый рисунок.
 let reps: [(name: String, pixels: Int, small: Bool)] = [
@@ -179,22 +181,38 @@ let reps: [(name: String, pixels: Int, small: Bool)] = [
     ("icon_256x256@2x", 512, false), ("icon_512x512", 512, false), ("icon_512x512@2x", 1024, false),
 ]
 
-for type in types {
-    let set = work.appendingPathComponent("DocIcon-\(type.ext).iconset", isDirectory: true)
-    try fm.createDirectory(at: set, withIntermediateDirectories: true)
-    var cache: [String: CGImage] = [:]
-    for rep in reps {
-        let key = "\(rep.pixels)-\(rep.small)"
-        let image = cache[key] ?? render(ext: type.ext, group: type.group, pixels: rep.pixels, small: rep.small)
-        cache[key] = image
-        writePNG(image, to: set.appendingPathComponent("\(rep.name).png"))
+/// Все значки; временная папка с iconset удаляется при любом выходе — и при ошибке (`defer` внутри функции).
+func generate() throws {
+    let fm = FileManager.default
+    try fm.createDirectory(at: outDir, withIntermediateDirectories: true)
+    let work = fm.temporaryDirectory.appendingPathComponent("mu-doc-icons-\(getpid())", isDirectory: true)
+    defer { try? fm.removeItem(at: work) }
+
+    for type in types {
+        let set = work.appendingPathComponent("DocIcon-\(type.ext).iconset", isDirectory: true)
+        try fm.createDirectory(at: set, withIntermediateDirectories: true)
+        var cache: [String: CGImage] = [:]
+        for rep in reps {
+            let key = "\(rep.pixels)-\(rep.small)"
+            let image = cache[key] ?? render(ext: type.ext, group: type.group, pixels: rep.pixels, small: rep.small)
+            cache[key] = image
+            try writePNG(image, to: set.appendingPathComponent("\(rep.name).png"))
+        }
+        let icns = outDir.appendingPathComponent("DocIcon-\(type.ext).icns")
+        let iconutil = Process()
+        iconutil.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
+        iconutil.arguments = ["-c", "icns", set.path, "-o", icns.path]
+        try iconutil.run()
+        iconutil.waitUntilExit()
+        guard iconutil.terminationStatus == 0 else { throw Failure(message: "iconutil: \(type.ext)") }
     }
-    let icns = outDir.appendingPathComponent("DocIcon-\(type.ext).icns")
-    let iconutil = Process()
-    iconutil.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
-    iconutil.arguments = ["-c", "icns", set.path, "-o", icns.path]
-    try iconutil.run()
-    iconutil.waitUntilExit()
-    guard iconutil.terminationStatus == 0 else { fatalError("iconutil: \(type.ext)") }
 }
-print("Значки документов: \(types.count) → \(outDir.path)")
+
+do {
+    try generate()
+    print("Значки документов: \(types.count) → \(outDir.path)")
+} catch {
+    let message = (error as? Failure)?.message ?? "\(error)"
+    FileHandle.standardError.write("make-doc-icons: \(message)\n".data(using: .utf8)!)
+    exit(1)
+}
