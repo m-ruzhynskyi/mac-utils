@@ -181,6 +181,51 @@ final class DocFormatViewTests: XCTestCase {
         XCTAssertNil(page.headerFrame)
     }
 
+    /// H1: вкладка «Колонтитулы» на ленте — метка «· Как в предыдущем» у связанного колонтитула, развязка и отмена байт в байт,
+    /// Esc закрывает правку, курсор основного текста остаётся на месте.
+    func testHeaderRibbonLinkLabelEscAndBodyCaret() throws {
+        let (tab, document, formatter) = try open()
+        let original = tab.text as String
+        let body = (document.storage.string as NSString).range(of: "Демоград")
+        document.textViews.first?.setSelectedRange(body)
+        let pages = document.pagesView.pages
+        XCTAssertGreaterThanOrEqual(pages.count, 2)
+        let second = pages[1]
+        XCTAssertEqual(second.section, 1, "вторая страница — второй раздел, своего колонтитула у него нет")
+        formatter.beginHeaderEditing(page: second, header: true)
+        XCTAssertEqual(formatter.headerLink, .linked)
+        XCTAssertEqual(second.headerFrame?.title, "Верхний колонтитул · Как в предыдущем")
+
+        formatter.setLinkedToPrevious(false)
+        settle()
+        XCTAssertEqual(formatter.headerLink, .own, "раздел получил свою копию")
+        XCTAssertNotNil(document.model.sections[1].headers[.headerRight])
+        XCTAssertEqual(second.headerFrame?.title, "Верхний колонтитул", "метка без «Как в предыдущем»")
+        tab.undo.undo()
+        settle()
+        XCTAssertEqual(tab.text as String, original, "отмена — файл байт в байт")
+        // Своя копия колонтитула ушла вместе с отменой — правка закрылась (`DocHeaderSession.reload`); открываем снова.
+        if formatter.headerSession == nil { formatter.beginHeaderEditing(page: second, header: true) }
+        XCTAssertEqual(formatter.headerLink, .linked)
+
+        // Esc в тексте колонтитула — выход; тело не бледное, курсор тела тот же.
+        let session = try XCTUnwrap(formatter.headerSession)
+        session.textView.cancelOperation(nil)
+        XCTAssertNil(formatter.headerSession)
+        XCTAssertFalse(second.faded)
+        XCTAssertNil(second.headerFrame)
+        XCTAssertEqual(document.textViews.first?.selectedRange(), body, "курсор основного текста не сдвинулся")
+    }
+
+    /// Метка рамки — на верхней границе справа, внутри ширины рамки.
+    func testHeaderFrameLabelSitsOnTopBorder() {
+        let frame = NSRect(x: 80, y: 30, width: 420, height: 40)
+        let label = DocHeaderFrameStyle.labelRect(for: frame, title: "Нижний колонтитул · Как в предыдущем")
+        XCTAssertEqual(label.midY, frame.minY, accuracy: 0.5, "по центру верхней границы")
+        XCTAssertLessThanOrEqual(label.maxX, frame.maxX - DocHeaderFrameStyle.labelInset + 0.5)
+        XCTAssertGreaterThanOrEqual(label.minX, frame.minX)
+    }
+
     func testFooterAddedOnDoubleClickAndRemoved() throws {
         let (tab, document, formatter) = try open()
         let original = tab.text as String
@@ -296,14 +341,24 @@ final class DocFormatViewTests: XCTestCase {
     /// Снимки панели для сверки с макетами (`d01`, `d06`, `d11`) — в каталог из `MU_DOC_FORMAT_SNAPSHOTS`, без экрана.
     func testSnapshotsForReview() throws {
         guard let directory = ProcessInfo.processInfo.environment["MU_DOC_FORMAT_SNAPSHOTS"] else { throw XCTSkip("MU_DOC_FORMAT_SNAPSHOTS не задан") }
-        for (name, size, dark, header) in [("d01", NSSize(width: 1000, height: 700), false, false), ("d06", NSSize(width: 520, height: 600), false, false),
-                                           ("d11", NSSize(width: 1000, height: 700), false, true), ("d01-dark", NSSize(width: 1000, height: 700), true, false)] {
+        // header: страница, где открыть правку колонтитула (`nil` — без правки); d11-linked — второй раздел, «Как в предыдущем».
+        let shots: [(String, NSSize, Bool, Int?)] = [
+            ("d01", NSSize(width: 1000, height: 700), false, nil), ("d06", NSSize(width: 520, height: 600), false, nil),
+            ("d11", NSSize(width: 1000, height: 700), false, 0), ("d11-dark", NSSize(width: 1000, height: 700), true, 0),
+            ("d11-linked", NSSize(width: 1000, height: 700), false, 1), ("d01-dark", NSSize(width: 1000, height: 700), true, nil),
+        ]
+        for (name, size, dark, header) in shots {
             let (workspace, tab) = DocDemo.tab()
             tab.restoreMode(nil)
             let window = host(workspace, size: size, dark: dark)
             let document = try XCTUnwrap(tab.documentController)
             select("Демоград", in: document)
-            if header, let page = document.pagesView.pages.first { DocFormatter.of(document).beginHeaderEditing(page: page, header: true) }
+            if let header, let page = document.pagesView.pages[safe: header] {
+                DocFormatter.of(document).beginHeaderEditing(page: page, header: true)
+                let clip = document.scrollView.contentView
+                clip.scroll(to: NSPoint(x: clip.bounds.minX, y: max(0, page.frame.minY - 16)))
+                document.scrollView.reflectScrolledClipView(clip)
+            }
             settle(0.5)
             let view = try XCTUnwrap(window.contentView)
             let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))

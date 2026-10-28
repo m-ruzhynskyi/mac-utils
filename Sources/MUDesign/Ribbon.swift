@@ -68,6 +68,8 @@ extension DS {
                             .padding(.horizontal, DS.Space.xs)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // Высота — по самой высокой группе, а не всё, что предложит родитель (подписи групп — на одной линии).
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(Color.dsPanel)
                     .overlay(alignment: .top) { Rectangle().fill(Color.dsLine).frame(height: 1) }
                 }

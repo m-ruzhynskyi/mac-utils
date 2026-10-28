@@ -180,11 +180,13 @@ package final class DocHeaderSession: NSObject, NSTextViewDelegate {
         page.headerFrame = (textView.frame.insetBy(dx: -8, dy: -6), title)
     }
 
-    /// Подпись над рамкой: «— чётные» и «— нечётные» — только когда они и правда разные (`\facingp`).
+    /// Подпись над рамкой: «— чётные» и «— нечётные» — только когда они и правда разные (`\facingp`); раздел показывает
+    /// колонтитул предыдущего — « · Как в предыдущем» (как в Word).
     package var title: String {
         let facing = controller?.model.facingPages ?? false
-        if !facing, kind.page == .even || kind.page == .odd { return RTFHeaderKind.kind(header: isHeader, page: .all).title }
-        return kind.title
+        var base = kind.title
+        if !facing, kind.page == .even || kind.page == .odd { base = RTFHeaderKind.kind(header: isHeader, page: .all).title }
+        return formatter?.headerLink == .linked ? base + " · Как в предыдущем" : base
     }
 
     // MARK: - Выделение
@@ -250,6 +252,42 @@ package final class DocHeaderSession: NSObject, NSTextViewDelegate {
 
 extension Array {
     package subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}
+
+/// Рамка правки колонтитула на странице (макет `.audit/word-ui-design`, «★2»): синяя пунктирная рамка и метка на её верхней
+/// границе справа — белая плашка с синим текстом и рамкой. Бумага всегда белая, поэтому цвета постоянные (синий светлой темы).
+package enum DocHeaderFrameStyle {
+    package static let blue = NSColor(srgbRed: 0x1F / 255.0, green: 0x6F / 255.0, blue: 0xDB / 255.0, alpha: 1)
+    package static let labelInk = NSColor(srgbRed: 0x1F / 255.0, green: 0x5F / 255.0, blue: 0xC0 / 255.0, alpha: 1)
+    /// Отступ метки от правого края рамки.
+    package static let labelInset: CGFloat = 24
+
+    /// Где стоит метка (для теста и рисования): по центру верхней границы, справа.
+    package static func labelRect(for rect: NSRect, title: String) -> NSRect {
+        let size = (title as NSString).size(withAttributes: attributes)
+        let width = size.width + 12, height = size.height + 4
+        return NSRect(x: max(rect.minX, rect.maxX - labelInset - width), y: rect.minY - height / 2, width: width, height: height)
+    }
+
+    package static var attributes: [NSAttributedString.Key: Any] {
+        [.font: NSFont(name: "Manrope-Bold", size: 10.5) ?? .boldSystemFont(ofSize: 10.5), .foregroundColor: labelInk]
+    }
+
+    package static func draw(_ rect: NSRect, title: String) {
+        let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+        path.setLineDash([4, 3], count: 2, phase: 0)
+        path.lineWidth = 1
+        blue.setStroke()
+        path.stroke()
+        let label = labelRect(for: rect, title: title)
+        let plate = NSBezierPath(roundedRect: label, xRadius: 6, yRadius: 6)
+        NSColor.white.setFill()
+        plate.fill()
+        labelInk.setStroke()
+        plate.lineWidth = 1
+        plate.stroke()
+        (title as NSString).draw(at: NSPoint(x: label.minX + 6, y: label.minY + 2), withAttributes: attributes)
+    }
 }
 
 // MARK: - Вход, выход и команды вкладки «Колонтитулы»
