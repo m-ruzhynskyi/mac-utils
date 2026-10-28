@@ -253,7 +253,7 @@ final class DocWordLayoutTests: XCTestCase {
                 XCTAssertGreaterThan(nested - left, 40)
                 XCTAssertLessThan(nested - left, 60)
             } else {
-                XCTAssertEqual(nested - left, 0.24, accuracy: 0.05, "вложенная — у верха ячейки, ниже на полосу своей верхней рамки")
+                XCTAssertEqual(nested - left, 0, accuracy: 0.05, "вложенная — у верха ячейки (строка «точно» — без полос рамок)")
             }
         }
     }

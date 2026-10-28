@@ -1033,8 +1033,11 @@ package final class DocRenderer {
         let cell = place.def
         // Рамки ячейки у Word занимают место в высоте строки (по половине линии сверху и снизу), у нас их только рисует блок.
         // Поля блока `NSTextTable` округляет до целых пунктов — полоса рамки (доли пункта) добавляется в `DocCellBlock`.
-        block.band = (cell.borderTop.isVisible ? DocCellBlock.wordWidth(cell.borderTop.width) / 2 : 0,
-                      cell.borderBottom.isVisible ? DocCellBlock.wordWidth(cell.borderBottom.width) / 2 : 0)
+        // «Точно» (`\trrh` < 0 и точная высота строки вложенной таблицы) у Word — без полос рамок.
+        if place.exactHeight == nil, place.height >= 0 {
+            block.band = (cell.borderTop.isVisible ? DocCellBlock.wordWidth(cell.borderTop.width) / 2 : 0,
+                          cell.borderBottom.isVisible ? DocCellBlock.wordWidth(cell.borderBottom.width) / 2 : 0)
+        }
         block.setWidth(CGFloat(place.padTop) / 20, type: .absoluteValueType, for: .padding, edge: .minY)
         block.setWidth(CGFloat(place.padBottom) / 20, type: .absoluteValueType, for: .padding, edge: .maxY)
         for (edge, border) in [(NSRectEdge.minY, cell.borderTop), (.maxY, cell.borderBottom), (.minX, cell.borderLeft), (.maxX, cell.borderRight)] {
@@ -1205,9 +1208,12 @@ package final class DocCellBlock: NSTextTableBlock {
     package override func boundsRect(forContentRect contentRect: NSRect, in rect: NSRect, textContainer: NSTextContainer,
                              characterRange charRange: NSRange) -> NSRect {
         var bounds = super.boundsRect(forContentRect: contentRect, in: rect, textContainer: textContainer, characterRange: charRange)
+        let natural = bounds.height
         bounds.origin.y -= appliedShift
         bounds.size.height += appliedShift + band.bottom
-        if rowHeight != 0 { bounds.size.height = max(bounds.height, abs(rowHeight)) }
+        // Строка с `\trrh` — как у Word: большее из содержимого и `\trrh`, плюс полосы рамок. Сдвиг выравнивания по оценке
+        // высоты строку не растит (оценка бывает чуть меньше настоящей — f078: +1,9 pt на строку).
+        if rowHeight != 0 { bounds.size.height = max(natural, abs(rowHeight)) + band.top + band.bottom }
         return bounds
     }
 
