@@ -89,8 +89,9 @@ final class WordColorTests: XCTestCase {
     }
 
     /// Маркер на тексте — виден (как у Word), `$` — в цвете документа (красный), без чужой подсветки.
+    /// `$` — отдельным словом: PDFKit macOS 15 (раннер CI) отдаёт слову один цвет, и в «$value» красный знак терялся.
     func testHighlightOnTextAndRedDollar() throws {
-        let rtf = Self.header + #"\pard{\highlight4 mark}\par\pard{\cf6 $}value\par}"#
+        let rtf = Self.header + #"\pard{\highlight4 mark}\par\pard{\cf6 $} value\par}"#
         let pages = WordColors.pages(try rendered(rtf))
         XCTAssertTrue(pages.flatMap(\.fills).contains { $0.key.near(WordColors.RGB(0, 1, 0), tolerance: 16) }, "маркер на тексте")
         let colors = pages.flatMap(\.text).filter { !$0.key.isBlack }.map(\.key)
