@@ -1,5 +1,8 @@
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUScreenShare
+@testable import MUTextEditor
 
 /// Мониторы ведущего (SHARE-PROTOCOL §4.1): список с этого Mac, правило ведущего, зритель — запрос, ответ, таймаут.
 /// Формат сообщений сверяется с relay и страницей в ShareCompatTests (displays.json).
@@ -236,5 +239,45 @@ final class ShareMonitorsTests: XCTestCase {
         XCTAssertEqual(kate[1].accessibilityLabel(current: 2), "Монитор 2, основной, 3840 на 2160, 175 %, показывается сейчас")
         XCTAssertEqual(kate[0].accessibilityLabel(current: 2), "Монитор 1, 1920 на 1080, 100 %")
         XCTAssertEqual(kate[2].title, "Монитор 3 · 1920×1080 · 100 %")
+    }
+}
+
+@MainActor
+final class ShareMarksInVideoTests: XCTestCase {
+    func testFieldParsing() {
+        XCTAssertTrue(ShareVideoMode.marksInVideo(from: ["type": "displays", "marks": "video"]))
+        XCTAssertFalse(ShareVideoMode.marksInVideo(from: ["type": "displays"]))
+        XCTAssertFalse(ShareVideoMode.marksInVideo(from: ["type": "displays", "marks": "x"]))
+        XCTAssertFalse(ShareVideoMode.marksInVideo(from: ["type": "displays", "marks": true]))
+    }
+
+    func testMarksAreDrawnNormallyWithoutFlag() throws {
+        let store = ShareMarkStore()
+        let mark = try XCTUnwrap(ShareMark.parse(ShareMark.message(ping: CGPoint(x: 0.5, y: 0.5), color: "red")))
+        store.add(mark, local: true)
+        store.add(mark)
+        XCTAssertEqual(store.marks.count, 2)
+        XCTAssertEqual(store.marks.map(\.lifetime), [1.6, 1.6])
+    }
+
+    func testWithFlagOthersAreDroppedAndOwnIsShortEcho() throws {
+        let store = ShareMarkStore()
+        store.inVideo = true
+        let mark = try XCTUnwrap(ShareMark.parse(ShareMark.message(ping: CGPoint(x: 0.5, y: 0.5), color: "red")))
+        store.add(mark)
+        XCTAssertTrue(store.marks.isEmpty, "чужая метка уже в видео")
+        store.add(mark, local: true)
+        XCTAssertEqual(store.marks.count, 1)
+        XCTAssertEqual(store.marks[0].lifetime, ShareMark.echoLifetime)
+        XCTAssertLessThan(ShareMark.echoLifetime, 0.5)
+    }
+}
+
+final class ShareHostReconnectTests: XCTestCase {
+    func testQuickThenSlowAboutTenMinutes() {
+        XCTAssertEqual(ShareHostReconnect.quick.reduce(0, +), 44)
+        let total = ShareHostReconnect.delays.reduce(0, +)
+        XCTAssertGreaterThan(total, 600)
+        XCTAssertLessThan(total, 700)
     }
 }

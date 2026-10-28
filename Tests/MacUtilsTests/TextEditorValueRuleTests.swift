@@ -1,6 +1,8 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUTextEditor
 
 /// Окончательное правило панели «$» (1.7.1): значение — все символы исходника после `$` до конца строки или
 /// следующего `$`; RTF не разбирается. После «Убрать значения» — проверка баланса `{}`.

@@ -1,6 +1,8 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUTextEditor
 
 /// Списки в «Документе» (E-2): номера по `\listtable`/`\listoverridetable`/`\ls`/`\ilvl`, как у Word, и правка пунктов
 /// без потерь. Фикстуры — `Tests/Fixtures/DocLists` (выдуманный текст, структура — как у форм; `make_lists.py`).

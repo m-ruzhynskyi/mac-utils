@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUAppInputSource
 
 /// «Раскладка по программам»: что запоминается как выбор пользователя.
 final class InputSourceRememberTests: XCTestCase {

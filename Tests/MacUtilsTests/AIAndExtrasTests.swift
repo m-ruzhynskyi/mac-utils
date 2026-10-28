@@ -1,5 +1,13 @@
 @testable import MacUtils
 import XCTest
+@testable import MUCore
+@testable import MUWellbeing
+@testable import MUMeetings
+@testable import MUUpdate
+@testable import MUWindowSnap
+@testable import MUScreenShare
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 final class AIAndExtrasTests: XCTestCase {
     func testJSONInsideChatter() {

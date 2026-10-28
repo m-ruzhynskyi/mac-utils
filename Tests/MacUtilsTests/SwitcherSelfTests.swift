@@ -1,6 +1,8 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUDesign
+@testable import MUAppSwitcher
 
 /// Mac Utils в своём переключателе, пока у него есть значок в Dock. Окна в тестах не показываются.
 @MainActor

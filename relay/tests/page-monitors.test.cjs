@@ -48,6 +48,8 @@ test('ревизия растёт только при изменении спи�
 test('сообщение displays: как в фикстуре; выключено, окно или чужой current — пустой список без current', () => {
   assert.deepEqual(plain(page.displaysMessage(7, KATE.list, 2, true)), KATE);
   assert.deepEqual(plain(page.displaysMessage(8, KATE.list, 2, false)), { type: 'displays', v: 1, rev: 8, list: [] });
+  assert.deepEqual(plain(page.displaysMessage(7, KATE.list, 2, true, '', true)), { ...KATE, marks: 'video' }, 'метки идут в видео');
+  assert.deepEqual(plain(page.displaysMessage(7, KATE.list, 2, true, '', false)), KATE, 'нет флага — поля нет');
   assert.deepEqual(plain(page.displaysMessage(8, KATE.list, 0, true)), { type: 'displays', v: 1, rev: 8, list: [] });
   const many = fixture.valid[2].expected.list.concat([{ ...KATE.list[0], n: 9 }]);
   assert.equal(page.displaysMessage(1, many, 1, true).list.length, 8);

@@ -1,5 +1,8 @@
 import AppKit
 import Foundation
+import MUCore
+import MUDesign
+import MUAudio
 
 /// Значок «Инструменты» в Программах: маленькое приложение внутри Mac Utils.app
 /// (Contents/Resources/Инструменты.app), которое при запуске Mac Utils копируется
