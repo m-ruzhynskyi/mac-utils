@@ -130,8 +130,14 @@ package final class DocHeaderSession: NSObject, NSTextViewDelegate {
     package func reload(selectSource: NSRange?) {
         guard let controller, let page else { return }
         guard let header = controller.model.sections[safe: section]?.headers[kind] else {
-            // Колонтитула больше нет (отмена его добавления) — правка закончилась.
-            formatter?.endHeaderEditing()
+            // Своего колонтитула раздела больше нет (отмена «Отвязать от предыдущего», «Как в предыдущем»): раздел снова показывает
+            // колонтитул предыдущего — правка переходит на него. Нет и его (отмена добавления) — правка закончилась.
+            if section > 0, let provider = DocHeaderFooterEdits.provider(of: kind, before: min(section, controller.model.sections.count), model: controller.model) {
+                self.section = provider
+                reload(selectSource: nil)
+            } else {
+                formatter?.endHeaderEditing()
+            }
             return
         }
         let total = controller.pageCount
@@ -341,6 +347,7 @@ extension DocFormatter {
         for other in controller.pagesView.pages { other.faded = true }
         session.install()
         updateState()
+        controller.updateStatus()
     }
 
     package func endHeaderEditing() {
@@ -354,6 +361,7 @@ extension DocFormatter {
         }
         if let view = controller.textViews.first { view.window?.makeFirstResponder(view) }
         updateState()
+        controller.updateStatus()
     }
 
     /// После переключателя (первая страница, чётные/нечётные) страница может показывать другой колонтитул.

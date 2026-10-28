@@ -747,7 +747,12 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     /// Страница, раздел и свойства у курсора — строке состояния и панели форматирования.
     package func updateStatus() {
         let selection = textViews.first?.selectedRange() ?? NSRange(location: 0, length: 0)
-        if let view = textView(forUnit: selection.location), let page = view.page,
+        // Правка колонтитула: страница и раздел — те, где эта правка, а не те, где курсор основного текста.
+        if let page = DocFormatter.existing(for: self)?.headerSession?.page,
+           let index = pagesView.pages.firstIndex(where: { $0 === page }) {
+            if currentPage != index + 1 { currentPage = index + 1 }
+            if currentSection != page.section + 1 { currentSection = page.section + 1 }
+        } else if let view = textView(forUnit: selection.location), let page = view.page,
            let index = pagesView.pages.firstIndex(where: { $0 === page }) {
             if currentPage != index + 1 { currentPage = index + 1 }
             if currentSection != page.section + 1 { currentSection = page.section + 1 }

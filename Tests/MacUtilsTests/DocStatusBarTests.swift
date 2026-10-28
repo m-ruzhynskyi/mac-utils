@@ -120,4 +120,21 @@ final class DocStatusBarTests: XCTestCase {
         XCTAssertEqual(document.zoom, DocumentController.zoomRange.upperBound, accuracy: 0.001, "предел сверху")
         _ = tab
     }
+
+    /// Правка колонтитула второй страницы: строка состояния называет страницу и раздел этой правки, а не курсора основного текста.
+    func testStatusNamesPageOfHeaderEditing() throws {
+        let (_, document, _) = try open(DocHeaderLinkTests.threeSections)
+        let formatter = DocFormatter.of(document)
+        XCTAssertEqual(document.pageCount, 3)
+        document.textViews.first?.setSelectedRange(NSRange(location: 0, length: 0))
+        document.updateStatus()
+        XCTAssertEqual(document.currentPage, 1)
+        let second = document.pagesView.pages[1]
+        formatter.beginHeaderEditing(page: second, header: true)
+        XCTAssertEqual(document.currentPage, 2, "правка колонтитула второй страницы — «Страница 2»")
+        XCTAssertEqual(document.currentSection, 2)
+        formatter.endHeaderEditing()
+        XCTAssertEqual(document.currentPage, 1, "вышли — снова страница курсора")
+        XCTAssertEqual(document.currentSection, 1)
+    }
 }

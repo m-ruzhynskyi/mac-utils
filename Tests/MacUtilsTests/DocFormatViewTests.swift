@@ -204,9 +204,11 @@ final class DocFormatViewTests: XCTestCase {
         tab.undo.undo()
         settle()
         XCTAssertEqual(tab.text as String, original, "отмена — файл байт в байт")
-        // Своя копия колонтитула ушла вместе с отменой — правка закрылась (`DocHeaderSession.reload`); открываем снова.
-        if formatter.headerSession == nil { formatter.beginHeaderEditing(page: second, header: true) }
+        // Своя копия колонтитула ушла вместе с отменой — правка не закрывается, а переходит на колонтитул предыдущего раздела.
+        XCTAssertNotNil(formatter.headerSession, "правка осталась открытой")
+        XCTAssertEqual(formatter.headerSession?.section, 0, "перешла на колонтитул первого раздела")
         XCTAssertEqual(formatter.headerLink, .linked)
+        XCTAssertEqual(second.headerFrame?.title, "Верхний колонтитул · Как в предыдущем")
 
         // Esc в тексте колонтитула — выход; тело не бледное, курсор тела тот же.
         let session = try XCTUnwrap(formatter.headerSession)
