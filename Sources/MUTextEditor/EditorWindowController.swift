@@ -500,8 +500,7 @@ package final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuIt
 
     package func showFind(replace: Bool) {
         guard let tab = workspace.current else { return }
-        // Поиск и замена работают по исходнику — в «Код» (место переносится).
-        if tab.mode == .document { tab.setMode(.code) }
+        // В «Документе» поиск идёт по видимому тексту страниц (S2), в «Коде» — по исходнику.
         if workspace.findMode == nil { workspace.search.prepare(from: tab) }
         workspace.findMode = replace || workspace.findMode == true
         workspace.search.refresh()
