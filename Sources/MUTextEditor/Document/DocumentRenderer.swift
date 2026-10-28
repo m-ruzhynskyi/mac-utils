@@ -1208,12 +1208,16 @@ package final class DocCellBlock: NSTextTableBlock {
     package override func boundsRect(forContentRect contentRect: NSRect, in rect: NSRect, textContainer: NSTextContainer,
                              characterRange charRange: NSRange) -> NSRect {
         var bounds = super.boundsRect(forContentRect: contentRect, in: rect, textContainer: textContainer, characterRange: charRange)
-        let natural = bounds.height
+        // `super` уже растянул ячейку до высоты строки по предыдущим ячейкам, а в ней их полосы рамок: своя высота —
+        // от своего текста, иначе каждая следующая ячейка строки выше на полосу (f157: +0,96 pt на строку в 5 столбцов).
+        let own = contentRect.maxY + width(for: .padding, edge: .maxY) + width(for: .border, edge: .maxY)
+            + width(for: .margin, edge: .maxY) - bounds.minY
+        let row = bounds.maxY
         bounds.origin.y -= appliedShift
-        bounds.size.height += appliedShift + band.bottom
+        bounds.size.height = max(row - bounds.minY, own + appliedShift + band.bottom)
         // Строка с `\trrh` — как у Word: большее из содержимого и `\trrh`, плюс полосы рамок. Сдвиг выравнивания по оценке
         // высоты строку не растит (оценка бывает чуть меньше настоящей — f078: +1,9 pt на строку).
-        if rowHeight != 0 { bounds.size.height = max(natural, abs(rowHeight)) + band.top + band.bottom }
+        if rowHeight != 0 { bounds.size.height = max(row - bounds.minY, max(own, abs(rowHeight)) + band.top + band.bottom) }
         return bounds
     }
 

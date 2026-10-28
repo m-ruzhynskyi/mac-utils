@@ -290,4 +290,17 @@ final class DocWordLayoutTests: XCTestCase {
         let r1 = try XCTUnwrap(lines(document, "R1").first), r2 = try XCTUnwrap(lines(document, "R2").first)
         XCTAssertEqual(r2.minY - r1.minY, single(12) + 0.48, accuracy: 0.05, "строка таблицы — текст и полосы рамок (по 0,24 pt)")
     }
+
+    /// Полосы рамок не копятся по ячейкам строки: `NSTextTable` тянет каждую следующую ячейку до высоты строки, в которой
+    /// уже полоса предыдущей.
+    func testBorderBandsDoNotAddUpAcrossCells() throws {
+        let cells = (1...5).map { #"\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx\#($0 * 1500)"# }.joined()
+        func row(_ text: String) -> String {
+            #"\trowd\trgaph108\trleft0"# + cells + #"\pard\plain\intbl\fs24 "# + text + #"\cell"# + String(repeating: #"\pard\plain\intbl\fs24 \cell"#, count: 4)
+                + #"\trowd\trgaph108\trleft0"# + cells + #"\row"#
+        }
+        let document = try open(row("R1") + row("R2") + row("R3") + #"\pard END\par"#)
+        let r1 = try XCTUnwrap(lines(document, "R1").first), r3 = try XCTUnwrap(lines(document, "R3").first)
+        XCTAssertEqual(r3.minY - r1.minY, 2 * (single(12) + 0.48), accuracy: 0.05, "строка — текст и полосы, в 5 столбцов тоже")
+    }
 }
