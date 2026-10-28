@@ -171,8 +171,9 @@ final class PlayerEntryPointTests: XCTestCase {
         let data = try Data(contentsOf: plist)
         let info = try XCTUnwrap(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
         let types = try XCTUnwrap(info["CFBundleDocumentTypes"] as? [[String: Any]])
-        let media = types.filter { ["Видео", "Звук"].contains($0["CFBundleTypeName"] as? String) }
-        XCTAssertEqual(media.count, 2)
+        // Своя запись на каждый тип (свой значок с расширением): mp4, mov, m4v, mp3, m4a, wav, aac.
+        let media = types.filter { ($0["CFBundleTypeRole"] as? String) == "Viewer" }
+        XCTAssertEqual(media.count, PlayerMedia.openWithExtensions.count)
         for type in media {
             XCTAssertEqual(type["LSHandlerRank"] as? String, "Alternate", "QuickTime остаётся по умолчанию")
             XCTAssertEqual(type["CFBundleTypeRole"] as? String, "Viewer")
@@ -180,6 +181,33 @@ final class PlayerEntryPointTests: XCTestCase {
         let utis = media.flatMap { $0["LSItemContentTypes"] as? [String] ?? [] }
         XCTAssertTrue(utis.contains("public.mpeg-4"))
         XCTAssertFalse(utis.contains { $0.contains("matroska") || $0.contains("webm") || $0 == "public.avi" }, "MKV/WebM/AVI — во второй версии")
+    }
+
+    /// Значки документов: у каждой записи свой `DocIcon-<ext>.icns`, и это ровно список `scripts/make-doc-icons.swift`
+    /// (файлы рисует build.sh, в бандле их сверяет `scripts/check-doc-icons.sh`). Ранг везде Alternate — программы по умолчанию
+    /// не меняются; `.frm` — наш тип (exported) со значком, наследует простой текст, как раньше.
+    func testDocumentTypeIconsMatchGenerator() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("Resources/Info.plist"))
+        let info = try XCTUnwrap(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        let types = try XCTUnwrap(info["CFBundleDocumentTypes"] as? [[String: Any]])
+        let icons = types.compactMap { $0["CFBundleTypeIconFile"] as? String }
+        XCTAssertEqual(icons.count, types.count, "у каждой записи есть значок")
+        XCTAssertEqual(Set(icons).count, icons.count, "значки не повторяются")
+        for type in types { XCTAssertEqual(type["LSHandlerRank"] as? String, "Alternate", "\(type["CFBundleTypeName"] ?? "?")") }
+
+        let script = try String(contentsOf: root.appendingPathComponent("scripts/make-doc-icons.swift"), encoding: .utf8)
+        let pattern = try NSRegularExpression(pattern: #"\("([a-z0-9]+)", (docs|video|audio)\)"#)
+        let generated = pattern.matches(in: script, range: NSRange(script.startIndex..., in: script)).compactMap {
+            Range($0.range(at: 1), in: script).map { "DocIcon-\(script[$0]).icns" }
+        }
+        XCTAssertEqual(generated, icons, "порядок и состав — как в Info.plist")
+
+        XCTAssertNil(info["UTImportedTypeDeclarations"], ".frm объявлен нашим типом, импортированного больше нет")
+        let exported = try XCTUnwrap((info["UTExportedTypeDeclarations"] as? [[String: Any]])?.first)
+        XCTAssertEqual(exported["UTTypeIdentifier"] as? String, "com.mruzhynskyi.macutils.frm")
+        XCTAssertEqual(exported["UTTypeIconFile"] as? String, "DocIcon-frm.icns")
+        XCTAssertEqual(exported["UTTypeConformsTo"] as? [String], ["public.plain-text"], "Quick Look и Spotlight — как раньше")
     }
 
     /// Видеоплеер выходит в 1.9 (вместе с режимом «Документ»): пункты — в записи «1.9», без номеров версий в тексте.
