@@ -1,6 +1,6 @@
 import Foundation
 
-/// «Обновить поля» (E-4, F9 в Word): результат `{\fldrslt …}` полей PAGE, NUMPAGES и SECTIONPAGES переписывается
+/// «Обновить поля» (E-4, F9 в Word): результат `{\fldrslt …}` полей PAGE, NUMPAGES, SECTIONPAGES (и DATE, TIME — по образцу) переписывается
 /// числами нашей раскладки. Меняется только текст результата (коды вокруг него остаются), и только там, где число
 /// другое, — остальные байты те же. PAGE в колонтитуле не трогается: на каждой странице он свой, одного верного
 /// результата у него нет (Word тоже пишет туда что придётся).
@@ -11,6 +11,17 @@ package enum DocFieldUpdate {
         package var total: Int
         /// Страниц в разделе.
         package var sectionPages: (Int) -> Int?
+        /// Сейчас: результат `DATE` и `TIME` переписывается по их образцу (`\@ "dd.MM.yyyy"`); `nil` — их не трогаем.
+        package var now: Date?
+        package var locale = DocFieldFormat.locale
+        package var timeZone = TimeZone.current
+
+        package init(page: @escaping (Int) -> Int?, total: Int, sectionPages: @escaping (Int) -> Int?, now: Date? = nil) {
+            self.page = page
+            self.total = total
+            self.sectionPages = sectionPages
+            self.now = now
+        }
     }
 
     package struct Result: Equatable {
@@ -30,19 +41,27 @@ package enum DocFieldUpdate {
         }
         for entry in stories {
             for paragraph in entry.story.paragraphs {
-                for piece in pieces(paragraph) {
+                for piece in pieces(paragraph, model: model) {
                     result.fields += 1
-                    let wanted: Int?
+                    let wanted: String?
                     switch piece.kind {
-                    case .page: wanted = entry.header ? nil : piece.runs[0].map.first.flatMap { values.page($0.location) }
-                    case .numPages: wanted = values.total
-                    case .sectionPages: wanted = values.sectionPages(entry.section ?? paragraph.section)
-                    case .other: wanted = nil
+                    case .page: wanted = entry.header ? nil : piece.runs[0].map.first.flatMap { values.page($0.location) }.map(String.init)
+                    case .numPages: wanted = String(values.total)
+                    case .sectionPages: wanted = values.sectionPages(entry.section ?? paragraph.section).map(String.init)
+                    case .other(let name):
+                        // Дата и время: образец из кода поля, иначе — как у Word по умолчанию.
+                        if let now = values.now, name == "DATE" || name == "TIME" {
+                            let instruction = piece.runs[0].field.flatMap { model.fields[safe: $0]?.instruction } ?? ""
+                            let picture = DocFieldFormat.picture(ofInstruction: instruction) ?? DocFieldFormat.defaultPicture(forField: name)
+                            wanted = DocFieldFormat.text(picture: picture, date: now, locale: values.locale, timeZone: values.timeZone)
+                        } else {
+                            wanted = nil
+                        }
                     }
-                    guard let wanted, piece.text != "\(wanted)" else { continue }
+                    guard let wanted, piece.text != wanted else { continue }
                     // Число — на место текста первого прогона результата (его коды), текст остальных прогонов вырезается.
                     let first = piece.runs[0]
-                    var text = DocTextEditor.encode("\(wanted)", props: first.props, uc: first.uc, model: model)
+                    var text = DocTextEditor.encode(wanted, props: first.props, uc: first.uc, model: model)
                     let range = span(first.map)
                     if DocTextEditor.needsDelimiter(before: range.location, source: source) { text = " " + text }
                     result.edits.append(DocEdit(range: range, text: text))
@@ -60,11 +79,19 @@ package enum DocFieldUpdate {
 
     /// Результаты вычисляемых полей абзаца (`\fldrslt`): вид, весь текст и его прогоны (формат внутри результата
     /// бывает разным). Номер `\chpgn` без поля не в счёт.
-    package static func pieces(_ paragraph: RTFParagraph) -> [(kind: RTFFieldKind, text: String, runs: [RTFRun])] {
+    package static func pieces(_ paragraph: RTFParagraph, model: RTFDocumentModel) -> [(kind: RTFFieldKind, text: String, runs: [RTFRun])] {
         var result: [(kind: RTFFieldKind, text: String, runs: [RTFRun])] = []
         var last: Int?
         for run in paragraph.runs {
-            guard case .field(let kind) = run.kind, let field = run.field, !run.map.isEmpty else {
+            // Результат вычисляемого поля — прогон вида `.field`; у прочих (дата, время, ссылка) это обычный текст внутри поля.
+            let kind: RTFFieldKind
+            if case .field(let computed) = run.kind { kind = computed }
+            else if run.kind == .text, let index = run.field, let other = model.fields[safe: index]?.kind, !other.isComputed { kind = other }
+            else {
+                last = nil
+                continue
+            }
+            guard let field = run.field, !run.map.isEmpty else {
                 last = nil
                 continue
             }

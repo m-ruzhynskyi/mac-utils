@@ -126,20 +126,23 @@ package struct DollarPanelView: View {
         return document.page(ofSource: entry.mark.dollar).map { "с.\($0)" } ?? "—"
     }
 
-    /// Значение в строке: в «Коде» — как в исходнике, в «Документе» — как видно на странице (`\'ca…` → «Катя»).
-    private func shown(_ entry: DollarEntry) -> String {
-        guard tab.mode == .document, let document = tab.documentController else { return entry.value }
-        return document.visibleValue(of: entry.mark) ?? entry.value
-    }
 
     /// Строки групп — с разными id: иначе ленивый список путает строку, перешедшую из группы в группу.
     package static func skippedID(_ dollar: Int) -> Int { -dollar - 1 }
 
     private func row(_ entry: DollarEntry, skipped: Bool) -> some View {
-        DollarRow(entry: entry, skipped: skipped, selected: model.selected == entry.mark.dollar, place: place(entry), value: shown(entry)) {
+        let value = tab.dollarValue(entry)
+        // Статус — только у подсвеченных: пропущенные и служебные знаки не заполняются.
+        let status = skipped || entry.isHidden ? nil : model.status(of: entry, value: value)
+        return DollarRow(entry: entry, skipped: skipped, selected: model.selected == entry.mark.dollar, place: place(entry), value: value,
+                         status: status) {
             model.selected = entry.mark.dollar
             tab.dollars.onUpdate?()
             tab.revealDollar(entry)
+            // В «Документе» подсвеченный знак сразу правится в поповере над ним (V2).
+            if tab.mode == .document, !skipped, !entry.isHidden, let document = tab.documentController {
+                DocValuePopover.shared.show(entry, in: document)
+            }
         } remove: {
             tab.removeValues([entry])
         }
@@ -194,13 +197,32 @@ package struct DollarPanelView: View {
     }
 }
 
-/// Строка списка: номер строки, полоска оттенка, `$значение`; выбранная обведена и показывает × «убрать это значение».
+extension EditorTab {
+    /// Значение знака, как его показывают панель и счётчик «Заполнено»: в «Коде» — как в исходнике, в «Документе» — как видно
+    /// на странице (`visibleValue`: `\'ca…` → «Катя»; знак не виден на странице — как в исходнике).
+    package func dollarValue(_ entry: DollarEntry) -> String {
+        guard mode == .document, let document = documentController else { return entry.value }
+        return document.visibleValue(of: entry.mark) ?? entry.value
+    }
+
+    /// «Заполнено N из M» для строки состояния; `nil` — панель «$» закрыта или подсвеченных знаков нет.
+    package func dollarFill(panelVisible: Bool) -> (filled: Int, total: Int)? {
+        guard panelVisible else { return nil }
+        let fill = dollars.fill(value: dollarValue)
+        return fill.total > 0 ? fill : nil
+    }
+}
+
+/// Строка списка: номер строки, полоска оттенка, `$значение`, статус (✓ заполнено / пусто / правится…);
+/// выбранная обведена и показывает × «убрать это значение».
 private struct DollarRow: View {
     package let entry: DollarEntry
     package let skipped: Bool
     package let selected: Bool
     package let place: String
     package let value: String
+    /// `nil` — пропущенный или служебный знак (без статуса).
+    package let status: DollarStatus?
     package let select: () -> Void
     package let remove: () -> Void
     @State private var hovered = false
@@ -221,10 +243,20 @@ private struct DollarRow: View {
                 .font(DS.Font.mono(12.5, relativeTo: .body))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if value.isEmpty {
+            if value.isEmpty, status != .editing {
                 Text(entry.mark.isEmpty ? "пусто" : "пробелы").font(DS.Font.rowSub).foregroundStyle(.dsMute)
             }
             Spacer(minLength: 0)
+            switch status {
+            case .filled:
+                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.dsAccText)
+                    .help("Заполнено")
+            case .editing:
+                Text("правится…").font(DS.Font.manrope(11.5, .semibold, relativeTo: .caption)).foregroundStyle(DS.Tone.warning.text)
+                    .fixedSize()
+            case .empty, nil:
+                EmptyView()
+            }
             if (selected || hovered) && !entry.mark.isEmpty && !entry.isHidden {
                 Button(action: remove) {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 13)).foregroundStyle(.dsMute)
@@ -250,9 +282,17 @@ private struct DollarRow: View {
         .onKeyPress(.return) { select(); return .handled }
         .onKeyPress(.delete) { remove(); return .handled }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(place.hasPrefix("с.") ? "Страница " + place.dropFirst(2) : "Строка " + place), $\(value.isEmpty ? " пусто" : value)\(skipped ? ", пропущено" : "")")
+        .accessibilityLabel("\(place.hasPrefix("с.") ? "Страница " + place.dropFirst(2) : "Строка " + place), $\(value.isEmpty ? " пусто" : value)\(skipped ? ", пропущено" : "")\(Self.statusLabel(status))")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "Убрать значение", remove)
+    }
+
+    private static func statusLabel(_ status: DollarStatus?) -> String {
+        switch status {
+        case .filled: return ", заполнено"
+        case .editing: return ", правится"
+        case .empty, nil: return ""
+        }
     }
 }
 

@@ -386,55 +386,77 @@ package struct DocFormatBar: View {
     }
 }
 
-/// Вкладка «Колонтитулы» (`d11`): другой на первой странице, чётные и нечётные, номер страницы, удалить, закрыть.
+/// Контекстная синяя вкладка «Колонтитулы» (макет «★2», компоненты `DS.Ribbon*`): перейти к верхнему/нижнему, вставить номер,
+/// число страниц, дату или другое поле, параметры раздела (особый первой, чётные/нечётные, как в предыдущем), удалить, закрыть.
+/// Кнопки — только у тех действий, что уже работают: «Как в предыдущем» видна, когда у колонтитула есть предыдущий (H3).
 package struct DocHeaderFooterBar: View {
     @ObservedObject package var formatter: DocFormatter
+    private static let tabs = [DS.RibbonTabItem("header", "Колонтитулы", contextual: true)]
 
     package var body: some View {
-        ViewThatFits(in: .horizontal) {
-            row(short: false)
-            row(short: true)
+        DS.Ribbon(tabs: Self.tabs, selection: .constant("header")) {
+            let session = formatter.headerSession
+            DS.RibbonGroup("Колонтитул") {
+                VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                    DS.RibbonButton("Верхний колонтитул", systemImage: "rectangle.topthird.inset.filled", glyph: "Верхний",
+                                    isOn: session?.isHeader == true) { go(header: true) }
+                    DS.RibbonButton("Нижний колонтитул", systemImage: "rectangle.bottomthird.inset.filled", glyph: "Нижний",
+                                    isOn: session?.isHeader == false) { go(header: false) }
+                }
+            }
+            DS.RibbonGroup("Вставить") {
+                DS.RibbonButton("Номер страницы", systemImage: "number", size: .large) { formatter.insertField(.page) }
+                DS.RibbonButton("Всего страниц", systemImage: "doc.on.doc", glyph: "Всего", size: .large) { formatter.insertField(.numPages) }
+                DS.RibbonButton("Дата", systemImage: "calendar", size: .large) { formatter.insertField(.date(HeaderField.datePictures[0])) }
+                DS.RibbonField("Вставить поле у курсора: «Стр. X из Y», дата, время, имя файла", value: "Поле…") { fieldMenu }
+            }
+            DS.RibbonGroup("Параметры") {
+                VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                    DS.RibbonButton("Особый колонтитул первой страницы (\\titlepg)", glyph: "Особый первой", isOn: formatter.titlePageOn) {
+                        formatter.setTitlePage(!formatter.titlePageOn)
+                    }
+                    DS.RibbonButton("Разные колонтитулы чётных и нечётных страниц (\\facingp)", glyph: "Чётные / нечётные",
+                                    isOn: formatter.facingPagesOn) { formatter.setFacingPages(!formatter.facingPagesOn) }
+                }
+                if let link = formatter.headerLink {
+                    DS.RibbonButton("Как в предыдущем разделе: показывать колонтитул предыдущего", systemImage: "link",
+                                    glyph: "Как в предыдущем", size: .large, isOn: link == .linked) {
+                        formatter.setLinkedToPrevious(link != .linked)
+                    }
+                }
+            }
+            DS.RibbonGroup("Правка") {
+                DS.RibbonButton("Удалить этот колонтитул из файла", systemImage: "trash", glyph: "Удалить", size: .large) { formatter.removeHeader() }
+            }
+            DS.RibbonGroup("Закрыть", last: true) {
+                DS.RibbonButton("Закрыть колонтитулы", systemImage: "xmark", glyph: "Закрыть", size: .large, shortcut: "Esc") {
+                    formatter.endHeaderEditing()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .font(DS.Font.bodyStrong)
-        .padding(.horizontal, DS.Space.l)
-        .frame(height: 40)
-        .clipped()
-        .background(Color.dsSide)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.dsLine).frame(height: 1) }
+        .accessibilityLabel("Колонтитулы")
     }
 
-    private func row(short: Bool) -> some View {
-        HStack(spacing: DS.Space.m) {
-            if !short {
-                Text("КОЛОНТИТУЛЫ").font(DS.Font.groupLabel).tracking(DS.Font.tracking(0.08, size: 11)).foregroundStyle(Color.dsAccText)
-                    .accessibilityAddTraits(.isHeader)
+    /// Перейти к верхнему или нижнему колонтитулу той же страницы.
+    private func go(header: Bool) {
+        guard let page = formatter.headerSession?.page else { return }
+        formatter.beginHeaderEditing(page: page, header: header)
+    }
+
+    @ViewBuilder private var fieldMenu: some View {
+        Button(HeaderField.pageOfTotal.title) { formatter.insertField(.pageOfTotal) }
+        Button(HeaderField.sectionPages.title) { formatter.insertField(.sectionPages) }
+        Section("Дата") {
+            ForEach(HeaderField.datePictures, id: \.self) { picture in
+                Button(HeaderField.date(picture).title.replacingOccurrences(of: "Дата · ", with: "")) { formatter.insertField(.date(picture)) }
             }
-            Toggle(short ? "Первая страница" : "Другой на первой странице",
-                   isOn: Binding(get: { formatter.titlePageOn }, set: { formatter.setTitlePage($0) }))
-                .toggleStyle(.checkbox).fixedSize()
-                .help("Другой колонтитул на первой странице раздела (\\titlepg)")
-            Toggle(short ? "Чётные/нечётные" : "Чётные и нечётные",
-                   isOn: Binding(get: { formatter.facingPagesOn }, set: { formatter.setFacingPages($0) }))
-                .toggleStyle(.checkbox).fixedSize()
-                .help("Разные колонтитулы чётных и нечётных страниц (\\facingp)")
-            Rectangle().fill(Color.dsLine).frame(width: 1, height: 22).accessibilityHidden(true)
-            Menu {
-                Button("Номер страницы") { formatter.insertPageNumber(.page) }
-                Button("Стр. X из Y") { formatter.insertPageNumber(.pageOfTotal) }
-            } label: {
-                Label(short ? "Номер" : "Номер страницы", systemImage: "number")
-            }
-            .menuStyle(.borderlessButton).fixedSize()
-            .help("Вставить номер страницы у курсора")
-            Button { formatter.removeHeader() } label: { Label("Удалить", systemImage: "trash") }
-                .buttonStyle(.borderless).fixedSize()
-                .help("Удалить этот колонтитул из файла")
-            Spacer(minLength: 0)
-            Button("Закрыть") { formatter.endHeaderEditing() }
-                .keyboardShortcut(.cancelAction)
-                .fixedSize()
-                .help("Закончить правку колонтитула (Esc)")
         }
+        Section("Время") {
+            ForEach(HeaderField.timePictures, id: \.self) { picture in
+                Button(HeaderField.time(picture).title.replacingOccurrences(of: "Время · ", with: "")) { formatter.insertField(.time(picture)) }
+            }
+        }
+        Button(HeaderField.fileName.title) { formatter.insertField(.fileName) }
     }
 }

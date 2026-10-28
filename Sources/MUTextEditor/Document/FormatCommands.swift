@@ -43,6 +43,9 @@ package final class DocFormatter: ObservableObject {
         return formatter
     }
 
+    /// Форматировщик, если он уже создан (не создаёт новый).
+    package static func existing(for controller: DocumentController) -> DocFormatter? { registry.object(forKey: controller) }
+
     private init(controller: DocumentController) {
         self.controller = controller
         controller.onPageDoubleClick = { [weak self] event, page in self?.pageDoubleClick(event, on: page) ?? false }
