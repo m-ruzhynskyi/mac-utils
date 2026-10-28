@@ -49,6 +49,53 @@ package enum DocHeaderFooterEdits {
         return .success(plan)
     }
 
+    // MARK: - «Как в предыдущем»
+
+    /// Ближайший предыдущий раздел, у которого этот колонтитул записан (его и показывает раздел без своего).
+    package static func provider(of kind: RTFHeaderKind, before section: Int, model: RTFDocumentModel) -> Int? {
+        guard section > 0, section <= model.sections.count else { return nil }
+        return (0..<section).reversed().first { model.sections[$0].headers[kind] != nil }
+    }
+
+    /// Раздел показывает колонтитул предыдущего: своего нет, а у кого-то из предыдущих есть.
+    package static func isLinkedToPrevious(_ kind: RTFHeaderKind, section: Int, model: RTFDocumentModel) -> Bool {
+        guard section > 0, section < model.sections.count, model.sections[section].headers[kind] == nil else { return false }
+        return provider(of: kind, before: section, model: model) != nil
+    }
+
+    /// «Как в предыдущем» выключено: разделу записывается собственная копия колонтитула предыдущего (текст группы тот же,
+    /// поля внутри — те же), дальше его можно править отдельно.
+    package static func unlink(_ kind: RTFHeaderKind, section: Int, source: NSString, model: RTFDocumentModel) -> Result<FormatPlan, FormatFailure> {
+        guard isLinkedToPrevious(kind, section: section, model: model), let from = provider(of: kind, before: section, model: model),
+              let header = model.sections[from].headers[kind] else {
+            return .failure(FormatFailure(reason: "Этот колонтитул уже свой у раздела"))
+        }
+        guard NSMaxRange(header.group) <= source.length else { return .failure(FormatFailure(reason: "Не нашёл колонтитул в файле")) }
+        let groups = RTFGroupIndex(source)
+        let location = rootLevel(model.sections[section].headerInsertion, groups: groups)
+        var plan = FormatPlan()
+        plan.edits = [FormatEdit(range: NSRange(location: location, length: 0), string: source.substring(with: header.group), order: 1)]
+        var story = header.story
+        for index in story.paragraphs.indices { story.paragraphs[index].section = section }
+        let fields = model.fields.filter { NSLocationInRange($0.group.location, header.group) }.map(\.kind)
+        let allowance = FormatCheck.Allowance(sections: { sections, _ in
+            sections[section].headers[kind] = RTFHeader(kind: kind, story: story, group: NSRange())
+        }, extraFields: fields)
+        if let problem = FormatCheck.verify(plan, source: source, model: model, allowing: allowance) { return .failure(FormatFailure(reason: problem)) }
+        return .success(plan)
+    }
+
+    /// «Как в предыдущем» включено: собственный колонтитул раздела удаляется, раздел показывает колонтитул предыдущего.
+    package static func link(_ kind: RTFHeaderKind, section: Int, source: NSString, model: RTFDocumentModel) -> Result<FormatPlan, FormatFailure> {
+        guard section > 0, section < model.sections.count, model.sections[section].headers[kind] != nil else {
+            return .failure(FormatFailure(reason: "У раздела нет своего колонтитула"))
+        }
+        guard provider(of: kind, before: section, model: model) != nil else {
+            return .failure(FormatFailure(reason: "В предыдущих разделах такого колонтитула нет — связывать не с чем"))
+        }
+        return remove(kind, section: section, source: source, model: model)
+    }
+
     // MARK: - Особый первый лист и чётные/нечётные
 
     /// «Другой на первой странице»: `\titlepg` у раздела (и пустые `\headerf`/`\footerf`, если их нет и не наследуются);

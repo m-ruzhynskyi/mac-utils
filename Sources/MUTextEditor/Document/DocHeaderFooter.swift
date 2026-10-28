@@ -336,6 +336,35 @@ extension DocFormatter {
 
     package var facingPagesOn: Bool { controller?.model.facingPages ?? false }
 
+    /// «Как в предыдущем» у показанного колонтитула: `.linked` — раздел показывает колонтитул предыдущего, `.own` — свой (его можно
+    /// связать с предыдущим). `nil` — кнопки нет: правки колонтитула нет, раздел первый или в предыдущих такого колонтитула нет.
+    package enum HeaderLink: Equatable { case linked, own }
+
+    package var headerLink: HeaderLink? {
+        guard let controller, let session = headerSession, let page = session.page, page.section > 0 else { return nil }
+        let model = controller.model
+        if DocHeaderFooterEdits.isLinkedToPrevious(session.kind, section: page.section, model: model) { return .linked }
+        guard model.sections[safe: page.section]?.headers[session.kind] != nil,
+              DocHeaderFooterEdits.provider(of: session.kind, before: page.section, model: model) != nil else { return nil }
+        return .own
+    }
+
+    /// Включить или выключить «Как в предыдущем» у показанного колонтитула (одна правка файла, один шаг отмены).
+    package func setLinkedToPrevious(_ linked: Bool) {
+        guard let controller, let tab = controller.tab, let session = headerSession, let page = session.page, let state = headerLink else { return }
+        let model = controller.model
+        if linked {
+            guard state == .own, let provider = DocHeaderFooterEdits.provider(of: session.kind, before: page.section, model: model) else { return }
+            // Сначала правка переходит на колонтитул предыдущего раздела — свой исчезнет вместе с правкой.
+            session.retarget(section: provider, kind: session.kind)
+            perform(DocHeaderFooterEdits.link(session.kind, section: page.section, source: tab.text, model: model), name: "Как в предыдущем")
+        } else {
+            guard state == .linked else { return }
+            perform(DocHeaderFooterEdits.unlink(session.kind, section: page.section, source: tab.text, model: model), name: "Отвязать колонтитул от предыдущего")
+            if controller.model.sections[safe: page.section]?.headers[session.kind] != nil { session.retarget(section: page.section, kind: session.kind) }
+        }
+    }
+
     package func setTitlePage(_ on: Bool) {
         guard let controller, let tab = controller.tab, let page = headerSession?.page else { return }
         let inherited: Set<RTFHeaderKind> = page.section > 0 ? Set(controller.headers(of: page.section - 1).keys) : []
