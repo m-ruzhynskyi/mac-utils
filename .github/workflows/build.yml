@@ -181,6 +181,8 @@ jobs:
             env -u SIGN_IDENTITY ./build.sh --universal
           fi
           codesign --verify --deep --strict "build/Mac Utils.app"
+          # Значки документов: все .icns в бандле, каждый CFBundleTypeIconFile/UTTypeIconFile указывает на файл.
+          ./scripts/check-doc-icons.sh "build/Mac Utils.app"
           # Hardened Runtime на приложении и вложенном коде: без него другая программа может внедрить библиотеку в Mac Utils.
           for item in "build/Mac Utils.app" "build/Mac Utils.app/Contents/Resources/Инструменты.app" "build/Mac Utils.app/Contents/Resources/MUNowPlaying.dylib"; do
             codesign -dv "$item" 2>&1 | grep -Eq "flags=0x[0-9a-f]+\([^)]*runtime" || { echo "::error::Нет Hardened Runtime: $item"; exit 1; }
