@@ -243,7 +243,7 @@ package final class DocPageView: NSView {
         self.section = section
         self.outdent = outdent
         let body = Self.textRect(Self.bodyRect(props), outdent)
-        container = NSTextContainer(size: body.size)
+        container = DocPageContainer(size: body.size)
         container.widthTracksTextView = false
         container.heightTracksTextView = false
         container.lineFragmentPadding = 0
@@ -350,7 +350,14 @@ package final class DocPageView: NSView {
     private func applyBody() {
         let body = textRect
         if textView.frame != body { textView.frame = body }
-        if container.size != body.size { container.size = body.size }
+        let size = NSSize(width: body.width, height: min(body.height, breakLimit ?? body.height))
+        if container.size != size { container.size = size }
+    }
+
+    /// Разрыв страницы выше низа текста (правила Word: `\keepn`, `\keep`, висячие строки — `DocPagination`):
+    /// высота контейнера до этого места, остальное уходит на следующую страницу.
+    var breakLimit: CGFloat? {
+        didSet { if oldValue != breakLimit { applyBody() } }
     }
 
     package func update(props: RTFSectionProps, section: Int, outdent: DocOutdent) {
@@ -445,6 +452,12 @@ package final class DocStoryLayout {
 package final class DocPagesView: NSView {
     package static let gap: CGFloat = 24
     package private(set) var pages: [DocPageView] = []
+    /// Подряд идущие проходы `DocPagination`, менявшие раскладку (предохранитель от зацикливания).
+    var paginationRounds = 0
+    /// Что было отложено `DocPagination` последним проходом без изменений; `paginationStamp` растёт с каждой заменой текста.
+    struct PaginationKey: Equatable { var stamp: Int, length: Int, pages: Int }
+    var paginationDone: PaginationKey?
+    var paginationStamp = 0
 
     package override var isFlipped: Bool { true }
 
@@ -504,4 +517,10 @@ package final class DocCenteringClipView: NSClipView {
         }
         return rect
     }
+}
+
+/// Контейнер страницы. `dropsTopSpace` — у первой строки страницы пропадает отступ «перед» абзацем (Word так делает у страницы,
+/// начавшейся сама); решает `DocPagination`, потому что для страниц с таблицами это не проверено.
+final class DocPageContainer: NSTextContainer {
+    var dropsTopSpace = false
 }

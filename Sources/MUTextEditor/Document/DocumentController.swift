@@ -167,6 +167,9 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         let headersChanged = force || headers != headerSignature
         headerSignature = headers
         if headersChanged { headerCache = [:] }
+        // Разрывы по правилам Word — заново после правки (`DocPagination` в конце раскладки).
+        for page in pagesView.pages { page.breakLimit = nil }
+        pagesView.paginationStamp += 1
         storage.beginEditing()
         storage.replaceCharacters(in: replaced, with: string)
         storage.endEditing()
@@ -307,6 +310,10 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
                 }
                 pagesView.removePages(from: from)
             }
+        }
+        // Разрывы по правилам Word; если страницы сдвинулись — раскладка дойдёт до конца и вызовет нас снова.
+        if DocPagination.apply(pagesView, layoutManager: layoutManager) {
+            if let last = layoutManager.textContainers.last { layoutManager.ensureLayout(for: last) }
         }
         if pageCount != pagesView.pages.count { pageCount = pagesView.pages.count }
         updatePageSections()

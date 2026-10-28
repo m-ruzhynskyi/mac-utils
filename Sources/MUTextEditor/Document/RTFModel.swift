@@ -99,8 +99,9 @@ package struct RTFParaProps: Hashable {
     /// `\itapN` — глубина таблиц: 0 — вне таблицы, 1 — таблица, 2 — вложенная в её ячейку.
     package var nesting = 0
     package var keepNext = false
-    /// `\keep` — не разрывать абзац между страницами.
+    /// `\keep` — не разрывать абзац между страницами; `\widctlpar` — без висячих строк (≥ 2 строки на каждой странице).
     package var keepTogether = false
+    package var widowControl = false
     package var pageBreakBefore = false
     package var borderTop = RTFBorder()
     package var borderBottom = RTFBorder()
@@ -120,7 +121,25 @@ package struct RTFParaProps: Hashable {
     package var list = 0
     package var listLevel = 0
 
+    /// Рамка позиционирования (`\posx…`, `\posy…`, `\pv…`, `\ph…`, `\absw`/`\absh`).
+    package var frame = RTFFrame()
+
     package var hasBorders: Bool { borderTop.isVisible || borderBottom.isVisible || borderLeft.isVisible || borderRight.isVisible }
+}
+
+/// Рамка позиционирования абзаца. Рамка у абзаца (`\pvpara`) без сдвига по вертикали стоит рядом со следующим
+/// текстом (обтекание): места в потоке у Word не занимает — так в колонтитулах рамка номера страницы.
+package struct RTFFrame: Hashable {
+    package var isSet = false
+    /// По вертикали — от абзаца (`\pvpara`), иначе от поля или листа.
+    package var fromParagraph = false
+    /// `\posyN` (твипы); `\posyt`/`\posyc`/… — не 0.
+    package var y = 0
+    /// `\posxl`/`\posxc`/`\posxr` (`\posxi`/`\posxo` — как слева/справа), `\posxN` — слева.
+    package var x: RTFAlignment?
+
+    /// Рамка у правого края на месте абзаца (номер, штамп): текст идёт рядом слева, места она не занимает. Рамка по центру (f152) текст раздвигает.
+    package var besideNext: Bool { isSet && fromParagraph && y == 0 && x == .right }
 }
 
 /// Свойства раздела (страница, поля, колонтитулы).

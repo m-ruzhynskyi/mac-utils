@@ -718,6 +718,10 @@ package final class DocRenderer {
         case .right: style.alignment = .right
         case .justify: style.alignment = .justified
         }
+        // Рамка рядом со следующим текстом — по своему краю (`\posxr`, `\posxc`).
+        if props.frame.besideNext, let x = props.frame.x {
+            style.alignment = x == .right ? .right : x == .center ? .center : .left
+        }
         // В блоке абзаца с рамкой строка не начинается левее него (так она и ложилась: левее края TextKit её не ставит).
         let floor = place == nil && Self.hasBlock(props) ? 0 : Int.min
         style.headIndent = CGFloat(max(floor, props.left)) / 20
