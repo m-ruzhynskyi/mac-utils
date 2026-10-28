@@ -250,7 +250,7 @@ async function liveStatus(env, ids) {
 const jsonError = (error, status) => Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
 
 // POST /status: подписанный запрос (хозяин ID спрашивает про список ID), строка подписи — statusMessage.
-async function statusPost(request, env, ip) {
+async function statusPost(request, env, ip, es256Only = false) {
   if (await limited(env.RL_STATUS, ip)) return jsonError("rate-limited", 429);
   let body;
   try {
@@ -261,6 +261,8 @@ async function statusPost(request, env, ip) {
   const now = Date.now();
   // Ключ приложения — Ed25519; страница relay (браузер, приложение для Windows) подписывает ключом P-256 (alg "es256").
   const alg = body && body.alg === "es256" ? "es256" : "ed25519";
+  // Строгий режим: без заголовка mu-share-2 и без auth=v2 пускается только подпись ключом страницы (она сама доказывает ключ).
+  if (es256Only && alg !== "es256") return new Response("Update Mac Utils", { status: 426 });
   const ok = body && typeof body === "object" && body.v === 2 && typeof body.id === "string" && ID10.test(body.id) &&
     typeof body.pub === "string" && b64uHasLength(body.pub, alg === "es256" ? 65 : 32) && typeof body.sig === "string" &&
     Number.isSafeInteger(body.ts) && Math.abs(now - body.ts) <= STATUS_SKEW_MS &&
@@ -297,8 +299,7 @@ export default {
       if (!token) return new Response("Use the Mac Utils app", { status: 403 });
       if (request.method === "POST") {
         if (mode === "off") return new Response("Not found", { status: 404 });
-        if (mode === "required" && !keyedClient(token, url)) return upgradeRequired(request);
-        return statusPost(request, env, ip);
+        return statusPost(request, env, ip, mode === "required" && !keyedClient(token, url));
       }
       if (mode === "required") return new Response("Update Mac Utils", { status: 426 });
       if (await limited(env.RL_STATUS, ip)) return new Response("Too many requests", { status: 429 });

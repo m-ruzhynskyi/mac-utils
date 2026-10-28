@@ -485,6 +485,7 @@ const AUTH_ERRORS = {
   "replaced": "Трансляция с вашим ID продолжена в другом окне или на другом устройстве с этим же ключом.",
   "rate-limited": "Слишком много подключений. Подождите пару минут и попробуйте снова.",
   "upgrade-required": "Сервер требует новую версию приложения — обновите Mac Utils Share.",
+  "no-storage": "Не удалось загрузить ключ этого устройства: хранилище браузера не ответило. Перезагрузите страницу (Ctrl+R) или перезапустите приложение и попробуйте ещё раз.",
   "no-key": "Сервер проверяет ключ устройства, а эта версия приложения так не умеет — обновите Mac Utils Share.",
 };
 const VIEW_ACK_EVERY = 10;
@@ -568,7 +569,7 @@ async function fetchLive(ids) {
         // Страница без ключа приложения подписывает своим ключом P-256 (alg es256).
         body = { v: 2, alg: "es256", id: myId, pub: pageKey.pub, ts, ids, sig: await pageKey.sign(`mu-share/v2\nstatus\n${myId}\n${ts}\n${ids.join(",")}`) };
       }
-      const response = await fetch("/status", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const response = await fetch("/status?auth=v2", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       // Лимит: GET уйдёт под тот же лимит, не удваиваем запросы.
       if (response.status === 429) limited = true;
       if (response.status === 404 || response.status === 405) signedStatus = false;
@@ -945,13 +946,22 @@ async function watch() {
   stopWatch();
   status("Подключаюсь…");
   watchingId = id;
-  viewRetries = 0; viewEverOpened = false;
+  viewRetries = 0; viewEverOpened = false; keyRetried = false;
   openView(id);
 }
 
 // Повторы после обрыва: как на Mac (`ShareViewerReconnect`) — 1, 2, 4, 8, 15, 15, 15 с, последний кадр остаётся на экране.
 const VIEW_RETRY_SECONDS = [1, 2, 4, 8, 15, 15, 15];
 let viewRetries = 0, viewRetryTimer = 0, viewEverOpened = false;
+// Relay ответил upgrade-required, хотя ключ мог бы быть: хранилище браузера отвечало медленно. Ждём ключ и повторяем один раз,
+// иначе говорим про хранилище, а не «обновите приложение». true — ключ появился.
+let keyRetried = false;
+async function recoverMissingKey() {
+  if (pageKey || keyRetried || !pageKeySupported()) return false;
+  keyRetried = true;
+  return retryPageKey();
+}
+const missingKeyText = (code) => (code === "upgrade-required" && pageKeySupported() && !pageKey ? AUTH_ERRORS["no-storage"] : null);
 function scheduleViewRetry(id) {
   if (viewRetries >= VIEW_RETRY_SECONDS.length) { status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); return; }
   const delay = VIEW_RETRY_SECONDS[viewRetries++];
@@ -1013,6 +1023,11 @@ function openView(id) {
   viewSocket.onclose = (event) => {
     if (event.code === 1000 || ws !== viewSocket) return;
     const code = CLOSE_CODES[event.code];
+    if (code === "upgrade-required" && !pageKey && pageKeySupported()) {
+      viewSocket = null;
+      recoverMissingKey().then((ok) => { if (watchingId === id && !viewSocket) { if (ok) openView(id); else status(missingKeyText(code) || authError(code)); } });
+      return;
+    }
     if (code) { status(authError(code, viewError?.message)); return; }
     // Обрыв сети, сон, перезапуск relay: до 7 попыток; не повторяем, если ведущий отказал (`declined`) или закончил (`ended`) —
     // там stopWatch сам закрывает сокет с кодом 1000 и сюда не попадаем.
@@ -1494,6 +1509,7 @@ async function share() {
     }
   }
   if (!stream) return status(`Трансляция не началась${failure ? ` (${failure.name}: ${failure.message})` : ""}`);
+  keyRetried = false;
   let ok = await openHost(myId);
   // ID закреплён за ключом страницы, а ключ не загрузился (медленная или зависшая IndexedDB): сначала грузим ключ ещё раз.
   if (!ok && !pageKey && pageKeySupported() && (await hostCheckReason()) === "id-claimed" && (await retryPageKey())) ok = await openHost(myId);
@@ -1558,6 +1574,10 @@ async function hostChallenge(ws, msg) {
 // Закрытие сокета ведущего: ошибки ключа — конец трансляции с объяснением, остальное — переподключение.
 function hostClosed(code, event) {
   const reason = CLOSE_CODES[event?.code];
+  if (reason === "upgrade-required" && !pageKey && pageKeySupported()) {
+    recoverMissingKey().then((ok) => { if (!capture) return; if (ok) reconnectHost(code); else stopHost(missingKeyText(reason)); });
+    return;
+  }
   if (reason && reason !== "auth-timeout" && reason !== "rate-limited") {
     // Ведущего без ключа вытеснил владелец ID с ключом: это не «другое окно», а чужое (или новое своё) устройство.
     const keyless = reason === "replaced" && !hostAuth?.keyed;

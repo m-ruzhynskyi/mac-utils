@@ -1572,9 +1572,9 @@ test('strict: страница подписывает POST /status ключом 
   const ch = msgOf(socket, 'challenge');
   await send(w.f(ROOM), socket, esFrame(page, page.sign(hostMsg(ROOM, ch.nonce))));
   const body = { ...statusBody(page, { id: ROOM, ids: [ROOM] }), alg: 'es256' };
-  const res = await postStatus(w, body, { token: V1, env: w.env });
-  // mu-share-1 без auth=v2 — клиент без ключа; страница шлёт POST с mu-share-1, поэтому проверяем и вариант с токеном v2 от приложения Windows.
-  assert.equal(res.status, 426);
+  // mu-share-1 без auth=v2: подпись ключом страницы сама доказывает ключ — пускается; Ed25519-подпись без ключа — 426.
+  assert.equal((await postStatus(w, body, { token: V1, env: w.env })).status, 200);
+  assert.equal((await postStatus(w, statusBody(OWNER, { id: ROOM }), { token: V1, env: w.env })).status, 426);
   const ok = await w.worker(new Request('https://relay.example/status?auth=v2', { method: 'POST', headers: { 'x-macutils-client': V1 }, body: JSON.stringify(body) }));
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { [ROOM]: true });
@@ -1588,4 +1588,58 @@ test('strict: /version объявляет только mu-share-2 и auth=requir
   const w = strictWorld();
   const version = await (await w.worker(new Request('https://relay.example/version'))).json();
   assert.deepEqual([version.protocols, version.auth], [[V2], 'required']);
+});
+
+test('«в эфире»: адрес и тело POST /status берутся из кода страницы и проходят строгий relay (mu-share-1 + Origin, без заголовка auth)', async () => {
+  const w = strictWorld();
+  const page = p256();
+  const { socket } = await connect(w, 'host', ROOM, { ...PAGE });
+  const ch = msgOf(socket, 'challenge');
+  await send(w.f(ROOM), socket, esFrame(page, page.sign(hostMsg(ROOM, ch.nonce))));
+  const html = fs.readFileSync(`${__dirname}/../src/index.html`, 'utf8');
+  const from = html.indexOf('let signedStatus = true;'), to = html.indexOf('async function refreshLive');
+  assert.ok(from > 0 && to > from);
+  const sent = [];
+  const context = vm.createContext({
+    appSigns: () => false, canSign: () => true, pageKey: { pub: page.pub, sign: async (m) => page.sign(m) }, myId: ROOM,
+    Date, JSON, fetch: async (url, init) => { sent.push({ url, init }); return { status: 200, ok: true, json: async () => ({ [ROOM]: true }) }; },
+  });
+  vm.runInContext(`${html.slice(from, to)}\nthis.fetchLive = fetchLive;`, context);
+  const json = await context.fetchLive([ROOM]);
+  assert.deepEqual(json, { [ROOM]: true });
+  assert.equal(sent[0].init.method, 'POST');
+  // Тот же запрос, что ушёл бы с Windows/браузера: путь и тело — как в странице, заголовок клиента mu-share-1, есть Origin.
+  const request = (path) => new Request(`https://relay.example${path}`, { method: 'POST', body: sent[0].init.body,
+    headers: { 'x-macutils-client': V1, Origin: 'https://relay.example' } });
+  const body = JSON.parse(sent[0].init.body);
+  body.ts = w.now;
+  body.sig = page.sign(`mu-share/v2\nstatus\n${ROOM}\n${body.ts}\n${ROOM}`);
+  sent[0].init.body = JSON.stringify(body);
+  assert.match(sent[0].url, /^\/status\?auth=v2$/, 'страница шлёт /status?auth=v2');
+  assert.equal((await w.worker(request(sent[0].url))).status, 200, 'с адресом страницы');
+  assert.equal((await w.worker(request('/status'))).status, 200, 'и ровно /status без параметра: подпись es256 сама доказывает ключ');
+});
+
+test('слабое хранилище: upgrade-required при возможном ключе → ждём ключ и повторяем один раз, иначе текст про хранилище', async () => {
+  const html = fs.readFileSync(`${__dirname}/../src/index.html`, 'utf8');
+  const from = html.indexOf('let keyRetried = false;'), to = html.indexOf('\n', html.indexOf('const missingKeyText'));
+  const make = (supported, arrives) => {
+    const context = vm.createContext({ pageKey: null, pageKeySupported: () => supported, AUTH_ERRORS: { 'no-storage': 'СКЛАД' }, retries: 0,
+      retryPageKey: async function () { context.retries++; if (arrives) context.pageKey = { pub: 'x' }; return !!context.pageKey; } });
+    vm.runInContext(`${html.slice(from, to)}\nthis.recover = recoverMissingKey; this.text = missingKeyText; this.reset = () => { keyRetried = false; };`, context);
+    return context;
+  };
+  const slow = make(true, true);
+  assert.equal(await slow.recover(), true, 'ключ пришёл — повторить подключение');
+  assert.equal(await slow.recover(), false, 'второй раз не ждём');
+  const never = make(true, false);
+  assert.equal(await never.recover(), false);
+  assert.equal(never.text('upgrade-required'), 'СКЛАД', 'текст про хранилище, а не «обновите приложение»');
+  const unsupported = make(false, false);
+  assert.equal(await unsupported.recover(), false);
+  assert.equal(unsupported.text('upgrade-required'), null, 'ключа быть не может — обычное сообщение про обновление');
+  assert.equal(never.text('rate-limited'), null);
+  // Подключение страницы действительно идёт через эти функции.
+  assert.match(html, /code === "upgrade-required" && !pageKey && pageKeySupported\(\)/);
+  assert.match(html, /reason === "upgrade-required" && !pageKey && pageKeySupported\(\)/);
 });
