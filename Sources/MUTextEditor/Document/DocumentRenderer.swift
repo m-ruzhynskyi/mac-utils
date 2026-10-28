@@ -785,6 +785,13 @@ package final class DocRenderer {
         return story
     }
 
+    /// Левый край ячейки от начала контейнера текста, твипы (для линий по `\cellx`). У вложенной таблицы `table.offset` — от
+    /// текста внешней ячейки: к нему — левый край внешней ячейки и её поле (как показано), по всей цепочке внешних ячеек.
+    private static func absoluteLeft(_ place: CellPlace) -> Int {
+        guard let parent = place.outer.last else { return place.table.offset + place.start }
+        return absoluteLeft(parent) + parent.padLeft + place.table.offset + place.start
+    }
+
     /// Ширина текста ячейки внешней таблицы, в которой стоит вложенная (твипы): от неё — `\trqc`/`\trqr` вложенной.
     private static func parentTextWidth(of table: Int, in story: RTFStory) -> Int? {
         guard let parent = story.tables[safe: table]?.parent, let row = story.tables[safe: parent.table]?.rows[safe: parent.row],
@@ -979,7 +986,8 @@ package final class DocRenderer {
             block.lines.append(DocCellBlock.Line(edge: edge, width: DocCellBlock.wordWidth(border.width),
                                                  color: color(border.color, model: model) ?? .black))
         }
-        block.edges = (CGFloat(place.table.offset + place.start) / 20, CGFloat(place.table.offset + place.start + place.width) / 20)
+        let left = Self.absoluteLeft(place)
+        block.edges = (CGFloat(left) / 20, CGFloat(left + place.width) / 20)
         if let fill = shade(cell.shading, pattern: cell.shadingPattern, percent: cell.shadingPercent, model: model) { block.backgroundColor = fill }
         block.setContentWidth(max(4, width - padLeft - padRight), type: .absoluteValueType)
         if let exact = place.exactHeight {
@@ -993,7 +1001,8 @@ package final class DocRenderer {
         }
         // Высота строки `\trrh` — только в строках без вертикального объединения: в строках с `\clvmgf`/`\clvmrg` гейт давал
         // ухудшения (f005, f085, f144 — лишняя страница): `NSTextTable` сверх высот строк добавляет высоту объединённой ячейки.
-        if place.rowSpan == 1, !place.rowMerged { block.rowHeight = CGFloat(place.height) / 20 }
+        // Во вложенной таблице высота строки — своя (`exactHeight`, P-4): `\trrh` поверх неё давал лишнюю страницу (f077, f078).
+        if place.rowSpan == 1, !place.rowMerged, place.outer.isEmpty { block.rowHeight = CGFloat(place.height) / 20 }
         switch cell.verticalAlign {
         case .top: block.verticalAlignment = .topAlignment
         case .center: block.verticalAlignment = .middleAlignment
