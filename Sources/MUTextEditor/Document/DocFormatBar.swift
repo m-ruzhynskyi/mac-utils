@@ -91,6 +91,7 @@ package struct DocFormatBar: View {
                 icon("Таблица — скоро. Пока измените это в режиме «Код»", "tablecells", enabled: false) {}
             }
             if level == 0 { icon("Очистить формат", "textformat.alt", action: formatter.clearFormatting) }
+            if level == 0 { moreFormatMenu }
             divider
             icon("Невидимые символы (⌥⌘I)", "paragraphsign", active: document.showsInvisibles) {
                 EditorWindowController.shared.workspace.showsInvisibles.toggle()
@@ -101,6 +102,14 @@ package struct DocFormatBar: View {
             Group {
                 Button("") { formatter.stepSize(-1) }.keyboardShortcut("<", modifiers: .command)
                 Button("") { formatter.stepSize(1) }.keyboardShortcut(">", modifiers: .command)
+                // E-4 — сочетания Word.
+                Button("") { formatter.toggleVertical(.superscript) }.keyboardShortcut("=", modifiers: [.command, .shift])
+                Button("") { formatter.toggleVertical(.subscript) }.keyboardShortcut("=", modifiers: .command)
+                Button("") { formatter.toggleSmallCaps() }.keyboardShortcut("k", modifiers: [.command, .shift])
+                Button("") { formatter.toggleCaps() }.keyboardShortcut("a", modifiers: [.command, .shift])
+                Button("") { formatter.toggleHidden() }.keyboardShortcut("h", modifiers: [.command, .shift])
+                Button("") { formatter.insertPageBreak() }.keyboardShortcut(.return, modifiers: .command)
+                Button("") { formatter.updateFields() }.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF9FunctionKey)!)), modifiers: [])
             }
             .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
         }
@@ -289,6 +298,36 @@ package struct DocFormatBar: View {
         Button("Увеличить отступ") { formatter.stepIndent(1) }
     }
 
+    /// Шрифт и абзац сверх кнопок (E-4): индексы, капитель, прописные, скрытый, флаги абзаца, разрыв страницы, поля.
+    private var moreFormatMenu: some View {
+        Menu { moreFormatItems } label: {
+            Image(systemName: "textformat.superscript").font(.system(size: 15))
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 34, height: 30)
+        .help("Ещё: индексы, капитель, скрытый, абзац, разрыв страницы, поля")
+        .accessibilityLabel("Ещё команды шрифта и абзаца")
+    }
+
+    @ViewBuilder private var moreFormatItems: some View {
+        Toggle("Надстрочный (⇧⌘=)", isOn: binding(state.vertical == .superscript) { formatter.toggleVertical(.superscript) })
+        Toggle("Подстрочный (⌘=)", isOn: binding(state.vertical == .subscript) { formatter.toggleVertical(.subscript) })
+        Toggle("Капитель (⇧⌘K)", isOn: binding(state.smallCaps) { formatter.toggleSmallCaps() })
+        Toggle("Все прописные (⇧⌘A)", isOn: binding(state.caps) { formatter.toggleCaps() })
+        Toggle("Скрытый (⇧⌘H)", isOn: binding(state.hidden) { formatter.toggleHidden() })
+        Divider()
+        ForEach(DocParaFlag.allCases, id: \.self) { flag in
+            Toggle(flag.title, isOn: binding(state.paragraph.map(flag.value) ?? false) { formatter.toggle(flag) })
+        }
+        Divider()
+        Button("Разрыв страницы (⌘↩)") { formatter.insertPageBreak() }
+        Button("Обновить поля (F9)") { formatter.updateFields() }
+    }
+
+    /// Флажок меню: показывает состояние, щелчок — команда.
+    private func binding(_ value: Bool, _ action: @escaping () -> Void) -> Binding<Bool> {
+        Binding(get: { value }, set: { _ in action() })
+    }
+
     private func overflow(level: Int) -> some View {
         Menu {
             if level >= 5 { Button("Повторить") { tab.undo.redo() }.disabled(!tab.undo.canRedo) }
@@ -313,6 +352,7 @@ package struct DocFormatBar: View {
                 Button("Увеличить отступ") { formatter.stepIndent(1) }
             }
             Button("Очистить формат") { formatter.clearFormatting() }
+            Menu("Шрифт и абзац: ещё") { moreFormatItems }
             if level >= 2 {
                 Divider()
                 Button("Списки — скоро, пока в режиме «Код»") {}.disabled(true)

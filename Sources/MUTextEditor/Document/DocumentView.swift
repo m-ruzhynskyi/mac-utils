@@ -85,6 +85,7 @@ package final class DocTextView: NSTextView {
     }
 
     package override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1, let controller, controller.dragTableBoundary(event, in: self) { return }
         if event.clickCount == 2, let handler = onDoubleClickOutside, handler(event) { return }
         super.mouseDown(with: event)
     }
@@ -133,21 +134,20 @@ package final class DocTextView: NSTextView {
         item.target = self
         menu.insertItem(item, at: 0)
         menu.insertItem(.separator(), at: 1)
-        if controller?.cellAtSelection != nil {
-            for (index, (title, action)) in [("Вставить строку выше", #selector(insertRowAbove(_:))), ("Вставить строку ниже", #selector(insertRowBelow(_:))),
-                                             ("Удалить строку", #selector(deleteRow(_:)))].enumerated() {
-                let row = NSMenuItem(title: title, action: action, keyEquivalent: "")
-                row.target = self
-                menu.insertItem(row, at: 2 + index)
-            }
-            menu.insertItem(.separator(), at: 5)
-        }
+        // Таблица: строки, столбцы, объединение, границы, заливка; вне таблицы — вставка таблицы.
+        for (index, item) in (controller?.tableMenuItems() ?? []).enumerated() { menu.insertItem(item, at: 2 + index) }
+        if controller != nil { menu.insertItem(.separator(), at: 3) }
         return menu
     }
 
-    @objc package func insertRowAbove(_ sender: Any?) { controller?.insertTableRow(below: false) }
-    @objc package func insertRowBelow(_ sender: Any?) { controller?.insertTableRow(below: true) }
-    @objc package func deleteRow(_ sender: Any?) { controller?.deleteTableRow() }
+    // Граница ячеек таблицы: курсор «←→», перетаскивание — ширина столбца.
+    package override func mouseMoved(with event: NSEvent) {
+        if let controller, controller.tableBoundary(at: convert(event.locationInWindow, from: nil), in: self) != nil {
+            NSCursor.resizeLeftRight.set()
+            return
+        }
+        super.mouseMoved(with: event)
+    }
 
     // Tab в таблице — по ячейкам, как в Word (и в пункте списка внутри ячейки); вне таблицы Tab в начале пункта
     // списка — уровень ниже (ввод «\t» → `DocListEdit`), ⇧Tab — выше.

@@ -649,8 +649,12 @@ private final class RTFParser {
         case .intbl:
             noteContent(range.location)
             top.para.inTable = true
-        case .keepn: top.para.keepNext = true
-        case .keep: top.para.keepTogether = true
+        case .keepn:
+            top.para.keepNext = (number ?? 1) != 0
+            token("keepn", range)
+        case .keep:
+            top.para.keepTogether = (number ?? 1) != 0
+            token("keep", range)
         case .widctlpar: top.para.widowControl = true
         case .nowidctlpar: top.para.widowControl = false
         case .posx, .posxl, .posxi: top.para.frame.isSet = true; top.para.frame.x = .left
@@ -662,7 +666,7 @@ private final class RTFParser {
         case .pvmrg, .pvpg: top.para.frame.isSet = true; top.para.frame.fromParagraph = false
         case .phmrg, .phpg, .phcol, .absw, .absh: top.para.frame.isSet = true
         case .pagebb:
-            top.para.pageBreakBefore = true
+            top.para.pageBreakBefore = (number ?? 1) != 0
             token("pagebb", range)
         case .s: top.para.style = number
         case .contextualspace: top.para.contextualSpace = (number ?? 1) != 0

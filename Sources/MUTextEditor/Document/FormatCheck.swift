@@ -208,6 +208,10 @@ package enum FormatCheck {
         case .italic(let on): expect.italic = on
         case .underline(let on): expect.underline = on ? .single : .none
         case .strike(let on): expect.strike = on
+        case .vertical(let vertical): expect.vertical = vertical
+        case .smallCaps(let on): expect.smallCaps = on
+        case .caps(let on): expect.caps = on
+        case .hidden(let on): expect.hidden = on
         case .size(let halfPoints): expect.halfPoints = min(max(halfPoints, 2), 3_276)
         case .color(let color):
             guard new.color(props.color) == color, color != nil || props.color == 0 else { return false }
