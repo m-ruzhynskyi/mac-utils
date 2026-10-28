@@ -139,6 +139,10 @@ package struct DollarPanelView: View {
             model.selected = entry.mark.dollar
             tab.dollars.onUpdate?()
             tab.revealDollar(entry)
+            // В «Документе» подсвеченный знак сразу правится в поповере над ним (V2).
+            if tab.mode == .document, !skipped, !entry.isHidden, let document = tab.documentController {
+                DocValuePopover.shared.show(entry, in: document)
+            }
         } remove: {
             tab.removeValues([entry])
         }

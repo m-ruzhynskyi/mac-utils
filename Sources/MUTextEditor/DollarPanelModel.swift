@@ -70,6 +70,8 @@ package final class DollarPanelModel: ObservableObject {
     @Published package private(set) var editing: Int?
     /// Последнее выделение исходника: после пересчёта списка «правится» ищется заново (смещения могли сдвинуться).
     private var caret: NSRange?
+    /// Знак, открытый в поповере правки (V2): «правится» он, где бы ни стоял курсор.
+    private var pinned: Int?
 
     /// Вызывается, когда список готов (для подсветки текста).
     package var onUpdate: (() -> Void)?
@@ -180,7 +182,14 @@ package final class DollarPanelModel: ObservableObject {
     /// Курсор или выделение исходника сдвинулись (в «Коде» или в «Документе»): какой знак сейчас правится.
     package func caretMoved(to selection: NSRange) {
         caret = selection
-        let next = entry(containing: selection)?.mark.dollar
+        let next = pinned ?? entry(containing: selection)?.mark.dollar
+        if next != editing { editing = next }
+    }
+
+    /// Поповер правки открыт на знаке (`nil` — закрыт): строка панели — «правится…».
+    package func pinEditing(_ dollar: Int?) {
+        pinned = dollar
+        let next = dollar ?? caret.flatMap { entry(containing: $0)?.mark.dollar }
         if next != editing { editing = next }
     }
 

@@ -86,6 +86,7 @@ package final class DocTextView: NSTextView {
 
     package override func mouseDown(with event: NSEvent) {
         if event.clickCount == 1, let controller, controller.dragTableBoundary(event, in: self) { return }
+        if event.clickCount == 1, let controller, controller.clickDollar(event, in: self) { return }  // V2: поповер значения `$`
         if event.clickCount == 2, let handler = onDoubleClickOutside, handler(event) { return }
         super.mouseDown(with: event)
     }
