@@ -171,6 +171,8 @@ package final class DocRenderer {
         package var marginLeft: Int
         package var marginRight: Int
         package var height: Int
+        /// В строке есть вертикально объединённые ячейки (`\clvmgf`/`\clvmrg`).
+        package var rowMerged = false
         package var columns: Int
         package var tableWidth: Int
         /// Поля ячейки для показа, твипы: поля по RTF, уменьшенные на отрицательные отступы её абзацев (в Word абзац ячейки
@@ -847,6 +849,7 @@ package final class DocRenderer {
                                           padTop: row.padTop, padBottom: row.padBottom)
                     for offset in 0..<span {
                         var placed = place
+                        placed.rowMerged = row.cells.contains { $0.verticalMergeFirst || $0.verticalMerged }
                         if offset > 0 { placed.skip = true }
                         places[RTFCellRef(table: ordinal, row: rowIndex, cell: cellIndex + offset)] = placed
                     }
@@ -925,7 +928,9 @@ package final class DocRenderer {
         if place.height < 0, place.rowSpan == 1 {
             block.setValue(CGFloat(-place.height) / 20, type: .absoluteValueType, for: .maximumHeight)
         }
-        if place.rowSpan == 1 { block.rowHeight = CGFloat(place.height) / 20 }
+        // Высота строки `\trrh` — только в строках без вертикального объединения: в строках с `\clvmgf`/`\clvmrg` гейт давал
+        // ухудшения (f005, f085, f144 — лишняя страница): `NSTextTable` сверх высот строк добавляет высоту объединённой ячейки.
+        if place.rowSpan == 1, !place.rowMerged { block.rowHeight = CGFloat(place.height) / 20 }
         switch cell.verticalAlign {
         case .top: block.verticalAlignment = .topAlignment
         case .center: block.verticalAlignment = .middleAlignment
