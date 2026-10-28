@@ -188,6 +188,15 @@ package final class Ollama: ObservableObject {
         return text
     }
 
+    /// Ollama отвечает (быстрая проверка перед работой, которая без неё не нужна).
+    package nonisolated static func isReachable(timeout: TimeInterval = 2) async -> Bool {
+        let base = await MainActor.run { Self.base }
+        var request = URLRequest(url: base.appendingPathComponent("api/tags"))
+        request.timeoutInterval = timeout
+        guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200
+    }
+
     /// Ответ-JSON, разобранный в словарь.
     package nonisolated static func generateJSON(_ prompt: String, system: String? = nil,
                                          maxTokens: Int = 600, background: Bool = false) async throws -> [String: Any] {

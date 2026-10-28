@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 
 /// Разбор вывода whisper-cli (без процесса — для тестов).
@@ -47,8 +48,23 @@ package final class Whisper: ObservableObject {
 
     package nonisolated static let modelName = "ggml-large-v3-turbo-q5_0.bin"
     package nonisolated static let vadName = "ggml-silero-v5.1.2.bin"
-    private static let modelURL = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(modelName)")!
-    private static let vadURL = URL(string: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/\(vadName)")!
+    /// Ревизии HuggingFace закреплены коммитом (не `main`), SHA-256 файлов — из метаданных этих ревизий (lfs.oid): файл, подменённый
+    /// на сервере или по дороге, не пройдёт проверку и не дойдёт до `whisper-cli`.
+    package nonisolated static let modelRevision = "5359861c739e955e79d9a303bcbc70fb988958b1"
+    package nonisolated static let vadRevision = "9ffd54a1e1ee413ddf265af9913beaf518d1639b"
+    package nonisolated static let modelSHA256 = "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+    package nonisolated static let vadSHA256 = "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
+    package nonisolated static let modelURL = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(modelRevision)/\(modelName)")!
+    package nonisolated static let vadURL = URL(string: "https://huggingface.co/ggml-org/whisper-vad/resolve/\(vadRevision)/\(vadName)")!
+
+    /// SHA-256 файла потоком (модель ~550 МБ в память не грузим).
+    package nonisolated static func sha256(of file: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 4 * 1024 * 1024), !chunk.isEmpty { hasher.update(data: chunk) }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
 
     package nonisolated static var folder: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -101,10 +117,10 @@ package final class Whisper: ObservableObject {
             }
             do {
                 try FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
-                if Self.vad == nil { try await download(Self.vadURL, to: Self.folder.appendingPathComponent(Self.vadName)) }
+                if Self.vad == nil { try await download(Self.vadURL, to: Self.folder.appendingPathComponent(Self.vadName), sha256: Self.vadSHA256) }
                 if Self.model == nil {
                     message = "Скачиваю модель…"
-                    try await download(Self.modelURL, to: Self.folder.appendingPathComponent(Self.modelName))
+                    try await download(Self.modelURL, to: Self.folder.appendingPathComponent(Self.modelName), sha256: Self.modelSHA256)
                 }
                 message = nil
             } catch {
@@ -114,7 +130,7 @@ package final class Whisper: ObservableObject {
         }
     }
 
-    private func download(_ source: URL, to target: URL) async throws {
+    private func download(_ source: URL, to target: URL, sha256 expected: String) async throws {
         downloadProgress = 0
         defer { downloadProgress = nil }
         let delegate = DownloadDelegate { value in
@@ -125,6 +141,11 @@ package final class Whisper: ObservableObject {
         let (temporary, response) = try await session.download(from: source)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw Transcriber.Failure(errorDescription: "Сервер вернул ошибку")
+        }
+        let actual = try await Task.detached(priority: .utility) { try Self.sha256(of: temporary) }.value
+        guard actual == expected else {
+            try? FileManager.default.removeItem(at: temporary)
+            throw Transcriber.Failure(errorDescription: "Файл модели не прошёл проверку SHA-256")
         }
         try? FileManager.default.removeItem(at: target)
         try FileManager.default.moveItem(at: temporary, to: target)

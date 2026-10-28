@@ -23,7 +23,13 @@ package enum ShareCode {
     }
 
     /// Имя компьютера — его видит ведущий в запросе на подключение.
-    package static var myName: String { Host.current().localizedName ?? "Mac" }
+    /// Имя в трансляции: заданное в настройках (`shareName`), иначе общее «Mac». Имя компьютера (часто с именем владельца) не отправляем.
+    package static var myName: String { displayName(setting: UserDefaults.standard.string(forKey: Pref.shareName)) }
+
+    package static func displayName(setting: String?) -> String {
+        let name = (setting ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "Mac" : String(name.prefix(60))
+    }
 
     /// «123 456 7890» → «1234567890»; nil — не 10 (или старые 6) цифр.
     package static func normalized(_ text: String) -> String? {

@@ -211,6 +211,57 @@ enum AppAction: Equatable {
         }
     }
 
+    /// Подтверждение для действий, пришедших по ссылке; тесты подменяют (иначе — вопрос в окне).
+    @MainActor static var linkConfirmer: ((_ title: String, _ detail: String) -> Bool)?
+
+    /// Вопрос перед выполнением действия из ссылки `macutils://` (её может открыть любая страница или программа): трансляция,
+    /// запись встречи, просмотр чужой трансляции, файл в плеере. Остановка и остальные действия — без вопроса.
+    var linkQuestion: (title: String, detail: String)? {
+        switch self {
+        case .shareStart, .shareToggle:
+            return ("Начать трансляцию экрана?", "Ссылка macutils:// просит начать трансляцию. Окно выбора, что показывать, откроется после ответа.")
+        case .meeting(.start), .meeting(.toggle):
+            return ("Начать запись встречи?", "Ссылка macutils:// просит включить запись звука встречи.")
+        case .watch:
+            return ("Смотреть чужую трансляцию?", "Ссылка macutils:// просит подключиться зрителем к трансляции.")
+        case .playerOpen(let path):
+            return ("Открыть файл в плеере?", "Ссылка macutils:// просит открыть файл:\n\(Self.fileURL(path).path)")
+        default: return nil
+        }
+    }
+
+    /// Ссылка не пропускает окно выбора: `?screen` из ссылки делает обычный старт с выбором.
+    var forLink: AppAction {
+        switch self {
+        case .shareStart: return .shareStart(screen: false)
+        case .shareToggle: return .shareToggle(screen: false)
+        default: return self
+        }
+    }
+
+    /// Действие из ссылки `macutils://`: сначала вопрос (если он нужен), потом то же исполнение, что у меню, горячих клавиш и «Команд».
+    @MainActor
+    func runFromLink() {
+        let action = forLink
+        if let question = action.linkQuestion {
+            let allowed = Self.linkConfirmer?(question.title, question.detail) ?? Self.askLink(question.title, question.detail)
+            guard allowed else { return }
+        }
+        action.run()
+    }
+
+    @MainActor
+    private static func askLink(_ title: String, _ detail: String) -> Bool {
+        guard ScreenOutput.mayShow("Вопрос ссылки") else { return false }
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: "Продолжить")
+        alert.addButton(withTitle: "Отмена")
+        ScreenOutput.activateApp()
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     static func fileURL(_ path: String) -> URL { URL(fileURLWithPath: (path as NSString).expandingTildeInPath) }
 
     /// Ссылку может открыть любая страница: прежде чем менять файл — показать, что и где, и спросить.

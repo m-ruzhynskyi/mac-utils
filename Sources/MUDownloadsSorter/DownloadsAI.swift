@@ -37,8 +37,10 @@ package final class DocumentTagger: ObservableObject {
         ("Video", "🎬"), ("Audio", "🎵"), ("Code", "💻"), ("Data", "📑"), ("Font", "🔤"),
     ]
     package nonisolated static let otherEmoji = "📁"
-    package nonisolated static let textExtensions: Set<String> = ["pdf", "txt", "rtf", "doc", "docx", "pages", "odt", "md", "csv",
-                                                          "json", "html", "swift", "py", "js", "ts"]
+    /// Что читаем ради текста: PDF (PDFKit), RTF и простой текст. html, doc, docx, odt, pages не разбираем: разборщики этих форматов
+    /// (WebKit и др.) работают в нашем процессе и могут подгрузить внешние ресурсы из файла, который человек даже не открывал.
+    package nonisolated static let textExtensions: Set<String> = ["pdf", "txt", "rtf", "md", "csv", "json", "swift", "py", "js", "ts"]
+    package nonisolated static let richTextExtensions: Set<String> = ["rtf"]
     package nonisolated static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "webp", "tiff", "gif"]
 
     private var queue: [URL] = []
@@ -90,6 +92,8 @@ package final class DocumentTagger: ObservableObject {
     /// «📋 Spec — notch app for AI agents».
     package nonisolated static func describe(_ url: URL) async throws -> String? {
         let ext = url.pathExtension.lowercased()
+        // Сначала — работает ли Ollama; иначе файл читали бы зря.
+        guard await Ollama.isReachable() else { return nil }
         let text = await Task.detached(priority: .utility) { () -> String in
             if textExtensions.contains(ext) { return extractText(url, limit: 1200) }
             if imageExtensions.contains(ext),
@@ -162,10 +166,25 @@ package final class DocumentTagger: ObservableObject {
            let data = try? PropertyListSerialization.data(fromPropertyList: comment, format: .binary, options: 0) {
             _ = data.withUnsafeBytes { setxattr(url.path, commentAttribute, $0.baseAddress, data.count, 0, 0) }
         }
-        Log.ai.info("Описание: \(url.lastPathComponent, privacy: .public)")
+        Log.ai.info("Описание: \(url.lastPathComponent, privacy: .private)")
     }
 
-    /// Текст документа: PDF — первые страницы, остальное — через NSAttributedString.
+    /// RTF и простой текст — с явным `documentType`: формат по расширению и содержимому не угадывается (иначе html и офисные
+    /// форматы пошли бы через свои разборщики). Остальные расширения — nil.
+    package nonisolated static func attributedText(_ url: URL) -> NSAttributedString? {
+        let ext = url.pathExtension.lowercased()
+        guard textExtensions.contains(ext), ext != "pdf" else { return nil }
+        // Читаем только начало: на подпись хватает ~1200 знаков.
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 256 * 1024), !data.isEmpty else { return nil }
+        let type: NSAttributedString.DocumentType = richTextExtensions.contains(ext) ? .rtf : .plain
+        var options: [NSAttributedString.DocumentReadingOptionKey: Any] = [.documentType: type]
+        if type == .plain { options[.characterEncoding] = String.Encoding.utf8.rawValue }
+        return try? NSAttributedString(data: data, options: options, documentAttributes: nil)
+    }
+
+    /// Текст документа: PDF — первые страницы, остальное — через `attributedText`.
     package nonisolated static func extractText(_ url: URL, limit: Int) -> String {
         var text = ""
         if url.pathExtension.lowercased() == "pdf", let document = PDFDocument(url: url) {
@@ -173,7 +192,7 @@ package final class DocumentTagger: ObservableObject {
                 text += (document.page(at: index)?.string ?? "") + "\n"
                 if text.count > limit { break }
             }
-        } else if let attributed = try? NSAttributedString(url: url, options: [:], documentAttributes: nil) {
+        } else if let attributed = Self.attributedText(url) {
             text = attributed.string
         }
         let compact = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
