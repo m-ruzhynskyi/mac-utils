@@ -296,6 +296,8 @@ package final class Updater: NSObject, ObservableObject {
                 try fm.createDirectory(at: work, withIntermediateDirectories: true)
                 let zip = work.appendingPathComponent("update.zip")
                 try fm.moveItem(at: downloaded, to: zip)
+                // Размер — до распаковки: подпись проверяется только после неё, а архив-«бомба» мог бы забить диск.
+                try Self.checkArchive(zip)
                 let unpacked = work.appendingPathComponent("unpacked")
                 try fm.createDirectory(at: unpacked, withIntermediateDirectories: true)
                 try Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
@@ -429,6 +431,48 @@ package final class Updater: NSObject, ObservableObject {
             throw UpdateError("Текущая сборка подписана ad-hoc: проверить издателя обновления нельзя")
         }
         try verifySignature(of: app, requirement: requirement)
+    }
+
+    /// Пределы архива обновления: само приложение с запасом (сейчас порядка 50–100 МБ).
+    package nonisolated static let maxZipBytes = 500 * 1024 * 1024
+    package nonisolated static let maxUnpackedBytes = 1500 * 1024 * 1024
+
+    /// Размер zip и заявленный размер распакованного (из оглавления `unzip -l`) в пределах; иначе ошибка, распаковки не будет.
+    package nonisolated static func checkArchive(_ zip: URL) throws {
+        let size = (try? zip.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        let listing = try? unzipListing(zip)
+        try checkArchive(zipBytes: size, listing: listing)
+    }
+
+    package nonisolated static func checkArchive(zipBytes: Int, listing: String?) throws {
+        guard zipBytes <= maxZipBytes else { throw UpdateError("Архив обновления слишком большой") }
+        guard let listing, let total = unpackedTotal(fromListing: listing) else {
+            throw UpdateError("Не удалось прочитать оглавление архива обновления")
+        }
+        guard total <= maxUnpackedBytes else { throw UpdateError("Архив обновления слишком велик после распаковки") }
+    }
+
+    /// Итоговая строка `unzip -l`: « 123456  42 files».
+    package nonisolated static func unpackedTotal(fromListing listing: String) -> Int? {
+        for line in listing.split(separator: "\n").reversed() {
+            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+            if parts.count >= 3, parts[1...].contains(where: { $0 == "files" || $0 == "file" }), let total = Int(parts[0]) { return total }
+        }
+        return nil
+    }
+
+    private nonisolated static func unzipListing(_ zip: URL) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-l", zip.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw UpdateError("Не удалось прочитать оглавление архива обновления") }
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Бандл целостный и подписан по `requirement` (тот же издатель), без символических ссылок внутри.

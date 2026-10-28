@@ -65,7 +65,7 @@ package final class ScrollCapture: NSObject, ObservableObject {
         let capture = ScrollCapture(rect: rect.intersection(screen.frame), screen: screen)
         current = capture
         capture.logHeader()
-        Log.capture.notice("Длинный снимок: старт, журнал \(capture.log?.url.lastPathComponent ?? "-", privacy: .public)")
+        Log.capture.notice("Длинный снимок: старт, журнал \(capture.log?.url.lastPathComponent ?? "-", privacy: .private)")
         // SCShareableContent может не ответить (завис replayd, открыт системный запрос): тогда съёмка без панелей
         // висела бы в `current`, а новые снимки молча не запускались.
         Task { @MainActor in

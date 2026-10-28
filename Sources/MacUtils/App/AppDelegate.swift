@@ -137,20 +137,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !route.editor.isEmpty { EditorWindowController.shared.open(route.editor) }
         for url in urls where url.scheme == "macutils" {
             if let action = AppAction(url: url) {
-                action.run()
+                action.runFromLink()
                 continue
             }
             switch url.host {
+            #if DEBUG
+            // Только для проверок: оборвать связь трансляции, как при сбое сети. В рабочей сборке такой ссылки нет.
             case "share-drop": ScreenShare.shared.simulateDrop()
+            #endif
             case "meeting-report":
-                if let name = url.query?.removingPercentEncoding {
-                    let folder = MeetingRecorder.root.appendingPathComponent(name, isDirectory: true)
+                if let name = url.query?.removingPercentEncoding, let folder = MeetingRecorder.folder(named: name, root: MeetingRecorder.root) {
                     Task { await MeetingRecorder.shared.process(.init(folder: folder), reportOnly: true) }
                 }
             case "meeting-process":
                 // macutils://meeting-process?2026-10-07%2020.30 — заново расшифровать встречу из папки «Встречи».
-                if let name = url.query?.removingPercentEncoding {
-                    let folder = MeetingRecorder.root.appendingPathComponent(name, isDirectory: true)
+                if let name = url.query?.removingPercentEncoding, let folder = MeetingRecorder.folder(named: name, root: MeetingRecorder.root) {
                     Task { await MeetingRecorder.shared.process(.init(folder: folder)) }
                 }
             default: SettingsWindowController.shared.show()

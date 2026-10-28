@@ -78,7 +78,9 @@ enum MoveToApplications {
             } else {
                 try manager.moveItem(at: source, to: target)
             }
-            removeQuarantine(target)
+            // Карантин снимаем только у копии с подписью того же издателя, что у запущенного приложения; не прошла — оставляем карантин
+            // (macOS сам спросит при запуске).
+            if verifiedCopy(target) { removeQuarantine(target) }
             relaunch(target)
         } catch {
             let failure = NSAlert()
@@ -86,6 +88,12 @@ enum MoveToApplications {
             failure.informativeText = "Перетащите Mac Utils в «Программы» вручную в Finder и запустите оттуда.\n\n\(error.localizedDescription)"
             failure.runModal()
         }
+    }
+
+    /// Копия в «Программах» подписана тем же издателем, что запущенное приложение. Ad-hoc сборка (требование `cdhash`) не проверяется.
+    private static func verifiedCopy(_ target: URL) -> Bool {
+        guard let requirement = try? Updater.currentRequirement() else { return false }
+        return (try? Updater.verifySignature(of: target, requirement: requirement)) != nil
     }
 
     private static func removeQuarantine(_ url: URL) {

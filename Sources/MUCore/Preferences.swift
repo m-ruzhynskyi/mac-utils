@@ -109,6 +109,8 @@ package enum Pref {
     /// Адрес ретранслятора трансляции экрана (relay/, Cloudflare Workers).
     package static let shareServer = "shareServer"
     package static let shareAudio = "shareAudio"
+    /// Имя ведущего/зрителя для трансляции (по умолчанию общее «Mac», без имени владельца компьютера).
+    package static let shareName = "shareName"
     /// Зрители могут ставить метки и рисовать поверх экрана ведущего.
     package static let shareAllowMarks = "shareAllowMarks"
     /// Зрители сами переключают, какой монитор ведущего транслируется (без вопроса; ведущему — уведомление).
