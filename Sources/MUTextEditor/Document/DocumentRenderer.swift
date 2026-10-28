@@ -598,7 +598,8 @@ package final class DocRenderer {
         let name = fontEntry?.name ?? "Times New Roman"
         let family = FontSubstitution.display(for: name, family: fontEntry?.family ?? .roman, panose: fontEntry?.panose)
         var size = CGFloat(props.halfPoints) / 2
-        if props.vertical != .normal { size *= 0.65 }
+        // Индекс у Word — ⅔ размера в целых полупунктах: 11 pt → 7, 12 pt → 8.
+        if props.vertical != .normal { size = CGFloat(props.halfPoints * 2 / 3) / 2 }
         var attributes: [NSAttributedString.Key: Any] = [
             .font: font(family: family, size: size, bold: props.bold, italic: props.italic),
             .foregroundColor: color(props.color, model: model) ?? NSColor.black,
@@ -619,6 +620,9 @@ package final class DocRenderer {
         case .wave: attributes[.underlineStyle] = NSUnderlineStyle([.single, .patternDashDot]).rawValue
         }
         if props.strike { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+        // Кернинг пар оставлен как у TextKit: выключение (`.kern = 0`, как у Word без `\kerningN`) в гейте почти не меняло
+        // разрывы (40 форм), но давало f144 лишнюю страницу. Межзнаковый интервал `\expndtw` — `.tracking`.
+        if props.expand != 0 { attributes[.tracking] = CGFloat(props.expand) / 20 }
         switch props.vertical {
         case .normal: break
         case .superscript: attributes[.baselineOffset] = CGFloat(props.halfPoints) / 2 * 0.35
