@@ -77,35 +77,14 @@ package enum DocLineMetrics {
         return max(single, value)
     }
 
-    /// Насколько строка TextKit, начинающаяся с `index`, выше строки Word (бывает и ниже — тогда < 0). Нужно странице:
-    /// помещается ли строка, typesetter решает по своей высоте, до `adjust` — и строку, которая у Word ещё на
-    /// странице, уносит на следующую (`DocPageContainer`). Шрифты — с `index` до конца абзаца (не дальше 300 знаков).
-    @MainActor static func excess(_ layoutManager: NSLayoutManager, at index: Int) -> CGFloat {
-        guard let storage = layoutManager.textStorage, index < storage.length else { return 0 }
-        let paragraph = (storage.string as NSString).paragraphRange(for: NSRange(location: index, length: 0))
-        let range = NSRange(location: index, length: min(300, NSMaxRange(paragraph) - index))
-        var above: CGFloat = 0, below: CGFloat = 0, natural: CGFloat = 0
-        var plain = true
-        storage.enumerateAttributes(in: range) { attributes, _, stop in
-            if attributes[.attachment] != nil || attributes[.docBreakLine] != nil {
-                plain = false
-                stop.pointee = true
-                return
-            }
-            guard let font = attributes[.font] as? NSFont else { return }
-            let metrics = metrics(font)
-            above = max(above, metrics.above)
-            below = max(below, metrics.below)
-            natural = max(natural, layoutManager.defaultLineHeight(for: font))
-        }
-        guard plain, above + below > 0 else { return 0 }
-        let style = storage.attribute(.paragraphStyle, at: index, effectiveRange: nil) as? NSParagraphStyle ?? .default
-        var textKit = natural
-        if style.lineHeightMultiple > 0 { textKit *= style.lineHeightMultiple }
-        if style.minimumLineHeight > 0 { textKit = max(textKit, style.minimumLineHeight) }
-        if style.maximumLineHeight > 0 { textKit = min(textKit, style.maximumLineHeight) }
-        let props = (storage.attribute(.docPara, at: index, effectiveRange: nil) as? DocParaInfo)?.props
-        return textKit - lineHeight(single: above + below, props: props)
+    /// Отступ перед абзацем пропадает у первой строки страницы, начавшейся сама (`DocPageContainer.dropsTopSpace`: не первая страница);
+    /// жёсткий разрыв («\f») и `\pagebb` отступ сохраняют.
+    @MainActor private static func dropsSpaceBefore(_ layoutManager: NSLayoutManager, container: NSTextContainer, rect: NSRect,
+                                                    paragraph: NSRange, style: NSParagraphStyle, props: RTFParaProps?) -> Bool {
+        guard rect.minY < 0.5, style.paragraphSpacingBefore > 0, style.textBlocks.isEmpty, props?.pageBreakBefore != true,
+              paragraph.location > 0, (container as? DocPageContainer)?.dropsTopSpace == true,
+              let storage = layoutManager.textStorage else { return false }
+        return (storage.string as NSString).character(at: paragraph.location - 1) != 0x0C
     }
 
     /// Поправить строку, которую разложил TextKit: высота, базовая линия, интервалы абзаца. `false` — оставить как есть
@@ -159,7 +138,15 @@ package enum DocLineMetrics {
         let first = characters.location == paragraph.location
             || (characters.location == paragraph.location + 1 && storage.attribute(.docBreakLine, at: paragraph.location, effectiveRange: nil) != nil)
         let last = NSMaxRange(characters) >= NSMaxRange(paragraph)
-        let before = first ? style.paragraphSpacingBefore : 0
+        // Word не отступает «перед» абзацем в начале страницы, если страница началась сама (не жёстким разрывом, не `\pagebb`)
+        // и это не первая страница: иначе каждая такая страница сдвинута вниз на отступ.
+        var before = first && !Self.dropsSpaceBefore(layoutManager, container: container, rect: rect, paragraph: paragraph, style: style, props: props)
+            ? style.paragraphSpacingBefore : 0
+        // Между абзацами Word оставляет большее из «после» предыдущего и «перед» следующего, а не сумму (предыдущая строка уже несёт своё «после»).
+        if before > 0, first, paragraph.location > 0, style.textBlocks.isEmpty {
+            let previous = storage.attribute(.paragraphStyle, at: paragraph.location - 1, effectiveRange: nil) as? NSParagraphStyle
+            if let previous, previous.textBlocks.isEmpty { before = max(0, before - previous.paragraphSpacing) }
+        }
         let after = last ? style.paragraphSpacing : 0
         rect.size.height = before + height + after
         used.origin.y = rect.minY + before

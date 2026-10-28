@@ -169,6 +169,7 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         if headersChanged { headerCache = [:] }
         // Разрывы по правилам Word — заново после правки (`DocPagination` в конце раскладки).
         for page in pagesView.pages { page.breakLimit = nil }
+        pagesView.paginationStamp += 1
         storage.beginEditing()
         storage.replaceCharacters(in: replaced, with: string)
         storage.endEditing()

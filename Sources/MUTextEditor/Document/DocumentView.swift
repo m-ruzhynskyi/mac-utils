@@ -452,6 +452,12 @@ package final class DocStoryLayout {
 package final class DocPagesView: NSView {
     package static let gap: CGFloat = 24
     package private(set) var pages: [DocPageView] = []
+    /// Подряд идущие проходы `DocPagination`, менявшие раскладку (предохранитель от зацикливания).
+    var paginationRounds = 0
+    /// Что было отложено `DocPagination` последним проходом без изменений; `paginationStamp` растёт с каждой заменой текста.
+    struct PaginationKey: Equatable { var stamp: Int, length: Int, pages: Int }
+    var paginationDone: PaginationKey?
+    var paginationStamp = 0
 
     package override var isFlipped: Bool { true }
 
@@ -513,22 +519,8 @@ package final class DocCenteringClipView: NSClipView {
     }
 }
 
-/// Контейнер страницы: помещается ли строка, решается по высоте строки Word (`DocLineMetrics.excess`), а не TextKit —
-/// TextKit выше (TNR 12: 14,5 pt против 13,8), и строка, которая у Word ещё на странице, уходила на следующую.
+/// Контейнер страницы. `dropsTopSpace` — у первой строки страницы пропадает отступ «перед» абзацем (Word так делает у страницы,
+/// начавшейся сама); решает `DocPagination`, потому что для страниц с таблицами это не проверено.
 final class DocPageContainer: NSTextContainer {
-    override var isSimpleRectangularTextContainer: Bool { false }
-
-    override func lineFragmentRect(forProposedRect proposedRect: NSRect, at characterIndex: Int, writingDirection baseWritingDirection: NSWritingDirection,
-                                   remaining remainingRect: UnsafeMutablePointer<NSRect>?) -> NSRect {
-        let excess = layoutManager.map { manager in MainActor.assumeIsolated { DocLineMetrics.excess(manager, at: characterIndex) } } ?? 0
-        guard excess != 0, proposedRect.height - excess > 0 else {
-            return super.lineFragmentRect(forProposedRect: proposedRect, at: characterIndex, writingDirection: baseWritingDirection, remaining: remainingRect)
-        }
-        var proposed = proposedRect
-        proposed.size.height -= excess
-        var rect = super.lineFragmentRect(forProposedRect: proposed, at: characterIndex, writingDirection: baseWritingDirection, remaining: remainingRect)
-        // Высоту строки дальше поправит `DocLineMetrics.adjust`; typesetter ждёт свою.
-        if !rect.isEmpty { rect.size.height = proposedRect.height }
-        return rect
-    }
+    var dropsTopSpace = false
 }

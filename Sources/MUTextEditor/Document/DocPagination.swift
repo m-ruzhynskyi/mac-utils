@@ -10,6 +10,8 @@ import AppKit
 /// После жёсткого разрыва («\f») правила не действуют: разрыв уже там, где задан.
 @MainActor
 package enum DocPagination {
+    /// Запас к пределу: предыдущий кусок кончается ровно там, где начинается переносимый, и без запаса он не поместился бы из-за округления.
+    private static let slack: CGFloat = 1.5
     /// Кусок раскладки в порядке текста: абзац вне таблицы или строка таблицы.
     private struct Unit {
         package var key: String
@@ -23,24 +25,95 @@ package enum DocPagination {
         package var paragraph: NSRange?
     }
 
-    /// Применить правила ко всем страницам; `true` — какая-то страница стала короче (раскладка изменилась).
+    /// Применить правила ко всем страницам; `true` — раскладка изменилась (нужен ещё проход).
+    /// Страницы проходятся по порядку, и всё по странице считается заново по естественной раскладке: предел, поставленный
+    /// при другом составе предыдущих страниц, устаревает (раскладка идёт дальше от разрывов) и унёс бы лишнее.
+    /// Страницы, где таблицы занимают заметную часть, не трогаются: высоты строк таблиц у нас пока неточные, и правило, верное само по себе,
+    /// переносило бы абзац из-за чужой ошибки (f030, f069, f176 по гейту).
     @discardableResult
     package static func apply(_ pagesView: DocPagesView, layoutManager: NSLayoutManager) -> Bool {
         guard let storage = layoutManager.textStorage, storage.length > 0 else { return false }
+        // Проход уже сделан для этого текста и этого числа страниц: перераскладка, которую он сам вызвал, ничего не меняет.
+        if pagesView.paginationDone == DocPagesView.PaginationKey(stamp: pagesView.paginationStamp, length: storage.length, pages: pagesView.pages.count) {
+            return false
+        }
         var changed = false
         var index = 0
-        while index + 1 < pagesView.pages.count {
-            let page = pagesView.pages[index], next = pagesView.pages[index + 1]
-            layoutManager.ensureLayout(for: next.container)
-            if let limit = breakTop(page: page.container, next: next.container, layoutManager: layoutManager, storage: storage),
-               limit < (page.breakLimit ?? .greatestFiniteMagnitude) - 0.5 {
-                page.breakLimit = limit
-                layoutManager.ensureLayout(for: page.container)
-                changed = true
+        while index < pagesView.pages.count {
+            let page = pagesView.pages[index]
+            let old = page.breakLimit
+            page.breakLimit = nil
+            // Отступ «перед» у верха страницы, начавшейся сама: не у первой и не у страницы с таблицей.
+            if let container = page.container as? DocPageContainer {
+                layoutManager.ensureLayout(for: container)
+                var drops = index > 0 && !mostlyTable(container, layoutManager: layoutManager)
+                if container.dropsTopSpace != drops {
+                    container.dropsTopSpace = drops
+                    relayout(container, layoutManager: layoutManager)
+                    if drops, mostlyTable(container, layoutManager: layoutManager) {
+                        // Страница втянула таблицы — отступ не трогаем.
+                        drops = false
+                        container.dropsTopSpace = false
+                        relayout(container, layoutManager: layoutManager)
+                    }
+                    changed = true
+                }
+            }
+            if index + 1 < pagesView.pages.count {
+                let next = pagesView.pages[index + 1]
+                next.breakLimit = nil
+                layoutManager.ensureLayout(for: next.container)
+                var limit: CGFloat?
+                if !mostlyTable(page.container, layoutManager: layoutManager) {
+                    limit = breakTop(page: page.container, next: next.container, layoutManager: layoutManager, storage: storage)
+                }
+                if let limit {
+                    page.breakLimit = limit
+                    layoutManager.ensureLayout(for: page.container)
+                }
+                if (old == nil) != (limit == nil) || abs((old ?? 0) - (limit ?? 0)) > 0.5 { changed = true }
             }
             index += 1
         }
+        if let last = layoutManager.textContainers.last { layoutManager.ensureLayout(for: last) }
+        // Страховка от бесконечного прохода: страница то втягивает таблицу, то нет.
+        if changed {
+            pagesView.paginationRounds += 1
+            if pagesView.paginationRounds > 6 { changed = false }
+        } else {
+            pagesView.paginationRounds = 0
+        }
+        if !changed {
+            pagesView.paginationDone = DocPagesView.PaginationKey(stamp: pagesView.paginationStamp, length: storage.length, pages: pagesView.pages.count)
+        }
         return changed
+    }
+
+    private static func relayout(_ container: NSTextContainer, layoutManager: NSLayoutManager) {
+        let glyphs = layoutManager.glyphRange(for: container)
+        if glyphs.length > 0 {
+            layoutManager.invalidateLayout(forCharacterRange: layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil), actualCharacterRange: nil)
+        }
+        layoutManager.ensureLayout(for: container)
+    }
+
+    /// Доля строк таблиц на странице, выше которой правила не действуют.
+    private static let tableShareLimit = 0.25
+
+    /// Таблицы занимают заметную часть страницы.
+    private static func mostlyTable(_ container: NSTextContainer, layoutManager: NSLayoutManager) -> Bool {
+        guard let storage = layoutManager.textStorage else { return false }
+        let glyphs = layoutManager.glyphRange(for: container)
+        guard glyphs.length > 0 else { return false }
+        var table = 0, all = 0
+        layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { _, _, _, lineGlyphs, _ in
+            let character = layoutManager.characterIndexForGlyph(at: lineGlyphs.location)
+            guard character < storage.length else { return }
+            all += 1
+            if let style = storage.attribute(.paragraphStyle, at: character, effectiveRange: nil) as? NSParagraphStyle,
+               style.textBlocks.contains(where: { $0 is NSTextTableBlock }) { table += 1 }
+        }
+        return all > 0 && Double(table) / Double(all) > tableShareLimit
     }
 
     /// Куда перенести начало следующей страницы (верх куска на этой), если правило Word этого требует.
@@ -69,7 +142,7 @@ package enum DocPagination {
                     moved = units.count - 1
                 } else if ends, remaining < 2 {
                     // Висячая последняя строка: переносим ещё одну, если здесь останется две; иначе — весь абзац.
-                    if last.lines.count - 1 >= 2 { return last.lines[last.lines.count - 1].minY }
+                    if last.lines.count - 1 >= 2 { return last.lines[last.lines.count - 1].minY + slack }
                     moved = units.count - 1
                 }
             }
@@ -80,7 +153,7 @@ package enum DocPagination {
         // Переносить нечего или вся страница — одна цепочка: Word такой разрыв не делает.
         guard moved > 0, moved < units.count else { return nil }
         let top = units[moved].top
-        return top > 0.5 ? top : nil
+        return top > 0.5 ? top + slack : nil
     }
 
     /// Куски страницы по порядку текста с их строками.
