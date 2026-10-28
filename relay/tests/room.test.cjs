@@ -1287,7 +1287,7 @@ test('video-trouble: зритель просит ключевой и «не ус
 const LIVE_HOST = { lastSeen: 1_000_000 };
 const enc = (o) => JSON.stringify(o);
 
-test('L2: пять отказов подряд — комната не принимает новых запросов 10 минут; принятие обнуляет серию', async () => {
+test('L2: пять отказов подряд — комната не принимает новых запросов 2 минуты; принятие обнуляет серию', async () => {
   const f = fixture(), host = f.socket('host', { lastSeen: Infinity });
   const waiting = (i) => f.socket('viewer', { id: `10000000${String(i).padStart(2, '0')}`, name: 'v', rid: `r${i}`, approved: false, reqSent: true, auth: 'none', ip: `1.1.1.${i}` });
   const connect = (id) => f.room.fetch(new Request(`https://room/1234567890?role=viewer&viewer=${id}&name=x`));
@@ -1304,11 +1304,10 @@ test('L2: пять отказов подряд — комната не прин�
   f.room.webSocketMessage(host, enc({ type: 'decline', viewer: waiting(10).info.id }));
   assert.equal((await connect('2000000003')).status, 429, 'пятый отказ подряд — пауза');
   const alive = () => f.room.webSocketMessage(host, enc({ type: 'heartbeat' }));
-  f.advance(100_000); alive(); f.advance(100_000); alive(); f.advance(100_000); alive(); f.advance(100_000); alive(); f.advance(100_000); alive();
-  f.advance(99_000); alive();
-  assert.equal((await connect('2000000004')).status, 429);
-  f.advance(2_000); alive();
-  assert.equal((await connect('2000000005')).status, 101, 'через 10 минут снова принимает');
+  f.advance(100_000); alive();
+  assert.equal((await connect('2000000004')).status, 429, 'пауза — две минуты');
+  f.advance(21_000); alive();
+  assert.equal((await connect('2000000005')).status, 101, 'через две минуты снова принимает');
 });
 
 test('L2: запросы по IP и по ключу за минуту; «свой» запрос владельца ID не считается', () => {

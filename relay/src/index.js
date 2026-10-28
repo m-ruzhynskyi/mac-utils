@@ -56,7 +56,9 @@ const CLAIM_PERIOD_MS = 86_400_000;
 const REQUESTS_PER_IP_PER_MIN = 12;
 const REQUESTS_PER_KEY_PER_MIN = 4;
 const ROOM_DECLINE_LIMIT = 5;
-const ROOM_PAUSE_MS = 600_000;
+const ROOM_PAUSE_MS = 120_000;
+// Сколько принятых ведущим зрителей помнит комната (их переподключения не считаются запросами).
+const MAX_ADMITTED = 200;
 // Размер сообщения проверяется до разбора JSON (L3): до проверки ключа — 1 КБ, служебные heartbeat/ack — 256 Б,
 // остальные — 32 КБ (метки до 2000 точек, список мониторов).
 const MAX_PENDING_BYTES = 1024;
@@ -309,6 +311,11 @@ export default {
   },
 };
 
+// ID зрителя из адреса (mu-share-1): только цифры, не больше 10.
+function viewerParam(url) {
+  return (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
+}
+
 export class Room {
   constructor(state, env) {
     this.state = state;
@@ -320,6 +327,8 @@ export class Room {
     this.ipRequests = new Map();
     this.keyRequests = new Map();
     this.roomDeclines = { streak: 0, until: 0 };
+    // Принятые ведущим на время трансляции: `k:<pub>` (v2) и `l:<ip>|<id>` (mu-share-1). В памяти.
+    this.admitted = new Set();
     // Поток видео к каждому зрителю: { sent, acked, acking, skipping, skipped } (в памяти, после выгрузки — заново).
     this.flow = new WeakMap();
     this.lastKeyAsk = 0;
@@ -369,7 +378,7 @@ export class Room {
         return new Response("rate-limited", { status: 429 });
       }
       // Старый зритель без ключа не бывает «своим»: пауза комнаты и счёт по IP действуют на него всегда.
-      if (!v2 && !this.requestAllowed(ip, "", false)) return new Response("rate-limited", { status: 429 });
+      if (!v2 && !this.requestAllowed(ip, "", false, this.legacyAdmitKey(ip, viewerParam(url)))) return new Response("rate-limited", { status: 429 });
     }
     const [client, server] = Object.values(new WebSocketPair());
     if (role === "host") {
@@ -381,7 +390,7 @@ export class Room {
     } else if (v2) {
       return this.connectViewerV2(url, roomId, ip, server, client);
     } else {
-      let viewer = (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
+      let viewer = viewerParam(url);
       // ID комнаты как ID зрителя — подделка (его знает любой, у кого есть код): старые Mac-хосты 1.3.x
       // принимали такого «себя» без вопроса. Отдаём хосту пустой ID, он покажет обычный запрос.
       if (viewer === roomId) viewer = "";
@@ -632,7 +641,7 @@ export class Room {
     if (foreign) this.endViewers();
     // M2: пущенные зрители остаются только у того ключа, который их пустил, — и в grace, когда прежнего хоста уже нет.
     for (const viewer of this.approvedViewers()) {
-      if ((viewer.deserializeAttachment() || {}).approvedBy !== auth.pub) this.endViewer(viewer);
+      if ((viewer.deserializeAttachment() || {}).approvedBy !== auth.pub) { this.endViewer(viewer); this.admitted.clear(); }
     }
     socket.serializeAttachment({ ...current, auth: "key", pub: auth.pub, fp, nonce: undefined, verifying: undefined, lastSeen: Date.now() });
     socket.send(JSON.stringify({ type: "authed", v: 2, fp, claimed: claim.claimed }));
@@ -672,6 +681,8 @@ export class Room {
     const self = !!owner && owner.pub === auth.pub;
     // Пауза после отказа — до привязки ID: отклонённый не тратит квоту и не закрепляет новый ID.
     if (!self && declineCooldown(this.declines, `k:${auth.pub}`, Date.now()) > 0) return this.failAuth(socket, "rate-limited");
+    // Пауза комнаты тоже до привязки ID, но уже пущенных она не касается.
+    if (!self && !this.admitted.has(`k:${auth.pub}`) && this.roomDeclines.until > Date.now()) return this.failAuth(socket, "rate-limited");
     const fp = await fingerprintOf(auth.pub);
     let id = info.id, idVerified;
     if (info.id === info.roomId) {
@@ -694,13 +705,24 @@ export class Room {
 
   // Можно ли принять ещё один запрос: комната не на паузе после серии отказов, с этого IP и по этому ключу не слишком часто.
   // «Своё» окно владельца ID ведущего не считается и не блокируется.
-  requestAllowed(ip, pub, self) {
-    if (self) return true;
+  // Уже пущенные ведущим (`admitKey`) возвращаются после обрыва без лимитов и без паузы: это продолжение, а не новый запрос.
+  requestAllowed(ip, pub, self, admitKey = pub ? `k:${pub}` : "") {
+    if (self || (admitKey && this.admitted.has(admitKey))) return true;
     const now = Date.now();
     if (this.roomDeclines.until > now) return false;
     if (ip && !windowHit(this.ipRequests, ip, REQUESTS_PER_IP_PER_MIN, 60_000, now)) return false;
     if (pub && !windowHit(this.keyRequests, pub, REQUESTS_PER_KEY_PER_MIN, 60_000, now)) return false;
     return true;
+  }
+
+  legacyAdmitKey(ip, id) { return ip && id ? `l:${ip}|${id}` : ""; }
+
+  rememberAdmitted(info) {
+    const key = info.auth === "key" && info.pub ? `k:${info.pub}` : this.legacyAdmitKey(info.ip, info.id);
+    if (!key) return;
+    this.admitted.delete(key);
+    this.admitted.add(key);
+    if (this.admitted.size > MAX_ADMITTED) this.admitted.delete(this.admitted.values().next().value);
   }
 
   noteRoomDecline(now) {
@@ -1103,10 +1125,12 @@ export class Room {
         }
         viewer.send(JSON.stringify(accepted));
         this.noteRoomAccept();
+        this.rememberAdmitted(info);
       } else if (command.type === "decline") {
         const key = info.pub ? `k:${info.pub}` : (info.ip ? `ip:${info.ip}` : "");
         if (key) noteDecline(this.declines, key, Date.now());
-        this.noteRoomDecline(Date.now());
+        // Таймаут Mac («не ответили за 3 минуты») — не отказ человека: серию отказов и паузу комнаты не запускает.
+        if (command.reason !== "timeout") this.noteRoomDecline(Date.now());
         try {
           viewer.serializeAttachment({ ...info, ended: true });
           viewer.send(JSON.stringify({ type: "declined" }));
@@ -1139,6 +1163,7 @@ export class Room {
   }
 
   endViewers() {
+    this.admitted.clear();
     for (const viewer of this.state.getWebSockets("viewer")) this.endViewer(viewer);
   }
 

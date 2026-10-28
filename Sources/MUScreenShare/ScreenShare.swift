@@ -1094,25 +1094,26 @@ package final class ScreenShare: NSObject, ObservableObject {
                 let accept = ShareRules.apply(reply, to: request, prompt: prompt) { id, name, pub in
                     ShareHistory.shared.trust(id, name: name, pub: pub)
                 }
-                self.answer(request, accept: accept)
+                self.answer(request, accept: accept, timedOut: reply == .timeout)
             }
             ShareRequestQueue.shared.add(item)
         }
     }
 
-    private func answer(_ request: ShareRequest, accept: Bool) {
+    private func answer(_ request: ShareRequest, accept: Bool, timedOut: Bool = false) {
         let hostSig = accept && hostKeyed ? ShareRules.hostSignature(for: request, roomId: ShareCode.myID, identity: .shared) : nil
-        if let message = Self.answerMessage(viewer: request.viewer, accept: accept, rid: request.rid, hostSig: hostSig) {
+        if let message = Self.answerMessage(viewer: request.viewer, accept: accept, rid: request.rid, hostSig: hostSig, timedOut: timedOut) {
             socket?.send(.string(message)) { _ in }
         }
         if accept { sender?.resendLast() }
     }
 
     /// JSON ответа ведущего; значения экранирует JSONSerialization, а не подстановка в строку.
-    package static func answerMessage(viewer: String, accept: Bool, rid: String? = nil, hostSig: String? = nil) -> String? {
+    package static func answerMessage(viewer: String, accept: Bool, rid: String? = nil, hostSig: String? = nil, timedOut: Bool = false) -> String? {
         var object: [String: Any] = ["type": accept ? "accept" : "decline", "viewer": viewer, "name": ShareCode.myName]
         if let rid { object["rid"] = rid }
         if let hostSig { object["hostSig"] = hostSig }
+        if timedOut, !accept { object["reason"] = "timeout" }
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
         return String(data: data, encoding: .utf8)
     }

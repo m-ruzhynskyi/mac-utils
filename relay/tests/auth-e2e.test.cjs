@@ -1407,3 +1407,99 @@ test('es256: /claim и отпечаток принимают ключ P-256, м�
     assert.equal((await claim(bad)).status, 400, bad);
   }
 });
+
+// =====================================================================================================
+// RELAYFIX (ревью #179, L2): пущенные зрители возвращаются во время паузы и под лимитами; таймаут Mac не пауза
+// =====================================================================================================
+const spamKeys = (w, host, count, reason) => (async () => {
+  for (let i = 0; i < count; i++) {
+    const s = await viewerLogin(w, keypair(300 + i), ROOM, { viewer: `77000000${String(i).padStart(2, '0')}`, ip: `8.8.${i}.1` });
+    await send(w.f(ROOM), host, { type: 'decline', viewer: s.info.id, rid: s.info.rid, ...(reason ? { reason } : {}) });
+  }
+})();
+const drop = (w, socket) => w.f(ROOM).room.webSocketClose(socket, 1006);
+
+test('P1: пущенный зритель возвращается во время паузы комнаты; новый — нет; через две минуты пауза кончается', async () => {
+  const w = world(), host = await hostLogin(w);
+  const trusted = await viewerLogin(w, keypair(200), ROOM, { viewer: '5500000001', ip: '3.3.3.3' });
+  await accept(w, host, trusted);
+  await spamKeys(w, host, 5);
+  assert.equal(w.f(ROOM).room.roomDeclines.until > w.now, true, 'пауза началась');
+  const stranger = await connect(w, 'viewer', ROOM, { viewer: '5500000002', ip: '4.4.4.4' });
+  const strangerKey = keypair(201);
+  const challenge = msgOf(stranger.socket, 'challenge');
+  await send(w.f(ROOM), stranger.socket, authFrame(strangerKey, strangerKey.sign(viewerMsg(ROOM, '5500000002', challenge.rid, challenge.nonce))));
+  assert.equal(closeCode(stranger.socket), 4429, 'новый зритель во время паузы — отказ');
+  await drop(w, trusted);
+  w.pass(30_000);
+  const back = await viewerLogin(w, keypair(200), ROOM, { viewer: '5500000001', ip: '3.3.3.3' });
+  assert.equal(closeCode(back), undefined, 'пущенный вернулся');
+  assert.ok(msgOf(back, 'waiting'));
+});
+
+test('P2: десять зрителей с одного IP переподключаются в первую минуту — вернулись все', async () => {
+  const w = world(), host = await hostLogin(w);
+  const keys = [], sockets = [];
+  for (let i = 0; i < 10; i++) {
+    keys.push(keypair(400 + i));
+    const s = await viewerLogin(w, keys[i], ROOM, { viewer: `66000000${String(i).padStart(2, '0')}`, ip: '5.5.5.5' });
+    await accept(w, host, s);
+    sockets.push(s);
+  }
+  for (const s of sockets) await drop(w, s);
+  w.pass(30_000);
+  for (let i = 0; i < 10; i++) {
+    const s = await viewerLogin(w, keys[i], ROOM, { viewer: `66000000${String(i).padStart(2, '0')}`, ip: '5.5.5.5' });
+    assert.equal(closeCode(s), undefined, `зритель ${i + 1} вернулся`);
+    await accept(w, host, s);
+  }
+});
+
+test('P3: частые обрывы одного зрителя (каждые 10 с) не упираются в лимит по ключу', async () => {
+  const w = world(), host = await hostLogin(w), key = keypair(500);
+  let s = await viewerLogin(w, key, ROOM, { viewer: '5400000001', ip: '6.6.6.6' });
+  await accept(w, host, s);
+  for (let i = 0; i < 8; i++) {
+    await drop(w, s);
+    w.pass(10_000);
+    s = await viewerLogin(w, key, ROOM, { viewer: '5400000001', ip: '6.6.6.6' });
+    assert.equal(closeCode(s), undefined, `переподключение ${i + 1}`);
+    await accept(w, host, s);
+  }
+});
+
+test('P1 для mu-share-1: пущенный старый зритель (IP + ID) возвращается во время паузы, другой — 429', async () => {
+  const w = world(), host = await hostLogin(w);
+  const old = await connect(w, 'viewer', ROOM, { token: V1, viewer: '5300000001', ip: '3.3.3.3' });
+  await accept(w, host, old.socket);
+  await spamKeys(w, host, 5);
+  assert.equal((await connect(w, 'viewer', ROOM, { token: V1, viewer: '5300000002', ip: '3.3.3.3' })).res.status, 429, 'другой ID во время паузы — отказ');
+  await drop(w, old.socket);
+  assert.equal((await connect(w, 'viewer', ROOM, { token: V1, viewer: '5300000001', ip: '3.3.3.3' })).res.status, 101, 'пущенный вернулся');
+  assert.equal((await connect(w, 'viewer', ROOM, { token: V1, viewer: '5300000001', ip: '9.9.9.9' })).res.status, 429, 'тот же ID с другого IP — не продолжение');
+});
+
+test('таймаут Mac (reason:"timeout") не запускает паузу комнаты, ручные отказы — запускают', async () => {
+  const w = world(), host = await hostLogin(w);
+  await spamKeys(w, host, 6, 'timeout');
+  assert.equal(w.f(ROOM).room.roomDeclines.until, 0, 'шесть таймаутов — пауза не началась');
+  assert.equal(w.f(ROOM).room.roomDeclines.streak, 0);
+  w.pass(61_000);
+  await spamKeys(w, host, 5);
+  assert.equal(w.f(ROOM).room.roomDeclines.until > w.now, true, 'пять ручных отказов — пауза');
+});
+
+test('пауза проверяется до привязки ID: отказанная попытка не тратит квоту привязок', async () => {
+  const w = world(), host = await hostLogin(w);
+  await spamKeys(w, host, 5);
+  let claims = 0;
+  const original = w.env.ROOMS.get;
+  w.env.ROOMS.get = (name) => { const room = original(name); return { fetch: (url, init) => { if (String(url).endsWith('/claim')) claims++; return room.fetch(url, init); } }; };
+  const before = claims;
+  const key = keypair(600);
+  const { socket } = await connect(w, 'viewer', ROOM, { viewer: '5200000001', ip: '2.2.2.2' });
+  const challenge = msgOf(socket, 'challenge');
+  await send(w.f(ROOM), socket, authFrame(key, key.sign(viewerMsg(ROOM, '5200000001', challenge.rid, challenge.nonce))));
+  assert.equal(closeCode(socket), 4429);
+  assert.equal(claims, before, 'verifyViewerId не вызывался');
+});

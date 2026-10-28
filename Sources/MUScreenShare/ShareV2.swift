@@ -143,7 +143,9 @@ package struct ShareRequest: Equatable {
     }
 }
 
-package enum ShareAnswer: Equatable { case allowOnce, allowAlways, decline }
+package enum ShareAnswer: Equatable { case allowOnce, allowAlways, decline
+    /// Ведущий не ответил за отведённое время: отказ, который relay не считает серией отказов (reason:"timeout").
+    case timeout }
 
 /// Что делать с запросом (раздел 4.2 дизайна): принять сразу или спросить.
 package enum ShareDecision: Equatable {
@@ -213,7 +215,7 @@ package enum ShareRules {
     package static func apply(_ answer: ShareAnswer, to request: ShareRequest, prompt: ShareDecision.Prompt,
                       remember: (_ id: String, _ name: String, _ pub: String) -> Void) -> Bool {
         switch answer {
-        case .decline: return false
+        case .decline, .timeout: return false
         case .allowOnce: return true
         case .allowAlways:
             if prompt.allowAlways, request.auth == .key, let pub = request.pub {
@@ -239,7 +241,7 @@ package enum ShareErrorText {
         case "id-claimed": return "Этот ID занят другим устройством. Нажмите «Получить новый ID»."
         case "id-format": return "Этот ID не подходит для проверки устройства. Нажмите «Получить новый ID»."
         case "replaced": return "Трансляция с этим ID продолжена в другом окне."
-        case "rate-limited": return "Слишком много попыток. Подождите минуту и повторите."
+        case "rate-limited": return "Слишком много попыток. Подождите пару минут и повторите."
         case "auth-timeout": return "Сервер не дождался проверки устройства. Попробуйте ещё раз."
         case "bad-signature": return "Сервер не принял подпись устройства. Попробуйте ещё раз."
         case "upgrade-required": return "Сервер требует обновить Mac Utils."
