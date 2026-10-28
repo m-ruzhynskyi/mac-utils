@@ -55,6 +55,9 @@ plist_set MUGitCommit "$V_COMMIT"
 plist_set MUCommitsSinceRelease "$V_SINCE"
 echo "Версия: $V_SHORT ($V_CHANNEL, $V_COMMIT)"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# Значки документов (CFBundleTypeIconFile в Info.plist): рисуются при сборке, в git их нет. Проверка — те же файлы, что в plist.
+swift scripts/make-doc-icons.swift "$APP/Contents/Resources"
+./scripts/check-doc-icons.sh "$APP"
 # Шрифты интерфейса (Manrope, JetBrains Mono — SIL OFL 1.1) с лицензиями; регистрируются при запуске (DSFonts).
 cp -R Resources/Fonts "$APP/Contents/Resources/Fonts"
 
@@ -103,7 +106,7 @@ else
     sign - "$TOOLS"
     sign - --entitlements "$ENTITLEMENTS" "$APP"
 fi
-echo "Готово: $APP"
+echo "Готово: $APP ($(du -sh "$APP" | cut -f1))"
 
 if (( INSTALL )); then
     pkill -x "$EXECUTABLE" 2>/dev/null || true
