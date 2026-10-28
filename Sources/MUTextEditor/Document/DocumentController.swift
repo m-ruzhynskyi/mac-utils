@@ -56,6 +56,9 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     private var headerCache: [String: DocRenderer.StoryRendering] = [:]
     private var headerSignature = 0
     private var highlighted = false
+    /// Совпадения поиска (показанные единицы) и текущее — `DocFind.swift`.
+    package internal(set) var findMatches: [NSRange] = []
+    package internal(set) var findCurrent: Int?
     private var observers: [NSObjectProtocol] = []
 
     @Published package private(set) var pageCount = 1
@@ -453,6 +456,7 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     /// Только заливка и подчёркивание: цвет текста — из документа, как в Word.
     package func highlightDollars() {
         guard let tab else { return }
+        defer { paintFind() }  // подсветка `$` снимает фон со всего текста — совпадения поиска возвращаем
         let full = NSRange(location: 0, length: storage.length)
         let keys: [NSAttributedString.Key] = [.backgroundColor, .underlineStyle, .underlineColor]
         if highlighted { for key in keys { layoutManager.removeTemporaryAttribute(key, forCharacterRange: full) } }
@@ -671,14 +675,14 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     }
 
     /// Серия набора для склейки отмены: куда, что набрано, ревизия исходника после последнего символа, когда.
-    private struct TypingBurst {
+    struct TypingBurst {
         package var source: Int
         package var text: String
         package var revision: Int
         package var time: Date
     }
 
-    private var typingBurst: TypingBurst?
+    var typingBurst: TypingBurst?
     /// Пауза, после которой набор — уже новый шаг отмены.
     package static let typingBurstPause: TimeInterval = 2
 

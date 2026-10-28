@@ -39,13 +39,26 @@ package final class EditorSearch: ObservableObject {
     private let queue = DispatchQueue(label: "macutils.editor.search", qos: .userInitiated)
 
     private var tab: EditorTab? { workspace?.current }
+
+    // В «Документе» ищем по видимому тексту страниц (не по кодам RTF): совпадения — показанные единицы, подсветка — на страницах,
+    // замена — точечные правки исходника через `DocumentController`.
+    private var doc: DocumentController? { tab?.mode == .document ? tab?.documentController : nil }
+    private var haystack: NSString { doc.map { $0.storage.string as NSString } ?? tab?.text ?? "" }
+    private var haystackLength: Int { doc?.storage.length ?? tab?.storage.length ?? 0 }
+    private var currentSelection: NSRange { doc?.selectedUnits ?? tab?.textView.selectedRange() ?? NSRange(location: 0, length: 0) }
+    private var matchList: [NSRange] { doc?.findMatches ?? tab?.matches ?? [] }
+    private var revision: Int { doc != nil ? (tab?.sourceRevision ?? 0) : (tab?.textVersion ?? 0) }
+
+    private func setMatches(_ ranges: [NSRange], current: Int?, in tab: EditorTab) {
+        if let doc { doc.setFindMatches(ranges, current: current) } else { tab.setMatches(ranges, current: current) }
+    }
     package var isActive: Bool { workspace?.findMode != nil }
 
     /// Открыть панель: выделенный текст в одной строке становится запросом, выделение в несколько строк — областью «В выделении».
     package func prepare(from tab: EditorTab) {
-        let selection = tab.textView.selectedRange()
+        let selection = doc?.selectedUnits ?? tab.textView.selectedRange()
         guard selection.length > 0 else { return }
-        let selected = tab.text.substring(with: selection)
+        let selected = haystack.substring(with: selection)
         if selected.contains(where: \.isNewline) {
             options.inSelection = true
             scope = selection
@@ -55,8 +68,8 @@ package final class EditorSearch: ObservableObject {
     }
 
     private func captureScope() {
-        guard options.inSelection, let tab else { scope = nil; return }
-        let selection = tab.textView.selectedRange()
+        guard options.inSelection, tab != nil else { scope = nil; return }
+        let selection = currentSelection
         scope = selection.length > 0 ? selection : nil
     }
 
@@ -75,6 +88,7 @@ package final class EditorSearch: ObservableObject {
     package func clear() {
         stopRunning()
         for tab in workspace?.tabs ?? [] where !tab.matches.isEmpty { tab.setMatches([], current: nil) }
+        for tab in workspace?.tabs ?? [] { tab.documentController?.setFindMatches([], current: nil) }
         count = 0
         current = nil
         error = nil
@@ -82,8 +96,8 @@ package final class EditorSearch: ObservableObject {
     }
 
     private var searchScope: NSRange? {
-        guard options.inSelection, let scope, let tab else { return nil }
-        let full = NSRange(location: 0, length: tab.storage.length)
+        guard options.inSelection, let scope, tab != nil else { return nil }
+        let full = NSRange(location: 0, length: haystackLength)
         let clipped = NSIntersectionRange(scope, full)
         return clipped.length > 0 ? clipped : nil
     }
@@ -102,16 +116,16 @@ package final class EditorSearch: ObservableObject {
             count = 0
             truncated = false
             current = nil
-            tab.setMatches([], current: nil)
+            setMatches([], current: nil, in: tab)
             return
         }
         let query = self.query, options = self.options, scope = searchScope
         guard options.regex else {
-            finish(Result { try TextSearch.find(query, in: tab.text, options: options, scope: scope) }, timedOut: false, tab: tab)
+            finish(Result { try TextSearch.find(query, in: haystack, options: options, scope: scope) }, timedOut: false, tab: tab)
             return
         }
         let generation = self.generation
-        let snapshot = UncheckedSendable(tab.text.copy() as! NSString)
+        let snapshot = UncheckedSendable(haystack.copy() as! NSString)
         let cancel = TextSearch.Cancellation()
         running = cancel
         searching = true
@@ -139,15 +153,15 @@ package final class EditorSearch: ObservableObject {
             error = nil
             count = result.ranges.count
             truncated = result.truncated
-            let selection = tab.textView.selectedRange()
+            let selection = currentSelection
             current = result.ranges.firstIndex { $0 == selection } ?? result.ranges.firstIndex { $0.location >= selection.location }
                 ?? (result.ranges.isEmpty ? nil : 0)
-            tab.setMatches(result.ranges, current: current)
+            setMatches(result.ranges, current: current, in: tab)
         case .failure(let failure):
             error = timedOut ? "Выражение ищет слишком долго" : failure.localizedDescription
             count = 0
             current = nil
-            tab.setMatches([], current: nil)
+            setMatches([], current: nil, in: tab)
         }
     }
 
@@ -163,29 +177,34 @@ package final class EditorSearch: ObservableObject {
     /// ⌘G / ⇧⌘G: следующее или предыдущее совпадение, по кругу.
     package func next(backwards: Bool = false) {
         guard let tab else { return }
-        if pending != nil || (tab.matches.isEmpty && !searching) { refresh() }
+        if pending != nil || (matchList.isEmpty && !searching) { refresh() }
         if searching {
             nextAfterSearch = backwards
             return
         }
-        guard let found = TextSearch.next(in: tab.matches, after: tab.textView.selectedRange(), backwards: backwards) else {
+        guard let found = TextSearch.next(in: matchList, after: currentSelection, backwards: backwards) else {
             Feedback.beep()
             return
         }
         current = found.index
         wrapped = found.wrapped
-        tab.setMatches(tab.matches, current: found.index)
-        tab.reveal(tab.matches[found.index])
+        let matches = matchList
+        setMatches(matches, current: found.index, in: tab)
+        if let doc { doc.revealFind(found.index) } else { tab.reveal(matches[found.index]) }
     }
 
     /// «Заменить»: текущее совпадение (если выделено оно) — и к следующему.
     package func replaceOne() {
         guard let tab, error == nil, !query.isEmpty else { return }
-        let selection = tab.textView.selectedRange()
-        if tab.matches.contains(selection),
-           let string = try? TextSearch.replacement(for: selection, query, template: replacement, in: tab.text, options: options) {
-            tab.textView.replace([selection], with: [string], actionName: "Заменить")
-            tab.textView.setSelectedRange(NSRange(location: selection.location + (string as NSString).length, length: 0))
+        let selection = currentSelection
+        if matchList.contains(selection),
+           let string = try? TextSearch.replacement(for: selection, query, template: replacement, in: haystack, options: options) {
+            if let doc {
+                if !doc.perform(replacing: selection, with: string) { note = doc.notice ?? "Здесь заменить нельзя" }
+            } else {
+                tab.textView.replace([selection], with: [string], actionName: "Заменить")
+                tab.textView.setSelectedRange(NSRange(location: selection.location + (string as NSString).length, length: 0))
+            }
             refresh()
         }
         next()
@@ -197,13 +216,13 @@ package final class EditorSearch: ObservableObject {
         guard let tab, !query.isEmpty else { return }
         let query = self.query, template = replacement, options = self.options, scope = searchScope
         guard options.regex else {
-            apply(Result { try TextSearch.replacements(query, template: template, in: tab.text, options: options, scope: scope) },
+            apply(Result { try TextSearch.replacements(query, template: template, in: haystack, options: options, scope: scope) },
                   timedOut: false, to: tab)
             return
         }
         stopRunning()
-        let generation = self.generation, version = tab.textVersion
-        let snapshot = UncheckedSendable(tab.text.copy() as! NSString)
+        let generation = self.generation, version = revision
+        let snapshot = UncheckedSendable(haystack.copy() as! NSString)
         let cancel = TextSearch.Cancellation()
         running = cancel
         searching = true
@@ -218,7 +237,7 @@ package final class EditorSearch: ObservableObject {
                     guard let self, self.generation == generation else { return }
                     self.searching = false
                     self.running = nil
-                    guard tab.textVersion == version else {
+                    guard self.revision == version else {
                         self.note = "Текст изменился — замените ещё раз"
                         return
                     }
@@ -233,6 +252,12 @@ package final class EditorSearch: ObservableObject {
         case .success(let plan):
             guard !plan.ranges.isEmpty else {
                 note = "Совпадений нет"
+                return
+            }
+            if let doc {
+                let outcome = doc.replaceAll(plan.ranges, with: plan.strings)
+                refresh()
+                note = outcome.skipped > 0 ? "Заменено: \(outcome.done); пропущено: \(outcome.skipped) — их нельзя править в «Документе»" : "Заменено: \(outcome.done)"
                 return
             }
             tab.textView.replace(plan.ranges, with: plan.strings, actionName: "Заменить все")
