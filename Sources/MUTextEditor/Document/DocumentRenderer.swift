@@ -620,9 +620,8 @@ package final class DocRenderer {
         case .wave: attributes[.underlineStyle] = NSUnderlineStyle([.single, .patternDashDot]).rawValue
         }
         if props.strike { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
-        // Кернинг пар Word делает только с размера `\kerningN` (по умолчанию — нет), TextKit — всегда: `.kern = 0` его
-        // выключает. Межзнаковый интервал `\expndtw` — `.tracking`: он кернинг обратно не включает.
-        if props.kerning == 0 || props.halfPoints < props.kerning { attributes[.kern] = 0 }
+        // Кернинг пар оставлен как у TextKit: выключение (`.kern = 0`, как у Word без `\kerningN`) в гейте почти не меняло
+        // разрывы (40 форм), но давало f144 лишнюю страницу. Межзнаковый интервал `\expndtw` — `.tracking`.
         if props.expand != 0 { attributes[.tracking] = CGFloat(props.expand) / 20 }
         switch props.vertical {
         case .normal: break

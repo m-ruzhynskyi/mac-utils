@@ -3,7 +3,7 @@ import XCTest
 @testable import MacUtils
 @testable import MUTextEditor
 
-/// Ширины текста как у Word (этап P-2): шрифты Word или метрически совместимые замены, кернинг только с `\kerningN`,
+/// Ширины текста как у Word (этап P-2): шрифты Word или метрически совместимые замены, кернинг пар — как у TextKit,
 /// межзнаковый интервал `\expnd`, капитель `\caps`/`\scaps`, висячий отступ `\fi` как позиция табуляции.
 /// Демо-фикстуры с выдуманным текстом; ожидания — по правилам Word.
 @MainActor
@@ -24,11 +24,12 @@ final class DocWordWidthTests: XCTestCase {
 
     // MARK: - Кернинг и межзнаковый интервал
 
-    func testNoPairKerningUnlessWordKernsThatSize() throws {
-        let text = rendered(#"\pard\plain\f0\fs24 AVA Toy\par\pard\plain\f0\fs32\kerning28 VAV Tea\par\pard\plain\f0\fs24\kerning28 WAW\par}"#)
-        XCTAssertEqual(try attributes(of: "AVA", in: text)[.kern] as? CGFloat, 0, "по умолчанию Word не кернит")
-        XCTAssertNil(try attributes(of: "VAV", in: text)[.kern], "16 pt ≥ \\kerning28 (14 pt) — кернинг шрифта")
-        XCTAssertEqual(try attributes(of: "WAW", in: text)[.kern] as? CGFloat, 0, "12 pt < 14 pt — без кернинга")
+    /// Кернинг пар не выключается (`.kern` не задаётся): выключение по правилу Word (без `\kerningN` — не кернит) в гейте
+    /// почти не меняло разрывы, а форме f144 давало лишнюю страницу (.audit/doc-resume.md).
+    func testPairKerningLeftToTextKit() throws {
+        let text = rendered(#"\pard\plain\f0\fs24 AVA Toy\par\pard\plain\f0\fs32\kerning28 VAV Tea\par}"#)
+        XCTAssertNil(try attributes(of: "AVA", in: text)[.kern])
+        XCTAssertNil(try attributes(of: "VAV", in: text)[.kern])
     }
 
     func testExpandedAndCondensedSpacing() throws {
@@ -36,7 +37,7 @@ final class DocWordWidthTests: XCTestCase {
         XCTAssertEqual(try attributes(of: "wide", in: text)[.tracking] as? CGFloat, 1, "\\expndtw20 = 1 pt после каждого знака")
         XCTAssertEqual(try attributes(of: "tight", in: text)[.tracking] as? CGFloat, -0.5, "\\expnd-2 = −½ pt (четверти пункта)")
         XCTAssertNil(try attributes(of: "flat", in: text)[.tracking])
-        XCTAssertEqual(try attributes(of: "wide", in: text)[.kern] as? CGFloat, 0, "интервал не включает кернинг пар")
+        XCTAssertNil(try attributes(of: "wide", in: text)[.kern], "интервал не трогает кернинг пар")
     }
 
     func testExpandWidensLineLikeWord() {
