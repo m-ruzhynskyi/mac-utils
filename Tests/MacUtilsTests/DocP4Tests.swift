@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUTextEditor
 
 /// P-4: хвосты показа — вложенные таблицы (`\nestrow`) и др. Фикстуры — `Tests/Fixtures/DocP4` (выдуманный текст,
 /// `make_p4.py`).

@@ -1,5 +1,7 @@
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUWellbeing
 
 private final class FakeAssertions: SleepAssertionProviding {
     var created: [String] = []

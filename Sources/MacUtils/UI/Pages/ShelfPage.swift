@@ -1,5 +1,8 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUTextEditor
 
 // MARK: - Полка
 

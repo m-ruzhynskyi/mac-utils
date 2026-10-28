@@ -2,6 +2,8 @@ import CoreVideo
 import VideoToolbox
 import XCTest
 @testable import MacUtils
+@testable import MUScreenShare
+@testable import MUTextEditor
 
 /// Качество трансляции Mac-ведущего: размер потока, скорость и её подстройка, профиль, показ у зрителя вне главного потока.
 final class ScreenShareVideoTests: XCTestCase {

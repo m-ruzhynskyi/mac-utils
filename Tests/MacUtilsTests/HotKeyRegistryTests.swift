@@ -1,6 +1,9 @@
 import Carbon.HIToolbox
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUDesign
+@testable import MUWindowSnap
 
 final class HotKeyRegistryTests: XCTestCase {
     private var defaults: UserDefaults!
@@ -24,7 +27,7 @@ final class HotKeyRegistryTests: XCTestCase {
             .settings: "⌃⌥⌘,", .tools: "⌃⌥⌘T", .screenshot: "⇧⌘X", .screenshotOCR: "⌥⇧⌘X",
             .dropShelf: "⌃⌥D", .annotate: "⌃⌥A", .windowPin: "⌃⌥P (З)", .fixText: "⌃⌥E", .meeting: "⌃⌥M",
             .focus: "⌃⌥F", .qr: "⌃⌥Q", .appVolume: "⌃⌥V", .layoutFix: "⌘] (Ъ)", .textEditor: "⌃⌥⌘E",
-            .videoPlayer: "⌃⌥⌘P (З)",
+            .videoPlayer: "⌃⌥⌘P (З)", .remoteConnections: "⌃⌥⌘A",
         ]
         for action in HotKeyAction.allCases {
             XCTAssertEqual(HotKeyRegistry.combo(for: action, defaults: defaults).title, expected[action], action.rawValue)

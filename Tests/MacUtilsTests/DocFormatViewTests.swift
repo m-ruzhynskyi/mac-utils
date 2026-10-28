@@ -2,6 +2,11 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUDesign
+@testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Панель форматирования и колонтитулы в окне (офскрин): команды меняют только свои байты, отмена возвращает файл
 /// байт в байт, колонтитул правится по двойному клику.
@@ -91,7 +96,9 @@ final class DocFormatViewTests: XCTestCase {
         formatter.updateState()
         XCTAssertEqual(formatter.state.fontName, "Calibri", "в файле — исходное имя")
         if !FontCatalog.isInstalled("Calibri") {
-            XCTAssertEqual(formatter.state.displayFont, "Helvetica Neue", "на экране — замена")
+            // Нет Word — замена той же ширины из ресурсов (Carlito), без неё — по таблице.
+            XCTAssertEqual(formatter.state.displayFont, FontSubstitution.display(for: "Calibri"), "на экране — замена")
+            XCTAssertNotEqual(formatter.state.displayFont, "Calibri")
         }
         XCTAssertTrue(tab.text.contains("Calibri;}"))
         // Размер −/+ по списку Word, поле принимает 10,5.

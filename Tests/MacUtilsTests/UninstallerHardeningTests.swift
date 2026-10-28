@@ -1,5 +1,7 @@
 import XCTest
 @testable import MacUtils
+@testable import MUUninstaller
+@testable import MUTextEditor
 
 /// Удаление программ, волна P2: подмена пути при переносе от root (N1), агенты в бандле программы (U3).
 /// Скрипт root прогоняется через /bin/sh без прав во временной папке.

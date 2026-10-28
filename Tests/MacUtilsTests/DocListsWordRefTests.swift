@@ -1,6 +1,7 @@
 import PDFKit
 import XCTest
 @testable import MacUtils
+@testable import MUTextEditor
 
 /// Номера списков против PDF, которые сделал сам Word (`pdf/fNNN.pdf` к `rtf/fNNN.rtf`). Только по `MU_WORD_REF_DIR`,
 /// иначе пропускается. Для каждого пункта списка в тексте PDF ищется начало его текста, и перед ним должен стоять

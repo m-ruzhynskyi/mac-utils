@@ -92,7 +92,7 @@ for ((i = 0; i < JOBS; i++)); do
     fi
 done
 [[ $FAILED -eq 0 ]] || exit 3
-{ cat "$WORK"/part*.tsv 2>/dev/null | grep -m1 '^file'; cat "$WORK"/part*.tsv 2>/dev/null | grep '^f[0-9]' | sort; } > "$WORK/all.tsv"
+{ cat "$WORK"/part*.tsv 2>/dev/null | awk '/^file/ && !h { print; h = 1 }'; cat "$WORK"/part*.tsv 2>/dev/null | grep '^f[0-9]' | sort; } > "$WORK/all.tsv"
 echo "Форм: $(grep -c '^f[0-9]' "$WORK/all.tsv"), всего с начала — $((SECONDS - START)) с"
 [[ -z "$RESULTS" ]] || cp "$WORK/all.tsv" "$RESULTS"
 
