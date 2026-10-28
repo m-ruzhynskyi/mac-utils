@@ -39,7 +39,7 @@
     <array>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>Форма RTF (.frm)</string>
+            <string>Форма RTF</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>CFBundleTypeIconFile</key>
@@ -50,9 +50,47 @@
             <array>
                 <string>com.mruzhynskyi.macutils.frm</string>
             </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Форма RTF (.frm)</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>DocIcon-frm.icns</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
             <key>CFBundleTypeExtensions</key>
             <array>
                 <string>frm</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Словарь DSL</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>DocIcon-dsl.icns</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.mruzhynskyi.macutils.dsl</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Словарь DSL (.dsl)</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>DocIcon-dsl.icns</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>dsl</string>
             </array>
         </dict>
         <dict>
@@ -257,6 +295,25 @@
                 <key>public.filename-extension</key>
                 <array>
                     <string>frm</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.mruzhynskyi.macutils.dsl</string>
+            <key>UTTypeDescription</key>
+            <string>Словарь DSL</string>
+            <key>UTTypeIconFile</key>
+            <string>DocIcon-dsl.icns</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.plain-text</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>dsl</string>
                 </array>
             </dict>
         </dict>
