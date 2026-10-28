@@ -86,6 +86,7 @@ package final class DocTextView: NSTextView {
 
     package override func mouseDown(with event: NSEvent) {
         if event.clickCount == 1, let controller, controller.dragTableBoundary(event, in: self) { return }
+        if event.clickCount == 1, let controller, controller.clickDollar(event, in: self) { return }  // V2: поповер значения `$`
         if event.clickCount == 2, let handler = onDoubleClickOutside, handler(event) { return }
         super.mouseDown(with: event)
     }
@@ -383,22 +384,7 @@ package final class DocPageView: NSView {
         if header != nil { headerLayout.draw(at: headerRect.origin) }
         if footer != nil { footerLayout.draw(at: NSPoint(x: footerRect.minX, y: footerRect.maxY - footerHeight)) }
         if dims { context?.cgContext.restoreGState() }
-        if let frame = headerFrame {
-            let path = NSBezierPath(rect: frame.rect)
-            path.setLineDash([5, 3], count: 2, phase: 0)
-            path.lineWidth = 1.5
-            NSColor(srgbRed: 0.42, green: 0.62, blue: 0.0, alpha: 1).setStroke()
-            path.stroke()
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont(name: "Manrope-Bold", size: 11) ?? .boldSystemFont(ofSize: 11),
-                .foregroundColor: NSColor(srgbRed: 0.08, green: 0.1, blue: 0.04, alpha: 1),
-            ]
-            let size = (frame.title as NSString).size(withAttributes: attributes)
-            let label = NSRect(x: frame.rect.minX, y: frame.rect.minY - size.height - 6, width: size.width + 12, height: size.height + 6)
-            NSColor(srgbRed: 0.784, green: 0.941, blue: 0.353, alpha: 1).setFill()
-            NSBezierPath(roundedRect: label, xRadius: 4, yRadius: 4).fill()
-            (frame.title as NSString).draw(at: NSPoint(x: label.minX + 6, y: label.minY + 3), withAttributes: attributes)
-        }
+        if let frame = headerFrame { DocHeaderFrameStyle.draw(frame.rect, title: frame.title) }  // рамка правки колонтитула (H1)
     }
 
     package override func mouseDown(with event: NSEvent) {
