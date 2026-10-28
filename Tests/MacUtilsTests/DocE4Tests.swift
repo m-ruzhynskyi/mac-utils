@@ -1,6 +1,8 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUTextEditor
 
 /// E-4: индексы, капитель, все прописные, скрытый; «не отрывать», «не разрывать», «с новой страницы»; разрыв страницы;
 /// «Обновить поля». Каждая команда — без потерь: `DocSaveGuard`, отмена байт в байт, вне цели модель та же

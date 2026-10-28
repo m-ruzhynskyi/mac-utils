@@ -33,14 +33,50 @@ trap 'rm -rf "$WORK"' EXIT
 START=$SECONDS
 
 echo "Сборка тестов…"
-nice -n 20 swift build --build-tests -j 2 > "$WORK/build.txt" 2>&1 || { tail -20 "$WORK/build.txt"; exit 3; }
+# Сборки команды — по одной (замок build.lock в .audit основного дерева, если он есть; .audit/doc-team-rules.md).
+BUILD_LOCK="${MU_BUILD_LOCK:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/.audit/build.lock}"
+BUILD=(nice -n 20 swift build --build-tests -j 2)
+[[ -d "$(dirname "$BUILD_LOCK")" ]] && BUILD=(/usr/bin/lockf -k "$BUILD_LOCK" "${BUILD[@]}")
+"${BUILD[@]}" > "$WORK/build.txt" 2>&1 || { tail -20 "$WORK/build.txt"; exit 3; }
 BUNDLE="$(swift build --show-bin-path)/MacUtilsTests.xctest"
 echo "Сборка: $((SECONDS - START)) с"
 
 echo "Прогон по эталону: $JOBS процесса(ов)…"
+# Доля форм в своём процессе xctest. Сторож: нет новой строки журнала дольше FORM_TIMEOUT — форма зависла
+# (раскладка не кончается): процесс снимается, форма — провал «зависла», доля продолжается без неё.
+# Процесс снят извне (память, kill) — один повтор без уже готовых форм. Числа форм тест дописывает по одной.
+FORM_TIMEOUT="${MU_WORD_FORM_TIMEOUT:-120}"
 run_shard() {
-    MU_WORD_REF_DIR="$REF" MU_WORD_REF_SHARD="$1/$JOBS" MU_WORD_REF_ONLY="$ONLY" MU_WORD_FIDELITY_TSV="$WORK/part$1.tsv" \
-        nice -n 20 xcrun xctest -XCTest MacUtilsTests.WordFidelityTests/testAgainstWordReference "$BUNDLE" > "$WORK/log$1.txt" 2>&1
+    local i="$1" part="$WORK/part$1.tsv" log="$WORK/log$1.txt" retried=0
+    while true; do
+        local skip="" code=0 stall=0 size=-1 now pid hung
+        [[ -f "$part" ]] && skip="$(grep -o '^f[0-9]*' "$part" | paste -sd, -)"
+        MU_WORD_REF_DIR="$REF" MU_WORD_REF_SHARD="$i/$JOBS" MU_WORD_REF_ONLY="$ONLY" MU_WORD_REF_SKIP="$skip" \
+            MU_WORD_FIDELITY_TSV="$part" nice -n 20 xcrun xctest -XCTest MacUtilsTests.WordFidelityTests/testAgainstWordReference \
+            "$BUNDLE" >> "$log" 2>&1 &
+        pid=$!
+        while kill -0 "$pid" 2>/dev/null; do
+            sleep 5
+            now=$(wc -c < "$log")
+            if [[ "$now" != "$size" ]]; then size="$now"; stall=0; else stall=$((stall + 5)); fi
+            [[ $stall -ge $FORM_TIMEOUT ]] && break
+        done
+        if [[ $stall -ge $FORM_TIMEOUT ]]; then
+            hung="$(grep -ao 'word-fidelity start f[0-9]*' "$log" | tail -1 | awk '{print $3}')"
+            pkill -9 -P "$pid" 2>/dev/null || true
+            kill -9 "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            [[ -n "$hung" ]] || return 1
+            echo "Форма $hung: раскладка не закончилась за $FORM_TIMEOUT с — провал формы, дальше без неё" >&2
+            printf '%s\t2%s\n' "$hung" "$(printf '\t0%.0s' $(seq 13))" >> "$part"
+            continue
+        fi
+        wait "$pid" || code=$?
+        [[ $code -eq 0 ]] && return 0
+        [[ $retried -eq 0 ]] || return 1
+        retried=1
+        echo "Процесс $i прервался (код $code) после $(grep -ao 'word-fidelity f[0-9]*:' "$log" | tail -1 | cut -d' ' -f2 | tr -d :), повтор без готовых форм…" >&2
+    done
 }
 PIDS=()
 for ((i = 0; i < JOBS; i++)); do
@@ -49,17 +85,14 @@ for ((i = 0; i < JOBS; i++)); do
 done
 FAILED=0
 for ((i = 0; i < JOBS; i++)); do
-    wait "${PIDS[$i]}" && [[ -f "$WORK/part$i.tsv" ]] && continue
-    # Процесс могли снять (память, чужой kill) — последняя готовая форма в журнале, затем один повтор.
-    echo "Процесс $i прервался после $(grep -o 'word-fidelity f[0-9]*' "$WORK/log$i.txt" | tail -1 | cut -d' ' -f2), повтор…" >&2
-    if ! run_shard "$i" || [[ ! -f "$WORK/part$i.tsv" ]]; then
-        echo "Процесс $i не завершил прогон и при повторе:" >&2
-        grep -E "error|crash|Fatal" "$WORK/log$i.txt" | head -5 >&2 || true
+    if ! wait "${PIDS[$i]}"; then
+        echo "Процесс $i не завершил прогон:" >&2
+        grep -aE "error|crash|Fatal" "$WORK/log$i.txt" | head -5 >&2 || true
         FAILED=1
     fi
 done
 [[ $FAILED -eq 0 ]] || exit 3
-{ head -1 "$WORK/part0.tsv"; cat "$WORK"/part*.tsv | grep '^f[0-9]' | sort; } > "$WORK/all.tsv"
+{ cat "$WORK"/part*.tsv 2>/dev/null | awk '/^file/ && !h { print; h = 1 }'; cat "$WORK"/part*.tsv 2>/dev/null | grep '^f[0-9]' | sort; } > "$WORK/all.tsv"
 echo "Форм: $(grep -c '^f[0-9]' "$WORK/all.tsv"), всего с начала — $((SECONDS - START)) с"
 [[ -z "$RESULTS" ]] || cp "$WORK/all.tsv" "$RESULTS"
 

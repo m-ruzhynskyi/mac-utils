@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUAudio
 
 final class SystemStatsTests: XCTestCase {
     func testCPUUsageAcrossCores() {

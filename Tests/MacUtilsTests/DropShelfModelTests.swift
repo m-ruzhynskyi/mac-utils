@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUDropShelf
 
 /// Полка: ложное открытие по устаревшему пастборду перетаскивания, дубли и исчезнувшие файлы.
 final class DropShelfModelTests: XCTestCase {

@@ -1,6 +1,8 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUTextEditor
 
 /// Внутренний разбор `$` по видимому тексту RTF — для будущего режима «Документ»; панель «$» его не использует
 /// (правило панели — до конца строки исходника, TextEditorValueRuleTests). Через коды, группы и переводы строк

@@ -31,6 +31,15 @@ const HOST_TIMEOUT_MS = 120_000;
 const HOST_GRACE_MS = 45_000;
 const HOST_CHECK_MS = 30_000;
 const VIEWER_TIMEOUT_MS = 120_000;
+// Медленный зритель: «долг» — видеопакетов отправлено, но не подтверждено (`ack`). Больше предела — зрителю идут только
+// ключевые кадры после того, как долг спал; ведущему уходит запрос ключевого кадра (не чаще раза в KEY_ASK_MS).
+const DEBT_LIMIT = 60;
+const DEBT_RESUME = 15;
+const KEY_ASK_MS = 1000;
+// Зритель не успевает декодировать (`video-trouble` со `slow`): ведущему — `slow` в `viewers`, не чаще раза в SLOW_ASK_MS.
+const SLOW_ASK_MS = 5000;
+// H.264 от ведущего шёл не дольше этого назад — картинки JPEG зрителям с H.264 не нужны (не мост).
+const H264_ACTIVE_MS = 700;
 const ID = /^\d{6}$|^\d{10}$/;
 const ID10 = /^\d{10}$/;
 const OWNER_TTL_MS = 180 * 86_400_000;
@@ -129,6 +138,8 @@ function sanitizeDisplays(command) {
   displays.list = list;
   // Как ведущий кодирует видео (необязательно): hw — видеокарта, sw — программно, jpeg — картинки. Прочее — без поля.
   if (["hw", "sw", "jpeg"].includes(command.video)) displays.video = command.video;
+  // Метки зрителей попадают в видео ведущего (окно меток не исключено из захвата): зрители свою копию не рисуют.
+  if (command.marks === "video") displays.marks = "video";
   return displays;
 }
 
@@ -244,7 +255,7 @@ export default {
       if (!token) return new Response("Use the Mac Utils app", { status: 403 });
       if (request.method === "POST") {
         if (mode === "off") return new Response("Not found", { status: 404 });
-        if (mode === "required" && token !== CLIENT_V2) return new Response("Update Mac Utils", { status: 426 });
+        if (mode === "required" && !keyedClient(token, url)) return new Response("Update Mac Utils", { status: 426 });
         return statusPost(request, env, ip);
       }
       if (mode === "required") return new Response("Update Mac Utils", { status: 426 });
@@ -288,6 +299,10 @@ export class Room {
     // В памяти: после выгрузки объекта обнуляются, это допустимо (.audit/auth-design.md §7).
     this.declines = new Map();
     this.requestWindow = new Map();
+    // Поток видео к каждому зрителю: { sent, acked, acking, skipping, skipped } (в памяти, после выгрузки — заново).
+    this.flow = new WeakMap();
+    this.lastKeyAsk = 0;
+    this.lastSlowAsk = 0;
     // Цепочка для операций «прочитать — сравнить — записать» в storage (владелец ID, квота привязок).
     this.chain = Promise.resolve();
   }
@@ -777,8 +792,9 @@ export class Room {
         try { viewer.send(JSON.stringify({ type: "heartbeat" })); }
         catch (_) { this.closed(viewer); }
       }
-      // Older clients resend their last frame on a viewers update, even on a static screen.
-      this.notifyHost();
+      // Периодическое напоминание (`tick`): новые ведущие по нему не шлют ключевой кадр и список мониторов (только состав зрителей,
+      // он не менялся); старые клиенты не знают поля и по-прежнему повторяют последний кадр.
+      this.notifyHost(undefined, { tick: true });
       await this.state.storage.setAlarm(Date.now() + HOST_CHECK_MS);
     }
   }
@@ -798,13 +814,76 @@ export class Room {
   }
 
   activeViewers() {
-    return this.state.getWebSockets("viewer").filter((s) =>
-      s.readyState === 1 && !s.deserializeAttachment()?.ended &&
-      Date.now() - (s.deserializeAttachment()?.lastSeen ?? Date.now()) < VIEWER_TIMEOUT_MS);
+    return this.viewersWhere(() => true);
+  }
+
+  // Один разбор вложения на сокет (кадры идут до 60 раз в секунду, а зрителей несколько).
+  viewersWhere(accept) {
+    const now = Date.now();
+    return this.state.getWebSockets("viewer").filter((s) => {
+      if (s.readyState !== 1) return false;
+      const info = s.deserializeAttachment();
+      return !info?.ended && now - (info?.lastSeen ?? now) < VIEWER_TIMEOUT_MS && accept(info);
+    });
   }
 
   approvedViewers() {
-    return this.activeViewers().filter((s) => s.deserializeAttachment()?.approved);
+    return this.viewersWhere((info) => !!info?.approved);
+  }
+
+  // Пускать ли кадр этому зрителю. Старые клиенты `ack` не шлют — для них всё как раньше. Подтверждающий зритель, у которого
+  // накопился долг, пропускает кадры до ключевого: очередь на нём не растёт, остальные и ведущий не затронуты.
+  admit(viewer, message) {
+    const bytes = Object.prototype.toString.call(message) === "[object ArrayBuffer]" ? new Uint8Array(message) : ArrayBuffer.isView(message) ? new Uint8Array(message.buffer, message.byteOffset, message.byteLength) : null;
+    if (!bytes || !bytes.length) return true;
+    const type = bytes[0];
+    if (type !== 1 && type !== 3) return true; // звук и прочее — как раньше
+    let flow = this.flow.get(viewer);
+    if (!flow) {
+      flow = { sent: 0, acked: 0, acking: false, skipping: false, skipped: 0, lastH264: 0, h264: !!viewer.deserializeAttachment()?.h264 };
+      this.flow.set(viewer, flow);
+    }
+    // Каждому — его вид кадров: старому зрителю без H.264 картинки JPEG, зрителю с H.264 — видео. Картинки зрителю с H.264
+    // нужны только мостом, пока ведущий не шлёт H.264 (кодер пересоздаётся): параллельные JPEG Mac-ведущего ему ни к чему.
+    const at = Date.now();
+    if (type === 3) { this.lastHostH264 = at; if (!flow.h264) return false; }
+    else if (flow.h264 && at - (this.lastHostH264 ?? 0) < H264_ACTIVE_MS) return false;
+    if (!flow.acking) { flow.sent++; return true; }
+    const debt = flow.sent - flow.acked;
+    const now = Date.now();
+    if (type === 3) flow.lastH264 = now;
+    // H.264-зритель возобновляется только на ключевом H.264, пока ведущий его шлёт (JPEG при этом — параллельные картинки
+    // для старых зрителей или мост); ведущий только с картинками (H.264 нет дольше секунды) — на любом JPEG.
+    const key = type === 3 ? bytes[1] === 1 : (!flow.h264 || now - flow.lastH264 > 1000);
+    if (!flow.skipping && debt > DEBT_LIMIT) { flow.skipping = true; flow.skipped = 0; }
+    if (flow.skipping) {
+      if (key && debt <= DEBT_RESUME) flow.skipping = false;
+      else {
+        flow.skipped++;
+        this.askKeyFrame(debt, now);
+        return false;
+      }
+    }
+    flow.sent++;
+    return true;
+  }
+
+  // Просьба ведущему о ключевом кадре для зрителя, пропускающего кадры: не чаще раза в KEY_ASK_MS на комнату и только когда долг спал.
+  askKeyFrame(debt, now) {
+    if (debt > DEBT_RESUME || now - this.lastKeyAsk < KEY_ASK_MS) return;
+    this.lastKeyAsk = now;
+    this.notifyHost(undefined, { key: true });
+  }
+
+  // Просьба зрителя: не чаще KEY_ASK_MS (ключевой, общий счёт с askKeyFrame) и SLOW_ASK_MS (slow) на комнату.
+  // Всегда с `key: true`: ведущий, не знающий `slow`, отвечает ключевым кадром и не считает это сменой состава.
+  videoTrouble(key, slow, now) {
+    const askKey = key && now - this.lastKeyAsk >= KEY_ASK_MS;
+    const askSlow = slow && now - this.lastSlowAsk >= SLOW_ASK_MS;
+    if (!askKey && !askSlow) return;
+    if (askKey) this.lastKeyAsk = now;
+    if (askSlow) this.lastSlowAsk = now;
+    this.notifyHost(undefined, { key: true, ...(askSlow ? { slow: true } : {}) });
   }
 
   toHost(message) {
@@ -829,7 +908,7 @@ export class Room {
       if (typeof message === "string" || Date.now() - (info.lastSeen ?? 0) > 1000) socket.serializeAttachment({ ...info, lastSeen: Date.now() });
       if (typeof message === "string") return this.hostCommand(message, socket);
       for (const viewer of this.approvedViewers()) {
-        try { viewer.send(message); } catch (_) { /* зритель отвалился */ }
+        try { if (this.admit(viewer, message)) viewer.send(message); } catch (_) { /* зритель отвалился */ }
       }
       return;
     }
@@ -842,6 +921,16 @@ export class Room {
     if (!command || typeof command !== "object") return;
     if (command.type === "heartbeat") {
       socket.serializeAttachment({ ...info, lastSeen: Date.now() });
+      return;
+    }
+    // Подтверждение приёма видео: n — сколько видеопакетов зритель получил за соединение.
+    if (command.type === "ack") {
+      const flow = this.flow.get(socket);
+      if (info.approved && flow && Number.isInteger(command.n) && command.n >= flow.acked && command.n <= flow.sent) {
+        flow.acked = command.n; flow.acking = true;
+        // На статичном экране кадров от ведущего нет, `admit` не зовётся: просим ключевой кадр, как только долг спал.
+        if (flow.skipping) this.askKeyFrame(flow.sent - flow.acked, Date.now());
+      }
       return;
     }
     // До проверки ключа разрешены только auth и heartbeat; auth принимается один раз на сокет.
@@ -864,6 +953,13 @@ export class Room {
       for (const host of this.activeHosts()) {
         try { host.send(game); } catch (_) {}
       }
+      return;
+    }
+    // Зритель не успевает показывать видео (необязательное, SHARE-PROTOCOL §3.6): key — выбросил кадры до ключевого и просит
+    // его; slow — декодер отстаёт, ведущему снизить частоту. Ведущему уходит `viewers` с флагами; старые ведущие по `key`
+    // просто шлют ключевой кадр (как по просьбе relay для медленного зрителя).
+    if (command.type === "video-trouble") {
+      this.videoTrouble(command.key === true, command.slow === true, Date.now());
       return;
     }
     // Переключить монитор ведущего — только ведущему, как игра: ID и имя зрителя ставит relay.
@@ -1025,7 +1121,9 @@ export class Room {
     }
   }
 
-  notifyHost(leaving) {
+  // flags: tick — периодическое напоминание, key — просьба о ключевом кадре (медленный зритель), slow — зритель не успевает
+  // декодировать (ведущему снизить частоту кадров); без флагов — состав изменился.
+  notifyHost(leaving, flags = {}) {
     const watching = this.approvedViewers().filter((s) => s !== leaving);
     // Count viewer devices, not overlapping sockets after a reconnect.
     // Anonymous legacy viewers remain separate rather than sharing an empty ID.
@@ -1037,6 +1135,7 @@ export class Room {
       type: "viewers",
       count: people.length,
       list: people,
+      ...flags,
     });
   }
 }

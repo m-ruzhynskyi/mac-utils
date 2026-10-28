@@ -2,6 +2,10 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUDesign
+@testable import MUAudio
+@testable import MUTextEditor
 
 /// Дизайн-система Graphite (волна 0 редизайна v2): группы боковой панели, контраст токенов в обеих темах, шрифты.
 @MainActor
@@ -35,7 +39,7 @@ final class DesignSystemTests: XCTestCase {
         XCTAssertEqual(SettingsGroup.filesSystem.sections.map(\.title),
                        ["Полка", "Загрузки", "Текстовый редактор", "Видеоплеер", "Шпаргалка", "Удаление программ", "Очистка диска", "Монитор системы", "Диспетчер задач"])
         XCTAssertEqual(SettingsGroup.more.sections.map(\.title),
-                       ["Перерывы и тёплый экран", "Фокус", "Музыка", "Трансляция экрана", "ИИ (Ollama)"])
+                       ["Перерывы и тёплый экран", "Фокус", "Музыка", "Трансляция экрана", "Удалённые подключения", "ИИ (Ollama)"])
     }
 
     func testSymbolsExist() {
@@ -45,6 +49,7 @@ final class DesignSystemTests: XCTestCase {
     }
 
     func testSubtitlesContainNoVersionNumbers() {
+        SettingsSection.installAppSubtitles()
         let version = try! NSRegularExpression(pattern: #"\b\d+\.\d+(\.\d+)?\b"#)
         for section in SettingsSection.allCases {
             let text = section.subtitle

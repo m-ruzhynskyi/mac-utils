@@ -1,6 +1,9 @@
 import CoreGraphics
 import XCTest
 @testable import MacUtils
+@testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 final class StepsModelTests: XCTestCase {
     private func image(_ width: Int = 40, _ height: Int = 30, gray: CGFloat = 0.5) -> CGImage {

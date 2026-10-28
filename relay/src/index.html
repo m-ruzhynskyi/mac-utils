@@ -313,6 +313,7 @@
   <label class="muted" id="allowSwitchBox" style="display:none"><input type="checkbox" id="allowSwitch" style="width:auto"> Зрители могут переключать мои мониторы<span class="new" id="allowSwitchNew">НОВОЕ</span></label>
   <p class="muted" id="allowSwitchHint" style="display:none">По умолчанию выключено. Включите — и зритель сам выберет монитор, вы увидите уведомление. Только когда показываете экран целиком; выбор запоминается.</p>
   <div id="muteBox" class="muted" style="display:none; margin-top:6px">Не передавать звук программ (например, созвона):
+    <label id="muteCallsBox" style="display:none; white-space:nowrap"><input type="checkbox" id="muteCalls" checked style="width:auto"> Не передавать звонки (Discord, Zoom, Teams, Telegram…)</label>
     <div id="muteApps"></div></div>
   <div style="text-align:right; margin-top:10px"><button id="pickerCancel">Отмена</button></div>
 </div></div>
@@ -330,6 +331,7 @@
 <div id="game"></div>
 <div id="mutePanel" class="floatBox"><div class="head"><b>Не передавать звук программ</b><button id="muteClose" aria-label="Закрыть">✕</button></div>
   <p class="muted" style="margin:0 0 8px">Отмеченных программ зрители не слышат. Меняется сразу, прямо в эфире.</p>
+  <label id="muteCallsLive" style="display:none; margin-bottom:8px"><input type="checkbox" id="muteCallsLiveBox" style="width:auto"> Звонки (Discord, Zoom, Teams, Telegram…)</label>
   <div id="muteLive"></div></div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -353,7 +355,8 @@ const mainId = window.mu && (typeof window.mu.myId === "function" ? window.mu.my
 const idFromApp = typeof mainId === "string" && /^\d{10}$/.test(mainId);
 let myId = idFromApp ? mainId : store.get("mu-id", null);
 if (!myId) { myId = generateId(); store.set("mu-id", myId); }
-const myName = (window.mu && window.mu.hostname) || "Windows";
+// Имя для ведущего и зрителей — всегда «Windows» (решение пользователя): имя компьютера на сервер не отправляется.
+const getMyName = () => "Windows";
 $("myId").textContent = display(myId);
 $("myId").onclick = () => navigator.clipboard?.writeText(myId);
 
@@ -469,6 +472,7 @@ const AUTH_ERRORS = {
   "upgrade-required": "Сервер требует новую версию приложения — обновите Mac Utils Share.",
   "no-key": "Сервер проверяет ключ устройства, а эта версия приложения так не умеет — обновите Mac Utils Share.",
 };
+const VIEW_ACK_EVERY = 10;
 const CLOSE_CODES = { 4400: "id-format", 4401: "bad-signature", 4403: "id-claimed", 4408: "auth-timeout",
                       4409: "replaced", 4426: "upgrade-required", 4429: "rate-limited" };
 // Текст для статуса (HTML): свои сообщения — как есть, сообщение relay — экранированным.
@@ -477,12 +481,14 @@ function authError(code, relayMessage) { return AUTH_ERRORS[code] || esc(relayMe
 // ---- История и доверенные ----
 function history() { return store.get("mu-history", []); }
 function saveHistory(list) { store.set("mu-history", list); renderHistory(); }
-function visited(id, name, hostKey) {
+function visited(id, name, hostKey, signed = false) {
   const list = history(); let entry = list.find((e) => e.id === id);
   if (!entry) { entry = { id, name: "", label: "" }; list.push(entry); }
   if (name) entry.name = name; entry.last = Date.now();
   // Ключ ведущего (pinning §4.3): при следующем подключении другой ключ — предупреждение.
-  if (typeof hostKey === "string" && B64U_KEY.test(hostKey)) entry.hostKey = hostKey;
+  if (typeof hostKey === "string" && B64U_KEY.test(hostKey)) { if (entry.hostKey !== hostKey) delete entry.hostSignedKey; entry.hostKey = hostKey; }
+  // Ведущий с этим ключом подписал принятие, подпись сошлась: дальше без подписи он не принимается.
+  if (signed && entry.hostKey) entry.hostSignedKey = entry.hostKey;
   saveHistory(list);
 }
 // Доверенные — `mu-trusted-v2`: [{id, pub, fp}]. pub null — доверие только по ID (старые зрители и ведущий без ключа);
@@ -571,7 +577,13 @@ const COLORS = { red: "#ff453a", yellow: "#ffd60a", green: "#30d158", blue: "#0a
 const marks = [];
 let tool = "ping", color = "red", drawing = null;
 
-function addMark(mark) { mark.born = performance.now(); marks.push(mark); if (marks.length === 1) requestAnimationFrame(renderMarks); }
+// Ведущий сообщил `marks: "video"` — его метки поверх экрана уже в видео: чужие не рисуем, своя — короткий отклик.
+let viewMarksInVideo = false;
+const ECHO_SECONDS = 0.3;
+function addMark(mark, own = false) {
+  if (viewMarksInVideo) { if (!own) return; mark.echo = true; }
+  mark.born = performance.now(); marks.push(mark); if (marks.length === 1) requestAnimationFrame(renderMarks);
+}
 
 function imageRect() {
   // Видео H.264 (холст) или картинка JPEG от старых версий.
@@ -593,7 +605,7 @@ function renderMarks() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const rect = imageRect(), now = performance.now();
   for (let i = marks.length - 1; i >= 0; i--) {
-    const m = marks[i], age = (now - m.born) / 1000, life = m.type === "ping" ? 1.6 : 5;
+    const m = marks[i], age = (now - m.born) / 1000, life = m.echo ? ECHO_SECONDS : m.type === "ping" ? 1.6 : 5;
     if (age > life) { marks.splice(i, 1); continue; }
     if (rect) drawMark(ctx, m, age, life, (p) => [rect.x + p[0] * rect.w, rect.y + p[1] * rect.h]);
   }
@@ -637,7 +649,7 @@ function framePoint(event) {
 }
 
 function sendMark(mark) {
-  addMark(mark);
+  addMark(mark, true);
   if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify(mark));
 }
 
@@ -702,10 +714,11 @@ function displaysRevision(memo, list) {
 
 // Сообщение displays; переключать нельзя (настройка, окно, нет списка) — пустой список без current. `video` — как
 // ведущий кодирует (hw — видеокарта, sw — программно, jpeg — картинки): необязательное поле, старые зрители его не читают.
-function displaysMessage(rev, list, current, allowed, video) {
+function displaysMessage(rev, list, current, allowed, video, marksInVideo) {
   const shown = allowed && list.some((d) => d.n === current) ? list.slice(0, MAX_DISPLAYS) : [];
   const message = shown.length ? { type: "displays", v: 1, rev, current, list: shown } : { type: "displays", v: 1, rev, list: [] };
   if (VIDEO_MODES.includes(video)) message.video = video;
+  if (marksInVideo === true) message.marks = "video";
   return message;
 }
 
@@ -911,12 +924,31 @@ async function watch() {
   stopWatch();
   status("Подключаюсь…");
   watchingId = id;
+  viewRetries = 0; viewEverOpened = false;
+  openView(id);
+}
+
+// Повторы после обрыва: как на Mac (`ShareViewerReconnect`) — 1, 2, 4, 8, 15, 15, 15 с, последний кадр остаётся на экране.
+const VIEW_RETRY_SECONDS = [1, 2, 4, 8, 15, 15, 15];
+let viewRetries = 0, viewRetryTimer = 0, viewEverOpened = false;
+function scheduleViewRetry(id) {
+  if (viewRetries >= VIEW_RETRY_SECONDS.length) { status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); return; }
+  const delay = VIEW_RETRY_SECONDS[viewRetries++];
+  status(`Связь потеряна, переподключаюсь… (${viewRetries} из ${VIEW_RETRY_SECONDS.length})`);
+  clearTimeout(viewRetryTimer);
+  viewRetryTimer = setTimeout(() => { if (watchingId === id && !viewSocket) openView(id); }, delay * 1000);
+}
+
+function openView(id) {
   viewHostKey = null; viewError = null;
   $("leave").style.display = "";
   const h264 = typeof VideoDecoder !== "undefined" ? "&h264=1" : "";
   const auth = authParam("signViewer") ? `&${authParam("signViewer")}` : "";
-  const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(myName)}${h264}${auth}`);
+  const ws = viewSocket = new WebSocket(`${wsBase}/room/${id}?role=viewer&viewer=${myId}&name=${encodeURIComponent(getMyName())}${h264}${auth}`);
   viewSocket.binaryType = "arraybuffer";
+  // Подтверждаем приём видео каждые ACK_EVERY пакетов: relay по этому видит, не отстал ли зритель, и ему не копит очередь.
+  let videoSeen = 0;
+  viewSocket.onopen = () => { viewEverOpened = true; };
   viewSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
       let m; try { m = JSON.parse(event.data); } catch (_) { return; }
@@ -927,17 +959,18 @@ async function watch() {
       }
       else if (m.type === "waiting") status(`Ждём, пока ${display(id)} разрешит подключение…`);
       else if (m.type === "game") gameReceive(m, "host", hostName || display(id), viewGameSend);
-      else if (m.type === "accepted") { hostName = m.name || ""; visited(id, m.name, viewHostKey); status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; renderMonitors(); }
+      else if (m.type === "accepted") onAccepted(ws, id, m);
       else if (m.type === "declined") { status("Вам не разрешили подключиться"); stopWatch(true); }
       else if (m.type === "ended") { status("Трансляция завершена"); stopWatch(true); }
       else if (m.type === "reconnecting") status("Ведущий переподключается…");
       else if (m.type === "resumed") status("");
       else if (m.type === "ping" || m.type === "stroke") addMark(m);
-      else if (m.type === "displays") { setViewVideo(viewKind, VIDEO_MODES.includes(m.video) ? m.video : ""); onViewerDisplays(m); }
+      else if (m.type === "displays") { setViewVideo(viewKind, VIDEO_MODES.includes(m.video) ? m.video : ""); viewMarksInVideo = m.marks === "video"; onViewerDisplays(m); }
       else if (m.type === "switch-result") onSwitchResult(m);
       return;
     }
     const bytes = new Uint8Array(event.data);
+    if ((bytes[0] === 1 || bytes[0] === 3) && ++videoSeen % VIEW_ACK_EVERY === 0 && ws.readyState === 1) ws.send(JSON.stringify({ type: "ack", n: videoSeen }));
     if (bytes[0] === 1) {
       if (!jpegIsBridge(performance.now(), lastH264At)) return;
       const url = URL.createObjectURL(new Blob([bytes.subarray(1)], { type: "image/jpeg" }));
@@ -957,14 +990,73 @@ async function watch() {
     }
   };
   viewSocket.onclose = (event) => {
-    if (event.code === 1000 || !viewSocket) return;
+    if (event.code === 1000 || ws !== viewSocket) return;
     const code = CLOSE_CODES[event.code];
-    status(code ? authError(code, viewError?.message) : "Сейчас этот ID ничего не транслирует (или связь прервалась)");
+    if (code) { status(authError(code, viewError?.message)); return; }
+    // Обрыв сети, сон, перезапуск relay: до 7 попыток; не повторяем, если ведущий отказал (`declined`) или закончил (`ended`) —
+    // там stopWatch сам закрывает сокет с кодом 1000 и сюда не попадаем.
+    viewSocket = null;
+    // ID без трансляции (relay отвечает 404 на подключение, код 1006 без открытия) и опечатка в ID — сразу сообщение,
+    // без повторов: они нужны, только если соединение уже было.
+    if (!viewEverOpened) { status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); return; }
+    scheduleViewRetry(id);
   };
 }
 
+// Ведущий пустил: подпись принятия (если есть) должна сойтись с его ключом; ключ, который уже подписывал, без подписи не принимается.
+async function onAccepted(ws, id, m) {
+  let result = "none";
+  if (typeof m.hostSig === "string") {
+    result = viewHostKey && viewRid && viewMyPub && window.crypto && window.crypto.subtle
+      ? await verifyHostSig(window.crypto.subtle, viewHostKey, m.hostSig, acceptMessage(id, viewMyPub, viewRid)) : "bad";
+  }
+  if (ws !== viewSocket) return;
+  const signedBefore = !!viewHostKey && history().find((e) => e.id === id)?.hostSignedKey === viewHostKey;
+  const decision = hostSigDecision(result, signedBefore);
+  if (decision.startsWith("reject")) { status(decision === "reject-bad" ? "Подпись ведущего не сошлась: подключение отменено" : "Ведущий раньше подписывал принятие, а теперь нет: подключение отменено"); return stopWatch(true); }
+  viewRetries = 0; hostName = m.name || ""; visited(id, m.name, viewHostKey, decision === "accept-signed");
+  status("Жду картинку…"); watching = true; $("tools").style.display = "flex"; $("marks").style.cursor = "crosshair"; renderMonitors();
+}
+
+// <host-sig>
+// Подпись принятия (`hostSig`, SHARE-PROTOCOL §3): ведущий с ключом подтверждает, что пустил зрителя именно он. Строка — как у Mac
+// (`ShareIdentity.acceptMessage`). Страница-ведущий подписывает ключом страницы (P-256); зритель-страница проверяет подпись ключом
+// ведущего из challenge: P-256 — всегда, Ed25519 (ведущий Mac) — если браузер умеет (в Chromium 130 нет — тогда без проверки).
+const acceptMessage = (room, viewerPub, rid) => `mu-share/v2\naccept\n${room}\n${viewerPub}\n${rid}`;
+function b64uBytes(text) {
+  const t = String(text);
+  const bin = atob(t.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - t.length % 4) % 4));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+// "ok" | "bad" | "unsupported".
+async function verifyHostSig(subtle, hostKey, sig, message) {
+  try {
+    const key = b64uBytes(hostKey), signature = b64uBytes(sig), data = new TextEncoder().encode(message);
+    if (signature.length !== 64) return "bad";
+    if (key.length === 65 && key[0] === 4) {
+      const imported = await subtle.importKey("raw", key, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+      return (await subtle.verify({ name: "ECDSA", hash: "SHA-256" }, imported, signature, data)) ? "ok" : "bad";
+    }
+    if (key.length === 32) {
+      let imported;
+      try { imported = await subtle.importKey("raw", key, { name: "Ed25519" }, false, ["verify"]); } catch (_) { return "unsupported"; }
+      return (await subtle.verify({ name: "Ed25519" }, imported, signature, data)) ? "ok" : "bad";
+    }
+    return "bad";
+  } catch (_) { return "bad"; }
+}
+// Решение зрителя по `accepted`: result — итог проверки подписи ("none" — подписи нет); signedBefore — этот ключ ведущего уже
+// подписывал. → "accept" | "accept-signed" (запомнить «подписывает») | "reject-bad" | "reject-downgrade".
+function hostSigDecision(result, signedBefore) {
+  if (result === "ok") return "accept-signed";
+  if (result === "bad") return "reject-bad";
+  if (result === "none") return signedBefore ? "reject-downgrade" : "accept";
+  return "accept";   // unsupported: проверить нечем — как раньше
+}
+// </host-sig>
+
 // Зритель v2: relay прислал challenge — подписываем; ключ ведущего сверяем с запомненным.
-let viewHostKey = null, viewError = null;
+let viewHostKey = null, viewError = null, viewRid = null, viewMyPub = null;
 async function viewerChallenge(ws, id, m) {
   if (ws !== viewSocket) return;
   if (!canSign("signViewer") || typeof m.nonce !== "string" || typeof m.rid !== "string") { status(AUTH_ERRORS["no-key"]); return stopWatch(true); }
@@ -976,13 +1068,67 @@ async function viewerChallenge(ws, id, m) {
     return;
   }
   if (ws !== viewSocket) return;
-  viewHostKey = hostKey;
+  viewHostKey = hostKey; viewRid = m.rid;
+  try { viewMyPub = appSigns("signViewer") ? (await myIdentity()).pub : (pageKey ? pageKey.pub : null); } catch (_) { viewMyPub = null; }
   if (!(await sendAuth(ws, "signViewer", [id, myId, m.rid, m.nonce])) && ws === viewSocket) { status(AUTH_ERRORS["no-key"]); stopWatch(true); }
 }
 
 // ---- Видео H.264: аппаратное декодирование WebCodecs ----
-let decoder = null;
+// <view-video>
+// Отставание декодера считается по времени (сколько ждёт самый старый кадр, отданный в декодер), а не по числу кадров:
+// на 60 кадрах/с 4 кадра — это 66 мс, и короткий всплеск (сборка мусора, перетаскивание окна) выбрасывал всё до ключевого
+// кадра — заморозка до 4 с. Теперь: отстал больше VIEW_LAG_DROP_MS — очередь сбрасывается, ключевой кадр просим у
+// ведущего сразу; отстаёт больше VIEW_LAG_SLOW_MS дольше VIEW_SLOW_HOLD_MS или выбрасывать пришлось второй раз за
+// VIEW_DROP_REPEAT_MS — просим ведущего снизить частоту (30 кадров/с). Разовая заминка частоту не трогает.
+const VIEW_LAG_DROP_MS = 500, VIEW_LAG_SLOW_MS = 200, VIEW_SLOW_HOLD_MS = 2000, VIEW_DROP_REPEAT_MS = 10_000, VIEW_QUEUE_MAX = 120;
+const VIEW_KEY_ASK_MS = 1000, VIEW_SLOW_ASK_MS = 5000, VIEW_STATS_MS = 60_000;
+let decoder = null, decoderSps = "", decoderConfig = null, decoderHwFailed = false;
 let waitKey = false, latestFrame = null, paintQueued = false;
+let viewPending = [], viewLastInput = -Infinity, viewLagSince = null, viewKeyAskAt = -Infinity, viewSlowAskAt = -Infinity, viewFreezeAt = null, viewDropAt = -Infinity;
+const viewStatsNew = (now) => ({ since: now, received: 0, decoded: 0, painted: 0, dropped: 0, maxQueue: 0, maxLagMs: 0,
+                                 freezes: 0, freezeMs: 0, keyAsks: 0, slowAsks: 0, errors: 0, size: "-" });
+let viewStats = viewStatsNew(0);
+function viewerLog(line) {
+  try { console.info(`[share] viewer ${line}`); } catch (_) {}
+  try { window.mu?.log?.(`viewer ${line}`); } catch (_) {}
+}
+// Раз в минуту (и в конце просмотра) — только числа: декодер, кадры, выбросы, очередь, заморозки, просьбы ведущему.
+function viewStatsFlush(now, force) {
+  const s = viewStats;
+  if (!s.received || (!force && now - s.since < VIEW_STATS_MS)) return;
+  const accel = !decoderConfig ? "-" : decoderConfig.hardwareAcceleration === "prefer-hardware" ? "hw" : "auto";
+  viewerLog(`stats decoder=${accel} size=${s.size} sec=${Math.round((now - s.since) / 1000)} in=${s.received} decoded=${s.decoded} ` +
+    `painted=${s.painted} dropped=${s.dropped} maxQueue=${s.maxQueue} maxLagMs=${Math.round(s.maxLagMs)} freezes=${s.freezes} ` +
+    `freezeMs=${Math.round(s.freezeMs)} keyAsks=${s.keyAsks} slowAsks=${s.slowAsks} errors=${s.errors}`);
+  viewStats = viewStatsNew(now);
+  viewStats.size = s.size;
+}
+function viewTrouble(now, slow) {
+  const key = waitKey && now - viewKeyAskAt >= VIEW_KEY_ASK_MS;
+  const slowNow = slow && now - viewSlowAskAt >= VIEW_SLOW_ASK_MS;
+  if (!key && !slowNow) return;
+  if (key) { viewKeyAskAt = now; viewStats.keyAsks++; }
+  if (slowNow) { viewSlowAskAt = now; viewStats.slowAsks++; }
+  if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify({ type: "video-trouble", key, slow: slowNow }));
+}
+// Сколько ждёт самый старый кадр в декодере, мс — только пока в декодере есть очередь: декодер может держать последний
+// кадр до следующего входа (задержка вывода на кадр), и на статичном экране (ведущий молчит секундами) это не отставание.
+const viewLag = (now) => (viewPending.length && decoder && decoder.decodeQueueSize > 0 ? now - viewPending[0].since : 0);
+// Ждать ключевой кадр: недекодированное выбрасывается (reset), ключевой просим сразу; заморозка считается до первого кадра.
+function viewWaitKey(now) {
+  const slow = now - viewDropAt < VIEW_DROP_REPEAT_MS;
+  viewDropAt = now;
+  if (!waitKey) { waitKey = true; viewFreezeAt ??= now; }
+  if (decoder && decoder.state === "configured") {
+    try { decoder.reset(); decoder.configure(decoderConfig); } catch (_) { closeDecoder(); }
+  }
+  viewPending = []; viewLagSince = null;
+  viewTrouble(now, slow);
+}
+function closeDecoder() {
+  if (decoder && decoder.state !== "closed") { try { decoder.close(); } catch (_) {} }
+  decoder = null; decoderConfig = null; viewPending = []; viewLagSince = null;
+}
 function paintFrame() {
   paintQueued = false;
   const frame = latestFrame; latestFrame = null;
@@ -990,37 +1136,82 @@ function paintFrame() {
   const canvas = $("video");
   if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
   canvas.getContext("2d").drawImage(frame, 0, 0); frame.close();
+  viewStats.painted++;
   if (canvas.style.display !== "block") { canvas.style.display = "block"; $("screen").style.display = "none"; status(""); }
 }
-let decoderSps = "";
-function playH264(bytes) {
+// Аппаратный декодер, если есть («prefer-hardware»); нет — тот, что выберет браузер. Отказ аппаратного (ошибка до первого
+// кадра или isConfigSupported) запоминается до конца страницы, ключевой кадр просим заново.
+function createDecoder(sps, now) {
+  const hex = (n) => n.toString(16).padStart(2, "0");
+  const config = { codec: `avc1.${hex(sps[1])}${hex(sps[2])}${hex(sps[3])}`, optimizeForLatency: true,
+                   hardwareAcceleration: decoderHwFailed ? "no-preference" : "prefer-hardware" };
+  let outputs = 0;
+  const instance = new VideoDecoder({
+    // Кадр ждёт ближайшего requestAnimationFrame; пришло два за такт — старый не рисуем (на 60 Гц кадр = такт).
+    output: (frame) => {
+      outputs++;
+      if (instance !== decoder) { frame.close(); return; }
+      const ts = frame.timestamp / 1000;
+      while (viewPending.length && viewPending[0].ts <= ts) viewPending.shift();
+      viewStats.decoded++; viewStats.size = `${frame.displayWidth}x${frame.displayHeight}`;
+      if (viewFreezeAt !== null && !waitKey) { const t = performance.now(); viewStats.freezes++; viewStats.freezeMs += t - viewFreezeAt; viewFreezeAt = null; }
+      if (latestFrame) latestFrame.close();
+      latestFrame = frame;
+      if (!paintQueued) { paintQueued = true; requestAnimationFrame(paintFrame); }
+    },
+    error: () => {
+      if (instance !== decoder) return;
+      viewStats.errors++;
+      if (config.hardwareAcceleration === "prefer-hardware" && outputs === 0) decoderHwFailed = true;
+      closeDecoder();
+      waitKey = true; viewFreezeAt ??= performance.now();
+      viewTrouble(performance.now(), false);
+    },
+  });
+  try { instance.configure(config); } catch (_) {
+    if (config.hardwareAcceleration !== "prefer-hardware") return false;
+    decoderHwFailed = true;
+    return createDecoder(sps, now);
+  }
+  decoder = instance; decoderConfig = config; decoderSps = sps.join();
+  if (!decoderHwFailed && typeof VideoDecoder.isConfigSupported === "function") {
+    VideoDecoder.isConfigSupported(config).then((r) => { if (!r?.supported) decoderHwFailed = true; }, () => {});
+  }
+  return true;
+}
+function playH264(bytes, now = performance.now()) {
   const key = bytes[0] === 1, data = bytes.subarray(1);
+  viewStats.received++;
+  viewStatsFlush(now, false);
   const sps = key ? nalUnits(data).find((u) => (u[0] & 0x1f) === 7) : null;
   // Другие SPS (ведущий переключил монитор, другой размер) — новый декодер с этого ключевого кадра: надёжнее, чем
   // рассчитывать на смену разрешения внутри одного VideoDecoder.
-  if (sps && decoder && decoder.state !== "closed" && sps.join() !== decoderSps) { try { decoder.close(); } catch (_) {} decoder = null; waitKey = false; }
+  if (sps && decoder && decoder.state !== "closed" && sps.join() !== decoderSps) closeDecoder();
   if (!decoder || decoder.state === "closed") {
-    if (!key || typeof VideoDecoder === "undefined") return;
-    if (!sps) return;
-    decoderSps = sps.join();
-    const hex = (n) => n.toString(16).padStart(2, "0");
-    const canvas = $("video"), ctx = canvas.getContext("2d");
-    decoder = new VideoDecoder({
-      // Кадр ждёт ближайшего requestAnimationFrame; пришло два за такт — старый не рисуем (на 60 Гц кадр = такт).
-      output: (frame) => {
-        if (latestFrame) latestFrame.close();
-        latestFrame = frame;
-        if (!paintQueued) { paintQueued = true; requestAnimationFrame(paintFrame); }
-      },
-      error: () => { decoder = null; },
-    });
-    decoder.configure({ codec: `avc1.${hex(sps[1])}${hex(sps[2])}${hex(sps[3])}`, optimizeForLatency: true });
+    if (typeof VideoDecoder === "undefined") return;
+    if (!key || !sps) { viewStats.dropped++; if (waitKey) viewTrouble(now, false); return; }
+    if (!createDecoder(sps, now)) return;
+    waitKey = false;
   }
-  // Очередь растёт — компьютер не успевает: пропускаем до следующего ключевого кадра.
-  if (decoder.decodeQueueSize > 4) waitKey = true;
-  if (waitKey) { if (!key) return; waitKey = false; }
-  decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: Math.round(performance.now() * 1000), data }));
+  // Перерыв входа (статичный экран, сеть): кадры, ждавшие в декодере, ждали входа, а не декодера — отсчёт заново.
+  if (now - viewLastInput > VIEW_LAG_SLOW_MS) for (const entry of viewPending) entry.since = now;
+  viewLastInput = now;
+  // Отстаёт: дольше VIEW_LAG_DROP_MS (или очередь непомерная) — сброс и ключевой; дольше VIEW_LAG_SLOW_MS подряд — «не успеваю».
+  const lag = viewLag(now), queue = decoder.decodeQueueSize;
+  if (queue > viewStats.maxQueue) viewStats.maxQueue = queue;
+  if (lag > viewStats.maxLagMs) viewStats.maxLagMs = lag;
+  if (!waitKey && (lag > VIEW_LAG_DROP_MS || queue > VIEW_QUEUE_MAX)) viewWaitKey(now);
+  else if (lag > VIEW_LAG_SLOW_MS) { viewLagSince ??= now; if (now - viewLagSince >= VIEW_SLOW_HOLD_MS) viewTrouble(now, true); }
+  else viewLagSince = null;
+  if (waitKey) {
+    if (!key) { viewStats.dropped++; viewTrouble(now, false); return; }
+    waitKey = false;
+  }
+  viewPending.push({ ts: Math.round(now * 1000) / 1000, since: now });
+  if (viewPending.length > 600) viewPending.shift();
+  decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: Math.round(now * 1000), data }));
 }
+// </view-video>
 
 $("leave").onclick = () => { stopWatch(); status("Вы отключились от трансляции"); };
 // Подпись «Видео · видеокарта / без видеокарты / Картинки» у зрителя: тип кадров — по пакетам, режим — от ведущего.
@@ -1036,10 +1227,11 @@ function stopWatch(keepStatus) {
   $("leave").style.display = "none";
   setViewVideo("", ""); lastH264At = -Infinity;
   if (game.peer === "host") gamePeerGone("host");
-  if (decoder && decoder.state !== "closed") { try { decoder.close(); } catch (_) {} }
-  decoder = null;
+  viewStatsFlush(performance.now(), true);
+  closeDecoder(); waitKey = false; viewFreezeAt = null;
   if (latestFrame) { latestFrame.close(); latestFrame = null; }
   $("video").style.display = "none"; $("screen").style.display = "";
+  clearTimeout(viewRetryTimer); viewRetries = 0;
   if (viewSocket) { viewSocket.onclose = null; viewSocket.close(1000); viewSocket = null; }
   watching = false; $("tools").style.display = "none";
   resetMonitors();
@@ -1088,7 +1280,7 @@ const gEsc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&
 function gSend(fields) { if (game.send) game.send({ type: "game", ...fields }); }
 function viewGameSend(fields) { if (viewSocket && viewSocket.readyState === 1) viewSocket.send(JSON.stringify(fields)); }
 function hostGameSend(to) {
-  return (fields) => { if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify({ ...fields, to, name: myName })); };
+  return (fields) => { if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify({ ...fields, to, name: getMyName() })); };
 }
 function gBegin(peer, name, send, inviter) {
   if (game.peer !== peer) { game.me = 0; game.them = 0; }
@@ -1173,6 +1365,11 @@ $("gameInvite").onclick = () => gameInvite("host", hostName || display(watchingI
 async function showMutePanel() {
   const list = $("muteLive");
   const saved = store.get("mu-muted-apps", []);
+  // Звонки исключаются сами (приложение знает их по имени программы); здесь их можно вернуть в трансляцию.
+  const callsLive = $("muteCallsLive");
+  callsLive.style.display = window.mu.setMuteCalls ? "" : "none";
+  $("muteCallsLiveBox").checked = store.get("mu-mute-calls", true);
+  $("muteCallsLiveBox").onchange = () => { store.set("mu-mute-calls", $("muteCallsLiveBox").checked); window.mu.setMuteCalls($("muteCallsLiveBox").checked); };
   const apps = (await window.mu.audioApps()) || [];
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
@@ -1205,6 +1402,9 @@ async function showMuteApps() {
   const apps = await window.mu.audioApps();
   if (!apps) { box.style.display = "none"; return; }
   helperAvailable = true;
+  // Старое приложение звонки само не исключает — тогда и галочки нет.
+  $("muteCallsBox").style.display = window.mu.setMuteCalls ? "" : "none";
+  $("muteCalls").checked = store.get("mu-mute-calls", true);
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
   if (!names.length) list.textContent = "Сейчас ни одна программа не играет звук — отметить можно и потом, прямо в эфире (кнопка «🔇 Звук»).";
@@ -1237,7 +1437,9 @@ function pickSource() {
         store.set("mu-muted-apps", muted);
         // Новые версии приложения: звук всегда через помощник — список можно менять в эфире.
         useHelperAudio = $("withAudio").checked && helperAvailable && !!window.mu.startAudio && (!!window.mu.setMuted || muted.length > 0);
-        await window.mu.choose(source.id, $("withAudio").checked, muted);
+        const muteCalls = !window.mu.setMuteCalls || $("muteCalls").checked;
+        store.set("mu-mute-calls", muteCalls);
+        await window.mu.choose(source.id, $("withAudio").checked, muted, muteCalls);
         resolve(true);
       };
       grid.appendChild(item);
@@ -1274,7 +1476,7 @@ async function share() {
   let ok = await openHost(myId);
   // ID закреплён за ключом страницы, а ключ не загрузился (медленная или зависшая IndexedDB): сначала грузим ключ ещё раз.
   if (!ok && !pageKey && pageKeySupported() && (await hostCheckReason()) === "id-claimed" && (await retryPageKey())) ok = await openHost(myId);
-  if (!ok) { stream.getTracks().forEach((t) => t.stop()); return explainHostFailure(); }
+  if (!ok) { stream.getTracks().forEach((t) => t.stop()); if (window.mu && window.mu.stopped) window.mu.stopped(); return explainHostFailure(); }
   startCapture(stream, myId);
   announceDisplays();
 }
@@ -1381,9 +1583,9 @@ function onRequest(msg) {
   const entry = canTrust(viewer) ? trustedList().find((e) => e.id === viewer) : null;
   if (kind === "legacy" && entry) return answer(viewer, true, rid);
   // Окно «сам себе»: relay сверил ключ зрителя с ключом владельца этого ID.
-  if (kind === "key" && pub && msg.self === true && hostAuth?.keyed) return answer(viewer, true, rid);
+  if (kind === "key" && pub && msg.self === true && hostAuth?.keyed) return answer(viewer, true, rid, pub);
   // Автоприём только если ID принадлежит этому ключу: при idVerified:false он закреплён за другим устройством.
-  if (kind === "key" && pub && entry && entry.pub === pub && msg.idVerified !== false) return answer(viewer, true, rid);
+  if (kind === "key" && pub && entry && entry.pub === pub && msg.idVerified !== false) return answer(viewer, true, rid, pub);
   requests.push({ viewer, name, rid, kind, pub, entry, idVerified: msg.idVerified,
                   fp: typeof msg.fp === "string" ? msg.fp.slice(0, 19) : null });
   showRequest();
@@ -1415,17 +1617,23 @@ function showRequest() {
   $("request").style.display = "flex";
   if (window.mu && window.mu.attention) window.mu.attention();
 }
-function answer(viewer, accept, rid) {
-  const reply = { type: accept ? "accept" : "decline", viewer, name: myName };
+async function answer(viewer, accept, rid, viewerPub) {
+  const reply = { type: accept ? "accept" : "decline", viewer, name: getMyName() };
   if (typeof rid === "string") reply.rid = rid;
+  // Принятие подписывается ключом страницы (приложение для Windows ключа не даёт): зритель сверит подпись с ключом ведущего.
+  if (accept && typeof rid === "string" && typeof viewerPub === "string" && B64U_KEY.test(viewerPub) && pageKey && !appSigns("signHost") && hostAuth?.keyed) {
+    try { reply.hostSig = await pageKey.sign(acceptMessage(myId, viewerPub, rid)); } catch (_) {}
+  }
   if (hostSocket && hostSocket.readyState === 1) hostSocket.send(JSON.stringify(reply));
 }
-$("allow").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, true, r.rid); showRequest(); };
-$("always").onclick = () => { const r = requests.shift(); if (r) { trust(r.viewer, r.kind === "key" ? r.pub : null, r.fp); answer(r.viewer, true, r.rid); } showRequest(); };
+$("allow").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, true, r.rid, r.kind === "key" ? r.pub : null); showRequest(); };
+$("always").onclick = () => { const r = requests.shift(); if (r) { trust(r.viewer, r.kind === "key" ? r.pub : null, r.fp); answer(r.viewer, true, r.rid, r.kind === "key" ? r.pub : null); } showRequest(); };
 $("decline").onclick = () => { const r = requests.shift(); if (r) answer(r.viewer, false, r.rid); showRequest(); };
 
 // ---- Кодер ведущего: запасные пути (relay/tests/page-video.test.cjs берёт код между метками) ----
 // <host-video>
+// Зритель не успевает декодировать (`viewers` с `slow`, SHARE-PROTOCOL): когда пришло — кодер переходит на 30 кадров/с.
+let viewerSlowAt = -Infinity;
 // Режимы кодера по порядку: аппаратный H.264; программный H.264 (OpenH264 в Chromium и Electron) — явно `prefer-software`:
 // `no-preference` на Windows снова берёт аппаратный Media Foundation, и после его сбоя оставался только JPEG; JPEG — мост
 // на время повторной попытки и единственный путь, только если H.264 нет вообще. Аппаратного кодера может не быть или он
@@ -1466,6 +1674,28 @@ function probeEncoders(done) {
       encoderLog(`probe ${results.map((r) => `${r.name}=${r.ok ? "yes" : `no(${r.code})`}`).join(" ")}`);
       done(results[0].ok || results[1].ok, results[3].ok);
     });
+}
+// Пробный кодер: настоящий VideoEncoder выбранного ускорения, несколько кадров 1280×720; удалась — он отдал кадр. Отдельно от
+// эфира, поэтому неработающий аппаратный кодер не останавливает картинку у зрителей на время пробы.
+const TRIAL_FRAME_US = 33_333;
+function trialEncode(acceleration, done) {
+  let finished = false, encoder = null;
+  const finish = (ok, code) => { if (finished) return; finished = true; clearTimeout(timer); try { encoder?.close(); } catch (_) {} done(ok, code); };
+  const timer = setTimeout(() => finish(false, "timeout"), 3000);
+  try {
+    encoder = new VideoEncoder({ output: () => finish(true, ""), error: (e) => finish(false, encoderErrorCode(e)) });
+    encoder.configure({ codec: ENCODER_CODEC, width: 1280, height: 720, bitrate: 2_000_000, framerate: 30, latencyMode: "realtime",
+                        avc: { format: "annexb" }, hardwareAcceleration: acceleration });
+    const canvas = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1280, 720) : Object.assign(document.createElement("canvas"), { width: 1280, height: 720 });
+    const ctx = canvas.getContext("2d");
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = `rgb(${40 * i}, 90, ${200 - 40 * i})`; ctx.fillRect(0, 0, 1280, 720);
+      ctx.fillStyle = "#fff"; ctx.fillRect(100 + 150 * i, 200, 300, 200);
+      const frame = new VideoFrame(canvas, { timestamp: i * 33_333, duration: TRIAL_FRAME_US });
+      encoder.encode(frame, { keyFrame: i === 0 }); frame.close();
+    }
+    encoder.flush().catch(() => {});
+  } catch (e) { finish(false, encoderErrorCode(e)); }
 }
 function nalUnits(data) {
   const units = []; let start = -1;
@@ -1530,6 +1760,22 @@ function encoderLadder(now = 0) {
       for (let i = 0; i < this.mode; i++) if (now >= this.retryAt[i]) return this.enter(i, now, "retry");
       return false;
     },
+    // Пора ли пробовать режим лучше текущего: индекс режима или -1. Пробует отдельный пробный кодер (`trialEncode`), текущий
+    // поток при этом не останавливается; режим меняется, только если проба удалась (`probeResult`).
+    retryTarget(now) {
+      if (this.noH264) return -1;
+      for (let i = 0; i < this.mode; i++) if (now >= this.retryAt[i]) return i;
+      return -1;
+    },
+    // Итог пробы режима i. Удалась — переходим на него (true). Нет — следующая проба позже, вдвое дольше (до предела), поток
+    // не трогаем.
+    probeResult(i, ok, now) {
+      if (ok) return this.enter(i, now, "retry");
+      const retry = ENCODER_RETRY[i];
+      this.backoff[i] = this.backoff[i] ? Math.min(retry.max, this.backoff[i] * 2) : retry.base;
+      this.retryAt[i] = now + this.backoff[i];
+      return false;
+    },
     // Итог VideoEncoder.isConfigSupported. Нет ни одного H.264 — JPEG без повторов; нет только аппаратного — сразу
     // программный (аппаратный — повтором, как после ошибки: проверка бывает неточной).
     supported(hardware, software, now) {
@@ -1583,11 +1829,13 @@ function startCapture(stream, code) {
   forceKey = true;
   let canEncode = typeof VideoEncoder !== "undefined";
   // Для журнала (только числа и коды): ошибки кодера, пропуски кадров (очередь кодера, JPEG занят), размер источника.
-  const counts = { errors: 0, queueSkips: 0, jpegSkips: 0, outputs: 0, statsOutputs: 0 };
+  const counts = { errors: 0, queueSkips: 0, jpegSkips: 0, outputs: 0, statsOutputs: 0, viewerSlow: 0 };
+  let slowSeen = viewerSlowAt;
   let sourceSize = "-", lastStatsAt = performance.now();
   const logEncoder = (event) => encoderLog(`${event} mode=${ladder.name} src=${sourceSize} size=${encodedSize || "-"} ` +
     `fps=${ladder.jpeg ? 8 : fps} bitrate=${Math.round(bitrate / 1000)}k queued=${Math.round(hostSocket?.bufferedAmount ?? 0)} ` +
     `encodeQueue=${encoder?.encodeQueueSize ?? 0} errors=${counts.errors} queueSkips=${counts.queueSkips} jpegSkips=${counts.jpegSkips} ` +
+    `viewerSlow=${counts.viewerSlow} ` +
     `outFps=${Math.round((counts.outputs - counts.statsOutputs) / Math.max(1, (performance.now() - lastStatsAt) / 1000))}`);
   // Режим сменился: прежний кодер закрыт, новый создаст следующий кадр. Программный — 30 кадров/с без возврата на 60.
   const applyMode = () => {
@@ -1607,7 +1855,7 @@ function startCapture(stream, code) {
     if (typeof announceDisplays === "function") announceDisplays();
   };
   hostVideoMode = ladder.name;
-  marksOnScreen = null; marksReason = ""; marksCovered = null;
+  marksOnScreen = null; marksReason = ""; marksCovered = null; hostMarksInVideo = false;
   try { hostSurface = stream.getVideoTracks()[0]?.getSettings?.().displaySurface || ""; } catch (_) { hostSurface = ""; }
   if (!canEncode) { ladder.supported(false, false, performance.now()); applyMode(); }
   else probeEncoders((hardware, software) => { if (ladder.supported(hardware, software, performance.now())) applyMode(); });
@@ -1617,7 +1865,7 @@ function startCapture(stream, code) {
   const audioRoom = () => hostSocket.bufferedAmount <= Math.max(400_000, bitrate / 8) + 256_000;
   // JPEG кодируется асинхронно и держит снимок холста (1920×1080 — 8 МБ). Пока прежний не готов, новый не начинаем:
   // на медленном компьютере очередь снимков росла на гигабайты за минуты.
-  let jpegBusy = false;
+  let jpegBusy = false, probing = false;
   const encoderConfig = (width, height) => ({ codec: ENCODER_CODEC, width, height, bitrate: Math.round(bitrate), framerate: fps,
                                               latencyMode: "realtime", avc: { format: "annexb" }, hardwareAcceleration: ladder.acceleration });
   // Кодер упал (ошибка, исключение, тишина): следующий кадр создаёт новый. Не отдал ни одного кадра — неудача,
@@ -1635,9 +1883,22 @@ function startCapture(stream, code) {
   const tick = (source, sourceWidth, sourceHeight) => {
     if (!hostSocket || hostSocket.readyState !== 1 || !sourceWidth) { forceKey = true; return; }
     const now = performance.now(), queued = hostSocket.bufferedAmount;
+    if (viewerSlowAt > slowSeen) { slowSeen = viewerSlowAt; counts.viewerSlow++; trouble(now); }
     sourceSize = `${sourceWidth}x${sourceHeight}`;
     hostSourceAspect = sourceWidth / sourceHeight;
-    if (ladder.retry(now)) applyMode();
+    // Лучший режим пробуем отдельным кодером, не останавливая эфир: неработающий аппаратный кодер раньше замораживал картинку
+    // на ~3 с при каждой повторной попытке.
+    if (!probing && typeof VideoEncoder !== "undefined") {
+      const target = ladder.retryTarget(now);
+      if (target >= 0) {
+        probing = true;
+        trialEncode(ENCODER_MODES[target], (ok, code) => {
+          probing = false;
+          logEncoder(`trial mode=${ENCODER_NAMES[target]} ok=${ok ? 1 : 0}${ok ? "" : ` code=${code}`}`);
+          if (capture && ladder.probeResult(target, ok, performance.now())) applyMode();
+        });
+      }
+    }
     if (now - lastStatsAt >= 60_000) { logEncoder("stats"); lastStatsAt = now; counts.statsOutputs = counts.outputs; }
     if (queued > 250_000 && now - lastAdapt > 500) { bitrate = Math.max(700_000, bitrate * 0.7); lastAdapt = now; }
     else if (queued < 60_000 && now - lastAdapt > 2000 && bitrate < 12_000_000) { bitrate = Math.min(12_000_000, bitrate * 1.15); lastAdapt = now; }
@@ -1792,13 +2053,13 @@ function startCapture(stream, code) {
     source.connect(processor);
     processor.connect(audioContext.destination);
   }
-  stream.getVideoTracks()[0].onended = () => stopHost("Трансляция остановлена");
+  stream.getVideoTracks()[0].onended = onVideoEnded;
   // Другой монитор (зритель переключил): новая дорожка видео в тот же эфир — без переподключения, звук остаётся.
   // Кодер пересоздаётся сам по размеру кадра, первым идёт ключевой.
   const replaceVideo = (next) => {
     const track = swapVideoTrack(stream, next, () => timer.cancel());
     if (!track) return false;
-    track.onended = () => stopHost("Трансляция остановлена");
+    track.onended = onVideoEnded;
     video.srcObject = new MediaStream([track]);
     video.play();
     forceKey = true;
@@ -1827,7 +2088,7 @@ function announceDisplays() {
     hostMonitors.rev = displaysRevision(hostMonitors.memo, list);
     renderSwitchButton();
     if (!capture || !hostSocket || hostSocket.readyState !== 1) return;
-    hostSocket.send(JSON.stringify(displaysMessage(hostMonitors.rev, list, hostMonitors.current, allowSwitch(), hostVideoMode)));
+    hostSocket.send(JSON.stringify(displaysMessage(hostMonitors.rev, list, hostMonitors.current, allowSwitch(), hostVideoMode, hostMarksInVideo)));
     hostMonitors.announcedAt = Date.now();
   }).catch(() => {});
   return announceChain;
@@ -1851,6 +2112,30 @@ function setAllowSwitch(allowed) {
 $("switchButton").onclick = () => setAllowSwitch(!allowSwitch());
 $("allowSwitch").onchange = () => setAllowSwitch($("allowSwitch").checked);
 if (window.mu && typeof window.mu.onDisplays === "function") window.mu.onDisplays(() => announceDisplays());
+
+// Захват остановился сам (сон, выдернули монитор): в приложении для Windows пробуем взять тот же или основной монитор и
+// продолжить эфир; закрыли транслируемое окно или не вышло — эфир заканчивается с понятной причиной.
+let videoRecovering = false;
+const videoRecoveries = [];   // моменты попыток: не больше 3 за минуту, иначе дорожка кончается снова и снова — эфир заканчивается
+async function onVideoEnded() {
+  if (videoRecovering) return;
+  const now = Date.now();
+  while (videoRecoveries.length && now - videoRecoveries[0] > 60_000) videoRecoveries.shift();
+  if (canSwitchMonitors() && capture?.replaceVideo && hostMonitors.current > 0 && videoRecoveries.length < 3) {
+    videoRecoveries.push(now);
+    videoRecovering = true;
+    await new Promise((r) => setTimeout(r, 1000));   // пауза: монитор/система должны успокоиться
+    if (!capture) { videoRecovering = false; return; }
+    try {
+      const info = await window.mu.displays();
+      const list = Array.isArray(info?.list) ? info.list : [];
+      const target = list.find((d) => d.n === hostMonitors.current) || list.find((d) => d.primary) || list[0];
+      if (target && await switchCapture(target.n)) { videoRecovering = false; announceDisplays(); return; }
+    } catch (_) {}
+    videoRecovering = false;
+  }
+  stopHost("Захват остановлен (монитор отключён или окно закрыто) — трансляция завершена");
+}
 
 // Новый монитор в тот же эфир: приложение выбирает источник, страница берёт его новым getDisplayMedia (только видео).
 async function switchCapture(n) {
@@ -1899,6 +2184,7 @@ let hostVideoMode = "";
 // встало: старая Windows 10, отказ Windows, нет помощника) — или это обычный браузер, где поверх экрана рисовать нечем.
 // Тогда ведущий видит их здесь, на схеме транслируемой области, а зрители — только свои (без копии в видео).
 const hostMarks = [];
+let hostMarksInVideo = false;
 let marksOnScreen = null, marksReason = "", marksCovered = null, hostSurface = "", hostSourceAspect = 16 / 9, hostMarkTextTimer = 0;
 const HOST_MARKS_NOTES = {
   "old-windows": "Метки зрителей — здесь: эта версия Windows не умеет скрывать окно меток из трансляции.",
@@ -1950,6 +2236,9 @@ if (window.mu && typeof window.mu.onMarksState === "function") {
   window.mu.onMarksState((state) => {
     marksOnScreen = !!state?.screen; marksReason = typeof state?.reason === "string" ? state.reason : "";
     marksCovered = typeof state?.covered === "boolean" ? state.covered : null;
+    // Окно меток не исключено из захвата — метки идут в видео: зрителям сообщаем, чтобы не рисовали свою копию.
+    const inVideo = state?.inVideo === true;
+    if (inVideo !== hostMarksInVideo) { hostMarksInVideo = inVideo; if (capture) announceDisplays(); }
   });
 }
 
@@ -1984,14 +2273,15 @@ function onHostMessage(ws, event) {
     if (game.peer !== "host" && !audience.some((v) => v.id === game.peer)) gamePeerGone(game.peer);
     if (game.phase === "pick") renderGame();
   }
-  if (msg.type === "viewers") forceKey = true; // новый зритель — сразу ключевой кадр
+  if (msg.type === "viewers" && msg.tick !== true) forceKey = true; // новый зритель — сразу ключевой кадр (периодическое напоминание — нет)
+  if (msg.type === "viewers" && msg.slow === true) viewerSlowAt = performance.now(); // зритель не успевает — 30 кадров/с
   if (msg.type === "cancelled") { const i = requests.findIndex((r) => typeof msg.rid === "string" ? r.rid === msg.rid : r.viewer === msg.viewer); if (i >= 0) { requests.splice(i, 1); showRequest(); } }
   if (msg.type === "viewers") {
     liveViewers = msg.count ? (msg.list || []) : [];
     renderLiveText();
     $("liveText").title = (msg.list || []).map((v) => v.fp ? `${v.name}: ключ ${v.fp}` : v.name).join("\n");
-    // Новый зритель (или тот же после переподключения) получает список мониторов без хранения на relay.
-    announceDisplays();
+    // Новый зритель (или тот же после переподключения) получает список мониторов без хранения на relay (по напоминанию — нет).
+    if (msg.tick !== true && msg.key !== true) announceDisplays();
   }
 }
 
@@ -2000,9 +2290,12 @@ async function reconnectHost(code) {
   if (!capture) return;
   hostSocket = null;
   $("liveText").textContent = "Переподключаюсь…";
-  for (const delay of [1, 2, 3, 5, 8, 10, 15]) {
+  // 44 с частых попыток (relay ждёт ведущего 45 с), затем раз в 30 с ещё 10 минут: захват идёт, эфир вернётся под тем же ID.
+  const delays = [1, 2, 3, 5, 8, 10, 15, ...Array(20).fill(30)];
+  for (const [i, delay] of delays.entries()) {
     await new Promise((r) => setTimeout(r, delay * 1000));
     if (!capture) return;
+    if (i >= 7) $("liveText").textContent = `Нет связи с сервером, пробую снова… (${i - 6} из 20)`;
     if (await openHost(code)) {
       hostSocket.onclose = (event) => hostClosed(code, event);
       $("liveText").textContent = "В эфире";

@@ -1,5 +1,12 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUAppInputSource
+import MUAudio
+import MULayoutFix
+import MUScreenShare
+import MUTextEditor
 
 // MARK: - Раскладка
 
@@ -22,7 +29,7 @@ struct LayoutPage: View {
             GroupLabel("Горячая клавиша")
             ListCard {
                 Row("Перевести", systemImage: "keyboard") {
-                    ShortcutRecorder(hotKey: current, validate: { HotKeyPrefs.shared.problem($0, for: .layoutFix) }) { $0.save() }
+                    ShortcutRecorder(hotKey: current, suspend: { LayoutFix.shared.suspendHotKey($0) }, validate: { HotKeyPrefs.shared.problem($0, for: .layoutFix) }) { $0.save() }
                 }
                 Row("Готовые варианты", systemImage: "list.bullet") {
                     HStack(spacing: DS.Space.s) {

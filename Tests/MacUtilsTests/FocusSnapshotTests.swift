@@ -1,5 +1,7 @@
 import XCTest
 @testable import MacUtils
+@testable import MUAI
+@testable import MUTextEditor
 
 final class FocusSnapshotTests: XCTestCase {
     private func snap(_ pid: pid_t, _ field: Int?) -> FocusSnapshot { FocusSnapshot(pid: pid, field: field) }

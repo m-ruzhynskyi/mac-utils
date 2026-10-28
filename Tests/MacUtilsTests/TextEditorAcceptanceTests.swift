@@ -1,6 +1,9 @@
 import CryptoKit
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUAudio
+@testable import MUTextEditor
 
 /// Приёмка ядра редактора по независимым данным тестировщика: `Tests/Fixtures/TextEditor/` (17 .frm и `expected.json`).
 /// Каждая фикстура проходит через то же, что делает редактор: автоопределение кодировки → текст → знаки `$` →

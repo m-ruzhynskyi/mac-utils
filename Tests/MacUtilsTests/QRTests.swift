@@ -1,5 +1,7 @@
 import XCTest
 @testable import MacUtils
+@testable import MUQR
+@testable import MUTextEditor
 
 final class QRTests: XCTestCase {
     func testRoundTrip() throws {

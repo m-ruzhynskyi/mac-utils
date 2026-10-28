@@ -1,5 +1,6 @@
 @testable import MacUtils
 import XCTest
+@testable import MUScreenShare
 
 final class TicTacToeTests: XCTestCase {
     func testWinDrawAndTurns() {

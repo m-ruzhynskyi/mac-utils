@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUCutPaste
 
 final class CutRulesTests: XCTestCase {
     private let a = URL(fileURLWithPath: "/tmp/a"), b = URL(fileURLWithPath: "/tmp/b"), c = URL(fileURLWithPath: "/tmp/c")

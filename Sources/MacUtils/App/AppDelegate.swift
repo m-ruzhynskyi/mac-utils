@@ -1,5 +1,29 @@
 import AppKit
 import Carbon.HIToolbox
+import MUCore
+import MUDesign
+import MUCutPaste
+import MUFocus
+import MUSmoothScroll
+import MUAppSwitcher
+import MUWellbeing
+import MUAppInputSource
+import MUMeetings
+import MUQR
+import MUUpdate
+import MUAudio
+import MULayoutFix
+import MUAppVolume
+import MUWindowSnap
+import MUAI
+import MUDownloadsSorter
+import MUDropShelf
+import MUCheatSheet
+import MUAnnotate
+import MUScreenShare
+import MUScreenshot
+import MUVideoPlayer
+import MUTextEditor
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения
@@ -14,10 +38,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Шрифты интерфейса (Graphite) — до первого окна; не вышло — системный шрифт.
         DSFonts.registerAll()
         Pref.register()
+        SettingsSection.installAppSubtitles()
+        AppRouter.shared.showWhatsNewIfUpdated = { WhatsNewWindowController.shared.showIfUpdated() }
+        AppRouter.shared.prepareForRelaunch = { AppSwitcher.shared.shutdown() }
+        AppRouter.shared.settingsVisible = { SettingsWindowController.shared.isVisible }
+        AppRouter.shared.syncDock = { AppDelegate.syncDock(editorOpen: $0, playerOpen: $1) }
+        AppRouter.shared.openMedia = { PlayerWindowController.open($0) }
+        AppRouter.shared.playerIsKey = { PlayerWindowController.isKey }
+        AppRouter.shared.openPlayerPanel = { PlayerWindowController.openPanel() }
+        AppRouter.shared.showShotsLibrary = { ToolsWindowController.shared.show(.shots) }
+        AppRouter.shared.addShot = { ScreenshotLibrary.shared.add($0, image: $1, app: $2) }
+        AppRouter.shared.refreshRecordingFilter = { ScreenRecorder.current?.refreshFilter() }
+        AppRouter.shared.cheatFrontGroups = { PlayerWindowController.isKey ? [PlayerShortcuts.cheatGroup] : [] }
+        AppRouter.shared.cheatMacUtilsGroup = { MainActor.assumeIsolated { CheatSheetGroups.macUtilsGroup() } }
+        AppRouter.shared.isInApplications = { MoveToApplications.isInApplications }
+        AppRouter.shared.runHotKey = { id in HotKeyAction.action(forHotKeyID: id).map { AppAction(hotKey: $0).run() } }
         KeepAwake.shared.observeWake()
         BusyRegistry.shared.installDefaultProviders()
         observeSystemShutdown()
         PanelTabs.migrate()
+        HotKeyCenter.shared.resolver = { HotKeyRegistry.resolve(id: $0, requested: $1) }
+        RemoteConnectionsCenter.addPanelTabOnce()
         MainMenu.install()
         lastTrusted = Permissions.accessibility
 
@@ -293,6 +334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MeetingRecorder.shared.sync()
         FocusBlur.shared.sync()
         AppStatusItem.shared.sync()
+        RemoteConnectionsCenter.syncHotKey()
         syncDock()
     }
 
@@ -315,26 +357,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { SettingsWindowController.shared.show() }
         }
     }
-}
-
-enum HotKeyID {
-    static let settings: UInt32 = 1
-    static let screenshot: UInt32 = 2
-    static let screenshotOCR: UInt32 = 3
-    static let layoutFix: UInt32 = 4
-    static let tools: UInt32 = 5
-    static let dropShelf: UInt32 = 6
-    static let annotate: UInt32 = 8
-    static let fixText: UInt32 = 9
-    static let qr: UInt32 = 7
-    /// 10…20 — раскладка окон (по одному на сочетание).
-    static let windowSnapBase: UInt32 = 10
-    static let appVolume: UInt32 = 30
-    static let windowPin: UInt32 = 31
-    static let meeting: UInt32 = 32
-    static let focus: UInt32 = 33
-    static let textEditor: UInt32 = 34
-    static let videoPlayer: UInt32 = 35
 }
 
 /// Куда открыть файлы из Finder и Dock: видео и звук — в плеер; субтитры — в плеер, если он открыт (к текущему видео),
