@@ -1,5 +1,19 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUWellbeing
+import MUMeetings
+import MUQR
+import MUAppVolume
+import MUWindowSnap
+import MUAI
+import MUDownloadsSorter
+import MUDropShelf
+import MUAnnotate
+import MUScreenshot
+import MUVideoPlayer
+import MUTextEditor
 
 extension Notification.Name {
     /// Открыть в настройках нужный раздел (object — SettingsSection).

@@ -1,0 +1,255 @@
+import Foundation
+
+// Всё, чем подключение трогает систему, — протоколами: в приложении AXUIElement, NSWorkspace и CGEvent,
+// в тестах — дерево значений и записи нажатий. Модуль сам ничего не запускает и не вводит.
+
+/// Элемент интерфейса чужой программы. Значение поля пароля не читается никогда — только его длина.
+public protocol AXNode: AnyObject {
+    var role: String? { get }
+    var subrole: String? { get }
+    /// Заголовок окна, кнопки, галочки или текст надписи (`AXStaticText`). У полей ввода — nil.
+    var label: String? { get }
+    var children: [AXNode] { get }
+    var processID: Int32? { get }
+    /// Сколько символов в поле; nil — не прочиталось.
+    var valueLength: Int? { get }
+    /// Состояние галочки; nil — не галочка.
+    var isChecked: Bool? { get }
+    /// Кнопка по умолчанию окна (`AXDefaultButton`).
+    var defaultButton: AXNode? { get }
+
+    func isSame(as other: AXNode) -> Bool
+    /// Записать секрет в поле (`AXValue`). Строка для AX создаётся из байтов прямо перед вызовом.
+    func setSecretValue(_ secret: SecretBuffer) -> Bool
+    func clearValue() -> Bool
+    func focus() -> Bool
+    func press() -> Bool
+
+    /// Подсказка пустого поля (`AXPlaceholderValue`): у полей веб-интерфейса TeamViewer подписи часто только в ней.
+    var placeholder: String? { get }
+    /// `AXDescription`: подпись кнопок и полей веб-интерфейса, у которых нет заголовка.
+    var detail: String? { get }
+    /// Записать в обычное поле не секретный текст (ID компьютера).
+    func setText(_ text: String) -> Bool
+}
+
+extension AXNode {
+    public var placeholder: String? { nil }
+    public var detail: String? { nil }
+    public func setText(_ text: String) -> Bool { false }
+}
+
+/// Доступ к дереву интерфейса («Универсальный доступ»).
+public protocol AXAccess: AnyObject {
+    /// Разрешение уже выдано. Модуль его не запрашивает.
+    var isTrusted: Bool { get }
+    func windows(ofProcess pid: Int32) -> [AXNode]
+    /// Элемент с фокусом клавиатуры в этом процессе.
+    func focusedElement(ofProcess pid: Int32) -> AXNode?
+    /// Код ошибки AX при чтении окон процесса (`AXError.rawValue`); nil — прочитались.
+    func windowsError(ofProcess pid: Int32) -> Int32?
+}
+
+extension AXAccess {
+    public func windowsError(ofProcess pid: Int32) -> Int32? { nil }
+}
+
+/// Программы на компьютере: есть ли, открыть ссылку, какой процесс впереди.
+public protocol AppLauncher: AnyObject {
+    func isInstalled(bundleID: String) -> Bool
+    /// Открыть ссылку подключения (`anydesk:…`). Пароль в ссылке не передаётся.
+    func open(_ url: URL) -> Bool
+    func runningProcess(bundleID: String) -> Int32?
+    /// Все процессы с этим bundle id, сначала — обычное приложение с окнами. У AnyDesk их несколько
+    /// (`--control`, `--local-service` и сам интерфейс), и первый попавшийся — без окон (rc-console3).
+    func runningProcesses(bundleID: String) -> [Int32]
+    func bundleID(ofProcess pid: Int32) -> String?
+    /// Team ID действительной подписи процесса; nil — подпись не проверилась.
+    func teamID(ofProcess pid: Int32) -> String?
+    var frontmostProcess: Int32? { get }
+    func activate(process pid: Int32)
+}
+
+extension AppLauncher {
+    public func runningProcesses(bundleID: String) -> [Int32] { runningProcess(bundleID: bundleID).map { [$0] } ?? [] }
+}
+
+/// Нажатия клавиш — только в процесс `pid`.
+public protocol KeyboardSender: AnyObject {
+    /// Один символ: 1–2 единицы UTF-16. Буфер затирается вызывающим сразу после вызова.
+    func type(_ units: UnsafeBufferPointer<UInt16>, to pid: Int32)
+    func pressReturn(to pid: Int32)
+}
+
+/// Часы и ожидание. В тестах время идёт мгновенно.
+public protocol RemoteClock: AnyObject {
+    /// Миллисекунды от любой точки отсчёта.
+    var milliseconds: Int { get }
+    /// Бросает при отмене задачи.
+    func sleep(milliseconds: Int) async throws
+}
+
+public final class SystemClock: RemoteClock {
+    private let start = DispatchTime.now().uptimeNanoseconds
+
+    public init() {}
+
+    public var milliseconds: Int { Int((DispatchTime.now().uptimeNanoseconds - start) / 1_000_000) }
+
+    public func sleep(milliseconds: Int) async throws {
+        try await Task.sleep(nanoseconds: UInt64(max(milliseconds, 0)) * 1_000_000)
+    }
+}
+
+// MARK: - Поиск по дереву
+
+enum AXTree {
+    /// С запасом: карточка «Terminal Session» AnyDesk встроена в главное окно с вкладками, списками и плитками
+    /// (rc-console2). Узлы адаптер читает одним запросом и помнит до следующего опроса окон.
+    static let maxDepth = 40
+    static let maxNodes = 5000
+
+    static func isSecureField(_ node: AXNode) -> Bool {
+        node.subrole == "AXSecureTextField" || node.role == "AXSecureTextField"
+    }
+
+    static func isTextInput(_ node: AXNode) -> Bool {
+        !isSecureField(node) && ["AXTextField", "AXComboBox", "AXSearchField"].contains(node.role ?? "")
+    }
+
+    /// Все подписи элемента: заголовок, описание, подсказка.
+    static func names(of node: AXNode) -> [String] {
+        [node.label, node.detail, node.placeholder].compactMap { $0 }
+    }
+
+    /// Предки `target` от корня до него самого; nil — его нет в дереве.
+    static func path(to target: AXNode, in root: AXNode) -> [AXNode]? {
+        var stack: [AXNode] = []
+        var found: [AXNode]?
+        visit(root) { node, depth in
+            stack.removeSubrange(min(depth, stack.count)...)
+            stack.append(node)
+            if node.isSame(as: target) { found = stack; return false }
+            return true
+        }
+        return found
+    }
+
+    /// Подходящий элемент, ближайший к `target`: в самом тесном общем контейнере. `levels` — на сколько
+    /// контейнеров вверх подниматься (nil — до корня).
+    static func nearest(to target: AXNode, in root: AXNode, levels: Int? = nil, where match: (AXNode) -> Bool) -> AXNode? {
+        guard let path = path(to: target, in: root) else { return nil }
+        for ancestor in path.reversed().prefix(levels.map { $0 + 1 } ?? path.count) {
+            if let hit = first(in: ancestor, where: match) { return hit }
+        }
+        return nil
+    }
+
+    /// Обход в глубину с пределами: у чужой программы дерево может быть огромным или зацикленным.
+    static func visit(_ root: AXNode, _ body: (AXNode, Int) -> Bool) {
+        var budget = maxNodes
+        func walk(_ node: AXNode, _ depth: Int) -> Bool {
+            budget -= 1
+            guard budget >= 0, body(node, depth) else { return false }
+            guard depth < maxDepth else { return true }
+            for child in node.children where !walk(child, depth + 1) { return false }
+            return true
+        }
+        _ = walk(root, 0)
+    }
+
+    static func first(in root: AXNode, where match: (AXNode) -> Bool) -> AXNode? {
+        var found: AXNode?
+        visit(root) { node, _ in
+            if match(node) { found = node; return false }
+            return true
+        }
+        return found
+    }
+
+    static func all(in root: AXNode, where match: (AXNode) -> Bool) -> [AXNode] {
+        var out: [AXNode] = []
+        visit(root) { node, _ in
+            if match(node) { out.append(node) }
+            return true
+        }
+        return out
+    }
+
+    /// Сводка окон для журнала: сколько узлов обойдено, наибольшая глубина, упёрлись ли в пределы, совпавшие ключи надписей.
+    static func summary(of windows: [AXNode], texts: ProviderTexts) -> (nodes: Int, depth: Int, full: Bool, keys: [String]) {
+        var nodes = 0, depth = 0, full = false
+        var keys: [String] = []
+        for window in windows {
+            var count = 0
+            visit(window) { node, d in
+                count += 1
+                depth = max(depth, d)
+                if let key = texts.matchedKey(node), !keys.contains(key) { keys.append(key) }
+                return true
+            }
+            nodes += count
+            full = full || count >= maxNodes || depth >= maxDepth
+        }
+        return (nodes, depth, full, keys)
+    }
+
+    /// «Диагностика» окон программы: по окну — число узлов и глубина (и упёрлись ли в пределы обхода); по узлу — роль,
+    /// глубина отступом, состояние галочки/радиокнопки и ключ совпавшей надписи программы (`ad.dlg.terminal.title`).
+    /// Ни заголовков, ни значений, ни прочих текстов. Окно больше `limit` строк — только важные узлы (с ключом надписи,
+    /// выборы, галочки, поля ввода) и их предки, остальное — счётчиком пропущенного.
+    static func diagnostics(of windows: [AXNode], texts: ProviderTexts, limit: Int = 400) -> [String] {
+        var lines: [String] = []
+        for (index, window) in windows.enumerated() {
+            var nodes: [(depth: Int, line: String, important: Bool)] = []
+            visit(window) { node, depth in
+                let role = node.role ?? "?"
+                var line = String(repeating: "  ", count: depth) + role + (node.subrole.map { "/\($0)" } ?? "")
+                let checked = node.isChecked
+                if let checked { line += checked ? " [on]" : " [off]" }
+                let key = texts.matchedKey(node)
+                if let key { line += " ← " + key }
+                let important = key != nil || checked != nil || isSecureField(node) || isTextInput(node)
+                    || ["AXWindow", "AXSheet", "AXRadioButton"].contains(role)
+                nodes.append((depth, line, important))
+                return true
+            }
+            let deepest = nodes.map(\.depth).max() ?? 0
+            let full = nodes.count >= maxNodes || deepest >= maxDepth
+            lines.append("# window \(index + 1): \(nodes.count) nodes, depth \(deepest)\(full ? ", limits reached" : "")")
+            guard nodes.count > limit else { lines += nodes.map(\.line); continue }
+            // Важные узлы и цепочки их предков (предок — ближайший выше с меньшей глубиной).
+            var keep = Set<Int>()
+            for i in nodes.indices where nodes[i].important {
+                keep.insert(i)
+                var depth = nodes[i].depth
+                var j = i - 1
+                while depth > 0, j >= 0 {
+                    if nodes[j].depth < depth { keep.insert(j); depth = nodes[j].depth }
+                    j -= 1
+                }
+            }
+            var skipped = 0
+            for i in nodes.indices {
+                guard keep.contains(i), lines.count < limit * (index + 1) else { skipped += 1; continue }
+                if skipped > 0 { lines.append(String(repeating: "  ", count: nodes[i].depth) + "… \(skipped) skipped"); skipped = 0 }
+                lines.append(nodes[i].line)
+            }
+            if skipped > 0 { lines.append("… \(skipped) skipped") }
+        }
+        return lines
+    }
+
+    /// Структура окна для разбора «поле не найдено»: только роли и глубина, без заголовков и значений.
+    static func structure(of root: AXNode, limit: Int = 80) -> [String] {
+        var lines: [String] = []
+        visit(root) { node, depth in
+            guard lines.count < limit else { return false }
+            let role = node.role ?? "?"
+            let sub = node.subrole.map { "/\($0)" } ?? ""
+            lines.append(String(repeating: "  ", count: depth) + role + sub)
+            return true
+        }
+        return lines
+    }
+}

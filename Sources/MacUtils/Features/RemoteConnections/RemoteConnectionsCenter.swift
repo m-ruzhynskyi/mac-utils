@@ -1,0 +1,523 @@
+import AppKit
+import Carbon.HIToolbox
+import MURemoteConnections
+import OSLog
+import UniformTypeIdentifiers
+import MUCore
+import MUDesign
+import MUScreenshot
+import MUTextEditor
+
+/// Ключи настроек «Удалённых подключений». Паролей среди них нет и быть не может: только путь, лист, программа
+/// по умолчанию и ID в избранном и недавних.
+enum RemotePref {
+    static let filePath = "remoteConnectionsFile"
+    static let sheet = "remoteConnectionsSheet"
+    static let favorites = "remoteConnectionsFavorites"
+    static let recents = "remoteConnectionsRecents"
+    static let defaultProgram = "remoteConnectionsDefaultProgram"
+    /// Ставить в окне пароля галочку «входить автоматически».
+    static let autologin = "remoteConnectionsAutologin"
+    /// Сколько секунд ждать окно пароля.
+    static let timeout = "remoteConnectionsTimeout"
+    /// Показывать HUD «Подключено» (ошибки показываются всегда).
+    static let notify = "remoteConnectionsNotify"
+    /// Язык интерфейса модуля: ru, uk, en.
+    static let language = "remoteConnectionsLanguage"
+    /// Вкладка «Удалённые» уже добавлена в панель 🔧 (один раз при обновлении).
+    static let panelTabAdded = "panelTabsRemoteAdded"
+}
+
+/// Адаптер модуля к UserDefaults: выбор файла, избранное, недавние.
+final class DefaultsRemoteStore: ConnectionsSettingsStore, RemotePreferencesStore {
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    var filePath: String? {
+        get { defaults.string(forKey: RemotePref.filePath) }
+        set { set(newValue, RemotePref.filePath) }
+    }
+
+    var sheetName: String? {
+        get { defaults.string(forKey: RemotePref.sheet) }
+        set { set(newValue, RemotePref.sheet) }
+    }
+
+    var favoriteIDs: [String] {
+        get { defaults.stringArray(forKey: RemotePref.favorites) ?? [] }
+        set { defaults.set(newValue, forKey: RemotePref.favorites) }
+    }
+
+    var recentIDs: [String] {
+        get { defaults.stringArray(forKey: RemotePref.recents) ?? [] }
+        set { defaults.set(newValue, forKey: RemotePref.recents) }
+    }
+
+    private func set(_ value: String?, _ key: String) {
+        if let value, !value.isEmpty { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+    }
+}
+
+/// Журнал модуля: события уже без ID, имён и путей — только числа и коды.
+final class RemoteConnectionsLog: RemoteLogger {
+    private let logger = Logger(subsystem: "com.mruzhynskyi.macutils", category: "remote")
+    func log(_ event: RemoteLogEvent) { logger.info("\(event.message, privacy: .public)") }
+}
+
+/// Состояние «Удалённых подключений» для вкладки панели и палитры (⌃⌥⌘A). Вся логика — в модуле MURemoteConnections.
+@MainActor
+final class RemoteConnectionsCenter: ObservableObject {
+    static let shared = RemoteConnectionsCenter()
+
+    @Published private(set) var state: ConnectionsFileState = .noFile
+    @Published private(set) var snapshot = ConnectionsSnapshot()
+    @Published private(set) var favorites: [String] = []
+    @Published private(set) var recents: [String] = []
+    @Published private(set) var loadedAt: Date?
+    private(set) var search = ConnectionSearch([])
+
+    private let defaults: UserDefaults
+    private let prefs: DefaultsRemoteStore
+    private let store: ConnectionsFileStore
+    private var started = false
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        prefs = DefaultsRemoteStore(defaults: defaults)
+        store = ConnectionsFileStore(settings: prefs, logger: RemoteConnectionsLog())
+        favorites = prefs.favoriteIDs
+        recents = prefs.recentIDs
+        RemoteL10n.language = defaults.string(forKey: RemotePref.language).flatMap(RemoteLanguage.init(rawValue:)) ?? .ru
+        store.onChange = { [weak self] in self?.sync() }
+    }
+
+    /// Первое обращение (вкладка, палитра) — начать читать файл и следить за ним.
+    func start() {
+        guard !started else { return }
+        started = true
+        store.start()
+    }
+
+    var fileURL: URL? { store.fileURL }
+    var sheetName: String? { store.sheetName }
+
+    /// Программа для строк без колонки «Программа». nil — AnyDesk, а если в файле есть обе программы — спросить.
+    var defaultProgramSetting: RemoteProgram? {
+        get { defaults.string(forKey: RemotePref.defaultProgram).flatMap(RemoteProgram.init(rawValue:)) }
+        set {
+            if let newValue { defaults.set(newValue.rawValue, forKey: RemotePref.defaultProgram) }
+            else { defaults.removeObject(forKey: RemotePref.defaultProgram) }
+            objectWillChange.send()
+        }
+    }
+
+    /// Программа строки без колонки «Программа» — для значков и фильтра списка.
+    var defaultProgram: RemoteProgram { defaultProgramSetting ?? .anyDesk }
+
+    var autologin: Bool {
+        get { defaults.bool(forKey: RemotePref.autologin) }
+        set { defaults.set(newValue, forKey: RemotePref.autologin); objectWillChange.send() }
+    }
+
+    static let timeoutRange = 5...60
+
+    var timeoutSeconds: Int {
+        get {
+            let value = defaults.integer(forKey: RemotePref.timeout)
+            return value == 0 ? 20 : min(max(value, Self.timeoutRange.lowerBound), Self.timeoutRange.upperBound)
+        }
+        set { defaults.set(newValue, forKey: RemotePref.timeout); objectWillChange.send() }
+    }
+
+    func listing(query: String, filter: ProgramFilter, tags: Set<String> = []) -> ConnectionListing {
+        ConnectionListBuilder.build(search: search, query: query, filter: filter, defaultProgram: defaultProgram,
+                                    favorites: favorites, recents: recents, tags: tags)
+    }
+
+    /// Подробности записи, открытые по ↩ (VPN, «Другое», RDP без адреса) — вкладка показывает их вместо списка.
+    @Published var detailsRecord: ConnectionRecord?
+
+    private func sync() {
+        state = store.state
+        // Подробности — той же записи из перечитанного файла; её больше нет — назад к списку.
+        if let open = detailsRecord {
+            detailsRecord = store.snapshot.records.first { $0.identity == open.identity && $0.name == open.name }
+        }
+        if snapshot != store.snapshot {
+            snapshot = store.snapshot
+            search = ConnectionSearch(snapshot.records)
+        }
+        if state == .ready { loadedAt = Date() }
+    }
+
+    // MARK: Файл
+
+    func reload() {
+        start()
+        store.reload()
+    }
+
+    func setFile(_ url: URL?, sheet: String? = nil) {
+        start()
+        store.setFile(url, sheet: sheet)
+    }
+
+    func setSheet(_ name: String?) {
+        store.setSheet(name)
+        objectWillChange.send()
+    }
+
+    /// Листы книги для выбора в настройках; у .xml — пусто.
+    static func sheetNames(of url: URL) -> [String] {
+        guard ["xlsx", "xlsm"].contains(url.pathExtension.lowercased()) else { return [] }
+        return (try? ConnectionsFileStore.sheetNames(url: url)) ?? []
+    }
+
+    /// «Создать шаблон»: таблица с колонками и строкой-примером, права 600; затем — выбрать её файлом подключений.
+    func createTemplate(xlsx: Bool) {
+        let panel = NSSavePanel()
+        panel.title = RL("Шаблон файла подключений")
+        panel.nameFieldStringValue = xlsx ? "connections.xlsx" : "connections.xml"
+        panel.allowedContentTypes = [xlsx ? UTType(filenameExtension: "xlsx") : .xml].compactMap { $0 }
+        ScreenOutput.activateApp(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let data = xlsx ? ConnectionsTemplate.xlsx() : ConnectionsTemplate.xml()
+        guard FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
+            Toast.show(RL("Не удалось сохранить шаблон"), symbol: "xmark.octagon.fill", tint: .red)
+            return
+        }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        setFile(url)
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: Правка записей (.xml)
+
+    /// Записи можно добавлять и править только в .xml; .xlsx правится в Excel.
+    var canEdit: Bool { fileURL?.pathExtension.lowercased() == "xml" }
+
+    /// Запись можно открыть в карточке: в .xml — править, в .xlsx/.xlsm — только смотреть (правка — в Excel).
+    var canView: Bool { ["xml", "xlsx", "xlsm"].contains(fileURL?.pathExtension.lowercased() ?? "") }
+
+    /// Добавить (`record == nil`) или изменить запись. Файл читается заново, меняются только байты этой записи,
+    /// перед записью — `.bak` с теми же правами.
+    func save(_ draft: ConnectionDraft, replacing record: ConnectionRecord?) throws {
+        try edit { data in
+            if let record { return try XMLConnectionsEditor.update(record, with: draft, in: data) }
+            return try XMLConnectionsEditor.add(draft, to: data)
+        }
+    }
+
+    func delete(_ record: ConnectionRecord) throws {
+        try edit { try XMLConnectionsEditor.delete(record, in: $0) }
+        prefs.favoriteIDs.removeAll { $0 == record.favoriteKey }
+        prefs.recentIDs.removeAll { $0 == record.favoriteKey }
+        favorites = prefs.favoriteIDs
+        recents = prefs.recentIDs
+    }
+
+    private func edit(_ change: (Data) throws -> Data) throws {
+        guard canEdit, let url = fileURL else { throw XMLEditError.unsupported }
+        let data: Data
+        do { data = try Data(contentsOf: url) } catch { throw XMLEditError.writeFailed }
+        try XMLConnectionsEditor.write(try change(data), to: url)
+        store.reload()
+    }
+
+    /// Выбор таблицы. Только путь; файл не копируется и не меняется.
+    func chooseFile() {
+        let panel = NSOpenPanel()
+        panel.title = RL("Файл подключений")
+        panel.message = RL("Таблица .xlsx или .xml со списком компьютеров")
+        panel.allowedContentTypes = [UTType(filenameExtension: "xlsx"), UTType(filenameExtension: "xlsm"), .xml].compactMap { $0 }
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        ScreenOutput.activateApp(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        setFile(url)
+    }
+
+    /// «Excel»: открыть таблицу в программе по умолчанию.
+    func openFile() {
+        guard let url = fileURL else { return chooseFile() }
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: Избранное и недавние
+
+    func isFavorite(_ record: ConnectionRecord) -> Bool { favorites.contains(record.favoriteKey) }
+
+    func toggleFavorite(_ record: ConnectionRecord) {
+        ConnectionLists.toggleFavorite(record, in: prefs)
+        favorites = prefs.favoriteIDs
+    }
+
+    // MARK: Программы
+
+    func isInstalled(_ program: RemoteProgram) -> Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: program.bundleID) != nil
+    }
+
+    /// Сообщение «Подключено» после ввода пароля. Ошибки показываются всегда.
+    var notifySuccess: Bool {
+        get { defaults.object(forKey: RemotePref.notify) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: RemotePref.notify); objectWillChange.send() }
+    }
+
+    var language: RemoteLanguage {
+        get { RemoteL10n.language }
+        set {
+            defaults.set(newValue.rawValue, forKey: RemotePref.language)
+            RemoteL10n.language = newValue
+            objectWillChange.send()
+        }
+    }
+
+    // MARK: Подключение
+
+    private lazy var launcher = WorkspaceLauncher()
+    private lazy var connector = RemoteConnector(ax: SystemAXAccess(), launcher: launcher, keyboard: ProcessKeyboard(),
+                                                 logger: RemoteConnectionsLog())
+    private var connection: Task<Void, Never>?
+    private var last: (record: ConnectionRecord, program: RemoteProgram, withPassword: Bool)?
+    @Published private(set) var isConnecting = false
+
+    /// Подключиться: пароль — из файла в момент подключения, ввод — в окно программы (HUD показывает ход).
+    /// `withPassword: false` — ⌘↩, только открыть программу на этом ID.
+    func connect(_ record: ConnectionRecord, withPassword: Bool = true, program chosen: RemoteProgram? = nil,
+                 retry: Bool = false) {
+        // RDP — в Windows App; VPN и «Другое» — подробности: AnyDesk/TeamViewer здесь ни при чём.
+        if let method = record.method {
+            if method == .rdp, RDPLink.isValidHost(record.id) { openRDP(record) } else { detailsRecord = record }
+            return
+        }
+        connection?.cancel()
+        let hud = RemoteHUDController.shared
+        hud.onAction = { [weak self] action in self?.handle(action) }
+        let ambiguous = snapshot.diagnostics.ambiguousProgramRows.contains(record.sourceRow)
+        guard let program = chosen ?? record.resolvedProgram(default: defaultProgramSetting, ambiguous: ambiguous) else {
+            last = (record, .anyDesk, withPassword)
+            hud.show(.finished(.failed(.programNotSpecified)), program: .anyDesk, record: record)
+            return
+        }
+        last = (record, program, withPassword)
+        let request = ConnectRequest(record: record, program: program, withPassword: withPassword, autologin: autologin,
+                                     timeoutSeconds: timeoutSeconds, reuseOpenWindow: retry)
+        let provider = RemoteProviders.provider(for: program, texts: texts(for: program))
+        let store = self.store
+        isConnecting = true
+        connection = Task { [weak self] in
+            var opened = false
+            let outcome = await self?.connector.connect(request, provider: provider, password: {
+                try await store.lookupPassword(for: record)
+            }, accountPassword: {
+                try await store.lookupSecret(.accountPassword, for: record)
+            }, progress: { [weak self] phase in
+                if phase == .opening { opened = true }
+                if case .finished(let outcome) = phase, outcome.isSuccess, self?.notifySuccess == false { return hud.dismiss() }
+                // Не подтвердилось или сеанс не выбран — «Диагностика»: роли окон программы и ключи надписей, без текстов.
+                if case .finished = phase, let lines = self?.connector.lastDiagnostics, !lines.isEmpty {
+                    return hud.show(RemoteHUDContent.make(phase, program: program, record: record).withDiagnostics(lines),
+                                    program: program)
+                }
+                hud.show(phase, program: program, record: record)
+            })
+            guard let self, let outcome else { return }
+            self.isConnecting = false
+            // В «Недавние» — только то, что открылось: «не подтверждено» и «сеанс закрыт» туда не попадают.
+            if opened, outcome.isSuccess {
+                ConnectionLists.noteConnected(record, in: self.prefs)
+                self.recents = self.prefs.recentIDs
+            }
+            if outcome == .failed(.entryGone) { self.store.reload() }
+            // Запасной путь — вставить ID вручную. Только ID: пароль в буфер обмена не попадает никогда.
+            if outcome == .unconfirmed(copyID: true) { self.writePlain(record.id) }
+        }
+    }
+
+    func appURL(_ program: RemoteProgram) -> URL? { launcher.appURL(bundleID: program.bundleID) }
+
+    // MARK: RDP, учётка, «Доступ»
+
+    /// Windows App (или прежний Microsoft Remote Desktop); нет — адрес в буфер и нейтральный тост.
+    func openRDP(_ record: ConnectionRecord) { openRDP(record, host: record.id, account: record.account) }
+
+    /// `host`/`account` — из записи или из разобранного «Доступа» (запись AnyDesk с RDP в «Доступе»).
+    func openRDP(_ record: ConnectionRecord, host: String, account: String) {
+        let hud = RemoteHUDController.shared
+        guard let contents = RDPLink.file(host: host, account: account) else { detailsRecord = record; return }
+        let who = "\(record.name) · \(host)"
+        if let app = RDPLink.bundleIDs.lazy.compactMap({ NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }).first,
+           let file = Self.writeRDPFile(contents, name: record.name) {
+            NSWorkspace.shared.open([file], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+            ConnectionLists.noteConnected(record, in: prefs)
+            recents = prefs.recentIDs
+            if notifySuccess { hud.show(RemoteHUDContent(tone: .success, title: RL("Открываю %@…", "Windows App"), detail: who)) }
+        } else {
+            writePlain(host)
+            hud.show(RemoteHUDContent(tone: .neutral, title: RL("Windows App не установлен — адрес скопирован"),
+                                      detail: RL("Вставьте адрес в программу удалённого рабочего стола."), actions: [.close]))
+        }
+    }
+
+    /// `.rdp` во временной папке только для владельца; через минуту удаляется (Windows App его уже прочитал).
+    private static func writeRDPFile(_ contents: Data, name: String) -> URL? {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mu-rdp-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let url = dir.appendingPathComponent(RDPLink.fileName(for: name))
+            guard FileManager.default.createFile(atPath: url.path, contents: contents, attributes: [.posixPermissions: 0o600]) else { return nil }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { try? FileManager.default.removeItem(at: dir) }
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    func copyAddress(_ record: ConnectionRecord) { copyPlain(record.id, title: RL("Адрес скопирован")) }
+
+    /// HUD и обычная запись в буфер — подменяются в тестах (тесты ничего не показывают и буфер не трогают).
+    var showHUD: (RemoteHUDContent) -> Void = { RemoteHUDController.shared.show($0) }
+    var writePlain: (String) -> Void = { text in
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+    /// Звонки — через UniTalk; в тестах двойник.
+    var dialer: RemoteDialer = WorkspaceDialer()
+
+    /// Не секрет (адрес, телефон) — обычной строкой.
+    func copyPlain(_ text: String, title: String) {
+        writePlain(text)
+        showHUD(RemoteHUDContent(tone: .success, title: title, detail: nil))
+    }
+
+    /// Позвонить через UniTalk (`tel:+380…`, обработчик по умолчанию не меняется). UniTalk не установлен, не открылся или номер
+    /// не распознан — номер копируется. В журнал номер не пишется.
+    @discardableResult
+    func call(_ phone: String) -> PhoneCall.Plan {
+        let app = dialer.appURL(bundleID: PhoneCall.uniTalkBundleID)
+        let plan = PhoneCall.plan(phone, uniTalkInstalled: app != nil)
+        switch plan {
+        case .call(let url):
+            let number = phone.trimmingCharacters(in: .whitespaces)
+            if let app {
+                dialer.open(url, withApplicationAt: app) { [weak self] ok in
+                    if !ok { self?.copyPlain(number, title: RL("UniTalk не открылся — номер скопирован")) }
+                }
+            }
+        case .copy(let number, let reason):
+            copyPlain(number, title: reason == .noUniTalk ? RL("UniTalk не найден — номер скопирован") : RL("Номер скопирован"))
+        }
+        return plan
+    }
+
+    /// Секретное поле (пароль, пароль учётки, «Доступ», «Контакты») — из файла сейчас. Вызывающий затирает.
+    func readSecret(_ field: ConnectionField, of record: ConnectionRecord) async -> SecretBuffer? {
+        try? await store.lookupSecret(field, for: record).secret
+    }
+
+    func showReadFailure() {
+        showHUD(RemoteHUDContent(tone: .warning, title: RL("Не удалось прочитать файл"),
+                                 detail: RL("Проверьте, что файл на месте, и повторите."), actions: [.close]))
+    }
+
+    /// Скопировать секрет: скрыто от истории буфера, через 30 с буфер очищается, если в нём всё ещё он.
+    func copySecret(_ field: ConnectionField, of record: ConnectionRecord) {
+        Task { @MainActor [weak self] in
+            _ = await self?.copySecretValue(field, of: record,
+                                            title: field == .access ? RL("«Доступ» скопирован") : RL("Пароль учётки скопирован"))
+        }
+    }
+
+    /// То же с ответом; `title` nil — без HUD (подпись показывает карточка). false — файл не прочитался.
+    func copySecretValue(_ field: ConnectionField, of record: ConnectionRecord, title: String? = nil) async -> Bool {
+        guard let secret = await readSecret(field, of: record) else {
+            showReadFailure()
+            return false
+        }
+        defer { secret.wipe() }
+        copyConcealed(secret.withBytes { String(decoding: $0, as: UTF8.self) }, title: title)
+        return true
+    }
+
+    /// Секрет в буфер: скрыт от истории буфера, через 30 с очищается, если в буфере всё ещё он. `title` nil — без HUD.
+    func copyConcealed(_ text: String, title: String?) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        item.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        item.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+        pasteboard.writeObjects([item])
+        let stamp = pasteboard.changeCount
+        if let title { showHUD(RemoteHUDContent(tone: .success, title: title, detail: RL("Буфер очистится через 30 с."))) }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            if NSPasteboard.general.changeCount == stamp { NSPasteboard.general.clearContents() }
+        }
+    }
+
+    /// Надписи окна пароля — из установленной программы, на всех её языках.
+    private func texts(for program: RemoteProgram) -> ProviderTexts {
+        guard let url = launcher.appURL(bundleID: program.bundleID) else {
+            return ProviderTexts.builtIn(keys: RemoteProviders.keys(for: program))
+        }
+        return ProviderTexts.load(appURL: url, keys: RemoteProviders.keys(for: program))
+    }
+
+    private func handle(_ action: RemoteHUDAction) {
+        let hud = RemoteHUDController.shared
+        switch action {
+        case .cancel:
+            connection?.cancel()
+            hud.dismiss()
+        case .close:
+            hud.dismiss()
+        case .openAccessibility:
+            hud.dismiss()
+            Permissions.open(.accessibility)
+        case .download:
+            hud.dismiss()
+            if let program = last?.program { NSWorkspace.shared.open(program.downloadURL) }
+        case .diagnostics:
+            // Структура — в буфер (только роли, глубина и ключи надписей программы: секретов в ней нет) и в HUD.
+            if let lines = hud.current?.structure, !lines.isEmpty { writePlain(lines.joined(separator: "\n")) }
+            hud.toggleStructure()
+        case .openFile:
+            hud.dismiss()
+            openFile()
+        case .retry:
+            guard let last else { return hud.dismiss() }
+            connect(last.record, withPassword: last.withPassword, program: last.program, retry: true)
+        case .choose(let program):
+            guard let last else { return hud.dismiss() }
+            connect(last.record, withPassword: last.withPassword, program: program)
+        }
+    }
+
+    /// Глобальная клавиша палитры — только когда выбран файл подключений: без него функция не нужна,
+    /// а зарегистрированная клавиша отнимала бы сочетание у всех программ. Вызывается на каждую смену настроек.
+    static func syncHotKey(defaults: UserDefaults = .standard) {
+        let hotKeys = HotKeyCenter.shared
+        guard hasFile(defaults: defaults) else { return hotKeys.unregister(id: HotKeyID.remoteConnections) }
+        let combo = HotKeyAction.remoteConnections.defaultCombo
+        hotKeys.register(id: HotKeyID.remoteConnections, keyCode: combo.keyCode, modifiers: combo.modifiers) {
+            AppRouter.shared.runHotKey(HotKeyID.remoteConnections)
+        }
+    }
+
+    static func hasFile(defaults: UserDefaults = .standard) -> Bool {
+        !(defaults.string(forKey: RemotePref.filePath) ?? "").isEmpty
+    }
+
+    /// Новая вкладка «Удалённые» — один раз, сразу после «Редактора» (или в конец).
+    static func addPanelTabOnce(defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: RemotePref.panelTabAdded) else { return }
+        defaults.set(true, forKey: RemotePref.panelTabAdded)
+        var tabs = (defaults.string(forKey: Pref.toolsPanelTabs) ?? PanelTabs.defaultValue).split(separator: ",").map(String.init)
+        guard !tabs.contains(SettingsSection.remote.rawValue) else { return }
+        tabs.insert(SettingsSection.remote.rawValue, at: tabs.firstIndex(of: "textEditor").map { $0 + 1 } ?? tabs.count)
+        defaults.set(tabs.joined(separator: ","), forKey: Pref.toolsPanelTabs)
+    }
+}

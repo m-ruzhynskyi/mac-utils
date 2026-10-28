@@ -3,6 +3,7 @@ import PDFKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUTextEditor
 
 /// Линии таблиц «Документа» как у Word (по его PDF): толщина и края — на сетке 1/300 дюйма (0,24 pt) от угла листа,
 /// вертикальная линия — серединой на точном краю `\cellx`, горизонтальная прибавляется к высоте строки.

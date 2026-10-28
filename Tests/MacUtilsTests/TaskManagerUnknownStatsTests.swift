@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUAudio
 
 /// Процессы root и других пользователей: имя из таблицы ядра, нагрузка неизвестна — в конце списка, без фальшивых нулей.
 final class TaskManagerUnknownStatsTests: XCTestCase {

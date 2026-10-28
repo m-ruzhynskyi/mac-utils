@@ -3,6 +3,7 @@ import PDFKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUTextEditor
 
 /// Цвета «Документа» против PDF Word: цвет текста (`\cf`), маркер и заливка знака (`\highlight`, `\cb`, `\chcbpat`),
 /// заливка абзаца и ячейки (`\cbpat`, `\clcbpat`). Наша сторона — та же раскладка, что в приложении (офскрин),

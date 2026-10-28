@@ -1,6 +1,11 @@
 import AVFoundation
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUAudio
+@testable import MUScreenshot
+@testable import MUVideoPlayer
+@testable import MUTextEditor
 
 /// Этап 2 плеера: модель на демо-видео. Звука нет (`silent`), позиции — в памяти.
 @MainActor

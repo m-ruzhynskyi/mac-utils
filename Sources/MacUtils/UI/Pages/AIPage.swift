@@ -1,5 +1,10 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUDownloadsSorter
+import MUScreenShare
+import MUTextEditor
 
 // MARK: - ИИ
 

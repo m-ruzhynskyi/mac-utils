@@ -1,5 +1,8 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUSmoothScroll
 
 // MARK: - Плавная прокрутка
 
