@@ -295,6 +295,16 @@ final class ScreenShareV2Tests: XCTestCase {
         XCTAssertNotNil(ShareRules.hostSignature(for: keyed(), roomId: "1234567890", identity: identity()))
     }
 
+    func testTimeoutDeclineCarriesReasonOnlyForTimeout() throws {
+        func object(_ message: String?) throws -> [String: Any] {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try XCTUnwrap(message).utf8)) as? [String: Any])
+        }
+        XCTAssertEqual(try object(ScreenShare.answerMessage(viewer: "9876543210", accept: false, rid: "r1", timedOut: true))["reason"] as? String, "timeout")
+        XCTAssertNil(try object(ScreenShare.answerMessage(viewer: "9876543210", accept: false, rid: "r1"))["reason"], "ручной отказ без reason")
+        XCTAssertNil(try object(ScreenShare.answerMessage(viewer: "9876543210", accept: true, timedOut: true))["reason"])
+        XCTAssertFalse(ShareRules.apply(.timeout, to: keyed(rid: "r"), prompt: .init(kind: .normal, allowAlways: true, notes: [])) { _, _, _ in XCTFail() })
+    }
+
     func testAnswerMessageCarriesHostSignatureOnlyWhenGiven() throws {
         let plain = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try XCTUnwrap(
             ScreenShare.answerMessage(viewer: "9876543210", accept: true, rid: "r1")).utf8)) as? [String: Any])
@@ -349,7 +359,7 @@ final class ScreenShareV2Tests: XCTestCase {
         let fast = try XCTUnwrap(queue.items.last)
         queue.answer(fast, .allowOnce)
         try await Task.sleep(nanoseconds: 400_000_000)
-        XCTAssertEqual(answers, [.allowOnce, .decline], "ответ на один запрос, автоотказ на другой")
+        XCTAssertEqual(answers, [.allowOnce, .timeout], "ответ на один запрос, автоотказ на другой")
         XCTAssertEqual(noted, ["Петя"], "пометка только для истёкшего")
         XCTAssertTrue(queue.items.isEmpty)
     }

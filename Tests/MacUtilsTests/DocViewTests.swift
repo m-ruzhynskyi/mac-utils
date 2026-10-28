@@ -105,6 +105,14 @@ final class DocViewTests: XCTestCase {
 
     private func settle(_ seconds: TimeInterval = 0.3) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
 
+    /// Крутить цикл событий, пока не выполнится условие (не дольше `timeout`). Перенос места при переключении «Код ↔ Документ»
+    /// идёт через `DispatchQueue.main.async`: на загруженной машине первая раскладка документа занимает весь проход цикла,
+    /// и фиксированные 0,3 с кончаются раньше, чем блок выполнится (CI 28.10: в документе выделено "" вместо «1,08»).
+    private func settle(until condition: () -> Bool, timeout: TimeInterval = 5) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    }
+
     @discardableResult
     private func host(_ workspace: EditorWorkspace, size: NSSize = NSSize(width: 800, height: 600), dark: Bool = false) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: size.width, height: size.height),
@@ -191,15 +199,17 @@ final class DocViewTests: XCTestCase {
         let target = source.range(of: "1,08")
         tab.textView.setSelectedRange(target)
         tab.setMode(.document)
-        settle()
         let document = try XCTUnwrap(tab.documentController)
+        // Место переносится асинхронно: ждём, пока выделение появится в документе (проверка — та же, ниже).
+        settle(until: { (document.textViews.first?.selectedRange().length ?? 0) > 0 })
         let shown = try XCTUnwrap(document.textViews.first?.selectedRange())
         XCTAssertEqual((document.storage.string as NSString).substring(with: shown), "1,08", "Код → Документ: то же место")
         // Документ → Код: выделение «Демоград» на странице — его кусок исходника.
         let word = (document.storage.string as NSString).range(of: "Демоград")
         document.textViews.first?.setSelectedRange(word)
+        let codeBefore = tab.textView.selectedRange()
         tab.setMode(.code)
-        settle()
+        settle(until: { tab.textView.selectedRange() != codeBefore })
         XCTAssertEqual(tab.textView.selectedRange(), tab.text.range(of: DocDemo.rtf("Демоград")), "в коде выделены ровно его \\'hh")
         XCTAssertEqual(EditorViewModes.preferred(for: tab.document.url), .code, "выбор запомнен для .frm")
     }

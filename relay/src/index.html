@@ -468,7 +468,7 @@ const AUTH_ERRORS = {
   "id-format": "Сервер не принял этот ID.",
   "auth-timeout": "Сервер не дождался подтверждения ключа. Попробуйте ещё раз.",
   "replaced": "Трансляция с вашим ID продолжена в другом окне или на другом устройстве с этим же ключом.",
-  "rate-limited": "Слишком много подключений. Подождите минуту и попробуйте снова.",
+  "rate-limited": "Слишком много подключений. Подождите пару минут и попробуйте снова.",
   "upgrade-required": "Сервер требует новую версию приложения — обновите Mac Utils Share.",
   "no-key": "Сервер проверяет ключ устройства, а эта версия приложения так не умеет — обновите Mac Utils Share.",
 };
@@ -1570,7 +1570,7 @@ const requests = [];
 // Доверять можно только чужому ID из 10 цифр: свой и пустой/кривой ID подделывает любой зритель.
 function canTrust(id) { return id !== myId && /^\d{10}$/.test(id); }
 // Вид запроса: "key" — зритель подписал ключом; "none" — старый зритель у ведущего с ключом;
-// "legacy" — ведущий без ключа (relay не спрашивал): доверие по ID, ровно как раньше.
+// "legacy" — ведущий без ключа (relay не спрашивал): личность не проверена, зрителя всегда спрашиваем.
 function requestKind(msg) {
   if (msg.auth === "key" || msg.auth === "none") return msg.auth;
   return hostAuth?.keyed ? "none" : "legacy";
@@ -1581,7 +1581,8 @@ function onRequest(msg) {
   const kind = requestKind(msg);
   const pub = kind === "key" && typeof msg.pub === "string" && B64U_KEY.test(msg.pub) ? msg.pub : null;
   const entry = canTrust(viewer) ? trustedList().find((e) => e.id === viewer) : null;
-  if (kind === "legacy" && entry) return answer(viewer, true, rid);
+  // «legacy» (ведущий без ключа) и «none» (старый зритель) по ID не впускаются: ID называет сам зритель, а ID люди разглашают.
+  // Как на Mac — всегда вопрос; автоприём только по проверенному ключу (ниже).
   // Окно «сам себе»: relay сверил ключ зрителя с ключом владельца этого ID.
   if (kind === "key" && pub && msg.self === true && hostAuth?.keyed) return answer(viewer, true, rid, pub);
   // Автоприём только если ID принадлежит этому ключу: при idVerified:false он закреплён за другим устройством.
@@ -1594,7 +1595,8 @@ function showRequest() {
   const r = requests[0]; if (!r) { $("request").style.display = "none"; return; }
   $("requestTitle").textContent = `${r.name} хочет посмотреть ваш экран`;
   let text = `ID ${display(r.viewer)}. Зритель только смотрит и может ставить метки — управлять компьютером он не может.`;
-  const canAlways = canTrust(r.viewer) && (r.kind === "legacy" || (r.kind === "key" && !!r.pub && r.idVerified !== false));
+  // Без ключа (legacy и none) «Всегда разрешать» нет: ID называет сам зритель, запомнить по нему нельзя.
+  const canAlways = canTrust(r.viewer) && r.kind === "key" && !!r.pub && r.idVerified !== false;
   const confirmKey = canAlways && r.kind === "key" && r.entry && !r.entry.pub;
   if (r.kind === "key") {
     if (confirmKey) text = `${r.name} — в доверенных. Теперь проверяется ключ устройства: подтвердите один раз. Отпечаток ${r.fp || "—"}.`;
@@ -1603,7 +1605,7 @@ function showRequest() {
       if (r.entry?.pub && r.entry.pub !== r.pub) text += ` Ключ изменился: раньше был ${r.entry.fp || "другой"} — проверьте у зрителя.`;
     }
     if (r.idVerified === false) text += " ID не подтверждён: этот ID принадлежит другому ключу.";
-  } else if (r.kind === "none") {
+  } else if (r.kind === "none" || r.kind === "legacy") {
     text += " Старая версия приложения: личность зрителя не проверена, «Всегда разрешать» недоступно.";
   }
   if (r.viewer === myId) text += " Запрос с вашим собственным ID — это может быть не вы.";

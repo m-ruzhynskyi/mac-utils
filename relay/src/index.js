@@ -17,6 +17,7 @@ import page from "./index.html";
 import landing from "./landing.html";
 // Одной строкой каждый: тестовая обвязка вырезает import и склеивает файлы в один скрипт.
 import { MAX_PENDING, MAX_PENDING_PER_IP, MAX_UNAUTH, MAX_UNAUTH_PER_IP, MAX_UNAUTH_VIEWERS_PER_IP, AUTH_TIMEOUT_MS, CLAIM_PER_IP_PER_DAY, ipKey, windowHit, pendingAllowed, declineCooldown, noteDecline } from "./limits.js";
+import { pageHeaders } from "./csp.js";
 import { b64uHasLength, isPublicKey, hostMessage, viewerMessage, statusMessage, verifyEd25519, verifyDevice, fingerprintOf, newNonce } from "./auth.js";
 
 // Смотреть и транслировать можно только из приложений Mac Utils (Mac) и Mac Utils Share (Windows):
@@ -50,6 +51,21 @@ const STATUS_PER_KEY_PER_MIN = 6;
 // Встреча из 10–20 человек не должна ждать минуту, пока ведущий увидит запрос (B1).
 const REQUESTS_PER_MIN = 20;
 const CLAIM_PERIOD_MS = 86_400_000;
+// Антиспам запросов (L2): ведущего хотят утомить, чтобы он нажал «Разрешить». Новые ключи и ID зритель берёт сколько угодно,
+// поэтому считаем ещё и по IP; после серии отказов подряд комната на время не принимает новых запросов (кроме «своих»).
+const REQUESTS_PER_IP_PER_MIN = 12;
+const REQUESTS_PER_KEY_PER_MIN = 4;
+const ROOM_DECLINE_LIMIT = 5;
+const ROOM_PAUSE_MS = 120_000;
+// Сколько принятых ведущим зрителей помнит комната (их переподключения не считаются запросами).
+const MAX_ADMITTED = 200;
+// Размер сообщения проверяется до разбора JSON (L3): до проверки ключа — 1 КБ, служебные heartbeat/ack — 256 Б,
+// остальные — 32 КБ (метки до 2000 точек, список мониторов).
+const MAX_PENDING_BYTES = 1024;
+const MAX_LIGHT_BYTES = 256;
+const MAX_MESSAGE_BYTES = 32768;
+const LIGHT_MESSAGE = /^\s*\{\s*"type"\s*:\s*"(?:heartbeat|ack)"/;
+const MAX_NAME = 60;
 // Лимит /status по ключу — в памяти изолята Worker (приблизительный: изолятов может быть несколько).
 const statusWindow = new Map();
 
@@ -151,7 +167,9 @@ function sanitizeSwitchRequest(command) {
 
 // Ответ ведущего одному зрителю (`to` relay убирает).
 function sanitizeSwitchResult(command) {
-  if (!command || typeof command !== "object" || typeof command.to !== "string" || command.to === "") return null;
+  if (!command || typeof command !== "object") return null;
+  const addressed = (typeof command.to === "string" && command.to !== "") || (typeof command.rid === "string" && command.rid !== "");
+  if (!addressed) return null;
   if (!displayNumber(command.display) || !SWITCH_RESULTS.has(command.result)) return null;
   return { type: "switch-result", display: command.display, result: command.result };
 }
@@ -160,11 +178,13 @@ function sanitizeSwitchResult(command) {
 const RATE_PER_SECOND = 20;
 const RATE_BURST = 40;
 const buckets = new WeakMap();
-function takeToken(socket, now = Date.now()) {
-  const bucket = buckets.get(socket) || { tokens: RATE_BURST, at: now };
+// Служебные heartbeat/ack — свой счёт: ack идёт каждые 10 видеопакетов и не должен съедать метки.
+const lightBuckets = new WeakMap();
+function takeToken(socket, now = Date.now(), store = buckets) {
+  const bucket = store.get(socket) || { tokens: RATE_BURST, at: now };
   bucket.tokens = Math.min(RATE_BURST, bucket.tokens + ((now - bucket.at) / 1000) * RATE_PER_SECOND);
   bucket.at = now;
-  buckets.set(socket, bucket);
+  store.set(socket, bucket);
   if (bucket.tokens < 1) return false;
   bucket.tokens -= 1;
   return true;
@@ -275,9 +295,8 @@ export default {
       return env.ROOMS.get(env.ROOMS.idFromName(check[1])).fetch(new Request(request, { headers }));
     }
     if (!room || !ID.test(room[1])) {
-      return new Response(isClient(request) ? page : landing, {
-        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-      });
+      const html = isClient(request) ? page : landing;
+      return new Response(html, { headers: await pageHeaders(html, url) });
     }
     if (!token) return new Response("Use the Mac Utils app", { status: 403 });
     if (mode === "required" && !keyedClient(token, url)) return new Response("Update Mac Utils", { status: 426 });
@@ -292,6 +311,11 @@ export default {
   },
 };
 
+// ID зрителя из адреса (mu-share-1): только цифры, не больше 10.
+function viewerParam(url) {
+  return (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
+}
+
 export class Room {
   constructor(state, env) {
     this.state = state;
@@ -299,6 +323,12 @@ export class Room {
     // В памяти: после выгрузки объекта обнуляются, это допустимо (.audit/auth-design.md §7).
     this.declines = new Map();
     this.requestWindow = new Map();
+    // Запросы по IP и по ключу за минуту; серия отказов ведущего подряд и пауза комнаты (L2). В памяти.
+    this.ipRequests = new Map();
+    this.keyRequests = new Map();
+    this.roomDeclines = { streak: 0, until: 0 };
+    // Принятые ведущим на время трансляции: `k:<pub>` (v2) и `l:<ip>|<id>` (mu-share-1). В памяти.
+    this.admitted = new Set();
     // Поток видео к каждому зрителю: { sent, acked, acking, skipping, skipped } (в памяти, после выгрузки — заново).
     this.flow = new WeakMap();
     this.lastKeyAsk = 0;
@@ -347,6 +377,8 @@ export class Room {
       } else if (ip && declineCooldown(this.declines, `ip:${ip}`, Date.now()) > 0) {
         return new Response("rate-limited", { status: 429 });
       }
+      // Старый зритель без ключа не бывает «своим»: пауза комнаты и счёт по IP действуют на него всегда.
+      if (!v2 && !this.requestAllowed(ip, "", false, this.legacyAdmitKey(ip, viewerParam(url)))) return new Response("rate-limited", { status: 429 });
     }
     const [client, server] = Object.values(new WebSocketPair());
     if (role === "host") {
@@ -358,7 +390,7 @@ export class Room {
     } else if (v2) {
       return this.connectViewerV2(url, roomId, ip, server, client);
     } else {
-      let viewer = (url.searchParams.get("viewer") || "").replace(/\D/g, "").slice(0, 10);
+      let viewer = viewerParam(url);
       // ID комнаты как ID зрителя — подделка (его знает любой, у кого есть код): старые Mac-хосты 1.3.x
       // принимали такого «себя» без вопроса. Отдаём хосту пустой ID, он покажет обычный запрос.
       if (viewer === roomId) viewer = "";
@@ -609,7 +641,7 @@ export class Room {
     if (foreign) this.endViewers();
     // M2: пущенные зрители остаются только у того ключа, который их пустил, — и в grace, когда прежнего хоста уже нет.
     for (const viewer of this.approvedViewers()) {
-      if ((viewer.deserializeAttachment() || {}).approvedBy !== auth.pub) this.endViewer(viewer);
+      if ((viewer.deserializeAttachment() || {}).approvedBy !== auth.pub) { this.endViewer(viewer); this.admitted.clear(); }
     }
     socket.serializeAttachment({ ...current, auth: "key", pub: auth.pub, fp, nonce: undefined, verifying: undefined, lastSeen: Date.now() });
     socket.send(JSON.stringify({ type: "authed", v: 2, fp, claimed: claim.claimed }));
@@ -649,6 +681,8 @@ export class Room {
     const self = !!owner && owner.pub === auth.pub;
     // Пауза после отказа — до привязки ID: отклонённый не тратит квоту и не закрепляет новый ID.
     if (!self && declineCooldown(this.declines, `k:${auth.pub}`, Date.now()) > 0) return this.failAuth(socket, "rate-limited");
+    // Пауза комнаты тоже до привязки ID, но уже пущенных она не касается.
+    if (!self && !this.admitted.has(`k:${auth.pub}`) && this.roomDeclines.until > Date.now()) return this.failAuth(socket, "rate-limited");
     const fp = await fingerprintOf(auth.pub);
     let id = info.id, idVerified;
     if (info.id === info.roomId) {
@@ -661,12 +695,44 @@ export class Room {
     const current = this.stillPending(socket);
     if (!current) return;
     if (!self && !this.waitingAllowed(current.ip)) return this.failAuth(socket, "rate-limited");
+    if (!this.requestAllowed(current.ip, auth.pub, self)) return this.failAuth(socket, "rate-limited");
     socket.serializeAttachment({ ...current, auth: "key", pub: auth.pub, fp, idVerified, self, id, nonce: undefined, verifying: undefined, lastSeen: Date.now() });
     socket.send(JSON.stringify({ type: "waiting", v: 2, rid: current.rid }));
     await this.requestOrQueue(socket);
   }
 
   // ---- Запросы хосту: не больше REQUESTS_PER_MIN в минуту, остальные ждут своей очереди ----
+
+  // Можно ли принять ещё один запрос: комната не на паузе после серии отказов, с этого IP и по этому ключу не слишком часто.
+  // «Своё» окно владельца ID ведущего не считается и не блокируется.
+  // Уже пущенные ведущим (`admitKey`) возвращаются после обрыва без лимитов и без паузы: это продолжение, а не новый запрос.
+  requestAllowed(ip, pub, self, admitKey = pub ? `k:${pub}` : "") {
+    if (self || (admitKey && this.admitted.has(admitKey))) return true;
+    const now = Date.now();
+    if (this.roomDeclines.until > now) return false;
+    if (ip && !windowHit(this.ipRequests, ip, REQUESTS_PER_IP_PER_MIN, 60_000, now)) return false;
+    if (pub && !windowHit(this.keyRequests, pub, REQUESTS_PER_KEY_PER_MIN, 60_000, now)) return false;
+    return true;
+  }
+
+  legacyAdmitKey(ip, id) { return ip && id ? `l:${ip}|${id}` : ""; }
+
+  rememberAdmitted(info) {
+    const key = info.auth === "key" && info.pub ? `k:${info.pub}` : this.legacyAdmitKey(info.ip, info.id);
+    if (!key) return;
+    this.admitted.delete(key);
+    this.admitted.add(key);
+    if (this.admitted.size > MAX_ADMITTED) this.admitted.delete(this.admitted.values().next().value);
+  }
+
+  noteRoomDecline(now) {
+    const streak = this.roomDeclines.streak + 1;
+    this.roomDeclines = { streak, until: streak >= ROOM_DECLINE_LIMIT ? now + ROOM_PAUSE_MS : 0 };
+  }
+
+  noteRoomAccept() {
+    this.roomDeclines = { streak: 0, until: 0 };
+  }
 
   requestMessage(info, hostAuth) {
     const base = { type: "request", viewer: info.id, name: info.name, rid: info.rid };
@@ -886,9 +952,11 @@ export class Room {
     this.notifyHost(undefined, { key: true, ...(askSlow ? { slow: true } : {}) });
   }
 
-  toHost(message) {
+  // rid — сокет зрителя-отправителя: ведущему с проверенным ключом (v2) он нужен для адресного ответа; старые ведущие его не получают.
+  toHost(message, rid) {
     for (const host of this.activeHosts()) {
-      try { host.send(JSON.stringify(message)); } catch (_) {}
+      const keyed = (host.deserializeAttachment() || {}).auth === "key";
+      try { host.send(JSON.stringify(keyed && typeof rid === "string" ? { ...message, rid } : message)); } catch (_) {}
     }
   }
 
@@ -898,7 +966,7 @@ export class Room {
       if (info.ended) return;
       if (info.auth === "pending") {
         // До проверки ключа принимается только auth; остальное, включая кадры, отбрасывается.
-        if (typeof message !== "string" || message.length > 4096) return;
+        if (typeof message !== "string" || message.length > MAX_PENDING_BYTES) return;
         let command;
         try { command = JSON.parse(message); } catch (_) { return; }
         if (command && command.type === "auth") return this.handleHostAuth(socket, command);
@@ -906,25 +974,34 @@ export class Room {
       }
       // Кадры идут десятки раз в секунду: метку «жив» обновляем не чаще раза в секунду (таймаут — минуты).
       if (typeof message === "string" || Date.now() - (info.lastSeen ?? 0) > 1000) socket.serializeAttachment({ ...info, lastSeen: Date.now() });
-      if (typeof message === "string") return this.hostCommand(message, socket);
+      if (typeof message === "string") {
+        // Размер — до разбора (L3): heartbeat ведущего крошечный, остальные команды не больше 32 КБ.
+        if (message.length > (LIGHT_MESSAGE.test(message.slice(0, 48)) ? MAX_LIGHT_BYTES : MAX_MESSAGE_BYTES)) return;
+        return this.hostCommand(message, socket);
+      }
       for (const viewer of this.approvedViewers()) {
         try { if (this.admit(viewer, message)) viewer.send(message); } catch (_) { /* зритель отвалился */ }
       }
       return;
     }
     // Зритель: метки и рисунки (короткий JSON) — только от пущенных, ведущему и остальным пущенным.
-    if (typeof message !== "string" || message.length > 32768) return;
+    if (typeof message !== "string" || message.length > MAX_MESSAGE_BYTES) return;
     const info = socket.deserializeAttachment();
     if (socket.readyState !== 1 || !info || info.ended) return;
+    // До разбора (L3): неподтверждённому сокету хватает 1 КБ (auth), heartbeat и ack — 256 Б; лишнее отбрасывается без JSON.parse.
+    const light = LIGHT_MESSAGE.test(message.slice(0, 48));
+    if (info.auth === "pending" ? message.length > MAX_PENDING_BYTES : light && message.length > MAX_LIGHT_BYTES) return;
     let command;
     try { command = JSON.parse(message); } catch (_) { return; }
     if (!command || typeof command !== "object") return;
     if (command.type === "heartbeat") {
+      if (!takeToken(socket, Date.now(), lightBuckets)) return;
       socket.serializeAttachment({ ...info, lastSeen: Date.now() });
       return;
     }
     // Подтверждение приёма видео: n — сколько видеопакетов зритель получил за соединение.
     if (command.type === "ack") {
+      if (!takeToken(socket, Date.now(), lightBuckets)) return;
       const flow = this.flow.get(socket);
       if (info.approved && flow && Number.isInteger(command.n) && command.n >= flow.acked && command.n <= flow.sent) {
         flow.acked = command.n; flow.acking = true;
@@ -949,10 +1026,7 @@ export class Room {
     if (command.type === "game") {
       const fields = sanitizeGame(command);
       if (!fields) return;
-      const game = JSON.stringify({ ...fields, from: info.id || "", name: info.name || "", ...(info.auth === "key" ? { fp: info.fp } : {}) });
-      for (const host of this.activeHosts()) {
-        try { host.send(game); } catch (_) {}
-      }
+      this.toHost({ ...fields, from: info.id || "", name: info.name || "", ...(info.auth === "key" ? { fp: info.fp } : {}) }, info.rid);
       return;
     }
     // Зритель не успевает показывать видео (необязательное, SHARE-PROTOCOL §3.6): key — выбросил кадры до ключевого и просит
@@ -966,7 +1040,7 @@ export class Room {
     if (command.type === "switch-request") {
       const fields = sanitizeSwitchRequest(command);
       if (!fields) return;
-      this.toHost({ ...fields, from: info.id || "", name: info.name || "", ...(info.auth === "key" ? { fp: info.fp } : {}) });
+      this.toHost({ ...fields, from: info.id || "", name: info.name || "", ...(info.auth === "key" ? { fp: info.fp } : {}) }, info.rid);
       return;
     }
     // Дальше — только метки; служебные типы (viewers, request, ended…) зритель слать не может.
@@ -980,6 +1054,17 @@ export class Room {
     }
   }
 
+  // Кому адресован ответ ведущего: по `rid` — одному сокету (его назвал relay, подделать нельзя); без `rid` (старый ведущий) —
+  // пущенным с ID `to`.
+  addressedViewers(command) {
+    const viewers = this.approvedViewers();
+    if (typeof command.rid === "string" && command.rid) {
+      return viewers.filter((viewer) => (viewer.deserializeAttachment() || {}).rid === command.rid);
+    }
+    if (typeof command.to !== "string" || !command.to) return [];
+    return viewers.filter((viewer) => { const info = viewer.deserializeAttachment() || {}; return info.id && info.id === command.to; });
+  }
+
   // hostSocket — сокет отправителя (обязателен, N4). Хосту с проверенным ключом rid обязателен; старым — как раньше.
   hostCommand(text, hostSocket) {
     const hostInfo = (hostSocket && hostSocket.deserializeAttachment()) || {};
@@ -989,14 +1074,13 @@ export class Room {
     if (!command || typeof command !== "object") return;
     if (command.type === "heartbeat") return;
     if (command.type === "release" && keyed) return this.releaseOwner(hostSocket);
-    // Игра ведущего — только выбранному зрителю (все его подключения).
+    // Игра ведущего — только выбранному зрителю, проверенная так же, как игра зрителя (L5). Адрес — `rid` его сокета (ведущий берёт
+    // его из сообщения зрителя), а старый ведущий называет ID: тогда все пущенные с этим ID.
     if (command.type === "game") {
-      const { to, ...rest } = command;
-      const game = JSON.stringify({ ...rest, from: "host" });
-      for (const viewer of this.approvedViewers()) {
-        const info = viewer.deserializeAttachment() || {};
-        if (info.id && info.id === to) { try { viewer.send(game); } catch (_) {} }
-      }
+      const fields = sanitizeGame(command);
+      if (!fields) return;
+      const game = JSON.stringify({ ...fields, from: "host" });
+      for (const viewer of this.addressedViewers(command)) { try { viewer.send(game); } catch (_) {} }
       return;
     }
     // Мониторы ведущего — всем пущенным зрителям; ожидающие и не прошедшие проверку их не видят.
@@ -1014,10 +1098,7 @@ export class Room {
       const result = sanitizeSwitchResult(command);
       if (!result) return;
       const message = JSON.stringify(result);
-      for (const viewer of this.approvedViewers()) {
-        const info = viewer.deserializeAttachment() || {};
-        if (info.id && info.id === command.to) { try { viewer.send(message); } catch (_) {} }
-      }
+      for (const viewer of this.addressedViewers(command)) { try { viewer.send(message); } catch (_) {} }
       return;
     }
     if (command.type !== "accept" && command.type !== "decline") return;
@@ -1037,15 +1118,19 @@ export class Room {
       if (command.type === "accept") {
         // Кто пустил: при смене хоста (в том числе в grace) пущенные чужим ключом завершаются (M2).
         viewer.serializeAttachment({ ...info, approved: true, approvedBy: keyed ? hostInfo.pub : "none" });
-        const accepted = { type: "accepted", name: command.name || "" };
+        const accepted = { type: "accepted", name: typeof command.name === "string" ? command.name.slice(0, MAX_NAME) : "" };
         // Подпись хоста (accept\n<room>\n<pub зрителя>\n<rid>): зритель сверит её с hostKey, relay подделать её не может.
         if (info.auth === "key" && typeof command.hostSig === "string" && b64uHasLength(command.hostSig, 64)) {
           accepted.hostSig = command.hostSig;
         }
         viewer.send(JSON.stringify(accepted));
+        this.noteRoomAccept();
+        this.rememberAdmitted(info);
       } else if (command.type === "decline") {
         const key = info.pub ? `k:${info.pub}` : (info.ip ? `ip:${info.ip}` : "");
         if (key) noteDecline(this.declines, key, Date.now());
+        // Таймаут Mac («не ответили за 3 минуты») — не отказ человека: серию отказов и паузу комнаты не запускает.
+        if (command.reason !== "timeout") this.noteRoomDecline(Date.now());
         try {
           viewer.serializeAttachment({ ...info, ended: true });
           viewer.send(JSON.stringify({ type: "declined" }));
@@ -1078,6 +1163,7 @@ export class Room {
   }
 
   endViewers() {
+    this.admitted.clear();
     for (const viewer of this.state.getWebSockets("viewer")) this.endViewer(viewer);
   }
 
