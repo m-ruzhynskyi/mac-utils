@@ -12,11 +12,11 @@
     "dist": "electron-builder --win nsis --publish never"
   },
   "dependencies": {
-    "electron-updater": "^6.3.9"
+    "electron-updater": "^6.8.10"
   },
   "devDependencies": {
-    "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
+    "electron": "44.7.2",
+    "electron-builder": "26.17.0"
   },
   "build": {
     "appId": "com.mruzhynskyi.macutils.share",
@@ -28,6 +28,9 @@
       "overlay-preload.js",
       "overlay-place.js",
       "displays.js",
+      "guard.js",
+      "marks.js",
+      "picker.js",
       "remote/**",
       "offline.html",
       "package.json",
@@ -58,6 +61,13 @@
     "asarUnpack": [
       "remote/tv-uia.ps1",
       "remote/clip-conceal.ps1"
-    ]
+    ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    }
   }
 }

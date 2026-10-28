@@ -386,7 +386,7 @@ test("TeamViewer: окно пароля на 35-й секунде после «C
   const running = connector.connectRecord({ name: "Демо", id: "123456789", hasPassword: true, program: "teamViewer" },
     { settings: { defaultProgram: "teamViewer", timeoutSeconds: 20, programPaths: {} }, store: { password: async () => new SecretBuffer("Demo-Tv-1") } });
   await new Promise((r) => setImmediate(r));
-  assert.deepEqual(JSON.parse(input[0]), { timeoutMs: 60_000, limitMs: 180_000, id: "123456789" });
+  assert.deepEqual(JSON.parse(input[0]), { timeoutMs: 60_000, limitMs: 180_000, id: "123456789", exe: "C:\\Program Files\\TeamViewer\\TeamViewer.exe" });
   emit("ready"); emit("waiting"); emit("intermediate");
   t.mock.timers.tick(35_000);
   assert.ok(!child.killed, "на 35-й секунде сторож ещё не сработал");
@@ -414,4 +414,68 @@ test("TeamViewer: ни окна пароля, ни сеанса к предел�
   assert.match(states.at(-1).detail, /не показал ни окно пароля, ни открытый сеанс/);
   assert.ok(log.some((l) => /^connect fail code=unconfirmed program=teamViewer typed=0 copied=1 waited=\d+ saw=progress$/.test(l)), log.join("|"));
   assert.ok(!log.join("\n").includes("123456789"));
+});
+
+// ---- Аудит безопасности L18: подпись — заново перед запуском; окно пароля TeamViewer — от проверенного exe ----
+test("перед запуском подпись проверяется заново: файл подменили с тем же путём и mtime — не запускается, пароль не читается", async () => {
+  const file = "C:\\Users\\demo\\Downloads\\AnyDesk.exe";
+  const files = fakeFs({ "C:\\Users\\demo\\Downloads": { "AnyDesk.exe": 100 } });
+  const signed = { [file]: AD_CERT };
+  const sys = fakeSystem({ signed });
+  const locator = createLocator({ fs: files, env: ENV, execFile: sys.execFile });
+  await locator.refresh();
+  const { spawn, spawned } = fakeSpawn();
+  const states = [];
+  let reads = 0;
+  const connector = createConnector({ exists: files.existsSync, env: ENV, locate: (p) => locator.candidates(p), trust: locator, spawn, hud: { show: (s) => states.push(s) } });
+  assert.equal(connector.installed("anyDesk"), true, "проверен — «установлен»");
+  // Чужая программа пользователя подменила файл и вернула mtime: кэш по пути и mtime этого не видит.
+  delete signed[file];
+  assert.equal(locator.trusted("anyDesk", file), true, "кэш по-прежнему верит");
+  const checked = sys.checked.length;
+  const r = await connector.connectRecord({ name: "Демо", id: "123456789", hasPassword: true, program: "anyDesk" },
+    { settings: { defaultProgram: "anyDesk", programPaths: {} }, store: { password: async () => { reads++; return new SecretBuffer("Demo-Pw-1"); } } });
+  assert.equal(sys.checked.length, checked + 1, "перед запуском — новая проверка, мимо кэша");
+  assert.deepEqual(r, { ok: false, error: "unsigned" });
+  assert.equal(spawned.length, 0, "подменённый файл не запущен");
+  assert.equal(reads, 0, "пароль не читался");
+  assert.equal(locator.trusted("anyDesk", file), false, "итог новой проверки запомнен: «установлен» снят");
+});
+
+test("TeamViewer: скрипту передаётся проверенный exe; окно пароля чужой копии TeamViewer — «untrustedWindow», пароль не читается", async () => {
+  const exe = "C:\\Users\\demo\\Downloads\\TeamViewer.exe";
+  const files = fakeFs({ "C:\\Users\\demo\\Downloads": { "TeamViewer.exe": 100 } });
+  const sys = fakeSystem({ signed: { [exe]: TV_CERT } });
+  const locator = createLocator({ fs: files, env: ENV, execFile: sys.execFile });
+  await locator.refresh();
+  const { spawn, spawned } = fakeSpawn();
+  const states = [], log = [];
+  let options = null, reads = 0;
+  const uia = { enter: async (opts) => { options = opts; await opts.afterReady(); return { state: "untrustedWindow" }; }, cancel() {} };
+  const connector = createConnector({ exists: files.existsSync, env: ENV, locate: (p) => locator.candidates(p), trust: locator, spawn, uia,
+    hud: { show: (s) => states.push(s) }, log: (l) => log.push(l) });
+  const r = await connector.connectRecord({ name: "Демо", id: "123456789", hasPassword: true, program: "teamViewer" },
+    { settings: { defaultProgram: "teamViewer", programPaths: {} }, store: { password: async () => { reads++; return new SecretBuffer("Demo-Tv-1"); } } });
+  assert.equal(options.exe, exe, "скрипт сверит путь процесса окна с этим exe");
+  assert.equal(spawned[0].file, exe);
+  assert.deepEqual(r, { ok: false, error: "untrustedWindow" });
+  assert.equal(reads, 0, "пароль не читался");
+  assert.equal(states.at(-1).kind, "warning");
+  assert.equal(states.at(-1).title, "Окно пароля — не от проверенного TeamViewer");
+  assert.deepEqual(log, ["connect fail code=untrustedWindow"]);
+  // Скрипт: путь exe процесса окна (QueryFullProcessImageName) сверяется до запроса пароля («passwordField»).
+  const script = fs.readFileSync(path.join(__dirname, "..", "..", "remote", "tv-uia.ps1"), "utf8");
+  assert.match(script, /QueryFullProcessImageName/);
+  assert.match(script, /\$trustedExe = \[string\]\$options\.exe/);
+  const check = script.indexOf("if (-not (Test-TrustedProcess $pid2)) { Emit 'untrustedWindow'; return }");
+  assert.ok(check > 0 && check < script.indexOf("Emit 'passwordField'"), "сверка — до запроса пароля");
+  // uia.js знает этот итог (не превращает его в «поле не найдено»).
+  const child = new EventEmitter();
+  child.stdin = { on() {}, write: (_b, cb) => cb?.(), end() {} };
+  child.stdout = new EventEmitter();
+  child.kill = () => {};
+  const running = createUia(() => child).enter({ timeoutMs: 5000, exe }, async () => { reads++; return null; });
+  child.stdout.emit("data", Buffer.from('{"state":"ready"}\n{"state":"untrustedWindow"}\n'));
+  assert.deepEqual(await running, { state: "untrustedWindow" });
+  assert.equal(reads, 0);
 });

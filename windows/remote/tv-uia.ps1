@@ -1,10 +1,10 @@
 ﻿# Ввод пароля в окно «Аутентификация» TeamViewer через UI Automation. Вход: stdin — строка 1: параметры JSON
-# {"timeoutMs":N,"id":"…","noPassword":true?}; строка 2 — пароль, но только ПОСЛЕ события "passwordField": модуль читает пароль из
+# {"timeoutMs":N,"id":"…","exe":"…","noPassword":true?}; строка 2 — пароль, но только ПОСЛЕ события "passwordField": модуль читает пароль из
 # файла, когда поле найдено и проверено, и лишь тогда дописывает его в stdin (пустая строка — пароля в файле больше нет). При
 # noPassword вторую строку скрипт не читает. В аргументах командной строки пароля нет; ни в вывод, ни в файлы он не пишется.
 # Выход: строки JSON — события {"state":"ready"|"waiting"|"idSubmitted"|"intermediate"|"passwordField"|"confirming"} и один итог:
 # "connected" | "session" | "submitted" | "sessionClosed" | "passwordNeeded" | "noPrompt" | "noWindow" | "idMismatch" | "elevated"
-# | "focusLost" | "fieldNotFound" | "wrongPassword".
+# | "untrustedWindow" | "focusLost" | "fieldNotFound" | "wrongPassword".
 #
 # Подтверждение — только окно сеанса: НОВОЕ окно TeamViewer, в заголовке которого есть цифры ID (пробелы не важны), без поля пароля
 # и без индикатора хода, и оно держится SettleMs. Без пароля это "session"; после ввода пароля — "connected". После пароля окна
@@ -30,6 +30,14 @@ public static class MuNative {
   [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetTokenInformation(IntPtr t, int cls, out int info, int len, out int ret);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
   [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr p, int flags, System.Text.StringBuilder name, ref int size);
+  // Полный путь exe процесса (хватает минимальных прав — и для процесса администратора); не открылся — null.
+  public static string ImagePath(int pid) {
+    IntPtr process = OpenProcess(0x1000, false, pid);
+    if (process == IntPtr.Zero) return null;
+    try { var name = new System.Text.StringBuilder(32768); int size = name.Capacity; return QueryFullProcessImageName(process, 0, name, ref size) ? name.ToString(0, size) : null; }
+    finally { CloseHandle(process); }
+  }
   // Процесс запущен от администратора. Не удалось даже открыть процесс с минимальными правами (PROCESS_QUERY_LIMITED_INFORMATION) или
   // его токен — он «выше нас»: так же отвечает Windows для поднятого процесса.
   public static bool Elevated(int pid) {
@@ -90,6 +98,22 @@ $knownWindows = New-Object System.Collections.Generic.HashSet[int]
 # судить, что клиент открылся, и окон подключения у них нет.
 $serviceNames = @('TeamViewer_Service', 'TeamViewer_Desktop')
 function Get-TeamViewerIds { @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'TeamViewer*' -and $serviceNames -notcontains $_.ProcessName } | ForEach-Object { $_.Id }) }
+
+# Проверенный модулем TeamViewer.exe (подпись издателя или Program Files). Пароль — только в окно процесса с этим путём или из
+# Program Files (туда пишет только администратор): чужая копия TeamViewer.exe с тем же именем процесса пароль не получит.
+# Пути нет (старый модуль) — проверка по имени процесса, как раньше.
+$trustedExe = [string]$options.exe
+function Test-TrustedProcess($processId) {
+  if (-not $trustedExe) { return $true }
+  $image = [MuNative]::ImagePath([int]$processId)
+  if (-not $image) { return $false }
+  $full = [System.IO.Path]::GetFullPath($image)
+  if ([string]::Equals($full, [System.IO.Path]::GetFullPath($trustedExe), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+  foreach ($dir in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432)) {
+    if ($dir -and $full.StartsWith(([System.IO.Path]::GetFullPath($dir).TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+  }
+  return $false
+}
 
 # Окна пароля, уже открытые до запуска подключения (прежнее подключение, чужой диалог): их игнорируем, пароль уйдёт только в новое.
 $baseline = New-Object System.Collections.Generic.HashSet[int]
@@ -304,6 +328,7 @@ try {
   $pid2 = $found.Window.Current.ProcessId
   $process = Get-Process -Id $pid2
   if ($process.ProcessName -notlike 'TeamViewer*' -or $serviceNames -contains $process.ProcessName) { Emit 'focusLost'; return }
+  if (-not (Test-TrustedProcess $pid2)) { Emit 'untrustedWindow'; return }
   if ([MuNative]::Elevated($pid2) -and -not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Emit 'elevated'; return }
 
   # Окно пароля показывает ID партнёра — он должен совпасть с записью: пароль записи X не уходит компьютеру Y.

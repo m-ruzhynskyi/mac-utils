@@ -55,6 +55,7 @@ const MESSAGES = {
   submitted: (p) => ({ kind: "info", title: "Пароль введён · сеанс не подтверждён", detail: `Проверьте окно ${TITLES[p]}: открылся ли сеанс.`, actions: [{ id: "close", label: "Закрыть" }] }),
   sessionClosed: (p) => ({ kind: "warning", title: `${TITLES[p]} закрыл сеанс`, detail: `Пароль введён, но сеанс не открылся. Причина — в окне ${TITLES[p]}.`, actions: [{ id: "retry", label: "Повторить" }, { id: "close", label: "Закрыть" }] }),
   // Окно пароля показывает ID другого компьютера: пароль этой записи туда не вводится.
+  untrustedWindow: (p) => ({ kind: "warning", title: `Окно пароля — не от проверенного ${TITLES[p]}`, detail: `Окно принадлежит другой копии ${TITLES[p]}. Пароль не вводился.`, actions: [{ id: "close", label: "Закрыть" }] }),
   idMismatch: (p) => ({ kind: "warning", title: "Окно пароля — от другого компьютера", detail: `${TITLES[p]} показал другой ID. Пароль не вводился.`, actions: [{ id: "close", label: "Закрыть" }] }),
   rdpMissing: (copied) => ({ kind: "info", title: copied ? "Удалённый рабочий стол не найден — адрес скопирован" : "Удалённый рабочий стол не найден",
     detail: "Вставьте адрес в программу удалённого рабочего стола.", actions: [{ id: "close", label: "Закрыть" }] }),
@@ -91,14 +92,15 @@ function createConnector(deps) {
     return ordered(program, custom).find((file) => exists(file) && trustedNow(program, file)) || null;
   }
   const installed = (program) => !!find(program, customPaths()[program]);
-  // Для запуска: непроверенный файл проверяется сейчас. { exe } или { exe: null, unsigned } — нашёлся только файл без подписи.
+  // Для запуска: файл вне Program Files проверяется сейчас, заново, без кэша (аудит L18): между проверкой для «установлен» и
+  // запуском его могли подменить. { exe } или { exe: null, unsigned } — нашёлся только файл без подписи.
   async function findForLaunch(program, custom) {
     let unsigned = false;
     for (const file of ordered(program, custom)) {
       if (!exists(file)) continue;
-      if (trustedNow(program, file)) return { exe: file };
+      if (!trust) return { exe: file };
       let ok = false;
-      try { ok = await trust.verify(program, file); } catch (_) { ok = false; }
+      try { ok = await trust.verify(program, file, { fresh: true }); } catch (_) { ok = false; }
       if (ok) return { exe: file };
       unsigned = true;
     }
@@ -230,7 +232,8 @@ function createConnector(deps) {
       const waiting = (title) => hud.show({ kind: "info", title, detail: `${Math.round((clock.now() - started) / 1000)} с`, progress: Math.min(1, (clock.now() - started) / timeoutMs), actions: [{ id: "cancel", label: "Отмена" }] });
       // Пароль — только по запросу скрипта (поле найдено и проверено); каждая прочитанная копия затирается в finally.
       const readPassword = async () => { const s = await store.password(record); if (s) secrets.push(s); return s; };
-      const result = await uia.enter({ timeoutMs, limitMs, id: record.id, ...(wantsPassword ? {} : { noPassword: true }), afterReady: async () => { launched = await launchTeamViewer(exe, record.id); } },
+      // exe — проверенный файл: скрипт введёт пароль только в окно процесса с этим путём (или из Program Files).
+      const result = await uia.enter({ timeoutMs, limitMs, id: record.id, exe, ...(wantsPassword ? {} : { noPassword: true }), afterReady: async () => { launched = await launchTeamViewer(exe, record.id); } },
         wantsPassword ? readPassword : null, (event) => {
         if (event.state === "idSubmitted") { typed = true; waiting(`Ввёл ID в ${title}, жду подключение…`); }
         else if (event.state === "intermediate") { sawProgress = true; waiting(`${title} подключается…`); }
@@ -261,6 +264,7 @@ function createConnector(deps) {
           hud.show(MESSAGES.noTeamViewerWindow(program, copied)); tvLog(`connect fail code=noWindow program=${program} copied=${copied ? 1 : 0}`); return { ok: false, error: "noWindow" };
         }
         case "idMismatch": hud.show(MESSAGES.idMismatch(program)); log(`connect fail code=idMismatch`); return { ok: false, error: "idMismatch" };
+        case "untrustedWindow": hud.show(MESSAGES.untrustedWindow(program)); log(`connect fail code=untrustedWindow`); return { ok: false, error: "untrustedWindow" };
         case "wrongPassword": hud.show(MESSAGES.wrongPassword()); log(`connect fail code=wrongPassword`); return { ok: false, error: "wrongPassword" };
         case "focusLost": hud.show(MESSAGES.focusLost()); log(`connect fail code=focusLost`); return { ok: false, error: "focusLost" };
         case "elevated": hud.show(MESSAGES.elevated(program)); log(`connect fail code=elevated`); return { ok: false, error: "elevated" };

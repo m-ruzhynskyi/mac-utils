@@ -3,6 +3,9 @@ name: Windows
 # Ветка windows: сборка Mac Utils Share для Windows на Windows-машине GitHub
 # и обновление релиза «windows-latest» (pre-release — Mac Utils его не трогает).
 # Версия: MAJOR.MINOR из windows/package.json + PATCH = номер запуска (docs/VERSIONING.md §2); приложение подхватывает её через latest.yml.
+# Права (аудит M4): сборка — только чтение, токен не остаётся в .git/config (npm-пакеты сборки его не прочтут); право записи —
+# только у задачи публикации, которая не ставит пакетов и не запускает кода из репозитория: берёт готовые файлы сборки.
+# Публикация — только с ветки windows: ручной запуск на другой ветке собирает и тестирует, релиз не трогает.
 on:
   push:
     branches: [windows]
@@ -10,16 +13,22 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: windows
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
@@ -44,12 +53,34 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Сборка установщика
         run: npx electron-builder --win nsis --publish never
+      - name: Файлы для публикации
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-installer
+          path: |
+            windows/dist/MacUtilsShare-Setup.exe
+            windows/dist/MacUtilsShare-Setup.exe.blockmap
+            windows/dist/latest.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/windows'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: windows-installer
+          path: dist
       - name: Релиз windows-latest
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           NOTES="Mac Utils Share для Windows $VERSION — трансляция экрана по коду и просмотр. Скачайте MacUtilsShare-Setup.exe; дальше приложение обновляется само."
           if gh release view windows-latest >/dev/null 2>&1; then
             gh release edit windows-latest --title "Mac Utils Share для Windows $VERSION" --notes "$NOTES" --prerelease

@@ -8,8 +8,11 @@ const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const place = require("./overlay-place");
 const monitorsList = require("./displays");
+const guard = require("./guard");
+const marks = require("./marks");
+const picker = require("./picker");
 
-const RELAY = "https://mac-utils-relay.mako-62d.workers.dev/";
+const RELAY = guard.RELAY;
 let window = null;
 let chosen = null; // { source, audio }
 let remoteConnections = null; // модуль «Удалённые подключения» (remote/index.js)
@@ -23,6 +26,15 @@ let tracker = null; // следит, где транслируемое окно,
 let audioHelper = null; // звук программ без выбранных (mu-audio.exe capture …)
 let audioPending = 0; // байт звука, отправленных странице и ещё не подтверждённых (audio-ack): страница подвисла — не копим
 const AUDIO_PENDING_MAX = 96_000; // ≈ 2 с звука 24 кГц моно
+// Выбор источника — только по действию ведущего в окне приложения: клик или клавиша, которые Windows прислала окну
+// (событие input-event видит только main, страница его не подделает), не раньше показа списка и не дольше USER_ACTION_MS.
+// После выбора страница может начать захват (getDisplayMedia) в течение ARM_MS; дальше — только через новый выбор.
+const USER_ACTION_MS = 5000, ARM_MS = 30_000;
+const USER_INPUT = new Set(["mouseDown", "mouseUp", "rawKeyDown", "keyDown", "keyUp", "char", "gestureTap", "gestureTapDown", "touchStart", "touchEnd", "pointerDown", "pointerUp"]);
+let lastInput = 0, inputs = 0; // время последнего клика или клавиши в главном окне и их счётчик
+let listed = null; // { ids, inputs } — источники, показанные странице последним `sources`, и счётчик кликов на тот момент
+let armedUntil = 0; // до какого времени getDisplayMedia страницы получает выбранный источник
+const markRate = marks.createRate();
 
 // Помощник mu-audio.exe (native/mu-audio.cpp): звук отдельных программ и положение окон.
 const HELPER = app.isPackaged ? path.join(process.resourcesPath, "mu-audio.exe") : path.join(__dirname, "bin", "mu-audio.exe");
@@ -480,6 +492,12 @@ function stopAudio() {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
+// Любое окно приложения: без <webview> и без новых окон (главное окно ставит свой обработчик — внешние ссылки).
+app.on("web-contents-created", (_e, contents) => {
+  contents.on("will-attach-webview", (event) => event.preventDefault());
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+});
+
 function createWindow() {
   window = new BrowserWindow({
     width: 1200,
@@ -489,23 +507,43 @@ function createWindow() {
     icon: path.join(__dirname, "assets", "icon.png"),
     autoHideMenuBar: true,
     // backgroundThrottling: false — свёрнутое окно не замедляет захват и кодирование кадров трансляции (до 60/с) до ~1 раза в секунду.
-    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, backgroundThrottling: false },
+    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false },
   });
   // Закрыли главное окно — выходим совсем (окно меток не должно держать приложение без окна).
   window.on("closed", () => { window = null; app.quit(); });
   // Страница с эфиром ушла (перезагрузка, offline.html, падение): эфира больше нет.
-  window.webContents.on("did-start-navigation", (_e, _url, inPlace, isMainFrame) => { if (isMainFrame && !inPlace && broadcasting) { hideOverlay(); stopAudio(); endBroadcast(); } });
-  window.webContents.on("render-process-gone", () => { hideOverlay(); stopAudio(); endBroadcast(); });
+  // Выбор источника новой странице не достаётся.
+  window.webContents.on("did-start-navigation", (_e, _url, inPlace, isMainFrame) => {
+    if (!isMainFrame || inPlace) return;
+    if (broadcasting) { hideOverlay(); stopAudio(); endBroadcast(); }
+    forgetChoice();
+  });
+  window.webContents.on("render-process-gone", () => { hideOverlay(); stopAudio(); forgetChoice(); endBroadcast(); });
   window.webContents.on("did-fail-load", () => endBroadcast());
   // Главное окно двигают, сворачивают — схема меток на странице только когда оно не над транслируемой областью.
   for (const event of ["move", "resize", "minimize", "restore"]) window.on(event, coveredChanged);
+  // Клик или клавиша ведущего в окне — для выбора источника (USER_ACTION_MS).
+  window.webContents.on("input-event", (_e, input) => { if (USER_INPUT.has(input?.type)) { lastInput = Date.now(); inputs++; } });
+  // Страница уходит только на адреса ретранслятора (offline.html → «Повторить» — тоже туда); остальное не открывается.
+  const stay = (event, url) => { if (!guard.navigationAllowed(event?.url ?? url)) event.preventDefault(); };
+  window.webContents.on("will-navigate", stay);
+  window.webContents.on("will-frame-navigate", stay);
+  window.webContents.on("will-redirect", stay);
   window.loadURL(RELAY).catch(() => window.loadFile(path.join(__dirname, "offline.html")));
   window.webContents.on("did-fail-load", () => window.loadFile(path.join(__dirname, "offline.html")));
-  // Внешние ссылки — в браузере.
+  // Новые окна не открываются; внешние ссылки — в браузере, только https и хосты из guard.EXTERNAL_HOSTS.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (guard.externalAllowed(url)) shell.openExternal(url);
     return { action: "deny" };
   });
+}
+
+// IPC главного окна — только из кадра страницы ретранслятора (event.senderFrame.url); остальным — отказ (denied).
+const relayOnly = (fn, denied) => (event, ...args) => (guard.fromRelay(event) ? fn(event, ...args) : denied);
+
+// Выбор закончился (эфир кончился, страница ушла): источник забыт — новый захват только через новый выбор.
+function forgetChoice() {
+  chosen = null; listed = null; armedUntil = 0;
 }
 
 app.whenReady().then(() => {
@@ -519,9 +557,17 @@ app.whenReady().then(() => {
     }
   );
 
-  // getDisplayMedia на странице получает то, что пользователь выбрал в нашем окне выбора.
+  // Разрешения браузера: всё запрещено, кроме захвата экрана и звука для страницы ретранслятора (guard.permissionAllowed).
+  // Камера, чтение буфера обмена, уведомления, геолокация и прочее — нет никому, и своим локальным окнам тоже.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) =>
+    callback(guard.permissionAllowed(permission, details?.requestingUrl || contents?.getURL?.() || "", details)));
+  session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) =>
+    guard.permissionAllowed(permission, details?.requestingUrl || origin || "", details));
+
+  // getDisplayMedia на странице получает то, что ведущий выбрал кликом (choose) не больше ARM_MS назад,
+  // или монитор, на который в эфире переключил зритель (switchTo). Иначе — отказ.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
-    if (!chosen) return callback({});
+    if (!chosen || (!nextSource && Date.now() > armedUntil) || !guard.isRelay(request?.securityOrigin || request?.frame?.url || "")) return callback(null);
     broadcasting = true;
     // Зритель переключил монитор: тот же эфир, другой экран; окно меток (prepareOverlay) — на него.
     if (nextSource) { previousSource = chosen.source; chosen.source = nextSource; nextSource = null; }
@@ -547,60 +593,65 @@ app.whenReady().then(() => {
     });
   }
 
-  ipcMain.on("version", (event) => { event.returnValue = app.getVersion(); });
+  // sendSync: ответ нужен всегда (иначе страница зависнет), версия — только своим страницам.
+  ipcMain.on("version", (event) => { event.returnValue = guard.fromRelay(event) || guard.fromLocal(event, __dirname) ? app.getVersion() : ""; });
   // Кто-то просится смотреть — привлекаем внимание (мигание на панели задач).
-  ipcMain.on("attention", () => {
+  ipcMain.on("attention", relayOnly(() => {
     if (!window || window.isDestroyed()) return;
     if (window.isMinimized()) window.restore();
     window.flashFrame(true);
     window.show();
-  });
+  }));
   // Метка ждёт, пока окно меток загрузится и станет известна область (не больше 50, иначе старые отбрасываются).
-  ipcMain.on("mark", (_event, mark) => {
+  // Метка пересобирается из проверенных полей (marks.clean: форма, цвет, до 2000 точек), не больше 30 меток в секунду.
+  ipcMain.on("mark", relayOnly((_event, raw) => {
     if (!chosen) return;
+    const mark = marks.clean(raw);
+    if (!mark || !markRate()) return;
     if (!overlay || overlay.isDestroyed()) prepareOverlay();
     pendingMarks.push(mark);
     if (pendingMarks.length > 50) pendingMarks.splice(0, pendingMarks.length - 50);
     flushMarks();
-  });
-  ipcMain.on("page-log", (event, line) => { if (window && event.sender === window.webContents) logPage(line); });
-  ipcMain.on("stopped", () => {
+  }));
+  ipcMain.on("page-log", relayOnly((event, line) => { if (window && event.sender === window.webContents) logPage(line); }));
+  ipcMain.on("stopped", relayOnly(() => {
     nextSource = null; previousSource = null; hideOverlay(); stopAudio();
+    forgetChoice();
     endBroadcast();
-  });
+  }));
   ipcMain.on("overlay-report", (event, report) => {
-    if (!overlay || overlay.isDestroyed() || event.sender !== overlay.webContents) return;
+    if (!overlay || overlay.isDestroyed() || event.sender !== overlay.webContents || !guard.fromLocal(event, __dirname)) return;
     checkClient(report);
     logMark(report);
   });
 
   // Программы, у которых сейчас есть звук, — для списка «Не передавать звук программ».
-  ipcMain.handle("audioApps", () => new Promise((resolve) => {
+  ipcMain.handle("audioApps", relayOnly(() => new Promise((resolve) => {
     if (!hasHelper()) return resolve(null);
     execFile(HELPER, ["list"], { windowsHide: true, timeout: 5000 }, (error, stdout) => {
       try { resolve(error ? null : JSON.parse(stdout).map((a) => a.name).filter(Boolean)); } catch (_) { resolve(null); }
     });
-  }));
+  }), null));
 
   // Звук всех программ, кроме выбранных: PCM 24 кГц моно — странице, она отправляет зрителям.
-  ipcMain.on("startAudio", (event) => startAudio(event.sender));
+  ipcMain.on("startAudio", relayOnly((event) => startAudio(event.sender)));
 
   // Поменяли список в эфире — перезапускаем захват звука с новым списком.
   // Звонки (Discord и др.) исключаются из звука сами (на Mac это настройка, по умолчанию выключена), пока пользователь не снимет галочку на странице ведущего: иначе собеседники
   // из того же созвона слышат себя с задержкой. Имена — процессы Windows (без учёта регистра).
-  ipcMain.on("setMuteCalls", (event, on) => {
+  ipcMain.on("setMuteCalls", relayOnly((event, on) => {
     if (!chosen) return;
     chosen.calls = on === true;
     if (audioHelper) startAudio(event.sender);
-  });
+  }));
 
-  ipcMain.on("setMuted", (event, muted) => {
+  ipcMain.on("setMuted", relayOnly((event, muted) => {
     if (!chosen) return;
     chosen.muted = cleanNames(muted);
     if (audioHelper) startAudio(event.sender);
-  });
+  }));
 
-  ipcMain.on("audio-ack", (_event, bytes) => { audioPending = Math.max(0, audioPending - (Number.isFinite(bytes) ? bytes : 0)); });
+  ipcMain.on("audio-ack", relayOnly((_event, bytes) => { audioPending = Math.max(0, audioPending - (Number.isFinite(bytes) ? bytes : 0)); }));
 
   function startAudio(sender) {
     stopAudio();
@@ -619,35 +670,43 @@ app.whenReady().then(() => {
     helper.on("exit", () => { if (audioHelper === helper) audioHelper = null; });
   }
 
-  ipcMain.handle("sources", async () => {
-    const sources = await desktopCapturer.getSources({
-      types: ["screen", "window"],
-      thumbnailSize: { width: 400, height: 225 },
-    });
-    return sources.map((s) => ({ id: s.id, name: s.name, thumbnail: s.thumbnail.toDataURL() }));
-  });
+  // Список для выбора — после клика ведущего («Транслировать»), без снимков экрана и окон: у экрана схема мониторов,
+  // у окна значок (picker.js). Снимки не нужны и не запрашиваются (thumbnailSize 0).
+  ipcMain.handle("sources", relayOnly(async () => {
+    if (Date.now() - lastInput > USER_ACTION_MS) { appendOverlayLog("sources denied reason=no-input"); return []; }
+    const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } });
+    listed = { ids: new Set(sources.map((s) => s.id)), inputs };
+    return picker.entries(sources, screen.getAllDisplays(), screen.getPrimaryDisplay());
+  }, []));
 
-  ipcMain.handle("choose", async (_event, id, audio, muted, muteCalls) => {
-    const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
+  // Выбор — только из показанного списка и только по клику (клавише) ведущего после его показа: страница не может
+  // молча выбрать экран. Ведущий и так кликает по плитке в окне приложения — лишнего подтверждения нет.
+  ipcMain.handle("choose", relayOnly(async (_event, id, audio, muted, muteCalls) => {
+    const now = Date.now();
+    const reason = !listed || !listed.ids.has(id) ? "not-listed" : inputs === listed.inputs || now - lastInput > USER_ACTION_MS ? "no-input" : null;
+    if (reason) { appendOverlayLog(`choose denied reason=${reason}`); forgetChoice(); return false; }
+    const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } });
     const source = sources.find((s) => s.id === id);
     chosen = source ? { source, audio: !!audio, muted: cleanNames(muted), calls: muteCalls !== false } : null;
+    listed = null; armedUntil = source ? now + ARM_MS : 0;
     nextSource = null; previousSource = null;
     return !!source;
-  });
+  }, false));
 
   // Мониторы для зрителей (SHARE-PROTOCOL §4.1): номер, основной, физические пиксели, масштаб, место в DIP — без имён
   // и ID устройств. current — номер транслируемого монитора, 0 — транслируется окно (переключать нельзя).
-  ipcMain.handle("displays", () => {
+  ipcMain.handle("displays", relayOnly(() => {
     const all = screen.getAllDisplays();
     const list = monitorsList.list(all, screen.getPrimaryDisplay(), physOf);
     const current = /^screen:/.test(chosen?.source?.id || "") ? monitorsList.numberOf(sharedDisplay(), all) : 0;
     return { list, current };
-  });
+  }, { list: [], current: 0 }));
 
   // Зритель выбрал монитор n: источник запоминается, страница берёт его новым getDisplayMedia. 0 — переключение не
   // состоялось: выбор забывается, а если обработчик getDisplayMedia уже отдал новый экран (и переставил окно меток), а
   // поток страница так и не получила, — источник и окно меток возвращаются на прежний экран.
-  ipcMain.handle("switchTo", async (event, n) => {
+  // Только в эфире (broadcasting): после эфира переключение не начнёт захват заново.
+  ipcMain.handle("switchTo", relayOnly(async (event, n) => {
     nextSource = null;
     if (n === 0) {
       if (previousSource && chosen) {
@@ -658,7 +717,7 @@ app.whenReady().then(() => {
       return false;
     }
     previousSource = null;
-    if (!Number.isInteger(n) || n < 1 || !/^screen:/.test(chosen?.source?.id || "")) return false;
+    if (!broadcasting || !Number.isInteger(n) || n < 1 || !/^screen:/.test(chosen?.source?.id || "")) return false;
     const sources = await desktopCapturer.getSources({ types: ["screen"] });
     const source = monitorsList.sourceFor(n, sources, screen.getAllDisplays());
     if (!source || !chosen) return false;
@@ -668,16 +727,16 @@ app.whenReady().then(() => {
     // Это единственное место, где странице выдаётся активация без действия пользователя; из других обработчиков — нет.
     try { await event?.sender?.executeJavaScript("void 0", true); } catch (_) {}
     return true;
-  });
+  }, false));
 
   // Уведомление ведущему о переключении — в окне меток нового монитора (оно исключено из захвата), 4 с.
-  ipcMain.on("notice", (_event, data) => {
+  ipcMain.on("notice", relayOnly((_event, data) => {
     const notice = monitorsList.notice(data);
     if (!notice || !chosen) return;
     if (!overlay || overlay.isDestroyed()) prepareOverlay();
     pendingNotice = notice;
     flushMarks();
-  });
+  }));
 
   createWindow();
   // «Удалённые подключения» — отдельный модуль (remote/): окно, палитра Ctrl+Alt+A, меню в трее. Его сбой не мешает трансляции.

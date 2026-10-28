@@ -98,9 +98,9 @@ test("TeamViewer открылся на главном экране без ID: с
   // W2-3: пароль читается из файла только по «passwordField» и дописывается в stdin до продолжения скрипта.
   assert.ok(r.order.indexOf("readPassword") > r.order.indexOf("passwordField"), r.order.join(","));
   assert.ok(r.order.indexOf("readPassword") < r.order.indexOf("password"), r.order.join(","));
-  assert.equal(r.inputAtField, JSON.stringify({ timeoutMs: 60_000, limitMs: 180_000, id: "123456789" }) + "\n", "до поля пароля в stdin — только параметры");
+  assert.equal(r.inputAtField, JSON.stringify({ timeoutMs: 60_000, limitMs: 180_000, id: "123456789", exe: TV }) + "\n", "до поля пароля в stdin — только параметры (и проверенный exe)");
   const [options, password] = r.input();
-  assert.deepEqual(JSON.parse(options), { timeoutMs: 60_000, limitMs: 180_000, id: "123456789" }, "ID — в параметрах скрипта (для поля ID и окна сеанса)");
+  assert.deepEqual(JSON.parse(options), { timeoutMs: 60_000, limitMs: 180_000, id: "123456789", exe: TV }, "ID — в параметрах скрипта (для поля ID и окна сеанса), exe — для сверки процесса окна");
   assert.equal(password, PW, "пароль — второй строкой stdin, не в параметрах");
   assert.ok(!JSON.stringify(r.spawned.map((s) => s.args)).includes("КАНАРЕЙКА"));
   assert.ok(r.states.some((s) => /Ввёл ID в TeamViewer/.test(s.title)), "ход виден: ID введён");
@@ -122,7 +122,7 @@ test("TeamViewer: окно сеанса подтверждено без окна
   const b = rig({ lines: ["waiting", "idSubmitted", "session"] });
   assert.deepEqual(await b.run(record({ hasPassword: false })), { ok: true });
   const [options, password] = b.input();
-  assert.deepEqual(JSON.parse(options), { timeoutMs: 60_000, limitMs: 180_000, id: "123456789", noPassword: true });
+  assert.deepEqual(JSON.parse(options), { timeoutMs: 60_000, limitMs: 180_000, id: "123456789", exe: TV, noPassword: true });
   assert.equal(password, "", "пароля нет — пустая строка");
   const c = rig({ lines: ["noPrompt"] });
   assert.deepEqual(await c.run(record({ hasPassword: false })), { ok: false, error: "unconfirmed" });

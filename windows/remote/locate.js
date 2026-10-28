@@ -169,12 +169,13 @@ function createLocator({ fs, env = process.env, execFile = null, reg = REG, powe
       if (inProgramFiles(file, env)) return true;
       return signatures.get(key(program, file)) === true;
     },
-    // Проверить подпись (результат запоминается по пути и mtime). Program Files — без проверки.
-    async verify(program, file) {
+    // Проверить подпись (результат запоминается по пути и mtime). Program Files — без проверки. fresh — проверить заново, без
+    // кэша: так перед запуском (аудит L18) — путь и mtime подделает любая программа пользователя, подменившая файл.
+    async verify(program, file, { fresh = false } = {}) {
       if (inProgramFiles(file, env)) return true;
       if (!exists(file)) return false;
       const k = key(program, file);
-      if (signatures.has(k)) return signatures.get(k);
+      if (!fresh && signatures.has(k)) return signatures.get(k);
       const ok = signatureOK(program, await run(powershell, ["-NoProfile", "-NonInteractive", "-Command", SIGNATURE_COMMAND], String(file), SIGNATURE_TIMEOUT_MS));
       signatures.set(k, ok);
       return ok;

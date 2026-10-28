@@ -15,6 +15,10 @@ const MAIN = process.env.MAIN_JS || path.join(__dirname, "..", "main.js");
 const VERIFY_MS = 300;
 process.env.MU_OVERLAY_VERIFY_MS = String(VERIFY_MS);
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
+// IPC от страницы ретранслятора: main сверяет адрес кадра-отправителя (guard.fromRelay).
+const RELAY_FRAME = { url: "https://mac-utils-relay.mako-62d.workers.dev/" };
+const page = (extra = {}) => ({ senderFrame: RELAY_FRAME, ...extra });
+const OVERLAY_FRAME = { url: require("node:url").pathToFileURL(path.join(path.dirname(MAIN), "overlay.html")).href };
 
 // Монитор: DIP-границы (как у Electron), масштаб и физическая рамка.
 const monitor = (id, phys, scale, dipOrigin, primary = false, dipSize = null) => ({
@@ -27,7 +31,7 @@ const overlap = (a, b) => Math.max(0, Math.min(a.x + a.width, b.x + b.width) - M
   Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
 
 function electron(world) {
-  const ipc = new Map(), handles = new Map(), screenEvents = new EventEmitter();
+  const ipc = new Map(), handles = new Map(), screenEvents = new EventEmitter(), permissions = {};
   let displayMedia = null;
   const windows = [];
   let nextHwnd = 0x10000;
@@ -53,7 +57,7 @@ function electron(world) {
           if (channel === "region") self.region = data;
           if (channel === "mark" && world.report !== false) self.reportMark(data);
         },
-        setWindowOpenHandler() {},
+        setWindowOpenHandler(fn) { self.openHandler = fn; },
       });
       windows.push(this);
     }
@@ -63,7 +67,7 @@ function electron(world) {
       const page = this.page, place = require("../overlay-place");
       const area = place.areaIn(this.region || { fx: 0, fy: 0, fw: 1, fh: 1 }, page.w, page.h);
       const first = mark.type === "ping" ? [mark.x, mark.y] : mark.points[0];
-      ipc.get("overlay-report")?.({ sender: this.webContents }, { mark: first, point: place.markPoint(first, area), area, region: this.region,
+      ipc.get("overlay-report")?.({ sender: this.webContents, senderFrame: OVERLAY_FRAME }, { mark: first, point: place.markPoint(first, area), area, region: this.region,
         innerWidth: page.w, innerHeight: page.h, dpr: page.dpr });
     }
     setBounds(b) { this.calls.push("setBounds"); this.bounds = { ...b }; const d = world.displays.find((m) => contains(m.bounds, b.x, b.y)) || world.displays[0];
@@ -144,7 +148,7 @@ function electron(world) {
     },
   });
   return {
-    windows, ipc, handles, helper, helperCalls, get displayMedia() { return displayMedia; },
+    windows, ipc, handles, helper, helperCalls, permissions, get displayMedia() { return displayMedia; },
     module: {
       app: { requestSingleInstanceLock: () => true, quit() {}, whenReady: () => Promise.resolve(), on() {}, isPackaged: false,
              getVersion: () => "1.1.0", getPath: () => world.logs,
@@ -153,8 +157,10 @@ function electron(world) {
       BrowserWindow, screen,
       desktopCapturer: { getSources: async () => world.sources },
       ipcMain: { on: (name, fn) => ipc.set(name, fn), handle: (name, fn) => handles.set(name, fn) },
-      session: { defaultSession: { webRequest: { onBeforeSendHeaders() {} }, setDisplayMediaRequestHandler: (fn) => { displayMedia = fn; } } },
-      dialog: { showMessageBox: async (...args) => { world.dialogs = (world.dialogs || 0) + 1; return { response: 1 }; } }, shell: {},
+      session: { defaultSession: { webRequest: { onBeforeSendHeaders() {} }, setDisplayMediaRequestHandler: (fn) => { displayMedia = fn; },
+        setPermissionRequestHandler: (fn) => { permissions.request = fn; }, setPermissionCheckHandler: (fn) => { permissions.check = fn; } } },
+      dialog: { showMessageBox: async (...args) => { world.dialogs = (world.dialogs || 0) + 1; return { response: 1 }; } },
+      shell: { openExternal: (url) => { (world.opened ||= []).push(url); return Promise.resolve(); } },
     },
   };
 }
@@ -188,14 +194,23 @@ async function start(world) {
   const host = {
     fake, trackers, spawned, updater,
     stop() { intervals.forEach(clearInterval); },
+    // Клик ведущего в главном окне (input-event видит только main).
+    click() { this.main.webContents.emit("input-event", {}, { type: "mouseUp" }); },
+    // Ведущий нажал «Транслировать» (список источников) и кликнул по плитке (choose).
+    async choose(sourceId, ...rest) {
+      this.click();
+      await fake.handles.get("sources")(page());
+      this.click();
+      return fake.handles.get("choose")(page(), sourceId, ...rest);
+    },
     // Ведущий выбрал источник и страница начала захват.
     async share(sourceId) {
-      await fake.handles.get("choose")({}, sourceId, false, []);
-      fake.displayMedia({ audioRequested: false }, () => {});
+      await this.choose(sourceId, false, []);
+      fake.displayMedia({ audioRequested: false, securityOrigin: RELAY_FRAME.url }, () => {});
       await tick();
     },
     track(rect) { trackers.at(-1).stdout.emit("data", Buffer.from(`${rect.x} ${rect.y} ${rect.width} ${rect.height}\n`)); },
-    mark(x, y) { fake.ipc.get("mark")({}, { type: "ping", x, y, color: "red" }); },
+    mark(x, y) { fake.ipc.get("mark")(page(), { type: "ping", x, y, color: "red" }); },
     get overlay() { return fake.windows.find((w) => w.opts.transparent && !w.destroyed); },
     markLog() {
       const file = path.join(world.logs, "overlay.log");
@@ -632,8 +647,8 @@ test("новая трансляция: окна меток прежних зак
 const katya = () => { const a = layoutA(), b = layoutB(), c = layoutC(); return { a, b, c, sources: [screenSource(a, 1), screenSource(b, 2), screenSource(c, 3)] }; };
 // Страница после switchTo делает новый getDisplayMedia: обработчик приложения отдаёт выбранный монитор.
 async function switchTo(host, n) {
-  const ok = await host.fake.handles.get("switchTo")({}, n);
-  if (ok) { host.fake.displayMedia({ audioRequested: false }, () => {}); await tick(); }
+  const ok = await host.fake.handles.get("switchTo")(page(), n);
+  if (ok) { host.fake.displayMedia({ audioRequested: false, securityOrigin: RELAY_FRAME.url }, () => {}); await tick(); }
   return ok;
 }
 
@@ -642,13 +657,13 @@ test("мониторы для зрителей (Катя): номера слев
   const host = await start(world([k.b, k.c, k.a], [...k.sources, windowSource]));
   try {
     await host.share("screen:2:0");
-    const info = await host.fake.handles.get("displays")();
+    const info = await host.fake.handles.get("displays")(page());
     assert.equal(info.current, 2);
     assert.deepEqual(info.list.map((d) => [d.n, d.w, d.h, d.scale, d.primary]), [[1, 1920, 1080, 1, false], [2, 3840, 2160, 1.75, true], [3, 1920, 1080, 1, false]]);
     assert.doesNotMatch(JSON.stringify(info), /"id"|display_id/);
     await host.share(windowSource.id);
-    assert.equal((await host.fake.handles.get("displays")()).current, 0);
-    assert.equal(await host.fake.handles.get("switchTo")({}, 1), false, "окно на монитор не переключается");
+    assert.equal((await host.fake.handles.get("displays")(page())).current, 0);
+    assert.equal(await host.fake.handles.get("switchTo")(page(), 1), false, "окно на монитор не переключается");
   } finally { host.stop(); }
 });
 
@@ -663,7 +678,7 @@ test("Катя: зритель переключает A → B → C — окно
       await tick(80);
       assert.deepEqual(host.overlay.phys, d.phys, `окно меток на мониторе ${n}`);
       near(host.landed(), expected(d.phys, ...P), `монитор ${n}`);
-      assert.equal((await host.fake.handles.get("displays")()).current, n);
+      assert.equal((await host.fake.handles.get("displays")(page())).current, n);
     }
   } finally { host.stop(); }
 });
@@ -673,9 +688,9 @@ test("выбор монитора без getDisplayMedia (страница не 
   const host = await start(world([k.a, k.b, k.c], k.sources));
   try {
     await host.share("screen:2:0");
-    assert.equal(await host.fake.handles.get("switchTo")({}, 3), true);
-    assert.equal(await host.fake.handles.get("switchTo")({}, 0), false);
-    host.fake.displayMedia({ audioRequested: false }, () => {});
+    assert.equal(await host.fake.handles.get("switchTo")(page(), 3), true);
+    assert.equal(await host.fake.handles.get("switchTo")(page(), 0), false);
+    host.fake.displayMedia({ audioRequested: false, securityOrigin: RELAY_FRAME.url }, () => {});
     await tick();
     host.mark(0.5, 0.5);
     await tick(80);
@@ -690,8 +705,8 @@ test("уведомление о переключении: в окне меток
     try {
       await host.share("screen:2:0");
       await switchTo(host, 3);
-      const list = (await host.fake.handles.get("displays")()).list;
-      host.fake.ipc.get("notice")({}, { name: "Максим", n: 3, list });
+      const list = (await host.fake.handles.get("displays")(page())).list;
+      host.fake.ipc.get("notice")(page(), { name: "Максим", n: 3, list });
       await tick(80);
       const notices = host.overlay.sent.filter(([c]) => c === "notice");
       assert.equal(notices.length, shown ? 1 : 0, JSON.stringify(extra));
@@ -724,9 +739,9 @@ test("switchTo даёт странице активацию (скрипт «с �
     await host.share("screen:2:0");
     const calls = [];
     const sender = { executeJavaScript: async (code, gesture) => { calls.push([code, gesture]); } };
-    assert.equal(await host.fake.handles.get("switchTo")({ sender }, 3), true);
+    assert.equal(await host.fake.handles.get("switchTo")(page({ sender }), 3), true);
     assert.deepEqual(calls, [["void 0", true]]);
-    assert.equal(await host.fake.handles.get("switchTo")({ sender }, 9), false);
+    assert.equal(await host.fake.handles.get("switchTo")(page({ sender }), 9), false);
     assert.equal(calls.length, 1, "нет такого монитора — без активации");
   } finally { host.stop(); }
 });
@@ -738,16 +753,16 @@ test("захват после switchTo не удался (getDisplayMedia уже
     await host.share("screen:2:0");
     assert.equal(await switchTo(host, 3), true);
     assert.deepEqual(host.overlay.phys, k.c.phys, "обработчик уже переставил окно меток на C");
-    assert.equal(await host.fake.handles.get("switchTo")({}, 0), false);
+    assert.equal(await host.fake.handles.get("switchTo")(page(), 0), false);
     await tick(80);
-    assert.equal((await host.fake.handles.get("displays")()).current, 2, "источник — снова B");
+    assert.equal((await host.fake.handles.get("displays")(page())).current, 2, "источник — снова B");
     host.mark(0.5, 0.5);
     await tick(80);
     assert.deepEqual(host.overlay.phys, k.b.phys, "окно меток вернулось на B");
     near(host.landed(), expected(k.b.phys, 0.5, 0.5), "метка на B");
     // Повторная отмена ничего не трогает: возвращаться уже не на что.
-    assert.equal(await host.fake.handles.get("switchTo")({}, 0), false);
-    assert.equal((await host.fake.handles.get("displays")()).current, 2);
+    assert.equal(await host.fake.handles.get("switchTo")(page(), 0), false);
+    assert.equal((await host.fake.handles.get("displays")(page())).current, 2);
   } finally { host.stop(); }
 });
 
@@ -758,9 +773,9 @@ test("удачное переключение не откатывается по
     await host.share("screen:2:0");
     await switchTo(host, 3);
     // Следующий запрос: страница не дошла до getDisplayMedia (обработчик не вызывался) и отменила выбор.
-    assert.equal(await host.fake.handles.get("switchTo")({}, 1), true);
-    assert.equal(await host.fake.handles.get("switchTo")({}, 0), false);
-    assert.equal((await host.fake.handles.get("displays")()).current, 3, "остаётся C — последний удачный");
+    assert.equal(await host.fake.handles.get("switchTo")(page(), 1), true);
+    assert.equal(await host.fake.handles.get("switchTo")(page(), 0), false);
+    assert.equal((await host.fake.handles.get("displays")(page())).current, 3, "остаётся C — последний удачный");
   } finally { host.stop(); }
 });
 
@@ -779,7 +794,7 @@ test("журнал кодера страницы — в overlay.log только
   try {
     const main = host.fake.windows.find((x) => !x.opts.transparent);
     const send = host.fake.ipc.get("page-log");
-    send({ sender: main.webContents }, "encoder start reason=start mode=hw src=3840x2160 <img src=x> Катя");
+    send(page({ sender: main.webContents }), "encoder start reason=start mode=hw src=3840x2160 <img src=x> Катя");
     send({ sender: {} }, "encoder start чужое окно");
     await tick(20);
     const log = host.log();
@@ -825,7 +840,7 @@ test("у окна меток осталась рамка: клиентская �
     await tick(80);
     const normal = host.overlay.sent.filter(([c]) => c === "region").at(-1)[1];
     assert.deepEqual(normal, { fx: 0, fy: 0, fw: 1, fh: 1 });
-    host.fake.ipc.get("overlay-report")({ sender: host.overlay.webContents }, { mark: [0.5, 0.5], point: [960, 500], area: {}, region: normal,
+    host.fake.ipc.get("overlay-report")({ sender: host.overlay.webContents, senderFrame: OVERLAY_FRAME }, { mark: [0.5, 0.5], point: [960, 500], area: {}, region: normal,
       innerWidth: 1904, innerHeight: 1041, dpr: 1 });
     const fixed = host.overlay.sent.filter(([c]) => c === "region").at(-1)[1];
     assert.ok(Math.abs(fixed.fw - 1920 / 1904) < 1e-9 && Math.abs(fixed.fh - 1080 / 1041) < 1e-9);
@@ -852,17 +867,17 @@ test("звонки (Discord и др.) исключаются из звука в�
   const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true);
   const host = await start(world([d], [screenSource(d, 1)]));
   try {
-    await host.fake.handles.get("choose")({}, "screen:1:0", true, ["Game.exe", "discord.exe"]);
-    host.fake.ipc.get("startAudio")({ sender: { isDestroyed: () => false, send() {} } });
+    await host.choose("screen:1:0", true, ["Game.exe", "discord.exe"]);
+    host.fake.ipc.get("startAudio")(page({ sender: { isDestroyed: () => false, send() {} } }));
     const args = host.spawned.at(-1);
     assert.equal(args[0], "capture");
     const names = args.slice(1).map((n) => n.toLowerCase());
     for (const need of ["game.exe", "discord.exe", "zoom.exe", "teams.exe", "telegram.exe"]) assert.ok(names.includes(need), need);
     assert.equal(names.filter((n) => n === "discord.exe").length, 1, "без повторов");
-    host.fake.ipc.get("setMuteCalls")({ sender: { isDestroyed: () => false, send() {} } }, false);
+    host.fake.ipc.get("setMuteCalls")(page({ sender: { isDestroyed: () => false, send() {} } }), false);
     assert.deepEqual(host.spawned.at(-1), ["capture", "Game.exe", "discord.exe"], "галочку сняли — только отмеченное вручную");
-    await host.fake.handles.get("choose")({}, "screen:1:0", true, [], false);
-    host.fake.ipc.get("startAudio")({ sender: { isDestroyed: () => false, send() {} } });
+    await host.choose("screen:1:0", true, [], false);
+    host.fake.ipc.get("startAudio")(page({ sender: { isDestroyed: () => false, send() {} } }));
     assert.deepEqual(host.spawned.at(-1), ["capture"], "выбор без звонков при начале эфира");
   } finally { host.stop(); }
 });
@@ -877,7 +892,7 @@ test("окно обновления не всплывает во время эф
     downloaded({ version: "9.9.9" });
     await tick(30);
     assert.equal(w.dialogs || 0, 0, "во время эфира окна нет");
-    host.fake.ipc.get("stopped")({});
+    host.fake.ipc.get("stopped")(page());
     await tick(1700);
     assert.equal(w.dialogs, 1, "после конца эфира — одно окно");
     downloaded({ version: "9.9.10" });
@@ -910,7 +925,7 @@ test("страница с эфиром ушла (перезагрузка, па�
     await host.share("screen:1:0");
     await tick(1700);
     assert.equal(w.dialogs, 2, "эфир начат раньше срока — окно не поверх него");
-    host.fake.ipc.get("stopped")({});
+    host.fake.ipc.get("stopped")(page());
     await tick(1700);
     assert.equal(w.dialogs, 3);
   } finally { host.stop(); }
@@ -920,16 +935,197 @@ test("страница не подтверждает звук (подвисла)
   const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true);
   const host = await start(world([d], [screenSource(d, 1)]));
   try {
-    await host.fake.handles.get("choose")({}, "screen:1:0", true, []);
+    await host.choose("screen:1:0", true, []);
     const sent = [];
-    host.fake.ipc.get("startAudio")({ sender: { isDestroyed: () => false, send: (...a) => sent.push(a) } });
+    host.fake.ipc.get("startAudio")(page({ sender: { isDestroyed: () => false, send: (...a) => sent.push(a) } }));
     const helper = host.trackers.at(-1);
     const chunk = Buffer.alloc(9600);
     for (let i = 0; i < 40; i++) helper.stdout.emit("data", chunk);
     assert.ok(sent.length <= 11, `отправлено ${sent.length} кусков, предел ≈ 2 с`);
     const stuck = sent.length;
-    host.fake.ipc.get("audio-ack")({}, 9600 * stuck);
+    host.fake.ipc.get("audio-ack")(page(), 9600 * stuck);
     helper.stdout.emit("data", chunk);
     assert.equal(sent.length, stuck + 1, "после подтверждения звук идёт");
+  } finally { host.stop(); }
+});
+
+// ---- Безопасность главного окна (аудит H1, L17): страница ретранслятора могла бы быть подменена ----
+const oneScreen = () => { const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true); return world([d], [screenSource(d, 1), { id: "window:4242:0", name: "Отчёт" }]); };
+const EVIL = (extra = {}) => ({ senderFrame: { url: "https://evil.example/" }, ...extra });
+const capture = (host, request = {}) => { let got; host.fake.displayMedia({ audioRequested: false, securityOrigin: RELAY_FRAME.url, ...request }, (s) => { got = s; }); return got; };
+
+test("навигация: главное окно не уходит с ретранслятора (ссылка, редирект, кадр); новые окна не открываются", async () => {
+  const host = await start(oneScreen());
+  try {
+    const contents = host.main.webContents;
+    const navigate = (event, url) => { let prevented = false; contents.emit(event, { url, preventDefault() { prevented = true; } }, url); return prevented; };
+    for (const event of ["will-navigate", "will-frame-navigate", "will-redirect"]) {
+      assert.equal(navigate(event, "https://mac-utils-relay.mako-62d.workers.dev/?id=1"), false, `${event}: ретранслятор`);
+      for (const url of ["https://evil.example/", "file:///C:/Windows/System32/calc.exe", "http://mac-utils-relay.mako-62d.workers.dev/", "javascript:alert(1)"]) {
+        assert.equal(navigate(event, url), true, `${event}: ${url}`);
+      }
+    }
+  } finally { host.stop(); }
+});
+
+test("openExternal со схемами file:, search-ms:, javascript: — отказ; новые окна — всегда deny", async () => {
+  const w = oneScreen();
+  const host = await start(w);
+  try {
+    const open = (url) => host.main.openHandler({ url });
+    for (const url of ["file://\\\\host\\share\\x.exe", "file:///C:/Windows/System32/calc.exe", "search-ms:query=x&crumb=location:\\\\host\\share",
+      "javascript:alert(1)", "ms-settings:privacy", "http://github.com/", "https://evil.example/"]) {
+      assert.deepEqual(open(url), { action: "deny" }, url);
+    }
+    assert.deepEqual(w.opened || [], [], "ничего не открыто в системе");
+    assert.deepEqual(open("https://github.com/m-ruzhynskyi/mac-utils/releases"), { action: "deny" }, "окно не открывается и для разрешённой ссылки");
+    assert.deepEqual(w.opened, ["https://github.com/m-ruzhynskyi/mac-utils/releases"], "разрешённая https-ссылка — в браузере");
+  } finally { host.stop(); }
+});
+
+test("обработчик разрешений: экран и звук — ретранслятору; камера, чтение буфера, уведомления — нет; чужим — ничего", async () => {
+  const host = await start(oneScreen());
+  try {
+    const { request, check } = host.fake.permissions;
+    const ask = (permission, details) => new Promise((resolve) => request(host.main.webContents, permission, resolve, details));
+    const relay = RELAY_FRAME.url;
+    assert.equal(await ask("display-capture", { requestingUrl: relay }), true);
+    assert.equal(await ask("media", { requestingUrl: relay, mediaTypes: ["audio"] }), true);
+    assert.equal(await ask("media", { requestingUrl: relay, mediaTypes: ["video"] }), false, "камера");
+    assert.equal(await ask("media", { requestingUrl: relay, mediaTypes: ["audio", "video"] }), false);
+    for (const permission of ["clipboard-read", "deprecated-sync-clipboard-read", "notifications", "geolocation", "openExternal", "fullscreen"]) {
+      assert.equal(await ask(permission, { requestingUrl: relay }), false, permission);
+    }
+    assert.equal(await ask("display-capture", { requestingUrl: "https://evil.example/" }), false);
+    assert.equal(await ask("media", { requestingUrl: OVERLAY_FRAME.url, mediaTypes: ["audio"] }), false, "свои локальные окна — тоже без разрешений");
+    assert.equal(check(host.main.webContents, "media", "https://mac-utils-relay.mako-62d.workers.dev", { mediaType: "audio" }), true);
+    assert.equal(check(host.main.webContents, "media", "https://mac-utils-relay.mako-62d.workers.dev", { mediaType: "video" }), false);
+    assert.equal(check(host.main.webContents, "clipboard-read", "https://mac-utils-relay.mako-62d.workers.dev", {}), false);
+    assert.equal(check(null, "display-capture", "https://evil.example", {}), false);
+  } finally { host.stop(); }
+});
+
+test("IPC: чужой кадр, кадр без адреса и окно меток не управляют трансляцией", async () => {
+  const host = await start(oneScreen());
+  try {
+    host.click();
+    for (const event of [EVIL(), {}, { senderFrame: null }, { sender: host.main.webContents, senderFrame: OVERLAY_FRAME }]) {
+      assert.deepEqual(await host.fake.handles.get("sources")(event), [], "sources");
+      host.click();
+      assert.equal(await host.fake.handles.get("choose")(event, "screen:1:0", true, []), false, "choose");
+      assert.deepEqual(await host.fake.handles.get("displays")(event), { list: [], current: 0 }, "displays");
+      assert.equal(await host.fake.handles.get("switchTo")(event, 1), false, "switchTo");
+      assert.equal(await host.fake.handles.get("audioApps")(event), null, "audioApps");
+      const sync = { ...event, returnValue: undefined };
+      host.fake.ipc.get("version")(sync);
+      assert.equal(sync.returnValue, event.senderFrame === OVERLAY_FRAME ? "1.1.0" : "", "version: ответ есть всегда, версия — только своим");
+    }
+    assert.equal(capture(host), null, "захват без выбора — отказ");
+    // Эфир по выбору ведущего; чужой кадр не ставит метки и не останавливает его.
+    await host.share("screen:1:0");
+    host.fake.ipc.get("mark")(EVIL(), { type: "ping", x: 0.5, y: 0.5, color: "red" });
+    host.fake.ipc.get("stopped")(EVIL());
+    await tick(80);
+    assert.ok(!host.overlay || host.marksSent() === 0, "метка чужого кадра не показана");
+    assert.equal(host.fake.ipc.get("version")(page()), undefined);
+    assert.ok(capture(host), "чужой stopped не забыл выбор");
+  } finally { host.stop(); }
+});
+
+test("выбор источника: только по клику ведущего после показа списка и только из списка; снимков у страницы нет", async () => {
+  const w = oneScreen();
+  const host = await start(w);
+  try {
+    // Без клика: ни списка, ни выбора, ни захвата.
+    assert.deepEqual(await host.fake.handles.get("sources")(page()), []);
+    assert.equal(await host.fake.handles.get("choose")(page(), "screen:1:0", false, []), false);
+    assert.equal(capture(host), null);
+    // Клик → список: без снимков.
+    host.click();
+    const list = await host.fake.handles.get("sources")(page());
+    assert.deepEqual(list.map((s) => s.id), ["screen:1:0", "window:4242:0"]);
+    assert.ok(list.every((s) => /^data:image\/svg\+xml,/.test(s.thumbnail)), "схема вместо снимка");
+    // Клик был ДО показа списка — выбор после него без нового клика не проходит.
+    assert.equal(await host.fake.handles.get("choose")(page(), "screen:1:0", false, []), false, "клик до списка не считается");
+    assert.equal(capture(host), null);
+    host.click();
+    await host.fake.handles.get("sources")(page());
+    host.click();
+    assert.equal(await host.fake.handles.get("choose")(page(), "screen:9:0", false, []), false, "не из списка");
+    host.click();
+    await host.fake.handles.get("sources")(page());
+    host.click();
+    assert.equal(await host.fake.handles.get("choose")(page(), "screen:1:0", false, []), true, "клик по плитке — выбор");
+    assert.equal(capture(host, { securityOrigin: "https://evil.example" }), null, "захват для чужого origin — отказ");
+    assert.equal(capture(host).video.id, "screen:1:0");
+    // Эфир кончился — выбор забыт: страница не начнёт захват снова без нового клика, switchTo не даёт активацию.
+    host.fake.ipc.get("stopped")(page());
+    assert.equal(capture(host), null, "после эфира — без нового выбора нельзя");
+    assert.equal(await host.fake.handles.get("switchTo")(page({ sender: { executeJavaScript: async () => assert.fail("активация без эфира") } }), 1), false);
+    assert.match(host.log(), /choose denied reason=no-input/);
+    assert.match(host.log(), /choose denied reason=not-listed/);
+  } finally { host.stop(); }
+});
+
+test("выбор действует ARM_MS: позже страница захват сама не начнёт; клавиша Enter тоже считается действием ведущего", async () => {
+  const host = await start(oneScreen());
+  const realNow = Date.now;
+  try {
+    const key = () => host.main.webContents.emit("input-event", {}, { type: "keyDown" });
+    const move = () => host.main.webContents.emit("input-event", {}, { type: "mouseMove" });
+    move();
+    assert.deepEqual(await host.fake.handles.get("sources")(page()), [], "движение мыши — не действие");
+    key();
+    await host.fake.handles.get("sources")(page());
+    key();
+    assert.equal(await host.fake.handles.get("choose")(page(), "screen:1:0", false, []), true);
+    const base = realNow();
+    Date.now = () => base + 31_000;
+    assert.equal(capture(host), null, "через 31 с без эфира выбор не действует");
+    Date.now = () => base + 6_000;
+    assert.equal(await host.fake.handles.get("choose")(page(), "screen:1:0", false, []), false, "клик старше 5 с не считается");
+  } finally { Date.now = realNow; host.stop(); }
+});
+
+test("страница ушла (перезагрузка) — выбор забыт", async () => {
+  const host = await start(oneScreen());
+  try {
+    await host.choose("screen:1:0", false, []);
+    host.main.webContents.emit("did-start-navigation", {}, "https://mac-utils-relay.mako-62d.workers.dev/", false, true);
+    assert.equal(capture(host), null);
+  } finally { host.stop(); }
+});
+
+test("метки (L17): негодные не показываются, у штриха не больше 2000 точек, не больше 30 меток в секунду", async () => {
+  const host = await start(oneScreen());
+  try {
+    await host.share("screen:1:0");
+    const send = (mark) => host.fake.ipc.get("mark")(page(), mark);
+    send({ type: "html", x: 0.5, y: 0.5 });
+    send({ type: "ping", x: "0.5", y: 0.5 });
+    send({ type: "stroke", points: Array.from({ length: 10_000 }, (_, i) => [i / 10_000, 0.5]), color: "green", extra: "<b>" });
+    await tick(80);
+    const sent = host.overlay.sent.filter(([c]) => c === "mark").map(([, m]) => m);
+    assert.equal(sent.length, 1, "дошёл только штрих");
+    assert.equal(sent[0].points.length, 2000);
+    assert.deepEqual(Object.keys(sent[0]), ["type", "points", "color"]);
+    for (let i = 0; i < 60; i++) send({ type: "ping", x: 0.5, y: 0.5, color: "red" });
+    await tick(80);
+    assert.equal(host.overlay.sent.filter(([c]) => c === "mark").length, 30, "за секунду — не больше 30 (одна уже была)");
+  } finally { host.stop(); }
+});
+
+test("буфер обмена (пароли «Удалённых подключений») главному окну недоступен: нет в preload, песочница, чтение запрещено", async () => {
+  const preload = fs.readFileSync(path.join(path.dirname(MAIN), "preload.js"), "utf8");
+  assert.ok(!/clipboard/i.test(preload), "в мосте window.mu нет буфера обмена");
+  const host = await start(oneScreen());
+  try {
+    const prefs = host.main.opts.webPreferences;
+    assert.equal(prefs.contextIsolation, true);
+    assert.equal(prefs.sandbox, true, "в песочнице preload не получит electron.clipboard");
+    assert.equal(prefs.nodeIntegration, false);
+    const ask = (permission) => new Promise((resolve) => host.fake.permissions.request(host.main.webContents, permission, resolve, { requestingUrl: RELAY_FRAME.url }));
+    assert.equal(await ask("clipboard-read"), false);
+    assert.equal(await ask("deprecated-sync-clipboard-read"), false);
   } finally { host.stop(); }
 });
