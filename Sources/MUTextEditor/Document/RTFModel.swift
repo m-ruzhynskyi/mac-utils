@@ -112,6 +112,9 @@ package struct RTFParaProps: Hashable {
     package var style: Int?
     /// `\contextualspace` — без интервалов `\sb`/`\sa` между соседними абзацами того же стиля.
     package var contextualSpace = false
+    /// `\sbauto1`/`\saauto1` — интервал «Авто» (как в HTML): `\sbN`/`\saN` рядом — только для старых читателей.
+    package var spaceBeforeAuto = false
+    package var spaceAfterAuto = false
     /// `\lsN` — замена списка (`\listoverride`), 0 — не пункт списка; `\ilvlN` — уровень. Список стиля `\sN` Word
     /// при чтении RTF не берёт (коды стиля — только в `{\stylesheet}`), поэтому и здесь — только свои коды абзаца.
     package var list = 0

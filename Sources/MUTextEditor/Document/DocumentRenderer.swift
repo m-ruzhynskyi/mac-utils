@@ -473,13 +473,25 @@ package final class DocRenderer {
     }
 
     /// Интервалы до и после абзаца, как их ставит Word: при `\contextualspace` между абзацами одного стиля их нет.
+    /// «Авто» (`\sbauto`/`\saauto`) — 14 pt, кроме начала и конца ячейки таблицы; два «авто» подряд не складываются.
     private static func spacing(_ story: RTFStory, index: Int) -> (before: Int, after: Int) {
-        let props = story.paragraphs[index].props
-        guard props.contextualSpace else { return (props.spaceBefore, props.spaceAfter) }
-        let previous = index > 0 ? story.paragraphs[index - 1].props : nil
-        let next = index + 1 < story.paragraphs.count ? story.paragraphs[index + 1].props : nil
-        return (previous?.style == props.style ? 0 : props.spaceBefore, next?.style == props.style ? 0 : props.spaceAfter)
+        let paragraph = story.paragraphs[index], props = paragraph.props
+        let previous = index > 0 ? story.paragraphs[index - 1] : nil
+        let next = index + 1 < story.paragraphs.count ? story.paragraphs[index + 1] : nil
+        var before = props.spaceBefore, after = props.spaceAfter
+        if props.spaceBeforeAuto {
+            let firstInCell = paragraph.cell != nil && previous?.cell != paragraph.cell
+            before = firstInCell || previous?.props.spaceAfterAuto == true ? 0 : autoSpacing
+        }
+        if props.spaceAfterAuto {
+            after = paragraph.cell != nil && next?.cell != paragraph.cell ? 0 : autoSpacing
+        }
+        guard props.contextualSpace else { return (before, after) }
+        return (previous?.props.style == props.style ? 0 : before, next?.props.style == props.style ? 0 : after)
     }
+
+    /// Интервал «Авто» у Word, твипы.
+    private static let autoSpacing = 280
 
     // MARK: - Атрибуты
 
@@ -1038,7 +1050,9 @@ package final class DocRenderer {
         // Высота строки `\trrh` — только в строках без вертикального объединения: в строках с `\clvmgf`/`\clvmrg` гейт давал
         // ухудшения (f005, f085, f144 — лишняя страница): `NSTextTable` сверх высот строк добавляет высоту объединённой ячейки.
         // Во вложенной таблице высота строки — своя (`exactHeight`, P-4): `\trrh` поверх неё давал лишнюю страницу (f077, f078).
-        if place.rowSpan == 1, !place.rowMerged, place.outer.isEmpty { block.rowHeight = CGFloat(place.height) / 20 }
+        if place.rowSpan == 1, !place.rowMerged, place.outer.isEmpty {
+            block.rowHeight = CGFloat(place.height) / 20
+        }
         switch cell.verticalAlign {
         case .top: block.verticalAlignment = .topAlignment
         case .center: block.verticalAlignment = .middleAlignment

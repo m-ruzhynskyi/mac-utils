@@ -256,4 +256,18 @@ final class DocWordLayoutTests: XCTestCase {
             }
         }
     }
+
+    /// Интервал «Авто» (`\sbauto1`/`\saauto1`; `\sb100`/`\sa100` рядом — для старых читателей): 14 pt, у начала и конца ячейки — 0,
+    /// два «авто» подряд не складываются (f145: строки таблиц были на 5–7 pt выше Word).
+    func testAutoSpacingLikeWord() throws {
+        let row = #"\trowd\trgaph108\trleft0\cellx3000\cellx6000 "#
+        let auto = #"\pard\plain\intbl\sbauto1\saauto1\sb100\sa100\fs24 "#
+        let body = #"\pard before\par "# + row + auto + #"PA\par"# + auto + #"PB\cell\pard\plain\intbl\fs24 OTHER\cell"# + row + #"\row\pard\plain\fs24 AFTER\par"#
+        let document = try open(body)
+        let a = try XCTUnwrap(lines(document, "PA").first), b = try XCTUnwrap(lines(document, "PB").first)
+        let other = try XCTUnwrap(lines(document, "OTHER").first), after = try XCTUnwrap(lines(document, "AFTER").first)
+        XCTAssertEqual(a.minY, other.minY, accuracy: 0.05, "у начала ячейки «авто» сверху нет")
+        XCTAssertEqual(b.minY - a.minY, single(12) + 14, accuracy: 0.05, "между «авто» — 14 pt, не 28")
+        XCTAssertEqual(after.minY - b.maxY, 0, accuracy: 0.05, "у конца ячейки «авто» снизу нет")
+    }
 }
