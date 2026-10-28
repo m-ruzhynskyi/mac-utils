@@ -1,6 +1,10 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUDesign
+@testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Правка текста в «Документе» (D-3): каждая команда — точечные правки исходника. Проверки «без потерь»:
 /// правки только в окне затронутых абзацев, скобок не хуже, наш разбор и Cocoa открывают, видимый текст ожидаемый,
@@ -184,11 +188,11 @@ final class DocEditTests: XCTestCase {
         XCTAssertEqual(model.body.tables.first?.rows.count, 2, "строки таблицы целы")
         XCTAssertEqual(model.body.tables.first?.rows.first?.paragraphs.count, 2, "ячейки целы")
         XCTAssertTrue(DocReaderTests.visibleText(model.body).hasPrefix("Be\n\u{7}\u{7}"), "текст ячеек стёрт, абзацы ячейки — склеены внутри неё")
-        // Только конец ячейки — не удаляется: подсказка.
+        // Только конец ячейки — не удаляется, как в Word: без правок и без подсказки «в коде».
         let cellEnd = (harness.display().0 as NSString).range(of: "\n", options: [], range: NSRange(location: 3, length: 5)).location
         let refused = DocTextEditor.replace(NSRange(location: cellEnd, length: 1), with: "", model: model, map: harness.display().1,
                                             source: harness.source as NSString)
-        XCTAssertNotNil(refused.refusal)
+        XCTAssertNil(refused.refusal)
         XCTAssertTrue(refused.edits.isEmpty)
     }
 

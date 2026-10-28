@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUTextEditor
 
 /// Ширины текста как у Word (этап P-2): шрифты Word или метрически совместимые замены, кернинг только с `\kerningN`,
 /// межзнаковый интервал `\expnd`, капитель `\caps`/`\scaps`, висячий отступ `\fi` как позиция табуляции.

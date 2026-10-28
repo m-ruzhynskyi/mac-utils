@@ -1,5 +1,10 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUAppSwitcher
+import MUScreenshot
+import MUTextEditor
 
 // MARK: - Переключатель
 

@@ -2,6 +2,10 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUDesign
+@testable import MUAudio
+@testable import MUTextEditor
 
 /// Демо-документы режима «Документ» (выдуманное содержимое, как на макетах `d01`–`d11`).
 enum DocDemo {
@@ -147,9 +151,9 @@ final class DocViewTests: XCTestCase {
         XCTAssertEqual(block.table.numberOfColumns, 4)
         XCTAssertEqual(block.startingColumn, 1)
         XCTAssertNotNil(block.backgroundColor)
-        // Рамка — по краю ячейки, места у текста не занимает (как в Word).
+        // Рамка — по краю ячейки, места у текста не занимает; толщина — как в PDF Word (`\brdrw10` — 0,48 pt).
         XCTAssertEqual(block.width(for: .border, edge: .minX), 0)
-        XCTAssertEqual((block as? DocCellBlock)?.lines.first { $0.edge == .minX }?.width, 0.5)
+        XCTAssertEqual((block as? DocCellBlock)?.lines.first { $0.edge == .minX }?.width ?? 0, 0.48, accuracy: 0.0001)
     }
 
     func testDollarHighlightsVisiblePartOfLineValue() throws {
@@ -158,11 +162,20 @@ final class DocViewTests: XCTestCase {
         host(workspace)
         waitForScan(tab)
         let document = try XCTUnwrap(tab.documentController)
-        document.highlightDollars()
         let text = document.storage.string as NSString
+        let value = text.range(of: "$соответствует")
+        // Панель «Знаки $» закрыта — страница как в Word: ни заливки, ни чужого цвета у знака.
+        workspace.dollarPanelVisible = false
+        settle()
+        document.highlightDollars()
+        XCTAssertNil(document.layoutManager.temporaryAttribute(.backgroundColor, atCharacterIndex: value.location, effectiveRange: nil))
+        workspace.dollarPanelVisible = true
+        settle()
+        XCTAssertTrue(document.showsDollarMarks, "панель открыта — знаки подсвечены")
+        XCTAssertNil(document.layoutManager.temporaryAttribute(.foregroundColor, atCharacterIndex: value.location, effectiveRange: nil),
+                     "цвет знака — из документа")
         // Первые три знака пропускаются (настройка по умолчанию); «соответствует» — подсвеченный. Значение в исходнике —
         // до конца строки, на странице — видимая часть (сами буквы).
-        let value = text.range(of: "$соответствует")
         var effective = NSRange()
         let fill = document.layoutManager.temporaryAttribute(.backgroundColor, atCharacterIndex: value.location + 1, effectiveRange: &effective)
         XCTAssertNotNil(fill, "значение подсвечено")

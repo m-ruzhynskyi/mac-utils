@@ -1,5 +1,10 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUScreenShare
+import MUVideoPlayer
+import MUTextEditor
 
 // MARK: - Видеоплеер
 

@@ -6,8 +6,9 @@ import Foundation
 enum WordGate {
     struct Row: Equatable {
         var name: String
-        /// Наша раскладка не открылась.
+        /// Наша раскладка не открылась; `hung` — не закончилась за таймаут (сторож снял процесс).
         var failed = false
+        var hung = false
         var pagesWord = 0
         var pagesOurs = 0
         var breaks: Double = 0
@@ -21,6 +22,15 @@ enum WordGate {
         var suspectPairs = 0
         var suspectMax: Double = 0
         var identical = false
+        /// Визуально (`WordVisual`): есть ли числа, наибольшая и средняя доля отличающихся пикселей страницы,
+        /// доля пикселей другого цвета по областям, «1 в 1» (≤ 0,5 % на каждой странице).
+        var hasVisual = false
+        var visualMax: Double = 0
+        var visualMean: Double = 0
+        var colorText: Double = 0
+        var colorLines: Double = 0
+        var colorFills: Double = 0
+        var visualIdentical = false
 
         var pageDifference: Int { abs(pagesOurs - pagesWord) }
 
@@ -46,26 +56,48 @@ enum WordGate {
             identical = result.identical
         }
 
+        mutating func add(_ visual: WordVisual.Result) {
+            hasVisual = true
+            visualMax = visual.maxDifference
+            visualMean = visual.meanDifference
+            colorText = visual.color(.text)
+            colorLines = visual.color(.lines)
+            colorFills = visual.color(.fills)
+            visualIdentical = visual.identical
+        }
+
         static let header = ["file", "failed", "pages_word", "pages_ours", "breaks", "shift_median", "shift_p95", "shift_max",
-                             "cell_wraps", "other_page", "missing_words", "extra_words", "suspect_pairs", "suspect_max", "identical"]
+                             "cell_wraps", "other_page", "missing_words", "extra_words", "suspect_pairs", "suspect_max", "identical",
+                             "visual_max", "visual_mean", "color_text", "color_lines", "color_fills", "visual_identical"]
+        /// Базы до визуального сравнения — без последних шести колонок.
+        static let headerWithoutVisual = 15
 
         var fields: [String] {
-            [name, failed ? "1" : "0", "\(pagesWord)", "\(pagesOurs)", String(format: "%.4f", breaks),
+            [name, hung ? "2" : failed ? "1" : "0", "\(pagesWord)", "\(pagesOurs)", String(format: "%.4f", breaks),
              String(format: "%.2f", shiftMedian), String(format: "%.2f", shiftP95), String(format: "%.2f", shiftMax),
              "\(cellWraps)", "\(otherPage)", "\(missingWords)", "\(extraWords)", "\(suspectPairs)",
              String(format: "%.2f", suspectMax), identical ? "1" : "0"]
+                + (hasVisual ? [String(format: "%.5f", visualMax), String(format: "%.5f", visualMean), String(format: "%.4f", colorText),
+                                String(format: "%.4f", colorLines), String(format: "%.4f", colorFills), visualIdentical ? "1" : "0"]
+                             : ["", "", "", "", "", ""])
         }
 
         init?(fields: [String]) {
-            guard fields.count == Self.header.count, fields[0].hasPrefix("f"), fields[0].count > 1,
+            guard fields.count == Self.header.count || fields.count == Self.headerWithoutVisual, fields[0].hasPrefix("f"), fields[0].count > 1,
                   fields[0].dropFirst().allSatisfy(\.isNumber) else { return nil }
             func int(_ i: Int) -> Int { Int(fields[i]) ?? 0 }
             func double(_ i: Int) -> Double { Double(fields[i]) ?? 0 }
-            self.init(name: fields[0], failed: fields[1] == "1")
+            self.init(name: fields[0], failed: fields[1] != "0")
+            hung = fields[1] == "2"
             pagesWord = int(2); pagesOurs = int(3); breaks = double(4)
             shiftMedian = double(5); shiftP95 = double(6); shiftMax = double(7)
             cellWraps = int(8); otherPage = int(9); missingWords = int(10); extraWords = int(11)
             suspectPairs = int(12); suspectMax = double(13); identical = fields[14] == "1"
+            if fields.count == Self.header.count, !fields[15].isEmpty {
+                hasVisual = true
+                visualMax = double(15); visualMean = double(16)
+                colorText = double(17); colorLines = double(18); colorFills = double(19); visualIdentical = fields[20] == "1"
+            }
         }
     }
 
@@ -80,7 +112,7 @@ enum WordGate {
 
     /// Чем форма стала хуже базы (пусто — не хуже). Допуски: доля разрывов −0,05 п. п., p95 сдвига +0,5 pt.
     static func worse(_ now: Row, than base: Row) -> [String] {
-        if now.failed { return base.failed ? [] : ["не открылась"] }
+        if now.failed { return base.failed ? [] : [now.hung ? "зависла (раскладка не закончилась за таймаут)" : "не открылась"] }
         if base.failed { return [] }
         var found: [String] = []
         if now.pageDifference > base.pageDifference { found.append("страницы \(base.pagesWord)/\(base.pagesOurs) → \(now.pagesWord)/\(now.pagesOurs)") }
@@ -89,6 +121,9 @@ enum WordGate {
         if now.cellWraps > base.cellWraps { found.append("переносы в ячейках \(base.cellWraps) → \(now.cellWraps)") }
         if now.missingWords > base.missingWords { found.append("нет слов \(base.missingWords) → \(now.missingWords)") }
         if now.extraWords > base.extraWords { found.append("лишние слова \(base.extraWords) → \(now.extraWords)") }
+        if now.hasVisual, base.hasVisual, now.visualMax > base.visualMax + 0.001 {
+            found.append("пиксели \(pixels(base.visualMax)) → \(pixels(now.visualMax))")
+        }
         return found
     }
 
@@ -103,6 +138,7 @@ enum WordGate {
         if now.cellWraps < base.cellWraps { found.append("переносы в ячейках") }
         if now.missingWords < base.missingWords { found.append("нет слов") }
         if now.extraWords < base.extraWords { found.append("лишние слова") }
+        if now.hasVisual, base.hasVisual, now.visualMax < base.visualMax - 0.001 { found.append("пиксели") }
         return found
     }
 
@@ -152,10 +188,32 @@ enum WordGate {
         row("Строк на другой странице") { "\(ok($0).map(\.otherPage).reduce(0, +))" }
         row("Слов нет / лишние") { "\(ok($0).map(\.missingWords).reduce(0, +)) / \(ok($0).map(\.extraWords).reduce(0, +))" }
         row("Ложные пары (исключены), max отклонение") { "\(ok($0).map(\.suspectPairs).reduce(0, +)), \(pt(ok($0).map(\.suspectMax).max() ?? 0)) pt" }
-        row("Не открылись") { "\($0.filter(\.failed).count)" }
+        row("Не открылись / зависли") { "\($0.filter { $0.failed && !$0.hung }.count) / \($0.filter(\.hung).count)" }
+        let visual = { (rows: [Row]) in ok(rows).filter(\.hasVisual) }
+        row("Визуально 1 в 1 (≤ 0,5 % пикселей на каждой странице)") { visual($0).isEmpty ? "—" : "\(visual($0).filter(\.visualIdentical).count) из \(visual($0).count)" }
+        row("Пиксели: худшая страница формы, медиана по формам") { visual($0).isEmpty ? "—" : pixels(median(visual($0).map(\.visualMax))) }
+        row("Пиксели: средняя по страницам, медиана по формам") { visual($0).isEmpty ? "—" : pixels(median(visual($0).map(\.visualMean))) }
+        row("Цвет другой: текст / линии / заливки, медиана") { rows in
+            let shown = visual(rows)
+            guard !shown.isEmpty else { return "—" }
+            return [\Row.colorText, \Row.colorLines, \Row.colorFills].map { key in percent(median(shown.map { row in row[keyPath: key] })) }
+                .joined(separator: " / ")
+        }
+        let byPixels = ok(now).filter(\.hasVisual).sorted { ($0.visualMax, $1.name) > ($1.visualMax, $0.name) }
+        if !byPixels.isEmpty {
+            lines.append("")
+            lines.append("## Визуально: топ-20 форм по различию")
+            lines.append("Доля отличающихся пикселей листа (растр 2×, допуск ±1 px): худшая страница / средняя; цвет другой — текст / линии / заливки.")
+            lines.append("")
+            lines.append("| Форма | Худшая стр. | Средняя | Цвет: текст / линии / заливки |")
+            lines.append("|---|---|---|---|")
+            for row in byPixels.prefix(20) {
+                lines.append("| \(row.name) | \(pixels(row.visualMax)) | \(pixels(row.visualMean)) | \(percent(row.colorText)) / \(percent(row.colorLines)) / \(percent(row.colorFills)) |")
+            }
+        }
         lines.append("")
         lines.append("## Хуже базы (\(comparison.worse.count))")
-        lines.append("Допуски: доля разрывов −0,05 п. п., p95 сдвига +0,5 pt; страницы, переносы в ячейках и слова — без допуска.")
+        lines.append("Допуски: доля разрывов −0,05 п. п., p95 сдвига +0,5 pt, пиксели худшей страницы +0,1 п. п.; страницы, переносы в ячейках и слова — без допуска.")
         lines.append("")
         lines += comparison.worse.isEmpty ? ["—"] : comparison.worse.map { "- \($0.name): \($0.what.joined(separator: "; "))" }
         lines.append("")
@@ -175,6 +233,7 @@ enum WordGate {
     }
 
     private static func percent(_ value: Double) -> String { String(format: "%.1f %%", value * 100).replacingOccurrences(of: ".", with: ",") }
+    private static func pixels(_ value: Double) -> String { String(format: "%.2f %%", value * 100).replacingOccurrences(of: ".", with: ",") }
     private static func pt(_ value: Double) -> String { String(format: "%.1f", value).replacingOccurrences(of: ".", with: ",") }
     private static func median(_ values: [Double]) -> Double {
         let sorted = values.sorted()

@@ -1,6 +1,8 @@
 import Carbon.HIToolbox
 import XCTest
+import MUScreenShare
 @testable import MacUtils
+@testable import MUCore
 
 @MainActor
 final class BusyRegistryTests: XCTestCase {
@@ -134,12 +136,12 @@ final class BusyRegistryTests: XCTestCase {
     // MARK: MAJOR-2: просмотр и шаги
 
     func testViewerIsBusyOnlyWhileConnected() {
-        XCTAssertTrue(BusyRegistry.viewerIsConnected(.connecting))
-        XCTAssertTrue(BusyRegistry.viewerIsConnected(.waiting))
-        XCTAssertTrue(BusyRegistry.viewerIsConnected(.watching))
-        XCTAssertTrue(BusyRegistry.viewerIsConnected(.reconnecting(attempt: 1)), "переподключение — просмотр ещё идёт")
-        XCTAssertFalse(BusyRegistry.viewerIsConnected(.idle))
-        XCTAssertFalse(BusyRegistry.viewerIsConnected(.ended("Трансляция завершена")), "открытое окно с «завершена» ничего не держит")
+        XCTAssertTrue(ShareViewer.State.connecting.isConnected)
+        XCTAssertTrue(ShareViewer.State.waiting.isConnected)
+        XCTAssertTrue(ShareViewer.State.watching.isConnected)
+        XCTAssertTrue(ShareViewer.State.reconnecting(attempt: 1).isConnected, "переподключение — просмотр ещё идёт")
+        XCTAssertFalse(ShareViewer.State.idle.isConnected)
+        XCTAssertFalse(ShareViewer.State.ended("Трансляция завершена").isConnected, "открытое окно с «завершена» ничего не держит")
     }
 
     func testStepsSessionExpiresWhenForgotten() {
@@ -154,7 +156,7 @@ final class BusyRegistryTests: XCTestCase {
     func testUpdaterDoesNotDeferForever() {
         // Закрытое/завершённое окно просмотра и забытые шаги: реестр пуст — установка проходит.
         let registry = BusyRegistry()
-        registry.setProvider(.viewing) { BusyRegistry.viewerIsConnected(.ended("x")) }
+        registry.setProvider(.viewing) { ShareViewer.State.ended("x").isConnected }
         registry.setProvider(.steps) { BusyRegistry.isFresh(Date().addingTimeInterval(-7200)) }
         XCTAssertFalse(BusyRegistry.shouldDefer(registry.active))
     }

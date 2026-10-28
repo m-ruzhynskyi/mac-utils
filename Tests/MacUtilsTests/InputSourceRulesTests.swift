@@ -1,5 +1,6 @@
 import XCTest
 @testable import MacUtils
+@testable import MUAppInputSource
 
 final class InputSourceRulesTests: XCTestCase {
     func testRuleBeatsRemembered() {

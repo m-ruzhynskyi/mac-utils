@@ -1,5 +1,9 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUScreenshot
+import MUTextEditor
 
 // MARK: - QR
 

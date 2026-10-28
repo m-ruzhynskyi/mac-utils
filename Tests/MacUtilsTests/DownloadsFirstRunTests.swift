@@ -1,5 +1,8 @@
 import XCTest
 @testable import MacUtils
+@testable import MUCore
+@testable import MUDownloadsSorter
+@testable import MUTextEditor
 
 /// Первый запуск «Загрузок»: ничего не уходит в Корзину без согласия, разложенное в этом проходе не трогается,
 /// опасные имена папок отвергаются.

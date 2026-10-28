@@ -35,7 +35,7 @@ function page(behaviour) {
   let wake = null, stopped = 0;
   class VideoFrame {
     constructor(source, init = {}) {
-      this.source = source; this.timestamp = init.timestamp;
+      this.source = source; this.timestamp = init.timestamp; this.duration = init.duration;
       this.displayWidth = init.displayWidth ?? source?.displayWidth ?? source?.width ?? 0;
       this.displayHeight = init.displayHeight ?? source?.displayHeight ?? source?.height ?? 0;
     }
@@ -64,7 +64,8 @@ function page(behaviour) {
       }
       if (behaviour.stuckQueue && (behaviour.fed?.length ?? 0) >= 10) { this.encodeQueueSize = 3; }
       const direct = frame.source instanceof VideoFrame;
-      (behaviour.fed ??= []).push({ direct, width: frame.source?.width ?? frame.displayWidth, config: this.config });
+      const trial = frame.duration === 33333;   // кадры пробного кодера (trialEncode) в учёт эфира не идут
+      if (!trial) (behaviour.fed ??= []).push({ direct, width: frame.source?.width ?? frame.displayWidth, config: this.config });
       if (direct && behaviour.direct === 'throw') throw new Error('EncodingError');
       if (direct && behaviour.direct === 'silent') return;
       const sets = keyFrame && (!behaviour.spsOnce || this.keys === 0);
@@ -77,6 +78,7 @@ function page(behaviour) {
         Promise.resolve().then(() => this.state === 'configured' && this.output(next));
       }
     }
+    flush() { return Promise.resolve(); }
     close() { this.state = 'closed'; }
   }
   if (behaviour.probe) {
@@ -91,7 +93,7 @@ function page(behaviour) {
     performance: { now: () => clock },
     setInterval: (fn, ms) => { intervals.push({ fn, ms }); return intervals.length; }, clearInterval() {},
     document: { createElement: (tag) => tag === 'canvas'
-      ? { width: 0, height: 0, getContext: () => ({ drawImage() {} }),
+      ? { width: 0, height: 0, getContext: () => ({ drawImage() {}, fillRect() {}, fillStyle: '' }),
           toBlob(done) { done({ arrayBuffer: async () => Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]).buffer }); } }
       : { srcObject: null, muted: false, play() {}, videoWidth: 1920, videoHeight: 1080 } },
     $: (id) => (elements[id] ??= element()),
@@ -126,6 +128,8 @@ function page(behaviour) {
       return context.capture.replaceVideo({ getVideoTracks: () => [next], getAudioTracks: () => [] });
     },
     viewerJoined() { context.forceKey = true; },
+    // Relay передал ведущему `viewers` с `slow` (зритель не успевает декодировать).
+    viewerSlow() { vm.runInContext('viewerSlowAt = performance.now()', context); },
     // Кадры захвата 1920×1080 по 60 в секунду: каждый — в цикл чтения страницы, затем все обещания кодера.
     // Захват ничего не присылает (неподвижный экран), часы идут.
     async idle(seconds) { clock += seconds * 1000; await new Promise(setImmediate); },
@@ -390,4 +394,28 @@ test('метки у ведущего: окно приложения над тр�
   const free = p.hostMark({ type: 'ping', x: 0.5, y: 0.5, color: 'red' }, false, false);
   assert.equal(free.shown, 1, 'окно на другом мониторе — схема');
   assert.equal(free.map, '');
+});
+
+test('повторная попытка аппаратного кодера: неудачная проба не трогает эфир, режим тот же, следующая проба позже', async () => {
+  const p = page({ outage: [2000, 400000] });
+  await p.run(40);   // аппаратный упал на 2 с, эфир на программном; проба через 30 с неудачна
+  assert.equal(p.videoMode, 'sw');
+  assert.ok(p.logs.some((l) => /^encoder trial mode=hw ok=0/.test(l)), 'проба была и не удалась');
+  const probesAfter = p.logs.filter((l) => l.startsWith('encoder trial')).length;
+  assert.ok(!p.logs.slice(p.logs.findIndex((l) => l.startsWith('encoder trial'))).some((l) => /^encoder mode reason=retry/.test(l)), 'эфир не перезапускался');
+  await p.run(20);
+  assert.equal(p.logs.filter((l) => l.startsWith('encoder trial')).length, probesAfter, 'следующая проба не раньше, чем через 60 с');
+});
+
+test('зритель не успевает декодировать (viewers.slow): ведущий-страница переходит на 30 кадров/с, в журнале viewerSlow', async () => {
+  const p = page({});
+  await p.run(4);
+  const rate = async (seconds) => { const from = p.sent.length; await p.run(seconds); return viewer(p.sent, from).h264 / seconds; };
+  assert.ok(await rate(1) > 50, '60 кадров/с до сигнала');
+  p.viewerSlow();
+  await p.run(1);
+  const slow = await rate(2);
+  assert.ok(slow > 20 && slow < 40, `после slow ~30 кадров/с, было ${slow}`);
+  await p.run(60);
+  assert.ok(p.logs.some((l) => /viewerSlow=1\b/.test(l)), 'сигнал зрителя посчитан в журнале кодера');
 });

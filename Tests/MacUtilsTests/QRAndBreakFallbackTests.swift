@@ -1,5 +1,7 @@
 import XCTest
 @testable import MacUtils
+@testable import MUWellbeing
+@testable import MUQR
 
 /// ⌃⌥Q: ⌘C — только запасной путь; перерыв: занятый микрофон откладывает не дольше 30 минут.
 final class QRAndBreakFallbackTests: XCTestCase {
