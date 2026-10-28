@@ -342,7 +342,8 @@ let watching = false;
 let forceKey = true;
 
 function status(text) { $("status").innerHTML = text; $("status").style.display = text ? "" : "none"; }
-function digits(text) { const d = text.replace(/\D/g, ""); return d.length === 10 || d.length === 6 ? d : null; }
+// Только 10-значные ID: 6-значные relay больше не принимает.
+function digits(text) { const d = text.replace(/\D/g, ""); return d.length === 10 ? d : null; }
 function display(id) { return id.length === 10 ? `${id.slice(0, 3)} ${id.slice(3, 6)} ${id.slice(6)}` : id; }
 function esc(text) { const d = document.createElement("div"); d.textContent = String(text ?? ""); return d.innerHTML; }
 
@@ -367,7 +368,7 @@ $("myId").onclick = () => navigator.clipboard?.writeText(myId);
 const B64U_KEY = /^(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{87})$/;
 function appSigns(fn) { return !!(window.mu && typeof window.mu.identity === "function" && typeof window.mu[fn] === "function"); }
 // Подписанный /status — только ключом приложения; вход ведущего и зрителя — и ключом страницы.
-function canSign(fn) { return appSigns(fn) || (fn !== "signStatus" && !!pageKey); }
+function canSign(fn) { return appSigns(fn) || !!pageKey; }
 // Заголовок клиента ставит приложение (mu-share-1), поэтому проверку ключом страница просит сама: relay без неё не спрашивает.
 function authParam(fn) { return !appSigns(fn) && pageKey ? "auth=v2" : ""; }
 async function myIdentity() {
@@ -439,9 +440,23 @@ function pageKeySupported() {
 async function loadPageKey() {
   try {
     if (!pageKeySupported()) return;
-    const opening = openPageKey(window.crypto.subtle).then((key) => { if (key) pageKey = key; return key; }).catch(() => null);
+    const opening = openPageKey(window.crypto.subtle).then((key) => { if (key) pageKey = key; return key; }).catch(() => null)
+      .then(async (key) => { if (!key && !pageKey) await useSessionKey(); return key; });
     const timeout = new Promise((resolve) => setTimeout(resolve, 10000, null));
     await Promise.race([opening, timeout]);
+  } catch (_) {}
+}
+// Хранилище не отдало ключ и не приняло новый (приватное окно, IndexedDB закрыт): relay принимает только клиентов с ключом,
+// поэтому делаем ключ на время открытой страницы. Он не переживёт перезагрузку, и привязанный к нему ID тоже — свой ID на сессию.
+async function useSessionKey() {
+  try {
+    const subtle = window.crypto.subtle;
+    const pair = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+    const pub = b64u(await subtle.exportKey("raw", pair.publicKey));
+    if (pageKey) return;
+    pageKey = { pub, session: true, sign: async (text) => b64u(await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, new TextEncoder().encode(text))) };
+    if (!idFromApp) { myId = generateId(); $("myId").textContent = display(myId); }
+    status("Браузер не сохраняет ключ устройства: ID действует, пока открыта эта страница.");
   } catch (_) {}
 }
 let pageKeyReady = loadPageKey();
@@ -544,10 +559,16 @@ async function fetchLive(ids) {
   let limited = false;
   if (signedStatus && canSign("signStatus")) {
     try {
-      const { pub } = await myIdentity(), ts = Date.now();
-      const sig = await window.mu.signStatus(myId, ts, ids.join(","));
-      const response = await fetch("/status", { method: "POST", headers: { "content-type": "application/json" },
-                                                 body: JSON.stringify({ v: 2, id: myId, pub, ts, ids, sig }) });
+      const ts = Date.now();
+      let body;
+      if (appSigns("signStatus")) {
+        const { pub } = await myIdentity();
+        body = { v: 2, id: myId, pub, ts, ids, sig: await window.mu.signStatus(myId, ts, ids.join(",")) };
+      } else {
+        // Страница без ключа приложения подписывает своим ключом P-256 (alg es256).
+        body = { v: 2, alg: "es256", id: myId, pub: pageKey.pub, ts, ids, sig: await pageKey.sign(`mu-share/v2\nstatus\n${myId}\n${ts}\n${ids.join(",")}`) };
+      }
+      const response = await fetch("/status", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       // Лимит: GET уйдёт под тот же лимит, не удваиваем запросы.
       if (response.status === 429) limited = true;
       if (response.status === 404 || response.status === 405) signedStatus = false;

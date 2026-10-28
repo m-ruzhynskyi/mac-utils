@@ -2,13 +2,14 @@ name = "mac-utils-relay"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
 
-# Режим аутентификации share: optional — принимаем и клиентов без ключа; required включают отдельно (.audit/auth-design.md).
+# Режим аутентификации share: required — только клиенты с ключом устройства (mu-share-2, у страницы — mu-share-1 и auth=v2),
+# только 10-значные ID. optional принимает и клиентов без ключа и 6-значные ID (.audit/auth-design.md, .audit/relay-strict.md).
 #
 # Аварийный откат — AUTH_MODE = "off" (ключи игнорируются, владельцы ID не проверяются и не стираются, данные целы).
 # Менять ТОЛЬКО здесь и деплоем (или `wrangler deploy --var AUTH_MODE:off`): значение, выставленное в панели Cloudflare,
 # следующий обычный деплой молча вернёт в "optional". Вернув, проверьте GET /version (поле auth). Подробнее: docs/SHARE-PROTOCOL.md §8, §11.
 [vars]
-AUTH_MODE = "optional"
+AUTH_MODE = "required"
 
 # Ограничения по IP до входа в Durable Object (Workers Rate Limiting, period только 10 или 60 с).
 [[ratelimits]]

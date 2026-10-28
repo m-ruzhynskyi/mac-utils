@@ -40,10 +40,11 @@ function fixture(env) {
     async json() { return JSON.parse(String(this.body)); }
     static json(data, init = {}) { return new FakeResponse(JSON.stringify(data), init); }
   }
+  const pairs = [];
   class FakePair { constructor() { const mk = () => ({ readyState: 1, info: null, messages: [], closes: [],
       deserializeAttachment() { return this.info; }, serializeAttachment(v) { this.info = v; },
-      send(v) { this.messages.push(JSON.parse(v)); }, close(...a) { this.closes.push(a); this.readyState = 2; } });
-    this[0] = mk(); this[1] = mk(); } }
+      accept() {}, send(v) { this.messages.push(JSON.parse(v)); }, close(...a) { this.closes.push(a); this.readyState = 2; } });
+    this[0] = mk(); this[1] = mk(); pairs.push(this); } }
   const context = vm.createContext({ Date: { now: () => now }, Response: FakeResponse, URL, WebSocketPair: FakePair, crypto: globalThis.crypto,
     TextEncoder, Headers, Request, page: 'PAGE', landing: 'LANDING' });
   vm.runInContext(`${source}\nthis.Room = Room; this.worker = worker;`, context);
@@ -57,7 +58,7 @@ function fixture(env) {
     };
     sockets.push(s); return s;
   }
-  return { get room() { return room; }, worker: context.worker, store, socket, all: () => sockets, advance(ms) { now += ms; }, get now() { return now; },
+  return { pairs, get room() { return room; }, worker: context.worker, store, socket, all: () => sockets, advance(ms) { now += ms; }, get now() { return now; },
     // Выгрузка Durable Object: память (Map в объекте) пропадает, storage и сокеты остаются.
     reload() { room = new context.Room(state, env); } };
 }
@@ -1502,4 +1503,89 @@ test('пауза проверяется до привязки ID: отказан
   await send(w.f(ROOM), socket, authFrame(key, key.sign(viewerMsg(ROOM, '5200000001', challenge.rid, challenge.nonce))));
   assert.equal(closeCode(socket), 4429);
   assert.equal(claims, before, 'verifyViewerId не вызывался');
+});
+
+// =====================================================================================================
+// STRICT (AUTH_MODE=required): только клиенты с ключом и 10-значные ID; понятная ошибка вместо «ошибки сети»
+// =====================================================================================================
+const strictWorld = () => world({ AUTH_MODE: 'required' });
+
+test('strict: приложение без ключа (mu-share-1) получает HTTP 426 на сокет, host-check и POST /status', async () => {
+  const w = strictWorld();
+  assert.equal((await connect(w, 'host', ROOM, { token: V1 })).res.status, 426);
+  assert.equal((await connect(w, 'viewer', ROOM, { token: V1 })).res.status, 426);
+  assert.equal((await hostCheck(w, ROOM, { token: V1 })).status, 426);
+  assert.equal((await postStatus(w, statusBody(OWNER, { id: ROOM }), { token: V1 })).status, 426);
+});
+
+test('strict: браузер без ключа получает открытый сокет с сообщением и кодом закрытия 4426 (а не «ошибку сети»)', async () => {
+  const w = strictWorld();
+  const res = await connect(w, 'viewer', ROOM, { token: V1, headers: { Origin: 'https://relay.example' } });
+  assert.equal(res.res.status, 101);
+  const server = w.control.pairs.at(-1)[1];
+  assert.equal(server.messages[0].type, 'error');
+  assert.equal(server.messages[0].code, 'upgrade-required');
+  assert.equal(server.closes[0][0], 4426);
+  const host = await connect(w, 'host', ROOM, { token: V1, headers: { Origin: 'https://relay.example' } });
+  assert.equal(w.control.pairs.at(-1)[1].closes[0][0], 4426);
+  assert.equal(host.res.status, 101);
+});
+
+test('strict: 6-значный ID отвергается (комната и host-check), 10-значный работает; в optional 6-значный по-старому', async () => {
+  const w = strictWorld();
+  assert.equal((await connect(w, 'host', '123456')).res.status, 400);
+  assert.equal((await connect(w, 'viewer', '123456')).res.status, 400);
+  assert.equal((await hostCheck(w, '123456')).status, 400);
+  assert.equal((await connect(w, 'host', ROOM)).res.status, 101);
+  const optional = world();
+  assert.equal((await connect(optional, 'host', '123456')).res.status, 101);
+});
+
+test('strict: e2e Mac (Ed25519, mu-share-2) ↔ страница (P-256, mu-share-1 + auth=v2) в обе стороны', async () => {
+  const w = strictWorld();
+  // Mac ведёт, страница смотрит.
+  const macHost = await hostLogin(w);
+  const page = p256();
+  const pageSocket = await pageViewer(w, page);
+  const request = msgOf(macHost, 'request');
+  assert.equal(request.auth, 'key');
+  assert.equal(request.idVerified, true);
+  await accept(w, macHost, pageSocket);
+  assert.ok(msgOf(pageSocket, 'accepted'));
+  // Страница ведёт, Mac смотрит.
+  const pageRoom = '3000000003';
+  const { res, socket: pageHost } = await connect(w, 'host', pageRoom, { ...PAGE });
+  assert.equal(res.status, 101);
+  const ch = msgOf(pageHost, 'challenge');
+  await send(w.f(pageRoom), pageHost, esFrame(page, page.sign(hostMsg(pageRoom, ch.nonce))));
+  assert.equal(msgOf(pageHost, 'authed')?.v, 2);
+  const macViewer = await viewerLogin(w, VIEWER_KEY, pageRoom);
+  assert.equal(msgOf(pageHost, 'request').auth, 'key');
+  await accept(w, pageHost, macViewer, pageRoom);
+  assert.ok(msgOf(macViewer, 'accepted'));
+});
+
+test('strict: страница подписывает POST /status ключом P-256 (es256); чужая подпись и Ed25519-размер для es256 — отказ', async () => {
+  const w = strictWorld();
+  const page = p256();
+  const { socket } = await connect(w, 'host', ROOM, { ...PAGE });
+  const ch = msgOf(socket, 'challenge');
+  await send(w.f(ROOM), socket, esFrame(page, page.sign(hostMsg(ROOM, ch.nonce))));
+  const body = { ...statusBody(page, { id: ROOM, ids: [ROOM] }), alg: 'es256' };
+  const res = await postStatus(w, body, { token: V1, env: w.env });
+  // mu-share-1 без auth=v2 — клиент без ключа; страница шлёт POST с mu-share-1, поэтому проверяем и вариант с токеном v2 от приложения Windows.
+  assert.equal(res.status, 426);
+  const ok = await w.worker(new Request('https://relay.example/status?auth=v2', { method: 'POST', headers: { 'x-macutils-client': V1 }, body: JSON.stringify(body) }));
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { [ROOM]: true });
+  const forged = { ...body, sig: p256().sign(`mu-share/v2\nstatus\n${ROOM}\n${body.ts}\n${ROOM}`) };
+  assert.equal((await w.worker(new Request('https://relay.example/status?auth=v2', { method: 'POST', headers: { 'x-macutils-client': V1 }, body: JSON.stringify(forged) }))).status, 401);
+  const wrongSize = { ...body, alg: 'ed25519' };
+  assert.equal((await w.worker(new Request('https://relay.example/status?auth=v2', { method: 'POST', headers: { 'x-macutils-client': V1 }, body: JSON.stringify(wrongSize) }))).status, 400);
+});
+
+test('strict: /version объявляет только mu-share-2 и auth=required', async () => {
+  const w = strictWorld();
+  const version = await (await w.worker(new Request('https://relay.example/version'))).json();
+  assert.deepEqual([version.protocols, version.auth], [[V2], 'required']);
 });

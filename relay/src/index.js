@@ -76,6 +76,7 @@ const ERRORS = {
   "auth-timeout": [4408, "Время проверки устройства истекло"],
   "replaced": [4409, "Подключилось другое окно этого компьютера"],
   "rate-limited": [4429, "Слишком много запросов, попробуйте позже"],
+  "upgrade-required": [4426, "Обновите приложение: сервер принимает только версии с проверкой устройства"],
 };
 
 const MARK_COLORS = new Set(["red", "yellow", "green", "blue", "white"]);
@@ -206,6 +207,25 @@ function keyedClient(token, url) {
 }
 
 // off — ключи игнорируются (аварийный откат); required — только mu-share-2; иначе optional.
+// 6-значные ID перебираются за ~10^6 запросов, ключ к ним не привязать: в строгом режиме (required) принимаются только 10-значные.
+function roomIdOk(id, mode) {
+  return mode === "required" ? ID10.test(id) : ID.test(id);
+}
+
+// Клиент без ключа в строгом режиме. Приложению — HTTP 426 (оно показывает текст по коду), браузерной странице — открытый сокет
+// с кодом закрытия 4426 и сообщением: из WebSocket браузер статус рукопожатия не отдаёт, и страница показала бы «ошибка сети».
+function upgradeRequired(request) {
+  if (request.headers.get("Upgrade") === "websocket" && request.headers.get("Origin")) {
+    const [client, server] = Object.values(new WebSocketPair());
+    server.accept();
+    const [code, message] = ERRORS["upgrade-required"];
+    try { server.send(JSON.stringify({ type: "error", code: "upgrade-required", message })); } catch (_) {}
+    try { server.close(code, "upgrade-required"); } catch (_) {}
+    return new Response(null, { status: 101, webSocket: client });
+  }
+  return new Response("Update Mac Utils", { status: 426 });
+}
+
 function authMode(env) {
   const mode = env && env.AUTH_MODE;
   return mode === "off" || mode === "required" ? mode : "optional";
@@ -239,13 +259,15 @@ async function statusPost(request, env, ip) {
     body = JSON.parse(text);
   } catch (_) { return jsonError("bad-request", 400); }
   const now = Date.now();
+  // Ключ приложения — Ed25519; страница relay (браузер, приложение для Windows) подписывает ключом P-256 (alg "es256").
+  const alg = body && body.alg === "es256" ? "es256" : "ed25519";
   const ok = body && typeof body === "object" && body.v === 2 && typeof body.id === "string" && ID10.test(body.id) &&
-    typeof body.pub === "string" && b64uHasLength(body.pub, 32) && typeof body.sig === "string" &&
+    typeof body.pub === "string" && b64uHasLength(body.pub, alg === "es256" ? 65 : 32) && typeof body.sig === "string" &&
     Number.isSafeInteger(body.ts) && Math.abs(now - body.ts) <= STATUS_SKEW_MS &&
     Array.isArray(body.ids) && body.ids.length <= STATUS_MAX_IDS && body.ids.every((id) => typeof id === "string" && ID10.test(id));
   if (!ok) return jsonError("bad-request", 400);
   // Сначала подпись, потом окно по ключу: иначе чужие подделки с публичным ключом владельца съедают его лимит (N1).
-  if (!(await verifyEd25519(body.pub, body.sig, statusMessage(body.id, body.ts, body.ids)))) return jsonError("bad-signature", 401);
+  if (!(await verifyDevice(alg, body.pub, body.sig, statusMessage(body.id, body.ts, body.ids)))) return jsonError("bad-signature", 401);
   const fp = await fingerprintOf(body.pub);
   if (!windowHit(statusWindow, fp, STATUS_PER_KEY_PER_MIN, 60_000, now)) return jsonError("rate-limited", 429);
   // Ключ должен уже принадлежать этому ID. Только чтение: /status никогда не привязывает свободный ID.
@@ -275,7 +297,7 @@ export default {
       if (!token) return new Response("Use the Mac Utils app", { status: 403 });
       if (request.method === "POST") {
         if (mode === "off") return new Response("Not found", { status: 404 });
-        if (mode === "required" && !keyedClient(token, url)) return new Response("Update Mac Utils", { status: 426 });
+        if (mode === "required" && !keyedClient(token, url)) return upgradeRequired(request);
         return statusPost(request, env, ip);
       }
       if (mode === "required") return new Response("Update Mac Utils", { status: 426 });
@@ -285,7 +307,8 @@ export default {
     }
     // GET /room/<ID>/host-check: страница узнаёт причину отказа ведущему без WebSocket. Лимит тот же, что у подключений.
     const check = url.pathname.match(/^\/room\/(\d+)\/host-check$/);
-    if (check && ID.test(check[1])) {
+    if (check && mode === "required" && !ID10.test(check[1])) return new Response("ID must be 10 digits", { status: 400 });
+    if (check && roomIdOk(check[1], mode)) {
       if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
       if (!token) return new Response("Use the Mac Utils app", { status: 403 });
       if (mode === "required" && !keyedClient(token, url)) return new Response("Update Mac Utils", { status: 426 });
@@ -294,12 +317,13 @@ export default {
       headers.set("x-relay-ip", ip);
       return env.ROOMS.get(env.ROOMS.idFromName(check[1])).fetch(new Request(request, { headers }));
     }
-    if (!room || !ID.test(room[1])) {
+    if (room && mode === "required" && !ID10.test(room[1])) return new Response("ID must be 10 digits", { status: 400 });
+    if (!room || !roomIdOk(room[1], mode)) {
       const html = isClient(request) ? page : landing;
       return new Response(html, { headers: await pageHeaders(html, url) });
     }
     if (!token) return new Response("Use the Mac Utils app", { status: 403 });
-    if (mode === "required" && !keyedClient(token, url)) return new Response("Update Mac Utils", { status: 426 });
+    if (mode === "required" && !keyedClient(token, url)) return upgradeRequired(request);
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected WebSocket", { status: 426 });
     }
