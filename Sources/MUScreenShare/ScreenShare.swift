@@ -26,9 +26,11 @@ package enum ShareCode {
     /// Имя в трансляции: заданное в настройках (`shareName`), иначе общее «Mac». Имя компьютера (часто с именем владельца) не отправляем.
     package static var myName: String { displayName(setting: UserDefaults.standard.string(forKey: Pref.shareName)) }
 
+    package static let maxNameLength = 60
+
     package static func displayName(setting: String?) -> String {
         let name = (setting ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "Mac" : String(name.prefix(60))
+        return name.isEmpty ? "Mac" : String(name.prefix(maxNameLength))
     }
 
     /// «123 456 7890» → «1234567890»; nil — не 10 (или старые 6) цифр.
@@ -2631,6 +2633,7 @@ package struct ScreenSharePage: View {
     @ObservedObject private var viewer = ShareViewer.shared
     @AppStorage(Pref.shareServer) private var server = ""
     @AppStorage(Pref.shareAudio) private var shareAudio = true
+    @AppStorage(Pref.shareName) private var shareName = ""
     @AppStorage(Pref.shareMuteCalls) private var muteCalls = false
     @AppStorage(Pref.shareAllowMarks) private var allowMarks = true
     @AppStorage(Pref.shareAllowMonitorSwitch) private var allowMonitorSwitch = false
@@ -2693,6 +2696,18 @@ package struct ScreenSharePage: View {
             }
         }
         if !compact && !demo { TrustedRows() }
+
+        GroupLabel("Имя в трансляции")
+        // Подпись над полем: в узкой панели поле справа от подписи сжимало её до столбика.
+        Card {
+            Text("Как вас видят зрители и ведущий").font(DS.Font.rowTitle).foregroundStyle(.dsText)
+            TextField("", text: $shareName, prompt: Text("Mac"))
+                .textFieldStyle(.graphite)
+                .frame(maxWidth: 420, alignment: .leading)
+                .accessibilityLabel("Имя в трансляции")
+                .onChange(of: shareName) { if shareName.count > ShareCode.maxNameLength { shareName = String(shareName.prefix(ShareCode.maxNameLength)) } }
+        }
+        Footnote("Имя уходит на сервер и зрителям. Пусто — «Mac»: имя компьютера (часто с вашим именем) не передаётся.")
 
         GroupLabel("Что могут зрители")
         ListCard {

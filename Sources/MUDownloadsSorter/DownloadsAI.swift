@@ -37,10 +37,13 @@ package final class DocumentTagger: ObservableObject {
         ("Video", "🎬"), ("Audio", "🎵"), ("Code", "💻"), ("Data", "📑"), ("Font", "🔤"),
     ]
     package nonisolated static let otherEmoji = "📁"
-    /// Что читаем ради текста: PDF (PDFKit), RTF и простой текст. html, doc, docx, odt, pages не разбираем: разборщики этих форматов
-    /// (WebKit и др.) работают в нашем процессе и могут подгрузить внешние ресурсы из файла, который человек даже не открывал.
-    package nonisolated static let textExtensions: Set<String> = ["pdf", "txt", "rtf", "md", "csv", "json", "swift", "py", "js", "ts"]
-    package nonisolated static let richTextExtensions: Set<String> = ["rtf"]
+    /// Что читаем ради текста: PDF (PDFKit), RTF, docx и odt (с явным типом документа, без WebKit) и простой текст. html, doc и pages
+    /// не разбираем: разборщик html — WebKit в нашем процессе, он может подгрузить внешние ресурсы из файла, который человек не открывал.
+    package nonisolated static let textExtensions: Set<String> = ["pdf", "txt", "rtf", "docx", "odt", "md", "csv", "json", "swift", "py", "js", "ts"]
+    package nonisolated static let documentTypes: [String: NSAttributedString.DocumentType] = [
+        "rtf": .rtf, "docx": .officeOpenXML, "odt": .openDocument,
+    ]
+    package nonisolated static let maxDocumentBytes = 20 * 1024 * 1024
     package nonisolated static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "webp", "tiff", "gif"]
 
     private var queue: [URL] = []
@@ -169,19 +172,42 @@ package final class DocumentTagger: ObservableObject {
         Log.ai.info("Описание: \(url.lastPathComponent, privacy: .private)")
     }
 
-    /// RTF и простой текст — с явным `documentType`: формат по расширению и содержимому не угадывается (иначе html и офисные
-    /// форматы пошли бы через свои разборщики). Остальные расширения — nil.
+    /// RTF, docx и odt — с явным `documentType` (формат по расширению не угадывается: иначе html и другие пошли бы через свои
+    /// разборщики), простой текст — прямым чтением с определением кодировки. Остальные расширения — nil.
     package nonisolated static func attributedText(_ url: URL) -> NSAttributedString? {
         let ext = url.pathExtension.lowercased()
         guard textExtensions.contains(ext), ext != "pdf" else { return nil }
+        if let type = documentTypes[ext] {
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            guard size > 0, size <= maxDocumentBytes else { return nil }
+            return try? NSAttributedString(url: url, options: [.documentType: type], documentAttributes: nil)
+        }
         // Читаем только начало: на подпись хватает ~1200 знаков.
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: 256 * 1024), !data.isEmpty else { return nil }
-        let type: NSAttributedString.DocumentType = richTextExtensions.contains(ext) ? .rtf : .plain
-        var options: [NSAttributedString.DocumentReadingOptionKey: Any] = [.documentType: type]
-        if type == .plain { options[.characterEncoding] = String.Encoding.utf8.rawValue }
-        return try? NSAttributedString(data: data, options: options, documentAttributes: nil)
+        guard let data = try? handle.read(upToCount: 256 * 1024), !data.isEmpty, let text = decodePlain(data) else { return nil }
+        return NSAttributedString(string: text)
+    }
+
+    /// Простой текст не только в UTF-8: сначала UTF-8 (обрезанный на середине знака хвост не мешает), потом автоопределение с
+    /// подсказкой «Windows-1251» (русские тексты из Windows), в крайнем случае — Windows-1251.
+    package nonisolated static func decodePlain(_ data: Data) -> String? {
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]) {
+            return String(data: data, encoding: .utf16)
+        }
+        var trimmed = data
+        for _ in 0..<4 {
+            if let text = String(data: trimmed, encoding: .utf8) { return text }
+            guard !trimmed.isEmpty else { break }
+            trimmed.removeLast()
+        }
+        var converted: NSString?
+        var lossy = ObjCBool(false)
+        let cp1251 = CFStringConvertEncodingToNSStringEncoding(CFStringConvertIANACharSetNameToEncoding("windows-1251" as CFString))
+        let encoding = NSString.stringEncoding(for: data, encodingOptions: [.suggestedEncodingsKey: [cp1251], .useOnlySuggestedEncodingsKey: true],
+                                               convertedString: &converted, usedLossyConversion: &lossy)
+        if encoding != 0, !lossy.boolValue, let converted { return converted as String }
+        return String(data: data, encoding: String.Encoding(rawValue: cp1251))
     }
 
     /// Текст документа: PDF — первые страницы, остальное — через `attributedText`.

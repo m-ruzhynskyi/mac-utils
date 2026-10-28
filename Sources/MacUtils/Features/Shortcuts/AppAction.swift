@@ -211,16 +211,25 @@ enum AppAction: Equatable {
         }
     }
 
+    /// Идёт ли трансляция / запись встречи сейчас (тесты подменяют): переключатель на включённом выключает, и вопрос не нужен.
+    @MainActor static var sharingNow: () -> Bool = { ScreenShare.shared.isLive }
+    @MainActor static var recordingNow: () -> Bool = { if case .recording = MeetingRecorder.shared.state { return true } else { return false } }
+
     /// Подтверждение для действий, пришедших по ссылке; тесты подменяют (иначе — вопрос в окне).
     @MainActor static var linkConfirmer: ((_ title: String, _ detail: String) -> Bool)?
 
     /// Вопрос перед выполнением действия из ссылки `macutils://` (её может открыть любая страница или программа): трансляция,
     /// запись встречи, просмотр чужой трансляции, файл в плеере. Остановка и остальные действия — без вопроса.
+    @MainActor
     var linkQuestion: (title: String, detail: String)? {
         switch self {
         case .shareStart, .shareToggle:
+            // Переключатель на включённой трансляции её выключает — вопрос только когда действие начинает трансляцию.
+            if case .shareToggle = self, Self.sharingNow() { return nil }
+            if case .shareStart = self, Self.sharingNow() { return nil }
             return ("Начать трансляцию экрана?", "Ссылка macutils:// просит начать трансляцию. Окно выбора, что показывать, откроется после ответа.")
         case .meeting(.start), .meeting(.toggle):
+            if case .meeting(.toggle) = self, Self.recordingNow() { return nil }
             return ("Начать запись встречи?", "Ссылка macutils:// просит включить запись звука встречи.")
         case .watch:
             return ("Смотреть чужую трансляцию?", "Ссылка macutils:// просит подключиться зрителем к трансляции.")
