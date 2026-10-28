@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const nodeCrypto = require('node:crypto');
 
-const source = ['limits.js', 'auth.js', 'index.js']
+const source = ['limits.js', 'auth.js', 'csp.js', 'index.js']
   .map((name) => fs.readFileSync(`${__dirname}/../src/${name}`, 'utf8'))
   .join('\n')
   .replace(/^import .*;$/gm, '')
@@ -1112,6 +1112,7 @@ test('R-D (M3, F1): квота привязок зрителя 20 в сутки 
   // Отвечаем сразу (decline: одобренных может быть только 10), иначе с одного IP упрёмся в лимит ожидающих (4).
   // Квоту привязок это не трогает: ID зрителя закрепляется при auth, до ответа ведущего.
   const claim = async (i, ip = '9.9.9.9') => {
+    w.pass(6_000); w.f(ROOM).room.roomDeclines = { streak: 0, until: 0 }; // антиспам запросов (L2) этот тест не проверяет
     const s = await viewerLogin(w, keypair(100 + i), ROOM, { viewer: `41000000${String(i).padStart(2, '0')}`, ip });
     await decline(w, host, s);
     return s;
@@ -1183,6 +1184,7 @@ test('M4: адреса IPv6 из одного /64 — один ключ для p
   const g = world();
   const gHost = await hostLogin(g, OWNER, ROOM);
   for (let i = 0; i < 21; i++) {
+    g.pass(6_000); g.f(ROOM).room.roomDeclines = { streak: 0, until: 0 }; // антиспам запросов (L2) этот тест не проверяет
     const s = await viewerLogin(g, keypair(160 + i), ROOM, { viewer: `43000000${String(i).padStart(2, '0')}`, ip: `2001:db8:aa:bb:${i.toString(16)}::${i + 1}` });
     assert.equal(s.info.idVerified, i < 20, `привязка ${i + 1}`);
     if (i < 20) await decline(g, gHost, s);

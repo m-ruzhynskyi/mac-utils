@@ -1570,7 +1570,7 @@ const requests = [];
 // Доверять можно только чужому ID из 10 цифр: свой и пустой/кривой ID подделывает любой зритель.
 function canTrust(id) { return id !== myId && /^\d{10}$/.test(id); }
 // Вид запроса: "key" — зритель подписал ключом; "none" — старый зритель у ведущего с ключом;
-// "legacy" — ведущий без ключа (relay не спрашивал): доверие по ID, ровно как раньше.
+// "legacy" — ведущий без ключа (relay не спрашивал): личность не проверена, зрителя всегда спрашиваем.
 function requestKind(msg) {
   if (msg.auth === "key" || msg.auth === "none") return msg.auth;
   return hostAuth?.keyed ? "none" : "legacy";
@@ -1581,7 +1581,8 @@ function onRequest(msg) {
   const kind = requestKind(msg);
   const pub = kind === "key" && typeof msg.pub === "string" && B64U_KEY.test(msg.pub) ? msg.pub : null;
   const entry = canTrust(viewer) ? trustedList().find((e) => e.id === viewer) : null;
-  if (kind === "legacy" && entry) return answer(viewer, true, rid);
+  // «legacy» (ведущий без ключа) и «none» (старый зритель) по ID не впускаются: ID называет сам зритель, а ID люди разглашают.
+  // Как на Mac — всегда вопрос; автоприём только по проверенному ключу (ниже).
   // Окно «сам себе»: relay сверил ключ зрителя с ключом владельца этого ID.
   if (kind === "key" && pub && msg.self === true && hostAuth?.keyed) return answer(viewer, true, rid, pub);
   // Автоприём только если ID принадлежит этому ключу: при idVerified:false он закреплён за другим устройством.
