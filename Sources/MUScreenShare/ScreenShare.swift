@@ -10,10 +10,6 @@ import MUAudio
 
 /// Код комнаты и адрес (без сети — для тестов).
 package enum ShareCode {
-    package static func random() -> String {
-        String(format: "%06d", Int.random(in: 0...999_999))
-    }
-
     /// Постоянный 10-значный ID этого Mac (как в AnyDesk): по нему к вам подключаются.
     package static var myID: String {
         if let saved = UserDefaults.standard.string(forKey: Pref.shareID), saved.count == 10 { return saved }
@@ -33,10 +29,10 @@ package enum ShareCode {
         return name.isEmpty ? "Mac" : String(name.prefix(maxNameLength))
     }
 
-    /// «123 456 7890» → «1234567890»; nil — не 10 (или старые 6) цифр.
+    /// «123 456 7890» → «1234567890»; nil — не 10 цифр (6-значные ID ретранслятор больше не принимает).
     package static func normalized(_ text: String) -> String? {
         let digits = text.filter(\.isNumber)
-        return digits.count == 10 || digits.count == 6 ? digits : nil
+        return digits.count == 10 ? digits : nil
     }
 
     /// Ретранслятор пускает только приложения Mac Utils — по этому заголовку. Токен mu-share-2 ставится,
@@ -203,7 +199,8 @@ package final class ScreenShare: NSObject, ObservableObject {
                 state = .failed(ShareErrorText.hostRefusal(code: errorCode, message: message))
                 return
             case .failed(let status):
-                state = .failed(Self.connectionMessage(status))
+                // Строгий relay отвечает 426 и клиенту, который не смог показать ключ (Связка ключей недоступна): причина не в версии.
+                state = .failed(status == 426 && keychainUnavailable ? ShareIdentity.keychainUnavailableMessage : Self.connectionMessage(status))
                 return
             case .ok(let socket, let keyed):
                 self.socket = socket
