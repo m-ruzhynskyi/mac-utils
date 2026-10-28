@@ -1029,10 +1029,8 @@ package final class DocRenderer {
         let cell = place.def
         // Рамки ячейки у Word занимают место в высоте строки (по половине линии сверху и снизу), у нас их только рисует блок.
         // Поля блока `NSTextTable` округляет до целых пунктов — полоса рамки (доли пункта) добавляется в `DocCellBlock`.
-        if ProcessInfo.processInfo.environment["MU_DIAG_BAND"] != nil {
-            block.band = (cell.borderTop.isVisible ? DocCellBlock.wordWidth(cell.borderTop.width) / 2 : 0,
-                          cell.borderBottom.isVisible ? DocCellBlock.wordWidth(cell.borderBottom.width) / 2 : 0)
-        }
+        block.band = (cell.borderTop.isVisible ? DocCellBlock.wordWidth(cell.borderTop.width) / 2 : 0,
+                      cell.borderBottom.isVisible ? DocCellBlock.wordWidth(cell.borderBottom.width) / 2 : 0)
         block.setWidth(CGFloat(place.padTop) / 20, type: .absoluteValueType, for: .padding, edge: .minY)
         block.setWidth(CGFloat(place.padBottom) / 20, type: .absoluteValueType, for: .padding, edge: .maxY)
         for (edge, border) in [(NSRectEdge.minY, cell.borderTop), (.maxY, cell.borderBottom), (.minX, cell.borderLeft), (.maxX, cell.borderRight)] {

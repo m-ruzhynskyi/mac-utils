@@ -95,7 +95,6 @@ package enum DocLineMetrics {
         var above: CGFloat = 0, below: CGFloat = 0
         // Пробелы, табуляции и метка абзаца — запасной вариант: высоту строки задают её символы (как у Word).
         var blankAbove: CGFloat = 0, blankBelow: CGFloat = 0
-        let rule1 = ProcessInfo.processInfo.environment["MU_DIAG_V1"] != nil
         let whole = storage.string as NSString
         var object = false
         storage.enumerateAttributes(in: characters) { attributes, range, stop in
@@ -110,7 +109,7 @@ package enum DocLineMetrics {
                 font = NSFont(descriptor: font.fontDescriptor, size: CGFloat(char.halfPoints) / 2) ?? font
             }
             let metrics = metrics(font)
-            if rule1, Self.blank(whole, range) {
+            if Self.blank(whole, range) {
                 blankAbove = max(blankAbove, metrics.above)
                 blankBelow = max(blankBelow, metrics.below)
                 return
@@ -147,7 +146,7 @@ package enum DocLineMetrics {
         used.size.height = height
         baseline = before + height - below
         // `\slmult`: добавок множителя — под текстом, базовая линия на ascent × min(m, 1) от верха строки (как у Word).
-        if ProcessInfo.processInfo.environment["MU_DIAG_V2"] != nil, let props, props.lineSpacing > 0, props.lineMultiple {
+        if let props, props.lineSpacing > 0, props.lineMultiple {
             baseline = before + above * min(1, CGFloat(props.lineSpacing) / 240)
         }
         return true
