@@ -1,5 +1,10 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUWindowSnap
+import MUScreenShare
+import MUTextEditor
 
 // MARK: - Окна
 

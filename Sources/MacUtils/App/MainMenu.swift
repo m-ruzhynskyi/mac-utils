@@ -1,4 +1,8 @@
 import AppKit
+import MUCore
+import MUUpdate
+import MUScreenshot
+import MUTextEditor
 
 /// Строка меню у LSUIElement-приложения не видна, но главное меню всё равно
 /// нужно: через него работают ⌘W, ⌘Q и правка текста (⌘C/⌘V) в окне настроек.

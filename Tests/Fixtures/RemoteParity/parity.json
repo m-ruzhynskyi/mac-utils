@@ -1,0 +1,8463 @@
+{
+  "dupes" : {
+    "ambiguousProgramRows" : [
+      3,
+      5,
+      9,
+      11,
+      12
+    ],
+    "clean" : false,
+    "columns" : [
+      {
+        "column" : 0,
+        "field" : "name",
+        "title" : "Название"
+      },
+      {
+        "column" : 1,
+        "field" : "id",
+        "title" : "ID"
+      },
+      {
+        "column" : 2,
+        "field" : "password",
+        "title" : "Пароль"
+      },
+      {
+        "column" : 3,
+        "field" : "group",
+        "title" : "Группа"
+      },
+      {
+        "column" : 4,
+        "field" : "tags",
+        "title" : "Теги"
+      },
+      {
+        "column" : 5,
+        "field" : "note",
+        "title" : "Заметка"
+      },
+      {
+        "column" : 6,
+        "field" : "program",
+        "title" : "Программа"
+      }
+    ],
+    "duplicateCount" : 1,
+    "duplicates" : [
+      {
+        "id" : "100015838",
+        "names" : [
+          "Офис Восток 2",
+          "Копия кассы"
+        ],
+        "rows" : [
+          4,
+          12
+        ]
+      }
+    ],
+    "loaded" : 12,
+    "lossyIDRows" : [
+
+    ],
+    "records" : [
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100000000",
+        "name" : "Лаборатория Север 0",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 2,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100007919",
+        "name" : "Склад Південь 1",
+        "note" : "",
+        "program" : null,
+        "row" : 3,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100015838",
+        "name" : "Офис Восток 2",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 4,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100023757",
+        "name" : "Аптека Захід 3",
+        "note" : "",
+        "program" : null,
+        "row" : 5,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : false,
+        "id" : "100031676",
+        "name" : "Школа №7 4",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 6,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100039595",
+        "name" : "Kyiv Front Desk 5",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 7,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100047514",
+        "name" : "Бухгалтерия 6",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 8,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100055433",
+        "name" : "Касса 2 7",
+        "note" : "",
+        "program" : null,
+        "row" : 9,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100063352",
+        "name" : "Сервер печати 8",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 10,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : false,
+        "id" : "100071271",
+        "name" : "Приёмная 9",
+        "note" : "",
+        "program" : null,
+        "row" : 11,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "100015838",
+        "name" : "Копия кассы",
+        "note" : "",
+        "program" : null,
+        "row" : 12,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "100000000",
+        "name" : "Тот же ID, другая программа",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 13,
+        "tags" : [
+
+        ]
+      }
+    ],
+    "skipped" : [
+
+    ],
+    "unrecognizedColumns" : [
+
+    ],
+    "withPassword" : 8
+  },
+  "hand-xml" : {
+    "ambiguousProgramRows" : [
+
+    ],
+    "clean" : false,
+    "columns" : [
+      {
+        "column" : null,
+        "field" : "name",
+        "title" : "name"
+      },
+      {
+        "column" : null,
+        "field" : "id",
+        "title" : "id"
+      },
+      {
+        "column" : null,
+        "field" : "password",
+        "title" : "password"
+      },
+      {
+        "column" : null,
+        "field" : "group",
+        "title" : "group"
+      },
+      {
+        "column" : null,
+        "field" : "program",
+        "title" : "app"
+      },
+      {
+        "column" : null,
+        "field" : "tags",
+        "title" : "tags"
+      },
+      {
+        "column" : null,
+        "field" : "note",
+        "title" : "note"
+      }
+    ],
+    "duplicateCount" : 0,
+    "duplicates" : [
+
+    ],
+    "loaded" : 3,
+    "lossyIDRows" : [
+
+    ],
+    "records" : [
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "123456789",
+        "name" : "Аптека Захід",
+        "note" : "",
+        "program" : null,
+        "row" : 4,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "555666777",
+        "name" : "Атрибуты",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 6,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "front@ad",
+        "name" : "Front",
+        "note" : "n & <m>",
+        "program" : null,
+        "row" : 7,
+        "tags" : [
+          "a",
+          "b"
+        ]
+      }
+    ],
+    "skipped" : [
+      {
+        "reason" : "invalidID",
+        "row" : 5,
+        "value" : "12"
+      }
+    ],
+    "unrecognizedColumns" : [
+      "extra"
+    ],
+    "withPassword" : 1
+  },
+  "id-forms" : {
+    "ambiguousProgramRows" : [
+
+    ],
+    "clean" : false,
+    "columns" : [
+      {
+        "column" : 0,
+        "field" : "name",
+        "title" : "Название"
+      },
+      {
+        "column" : 1,
+        "field" : "id",
+        "title" : "ID"
+      }
+    ],
+    "duplicateCount" : 5,
+    "duplicates" : [
+      {
+        "id" : "123456789",
+        "names" : [
+          "Узел 0",
+          "Узел 2",
+          "Узел 4",
+          "Узел 6",
+          "Узел 7",
+          "Узел 17"
+        ],
+        "rows" : [
+          2,
+          4,
+          6,
+          8,
+          9,
+          19
+        ]
+      }
+    ],
+    "loaded" : 14,
+    "lossyIDRows" : [
+      16
+    ],
+    "records" : [
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "123456789",
+        "name" : "Узел 0",
+        "note" : "",
+        "program" : null,
+        "row" : 2,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "1234567890",
+        "name" : "Узел 1",
+        "note" : "",
+        "program" : null,
+        "row" : 3,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "123456789",
+        "name" : "Узел 2",
+        "note" : "",
+        "program" : null,
+        "row" : 4,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "987654321",
+        "name" : "Узел 3",
+        "note" : "",
+        "program" : null,
+        "row" : 5,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "123456789",
+        "name" : "Узел 4",
+        "note" : "",
+        "program" : null,
+        "row" : 6,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "123456780",
+        "name" : "Узел 5",
+        "note" : "",
+        "program" : null,
+        "row" : 7,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "123456789",
+        "name" : "Узел 6",
+        "note" : "",
+        "program" : null,
+        "row" : 8,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "123456789",
+        "name" : "Узел 7",
+        "note" : "",
+        "program" : null,
+        "row" : 9,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "111222333",
+        "name" : "Узел 8",
+        "note" : "",
+        "program" : null,
+        "row" : 10,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "office@ad",
+        "name" : "Узел 9",
+        "note" : "",
+        "program" : null,
+        "row" : 11,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "front-desk.2@company",
+        "name" : "Узел 10",
+        "note" : "",
+        "program" : null,
+        "row" : 12,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "123000000",
+        "name" : "Узел 14",
+        "note" : "",
+        "program" : null,
+        "row" : 16,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "0123456789",
+        "name" : "Узел 15",
+        "note" : "",
+        "program" : null,
+        "row" : 17,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "123456789",
+        "name" : "Узел 17",
+        "note" : "",
+        "program" : null,
+        "row" : 19,
+        "tags" : [
+
+        ]
+      }
+    ],
+    "skipped" : [
+      {
+        "reason" : "invalidID",
+        "row" : 13,
+        "value" : "12345"
+      },
+      {
+        "reason" : "invalidID",
+        "row" : 14,
+        "value" : "abc"
+      },
+      {
+        "reason" : "invalidID",
+        "row" : 15,
+        "value" : "123456789012"
+      },
+      {
+        "reason" : "invalidID",
+        "row" : 18,
+        "value" : "a@b@c"
+      }
+    ],
+    "unrecognizedColumns" : [
+
+    ],
+    "withPassword" : 0
+  },
+  "lists" : {
+    "ad" : {
+      "counts" : {
+        "all" : 30,
+        "anyDesk" : 25,
+        "teamViewer" : 5
+      },
+      "sections" : [
+        {
+          "id" : "favorites",
+          "rows" : [
+            3,
+            5
+          ]
+        },
+        {
+          "id" : "recents",
+          "rows" : [
+            9,
+            8,
+            6,
+            5,
+            4
+          ]
+        },
+        {
+          "id" : "group:Клиенты",
+          "rows" : [
+            2,
+            6,
+            10,
+            14,
+            18,
+            22,
+            26,
+            30
+          ]
+        },
+        {
+          "id" : "group:Філії",
+          "rows" : [
+            3,
+            11,
+            15,
+            23,
+            27
+          ]
+        },
+        {
+          "id" : "group:Office",
+          "rows" : [
+            4,
+            8,
+            12,
+            16,
+            20,
+            24,
+            28
+          ]
+        },
+        {
+          "id" : "ungrouped",
+          "rows" : [
+            5,
+            9,
+            17,
+            21,
+            29
+          ]
+        }
+      ]
+    },
+    "plain" : {
+      "counts" : {
+        "all" : 30,
+        "anyDesk" : 25,
+        "teamViewer" : 5
+      },
+      "sections" : [
+        {
+          "id" : "favorites",
+          "rows" : [
+            3,
+            5
+          ]
+        },
+        {
+          "id" : "recents",
+          "rows" : [
+            9,
+            8,
+            7,
+            6,
+            5
+          ]
+        },
+        {
+          "id" : "group:Клиенты",
+          "rows" : [
+            2,
+            6,
+            10,
+            14,
+            18,
+            22,
+            26,
+            30
+          ]
+        },
+        {
+          "id" : "group:Філії",
+          "rows" : [
+            3,
+            7,
+            11,
+            15,
+            19,
+            23,
+            27,
+            31
+          ]
+        },
+        {
+          "id" : "group:Office",
+          "rows" : [
+            4,
+            8,
+            12,
+            16,
+            20,
+            24,
+            28
+          ]
+        },
+        {
+          "id" : "ungrouped",
+          "rows" : [
+            5,
+            9,
+            13,
+            17,
+            21,
+            25,
+            29
+          ]
+        }
+      ]
+    },
+    "query" : {
+      "counts" : {
+        "all" : 12,
+        "anyDesk" : 11,
+        "teamViewer" : 1
+      },
+      "sections" : [
+        {
+          "id" : "results",
+          "rows" : [
+            9,
+            19,
+            29,
+            2,
+            5,
+            8,
+            11,
+            14,
+            17,
+            20,
+            23,
+            26
+          ]
+        }
+      ]
+    },
+    "tv" : {
+      "counts" : {
+        "all" : 30,
+        "anyDesk" : 25,
+        "teamViewer" : 5
+      },
+      "sections" : [
+        {
+          "id" : "recents",
+          "rows" : [
+            7
+          ]
+        },
+        {
+          "id" : "group:Філії",
+          "rows" : [
+            7,
+            19,
+            31
+          ]
+        },
+        {
+          "id" : "ungrouped",
+          "rows" : [
+            13,
+            25
+          ]
+        }
+      ]
+    }
+  },
+  "messy-passwords" : {
+    "xlsx" : [
+      "Pw-0-секрет",
+      "Pw-1-секрет",
+      "Pw-12-секрет",
+      null,
+      "Pw-22-секрет",
+      "Pw-16-секрет"
+    ],
+    "xml" : [
+      null,
+      "Pw-0-секрет",
+      "Pw-11-секрет",
+      "Pw-19-секрет",
+      "Pw-21-секрет",
+      "Pw-15-секрет"
+    ]
+  },
+  "messy-xlsx" : {
+    "ambiguousProgramRows" : [
+
+    ],
+    "clean" : false,
+    "columns" : [
+      {
+        "column" : 0,
+        "field" : "name",
+        "title" : "Назва"
+      },
+      {
+        "column" : 1,
+        "field" : "id",
+        "title" : "ID AnyDesk"
+      },
+      {
+        "column" : 2,
+        "field" : "password",
+        "title" : "ПАРОЛЬ"
+      },
+      {
+        "column" : 3,
+        "field" : "group",
+        "title" : "Група"
+      },
+      {
+        "column" : 4,
+        "field" : "tags",
+        "title" : "Теги"
+      },
+      {
+        "column" : 5,
+        "field" : "note",
+        "title" : "Примітка"
+      },
+      {
+        "column" : 6,
+        "field" : "program",
+        "title" : "Програма"
+      }
+    ],
+    "duplicateCount" : 1,
+    "duplicates" : [
+      {
+        "id" : "100007919",
+        "names" : [
+          "Комп’ютер 1",
+          "Комп’ютер 12"
+        ],
+        "rows" : [
+          3,
+          14
+        ]
+      }
+    ],
+    "loaded" : 204,
+    "lossyIDRows" : [
+      10
+    ],
+    "records" : [
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100000000",
+        "name" : "Комп’ютер 0",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 2,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100007919",
+        "name" : "Комп’ютер 1",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 3,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100023757",
+        "name" : "Комп’ютер 3",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 5,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100039595",
+        "name" : "Комп’ютер 5",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 7,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100055433",
+        "name" : "Комп’ютер 7",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 9,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "123000000",
+        "name" : "Комп’ютер 8",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 10,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100071271",
+        "name" : "Комп’ютер 9",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 11,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "123456780",
+        "name" : "Комп’ютер 10",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 12,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100087109",
+        "name" : "Комп’ютер 11",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 13,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100007919",
+        "name" : "Комп’ютер 12",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 14,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100102947",
+        "name" : "Комп’ютер 13",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 15,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100118785",
+        "name" : "Комп’ютер 15",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 17,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "office@ad",
+        "name" : "Комп’ютер 16",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 18,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100134623",
+        "name" : "Комп’ютер 17",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 19,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100150461",
+        "name" : "Комп’ютер 19",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 21,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100166299",
+        "name" : "Комп’ютер 21",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 23,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "123456789",
+        "name" : "Комп’ютер 22",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 24,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100182137",
+        "name" : "Комп’ютер 23",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 25,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100190056",
+        "name" : "Комп’ютер 24",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 26,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100197975",
+        "name" : "Комп’ютер 25",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 27,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100205894",
+        "name" : "Комп’ютер 26",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 28,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100213813",
+        "name" : "Комп’ютер 27",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 29,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100221732",
+        "name" : "Комп’ютер 28",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 30,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100229651",
+        "name" : "Комп’ютер 29",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 31,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100237570",
+        "name" : "Комп’ютер 30",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 32,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100245489",
+        "name" : "Комп’ютер 31",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 33,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100253408",
+        "name" : "Комп’ютер 32",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 34,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100261327",
+        "name" : "Комп’ютер 33",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 35,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100269246",
+        "name" : "Комп’ютер 34",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 36,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100277165",
+        "name" : "Комп’ютер 35",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 37,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100285084",
+        "name" : "Комп’ютер 36",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 38,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100293003",
+        "name" : "Комп’ютер 37",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 39,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100300922",
+        "name" : "Комп’ютер 38",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 40,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100308841",
+        "name" : "Комп’ютер 39",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 41,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100316760",
+        "name" : "Комп’ютер 40",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 42,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100324679",
+        "name" : "Комп’ютер 41",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 43,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100332598",
+        "name" : "Комп’ютер 42",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 44,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100340517",
+        "name" : "Комп’ютер 43",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 45,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100348436",
+        "name" : "Комп’ютер 44",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 46,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100356355",
+        "name" : "Комп’ютер 45",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 47,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100364274",
+        "name" : "Комп’ютер 46",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 48,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100372193",
+        "name" : "Комп’ютер 47",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 49,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100380112",
+        "name" : "Комп’ютер 48",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 50,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100388031",
+        "name" : "Комп’ютер 49",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 51,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100395950",
+        "name" : "Комп’ютер 50",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 52,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100403869",
+        "name" : "Комп’ютер 51",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 53,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100411788",
+        "name" : "Комп’ютер 52",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 54,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100419707",
+        "name" : "Комп’ютер 53",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 55,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100427626",
+        "name" : "Комп’ютер 54",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 56,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100435545",
+        "name" : "Комп’ютер 55",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 57,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100443464",
+        "name" : "Комп’ютер 56",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 58,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100451383",
+        "name" : "Комп’ютер 57",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 59,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100459302",
+        "name" : "Комп’ютер 58",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 60,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100467221",
+        "name" : "Комп’ютер 59",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 61,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100475140",
+        "name" : "Комп’ютер 60",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 62,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100483059",
+        "name" : "Комп’ютер 61",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 63,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100490978",
+        "name" : "Комп’ютер 62",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 64,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100498897",
+        "name" : "Комп’ютер 63",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 65,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100506816",
+        "name" : "Комп’ютер 64",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 66,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100514735",
+        "name" : "Комп’ютер 65",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 67,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100522654",
+        "name" : "Комп’ютер 66",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 68,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100530573",
+        "name" : "Комп’ютер 67",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 69,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100538492",
+        "name" : "Комп’ютер 68",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 70,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100546411",
+        "name" : "Комп’ютер 69",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 71,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100554330",
+        "name" : "Комп’ютер 70",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 72,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100562249",
+        "name" : "Комп’ютер 71",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 73,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100570168",
+        "name" : "Комп’ютер 72",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 74,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100578087",
+        "name" : "Комп’ютер 73",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 75,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100586006",
+        "name" : "Комп’ютер 74",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 76,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100593925",
+        "name" : "Комп’ютер 75",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 77,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100601844",
+        "name" : "Комп’ютер 76",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 78,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100609763",
+        "name" : "Комп’ютер 77",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 79,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100617682",
+        "name" : "Комп’ютер 78",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 80,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100625601",
+        "name" : "Комп’ютер 79",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 81,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100633520",
+        "name" : "Комп’ютер 80",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 82,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100641439",
+        "name" : "Комп’ютер 81",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 83,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100649358",
+        "name" : "Комп’ютер 82",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 84,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100657277",
+        "name" : "Комп’ютер 83",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 85,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100665196",
+        "name" : "Комп’ютер 84",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 86,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100673115",
+        "name" : "Комп’ютер 85",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 87,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100681034",
+        "name" : "Комп’ютер 86",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 88,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100688953",
+        "name" : "Комп’ютер 87",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 89,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100696872",
+        "name" : "Комп’ютер 88",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 90,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100704791",
+        "name" : "Комп’ютер 89",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 91,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100712710",
+        "name" : "Комп’ютер 90",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 92,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100720629",
+        "name" : "Комп’ютер 91",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 93,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100728548",
+        "name" : "Комп’ютер 92",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 94,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100736467",
+        "name" : "Комп’ютер 93",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 95,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100744386",
+        "name" : "Комп’ютер 94",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 96,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100752305",
+        "name" : "Комп’ютер 95",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 97,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100760224",
+        "name" : "Комп’ютер 96",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 98,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100768143",
+        "name" : "Комп’ютер 97",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 99,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100776062",
+        "name" : "Комп’ютер 98",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 100,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100783981",
+        "name" : "Комп’ютер 99",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 101,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100791900",
+        "name" : "Комп’ютер 100",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 102,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100799819",
+        "name" : "Комп’ютер 101",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 103,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100807738",
+        "name" : "Комп’ютер 102",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 104,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100815657",
+        "name" : "Комп’ютер 103",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 105,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100823576",
+        "name" : "Комп’ютер 104",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 106,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100831495",
+        "name" : "Комп’ютер 105",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 107,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100839414",
+        "name" : "Комп’ютер 106",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 108,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100847333",
+        "name" : "Комп’ютер 107",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 109,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100855252",
+        "name" : "Комп’ютер 108",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 110,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100863171",
+        "name" : "Комп’ютер 109",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 111,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100871090",
+        "name" : "Комп’ютер 110",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 112,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100879009",
+        "name" : "Комп’ютер 111",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 113,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100886928",
+        "name" : "Комп’ютер 112",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 114,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100894847",
+        "name" : "Комп’ютер 113",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 115,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100902766",
+        "name" : "Комп’ютер 114",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 116,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100910685",
+        "name" : "Комп’ютер 115",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 117,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100918604",
+        "name" : "Комп’ютер 116",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 118,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100926523",
+        "name" : "Комп’ютер 117",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 119,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100934442",
+        "name" : "Комп’ютер 118",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 120,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100942361",
+        "name" : "Комп’ютер 119",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 121,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100950280",
+        "name" : "Комп’ютер 120",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 122,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100958199",
+        "name" : "Комп’ютер 121",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 123,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100966118",
+        "name" : "Комп’ютер 122",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 124,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100974037",
+        "name" : "Комп’ютер 123",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 125,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100981956",
+        "name" : "Комп’ютер 124",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 126,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100989875",
+        "name" : "Комп’ютер 125",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 127,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100997794",
+        "name" : "Комп’ютер 126",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 128,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101005713",
+        "name" : "Комп’ютер 127",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 129,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101013632",
+        "name" : "Комп’ютер 128",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 130,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101021551",
+        "name" : "Комп’ютер 129",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 131,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101029470",
+        "name" : "Комп’ютер 130",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 132,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101037389",
+        "name" : "Комп’ютер 131",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 133,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101045308",
+        "name" : "Комп’ютер 132",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 134,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101053227",
+        "name" : "Комп’ютер 133",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 135,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101061146",
+        "name" : "Комп’ютер 134",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 136,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101069065",
+        "name" : "Комп’ютер 135",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 137,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101076984",
+        "name" : "Комп’ютер 136",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 138,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101084903",
+        "name" : "Комп’ютер 137",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 139,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101092822",
+        "name" : "Комп’ютер 138",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 140,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101100741",
+        "name" : "Комп’ютер 139",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 141,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101108660",
+        "name" : "Комп’ютер 140",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 142,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101116579",
+        "name" : "Комп’ютер 141",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 143,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101124498",
+        "name" : "Комп’ютер 142",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 144,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101132417",
+        "name" : "Комп’ютер 143",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 145,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101140336",
+        "name" : "Комп’ютер 144",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 146,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101148255",
+        "name" : "Комп’ютер 145",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 147,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101156174",
+        "name" : "Комп’ютер 146",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 148,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101164093",
+        "name" : "Комп’ютер 147",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 149,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101172012",
+        "name" : "Комп’ютер 148",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 150,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101179931",
+        "name" : "Комп’ютер 149",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 151,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101187850",
+        "name" : "Комп’ютер 150",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 152,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101195769",
+        "name" : "Комп’ютер 151",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 153,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101203688",
+        "name" : "Комп’ютер 152",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 154,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101211607",
+        "name" : "Комп’ютер 153",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 155,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101219526",
+        "name" : "Комп’ютер 154",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 156,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101227445",
+        "name" : "Комп’ютер 155",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 157,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101235364",
+        "name" : "Комп’ютер 156",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 158,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101243283",
+        "name" : "Комп’ютер 157",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 159,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101251202",
+        "name" : "Комп’ютер 158",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 160,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101259121",
+        "name" : "Комп’ютер 159",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 161,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101267040",
+        "name" : "Комп’ютер 160",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 162,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101274959",
+        "name" : "Комп’ютер 161",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 163,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101282878",
+        "name" : "Комп’ютер 162",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 164,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101290797",
+        "name" : "Комп’ютер 163",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 165,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101298716",
+        "name" : "Комп’ютер 164",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 166,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101306635",
+        "name" : "Комп’ютер 165",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 167,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101314554",
+        "name" : "Комп’ютер 166",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 168,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101322473",
+        "name" : "Комп’ютер 167",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 169,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101330392",
+        "name" : "Комп’ютер 168",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 170,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101338311",
+        "name" : "Комп’ютер 169",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 171,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101346230",
+        "name" : "Комп’ютер 170",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 172,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101354149",
+        "name" : "Комп’ютер 171",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 173,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101362068",
+        "name" : "Комп’ютер 172",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 174,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101369987",
+        "name" : "Комп’ютер 173",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 175,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101377906",
+        "name" : "Комп’ютер 174",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 176,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101385825",
+        "name" : "Комп’ютер 175",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 177,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101393744",
+        "name" : "Комп’ютер 176",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 178,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101401663",
+        "name" : "Комп’ютер 177",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 179,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101409582",
+        "name" : "Комп’ютер 178",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 180,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101417501",
+        "name" : "Комп’ютер 179",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 181,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101425420",
+        "name" : "Комп’ютер 180",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 182,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101433339",
+        "name" : "Комп’ютер 181",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 183,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101441258",
+        "name" : "Комп’ютер 182",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 184,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101449177",
+        "name" : "Комп’ютер 183",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 185,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101457096",
+        "name" : "Комп’ютер 184",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 186,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101465015",
+        "name" : "Комп’ютер 185",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 187,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101472934",
+        "name" : "Комп’ютер 186",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 188,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101480853",
+        "name" : "Комп’ютер 187",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 189,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101488772",
+        "name" : "Комп’ютер 188",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 190,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101496691",
+        "name" : "Комп’ютер 189",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 191,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101504610",
+        "name" : "Комп’ютер 190",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 192,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101512529",
+        "name" : "Комп’ютер 191",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 193,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101520448",
+        "name" : "Комп’ютер 192",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 194,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101528367",
+        "name" : "Комп’ютер 193",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 195,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101536286",
+        "name" : "Комп’ютер 194",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 196,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101544205",
+        "name" : "Комп’ютер 195",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 197,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101552124",
+        "name" : "Комп’ютер 196",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 198,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101560043",
+        "name" : "Комп’ютер 197",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 199,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101567962",
+        "name" : "Комп’ютер 198",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 200,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101575881",
+        "name" : "Комп’ютер 199",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 201,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101583800",
+        "name" : "Комп’ютер 200",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 202,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101591719",
+        "name" : "Комп’ютер 201",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 203,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101599638",
+        "name" : "Комп’ютер 202",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 204,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101607557",
+        "name" : "Комп’ютер 203",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 205,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101615476",
+        "name" : "Комп’ютер 204",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 206,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101623395",
+        "name" : "Комп’ютер 205",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 207,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101631314",
+        "name" : "Комп’ютер 206",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 208,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101639233",
+        "name" : "Комп’ютер 207",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 209,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101647152",
+        "name" : "Комп’ютер 208",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 210,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101655071",
+        "name" : "Комп’ютер 209",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 211,
+        "tags" : [
+
+        ]
+      }
+    ],
+    "skipped" : [
+      {
+        "reason" : "missingName",
+        "row" : 4,
+        "value" : ""
+      },
+      {
+        "reason" : "missingID",
+        "row" : 6,
+        "value" : ""
+      },
+      {
+        "reason" : "invalidID",
+        "row" : 8,
+        "value" : "12345"
+      },
+      {
+        "reason" : "unknownProgram",
+        "row" : 16,
+        "value" : "RustDesk"
+      },
+      {
+        "reason" : "aliasNotSupported",
+        "row" : 20,
+        "value" : "front@ad"
+      }
+    ],
+    "unrecognizedColumns" : [
+      "Ответственный"
+    ],
+    "withPassword" : 204
+  },
+  "messy-xml" : {
+    "ambiguousProgramRows" : [
+
+    ],
+    "clean" : false,
+    "columns" : [
+      {
+        "column" : null,
+        "field" : "name",
+        "title" : "name"
+      },
+      {
+        "column" : null,
+        "field" : "id",
+        "title" : "id"
+      },
+      {
+        "column" : null,
+        "field" : "password",
+        "title" : "password"
+      },
+      {
+        "column" : null,
+        "field" : "group",
+        "title" : "group"
+      },
+      {
+        "column" : null,
+        "field" : "program",
+        "title" : "app"
+      }
+    ],
+    "duplicateCount" : 1,
+    "duplicates" : [
+      {
+        "id" : "100007919",
+        "names" : [
+          "Комп’ютер 1",
+          "Комп’ютер 12"
+        ],
+        "rows" : [
+          4,
+          15
+        ]
+      }
+    ],
+    "loaded" : 204,
+    "lossyIDRows" : [
+      11
+    ],
+    "records" : [
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100000000",
+        "name" : "Комп’ютер 0",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 3,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100007919",
+        "name" : "Комп’ютер 1",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 4,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100023757",
+        "name" : "Комп’ютер 3",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 6,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100039595",
+        "name" : "Комп’ютер 5",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 8,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100055433",
+        "name" : "Комп’ютер 7",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 10,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "123000000",
+        "name" : "Комп’ютер 8",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 11,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100071271",
+        "name" : "Комп’ютер 9",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 12,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "123456780",
+        "name" : "Комп’ютер 10",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 13,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100087109",
+        "name" : "Комп’ютер 11",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 14,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100007919",
+        "name" : "Комп’ютер 12",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 15,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100102947",
+        "name" : "Комп’ютер 13",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 16,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100118785",
+        "name" : "Комп’ютер 15",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 18,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "office@ad",
+        "name" : "Комп’ютер 16",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 19,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100134623",
+        "name" : "Комп’ютер 17",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 20,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100150461",
+        "name" : "Комп’ютер 19",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 22,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100166299",
+        "name" : "Комп’ютер 21",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 24,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "123456789",
+        "name" : "Комп’ютер 22",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 25,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100182137",
+        "name" : "Комп’ютер 23",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 26,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100190056",
+        "name" : "Комп’ютер 24",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 27,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100197975",
+        "name" : "Комп’ютер 25",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 28,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100205894",
+        "name" : "Комп’ютер 26",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 29,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100213813",
+        "name" : "Комп’ютер 27",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 30,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100221732",
+        "name" : "Комп’ютер 28",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 31,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100229651",
+        "name" : "Комп’ютер 29",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 32,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100237570",
+        "name" : "Комп’ютер 30",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 33,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100245489",
+        "name" : "Комп’ютер 31",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 34,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100253408",
+        "name" : "Комп’ютер 32",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 35,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100261327",
+        "name" : "Комп’ютер 33",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 36,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100269246",
+        "name" : "Комп’ютер 34",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 37,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100277165",
+        "name" : "Комп’ютер 35",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 38,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100285084",
+        "name" : "Комп’ютер 36",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 39,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100293003",
+        "name" : "Комп’ютер 37",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 40,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100300922",
+        "name" : "Комп’ютер 38",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 41,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100308841",
+        "name" : "Комп’ютер 39",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 42,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100316760",
+        "name" : "Комп’ютер 40",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 43,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100324679",
+        "name" : "Комп’ютер 41",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 44,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100332598",
+        "name" : "Комп’ютер 42",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 45,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100340517",
+        "name" : "Комп’ютер 43",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 46,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100348436",
+        "name" : "Комп’ютер 44",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 47,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100356355",
+        "name" : "Комп’ютер 45",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 48,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100364274",
+        "name" : "Комп’ютер 46",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 49,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100372193",
+        "name" : "Комп’ютер 47",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 50,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100380112",
+        "name" : "Комп’ютер 48",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 51,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100388031",
+        "name" : "Комп’ютер 49",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 52,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100395950",
+        "name" : "Комп’ютер 50",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 53,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100403869",
+        "name" : "Комп’ютер 51",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 54,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100411788",
+        "name" : "Комп’ютер 52",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 55,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100419707",
+        "name" : "Комп’ютер 53",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 56,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100427626",
+        "name" : "Комп’ютер 54",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 57,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100435545",
+        "name" : "Комп’ютер 55",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 58,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100443464",
+        "name" : "Комп’ютер 56",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 59,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100451383",
+        "name" : "Комп’ютер 57",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 60,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100459302",
+        "name" : "Комп’ютер 58",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 61,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100467221",
+        "name" : "Комп’ютер 59",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 62,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100475140",
+        "name" : "Комп’ютер 60",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 63,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100483059",
+        "name" : "Комп’ютер 61",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 64,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100490978",
+        "name" : "Комп’ютер 62",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 65,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100498897",
+        "name" : "Комп’ютер 63",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 66,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100506816",
+        "name" : "Комп’ютер 64",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 67,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100514735",
+        "name" : "Комп’ютер 65",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 68,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100522654",
+        "name" : "Комп’ютер 66",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 69,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100530573",
+        "name" : "Комп’ютер 67",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 70,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100538492",
+        "name" : "Комп’ютер 68",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 71,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100546411",
+        "name" : "Комп’ютер 69",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 72,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100554330",
+        "name" : "Комп’ютер 70",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 73,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100562249",
+        "name" : "Комп’ютер 71",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 74,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100570168",
+        "name" : "Комп’ютер 72",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 75,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100578087",
+        "name" : "Комп’ютер 73",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 76,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100586006",
+        "name" : "Комп’ютер 74",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 77,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100593925",
+        "name" : "Комп’ютер 75",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 78,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100601844",
+        "name" : "Комп’ютер 76",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 79,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100609763",
+        "name" : "Комп’ютер 77",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 80,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100617682",
+        "name" : "Комп’ютер 78",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 81,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100625601",
+        "name" : "Комп’ютер 79",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 82,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100633520",
+        "name" : "Комп’ютер 80",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 83,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100641439",
+        "name" : "Комп’ютер 81",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 84,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100649358",
+        "name" : "Комп’ютер 82",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 85,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100657277",
+        "name" : "Комп’ютер 83",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 86,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100665196",
+        "name" : "Комп’ютер 84",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 87,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100673115",
+        "name" : "Комп’ютер 85",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 88,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100681034",
+        "name" : "Комп’ютер 86",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 89,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100688953",
+        "name" : "Комп’ютер 87",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 90,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100696872",
+        "name" : "Комп’ютер 88",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 91,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100704791",
+        "name" : "Комп’ютер 89",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 92,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100712710",
+        "name" : "Комп’ютер 90",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 93,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100720629",
+        "name" : "Комп’ютер 91",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 94,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100728548",
+        "name" : "Комп’ютер 92",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 95,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100736467",
+        "name" : "Комп’ютер 93",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 96,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100744386",
+        "name" : "Комп’ютер 94",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 97,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100752305",
+        "name" : "Комп’ютер 95",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 98,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100760224",
+        "name" : "Комп’ютер 96",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 99,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100768143",
+        "name" : "Комп’ютер 97",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 100,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100776062",
+        "name" : "Комп’ютер 98",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 101,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100783981",
+        "name" : "Комп’ютер 99",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 102,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100791900",
+        "name" : "Комп’ютер 100",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 103,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100799819",
+        "name" : "Комп’ютер 101",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 104,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100807738",
+        "name" : "Комп’ютер 102",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 105,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100815657",
+        "name" : "Комп’ютер 103",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 106,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100823576",
+        "name" : "Комп’ютер 104",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 107,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100831495",
+        "name" : "Комп’ютер 105",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 108,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100839414",
+        "name" : "Комп’ютер 106",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 109,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100847333",
+        "name" : "Комп’ютер 107",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 110,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100855252",
+        "name" : "Комп’ютер 108",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 111,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100863171",
+        "name" : "Комп’ютер 109",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 112,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100871090",
+        "name" : "Комп’ютер 110",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 113,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100879009",
+        "name" : "Комп’ютер 111",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 114,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100886928",
+        "name" : "Комп’ютер 112",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 115,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100894847",
+        "name" : "Комп’ютер 113",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 116,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100902766",
+        "name" : "Комп’ютер 114",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 117,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100910685",
+        "name" : "Комп’ютер 115",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 118,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100918604",
+        "name" : "Комп’ютер 116",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 119,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100926523",
+        "name" : "Комп’ютер 117",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 120,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100934442",
+        "name" : "Комп’ютер 118",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 121,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100942361",
+        "name" : "Комп’ютер 119",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 122,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100950280",
+        "name" : "Комп’ютер 120",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 123,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100958199",
+        "name" : "Комп’ютер 121",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 124,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100966118",
+        "name" : "Комп’ютер 122",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 125,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100974037",
+        "name" : "Комп’ютер 123",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 126,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100981956",
+        "name" : "Комп’ютер 124",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 127,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100989875",
+        "name" : "Комп’ютер 125",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 128,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100997794",
+        "name" : "Комп’ютер 126",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 129,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101005713",
+        "name" : "Комп’ютер 127",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 130,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101013632",
+        "name" : "Комп’ютер 128",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 131,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101021551",
+        "name" : "Комп’ютер 129",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 132,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101029470",
+        "name" : "Комп’ютер 130",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 133,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101037389",
+        "name" : "Комп’ютер 131",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 134,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101045308",
+        "name" : "Комп’ютер 132",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 135,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101053227",
+        "name" : "Комп’ютер 133",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 136,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101061146",
+        "name" : "Комп’ютер 134",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 137,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101069065",
+        "name" : "Комп’ютер 135",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 138,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101076984",
+        "name" : "Комп’ютер 136",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 139,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101084903",
+        "name" : "Комп’ютер 137",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 140,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101092822",
+        "name" : "Комп’ютер 138",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 141,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101100741",
+        "name" : "Комп’ютер 139",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 142,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101108660",
+        "name" : "Комп’ютер 140",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 143,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101116579",
+        "name" : "Комп’ютер 141",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 144,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101124498",
+        "name" : "Комп’ютер 142",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 145,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101132417",
+        "name" : "Комп’ютер 143",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 146,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101140336",
+        "name" : "Комп’ютер 144",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 147,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101148255",
+        "name" : "Комп’ютер 145",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 148,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101156174",
+        "name" : "Комп’ютер 146",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 149,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101164093",
+        "name" : "Комп’ютер 147",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 150,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101172012",
+        "name" : "Комп’ютер 148",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 151,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101179931",
+        "name" : "Комп’ютер 149",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 152,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101187850",
+        "name" : "Комп’ютер 150",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 153,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101195769",
+        "name" : "Комп’ютер 151",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 154,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101203688",
+        "name" : "Комп’ютер 152",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 155,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101211607",
+        "name" : "Комп’ютер 153",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 156,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101219526",
+        "name" : "Комп’ютер 154",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 157,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101227445",
+        "name" : "Комп’ютер 155",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 158,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101235364",
+        "name" : "Комп’ютер 156",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 159,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101243283",
+        "name" : "Комп’ютер 157",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 160,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101251202",
+        "name" : "Комп’ютер 158",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 161,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101259121",
+        "name" : "Комп’ютер 159",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 162,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101267040",
+        "name" : "Комп’ютер 160",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 163,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101274959",
+        "name" : "Комп’ютер 161",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 164,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101282878",
+        "name" : "Комп’ютер 162",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 165,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101290797",
+        "name" : "Комп’ютер 163",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 166,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101298716",
+        "name" : "Комп’ютер 164",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 167,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101306635",
+        "name" : "Комп’ютер 165",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 168,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101314554",
+        "name" : "Комп’ютер 166",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 169,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101322473",
+        "name" : "Комп’ютер 167",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 170,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101330392",
+        "name" : "Комп’ютер 168",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 171,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101338311",
+        "name" : "Комп’ютер 169",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 172,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101346230",
+        "name" : "Комп’ютер 170",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 173,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101354149",
+        "name" : "Комп’ютер 171",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 174,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101362068",
+        "name" : "Комп’ютер 172",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 175,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101369987",
+        "name" : "Комп’ютер 173",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 176,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101377906",
+        "name" : "Комп’ютер 174",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 177,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101385825",
+        "name" : "Комп’ютер 175",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 178,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101393744",
+        "name" : "Комп’ютер 176",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 179,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101401663",
+        "name" : "Комп’ютер 177",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 180,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101409582",
+        "name" : "Комп’ютер 178",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 181,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101417501",
+        "name" : "Комп’ютер 179",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 182,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101425420",
+        "name" : "Комп’ютер 180",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 183,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101433339",
+        "name" : "Комп’ютер 181",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 184,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101441258",
+        "name" : "Комп’ютер 182",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 185,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101449177",
+        "name" : "Комп’ютер 183",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 186,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101457096",
+        "name" : "Комп’ютер 184",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 187,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101465015",
+        "name" : "Комп’ютер 185",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 188,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101472934",
+        "name" : "Комп’ютер 186",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 189,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101480853",
+        "name" : "Комп’ютер 187",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 190,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101488772",
+        "name" : "Комп’ютер 188",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 191,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101496691",
+        "name" : "Комп’ютер 189",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 192,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101504610",
+        "name" : "Комп’ютер 190",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 193,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101512529",
+        "name" : "Комп’ютер 191",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 194,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101520448",
+        "name" : "Комп’ютер 192",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 195,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101528367",
+        "name" : "Комп’ютер 193",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 196,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101536286",
+        "name" : "Комп’ютер 194",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 197,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101544205",
+        "name" : "Комп’ютер 195",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 198,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101552124",
+        "name" : "Комп’ютер 196",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 199,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101560043",
+        "name" : "Комп’ютер 197",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 200,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101567962",
+        "name" : "Комп’ютер 198",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 201,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101575881",
+        "name" : "Комп’ютер 199",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 202,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101583800",
+        "name" : "Комп’ютер 200",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 203,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101591719",
+        "name" : "Комп’ютер 201",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 204,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101599638",
+        "name" : "Комп’ютер 202",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 205,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101607557",
+        "name" : "Комп’ютер 203",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 206,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101615476",
+        "name" : "Комп’ютер 204",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 207,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101623395",
+        "name" : "Комп’ютер 205",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 208,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "101631314",
+        "name" : "Комп’ютер 206",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 209,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "101639233",
+        "name" : "Комп’ютер 207",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 210,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "101647152",
+        "name" : "Комп’ютер 208",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 211,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "101655071",
+        "name" : "Комп’ютер 209",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 212,
+        "tags" : [
+
+        ]
+      }
+    ],
+    "skipped" : [
+      {
+        "reason" : "missingName",
+        "row" : 5,
+        "value" : ""
+      },
+      {
+        "reason" : "missingID",
+        "row" : 7,
+        "value" : ""
+      },
+      {
+        "reason" : "invalidID",
+        "row" : 9,
+        "value" : "12345"
+      },
+      {
+        "reason" : "unknownProgram",
+        "row" : 17,
+        "value" : "RustDesk"
+      },
+      {
+        "reason" : "aliasNotSupported",
+        "row" : 21,
+        "value" : "front@ad"
+      }
+    ],
+    "unrecognizedColumns" : [
+      "extra"
+    ],
+    "withPassword" : 204
+  },
+  "no-password-column" : {
+    "ambiguousProgramRows" : [
+
+    ],
+    "clean" : true,
+    "columns" : [
+      {
+        "column" : 0,
+        "field" : "name",
+        "title" : "Назва"
+      },
+      {
+        "column" : 1,
+        "field" : "id",
+        "title" : "ID"
+      }
+    ],
+    "duplicateCount" : 0,
+    "duplicates" : [
+
+    ],
+    "loaded" : 2,
+    "lossyIDRows" : [
+
+    ],
+    "records" : [
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "111222333",
+        "name" : "Один",
+        "note" : "",
+        "program" : null,
+        "row" : 2,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "x@ad",
+        "name" : "Два",
+        "note" : "",
+        "program" : null,
+        "row" : 3,
+        "tags" : [
+
+        ]
+      }
+    ],
+    "skipped" : [
+
+    ],
+    "unrecognizedColumns" : [
+
+    ],
+    "withPassword" : 0
+  },
+  "searches" : {
+    "" : {
+      "effective" : "",
+      "hint" : null,
+      "rows" : [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        181,
+        182,
+        183,
+        184,
+        185,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        200,
+        201,
+        202,
+        203,
+        204,
+        205,
+        206,
+        207,
+        208,
+        209,
+        210,
+        211,
+        212,
+        213,
+        214,
+        215,
+        216,
+        217,
+        218,
+        219,
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227,
+        228,
+        229,
+        230,
+        231,
+        232,
+        233,
+        234,
+        235,
+        236,
+        237,
+        238,
+        239,
+        240,
+        241,
+        242,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249,
+        250,
+        251,
+        252,
+        253,
+        254,
+        255,
+        256,
+        257,
+        258,
+        259,
+        260,
+        261,
+        262,
+        263,
+        264,
+        265,
+        266,
+        267,
+        268,
+        269,
+        270,
+        271,
+        272,
+        273,
+        274,
+        275,
+        276,
+        277,
+        278,
+        279,
+        280,
+        281,
+        282,
+        283,
+        284,
+        285,
+        286,
+        287,
+        288,
+        289,
+        290,
+        291,
+        292,
+        293,
+        294,
+        295,
+        296,
+        297,
+        298,
+        299,
+        300,
+        301
+      ]
+    },
+    "100" : {
+      "effective" : "100",
+      "hint" : null,
+      "rows" : [
+        102,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        141
+      ]
+    },
+    "108 0" : {
+      "effective" : "108 0",
+      "hint" : null,
+      "rows" : [
+        110,
+        16,
+        139,
+        142
+      ]
+    },
+    "123" : {
+      "effective" : "123",
+      "hint" : null,
+      "rows" : [
+        125,
+        158,
+        294
+      ]
+    },
+    "ctdth" : {
+      "effective" : "север",
+      "hint" : "север",
+      "rows" : [
+        2,
+        12,
+        22,
+        32,
+        42,
+        52,
+        62,
+        72,
+        82,
+        92,
+        102,
+        112,
+        122,
+        132,
+        142,
+        152,
+        162,
+        172,
+        182,
+        192,
+        202,
+        212,
+        222,
+        232,
+        242,
+        252,
+        262,
+        272,
+        282,
+        292
+      ]
+    },
+    "gfhjkm" : {
+      "effective" : "gfhjkm",
+      "hint" : null,
+      "rows" : [
+
+      ]
+    },
+    "kyiv front" : {
+      "effective" : "kyiv front",
+      "hint" : null,
+      "rows" : [
+        7,
+        17,
+        27,
+        37,
+        47,
+        57,
+        67,
+        77,
+        87,
+        97,
+        107,
+        117,
+        127,
+        137,
+        147,
+        157,
+        167,
+        177,
+        187,
+        197,
+        207,
+        217,
+        227,
+        237,
+        247,
+        257,
+        267,
+        277,
+        287,
+        297
+      ]
+    },
+    "Pw-" : {
+      "effective" : "Pw-",
+      "hint" : null,
+      "rows" : [
+
+      ]
+    },
+    "zzzz" : {
+      "effective" : "zzzz",
+      "hint" : null,
+      "rows" : [
+
+      ]
+    },
+    "ё" : {
+      "effective" : "ё",
+      "hint" : null,
+      "rows" : [
+        2,
+        3,
+        5,
+        8,
+        10,
+        11,
+        12,
+        13,
+        15,
+        18,
+        20,
+        21,
+        22,
+        23,
+        25,
+        28,
+        30,
+        31,
+        32,
+        33,
+        35,
+        38,
+        40,
+        41,
+        42,
+        43,
+        45,
+        48,
+        50,
+        51,
+        52,
+        53,
+        55,
+        58,
+        60,
+        61,
+        62,
+        63,
+        65,
+        68,
+        70,
+        71,
+        72,
+        73,
+        75,
+        78,
+        80,
+        81,
+        82,
+        83,
+        85,
+        88,
+        90,
+        91,
+        92,
+        93,
+        95,
+        98,
+        100,
+        101,
+        102,
+        103,
+        105,
+        108,
+        110,
+        111,
+        112,
+        113,
+        115,
+        118,
+        120,
+        121,
+        122,
+        123,
+        125,
+        128,
+        130,
+        131,
+        132,
+        133,
+        135,
+        138,
+        140,
+        141,
+        142,
+        143,
+        145,
+        148,
+        150,
+        151,
+        152,
+        153,
+        155,
+        158,
+        160,
+        161,
+        162,
+        163,
+        165,
+        168,
+        170,
+        171,
+        172,
+        173,
+        175,
+        178,
+        180,
+        181,
+        182,
+        183,
+        185,
+        188,
+        190,
+        191,
+        192,
+        193,
+        195,
+        198,
+        200,
+        201,
+        202,
+        203,
+        205,
+        208,
+        210,
+        211,
+        212,
+        213,
+        215,
+        218,
+        220,
+        221,
+        222,
+        223,
+        225,
+        228,
+        230,
+        231,
+        232,
+        233,
+        235,
+        238,
+        240,
+        241,
+        242,
+        243,
+        245,
+        248,
+        250,
+        251,
+        252,
+        253,
+        255,
+        258,
+        260,
+        261,
+        262,
+        263,
+        265,
+        268,
+        270,
+        271,
+        272,
+        273,
+        275,
+        278,
+        280,
+        281,
+        282,
+        283,
+        285,
+        288,
+        290,
+        291,
+        292,
+        293,
+        295,
+        298,
+        300,
+        301,
+        6,
+        14,
+        26,
+        34,
+        46,
+        54,
+        66,
+        74,
+        86,
+        94,
+        106,
+        114,
+        126,
+        134,
+        146,
+        154,
+        166,
+        174,
+        186,
+        194,
+        206,
+        214,
+        226,
+        234,
+        246,
+        254,
+        266,
+        274,
+        286,
+        294
+      ]
+    },
+    "звонить" : {
+      "effective" : "звонить",
+      "hint" : null,
+      "rows" : [
+        2,
+        6,
+        10,
+        14,
+        18,
+        22,
+        26,
+        30,
+        34,
+        38,
+        42,
+        46,
+        50,
+        54,
+        58,
+        62,
+        66,
+        70,
+        74,
+        78,
+        82,
+        86,
+        90,
+        94,
+        98,
+        102,
+        106,
+        110,
+        114,
+        118,
+        122,
+        126,
+        130,
+        134,
+        138,
+        142,
+        146,
+        150,
+        154,
+        158,
+        162,
+        166,
+        170,
+        174,
+        178,
+        182,
+        186,
+        190,
+        194,
+        198,
+        202,
+        206,
+        210,
+        214,
+        218,
+        222,
+        226,
+        230,
+        234,
+        238,
+        242,
+        246,
+        250,
+        254,
+        258,
+        262,
+        266,
+        270,
+        274,
+        278,
+        282,
+        286,
+        290,
+        294,
+        298
+      ]
+    },
+    "касса" : {
+      "effective" : "касса",
+      "hint" : null,
+      "rows" : [
+        9,
+        19,
+        29,
+        39,
+        49,
+        59,
+        69,
+        79,
+        89,
+        99,
+        109,
+        119,
+        129,
+        139,
+        149,
+        159,
+        169,
+        179,
+        189,
+        199,
+        209,
+        219,
+        229,
+        239,
+        249,
+        259,
+        269,
+        279,
+        289,
+        299,
+        2,
+        5,
+        8,
+        11,
+        14,
+        17,
+        20,
+        23,
+        26,
+        32,
+        35,
+        38,
+        41,
+        44,
+        47,
+        50,
+        53,
+        56,
+        62,
+        65,
+        68,
+        71,
+        74,
+        77,
+        80,
+        83,
+        86,
+        92,
+        95,
+        98,
+        101,
+        104,
+        107,
+        110,
+        113,
+        116,
+        122,
+        125,
+        128,
+        131,
+        134,
+        137,
+        140,
+        143,
+        146,
+        152,
+        155,
+        158,
+        161,
+        164,
+        167,
+        170,
+        173,
+        176,
+        182,
+        185,
+        188,
+        191,
+        194,
+        197,
+        200,
+        203,
+        206,
+        212,
+        215,
+        218,
+        221,
+        224,
+        227,
+        230,
+        233,
+        236,
+        242,
+        245,
+        248,
+        251,
+        254,
+        257,
+        260,
+        263,
+        266,
+        272,
+        275,
+        278,
+        281,
+        284,
+        287,
+        290,
+        293,
+        296
+      ]
+    },
+    "клиенты 5" : {
+      "effective" : "клиенты 5",
+      "hint" : null,
+      "rows" : [
+        10,
+        14,
+        22,
+        26,
+        34,
+        38,
+        54,
+        58,
+        62,
+        66,
+        70,
+        74,
+        82,
+        86,
+        94,
+        106,
+        110,
+        122,
+        126,
+        134,
+        154,
+        158,
+        182,
+        186,
+        194,
+        198,
+        202,
+        206,
+        210,
+        218,
+        226,
+        230,
+        242,
+        254,
+        258,
+        262,
+        274,
+        278
+      ]
+    },
+    "лаборат" : {
+      "effective" : "лаборат",
+      "hint" : null,
+      "rows" : [
+        2,
+        12,
+        22,
+        32,
+        42,
+        52,
+        62,
+        72,
+        82,
+        92,
+        102,
+        112,
+        122,
+        132,
+        142,
+        152,
+        162,
+        172,
+        182,
+        192,
+        202,
+        212,
+        222,
+        232,
+        242,
+        252,
+        262,
+        272,
+        282,
+        292
+      ]
+    },
+    "лаборатория север 1" : {
+      "effective" : "лаборатория север 1",
+      "hint" : null,
+      "rows" : [
+        12,
+        102,
+        112,
+        122,
+        132,
+        142,
+        152,
+        162,
+        172,
+        182,
+        192,
+        2,
+        22,
+        32,
+        42,
+        52,
+        62,
+        72,
+        82,
+        92,
+        202,
+        212,
+        222,
+        232,
+        242,
+        252,
+        262,
+        272,
+        282,
+        292
+      ]
+    },
+    "Лнш" : {
+      "effective" : "kyi",
+      "hint" : "kyi",
+      "rows" : [
+        7,
+        17,
+        27,
+        37,
+        47,
+        57,
+        67,
+        77,
+        87,
+        97,
+        107,
+        117,
+        127,
+        137,
+        147,
+        157,
+        167,
+        177,
+        187,
+        197,
+        207,
+        217,
+        227,
+        237,
+        247,
+        257,
+        267,
+        277,
+        287,
+        297
+      ]
+    },
+    "ночь" : {
+      "effective" : "ночь",
+      "hint" : null,
+      "rows" : [
+        2,
+        5,
+        8,
+        11,
+        14,
+        17,
+        20,
+        23,
+        26,
+        29,
+        32,
+        35,
+        38,
+        41,
+        44,
+        47,
+        50,
+        53,
+        56,
+        59,
+        62,
+        65,
+        68,
+        71,
+        74,
+        77,
+        80,
+        83,
+        86,
+        89,
+        92,
+        95,
+        98,
+        101,
+        104,
+        107,
+        110,
+        113,
+        116,
+        119,
+        122,
+        125,
+        128,
+        131,
+        134,
+        137,
+        140,
+        143,
+        146,
+        149,
+        152,
+        155,
+        158,
+        161,
+        164,
+        167,
+        170,
+        173,
+        176,
+        179,
+        182,
+        185,
+        188,
+        191,
+        194,
+        197,
+        200,
+        203,
+        206,
+        209,
+        212,
+        215,
+        218,
+        221,
+        224,
+        227,
+        230,
+        233,
+        236,
+        239,
+        242,
+        245,
+        248,
+        251,
+        254,
+        257,
+        260,
+        263,
+        266,
+        269,
+        272,
+        275,
+        278,
+        281,
+        284,
+        287,
+        290,
+        293,
+        296,
+        299
+      ]
+    },
+    "офис 7" : {
+      "effective" : "офис 7",
+      "hint" : null,
+      "rows" : [
+        24,
+        54,
+        64,
+        74,
+        94,
+        104,
+        164,
+        174,
+        214,
+        224,
+        234,
+        264,
+        274
+      ]
+    },
+    "приемная" : {
+      "effective" : "приемная",
+      "hint" : null,
+      "rows" : [
+        11,
+        21,
+        31,
+        41,
+        51,
+        61,
+        71,
+        81,
+        91,
+        101,
+        111,
+        121,
+        131,
+        141,
+        151,
+        161,
+        171,
+        181,
+        191,
+        201,
+        211,
+        221,
+        231,
+        241,
+        251,
+        261,
+        271,
+        281,
+        291,
+        301
+      ]
+    },
+    "ФІЛІЇ" : {
+      "effective" : "ФІЛІЇ",
+      "hint" : null,
+      "rows" : [
+        3,
+        7,
+        11,
+        15,
+        19,
+        23,
+        27,
+        31,
+        35,
+        39,
+        43,
+        47,
+        51,
+        55,
+        59,
+        63,
+        67,
+        71,
+        75,
+        79,
+        83,
+        87,
+        91,
+        95,
+        99,
+        103,
+        107,
+        111,
+        115,
+        119,
+        123,
+        127,
+        131,
+        135,
+        139,
+        143,
+        147,
+        151,
+        155,
+        159,
+        163,
+        167,
+        171,
+        175,
+        179,
+        183,
+        187,
+        191,
+        195,
+        199,
+        203,
+        207,
+        211,
+        215,
+        219,
+        223,
+        227,
+        231,
+        235,
+        239,
+        243,
+        247,
+        251,
+        255,
+        259,
+        263,
+        267,
+        271,
+        275,
+        279,
+        283,
+        287,
+        291,
+        295,
+        299
+      ]
+    },
+    "Школа №7" : {
+      "effective" : "Школа №7",
+      "hint" : null,
+      "rows" : [
+        6,
+        16,
+        26,
+        36,
+        46,
+        56,
+        66,
+        76,
+        86,
+        96,
+        106,
+        116,
+        126,
+        136,
+        146,
+        156,
+        166,
+        176,
+        186,
+        196,
+        206,
+        216,
+        226,
+        236,
+        246,
+        256,
+        266,
+        276,
+        286,
+        296
+      ]
+    }
+  },
+  "shuffled-en-xml" : {
+    "ambiguousProgramRows" : [
+      4,
+      6,
+      10,
+      12,
+      16,
+      18,
+      22,
+      24,
+      28,
+      30,
+      34,
+      36,
+      40,
+      42
+    ],
+    "clean" : false,
+    "columns" : [
+      {
+        "column" : null,
+        "field" : "group",
+        "title" : "group"
+      },
+      {
+        "column" : null,
+        "field" : "name",
+        "title" : "name"
+      },
+      {
+        "column" : null,
+        "field" : "program",
+        "title" : "app"
+      },
+      {
+        "column" : null,
+        "field" : "password",
+        "title" : "password"
+      },
+      {
+        "column" : null,
+        "field" : "note",
+        "title" : "note"
+      },
+      {
+        "column" : null,
+        "field" : "id",
+        "title" : "id"
+      },
+      {
+        "column" : null,
+        "field" : "tags",
+        "title" : "tags"
+      }
+    ],
+    "duplicateCount" : 0,
+    "duplicates" : [
+
+    ],
+    "loaded" : 40,
+    "lossyIDRows" : [
+
+    ],
+    "records" : [
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100000000",
+        "name" : "Лаборатория Север 0",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 3,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100007919",
+        "name" : "Склад Південь 1",
+        "note" : "",
+        "program" : null,
+        "row" : 4,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100015838",
+        "name" : "Офис Восток 2",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 5,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100023757",
+        "name" : "Аптека Захід 3",
+        "note" : "",
+        "program" : null,
+        "row" : 6,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : false,
+        "id" : "100031676",
+        "name" : "Школа №7 4",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 7,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100039595",
+        "name" : "Kyiv Front Desk 5",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 8,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100047514",
+        "name" : "Бухгалтерия 6",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 9,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100055433",
+        "name" : "Касса 2 7",
+        "note" : "",
+        "program" : null,
+        "row" : 10,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100063352",
+        "name" : "Сервер печати 8",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 11,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : false,
+        "id" : "100071271",
+        "name" : "Приёмная 9",
+        "note" : "",
+        "program" : null,
+        "row" : 12,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100079190",
+        "name" : "Лаборатория Север 10",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 13,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100087109",
+        "name" : "Склад Південь 11",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 14,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100095028",
+        "name" : "Офис Восток 12",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 15,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100102947",
+        "name" : "Аптека Захід 13",
+        "note" : "",
+        "program" : null,
+        "row" : 16,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : false,
+        "id" : "100110866",
+        "name" : "Школа №7 14",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 17,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100118785",
+        "name" : "Kyiv Front Desk 15",
+        "note" : "",
+        "program" : null,
+        "row" : 18,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100126704",
+        "name" : "Бухгалтерия 16",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 19,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100134623",
+        "name" : "Касса 2 17",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 20,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100142542",
+        "name" : "Сервер печати 18",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 21,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "100150461",
+        "name" : "Приёмная 19",
+        "note" : "",
+        "program" : null,
+        "row" : 22,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100158380",
+        "name" : "Лаборатория Север 20",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 23,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100166299",
+        "name" : "Склад Південь 21",
+        "note" : "",
+        "program" : null,
+        "row" : 24,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100174218",
+        "name" : "Офис Восток 22",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 25,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100182137",
+        "name" : "Аптека Захід 23",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 26,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : false,
+        "id" : "100190056",
+        "name" : "Школа №7 24",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 27,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100197975",
+        "name" : "Kyiv Front Desk 25",
+        "note" : "",
+        "program" : null,
+        "row" : 28,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100205894",
+        "name" : "Бухгалтерия 26",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 29,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100213813",
+        "name" : "Касса 2 27",
+        "note" : "",
+        "program" : null,
+        "row" : 30,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100221732",
+        "name" : "Сервер печати 28",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 31,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : false,
+        "id" : "100229651",
+        "name" : "Приёмная 29",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 32,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100237570",
+        "name" : "Лаборатория Север 30",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 33,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100245489",
+        "name" : "Склад Південь 31",
+        "note" : "",
+        "program" : null,
+        "row" : 34,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100253408",
+        "name" : "Офис Восток 32",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 35,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100261327",
+        "name" : "Аптека Захід 33",
+        "note" : "",
+        "program" : null,
+        "row" : 36,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : false,
+        "id" : "100269246",
+        "name" : "Школа №7 34",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 37,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100277165",
+        "name" : "Kyiv Front Desk 35",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 38,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100285084",
+        "name" : "Бухгалтерия 36",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 39,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100293003",
+        "name" : "Касса 2 37",
+        "note" : "",
+        "program" : null,
+        "row" : 40,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100300922",
+        "name" : "Сервер печати 38",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 41,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "100308841",
+        "name" : "Приёмная 39",
+        "note" : "",
+        "program" : null,
+        "row" : 42,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      }
+    ],
+    "skipped" : [
+
+    ],
+    "unrecognizedColumns" : [
+
+    ],
+    "withPassword" : 32
+  },
+  "shuffled-uk-xlsx" : {
+    "ambiguousProgramRows" : [
+      3,
+      5,
+      9,
+      11,
+      15,
+      17,
+      21,
+      23,
+      27,
+      29,
+      33,
+      35,
+      39,
+      41
+    ],
+    "clean" : false,
+    "columns" : [
+      {
+        "column" : 0,
+        "field" : "group",
+        "title" : "Група"
+      },
+      {
+        "column" : 1,
+        "field" : "name",
+        "title" : "Назва"
+      },
+      {
+        "column" : 2,
+        "field" : "program",
+        "title" : "Програма"
+      },
+      {
+        "column" : 3,
+        "field" : "password",
+        "title" : "Пароль"
+      },
+      {
+        "column" : 4,
+        "field" : "note",
+        "title" : "Примітка"
+      },
+      {
+        "column" : 5,
+        "field" : "id",
+        "title" : "Адреса"
+      },
+      {
+        "column" : 6,
+        "field" : "tags",
+        "title" : "Теги"
+      }
+    ],
+    "duplicateCount" : 0,
+    "duplicates" : [
+
+    ],
+    "loaded" : 40,
+    "lossyIDRows" : [
+
+    ],
+    "records" : [
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100000000",
+        "name" : "Лаборатория Север 0",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 2,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100007919",
+        "name" : "Склад Південь 1",
+        "note" : "",
+        "program" : null,
+        "row" : 3,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100015838",
+        "name" : "Офис Восток 2",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 4,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100023757",
+        "name" : "Аптека Захід 3",
+        "note" : "",
+        "program" : null,
+        "row" : 5,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : false,
+        "id" : "100031676",
+        "name" : "Школа №7 4",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 6,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100039595",
+        "name" : "Kyiv Front Desk 5",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 7,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100047514",
+        "name" : "Бухгалтерия 6",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 8,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100055433",
+        "name" : "Касса 2 7",
+        "note" : "",
+        "program" : null,
+        "row" : 9,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100063352",
+        "name" : "Сервер печати 8",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 10,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : false,
+        "id" : "100071271",
+        "name" : "Приёмная 9",
+        "note" : "",
+        "program" : null,
+        "row" : 11,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100079190",
+        "name" : "Лаборатория Север 10",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 12,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100087109",
+        "name" : "Склад Південь 11",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 13,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100095028",
+        "name" : "Офис Восток 12",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 14,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100102947",
+        "name" : "Аптека Захід 13",
+        "note" : "",
+        "program" : null,
+        "row" : 15,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : false,
+        "id" : "100110866",
+        "name" : "Школа №7 14",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 16,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100118785",
+        "name" : "Kyiv Front Desk 15",
+        "note" : "",
+        "program" : null,
+        "row" : 17,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100126704",
+        "name" : "Бухгалтерия 16",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 18,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100134623",
+        "name" : "Касса 2 17",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 19,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100142542",
+        "name" : "Сервер печати 18",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 20,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "100150461",
+        "name" : "Приёмная 19",
+        "note" : "",
+        "program" : null,
+        "row" : 21,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100158380",
+        "name" : "Лаборатория Север 20",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 22,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100166299",
+        "name" : "Склад Південь 21",
+        "note" : "",
+        "program" : null,
+        "row" : 23,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100174218",
+        "name" : "Офис Восток 22",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 24,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100182137",
+        "name" : "Аптека Захід 23",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 25,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : false,
+        "id" : "100190056",
+        "name" : "Школа №7 24",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 26,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100197975",
+        "name" : "Kyiv Front Desk 25",
+        "note" : "",
+        "program" : null,
+        "row" : 27,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100205894",
+        "name" : "Бухгалтерия 26",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 28,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100213813",
+        "name" : "Касса 2 27",
+        "note" : "",
+        "program" : null,
+        "row" : 29,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100221732",
+        "name" : "Сервер печати 28",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 30,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : false,
+        "id" : "100229651",
+        "name" : "Приёмная 29",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 31,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100237570",
+        "name" : "Лаборатория Север 30",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 32,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100245489",
+        "name" : "Склад Південь 31",
+        "note" : "",
+        "program" : null,
+        "row" : 33,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100253408",
+        "name" : "Офис Восток 32",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 34,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100261327",
+        "name" : "Аптека Захід 33",
+        "note" : "",
+        "program" : null,
+        "row" : 35,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : false,
+        "id" : "100269246",
+        "name" : "Школа №7 34",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 36,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : true,
+        "id" : "100277165",
+        "name" : "Kyiv Front Desk 35",
+        "note" : "",
+        "program" : "teamViewer",
+        "row" : 37,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Клиенты",
+        "hasPassword" : true,
+        "id" : "100285084",
+        "name" : "Бухгалтерия 36",
+        "note" : "звонить заранее",
+        "program" : "anyDesk",
+        "row" : 38,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      },
+      {
+        "group" : "Філії",
+        "hasPassword" : true,
+        "id" : "100293003",
+        "name" : "Касса 2 37",
+        "note" : "",
+        "program" : null,
+        "row" : 39,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "Office",
+        "hasPassword" : true,
+        "id" : "100300922",
+        "name" : "Сервер печати 38",
+        "note" : "",
+        "program" : "anyDesk",
+        "row" : 40,
+        "tags" : [
+
+        ]
+      },
+      {
+        "group" : "",
+        "hasPassword" : false,
+        "id" : "100308841",
+        "name" : "Приёмная 39",
+        "note" : "",
+        "program" : null,
+        "row" : 41,
+        "tags" : [
+          "касса",
+          "ночь"
+        ]
+      }
+    ],
+    "skipped" : [
+
+    ],
+    "unrecognizedColumns" : [
+
+    ],
+    "withPassword" : 32
+  }
+}

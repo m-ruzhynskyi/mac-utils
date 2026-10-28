@@ -1,5 +1,8 @@
 import AppKit
 import SwiftUI
+import MUCore
+import MUDesign
+import MUAppVolume
 
 // MARK: - Громкость
 

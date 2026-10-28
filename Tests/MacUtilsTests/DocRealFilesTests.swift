@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUTextEditor
 
 /// Режим «Документ» на настоящих .frm пользователя — только по `MU_REAL_FRM_DIR` (папка с КОПИЯМИ), без неё тест
 /// пропускается. В журнал — только числа (правила — `.audit/real-frm-rules.md`).

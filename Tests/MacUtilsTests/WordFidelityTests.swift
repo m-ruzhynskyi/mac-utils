@@ -3,6 +3,10 @@ import PDFKit
 import SwiftUI
 import XCTest
 @testable import MacUtils
+@testable import MUDesign
+@testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// «Документ» против эталона Word. Эталон — PDF, которые сделал сам Word из копий форм (`pdf/fNNN.pdf` к `rtf/fNNN.rtf`).
 /// Наша сторона раскладывается тем же путём, что в приложении (вкладка в «Документе», `DocPageView`, колонтитулы),
@@ -97,6 +101,40 @@ final class WordFidelityTests: XCTestCase {
         XCTAssertEqual(WordFidelity.top(a, b).1 - WordFidelity.top(a, b).0, 3)
         a.baseline = 111; b.baseline = 111.5
         XCTAssertEqual(WordFidelity.top(a, b).1 - WordFidelity.top(a, b).0, 0.5, accuracy: 0.001, "другой шрифт, та же базовая линия")
+    }
+
+    /// Растр своего же PDF против себя — 0 %; против пустого листа — доля закрашенного; старая база без колонок читается.
+    func testVisualComparison() throws {
+        var rtf = #"{\rtf1\ansi\deff0{\fonttbl{\f0\froman Times New Roman;}}{\colortbl;\red200\green0\blue0;}\paperw11906\paperh16838"#
+        for number in 1...30 { rtf += #"\pard\plain\fs24 Line "# + "\(number)" + #" of demo text\par "# }
+        rtf += #"\pard\plain\cf1\fs24 Red line\par}"#
+        let pdf = try render(try open(Data(rtf.utf8), name: "visual.rtf"))
+        let lines = WordFidelity.lines(pdf)
+        let same = WordVisual.compare(word: pdf, ours: pdf, wordLines: lines, ourLines: lines, wordSegments: [], ourSegments: [])
+        XCTAssertEqual(same.maxDifference, 0)
+        XCTAssertTrue(same.identical)
+        XCTAssertGreaterThan(same.inked[.text] ?? 0, 1000, "текст попал в область «текст»")
+        XCTAssertEqual(same.color(.text), 0)
+
+        let blank = WordVisual.compare(word: pdf, ours: PDFDocument(), wordLines: lines, ourLines: [], wordSegments: [], ourSegments: [])
+        XCTAssertEqual(blank.pages.count, pdf.pageCount, "нет нашей страницы — против пустого листа")
+        XCTAssertGreaterThan(blank.maxDifference, 0.005)
+        XCTAssertFalse(blank.identical)
+
+        // Тот же текст другим цветом: пикселей почти не меньше, а «цвет другой» в тексте — почти весь.
+        let red = try render(try open(Data(rtf.replacingOccurrences(of: #"\cf1"#, with: "").replacingOccurrences(of: #"\fs24 Line"#, with: #"\cf1\fs24 Line"#).utf8), name: "red.rtf"))
+        let colored = WordVisual.compare(word: pdf, ours: red, wordLines: lines, ourLines: WordFidelity.lines(red), wordSegments: [], ourSegments: [])
+        XCTAssertGreaterThan(colored.color(.text), 0.5, "чёрный против красного")
+
+        var row = WordGate.Row(name: "f001")
+        row.add(same)
+        XCTAssertEqual(WordGate.rows(WordGate.tsv([row])).first?.visualIdentical, true)
+        let old = WordGate.Row.header.prefix(WordGate.Row.headerWithoutVisual).joined(separator: "\t") + "\n"
+            + WordGate.Row(name: "f002").fields.prefix(WordGate.Row.headerWithoutVisual).joined(separator: "\t")
+        XCTAssertEqual(WordGate.rows(old).first.map { ($0.name, $0.hasVisual) }?.1, false)
+        var worse = row
+        worse.visualMax = 0.01
+        XCTAssertEqual(WordGate.worse(worse, than: row), ["пиксели 0,00 % → 1,00 %"])
     }
 
     func testGateRulesAndTSV() {
@@ -205,32 +243,22 @@ final class WordFidelityTests: XCTestCase {
                     let document = try open(data, name: "\(name).rtf")
                     let ours = try render(document)
                     let geometry = PageGeometry(document)
-                    let ourLines = WordFidelity.lines(ours)
-                    var result = WordFidelity.compare(word: WordFidelity.lines(wordPDF), ours: ourLines,
+                    let ourLines = WordFidelity.lines(ours), wordLines = WordFidelity.lines(wordPDF)
+                    let wordSegments = WordFidelity.segments(wordPDF), ourSegments = WordFidelity.segments(ours)
+                    var result = WordFidelity.compare(word: wordLines, ours: ourLines,
                                                       pagesWord: wordPDF.pageCount, pagesOurs: ours.pageCount,
-                                                      category: geometry.category, wordSegments: WordFidelity.segments(wordPDF),
-                                                      ourSegments: WordFidelity.segments(ours))
+                                                      category: geometry.category, wordSegments: wordSegments, ourSegments: ourSegments)
                     let sizes = zip(WordFidelity.pageSizes(wordPDF), WordFidelity.pageSizes(ours))
                     result.sizeMismatch = sizes.contains { abs($0.width - $1.width) > 1 || abs($0.height - $1.height) > 1 }
                     report.add(name, result, lines: ourLines, category: geometry.category, constructs: geometry.constructs)
-                    if let dump = ProcessInfo.processInfo.environment["MU_WORD_FIDELITY_DUMP"] {
-                        let word = WordFidelity.lines(wordPDF)
-                        var rows = ""
-                        for (w, o) in WordFidelity.align(word, ourLines) where word[w].page == ourLines[o].page {
-                            let a = word[w], b = ourLines[o]
-                            rows += "\(name)\t\(geometry.category(b))\t\(b.page)\t\(Int(a.rect.minX))\t\(Int(a.rect.maxX))\t"
-                            rows += String(format: "%.1f\t%.1f\t%.1f\t%.1f\t", b.rect.minX - a.rect.minX, b.rect.maxX - a.rect.maxX, b.rect.minY - a.rect.minY, a.rect.minY)
-                            rows += geometry.info(b) + "\n"
-                        }
-                        for item in result.discrepancies where item.kind == .cellWrap {
-                            rows += "\(name)\twrap\t\(item.ours.page)\t\(Int(item.ours.rect.minX))\t\(Int(item.ours.rect.maxX))\t0\t0\t0\t0\t"
-                            rows += geometry.info(item.ours) + "\n"
-                        }
-                        if let handle = FileHandle(forWritingAtPath: dump) ?? { FileManager.default.createFile(atPath: dump, contents: nil); return FileHandle(forWritingAtPath: dump) }() {
-                            handle.seekToEndOfFile(); handle.write(Data(rows.utf8)); handle.closeFile()
-                        }
+                    var row = WordGate.Row(name: name, result)
+                    // Растры только в памяти (реальные формы): ни файлов, ни снимков. MU_WORD_VISUAL=0 — без них.
+                    if environment["MU_WORD_VISUAL"] != "0" {
+                        // Строка на каждую страницу — сторож скрипта видит, что длинная форма не зависла.
+                        row.add(WordVisual.compare(word: wordPDF, ours: ours, wordLines: wordLines, ourLines: ourLines,
+                                                   wordSegments: wordSegments, ourSegments: ourSegments) { Self.progress("word-fidelity \(name) пиксели, стр. \($0 + 1)") })
                     }
-                    rows.append(WordGate.Row(name: name, result))
+                    rows.append(row)
                 } catch {
                     report.failed.append(name)
                     rows.append(WordGate.Row(name: name, failed: true))
@@ -408,19 +436,6 @@ private struct PageGeometry {
     }
 
     /// Управляющие слова RTF, которыми задан абзац строки (для топа причин; без текста).
-    /// Диагностика (только числа и слова RTF): выравнивание, отступы, ширина блока ячейки, поле, верт. выравнивание.
-    func info(_ line: WordFidelity.Line) -> String {
-        let found = (storage.string as NSString).range(of: String(line.key.prefix(12)))
-        guard found.location != NSNotFound else { return "?" }
-        let attributes = storage.attributes(at: found.location, effectiveRange: nil)
-        let style = attributes[.paragraphStyle] as? NSParagraphStyle
-        let props = (attributes[.docPara] as? DocParaInfo)?.props
-        let block = style?.textBlocks.last as? NSTextTableBlock
-        let valign = block.map { "\($0.verticalAlignment.rawValue)" } ?? "-"
-        return "\(style?.alignment.rawValue ?? -1)\t\(props?.left ?? 0)\t\(props?.right ?? 0)\t\(props?.firstLine ?? 0)\t"
-            + "\(Int(block?.contentWidth ?? 0))\t\(Int(block?.width(for: .padding, edge: .minX) ?? 0))\t\(valign)\t\(Self.words(attributes).joined())"
-    }
-
     func constructs(_ line: WordFidelity.Line) -> [String] {
         let probe = String(line.key.prefix(40))
         var sources: [NSAttributedString] = [storage]

@@ -1,6 +1,10 @@
 import AppKit
 import XCTest
 @testable import MacUtils
+@testable import MUDesign
+@testable import MUAudio
+@testable import MUScreenshot
+@testable import MUTextEditor
 
 /// Правка текста в «Документе» (D-3): каждая команда — точечные правки исходника. Проверки «без потерь»:
 /// правки только в окне затронутых абзацев, скобок не хуже, наш разбор и Cocoa открывают, видимый текст ожидаемый,
@@ -41,24 +45,34 @@ final class DocEditTests: XCTestCase {
             source = after as String
             guard check else { return result }
             DocEditTests.checkLossless(before: before, after: after, edits: result.edits, model: model, map: map, units: units, file: file, line: line)
-            // Видимый текст: старый без удалённых единиц, набранное — на месте ввода.
+            // Видимый текст: старый без удалённых единиц, набранное — на месте ввода. Номера списков (`listText`) не
+            // сравниваются — их пересчитывает нумерация (↩ в пункте даёт номер новому); регистр — тоже (капитель `\caps`).
             var expected = Array((shown as NSString).utf16Units())
+            var numbers = (0..<expected.count).map { map.kind(at: $0) == .listText }
             let removedBefore = result.deletedUnits.filter { $0 < result.insertionUnit }.count
-            for unit in result.deletedUnits.sorted(by: >) { expected.remove(at: unit) }
+            for unit in result.deletedUnits.sorted(by: >) {
+                expected.remove(at: unit)
+                numbers.remove(at: unit)
+            }
             let typed = Array(DocEditTests.shownForm(text).utf16)
-            expected.insert(contentsOf: typed, at: min(expected.count, max(0, result.insertionUnit - removedBefore)))
+            let at = min(expected.count, max(0, result.insertionUnit - removedBefore))
+            expected.insert(contentsOf: typed, at: at)
+            numbers.insert(contentsOf: Array(repeating: false, count: typed.count), at: at)
             let (now, newMap) = display()
-            // Разрывы «\f» сравниваем отдельно: ↩ в абзаце с `\pagebb` даёт разрыв и новому абзацу (свойства переходят, как в Word).
-            let expectedText = String(utf16CodeUnits: expected, count: expected.count)
-            XCTAssertEqual(now.replacingOccurrences(of: "\u{0C}", with: ""), expectedText.replacingOccurrences(of: "\u{0C}", with: ""),
-                           "видимый текст после правки", file: file, line: line)
-            // Курсор — сразу после набранного.
-            let caret = newMap.firstUnit(atOrAfter: result.caretSource)
-            // Место курсора без учёта разрывов «\f» (они могут появиться при ↩ в абзаце с `\pagebb`).
-            let expectedCaret = min(expected.count, max(0, result.insertionUnit - removedBefore) + typed.count)
             let nowUnits = Array((now as NSString).utf16Units())
-            XCTAssertEqual(nowUnits.prefix(caret).filter { $0 != 0x0C }.count, expected.prefix(expectedCaret).filter { $0 != 0x0C }.count,
-                           "курсор", file: file, line: line)
+            let nowNumbers = (0..<nowUnits.count).map { newMap.kind(at: $0) == .listText }
+            // Разрывы «\f» сравниваем отдельно: ↩ в абзаце с `\pagebb` даёт разрыв и новому абзацу (свойства переходят, как в Word).
+            func plain(_ units: ArraySlice<UInt16>, _ skip: ArraySlice<Bool>) -> [UInt16] {
+                zip(units, skip).filter { !$1 && $0 != 0x0C }.map(\.0)
+            }
+            let expectedText = String(utf16CodeUnits: plain(expected[...], numbers[...]), count: plain(expected[...], numbers[...]).count)
+            let nowText = String(utf16CodeUnits: plain(nowUnits[...], nowNumbers[...]), count: plain(nowUnits[...], nowNumbers[...]).count)
+            XCTAssertEqual(nowText.lowercased(), expectedText.lowercased(), "видимый текст после правки", file: file, line: line)
+            // Курсор — сразу после набранного (без разрывов «\f» и номеров списков).
+            let caret = newMap.firstUnit(atOrAfter: result.caretSource)
+            let expectedCaret = min(expected.count, at + typed.count)
+            XCTAssertEqual(plain(nowUnits.prefix(caret), nowNumbers.prefix(caret)).count,
+                           plain(expected.prefix(expectedCaret), numbers.prefix(expectedCaret)).count, "курсор", file: file, line: line)
             // Отмена (обратная правка) — байт в байт.
             let restored = NSMutableString(string: source)
             for (range, text) in undo.reversed() { restored.replaceCharacters(in: range, with: text) }

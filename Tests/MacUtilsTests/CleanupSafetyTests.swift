@@ -1,5 +1,8 @@
 import XCTest
 @testable import MacUtils
+@testable import MUUninstaller
+@testable import MUAudio
+@testable import MUTextEditor
 
 /// Экранирование для sh/AppleScript в удалении с правами администратора, DiskCleanup и имена в Корзине.
 /// Всё работает во временной папке: настоящие Корзина, home и UserDefaults не затрагиваются.
