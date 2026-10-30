@@ -258,6 +258,49 @@ final class DocWordLayoutTests: XCTestCase {
         }
     }
 
+    /// Вложенные таблицы в обеих ячейках строки: вторая ячейка — у того же верха, строка — ровно `\trrh` (f078: верх ячейки
+    /// считался от текста вложенной, +1,08 pt на ячейку, и строка выходила выше `\trrh` на 2,2 pt).
+    func testNestedTablesInBothCellsKeepRowHeight() throws {
+        let row = #"\trowd\trgaph108\trleft0\trrh3272\cellx4500\cellx9000 "#
+        let nprops = #"{\*\nesttableprops\trowd\trgaph28\trleft0\trpaddt22\trpaddft3\trrh480\clbrdrt\brdrs\brdrw10 \cellx2000\clbrdrt\brdrs\brdrw10 \cellx4000\nestrow}{\nonesttables\par }"#
+        let nrow = { (a: String) in #"\pard\plain\intbl\itap2\fs20 "# + a + #"1\nestcell\pard\plain\intbl\itap2\fs20 "# + a + #"2\nestcell\pard\plain\intbl\itap2\fs20 "# + nprops }
+        let end = #"\pard\plain\intbl\itap1\fs20 \cell"#
+        let body = #"\pard before\par "# + row + nrow("NA") + nrow("NB") + end + nrow("NC") + nrow("ND") + end + row + #"\row "#
+            + row + nrow("NE") + end + nrow("NF") + end + row + #"\row\pard AFTER\par"#
+        let document = try open(body)
+        let left = try XCTUnwrap(lines(document, "NA1").first).minY, right = try XCTUnwrap(lines(document, "NC1").first).minY
+        let next = try XCTUnwrap(lines(document, "NE1").first).minY
+        XCTAssertEqual(right, left, accuracy: 0.05, "вложенная во второй ячейке — на той же высоте")
+        XCTAssertEqual(next - left, 163.6, accuracy: 0.05, "строка внешней — \\trrh3272")
+    }
+
+    /// Строка таблицы, не поместившаяся внизу страницы, на следующей — своей высоты (f161: `NSTextTable` помнил её низ
+    /// с прошлой страницы, ячейки тянулись на 803 pt и текст уходил на третью страницу).
+    func testTableRowMovedToNextPageKeepsItsHeight() throws {
+        // 51 строка — внизу остаётся место для первой строки ячеек, но не для всей строки таблицы (в третьей ячейке два абзаца).
+        let filler = String(repeating: #"\pard\plain\fs24 L\par "#, count: 51)
+        let row = #"\trowd\trgaph108\trleft0\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx3000\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx6000\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx9000 "#
+        let cells = { (a: String) in #"\pard\plain\intbl\fs24 "# + a + #"1\cell\pard\plain\intbl\fs24 "# + a + #"2\cell\pard\plain\intbl\fs24 "# + a
+            + #"3\par\pard\plain\intbl\fs24 "# + a + #"4\cell"# }
+        let document = try open(filler + row + cells("RA") + row + #"\row "# + row + cells("RB") + row + #"\row\pard END\par"#)
+        XCTAssertEqual(document.pagesView.pages.count, 2)
+        let manager = document.layoutManager
+        let text = document.storage.string as NSString
+        let glyph = { (marker: String) in manager.glyphIndexForCharacter(at: text.range(of: marker).location) }
+        XCTAssertTrue(manager.textContainer(forGlyphAt: glyph("RA1"), effectiveRange: nil) === document.pagesView.pages[1].container)
+        XCTAssertTrue(manager.textContainer(forGlyphAt: glyph("END"), effectiveRange: nil) === document.pagesView.pages[1].container)
+        let a = try XCTUnwrap(lines(document, "RA3").first).minY, b = try XCTUnwrap(lines(document, "RB3").first).minY
+        XCTAssertEqual(b - a, 2 * single(12) + 0.48, accuracy: 0.05, "строка — текст и полосы рамок")
+    }
+
+    /// Пустая строка TextKit после последнего «\n» страницы не добавляет: у Word её нет (f078 — вторая пустая страница).
+    func testTrailingEmptyLineDoesNotAddPage() throws {
+        let full = try open(String(repeating: #"\pard\plain\fs24 L\par "#, count: 52))
+        XCTAssertEqual(full.pagesView.pages.count, 1, "52 строки по 13,8 pt в 728,5 pt — одна страница")
+        let over = try open(String(repeating: #"\pard\plain\fs24 L\par "#, count: 53))
+        XCTAssertEqual(over.pagesView.pages.count, 2)
+    }
+
     /// Интервал «Авто» (`\sbauto1`/`\saauto1`; `\sb100`/`\sa100` рядом — для старых читателей): 14 pt, у начала и конца ячейки — 0,
     /// два «авто» подряд не складываются (f145: строки таблиц были на 5–7 pt выше Word).
     func testAutoSpacingLikeWord() throws {

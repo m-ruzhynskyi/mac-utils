@@ -288,12 +288,20 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
             return
         }
         if index < pagesView.pages.count { pagesView.pages[index].refreshFloating() }
+        var atEnd = atEnd
         if !atEnd, index == pagesView.pages.count - 1 {
             // Текст не поместился — следующая страница: её раздел — у следующего символа.
             let glyphs = layoutManager.glyphRange(for: container)
             let next = NSMaxRange(layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil))
-            addPage(section: rendering.section(atUnit: next))
-        } else if atEnd {
+            // Не поместилась только пустая строка TextKit после последнего «\n» — у Word её нет, страница не нужна (f078):
+            // строка остаётся в запасном контейнере.
+            if next < (layoutManager.textStorage?.length ?? 0) {
+                addPage(section: rendering.section(atUnit: next))
+            } else {
+                atEnd = true
+            }
+        }
+        if atEnd {
             // Лишние страницы, разделы и колонтитулы — после прохода: раскладка бывает и во время рисования страниц.
             let keep = index + 1
             DispatchQueue.main.async { [weak self] in

@@ -1003,7 +1003,7 @@ package final class DocRenderer {
         if let cached = tables[place.table] {
             table = cached
         } else {
-            table = NSTextTable()
+            table = DocTextTable()
             table.numberOfColumns = place.columns
             table.layoutAlgorithm = .fixedLayoutAlgorithm
             // Вложенная таблица со слиянием рамок у `NSTextTable` встаёт на полпункта ниже верха ячейки, и строка внешней таблицы
@@ -1137,6 +1137,21 @@ package final class DocRenderer {
 /// `NSTextBlock` заняла бы место в ширине столбца, и текст ячейки стал бы уже, чем в Word. Вертикальные линии — по точным
 /// краям `\cellx` (рамка `NSTextTable` — в целых пунктах), серединой на краю; толщина и края — на сетке Word
 /// 1/300 дюйма (0,24 pt) от левого края листа, как в его PDF.
+/// Таблица документа: помнит строку, которую кладёт `DocCellBlock.boundsRect`.
+package final class DocTextTable: NSTextTable {
+    package struct Pass {
+        package var row: Int
+        package var column: Int
+        package var container: ObjectIdentifier
+        package var top: CGFloat
+        package var bottom: CGFloat
+        /// Запись `NSTextTable` о высоте строки сделана в этом же контейнере.
+        package var trusted: Bool
+    }
+
+    package var pass: Pass?
+}
+
 package final class DocCellBlock: NSTextTableBlock {
     package struct Line {
         package var edge: NSRectEdge
@@ -1168,6 +1183,7 @@ package final class DocCellBlock: NSTextTableBlock {
             let content = contentHeight ?? MainActor.assumeIsolated { Self.height(of: storage.attributedSubstring(from: charRange), width: layout.width) }
             shift = max(0, (inner - content) * ownAlignment)
         }
+        layoutStart = (ObjectIdentifier(textContainer), layout.minY)
         layout.origin.y += shift + band.top
         appliedShift = shift + band.top
         return layout
@@ -1176,6 +1192,9 @@ package final class DocCellBlock: NSTextTableBlock {
     /// Сдвиг текста при последней раскладке: рамка ячейки — от верха строки, а не от текста (от рамки предыдущей
     /// ячейки `NSTextTable` отсчитывает верх строки для следующих).
     private var appliedShift: CGFloat = 0
+    /// Верх раскладки ячейки (без сдвига) при последней раскладке и её контейнер: верх строки — от него, а не от первой строки
+    /// текста (в ячейке со вложенной таблицей текст ниже на её отступ — f078: +1,08 pt на ячейку, строка внешней таблицы выше `\trrh`).
+    private var layoutStart: (container: ObjectIdentifier, y: CGFloat)?
 
 
     /// Высота текста ячейки: те же абзацы без блока таблицы, в ширину текста ячейки, высота строк — как в документе
@@ -1208,16 +1227,46 @@ package final class DocCellBlock: NSTextTableBlock {
     package override func boundsRect(forContentRect contentRect: NSRect, in rect: NSRect, textContainer: NSTextContainer,
                              characterRange charRange: NSRange) -> NSRect {
         var bounds = super.boundsRect(forContentRect: contentRect, in: rect, textContainer: textContainer, characterRange: charRange)
+        if rowSpan > 1 {
+            // Объединённая по вертикали ячейка: высоту на её строки делит `NSTextTable`, своя высота текста здесь ни при чём.
+            let natural = bounds.height
+            bounds.origin.y -= appliedShift
+            bounds.size.height += appliedShift + band.bottom
+            if rowHeight != 0 { bounds.size.height = max(natural, abs(rowHeight)) + band.top + band.bottom }
+            return bounds
+        }
         // `super` уже растянул ячейку до высоты строки по предыдущим ячейкам, а в ней их полосы рамок: своя высота —
         // от своего текста, иначе каждая следующая ячейка строки выше на полосу (f157: +0,96 pt на строку в 5 столбцов).
+        let insetTop = width(for: .padding, edge: .minY) + width(for: .border, edge: .minY) + width(for: .margin, edge: .minY)
+        if let start = layoutStart, start.container == ObjectIdentifier(textContainer), start.y + appliedShift <= contentRect.minY + 0.01 {
+            bounds.origin.y = min(bounds.minY, start.y + appliedShift - insetTop)
+        }
         let own = contentRect.maxY + width(for: .padding, edge: .maxY) + width(for: .border, edge: .maxY)
             + width(for: .margin, edge: .maxY) - bounds.minY
-        let row = bounds.maxY
+        var row = bounds.maxY
         bounds.origin.y -= appliedShift
-        bounds.size.height = max(row - bounds.minY, own + appliedShift + band.bottom)
+        let top = bounds.minY
         // Строка с `\trrh` — как у Word: большее из содержимого и `\trrh`, плюс полосы рамок. Сдвиг выравнивания по оценке
         // высоты строку не растит (оценка бывает чуть меньше настоящей — f078: +1,9 pt на строку).
-        if rowHeight != 0 { bounds.size.height = max(row - bounds.minY, max(own, abs(rowHeight)) + band.top + band.bottom) }
+        let ownBottom = top + (rowHeight != 0 ? max(own, abs(rowHeight)) + band.top + band.bottom : own + appliedShift + band.bottom)
+        if let table = table as? DocTextTable {
+            // Строку, которую сначала попробовали положить внизу страницы, `NSTextTable` переносит на следующую, но помнит её
+            // низ с прошлой страницы и тянет до него ячейки на новой (f161: ячейка 803 pt). Первой строке таблицы в контейнере
+            // эта запись не нужна: высота строки — из её ячеек, уже положенных здесь.
+            let container = ObjectIdentifier(textContainer)
+            let previous = table.pass
+            let sameRow = previous.map { $0.row == startingRow && $0.column < startingColumn && $0.container == container && abs($0.top - top) < 0.5 } ?? false
+            let trusted = sameRow ? previous?.trusted == true : previous?.container == container
+            if !trusted {
+                // Без записи `NSTextTable` — точная высота блока (строка вложенной таблицы) остаётся.
+                let declared = value(for: .height)
+                let insetBottom = width(for: .padding, edge: .maxY) + width(for: .border, edge: .maxY) + width(for: .margin, edge: .maxY)
+                row = max(sameRow ? previous?.bottom ?? top : top, declared > 0 ? top + insetTop + declared + insetBottom : top)
+            }
+            table.pass = DocTextTable.Pass(row: startingRow, column: startingColumn, container: container, top: top,
+                                           bottom: max(row, ownBottom), trusted: trusted)
+        }
+        bounds.size.height = max(row, ownBottom) - top
         return bounds
     }
 
