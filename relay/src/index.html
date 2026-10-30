@@ -1475,8 +1475,11 @@ function pickSource() {
         useHelperAudio = $("withAudio").checked && helperAvailable && !!window.mu.startAudio && (!!window.mu.setMuted || muted.length > 0);
         const muteCalls = !window.mu.setMuteCalls || $("muteCalls").checked;
         store.set("mu-mute-calls", muteCalls);
-        await window.mu.choose(source.id, $("withAudio").checked, muted, muteCalls);
-        resolve(true);
+        // Приложение отвечает false, если выбор не принят (клик не дошёл до окна, источник пропал): тогда оно не отдаст
+        // экран и getDisplayMedia, — сразу говорим об этом, а не «AbortError» после попыток захвата.
+        let accepted = false;
+        try { accepted = await window.mu.choose(source.id, $("withAudio").checked, muted, muteCalls); } catch (_) {}
+        resolve(accepted === false ? "not-chosen" : true);
       };
       grid.appendChild(item);
     }
@@ -1494,9 +1497,34 @@ function pickSource() {
   });
 }
 
+// Почему захват экрана не начался — по-русски, без имён исключений (WINNA-30). Имя ошибки — только в журнал приложения.
+const CAPTURE_NOT_CHOSEN = "Трансляция не началась: приложение не приняло выбор экрана. Нажмите «Транслировать свой экран» и выберите экран или окно ещё раз.";
+function captureFailureText(error, inApp) {
+  switch (error && error.name) {
+    case "NotAllowedError":
+      return inApp ? "Трансляция не началась: приложение не дало доступ к экрану. Обновите Mac Utils Share — перезапустите его и, когда оно предложит новую версию, нажмите «Перезапустить сейчас», — затем попробуйте снова."
+                   : "Трансляция не началась: экран не выбран или запись экрана запрещена (в браузере или в настройках системы).";
+    case "AbortError":
+      return inApp ? CAPTURE_NOT_CHOSEN : "Трансляция не началась: захват экрана прерван. Попробуйте ещё раз.";
+    case "NotReadableError":
+      return "Трансляция не началась: экран сейчас недоступен (его занимает другая программа или окно закрыто). Попробуйте ещё раз.";
+    case "NotFoundError":
+      return "Трансляция не началась: не найден экран для трансляции.";
+    case "NotSupportedError": case "TypeError":
+      if (!inApp) return "Трансляция не началась: здесь нельзя транслировать экран — откройте страницу в Chrome, Edge или Safari.";
+      // fallthrough
+    default:
+      return "Трансляция не началась. Попробуйте ещё раз.";
+  }
+}
+
 async function share() {
   stopHost();
-  if (window.mu && !(await pickSource())) return status("Трансляция отменена");
+  if (window.mu) {
+    const picked = await pickSource();
+    if (picked === "not-chosen") return status(CAPTURE_NOT_CHOSEN);
+    if (!picked) return status("Трансляция отменена");
+  }
   // Звук системы просим, только если он нужен (в приложении для Windows звук без выбранных программ идёт отдельно).
   const wantAudio = window.mu ? $("withAudio").checked && !useHelperAudio : true;
   let stream = null, failure = null;
@@ -1508,7 +1536,10 @@ async function share() {
       if (!window.mu && error && error.name === "NotAllowedError") break;
     }
   }
-  if (!stream) return status(`Трансляция не началась${failure ? ` (${failure.name}: ${failure.message})` : ""}`);
+  if (!stream) {
+    try { window.mu?.log?.(`capture failed name=${String(failure?.name || "none").replace(/[^A-Za-z]/g, "")}`); } catch (_) {}
+    return status(captureFailureText(failure, !!window.mu));
+  }
   keyRetried = false;
   let ok = await openHost(myId);
   // ID закреплён за ключом страницы, а ключ не загрузился (медленная или зависшая IndexedDB): сначала грузим ключ ещё раз.
