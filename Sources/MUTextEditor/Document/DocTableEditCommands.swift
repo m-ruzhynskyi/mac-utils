@@ -5,8 +5,13 @@ import MUCore
 extension DocumentController {
     /// Ячейка под курсором (начало выделения) в основном тексте.
     package var cellAtSelection: RTFCellRef? {
-        guard let index = rendering.paragraph(atUnit: min(selectedUnits.location, max(0, rendering.length - 1))) else { return nil }
-        return model.body.paragraphs[safe: index]?.cell
+        guard let index = rendering.paragraph(atUnit: min(selectedUnits.location, max(0, rendering.length - 1))),
+              let paragraph = model.body.paragraphs[safe: index], let cell = paragraph.cell else { return nil }
+        // Строки с вложенной таблицей и строки самой вложенной таблицы команды строк пока не меняют (P-4).
+        let tables = model.body.tables
+        guard paragraph.outerCell == nil, tables[safe: cell.table]?.nested != true,
+              !tables.contains(where: { $0.parent?.table == cell.table && $0.parent?.row == cell.row }) else { return nil }
+        return cell
     }
 
     /// Вставить строку выше или ниже строки под курсором; курсор — в первую ячейку новой строки.

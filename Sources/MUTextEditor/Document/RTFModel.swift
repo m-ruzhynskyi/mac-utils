@@ -96,6 +96,8 @@ package struct RTFParaProps: Hashable {
     package var lineMultiple = false
     package var tabs: [RTFTabStop] = []
     package var inTable = false
+    /// `\itapN` — глубина таблиц: 0 — вне таблицы, 1 — таблица, 2 — вложенная в её ячейку.
+    package var nesting = 0
     package var keepNext = false
     /// `\keep` — не разрывать абзац между страницами; `\widctlpar` — без висячих строк (≥ 2 строки на каждой странице).
     package var keepTogether = false
@@ -111,6 +113,9 @@ package struct RTFParaProps: Hashable {
     package var style: Int?
     /// `\contextualspace` — без интервалов `\sb`/`\sa` между соседними абзацами того же стиля.
     package var contextualSpace = false
+    /// `\sbauto1`/`\saauto1` — интервал «Авто» (как в HTML): `\sbN`/`\saN` рядом — только для старых читателей.
+    package var spaceBeforeAuto = false
+    package var spaceAfterAuto = false
     /// `\lsN` — замена списка (`\listoverride`), 0 — не пункт списка; `\ilvlN` — уровень. Список стиля `\sN` Word
     /// при чтении RTF не берёт (коды стиля — только в `{\stylesheet}`), поэтому и здесь — только свои коды абзаца.
     package var list = 0
@@ -402,6 +407,8 @@ package enum RTFParagraphEnd: Hashable {
     case paragraph
     /// `\cell` — конец ячейки таблицы.
     case cell
+    /// `\nestcell` — конец ячейки вложенной таблицы.
+    case nestedCell
     /// `\sect` — конец раздела.
     case section
     /// Конец истории (текста, колонтитула) без завершающего кода.
@@ -429,6 +436,8 @@ package struct RTFParagraph {
     package var section = 0
     /// Ячейка таблицы: номер таблицы, строки и ячейки (заполняется на `\row`).
     package var cell: RTFCellRef?
+    /// Абзац вложенной таблицы: ячейка внешней таблицы, в которой она стоит (`cell` — ячейка вложенной).
+    package var outerCell: RTFCellRef?
     /// Группа готового номера `{\listtext …}` или `{\pntext …}` абзаца целиком.
     package var listTextGroup: NSRange?
     /// Первая видимая единица абзаца в исходнике (или `endRange.location`, если абзац пуст).
@@ -509,6 +518,9 @@ package struct RTFRow {
 
 package struct RTFTable {
     package var rows: [RTFRow] = []
+    /// Вложенная таблица (`\nestrow`): стоит в ячейке `parent` внешней.
+    package var nested = false
+    package var parent: RTFCellRef?
 }
 
 /// Текст одной истории: основной текст или колонтитул.

@@ -78,6 +78,8 @@ private final class RTFParser {
         package var listText = false
         package var field: Int?
         package var fieldResult = false
+        /// `{\*\nesttableprops …}` — определение строки вложенной таблицы.
+        package var nestProps = false
     }
 
     private var stack: [Group] = []
@@ -102,6 +104,9 @@ private final class RTFParser {
         package var tables: [RTFTable] = []
         package var rowCells: [[Int]] = []
         package var cellParagraphs: [Int] = []
+        /// То же для строки вложенной таблицы (`\nestcell`, `\nestrow`).
+        package var nestedRowCells: [[Int]] = []
+        package var nestedCellParagraphs: [Int] = []
         package var pard: (range: NSRange, group: Int)?
         package var tokens: [String: (range: NSRange, group: Int)] = [:]
         package var range = NSRange(location: 0, length: 0)
@@ -121,9 +126,12 @@ private final class RTFParser {
     private var contentNoted = false
     private var lastHeaderEnd: [Int: Int] = [:]
     private var row = RTFRow()
+    /// Строка внешней таблицы, пока разбирается определение вложенной (`\nesttableprops`).
+    private var savedRows: [(row: RTFRow, cell: RTFCellDef, borders: RowBorders)] = []
     private var cellInProgress = RTFCellDef()
-    private var rowBorders = (top: RTFBorder?.none, bottom: RTFBorder?.none, left: RTFBorder?.none, right: RTFBorder?.none,
-                              insideH: RTFBorder?.none, insideV: RTFBorder?.none)
+    private typealias RowBorders = (top: RTFBorder?, bottom: RTFBorder?, left: RTFBorder?, right: RTFBorder?, insideH: RTFBorder?,
+                                    insideV: RTFBorder?)
+    private var rowBorders: RowBorders = (nil, nil, nil, nil, nil, nil)
 
     // MARK: Назначения: шрифты, цвета, рисунки, фигуры, поля
 
@@ -281,6 +289,9 @@ private final class RTFParser {
             attachHeader(kind, story: group.story, range: range)
             lastHeaderEnd[stories[group.story].section] = NSMaxRange(range)
         }
+        if group.nestProps, !top.nestProps, let saved = savedRows.popLast() {
+            (row, cellInProgress, rowBorders) = saved
+        }
         if group.listText, !top.listText, group.destination == .text, top.story == group.story {
             stories[group.story].current.listTextGroup = range
         }
@@ -365,6 +376,12 @@ private final class RTFParser {
 
     /// Первое слово группы — назначение. `true` — разобрано (или группа пропущена).
     private func destination(_ word: RTFWord?, key: Key, range: NSRange) -> Bool {
+        if key == Self.nestTablePropsKey {
+            // Строка вложенной таблицы: её `\trowd … \cellx … \nestrow` — своё состояние строки, внешнее вернётся на `}`.
+            top.nestProps = true
+            savedRows.append((row, cellInProgress, rowBorders))
+            return true
+        }
         if key == Self.listTableKey || key == Self.listOverrideTableKey {
             let start = top.start
             skipGroup()
@@ -498,6 +515,7 @@ private final class RTFParser {
     }
 
     private static let listTableKey = Key("listtable"), listOverrideTableKey = Key("listoverridetable")
+    private static let nestTablePropsKey = Key("nesttableprops")
 
     // swiftlint:disable:next function_body_length cyclomatic_complexity
     private func handle(_ word: RTFWord, _ number: Int?, range: NSRange) {
@@ -670,6 +688,8 @@ private final class RTFParser {
             token("pagebb", range)
         case .s: top.para.style = number
         case .contextualspace: top.para.contextualSpace = (number ?? 1) != 0
+        case .sbauto: top.para.spaceBeforeAuto = (number ?? 1) != 0
+        case .saauto: top.para.spaceAfterAuto = (number ?? 1) != 0
         case .ls:
             top.para.list = number ?? 0
             token("ls", range)
@@ -732,12 +752,14 @@ private final class RTFParser {
         case .page: special(.pageBreak, unit: 0x0C, range: range)
         case .cell, .nestcell:
             noteContent(range.location)
-            paragraphEnd(word == .cell ? .cell : .paragraph, range: range)
+            paragraphEnd(word == .cell ? .cell : .nestedCell, range: range)
         case .row:
             noteContent(range.location)
             finishRow(range)
         case .nestrow:
-            break
+            finishNestedRow(range)
+        case .itap:
+            top.para.nesting = number ?? 1
         case .emdash: text(0x2014, range: range)
         case .endash: text(0x2013, range: range)
         case .lquote: text(0x2018, range: range)
@@ -1044,6 +1066,13 @@ private final class RTFParser {
                 story.rowCells.append(story.cellParagraphs)
                 story.cellParagraphs = []
             }
+            if props.nesting >= 2 || end == .nestedCell {
+                story.nestedCellParagraphs.append(number)
+                if end == .nestedCell {
+                    story.nestedRowCells.append(story.nestedCellParagraphs)
+                    story.nestedCellParagraphs = []
+                }
+            }
         }
         story.current = RTFParagraph()
         story.current.regionStart = range.location + range.length
@@ -1063,15 +1092,28 @@ private final class RTFParser {
 
     // MARK: - Таблицы
 
-    private func finishRow(_ range: NSRange) {
+    private func finishRow(_ range: NSRange) { finishRow(range, nested: false) }
+
+    /// Конец строки вложенной таблицы (`\nestrow` в `{\*\nesttableprops}`).
+    private func finishNestedRow(_ range: NSRange) { finishRow(range, nested: true) }
+
+    /// Строка таблицы. Вложенная таблица — своя запись в `tables` (`nested`); её абзацы на конце внешней строки получают
+    /// `outerCell`, а сама таблица — `parent`.
+    private func finishRow(_ range: NSRange, nested: Bool) {
         let story = top.story
         guard top.destination == .text else { return }
-        var cells = stories[story].rowCells
-        if !stories[story].cellParagraphs.isEmpty {
-            cells.append(stories[story].cellParagraphs)
+        var cells = nested ? stories[story].nestedRowCells : stories[story].rowCells
+        let pending = nested ? stories[story].nestedCellParagraphs : stories[story].cellParagraphs
+        if !pending.isEmpty { cells.append(pending) }
+        if nested {
+            stories[story].nestedRowCells = []
+            stories[story].nestedCellParagraphs = []
+        } else {
+            stories[story].rowCells = []
+            stories[story].cellParagraphs = []
+            stories[story].nestedRowCells = []
+            stories[story].nestedCellParagraphs = []
         }
-        stories[story].rowCells = []
-        stories[story].cellParagraphs = []
         guard !cells.isEmpty else { return }
         var finished = row
         finished.endRange = range
@@ -1089,17 +1131,25 @@ private final class RTFParser {
             finished.cells[index] = cell
         }
         let firstParagraph = cells.first?.first ?? 0
-        if let lastTable = stories[story].tables.last, let lastRow = lastTable.rows.last, let lastParagraph = lastRow.paragraphs.last?.last,
-           lastParagraph + 1 == firstParagraph {
-            stories[story].tables[stories[story].tables.count - 1].rows.append(finished)
+        let tableIndex: Int
+        if let last = stories[story].tables.lastIndex(where: { $0.nested == nested }),
+           let lastParagraph = stories[story].tables[last].rows.last?.paragraphs.last?.last, lastParagraph + 1 == firstParagraph {
+            stories[story].tables[last].rows.append(finished)
+            tableIndex = last
         } else {
-            stories[story].tables.append(RTFTable(rows: [finished]))
+            stories[story].tables.append(RTFTable(rows: [finished], nested: nested))
+            tableIndex = stories[story].tables.count - 1
         }
-        let tableIndex = stories[story].tables.count - 1
         let rowIndex = stories[story].tables[tableIndex].rows.count - 1
         for (cellIndex, paragraphs) in cells.enumerated() {
+            let ref = RTFCellRef(table: tableIndex, row: rowIndex, cell: cellIndex)
             for paragraph in paragraphs where paragraph < stories[story].paragraphs.count {
-                stories[story].paragraphs[paragraph].cell = RTFCellRef(table: tableIndex, row: rowIndex, cell: cellIndex)
+                if !nested, let inner = stories[story].paragraphs[paragraph].cell, stories[story].tables[safe: inner.table]?.nested == true {
+                    stories[story].paragraphs[paragraph].outerCell = ref
+                    stories[story].tables[inner.table].parent = ref
+                } else {
+                    stories[story].paragraphs[paragraph].cell = ref
+                }
             }
         }
     }

@@ -17,6 +17,7 @@ package enum RTFWord: String, CaseIterable {
     case intbl, keepn, keep, widctlpar, nowidctlpar, pagebb, s, cbpat, contextualspace, ls, ilvl
     case posx, posxl, posxc, posxr, posxi, posxo, posy, posyt, posyc, posyb, posyil, posyin, posyout
     case pvpara, pvmrg, pvpg, phmrg, phpg, phcol, absw, absh
+    case sbauto, saauto
     case brdrt, brdrb, brdrl, brdrr, box, brdrw, brdrcf, brdrs, brdrth, brdrdb, brdrdot, brdrdash, brdrnone, brdrnil, brdrsh
     // Символ.
     case plain, f, fs, b, i, ul, uld, uldb, ulw, ulth, uldash, uldashd, uldashdd, ulwave, ulhwave, ululdbwave, ulthd, ulthdash
@@ -24,7 +25,7 @@ package enum RTFWord: String, CaseIterable {
     case kerning, expnd, expndtw
     case chshdng, chcfpat
     // Особые символы.
-    case tab, line, page, cell, row, nestcell, nestrow, uc, u, bin
+    case tab, line, page, cell, row, nestcell, nestrow, itap, uc, u, bin
     case emdash, endash, lquote, rquote, ldblquote, rdblquote, bullet, emspace, enspace, qmspace, zwj, zwnj, ltrmark, rtlmark, chpgn
     // Таблица.
     case trowd, cellx, clvmgf, clvmrg, clmgf, clmrg, clbrdrt, clbrdrb, clbrdrl, clbrdrr, clcbpat, clshdng, clcfpat, clvertalt, clvertalc, clvertalb
@@ -48,7 +49,7 @@ package enum RTFWord: String, CaseIterable {
         "stylesheet", "info", "rsidtbl", "generator", "datastore", "themedata",
         "colorschememapping", "latentstyles", "xmlnstbl", "mmathPr", "pgdsctbl", "revtbl", "filetbl", "userprops",
         "docvar", "template", "nonshppict", "footnote", "bkmkstart", "bkmkend", "pn", "pnseclvl", "pntxta", "pntxtb",
-        "ffdata", "formfield", "nesttableprops", "nonesttables", "xe", "tc", "tcn", "annotation", "atnid", "atnauthor",
+        "ffdata", "formfield", "nonesttables", "xe", "tc", "tcn", "annotation", "atnid", "atnauthor",
         "atrfstart", "atrfend", "atndate", "objdata", "objclass", "objname", "result", "blipuid", "picprop", "shptxt",
         "dptxbxtext", "oldcprops", "oldpprops", "oldsprops", "oldtprops", "defchp", "defpap", "fchars", "lchars",
         "wgrffmtfilter", "private", "comment", "doccomm", "title", "subject", "author", "operator", "keywords",
