@@ -43,7 +43,18 @@ test("разрешения: только захват экрана и звук (
   assert.equal(allow("media", RELAY, { mediaType: "audio" }), true, "проверка звука");
   assert.equal(allow("media", RELAY, { mediaTypes: ["video"] }), false, "камера");
   assert.equal(allow("media", RELAY, { mediaTypes: ["audio", "video"] }), false, "звук вместе с камерой");
-  assert.equal(allow("media", RELAY, { mediaTypes: [] }), false);
+  // Захват экрана (getDisplayMedia, getUserMedia "desktop") Electron спрашивает как "media" с пустым mediaTypes (WINNA-30):
+  // только когда ведущий только что выбрал источник (captureArmed), иначе — отказ.
+  assert.equal(allow("media", RELAY, { mediaTypes: [] }), false, "захват без выбора ведущего");
+  assert.equal(guard.permissionAllowed("media", RELAY, { mediaTypes: [] }, true), true, "захват после выбора ведущего");
+  assert.equal(guard.permissionAllowed("media", "https://evil.com/", { mediaTypes: [] }, true), false, "захват чужой странице");
+  assert.equal(guard.permissionAllowed("media", RELAY, { mediaTypes: ["video"] }, true), false, "камера и после выбора — нет");
+  assert.equal(guard.permissionAllowed("media", RELAY, { mediaTypes: ["audio", "video"] }, true), false);
+  assert.equal(guard.permissionAllowed("media", RELAY, { mediaType: "unknown" }, true), false, "проверка (не запрос) — как раньше");
+  assert.equal(guard.isCaptureRequest("media", { mediaTypes: [] }), true);
+  assert.equal(guard.isCaptureRequest("media", { mediaTypes: ["audio"] }), false);
+  assert.equal(guard.isCaptureRequest("media", { mediaType: "unknown" }), false);
+  assert.equal(guard.isCaptureRequest("display-capture", { mediaTypes: [] }), false);
   assert.equal(allow("media", RELAY, { mediaType: "video" }), false);
   assert.equal(allow("media", RELAY, { mediaType: "unknown" }), false);
   assert.equal(allow("media", RELAY), false, "без типа — нет");
