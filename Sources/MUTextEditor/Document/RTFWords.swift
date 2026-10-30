@@ -14,16 +14,21 @@ package enum RTFWord: String, CaseIterable {
     // Абзац.
     case pard, par, ql, qc, qr, qj, qd, li, ri, fi, lin, rin, sb, sa, sl, slmult
     case tx, tb, tqr, tqc, tqdec, tldot, tlhyph, tlul, tlth, tleq, tlmdot
-    case intbl, keepn, pagebb, s, cbpat, contextualspace
+    case intbl, keepn, keep, widctlpar, nowidctlpar, pagebb, s, cbpat, contextualspace, ls, ilvl
+    case posx, posxl, posxc, posxr, posxi, posxo, posy, posyt, posyc, posyb, posyil, posyin, posyout
+    case pvpara, pvmrg, pvpg, phmrg, phpg, phcol, absw, absh
+    case sbauto, saauto
     case brdrt, brdrb, brdrl, brdrr, box, brdrw, brdrcf, brdrs, brdrth, brdrdb, brdrdot, brdrdash, brdrnone, brdrnil, brdrsh
     // Символ.
     case plain, f, fs, b, i, ul, uld, uldb, ulw, ulth, uldash, uldashd, uldashdd, ulwave, ulhwave, ululdbwave, ulthd, ulthdash
     case ulnone, strike, striked, cf, cb, highlight, chcbpat, v, super_ = "super", sub, nosupersub, up, dn, caps, scaps
+    case kerning, expnd, expndtw
+    case chshdng, chcfpat
     // Особые символы.
-    case tab, line, page, cell, row, nestcell, nestrow, uc, u, bin
+    case tab, line, page, cell, row, nestcell, nestrow, itap, uc, u, bin
     case emdash, endash, lquote, rquote, ldblquote, rdblquote, bullet, emspace, enspace, qmspace, zwj, zwnj, ltrmark, rtlmark, chpgn
     // Таблица.
-    case trowd, cellx, clvmgf, clvmrg, clmgf, clmrg, clbrdrt, clbrdrb, clbrdrl, clbrdrr, clcbpat, clvertalt, clvertalc, clvertalb
+    case trowd, cellx, clvmgf, clvmrg, clmgf, clmrg, clbrdrt, clbrdrb, clbrdrl, clbrdrr, clcbpat, clshdng, clcfpat, clvertalt, clvertalc, clvertalb
     case trgaph, trleft, trrh, trhdr, trpaddt, trpaddb, trbrdrt, trbrdrb, trbrdrl, trbrdrr, trbrdrh, trbrdrv
     case trql, trqc, trqr, trpaddl, trpaddr, trpaddfl, trpaddfr, clpadt, clpadr, clpadft, clpadfr
     // Рисунок.
@@ -41,10 +46,10 @@ package enum RTFWord: String, CaseIterable {
 
     /// Группы, текст которых на странице не виден: пропускаются целиком, не разбираясь.
     package static let skippedDestinations: Set<RTFDollarScanner.WordKey> = Set([
-        "stylesheet", "info", "listtable", "listoverridetable", "rsidtbl", "generator", "datastore", "themedata",
+        "stylesheet", "info", "rsidtbl", "generator", "datastore", "themedata",
         "colorschememapping", "latentstyles", "xmlnstbl", "mmathPr", "pgdsctbl", "revtbl", "filetbl", "userprops",
         "docvar", "template", "nonshppict", "footnote", "bkmkstart", "bkmkend", "pn", "pnseclvl", "pntxta", "pntxtb",
-        "ffdata", "formfield", "nesttableprops", "nonesttables", "xe", "tc", "tcn", "annotation", "atnid", "atnauthor",
+        "ffdata", "formfield", "nonesttables", "xe", "tc", "tcn", "annotation", "atnid", "atnauthor",
         "atrfstart", "atrfend", "atndate", "objdata", "objclass", "objname", "result", "blipuid", "picprop", "shptxt",
         "dptxbxtext", "oldcprops", "oldpprops", "oldsprops", "oldtprops", "defchp", "defpap", "fchars", "lchars",
         "wgrffmtfilter", "private", "comment", "doccomm", "title", "subject", "author", "operator", "keywords",
