@@ -208,10 +208,22 @@ async function start(world) {
       this.click();
       return fake.handles.get("choose")(page(), sourceId, ...rest);
     },
+    // getDisplayMedia страницы так, как его проводит Electron 44 (shell/browser/web_contents_permission_helper.cc):
+    // сначала обработчик разрешений — "media" с ПУСТЫМ mediaTypes (захват экрана — не микрофон и не камера); отказ там —
+    // NotAllowedError «Permission denied». Потом setDisplayMediaRequestHandler; отказ (null) — AbortError.
+    getDisplayMedia(request = {}) {
+      const origin = request.securityOrigin ?? RELAY_FRAME.url;
+      let allowed, streams;
+      fake.permissions.request(this.main.webContents, "media", (ok) => { allowed = ok; }, { mediaTypes: [], requestingUrl: origin, securityOrigin: origin, isMainFrame: true });
+      if (allowed !== true) return { error: "NotAllowedError" };
+      fake.displayMedia({ audioRequested: false, securityOrigin: origin, ...request }, (s) => { streams = s; });
+      return streams ? { streams } : { error: "AbortError" };
+    },
     // Ведущий выбрал источник и страница начала захват.
     async share(sourceId) {
       await this.choose(sourceId, false, []);
-      fake.displayMedia({ audioRequested: false, securityOrigin: RELAY_FRAME.url }, () => {});
+      const got = this.getDisplayMedia();
+      assert.ok(got.streams, `захват после выбора: ${got.error}`);
       await tick();
     },
     track(rect) { trackers.at(-1).stdout.emit("data", Buffer.from(`${rect.x} ${rect.y} ${rect.width} ${rect.height}\n`)); },
@@ -653,7 +665,7 @@ const katya = () => { const a = layoutA(), b = layoutB(), c = layoutC(); return 
 // Страница после switchTo делает новый getDisplayMedia: обработчик приложения отдаёт выбранный монитор.
 async function switchTo(host, n) {
   const ok = await host.fake.handles.get("switchTo")(page(), n);
-  if (ok) { host.fake.displayMedia({ audioRequested: false, securityOrigin: RELAY_FRAME.url }, () => {}); await tick(); }
+  if (ok) { assert.ok(host.getDisplayMedia().streams, "захват после switchTo"); await tick(); }
   return ok;
 }
 
@@ -695,7 +707,7 @@ test("выбор монитора без getDisplayMedia (страница не 
     await host.share("screen:2:0");
     assert.equal(await host.fake.handles.get("switchTo")(page(), 3), true);
     assert.equal(await host.fake.handles.get("switchTo")(page(), 0), false);
-    host.fake.displayMedia({ audioRequested: false, securityOrigin: RELAY_FRAME.url }, () => {});
+    host.getDisplayMedia();
     await tick();
     host.mark(0.5, 0.5);
     await tick(80);
@@ -957,7 +969,7 @@ test("страница не подтверждает звук (подвисла)
 // ---- Безопасность главного окна (аудит H1, L17): страница ретранслятора могла бы быть подменена ----
 const oneScreen = () => { const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true); return world([d], [screenSource(d, 1), { id: "window:4242:0", name: "Отчёт" }]); };
 const EVIL = (extra = {}) => ({ senderFrame: { url: "https://evil.example/" }, ...extra });
-const capture = (host, request = {}) => { let got; host.fake.displayMedia({ audioRequested: false, securityOrigin: RELAY_FRAME.url, ...request }, (s) => { got = s; }); return got; };
+const capture = (host, request = {}) => host.getDisplayMedia(request).streams ?? null;
 
 test("навигация: главное окно не уходит с ретранслятора (ссылка, редирект, кадр); новые окна не открываются", async () => {
   const host = await start(oneScreen());
@@ -1089,6 +1101,37 @@ test("выбор действует ARM_MS: позже страница захв
     assert.equal(capture(host), null, "через 31 с без эфира выбор не действует");
     Date.now = () => base + 6_000;
     assert.equal(await host.fake.handles.get("choose")(page(), "screen:1:0", false, []), false, "клик старше 5 с не считается");
+  } finally { Date.now = realNow; host.stop(); }
+});
+
+test("WINNA-30: getDisplayMedia после выбора ведущего проходит обработчик разрешений Electron 44 (\"media\", mediaTypes [])", async () => {
+  const k = katya();
+  const host = await start(world([k.a, k.b, k.c], k.sources));
+  const realNow = Date.now;
+  try {
+    // Без выбора — отказ уже на разрешениях (у страницы это NotAllowedError), в журнале — почему.
+    assert.deepEqual(host.getDisplayMedia(), { error: "NotAllowedError" });
+    assert.match(host.log(), /capture denied reason=not-armed stage=permission/);
+    // Ведущий выбрал экран — тот же запрос проходит и получает выбранный экран (раньше: NotAllowedError, эфир не начинался).
+    assert.equal(await host.choose("screen:2:0", false, []), true);
+    assert.equal(host.getDisplayMedia().streams?.video?.id, "screen:2:0");
+    // Чужой origin и после выбора — нет.
+    assert.deepEqual(host.getDisplayMedia({ securityOrigin: "https://evil.example/" }), { error: "NotAllowedError" });
+    // Через ARM_MS без нового выбора — нет; а переключение монитора зрителем в эфире — да (nextSource).
+    const base = realNow();
+    Date.now = () => base + 31_000;
+    assert.deepEqual(host.getDisplayMedia(), { error: "NotAllowedError" }, "выбор протух");
+    assert.equal(await host.fake.handles.get("switchTo")(page({ sender: { executeJavaScript: async () => {} } }), 3), true);
+    assert.equal(host.getDisplayMedia().streams?.video?.id, "screen:3:0", "switchTo в эфире");
+    assert.deepEqual(host.getDisplayMedia(), { error: "NotAllowedError" }, "переключение — на один захват");
+    // Камера и после выбора — нет.
+    Date.now = realNow;
+    await host.choose("screen:1:0", false, []);
+    const ask = (details) => new Promise((resolve) => host.fake.permissions.request(host.main.webContents, "media", resolve, { requestingUrl: RELAY_FRAME.url, ...details }));
+    assert.equal(await ask({ mediaTypes: ["video"] }), false);
+    // Эфир кончился — захват снова только через новый выбор.
+    host.fake.ipc.get("stopped")(page());
+    assert.deepEqual(host.getDisplayMedia(), { error: "NotAllowedError" });
   } finally { Date.now = realNow; host.stop(); }
 });
 

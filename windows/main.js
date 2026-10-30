@@ -552,6 +552,9 @@ function withoutOwnWindows(sources) {
 // IPC главного окна — только из кадра страницы ретранслятора (event.senderFrame.url); остальным — отказ (denied).
 const relayOnly = (fn, denied) => (event, ...args) => (guard.fromRelay(event) ? fn(event, ...args) : denied);
 
+// Захват «взведён»: ведущий выбрал источник кликом не больше ARM_MS назад или зритель в эфире переключил монитор (switchTo).
+const captureArmed = () => !!chosen && (!!nextSource || Date.now() <= armedUntil);
+
 // Выбор закончился (эфир кончился, страница ушла): источник забыт — новый захват только через новый выбор.
 function forgetChoice() {
   chosen = null; listed = null; armedUntil = 0;
@@ -570,15 +573,25 @@ app.whenReady().then(() => {
 
   // Разрешения браузера: всё запрещено, кроме захвата экрана и звука для страницы ретранслятора (guard.permissionAllowed).
   // Камера, чтение буфера обмена, уведомления, геолокация и прочее — нет никому, и своим локальным окнам тоже.
-  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) =>
-    callback(guard.permissionAllowed(permission, details?.requestingUrl || contents?.getURL?.() || "", details)));
+  // getDisplayMedia Electron 44 сначала спрашивает здесь как "media" с пустым mediaTypes и при отказе отвечает странице
+  // NotAllowedError «Permission denied», до setDisplayMediaRequestHandler дело не доходит (WINNA-30). Такой запрос
+  // проходит, только пока захват «взведён» выбором ведущего (captureArmed) — тот же замок, что ниже.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const armed = captureArmed();
+    const allowed = guard.permissionAllowed(permission, details?.requestingUrl || contents?.getURL?.() || "", details, armed);
+    if (!allowed && guard.isCaptureRequest(permission, details)) appendOverlayLog(`capture denied reason=${armed ? "origin" : "not-armed"} stage=permission`);
+    callback(allowed);
+  });
   session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) =>
     guard.permissionAllowed(permission, details?.requestingUrl || origin || "", details));
 
   // getDisplayMedia на странице получает то, что ведущий выбрал кликом (choose) не больше ARM_MS назад,
   // или монитор, на который в эфире переключил зритель (switchTo). Иначе — отказ.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
-    if (!chosen || (!nextSource && Date.now() > armedUntil) || !guard.isRelay(request?.securityOrigin || request?.frame?.url || "")) return callback(null);
+    if (!captureArmed() || !guard.isRelay(request?.securityOrigin || request?.frame?.url || "")) {
+      appendOverlayLog(`capture denied reason=${captureArmed() ? "origin" : "not-armed"} stage=display`);
+      return callback(null);
+    }
     broadcasting = true;
     // Зритель переключил монитор: тот же эфир, другой экран; окно меток (prepareOverlay) — на него.
     if (nextSource) { previousSource = chosen.source; chosen.source = nextSource; nextSource = null; }

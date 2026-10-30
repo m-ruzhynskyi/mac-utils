@@ -39,15 +39,25 @@ function externalAllowed(url) {
   return !!u && u.protocol === "https:" && EXTERNAL_HOSTS.has(u.hostname) && !u.username && !u.password && !u.port;
 }
 
+// Запрос захвата экрана: getDisplayMedia (и getUserMedia с chromeMediaSource "desktop") Electron передаёт обработчику
+// разрешений как "media" с ПУСТЫМ mediaTypes — туда попадают только микрофон ("audio") и камера ("video")
+// (shell/browser/web_contents_permission_helper.cc, RequestMediaAccessPermission). Отказ на нём — NotAllowedError
+// «Permission denied» странице, до setDisplayMediaRequestHandler запрос не доходит.
+const isCaptureRequest = (permission, details) => permission === "media" && Array.isArray(details?.mediaTypes) && details.mediaTypes.length === 0;
+
 // Разрешения браузера: всё запрещено, кроме захвата экрана и звука (не камеры) для страницы ретранслятора.
 // clipboard-sanitized-write — только запись: страница копирует свой ID по клику (navigator.clipboard.writeText);
 // чтение буфера (clipboard-read и его старый вариант) запрещено.
 // mediaTypes — у запроса (массив), mediaType — у проверки (строка).
-function permissionAllowed(permission, url, details = {}) {
+// Захват экрана (isCaptureRequest) — только когда captureArmed: ведущий только что выбрал источник в окне приложения
+// (или зритель переключил монитор в эфире). getUserMedia с "desktop" сам выбирает источник по ID страницы, поэтому
+// без выбора ведущего он не проходит, как и getDisplayMedia.
+function permissionAllowed(permission, url, details = {}, captureArmed = false) {
   if (!isRelay(url)) return false;
   if (permission === "display-capture" || permission === "clipboard-sanitized-write") return true;
   if (permission !== "media") return false;
-  if (Array.isArray(details.mediaTypes)) return details.mediaTypes.length > 0 && details.mediaTypes.every((t) => t === "audio");
+  if (isCaptureRequest(permission, details)) return captureArmed === true;
+  if (Array.isArray(details.mediaTypes)) return details.mediaTypes.every((t) => t === "audio");
   return details.mediaType === "audio";
 }
 
@@ -58,4 +68,4 @@ function senderURL(event) {
 const fromRelay = (event) => isRelay(senderURL(event));
 const fromLocal = (event, dir) => isLocal(senderURL(event), dir);
 
-module.exports = { RELAY, RELAY_ORIGIN, EXTERNAL_HOSTS, isRelay, isLocal, navigationAllowed, externalAllowed, permissionAllowed, senderURL, fromRelay, fromLocal };
+module.exports = { RELAY, RELAY_ORIGIN, EXTERNAL_HOSTS, isRelay, isLocal, navigationAllowed, externalAllowed, permissionAllowed, isCaptureRequest, senderURL, fromRelay, fromLocal };
