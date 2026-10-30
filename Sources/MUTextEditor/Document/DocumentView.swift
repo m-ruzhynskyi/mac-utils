@@ -85,6 +85,8 @@ package final class DocTextView: NSTextView {
     }
 
     package override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1, let controller, controller.dragTableBoundary(event, in: self) { return }
+        if event.clickCount == 1, let controller, controller.clickDollar(event, in: self) { return }  // V2: поповер значения `$`
         if event.clickCount == 2, let handler = onDoubleClickOutside, handler(event) { return }
         super.mouseDown(with: event)
     }
@@ -113,6 +115,7 @@ package final class DocTextView: NSTextView {
         controller?.cancelComposition()
     }
 
+
     // Вставка: форматированная (RTF/HTML) — `DocFormatter` (D-4), иначе обычным текстом.
     package override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { [.string] }
 
@@ -125,14 +128,37 @@ package final class DocTextView: NSTextView {
 
     // MARK: Меню и перетаскивание
 
-    /// Контекстное меню: «Показать в коде» — то же место в исходнике.
+    /// Контекстное меню: «Показать в коде» — то же место в исходнике; в таблице — строки.
     package override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for: event) ?? NSMenu()
         let item = NSMenuItem(title: "Показать в коде", action: #selector(showInCode(_:)), keyEquivalent: "")
         item.target = self
         menu.insertItem(item, at: 0)
         menu.insertItem(.separator(), at: 1)
+        // Таблица: строки, столбцы, объединение, границы, заливка; вне таблицы — вставка таблицы.
+        for (index, item) in (controller?.tableMenuItems() ?? []).enumerated() { menu.insertItem(item, at: 2 + index) }
+        if controller != nil { menu.insertItem(.separator(), at: 3) }
         return menu
+    }
+
+    // Граница ячеек таблицы: курсор «←→», перетаскивание — ширина столбца.
+    package override func mouseMoved(with event: NSEvent) {
+        if let controller, controller.tableBoundary(at: convert(event.locationInWindow, from: nil), in: self) != nil {
+            NSCursor.resizeLeftRight.set()
+            return
+        }
+        super.mouseMoved(with: event)
+    }
+
+    // Tab в таблице — по ячейкам, как в Word (и в пункте списка внутри ячейки); вне таблицы Tab в начале пункта
+    // списка — уровень ниже (ввод «\t» → `DocListEdit`), ⇧Tab — выше.
+    package override func insertTab(_ sender: Any?) {
+        if controller?.tabInTable(forward: true) != true { super.insertTab(sender) }
+    }
+
+    package override func insertBacktab(_ sender: Any?) {
+        if controller?.tabInTable(forward: false) == true || controller?.backtab() == true { return }
+        super.insertBacktab(sender)
     }
 
     @objc package func showInCode(_ sender: Any?) {
@@ -199,7 +225,9 @@ package final class DocPageView: NSView {
     package private(set) var footerHeight: CGFloat = 0
     /// Выступ текста раздела в поля (таблицы шире полосы текста): рамка текста шире `bodyRect` на столько же.
     package private(set) var outdent = DocOutdent()
-    /// Правится колонтитул: основной текст бледнее.
+    /// Прозрачность колонтитулов, пока правится основной текст.
+    package static let marginsAlpha: CGFloat = 0.5
+    /// Правится колонтитул: основной текст бледнее, колонтитулы — в своих цветах.
     package var faded = false {
         didSet {
             textView.alphaValue = faded ? 0.45 : 1
@@ -216,7 +244,7 @@ package final class DocPageView: NSView {
         self.section = section
         self.outdent = outdent
         let body = Self.textRect(Self.bodyRect(props), outdent)
-        container = NSTextContainer(size: body.size)
+        container = DocPageContainer(size: body.size)
         container.widthTracksTextView = false
         container.heightTracksTextView = false
         container.lineFragmentPadding = 0
@@ -323,7 +351,14 @@ package final class DocPageView: NSView {
     private func applyBody() {
         let body = textRect
         if textView.frame != body { textView.frame = body }
-        if container.size != body.size { container.size = body.size }
+        let size = NSSize(width: body.width, height: min(body.height, breakLimit ?? body.height))
+        if container.size != size { container.size = size }
+    }
+
+    /// Разрыв страницы выше низа текста (правила Word: `\keepn`, `\keep`, висячие строки — `DocPagination`):
+    /// высота контейнера до этого места, остальное уходит на следующую страницу.
+    var breakLimit: CGFloat? {
+        didSet { if oldValue != breakLimit { applyBody() } }
     }
 
     package func update(props: RTFSectionProps, section: Int, outdent: DocOutdent) {
@@ -341,24 +376,15 @@ package final class DocPageView: NSView {
         // Только своя бумага: при отрисовке в картинку `dirtyRect` бывает шире страницы — иначе стёрли бы соседнюю.
         NSColor.white.setFill()
         dirtyRect.intersection(bounds).fill()
+        // Как в Word: пока правится основной текст, колонтитулы на экране бледные; при правке колонтитула бледнеет тело
+        // (`faded`). В PDF и при печати — в своих цветах.
+        let context = NSGraphicsContext.current
+        let dims = !faded && context?.isDrawingToScreen == true
+        if dims { context?.cgContext.saveGState(); context?.cgContext.setAlpha(Self.marginsAlpha) }
         if header != nil { headerLayout.draw(at: headerRect.origin) }
         if footer != nil { footerLayout.draw(at: NSPoint(x: footerRect.minX, y: footerRect.maxY - footerHeight)) }
-        if let frame = headerFrame {
-            let path = NSBezierPath(rect: frame.rect)
-            path.setLineDash([5, 3], count: 2, phase: 0)
-            path.lineWidth = 1.5
-            NSColor(srgbRed: 0.42, green: 0.62, blue: 0.0, alpha: 1).setStroke()
-            path.stroke()
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont(name: "Manrope-Bold", size: 11) ?? .boldSystemFont(ofSize: 11),
-                .foregroundColor: NSColor(srgbRed: 0.08, green: 0.1, blue: 0.04, alpha: 1),
-            ]
-            let size = (frame.title as NSString).size(withAttributes: attributes)
-            let label = NSRect(x: frame.rect.minX, y: frame.rect.minY - size.height - 6, width: size.width + 12, height: size.height + 6)
-            NSColor(srgbRed: 0.784, green: 0.941, blue: 0.353, alpha: 1).setFill()
-            NSBezierPath(roundedRect: label, xRadius: 4, yRadius: 4).fill()
-            (frame.title as NSString).draw(at: NSPoint(x: label.minX + 6, y: label.minY + 3), withAttributes: attributes)
-        }
+        if dims { context?.cgContext.restoreGState() }
+        if let frame = headerFrame { DocHeaderFrameStyle.draw(frame.rect, title: frame.title) }  // рамка правки колонтитула (H1)
     }
 
     package override func mouseDown(with event: NSEvent) {
@@ -412,6 +438,12 @@ package final class DocStoryLayout {
 package final class DocPagesView: NSView {
     package static let gap: CGFloat = 24
     package private(set) var pages: [DocPageView] = []
+    /// Подряд идущие проходы `DocPagination`, менявшие раскладку (предохранитель от зацикливания).
+    var paginationRounds = 0
+    /// Что было отложено `DocPagination` последним проходом без изменений; `paginationStamp` растёт с каждой заменой текста.
+    struct PaginationKey: Equatable { var stamp: Int, length: Int, pages: Int }
+    var paginationDone: PaginationKey?
+    var paginationStamp = 0
 
     package override var isFlipped: Bool { true }
 
@@ -471,4 +503,10 @@ package final class DocCenteringClipView: NSClipView {
         }
         return rect
     }
+}
+
+/// Контейнер страницы. `dropsTopSpace` — у первой строки страницы пропадает отступ «перед» абзацем (Word так делает у страницы,
+/// начавшейся сама); решает `DocPagination`, потому что для страниц с таблицами это не проверено.
+final class DocPageContainer: NSTextContainer {
+    var dropsTopSpace = false
 }

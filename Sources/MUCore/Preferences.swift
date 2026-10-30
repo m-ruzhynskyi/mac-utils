@@ -195,6 +195,8 @@ package enum Pref {
     /// Вид: невидимые символы и подсветка парных скобок.
     package static let editorInvisibles = "editorInvisibles"
     package static let editorBrackets = "editorBrackets"
+    /// «Документ»: автозамена «--» → «—» и кавычек в «ёлочки» (по умолчанию выключена).
+    package static let docAutocorrect = "docAutocorrect"
     /// Ширина табуляции в пробелах (табы ↔ пробелы, отступ таба на экране).
     package static let editorTabWidth = "editorTabWidth"
     /// Поиск в папке: последняя папка и маска имён.
@@ -327,6 +329,7 @@ package enum Pref {
             editorDollarPanel: true,
             editorInvisibles: false,
             editorBrackets: true,
+            docAutocorrect: false,
             editorTabWidth: 4,
             playerRememberPosition: true,
             playerSeekStep: 5,

@@ -6,8 +6,11 @@ import MUDesign
 /// Страницы документа вкладки (прокрутка контроллера) в окне редактора.
 package struct DocumentHost: NSViewRepresentable {
     package let controller: DocumentController
+    /// Открыта панель «Знаки $» — только тогда знаки подсвечены на страницах.
+    package var showsDollarMarks = false
 
     package func makeNSView(context: Context) -> NSView {
+        controller.showsDollarMarks = showsDollarMarks
         let container = NSView()
         container.wantsLayer = true
         container.clipsToBounds = true
@@ -16,6 +19,7 @@ package struct DocumentHost: NSViewRepresentable {
     }
 
     package func updateNSView(_ container: NSView, context: Context) {
+        controller.showsDollarMarks = showsDollarMarks
         guard container.subviews.first !== controller.scrollView else { return }
         container.subviews.forEach { $0.removeFromSuperview() }
         install(controller.scrollView, in: container)
@@ -112,11 +116,18 @@ package struct DocStatusBar: View {
                 .accessibilityLabel("Страница \(document.currentPage) из \(document.pageCount)")
             item("Раздел \(document.currentSection)")
             item("\(EditorSearch.number(document.wordCount)) \(plural(document.wordCount, "слово", "слова", "слов"))")
+            if let language = document.languageName { item(language).help("Язык текста у курсора (\\lang)") }
             if let name = document.selection.fontName, let shown = document.selection.displayFont,
                FontSubstitution.baseName(name) != shown {
                 item("\(name) → \(shown)").help("Шрифта «\(name)» нет на Mac: показан заменой, в файле остаётся «\(name)»")
             }
             Spacer(minLength: 0)
+            if tab.isDirty {
+                Button { EditorWindowController.shared.save(tab) { _ in } } label: { label("Изменён · ⌘S") }
+                    .buttonStyle(.plain)
+                    .help("Есть несохранённые правки. ⌘S записывает только ваши правки; не прошла проверка — предложит сохранить копию")
+                    .accessibilityLabel("Изменён. Сохранить ⌘S")
+            }
             Menu {
                 ForEach([50, 75, 80, 100, 125, 150, 200], id: \.self) { percent in
                     Button("\(percent) %") {

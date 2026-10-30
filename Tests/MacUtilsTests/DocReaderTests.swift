@@ -21,7 +21,7 @@ final class DocReaderTests: XCTestCase {
                 }
             }
             switch paragraph.end {
-            case .paragraph: out += "\n"
+            case .paragraph, .nestedCell: out += "\n"
             case .cell: out += "\u{7}"
             case .section, .storyEnd: break
             }

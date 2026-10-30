@@ -124,12 +124,20 @@ package final class DocHeaderSession: NSObject, NSTextViewDelegate {
         textView.setSelectedRange(NSRange(location: location, length: min(units.length, storage.length - location)))
     }
 
+    static let fieldShade = NSColor(white: 0.5, alpha: 0.16)
+
     /// Показанный текст колонтитула по модели контроллера; `selectSource` — выделение после правки.
     package func reload(selectSource: NSRange?) {
         guard let controller, let page else { return }
         guard let header = controller.model.sections[safe: section]?.headers[kind] else {
-            // Колонтитула больше нет (отмена его добавления) — правка закончилась.
-            formatter?.endHeaderEditing()
+            // Своего колонтитула раздела больше нет (отмена «Отвязать от предыдущего», «Как в предыдущем»): раздел снова показывает
+            // колонтитул предыдущего — правка переходит на него. Нет и его (отмена добавления) — правка закончилась.
+            if section > 0, let provider = DocHeaderFooterEdits.provider(of: kind, before: min(section, controller.model.sections.count), model: controller.model) {
+                self.section = provider
+                reload(selectSource: nil)
+            } else {
+                formatter?.endHeaderEditing()
+            }
             return
         }
         let total = controller.pageCount
@@ -146,6 +154,15 @@ package final class DocHeaderSession: NSObject, NSTextViewDelegate {
         let (string, map) = (rendering.string, rendering.map)
         self.map = map
         storage.setAttributedString(string)
+        // Поля — серым фоном, как у Word в правке колонтитула: видно, что это поле, а не набранный текст.
+        // Вычисляемые (номер страницы) — единицы вида `.field`; остальные (дата, время, имя файла) — текст внутри группы поля.
+        let groups = controller.model.fields.map(\.group).filter { NSIntersectionRange($0, header.group).length > 0 }
+        for unit in 0..<min(map.count, storage.length) {
+            let inGroup = groups.contains { NSLocationInRange(map.range(at: unit).location, $0) }
+            if map.kind(at: unit) == .field || inGroup {
+                storage.addAttribute(.backgroundColor, value: Self.fieldShade, range: NSRange(location: unit, length: 1))
+            }
+        }
         layoutManager.showsInvisibles = controller.showsInvisibles
         layout()
         if let selectSource {
@@ -169,11 +186,13 @@ package final class DocHeaderSession: NSObject, NSTextViewDelegate {
         page.headerFrame = (textView.frame.insetBy(dx: -8, dy: -6), title)
     }
 
-    /// Подпись над рамкой: «— чётные» и «— нечётные» — только когда они и правда разные (`\facingp`).
+    /// Подпись над рамкой: «— чётные» и «— нечётные» — только когда они и правда разные (`\facingp`); раздел показывает
+    /// колонтитул предыдущего — « · Как в предыдущем» (как в Word).
     package var title: String {
         let facing = controller?.model.facingPages ?? false
-        if !facing, kind.page == .even || kind.page == .odd { return RTFHeaderKind.kind(header: isHeader, page: .all).title }
-        return kind.title
+        var base = kind.title
+        if !facing, kind.page == .even || kind.page == .odd { base = RTFHeaderKind.kind(header: isHeader, page: .all).title }
+        return formatter?.headerLink == .linked ? base + " · Как в предыдущем" : base
     }
 
     // MARK: - Выделение
@@ -241,6 +260,42 @@ extension Array {
     package subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }
 
+/// Рамка правки колонтитула на странице (макет `.audit/word-ui-design`, «★2»): синяя пунктирная рамка и метка на её верхней
+/// границе справа — белая плашка с синим текстом и рамкой. Бумага всегда белая, поэтому цвета постоянные (синий светлой темы).
+package enum DocHeaderFrameStyle {
+    package static let blue = NSColor(srgbRed: 0x1F / 255.0, green: 0x6F / 255.0, blue: 0xDB / 255.0, alpha: 1)
+    package static let labelInk = NSColor(srgbRed: 0x1F / 255.0, green: 0x5F / 255.0, blue: 0xC0 / 255.0, alpha: 1)
+    /// Отступ метки от правого края рамки.
+    package static let labelInset: CGFloat = 24
+
+    /// Где стоит метка (для теста и рисования): по центру верхней границы, справа.
+    package static func labelRect(for rect: NSRect, title: String) -> NSRect {
+        let size = (title as NSString).size(withAttributes: attributes)
+        let width = size.width + 12, height = size.height + 4
+        return NSRect(x: max(rect.minX, rect.maxX - labelInset - width), y: rect.minY - height / 2, width: width, height: height)
+    }
+
+    package static var attributes: [NSAttributedString.Key: Any] {
+        [.font: NSFont(name: "Manrope-Bold", size: 10.5) ?? .boldSystemFont(ofSize: 10.5), .foregroundColor: labelInk]
+    }
+
+    package static func draw(_ rect: NSRect, title: String) {
+        let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+        path.setLineDash([4, 3], count: 2, phase: 0)
+        path.lineWidth = 1
+        blue.setStroke()
+        path.stroke()
+        let label = labelRect(for: rect, title: title)
+        let plate = NSBezierPath(roundedRect: label, xRadius: 6, yRadius: 6)
+        NSColor.white.setFill()
+        plate.fill()
+        labelInk.setStroke()
+        plate.lineWidth = 1
+        plate.stroke()
+        (title as NSString).draw(at: NSPoint(x: label.minX + 6, y: label.minY + 2), withAttributes: attributes)
+    }
+}
+
 // MARK: - Вход, выход и команды вкладки «Колонтитулы»
 
 extension DocFormatter {
@@ -292,6 +347,7 @@ extension DocFormatter {
         for other in controller.pagesView.pages { other.faded = true }
         session.install()
         updateState()
+        controller.updateStatus()
     }
 
     package func endHeaderEditing() {
@@ -305,6 +361,7 @@ extension DocFormatter {
         }
         if let view = controller.textViews.first { view.window?.makeFirstResponder(view) }
         updateState()
+        controller.updateStatus()
     }
 
     /// После переключателя (первая страница, чётные/нечётные) страница может показывать другой колонтитул.
@@ -324,6 +381,35 @@ extension DocFormatter {
     }
 
     package var facingPagesOn: Bool { controller?.model.facingPages ?? false }
+
+    /// «Как в предыдущем» у показанного колонтитула: `.linked` — раздел показывает колонтитул предыдущего, `.own` — свой (его можно
+    /// связать с предыдущим). `nil` — кнопки нет: правки колонтитула нет, раздел первый или в предыдущих такого колонтитула нет.
+    package enum HeaderLink: Equatable { case linked, own }
+
+    package var headerLink: HeaderLink? {
+        guard let controller, let session = headerSession, let page = session.page, page.section > 0 else { return nil }
+        let model = controller.model
+        if DocHeaderFooterEdits.isLinkedToPrevious(session.kind, section: page.section, model: model) { return .linked }
+        guard model.sections[safe: page.section]?.headers[session.kind] != nil,
+              DocHeaderFooterEdits.provider(of: session.kind, before: page.section, model: model) != nil else { return nil }
+        return .own
+    }
+
+    /// Включить или выключить «Как в предыдущем» у показанного колонтитула (одна правка файла, один шаг отмены).
+    package func setLinkedToPrevious(_ linked: Bool) {
+        guard let controller, let tab = controller.tab, let session = headerSession, let page = session.page, let state = headerLink else { return }
+        let model = controller.model
+        if linked {
+            guard state == .own, let provider = DocHeaderFooterEdits.provider(of: session.kind, before: page.section, model: model) else { return }
+            // Сначала правка переходит на колонтитул предыдущего раздела — свой исчезнет вместе с правкой.
+            session.retarget(section: provider, kind: session.kind)
+            perform(DocHeaderFooterEdits.link(session.kind, section: page.section, source: tab.text, model: model), name: "Как в предыдущем")
+        } else {
+            guard state == .linked else { return }
+            perform(DocHeaderFooterEdits.unlink(session.kind, section: page.section, source: tab.text, model: model), name: "Отвязать колонтитул от предыдущего")
+            if controller.model.sections[safe: page.section]?.headers[session.kind] != nil { session.retarget(section: page.section, kind: session.kind) }
+        }
+    }
 
     package func setTitlePage(_ on: Bool) {
         guard let controller, let tab = controller.tab, let page = headerSession?.page else { return }
@@ -345,6 +431,16 @@ extension DocFormatter {
         let result = DocHeaderFooterEdits.insertPageNumber(number, story: session.story, unit: unit, map: session.map, source: tab.text,
                                                            model: controller.model)
         perform(result, name: "Номер страницы")
+    }
+
+    /// Поле у курсора: дата, время, число страниц, имя файла… (`HeaderField.catalog`).
+    package func insertField(_ field: HeaderField) {
+        guard let controller, let tab = controller.tab, let session = headerSession else { return }
+        let unit = session.textView.selectedRange().location
+        let name = tab.document.url?.lastPathComponent ?? ""
+        let result = DocHeaderFooterEdits.insertField(field, story: session.story, unit: unit, map: session.map, source: tab.text,
+                                                      model: controller.model, fileName: name)
+        perform(result, name: field.title)
     }
 
     package func removeHeader() {
