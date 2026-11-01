@@ -54,6 +54,25 @@ final class ShotStuckTests: XCTestCase {
         wait(for: [done], timeout: 5)
     }
 
+    /// Выход из кода — только через `AppTermination`: прямой `NSApp.terminate` из задачи или блока главной очереди
+    /// снова повесил бы приложение «на выходе». Кнопки «Выйти» вызывают его из события — это безопасно.
+    func testTerminateGoesThroughAppTermination() throws {
+        let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Sources")
+        var found: [String] = []
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        for case let url as URL in files where url.pathExtension == "swift" && url.lastPathComponent != "AppTermination.swift" {
+            let lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: .newlines)
+            for (index, line) in lines.enumerated() {
+                let code = line.components(separatedBy: "//").first ?? line
+                guard code.contains("NSApp.terminate(") || code.contains("NSApplication.shared.terminate(") else { continue }
+                if code.contains("Button(") { continue }
+                found.append("\(url.lastPathComponent):\(index + 1)")
+            }
+        }
+        XCTAssertEqual(found, [], "NSApp.terminate мимо AppTermination.terminate()")
+    }
+
     private static func spin(until condition: () -> Bool, seconds: TimeInterval) {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition(), Date() < deadline {
