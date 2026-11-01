@@ -82,7 +82,7 @@ package enum Permissions {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", path]
         try? process.run()
-        NSApp.terminate(nil)
+        AppTermination.terminate()
     }
 
     package static func requestScreenRecording() {

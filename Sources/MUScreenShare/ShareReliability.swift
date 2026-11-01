@@ -123,3 +123,37 @@ package struct ShareFrameClock {
         return stamp
     }
 }
+
+/// Heartbeat ведущего: что делать на очередном тике таймера (чистая логика).
+///
+/// Таймер стоит в главном цикле событий (общие режимы) и срабатывает, даже когда главная очередь занята, а ошибку
+/// отправки раньше разбирал только блок `DispatchQueue.main.async` — если очередь стояла, сокет был мёртв, а эфир
+/// считался живым: каждые 20 с «heartbeat не ушёл», без переподключения и без завершения. Теперь решение — на тике.
+package struct ShareHeartbeatWatch: Equatable {
+    /// Столько тиков подряд с мёртвым сокетом — переподключение так и не началось: эфир завершается.
+    package static let failureLimit = 3
+
+    package enum Action: Equatable {
+        case send
+        case reconnect
+        case end
+    }
+
+    package private(set) var failures = 0
+    /// Прошлая отправка вернула ошибку (отмечается из её завершения).
+    package private(set) var lastSendFailed = false
+
+    package init() {}
+
+    package mutating func sendFailed() { lastSendFailed = true }
+
+    /// `socketAlive` — `URLSessionWebSocketTask.state == .running`.
+    package mutating func tick(socketAlive: Bool) -> Action {
+        guard !socketAlive || lastSendFailed else {
+            failures = 0
+            return .send
+        }
+        failures += 1
+        return failures >= Self.failureLimit ? .end : .reconnect
+    }
+}

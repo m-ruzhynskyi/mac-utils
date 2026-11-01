@@ -109,6 +109,6 @@ enum MoveToApplications {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", url.path]
         try? process.run()
-        NSApp.terminate(nil)
+        AppTermination.terminate()
     }
 }

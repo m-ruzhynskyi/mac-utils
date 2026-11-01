@@ -347,7 +347,9 @@ package final class Updater: NSObject, ObservableObject {
 
         UserDefaults.standard.set(release.version, forKey: Pref.justUpdatedTo)
         AppRouter.shared.prepareForRelaunch()
-        NSApp.terminate(nil)
+        // Не прямо из этой задачи: при идущей записи или эфире выход ждёт `.terminateLater`, а вложенный цикл внутри
+        // блока главной очереди её не разбирает — приложение зависало «на выходе» навсегда (см. AppTermination).
+        AppTermination.terminate()
     }
 
     /// Версия внутри скачанного бандла: совпадает с релизом, новее текущей, номер сборки больше текущего.
