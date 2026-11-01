@@ -225,47 +225,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             silent = false
         }
         terminationReplied = false
-        func reply() {
-            guard !terminationReplied else { return }
-            terminationReplied = true
-            NSApp.reply(toApplicationShouldTerminate: true)
-        }
+        windDownStarted = false
+        terminationGeneration += 1
+        let generation = terminationGeneration
+        let order = BusyRegistry.windDownOrder(reasons)
         Task { @MainActor in
-            await Self.windDown(BusyRegistry.windDownOrder(reasons), silent: silent)
-            reply()
+            self.windDownStarted = true
+            await Self.windDown(order, silent: silent)
+            self.replyTermination()
         }
         if systemQuit {
             // Система не ждёт: после короткого предела выходим в любом случае.
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: UInt64(BusyRegistry.systemShutdownLimit * 1_000_000_000))
-                reply()
+                self.replyTermination()
             }
         }
+        // Страховка на таймерах цикла событий (они срабатывают и во вложенном цикле `.terminateLater`, даже когда
+        // главная очередь стоит): задача завершения не началась — останавливаем всё сразу; не уложилась — выходим.
+        armTerminationTimer(after: BusyRegistry.windDownStartGrace) { [weak self] in
+            guard let self, self.terminationGeneration == generation,
+                  !self.terminationReplied, !self.windDownStarted else { return }
+            Log.capture.error("Выход: задача завершения не запустилась за \(BusyRegistry.windDownStartGrace, privacy: .public) с — останавливаю сразу")
+            for reason in order { _ = Self.beginStop(reason) }
+            self.replyTermination()
+        }
+        armTerminationTimer(after: BusyRegistry.windDownLimit(order, silent: silent)) { [weak self] in
+            guard let self, self.terminationGeneration == generation, !self.terminationReplied else { return }
+            Log.capture.error("Выход: штатное завершение не уложилось в предел — выхожу")
+            self.replyTermination()
+        }
         return .terminateLater
+    }
+
+    private var windDownStarted = false
+    /// Номер запроса выхода: таймеры прошлого (отменённого) запроса не отвечают за новый.
+    private var terminationGeneration = 0
+
+    private func replyTermination() {
+        guard !terminationReplied else { return }
+        terminationReplied = true
+        NSApp.reply(toApplicationShouldTerminate: true)
+    }
+
+    private func armTerminationTimer(after seconds: TimeInterval, _ action: @escaping @MainActor () -> Void) {
+        let timer = Timer(timeInterval: seconds, repeats: false) { _ in
+            MainActor.assumeIsolated { action() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    /// Начать штатную остановку причины (синхронно). false — останавливать нечего и ждать не нужно.
+    private static func beginStop(_ reason: BusyRegistry.Reason) -> Bool {
+        switch reason {
+        case .screenRecording:
+            ScreenRecorder.current?.stop()
+        case .meetingRecording:
+            MeetingRecorder.shared.stop()
+        case .scrollCapture:
+            ScrollCapture.current?.finish()
+        case .steps:
+            StepsSession.current?.finish()
+        case .broadcast:
+            ScreenShare.shared.stop()
+        case .viewing:
+            ShareViewer.shared.stopWatching()
+        case .screenshotSaving:
+            break   // останавливать нечего: ждём, пока снимок закодируется и запишется
+        case .meetingProcessing, .uninstalling:
+            return false
+        }
+        return true
     }
 
     /// Штатно завершает идущее: запись сохраняется, эфир закрывается. Ждёт ограниченное время на каждое.
     private static func windDown(_ reasons: [BusyRegistry.Reason], silent: Bool) async {
         let registry = BusyRegistry.shared
         for reason in reasons {
-            switch reason {
-            case .screenRecording:
-                ScreenRecorder.current?.stop()
-            case .meetingRecording:
-                MeetingRecorder.shared.stop()
-            case .scrollCapture:
-                ScrollCapture.current?.finish()
-            case .steps:
-                StepsSession.current?.finish()
-            case .broadcast:
-                ScreenShare.shared.stop()
-            case .viewing:
-                ShareViewer.shared.stopWatching()
-            case .screenshotSaving:
-                break   // останавливать нечего: ждём, пока снимок закодируется и запишется
-            case .meetingProcessing, .uninstalling:
-                continue
-            }
+            guard beginStop(reason) else { continue }
             // Запись дописывается в файл (GIF собирается долго): даём закончиться, но в рамках предела.
             for _ in 0..<BusyRegistry.waitAttempts(for: reason, silent: silent) where registry.isActive(reason) {
                 try? await Task.sleep(nanoseconds: 250_000_000)

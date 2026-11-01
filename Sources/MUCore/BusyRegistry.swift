@@ -131,6 +131,19 @@ package final class BusyRegistry {
     /// Общий предел ожидания при системном завершении, секунды.
     package static let systemShutdownLimit: TimeInterval = 10
 
+    /// За сколько секунд задача штатного завершения должна начаться. Не началась — главная очередь не разбирается
+    /// (выход вызван изнутри её блока), и ждать её бессмысленно: останавливаем идущее сразу и выходим.
+    package static let windDownStartGrace: TimeInterval = 2
+
+    /// Жёсткий предел штатного завершения, секунды: сумма ожиданий по всем причинам плюс запас.
+    /// После него выход подтверждается в любом случае — приложение не остаётся «на выходе» навсегда.
+    package static func windDownLimit(_ reasons: [Reason], silent: Bool) -> TimeInterval {
+        let waits = windDownOrder(reasons).reduce(0.0) { total, reason in
+            total + Double(waitAttempts(for: reason, silent: silent)) * 0.25 + (reason == .meetingRecording ? 2.5 : 0)
+        }
+        return waits + 10
+    }
+
     /// Автоматические действия (установка обновления) откладываются, пока что-то идёт.
     package static func shouldDefer(_ reasons: [Reason]) -> Bool { !reasons.isEmpty }
 }
