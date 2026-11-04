@@ -15,57 +15,17 @@ package struct ShareAudioProcess: Equatable {
     package let bundleID: String?
     /// Программа, «ответственная» за процесс (Discord для Discord Helper); nil — не узнали.
     package let ownerBundleID: String?
-    /// Процесс сейчас пишет микрофон (`kAudioProcessPropertyIsRunningInput`) — так выглядит звонок.
-    package var capturesInput = false
 }
 
-/// Что не передавать в трансляцию: заглушённые программы вместе с их помощниками и сам Mac Utils.
-/// Звук звонка Discord играет не сама программа, а `com.hnc.Discord.helper*` без окон — ScreenCaptureKit
-/// таких процессов в списке программ не знает, поэтому исключаем по процессам Core Audio.
+/// Что не передавать в трансляцию: только программы, которые пользователь сам отметил в «Не передавать звук программ»
+/// (вместе с их помощниками), и сам Mac Utils. Звонки (UniTalk, Discord, Telegram, FaceTime…) сами не исключаются —
+/// зрители слышат весь звук системы, кроме отмеченного. Звук звонка Discord играет не сама программа, а
+/// `com.hnc.Discord.helper*` без окон — ScreenCaptureKit таких процессов в списке программ не знает, поэтому
+/// исключаем по процессам Core Audio: отмеченная программа молчит целиком.
 package enum ShareAudioExclusion {
-    /// Программы звонков для «Не передавать звонки»: иначе собеседник слышит себя с задержкой.
-    package static let callApps: [String] = [
-        "com.hnc.Discord", "com.hnc.DiscordPTB", "com.hnc.DiscordCanary",
-        "ru.keepcoder.Telegram", "com.tdesktop.Telegram", "com.viber.osx", "net.whatsapp.WhatsApp", "desktop.WhatsApp",
-        "us.zoom.xos", "com.microsoft.teams2", "com.microsoft.teams", "com.skype.skype", "com.tinyspeck.slackmacgap",
-        "com.apple.FaceTime", "com.apple.avconferenced", "com.unitalk.desktop",
-    ]
-
-    /// Звонок в программе, которой нет в `callApps`: её процесс пишет микрофон. Исключается вся программа — по
-    /// ответственной программе или своему bundle id (с помощниками), процесс без bundle id — по pid. Mac Utils
-    /// (запись встреч, микрофон без эха) сюда не попадает: свой процесс исключён и так, а свой bundle id не должен
-    /// становиться «программой звонка».
-    package static func inputCallers(_ processes: [ShareAudioProcess], ownPID: pid_t,
-                                     ownBundleID: String? = Bundle.main.bundleIdentifier) -> (apps: Set<String>, pids: Set<pid_t>) {
-        let own: Set<String> = ownBundleID.map { [$0] } ?? []
-        var apps: Set<String> = [], pids: Set<pid_t> = []
-        for process in processes where process.capturesInput && process.pid != ownPID {
-            guard !matches(process.bundleID, own), !matches(process.ownerBundleID, own) else { continue }
-            if let app = process.ownerBundleID ?? process.bundleID, !app.isEmpty { apps.insert(app) } else { pids.insert(process.pid) }
-        }
-        return (apps, pids)
-    }
-
-    /// Что исключить сейчас: выбранные программы, а при «Не передавать звонки» — ещё и известные программы звонков
-    /// и всё, что пишет микрофон (`processes` — процессы Core Audio).
-    package static func current(_ processes: [ShareAudioProcess], apps: Set<String>, calls: Bool, ownPID: pid_t,
-                                ownBundleID: String? = Bundle.main.bundleIdentifier) -> (muted: Set<String>, pids: Set<pid_t>) {
-        let base = muted(apps: apps, calls: calls)
-        guard calls else { return (base, []) }
-        let callers = inputCallers(processes, ownPID: ownPID, ownBundleID: ownBundleID)
-        return (base.union(callers.apps), callers.pids)
-    }
-
-    /// Заглушённые bundle id: выбранные вручную и, если включено, программы звонков.
-    package static func muted(apps: Set<String>, calls: Bool) -> Set<String> {
-        calls ? apps.union(callApps) : apps
-    }
-
-    /// `current` по настройкам пользователя.
-    package static func currentMuted(_ processes: [ShareAudioProcess]) -> (muted: Set<String>, pids: Set<pid_t>) {
-        current(processes, apps: Set(UserDefaults.standard.stringArray(forKey: Pref.shareMutedApps) ?? []),
-                calls: UserDefaults.standard.bool(forKey: Pref.shareMuteCalls),
-                ownPID: ProcessInfo.processInfo.processIdentifier)
+    /// Отмеченные пользователем программы (bundle id) — единственное, что исключается помимо самого Mac Utils.
+    package static func mutedApps(_ defaults: UserDefaults = .standard) -> Set<String> {
+        Set(defaults.stringArray(forKey: Pref.shareMutedApps) ?? [])
     }
 
     /// Совпадение по bundle id: сама программа или её помощник (`com.hnc.Discord.helper`), но не другая
@@ -75,11 +35,13 @@ package enum ShareAudioExclusion {
         return muted.contains { bundleID == $0 || bundleID.hasPrefix($0 + ".") }
     }
 
-    package static func excluded(_ processes: [ShareAudioProcess], muted: Set<String>, pids: Set<pid_t> = [], ownPID: pid_t,
+    /// Исключаемые процессы: Mac Utils (свой pid, свой bundle id и его помощники) и отмеченные программы — по своему
+    /// bundle id или по ответственной программе.
+    package static func excluded(_ processes: [ShareAudioProcess], muted: Set<String>, ownPID: pid_t,
                          ownBundleID: String? = Bundle.main.bundleIdentifier) -> [ShareAudioProcess] {
         let own: Set<String> = ownBundleID.map { [$0] } ?? []
         return processes.filter { process in
-            process.pid == ownPID || pids.contains(process.pid) || matches(process.bundleID, own) || matches(process.ownerBundleID, own)
+            process.pid == ownPID || matches(process.bundleID, own) || matches(process.ownerBundleID, own)
                 || matches(process.bundleID, muted) || matches(process.ownerBundleID, muted)
         }
     }
@@ -98,17 +60,8 @@ package enum ShareAudioExclusion {
             guard pid > 0 else { return nil }
             let bundleID = CoreAudioHelper.readString(object, kAudioProcessPropertyBundleID).flatMap { $0.isEmpty ? nil : $0 }
                 ?? NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
-            return ShareAudioProcess(object: object, pid: pid, bundleID: bundleID, ownerBundleID: ownerBundleID(of: pid),
-                                     capturesInput: CoreAudioHelper.read(object, kAudioProcessPropertyIsRunningInput, default: UInt32(0)) != 0)
+            return ShareAudioProcess(object: object, pid: pid, bundleID: bundleID, ownerBundleID: ownerBundleID(of: pid))
         }
-    }
-
-    /// Процессы Core Audio, которые сейчас пишут микрофон (для сторожа: начался ли звонок). Свойство есть с macOS 14.0,
-    /// где его нет — 0, то есть «не пишет».
-    package static func inputSignature() -> [AudioObjectID] {
-        CoreAudioHelper.readArray(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyProcessObjectList)
-            .filter { CoreAudioHelper.read($0, kAudioProcessPropertyIsRunningInput, default: UInt32(0)) != 0 }
-            .sorted()
     }
 
     /// Строка для журнала: только число и bundle id (это не личные данные).
@@ -162,11 +115,10 @@ package struct ShareTapWatchdog: Equatable {
     }
 }
 
-/// Звук пошёл запасным способом (ScreenCaptureKit): помощников программ он не исключает. Включено «Не передавать
-/// звонки» или есть заглушённые программы — ведущему прямо говорим, что звонок или они могут попасть в трансляцию.
+/// Звук пошёл запасным способом (ScreenCaptureKit): помощников программ он не исключает. Есть заглушённые
+/// программы — ведущему прямо говорим, что они могут попасть в трансляцию.
 package enum ShareAudioFallback {
-    package static func message(muteCalls: Bool, mutedApps: Int) -> String {
-        if muteCalls { return "Звук трансляции — запасным способом: звонок (Discord, FaceTime…) может попасть в трансляцию, зрители его услышат" }
+    package static func message(mutedApps: Int) -> String {
         if mutedApps > 0 { return "Звук трансляции — запасным способом: заглушённые программы могут быть слышны зрителям" }
         return "Звук трансляции — запасным способом"
     }
@@ -258,43 +210,25 @@ package struct ShareTapRetry: Equatable {
 }
 
 /// Когда пересобирать список исключённых: программа запустилась или закрылась, процесс открыл или закрыл звук
-/// (так начинается звонок — голос Discord появляется в отдельном процессе уже после старта трансляции),
-/// сменился выход звука (перехват пересобирается на часах нового устройства), процесс начал или перестал писать
-/// микрофон (звонок в уже открытой программе — UniTalk: процесс есть с запуска, меняется только вход).
-/// Вход — опросом раз в `inputInterval` (только при «Не передавать звонки», дёшево: одно свойство на процесс);
-/// остальное — событиями. Всё — только пока идёт трансляция со звуком.
+/// (голос Discord появляется в отдельном процессе-помощнике уже после старта трансляции — у отмеченного Discord он
+/// тоже исключается), сменился выход звука (перехват пересобирается на часах нового устройства). Только события,
+/// без опроса; всё — только пока идёт трансляция со звуком.
 @MainActor
 package final class ShareAudioWatcher {
-    package static let inputInterval: TimeInterval = 2
-
     private let workspace: NotificationCenter
     private var observers: [NSObjectProtocol] = []
     private var listeners: [(AudioObjectPropertySelector, AudioObjectPropertyListenerBlock)] = []
     private var scheduled = false
     private let onChange: @MainActor () -> Void
-    /// Кто пишет микрофон сейчас; nil — не следим («Не передавать звонки» выключено).
-    private let inputSignature: @MainActor () -> [AudioObjectID]?
-    private var lastInput: [AudioObjectID]?
-    private var inputTimer: Timer?
 
     package init(workspace: NotificationCenter = NSWorkspace.shared.notificationCenter, coreAudio: Bool = true,
-                 inputSignature: @escaping @MainActor () -> [AudioObjectID]? = ShareAudioWatcher.liveInputSignature,
-                 pollInput: Bool = true, onChange: @escaping @MainActor () -> Void) {
+                 onChange: @escaping @MainActor () -> Void) {
         self.workspace = workspace
         self.onChange = onChange
-        self.inputSignature = inputSignature
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.schedule() }
             })
-        }
-        lastInput = inputSignature()
-        if pollInput {
-            let timer = Timer(timeInterval: Self.inputInterval, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.checkInput() }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            inputTimer = timer
         }
         guard coreAudio else { return }
         for selector in [kAudioHardwarePropertyProcessObjectList, kAudioHardwarePropertyDefaultOutputDevice] {
@@ -309,23 +243,7 @@ package final class ShareAudioWatcher {
     }
 
     /// Снять подписки (до освобождения: блок Core Audio держит систему, а не нас).
-    /// Настоящий источник: процессы Core Audio со входом, пока включено «Не передавать звонки».
-    package static func liveInputSignature() -> [AudioObjectID]? {
-        UserDefaults.standard.bool(forKey: Pref.shareMuteCalls) ? ShareAudioExclusion.inputSignature() : nil
-    }
-
-    /// Набор пишущих микрофон сменился (начался или кончился звонок, включили «Не передавать звонки») — пересборка.
-    package func checkInput() {
-        guard !observers.isEmpty else { return }
-        let now = inputSignature()
-        guard now != lastInput else { return }
-        lastInput = now
-        schedule()
-    }
-
     package func stop() {
-        inputTimer?.invalidate()
-        inputTimer = nil
         for observer in observers { workspace.removeObserver(observer) }
         observers = []
         for (selector, listener) in listeners {

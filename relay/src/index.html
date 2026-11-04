@@ -312,8 +312,7 @@
   <label class="muted"><input type="checkbox" id="withAudio" checked style="width:auto"> Передавать звук системы</label>
   <label class="muted" id="allowSwitchBox" style="display:none"><input type="checkbox" id="allowSwitch" style="width:auto"> Зрители могут переключать мои мониторы<span class="new" id="allowSwitchNew">НОВОЕ</span></label>
   <p class="muted" id="allowSwitchHint" style="display:none">По умолчанию выключено. Включите — и зритель сам выберет монитор, вы увидите уведомление. Только когда показываете экран целиком; выбор запоминается.</p>
-  <div id="muteBox" class="muted" style="display:none; margin-top:6px">Не передавать звук программ (например, созвона):
-    <label id="muteCallsBox" style="display:none; white-space:nowrap"><input type="checkbox" id="muteCalls" checked style="width:auto"> Не передавать звонки (Discord, Zoom, Teams, Telegram…)</label>
+  <div id="muteBox" class="muted" style="display:none; margin-top:6px">Не передавать звук программ (остальной звук, в том числе звонки, зрители слышат):
     <div id="muteApps"></div></div>
   <div style="text-align:right; margin-top:10px"><button id="pickerCancel">Отмена</button></div>
 </div></div>
@@ -331,7 +330,6 @@
 <div id="game"></div>
 <div id="mutePanel" class="floatBox"><div class="head"><b>Не передавать звук программ</b><button id="muteClose" aria-label="Закрыть">✕</button></div>
   <p class="muted" style="margin:0 0 8px">Отмеченных программ зрители не слышат. Меняется сразу, прямо в эфире.</p>
-  <label id="muteCallsLive" style="display:none; margin-bottom:8px"><input type="checkbox" id="muteCallsLiveBox" style="width:auto"> Звонки (Discord, Zoom, Teams, Telegram…)</label>
   <div id="muteLive"></div></div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -1401,11 +1399,6 @@ $("gameInvite").onclick = () => gameInvite("host", hostName || display(watchingI
 async function showMutePanel() {
   const list = $("muteLive");
   const saved = store.get("mu-muted-apps", []);
-  // Звонки исключаются сами (приложение знает их по имени программы); здесь их можно вернуть в трансляцию.
-  const callsLive = $("muteCallsLive");
-  callsLive.style.display = window.mu.setMuteCalls ? "" : "none";
-  $("muteCallsLiveBox").checked = store.get("mu-mute-calls", true);
-  $("muteCallsLiveBox").onchange = () => { store.set("mu-mute-calls", $("muteCallsLiveBox").checked); window.mu.setMuteCalls($("muteCallsLiveBox").checked); };
   const apps = (await window.mu.audioApps()) || [];
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
@@ -1438,9 +1431,6 @@ async function showMuteApps() {
   const apps = await window.mu.audioApps();
   if (!apps) { box.style.display = "none"; return; }
   helperAvailable = true;
-  // Старое приложение звонки само не исключает — тогда и галочки нет.
-  $("muteCallsBox").style.display = window.mu.setMuteCalls ? "" : "none";
-  $("muteCalls").checked = store.get("mu-mute-calls", true);
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
   if (!names.length) list.textContent = "Сейчас ни одна программа не играет звук — отметить можно и потом, прямо в эфире (кнопка «🔇 Звук»).";
@@ -1473,9 +1463,9 @@ function pickSource() {
         store.set("mu-muted-apps", muted);
         // Новые версии приложения: звук всегда через помощник — список можно менять в эфире.
         useHelperAudio = $("withAudio").checked && helperAvailable && !!window.mu.startAudio && (!!window.mu.setMuted || muted.length > 0);
-        const muteCalls = !window.mu.setMuteCalls || $("muteCalls").checked;
-        store.set("mu-mute-calls", muteCalls);
-        await window.mu.choose(source.id, $("withAudio").checked, muted, muteCalls);
+        // Звонки сами не исключаются: только отмеченные программы. Явное false — для прежних версий приложения для
+        // Windows с «Не передавать звонки» (без него они глушили звонки); новые четвёртый аргумент не читают.
+        await window.mu.choose(source.id, $("withAudio").checked, muted, false);
         resolve(true);
       };
       grid.appendChild(item);
