@@ -203,9 +203,11 @@ package struct ShareTapRetry: Equatable {
     package func shouldTry(_ situation: String) -> Bool { situation != failedIn }
     package mutating func failed(in situation: String) { failedIn = situation }
 
-    /// Обстановка: устройство вывода и запущенные программы.
+    /// Обстановка: только устройство вывода. Число программ сюда не входит: оно меняется каждые несколько секунд
+    /// (помощники браузеров и звонков), и каждая смена пересобирала перехват — три агрегата по 3 с и перезапуск
+    /// запасного ScreenCaptureKit; на Mac с постоянной ошибкой перехвата это грузило систему и рвало трансляцию.
     @MainActor package static func situation() -> String {
-        "\(CoreAudioHelper.defaultOutputDevice)-\(NSWorkspace.shared.runningApplications.count)"
+        "\(CoreAudioHelper.defaultOutputDevice)"
     }
 }
 

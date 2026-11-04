@@ -154,13 +154,18 @@ final class ShareAudioTests: XCTestCase {
     /// После ошибки перехвата — одна попытка на новую обстановку, а не на каждую пересборку.
     func testTapRetryOncePerSituation() {
         var retry = ShareTapRetry()
-        XCTAssertTrue(retry.shouldTry("out1-10"))
-        retry.failed(in: "out1-10")
-        XCTAssertFalse(retry.shouldTry("out1-10"), "та же обстановка — не повторяем")
-        XCTAssertTrue(retry.shouldTry("out2-10"), "сменился выход")
-        XCTAssertTrue(retry.shouldTry("out1-11"), "запустилась программа")
+        XCTAssertTrue(retry.shouldTry("out1"))
+        retry.failed(in: "out1")
+        XCTAssertFalse(retry.shouldTry("out1"), "тот же выход — не повторяем")
+        XCTAssertTrue(retry.shouldTry("out2"), "сменился выход")
         retry = ShareTapRetry()
-        XCTAssertTrue(retry.shouldTry("out1-10"), "после успеха — заново")
+        XCTAssertTrue(retry.shouldTry("out1"), "после успеха — заново")
+    }
+
+    /// Запуск и закрытие программ не меняют обстановку: иначе при постоянной ошибке перехват пересобирается
+    /// каждые несколько секунд и грузит систему.
+    @MainActor func testTapRetrySituationIgnoresAppCount() {
+        XCTAssertEqual(ShareTapRetry.situation(), "\(CoreAudioHelper.defaultOutputDevice)")
     }
 
     private func format(_ rate: Double, channels: UInt32 = 1) -> AudioStreamBasicDescription {
