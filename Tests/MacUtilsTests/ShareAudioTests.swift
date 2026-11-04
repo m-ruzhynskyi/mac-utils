@@ -3,10 +3,11 @@ import CoreAudio
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUCore
 @testable import MUScreenShare
 
-/// Что не передавать в трансляцию (эхо звонка): помощники программ, ответственный процесс, позднее появление,
-/// пересборка по событиям. Без захвата: ни экрана, ни звука.
+/// Что не передавать в трансляцию: только отмеченные программы (с помощниками, по ответственному процессу, в том числе
+/// появившимися позже) и сам Mac Utils; звонки сами не исключаются. Пересборка по событиям. Без захвата: ни экрана, ни звука.
 @MainActor
 final class ShareAudioTests: XCTestCase {
     private let ownPID: pid_t = 100
@@ -54,12 +55,49 @@ final class ShareAudioTests: XCTestCase {
         XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ["com.hnc.Discord"], ownPID: ownPID).map(\.pid), [1, 9])
     }
 
-    func testMuteCallsAddsKnownCallApps() {
-        let muted = ShareAudioExclusion.muted(apps: ["com.spotify.client"], calls: true)
-        XCTAssertTrue(muted.isSuperset(of: ["com.spotify.client", "com.hnc.Discord", "ru.keepcoder.Telegram", "com.viber.osx", "us.zoom.xos"]))
-        XCTAssertEqual(ShareAudioExclusion.muted(apps: ["com.spotify.client"], calls: false), ["com.spotify.client"])
-        let processes = [process(1, "ru.keepcoder.Telegram"), process(2, "com.hnc.Discord.helper"), process(3, "com.spotify.client")]
-        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ShareAudioExclusion.muted(apps: [], calls: true), ownPID: ownPID).map(\.pid), [1, 2])
+    /// Решение пользователя: зрители слышат весь звук, в том числе звонки. Неотмеченная программа звонка (UniTalk,
+    /// Discord с помощниками, Telegram, FaceTime/avconferenced) не исключается — ни перехватом, ни запасным способом.
+    func testUnpickedCallAppsAreNotExcluded() {
+        let processes = [
+            process(1, "com.unitalk.desktop"),
+            process(2, "com.hnc.Discord"),
+            process(3, "com.hnc.Discord.helper"),
+            process(4, nil, owner: "com.hnc.Discord"),
+            process(5, "ru.keepcoder.Telegram"),
+            process(6, "com.apple.avconferenced"),
+            process(7, "com.apple.FaceTime"),
+            process(8, "com.spotify.client"),
+        ]
+        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: [], ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [])
+        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ["com.spotify.client"], ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [8],
+                       "отмечен только Spotify — UniTalk и остальные звонки идут зрителям")
+    }
+
+    /// Отмеченная программа молчит целиком: сама, её помощники и процессы, за которые она отвечает; соседние — нет.
+    func testPickedAppAndItsHelpersAreExcluded() {
+        let processes = [
+            process(1, "com.unitalk.desktop"),
+            process(2, "com.hnc.Discord"),
+            process(3, "com.hnc.Discord.helper"),
+            process(4, "com.hnc.Discord.helper.Renderer"),
+            process(5, nil, owner: "com.hnc.Discord"),
+            process(6, "com.hnc.DiscordPTB"),
+        ]
+        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ["com.hnc.Discord"], ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [2, 3, 4, 5])
+        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ["com.unitalk.desktop"], ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [1],
+                       "UniTalk исключается, только если его отметили")
+    }
+
+    /// Список берётся только из «Не передавать звук программ»; прежний ключ «Не передавать звонки» (у пользователя — 1)
+    /// ни на что не влияет.
+    func testMutedAppsComeOnlyFromPickedList() throws {
+        let name = "ShareAudioTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(true, forKey: "shareMuteCalls")
+        XCTAssertEqual(ShareAudioExclusion.mutedApps(defaults), [])
+        defaults.set(["com.hnc.Discord"], forKey: Pref.shareMutedApps)
+        XCTAssertEqual(ShareAudioExclusion.mutedApps(defaults), ["com.hnc.Discord"])
     }
 
     func testSummaryHasOnlyCountAndBundleIDs() {
@@ -71,7 +109,7 @@ final class ShareAudioTests: XCTestCase {
     func testWatcherRebuildsOnLaunchAndTerminate() {
         let center = NotificationCenter()
         var calls = 0
-        let watcher = ShareAudioWatcher(workspace: center, coreAudio: false, inputSignature: { nil }, pollInput: false) { calls += 1 }
+        let watcher = ShareAudioWatcher(workspace: center, coreAudio: false) { calls += 1 }
         center.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         center.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
@@ -215,11 +253,11 @@ final class ShareAudioTests: XCTestCase {
         XCTAssertEqual(ShareTapClock.code(0), "0")
     }
 
-    /// Запасной способ (SCK) помощников не исключает — при «Не передавать звонки» говорим прямо про звонок.
-    func testFallbackMessageWarnsAboutCalls() {
-        XCTAssertTrue(ShareAudioFallback.message(muteCalls: true, mutedApps: 0).contains("звонок"))
-        XCTAssertTrue(ShareAudioFallback.message(muteCalls: false, mutedApps: 2).contains("заглушённые программы"))
-        XCTAssertEqual(ShareAudioFallback.message(muteCalls: false, mutedApps: 0), "Звук трансляции — запасным способом")
+    /// Запасной способ (SCK) помощников не исключает — есть отмеченные программы, говорим об этом; про звонки — ни слова.
+    func testFallbackMessageWarnsAboutMutedApps() {
+        XCTAssertTrue(ShareAudioFallback.message(mutedApps: 2).contains("заглушённые программы"))
+        XCTAssertEqual(ShareAudioFallback.message(mutedApps: 0), "Звук трансляции — запасным способом")
+        XCTAssertFalse(ShareAudioFallback.message(mutedApps: 1).contains("звонок"))
     }
 
     /// Смена списка исключённых: до первых колбэков — откладывается (не трогаем описание только что запущенного перехвата);
@@ -233,84 +271,10 @@ final class ShareAudioTests: XCTestCase {
         XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: true, rebuildOnChange: true), .rebuilt)
     }
 
-    private func input(_ pid: pid_t, _ bundleID: String?, owner: String? = nil) -> ShareAudioProcess {
-        var value = process(pid, bundleID, owner: owner)
-        value.capturesInput = true
-        return value
-    }
-
-    /// UniTalk (Qt, один процесс) — в списке программ звонков: журнал 04.11, звонок шёл зрителю.
-    func testUniTalkIsCallApp() {
-        XCTAssertTrue(ShareAudioExclusion.callApps.contains("com.unitalk.desktop"))
-        let processes = [process(1, "com.unitalk.desktop"), process(2, "com.spotify.client")]
-        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ShareAudioExclusion.muted(apps: [], calls: true), ownPID: ownPID).map(\.pid), [1])
-    }
-
-    /// Программа не из списка пишет микрофон — это звонок: исключается вся программа (с помощниками по владельцу),
-    /// процесс без bundle id — по pid; Mac Utils (свой pid, свой bundle id и его помощники) «звонком» не становится.
-    func testInputCallersExcludedWithTheirApp() {
-        let processes = [
-            input(1, "com.example.Call.helper", owner: "com.example.Call"),
-            process(2, "com.example.Call"),
-            input(3, nil),
-            input(ownPID, "own.app"),
-            input(5, "own.app.helper"),
-            input(6, "com.other.helper", owner: "own.app"),
-            process(7, "com.spotify.client"),
-        ]
-        let callers = ShareAudioExclusion.inputCallers(processes, ownPID: ownPID, ownBundleID: "own.app")
-        XCTAssertEqual(callers.apps, ["com.example.Call"])
-        XCTAssertEqual(callers.pids, [3])
-        let current = ShareAudioExclusion.current(processes, apps: [], calls: true, ownPID: ownPID, ownBundleID: "own.app")
-        XCTAssertFalse(current.muted.contains("own.app"), "свой bundle id не становится программой звонка")
-        let excluded = ShareAudioExclusion.excluded(processes, muted: current.muted, pids: current.pids, ownPID: ownPID, ownBundleID: "own.app")
-        // Mac Utils исключён как всегда (свой), Spotify — играет дальше.
-        XCTAssertEqual(excluded.map(\.pid), [1, 2, 3, ownPID, 5, 6])
-        XCTAssertFalse(excluded.contains { $0.pid == 7 })
-    }
-
-    /// «Не передавать звонки» выключено — микрофон ничего не исключает, остаются только выбранные вручную.
-    func testInputCallersIgnoredWhenMuteCallsOff() {
-        let processes = [input(1, "com.example.Call"), process(2, "com.spotify.client")]
-        let current = ShareAudioExclusion.current(processes, apps: ["com.spotify.client"], calls: false, ownPID: ownPID, ownBundleID: "own.app")
-        XCTAssertEqual(current.muted, ["com.spotify.client"])
-        XCTAssertEqual(current.pids, [])
-        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: current.muted, pids: current.pids, ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [2])
-    }
-
-    /// ScreenCaptureKit (запасной способ) получает тот же набор: программа звонка из списка программ SCK исключается
-    /// по bundle id, найденному по процессам Core Audio.
-    func testFallbackAppliesInputCallers() {
-        let audio = [input(1, "com.example.Call.helper", owner: "com.example.Call")]
-        let current = ShareAudioExclusion.current(audio, apps: [], calls: true, ownPID: ownPID, ownBundleID: "own.app")
-        let sckApps = [process(10, "com.example.Call"), process(11, "com.unitalk.desktop"), process(12, "com.spotify.client")]
-        XCTAssertEqual(ShareAudioExclusion.excluded(sckApps, muted: current.muted, pids: current.pids, ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [10, 11])
-    }
-
-    /// Звонок начался в уже открытой программе: меняется только вход процесса — сторож замечает по опросу, одна пересборка;
-    /// без изменений и после `stop` — ничего.
-    func testWatcherRebuildsWhenInputChanges() {
-        var signature: [AudioObjectID]? = []
-        var calls = 0
-        let watcher = ShareAudioWatcher(workspace: NotificationCenter(), coreAudio: false, inputSignature: { signature },
-                                        pollInput: false) { calls += 1 }
-        watcher.checkInput()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        XCTAssertEqual(calls, 0, "вход не менялся")
-        signature = [148]
-        watcher.checkInput()
-        watcher.checkInput()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        XCTAssertEqual(calls, 1, "начался звонок")
-        signature = []
-        watcher.checkInput()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        XCTAssertEqual(calls, 2, "звонок кончился")
-        watcher.stop()
-        signature = [149]
-        watcher.checkInput()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        XCTAssertEqual(calls, 2, "после stop — не работает")
+    /// ScreenCaptureKit (запасной способ) получает тот же набор: отмеченная программа исключается, UniTalk — нет.
+    func testFallbackUsesOnlyPickedApps() {
+        let sckApps = [process(10, "com.hnc.Discord"), process(11, "com.unitalk.desktop"), process(12, "com.spotify.client")]
+        XCTAssertEqual(ShareAudioExclusion.excluded(sckApps, muted: ["com.hnc.Discord"], ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [10])
     }
 
     /// Глобальный перехват 48 000 при выходе 44 100 (журнал 04.11, «колбэков 0») — сразу перехват потока выхода;

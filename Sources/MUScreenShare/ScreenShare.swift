@@ -367,10 +367,8 @@ package final class ScreenShare: NSObject, ObservableObject {
             ShareAudioProcess(object: 0, pid: $0.processID, bundleID: $0.bundleIdentifier,
                               ownerBundleID: ShareAudioExclusion.ownerBundleID(of: $0.processID))
         }
-        // Те же правила, что у перехвата: звонок, найденный по микрофону в процессах Core Audio, исключается и здесь
-        // (по программе — помощников ScreenCaptureKit в списке программ всё равно не знает).
-        let muted = ShareAudioExclusion.currentMuted(ShareAudioExclusion.audioProcesses())
-        let excluded = ShareAudioExclusion.excluded(processes, muted: muted.muted, pids: muted.pids,
+        // Те же правила, что у перехвата: только отмеченные программы и сам Mac Utils.
+        let excluded = ShareAudioExclusion.excluded(processes, muted: ShareAudioExclusion.mutedApps(),
                                                     ownPID: ProcessInfo.processInfo.processIdentifier)
         let pids = Set(excluded.map(\.pid))
         let filter = SCContentFilter(display: display, excludingApplications: content.applications.filter { pids.contains($0.processID) },
@@ -380,10 +378,8 @@ package final class ScreenShare: NSObject, ObservableObject {
 
     /// Исключаемые объекты Core Audio для перехвата.
     private static func tapExclusion() -> [ShareAudioProcess] {
-        let processes = ShareAudioExclusion.audioProcesses()
-        let muted = ShareAudioExclusion.currentMuted(processes)
-        return ShareAudioExclusion.excluded(processes, muted: muted.muted, pids: muted.pids,
-                                            ownPID: ProcessInfo.processInfo.processIdentifier)
+        ShareAudioExclusion.excluded(ShareAudioExclusion.audioProcesses(), muted: ShareAudioExclusion.mutedApps(),
+                                     ownPID: ProcessInfo.processInfo.processIdentifier)
     }
 
     private static func audioConfiguration() -> SCStreamConfiguration {
@@ -400,8 +396,8 @@ package final class ScreenShare: NSObject, ObservableObject {
         return config
     }
 
-    /// Список заглушённых изменился, программа запустилась или закрылась, процесс открыл звук (начался звонок) —
-    /// пересобираем список исключённых.
+    /// Список заглушённых изменился, программа запустилась или закрылась, процесс открыл звук (помощник отмеченной
+    /// программы) — пересобираем список исключённых.
     package func refreshAudioFilter() {
         // Откатились на SCK из-за ошибки перехвата — пробуем перехват снова, когда сменился выход или набор программ.
         if #available(macOS 14.2, *), audioTap == nil, let stream = audioStream, let sender,
@@ -578,8 +574,7 @@ package final class ScreenShare: NSObject, ObservableObject {
     private func showAudioFallback() {
         guard !audioFallbackShown else { return }
         audioFallbackShown = true
-        Toast.show(ShareAudioFallback.message(muteCalls: UserDefaults.standard.bool(forKey: Pref.shareMuteCalls),
-                                              mutedApps: (UserDefaults.standard.stringArray(forKey: Pref.shareMutedApps) ?? []).count),
+        Toast.show(ShareAudioFallback.message(mutedApps: ShareAudioExclusion.mutedApps().count),
                    symbol: "exclamationmark.triangle.fill", tint: .orange)
     }
 
@@ -2707,7 +2702,6 @@ package struct ScreenSharePage: View {
     @AppStorage(Pref.shareServer) private var server = ""
     @AppStorage(Pref.shareAudio) private var shareAudio = true
     @AppStorage(Pref.shareName) private var shareName = ""
-    @AppStorage(Pref.shareMuteCalls) private var muteCalls = false
     @AppStorage(Pref.shareAllowMarks) private var allowMarks = true
     @AppStorage(Pref.shareAllowMonitorSwitch) private var allowMonitorSwitch = false
     @State private var code = ""
@@ -2797,15 +2791,9 @@ package struct ScreenSharePage: View {
         GroupLabel("Звук")
         ListCard {
             ToggleRow("Передавать звук системы",
-                      subtitle: "Зрители слышат то, что играет на Mac (видео, музыку, звонок). Микрофон не передаётся.",
+                      subtitle: "Зрители слышат всё, что играет на Mac: видео, музыку и звонки (UniTalk, Discord, Telegram…), кроме программ, отмеченных ниже. Микрофон не передаётся.",
                       systemImage: "speaker.wave.2", isOn: $shareAudio)
-            if shareAudio {
-                ToggleRow("Не передавать звонки",
-                          subtitle: "Звук звонков (Discord, Telegram, Zoom, FaceTime, UniTalk…) и любой программы, которая сейчас пишет микрофон, не идёт в трансляцию: иначе собеседник, который смотрит трансляцию, слышит сам себя.",
-                          systemImage: "phone.down", isOn: $muteCalls)
-            }
         }
-        .onChange(of: muteCalls) { share.refreshAudioFilter() }
         if shareAudio { MutedAppsList(demo: demo) }
 
         GroupLabel("Для собеседника на Windows")
@@ -3350,7 +3338,8 @@ private final class Picker: NSObject, SCContentSharingPickerObserver {
     }
 }
 
-/// «Не передавать звук этих программ» — например, созвон, чтобы собеседники не слышали себя дважды.
+/// «Не передавать звук этих программ» — единственное, что не идёт зрителям (кроме самого Mac Utils): звонки и
+/// остальной звук системы передаются, пока программу здесь не отметили.
 /// Заглушённая программа — красный чип (как в окне зрителя и на Windows).
 private struct MutedAppsList: View {
     package var demo = false
