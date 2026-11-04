@@ -138,6 +138,20 @@ package final class ScrollCapture: NSObject, ObservableObject {
         }
     }
 
+    /// Панели съёмки на экране (без них человек не видит, что съёмка идёт, и не может её закончить).
+    package var isShowing: Bool {
+        !stopped && (hudPanel?.isVisible == true || borderPanel?.isVisible == true)
+    }
+
+    /// Сколько секунд идёт съёмка.
+    package var age: TimeInterval { ProcessInfo.processInfo.systemUptime - started }
+
+    /// Зависшая съёмка без панелей: убрать молча, чтобы она не блокировала новые снимки.
+    package func abandon() {
+        guard !stopped else { return }
+        stop(reason: "stale")
+    }
+
     package func cancel() {
         guard !stopped else { return }
         stop(reason: "cancel")
