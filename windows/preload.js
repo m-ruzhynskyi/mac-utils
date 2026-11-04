@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld("mu", {
   version: ipcRenderer.sendSync("version"),
   attention: () => ipcRenderer.send("attention"),
   sources: () => ipcRenderer.invoke("sources"),
-  choose: (id, audio, muted, muteCalls) => ipcRenderer.invoke("choose", id, audio, muted, muteCalls),
+  choose: (id, audio, muted) => ipcRenderer.invoke("choose", id, audio, muted),
   // Не передавать звук выбранных программ: список программ со звуком и поток звука без них.
   audioApps: () => ipcRenderer.invoke("audioApps"),
   startAudio: (onChunk) => {
@@ -15,7 +15,6 @@ contextBridge.exposeInMainWorld("mu", {
     ipcRenderer.send("startAudio");
   },
   setMuted: (muted) => ipcRenderer.send("setMuted", muted),
-  setMuteCalls: (on) => ipcRenderer.send("setMuteCalls", !!on),
   // Метки зрителей — на экран ведущего; трансляция закончилась — убрать окно меток.
   mark: (mark) => ipcRenderer.send("mark", mark),
   // Где ведущий видит метки: { screen: false, reason } — поверх экрана нельзя (исключение из захвата не встало), страница

@@ -880,22 +880,37 @@ test("система ужала окно меток до рабочей обла
   } finally { host.stop(); }
 });
 
-test("звонки (Discord и др.) исключаются из звука ведущего сами, пока галочку не сняли", async () => {
+// Решение пользователя: зрители слышат весь звук, в том числе звонки; исключается только отмеченное в «🔇 Звук».
+test("звонки (UniTalk, Discord…) сами не исключаются: зрителям не идёт только отмеченное вручную", async () => {
   const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true);
   const host = await start(world([d], [screenSource(d, 1)]));
+  const sender = () => page({ sender: { isDestroyed: () => false, send() {} } });
   try {
-    await host.choose("screen:1:0", true, ["Game.exe", "discord.exe"]);
-    host.fake.ipc.get("startAudio")(page({ sender: { isDestroyed: () => false, send() {} } }));
-    const args = host.spawned.at(-1);
-    assert.equal(args[0], "capture");
-    const names = args.slice(1).map((n) => n.toLowerCase());
-    for (const need of ["game.exe", "discord.exe", "zoom.exe", "teams.exe", "telegram.exe", "unitalk.exe"]) assert.ok(names.includes(need), need);
-    assert.equal(names.filter((n) => n === "discord.exe").length, 1, "без повторов");
-    host.fake.ipc.get("setMuteCalls")(page({ sender: { isDestroyed: () => false, send() {} } }), false);
-    assert.deepEqual(host.spawned.at(-1), ["capture", "Game.exe", "discord.exe"], "галочку сняли — только отмеченное вручную");
-    await host.choose("screen:1:0", true, [], false);
-    host.fake.ipc.get("startAudio")(page({ sender: { isDestroyed: () => false, send() {} } }));
-    assert.deepEqual(host.spawned.at(-1), ["capture"], "выбор без звонков при начале эфира");
+    await host.choose("screen:1:0", true, []);
+    host.fake.ipc.get("startAudio")(sender());
+    assert.deepEqual(host.spawned.at(-1), ["capture"], "ничего не отмечено — UniTalk, Discord, Telegram идут зрителям");
+    // Прежняя страница relay передаёт четвёртым аргументом «Не передавать звонки» = true — он не читается.
+    await host.choose("screen:1:0", true, ["Game.exe"], true);
+    host.fake.ipc.get("startAudio")(sender());
+    const names = host.spawned.at(-1).slice(1).map((n) => n.toLowerCase());
+    assert.deepEqual(names, ["game.exe"]);
+    for (const call of ["unitalk.exe", "discord.exe", "telegram.exe", "zoom.exe", "teams.exe"]) assert.ok(!names.includes(call), call);
+    assert.equal(host.fake.ipc.get("setMuteCalls"), undefined, "переключателя звонков больше нет");
+  } finally { host.stop(); }
+});
+
+test("отмеченная программа исключается целиком (по имени процесса, без учёта регистра и без повторов), в том числе в эфире", async () => {
+  const d = monitor(7, { x: 0, y: 0, width: 1920, height: 1080 }, 1, [0, 0], true);
+  const host = await start(world([d], [screenSource(d, 1)]));
+  const sender = () => page({ sender: { isDestroyed: () => false, send() {} } });
+  try {
+    await host.choose("screen:1:0", true, ["Discord.exe", "discord.exe"]);
+    host.fake.ipc.get("startAudio")(sender());
+    assert.deepEqual(host.spawned.at(-1), ["capture", "Discord.exe"], "все процессы Discord.exe — одним именем");
+    host.fake.ipc.get("setMuted")(sender(), ["Discord.exe", "UniTalk.exe"]);
+    assert.deepEqual(host.spawned.at(-1), ["capture", "Discord.exe", "UniTalk.exe"], "UniTalk — только если его отметили");
+    host.fake.ipc.get("setMuted")(sender(), []);
+    assert.deepEqual(host.spawned.at(-1), ["capture"]);
   } finally { host.stop(); }
 });
 
