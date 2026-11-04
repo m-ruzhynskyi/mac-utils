@@ -474,12 +474,11 @@ function hideOverlay() {
   pendingMarks.length = 0; pendingNotice = null;
 }
 
-// Программы созвонов (имена процессов Windows), как `callApps` на Mac. Дочерние процессы (Discord.exe, Teams) совпадают по имени.
-const CALL_APPS = ["Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe", "Telegram.exe", "Viber.exe", "WhatsApp.exe", "WhatsApp.Root.exe",
-  "Zoom.exe", "CptHost.exe", "Teams.exe", "ms-teams.exe", "Skype.exe", "Slack.exe", "Webex.exe", "CiscoCollabHost.exe",
-  "UniTalk.exe"];
+// Что не идёт зрителям: только программы, отмеченные ведущим («🔇 Звук»), как `shareMutedApps` на Mac; сам Mac Utils Share
+// исключает помощник. Звонки (UniTalk, Discord, Telegram…) сами не исключаются — зрители слышат весь звук системы.
+// Имена — процессы Windows без учёта регистра; дочерние процессы отмеченной программы (Discord.exe) совпадают по имени.
 function mutedProcesses(state) {
-  const names = state.calls ? [...state.muted, ...CALL_APPS] : state.muted;
+  const names = state.muted;
   return [...new Set(names.map((n) => n.toLowerCase()))].map((lower) => names.find((n) => n.toLowerCase() === lower));
 }
 
@@ -662,14 +661,6 @@ app.whenReady().then(() => {
   ipcMain.on("startAudio", relayOnly((event) => startAudio(event.sender)));
 
   // Поменяли список в эфире — перезапускаем захват звука с новым списком.
-  // Звонки (Discord и др.) исключаются из звука сами (на Mac это настройка, по умолчанию выключена), пока пользователь не снимет галочку на странице ведущего: иначе собеседники
-  // из того же созвона слышат себя с задержкой. Имена — процессы Windows (без учёта регистра).
-  ipcMain.on("setMuteCalls", relayOnly((event, on) => {
-    if (!chosen) return;
-    chosen.calls = on === true;
-    if (audioHelper) startAudio(event.sender);
-  }));
-
   ipcMain.on("setMuted", relayOnly((event, muted) => {
     if (!chosen) return;
     chosen.muted = cleanNames(muted);
@@ -706,13 +697,14 @@ app.whenReady().then(() => {
 
   // Выбор — только из показанного списка и только по клику (клавише) ведущего после его показа: страница не может
   // молча выбрать экран. Ведущий и так кликает по плитке в окне приложения — лишнего подтверждения нет.
-  ipcMain.handle("choose", relayOnly(async (_event, id, audio, muted, muteCalls) => {
+  // Четвёртый аргумент (прежнее «Не передавать звонки» страницы relay) не читается: исключается только отмеченное.
+  ipcMain.handle("choose", relayOnly(async (_event, id, audio, muted) => {
     const now = Date.now();
     const reason = !listed || !listed.ids.has(id) ? "not-listed" : inputs === listed.inputs || now - lastInput > USER_ACTION_MS ? "no-input" : null;
     if (reason) { appendOverlayLog(`choose denied reason=${reason}`); forgetChoice(); return false; }
     const sources = withoutOwnWindows(await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } }));
     const source = sources.find((s) => s.id === id);
-    chosen = source ? { source, audio: !!audio, muted: cleanNames(muted), calls: muteCalls !== false } : null;
+    chosen = source ? { source, audio: !!audio, muted: cleanNames(muted) } : null;
     listed = null; armedUntil = source ? now + ARM_MS : 0;
     nextSource = null; previousSource = null;
     return !!source;
