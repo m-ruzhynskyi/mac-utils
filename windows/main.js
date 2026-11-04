@@ -476,7 +476,8 @@ function hideOverlay() {
 
 // Программы созвонов (имена процессов Windows), как `callApps` на Mac. Дочерние процессы (Discord.exe, Teams) совпадают по имени.
 const CALL_APPS = ["Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe", "Telegram.exe", "Viber.exe", "WhatsApp.exe", "WhatsApp.Root.exe",
-  "Zoom.exe", "CptHost.exe", "Teams.exe", "ms-teams.exe", "Skype.exe", "Slack.exe", "Webex.exe", "CiscoCollabHost.exe"];
+  "Zoom.exe", "CptHost.exe", "Teams.exe", "ms-teams.exe", "Skype.exe", "Slack.exe", "Webex.exe", "CiscoCollabHost.exe",
+  "UniTalk.exe"];
 function mutedProcesses(state) {
   const names = state.calls ? [...state.muted, ...CALL_APPS] : state.muted;
   return [...new Set(names.map((n) => n.toLowerCase()))].map((lower) => names.find((n) => n.toLowerCase() === lower));
