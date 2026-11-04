@@ -121,7 +121,7 @@ package enum Pref {
     package static let shareHistory = "shareHistory"
     /// Программы, чей звук не идёт в трансляцию (bundle id).
     package static let shareMutedApps = "shareMutedApps"
-    /// «Не передавать звонки»: программы звонков (`ShareAudioExclusion.callApps`) заглушены для трансляции.
+    /// «Не передавать звонки»: программы звонков (`ShareAudioExclusion.callApps`) и все, кто пишет микрофон, заглушены для трансляции.
     package static let shareMuteCalls = "shareMuteCalls"
     /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.
     package static let cheatSheetSticky = "cheatSheetSticky"
