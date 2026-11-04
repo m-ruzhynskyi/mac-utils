@@ -71,7 +71,7 @@ final class ShareAudioTests: XCTestCase {
     func testWatcherRebuildsOnLaunchAndTerminate() {
         let center = NotificationCenter()
         var calls = 0
-        let watcher = ShareAudioWatcher(workspace: center, coreAudio: false) { calls += 1 }
+        let watcher = ShareAudioWatcher(workspace: center, coreAudio: false, inputSignature: { nil }, pollInput: false) { calls += 1 }
         center.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         center.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
@@ -231,5 +231,109 @@ final class ShareAudioTests: XCTestCase {
         XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: false, rebuildOnChange: true), .deferred)
         XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: true, rebuildOnChange: false), .applied)
         XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: true, rebuildOnChange: true), .rebuilt)
+    }
+
+    private func input(_ pid: pid_t, _ bundleID: String?, owner: String? = nil) -> ShareAudioProcess {
+        var value = process(pid, bundleID, owner: owner)
+        value.capturesInput = true
+        return value
+    }
+
+    /// UniTalk (Qt, один процесс) — в списке программ звонков: журнал 04.11, звонок шёл зрителю.
+    func testUniTalkIsCallApp() {
+        XCTAssertTrue(ShareAudioExclusion.callApps.contains("com.unitalk.desktop"))
+        let processes = [process(1, "com.unitalk.desktop"), process(2, "com.spotify.client")]
+        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ShareAudioExclusion.muted(apps: [], calls: true), ownPID: ownPID).map(\.pid), [1])
+    }
+
+    /// Программа не из списка пишет микрофон — это звонок: исключается вся программа (с помощниками по владельцу),
+    /// процесс без bundle id — по pid; Mac Utils (свой pid, свой bundle id и его помощники) «звонком» не становится.
+    func testInputCallersExcludedWithTheirApp() {
+        let processes = [
+            input(1, "com.example.Call.helper", owner: "com.example.Call"),
+            process(2, "com.example.Call"),
+            input(3, nil),
+            input(ownPID, "own.app"),
+            input(5, "own.app.helper"),
+            input(6, "com.other.helper", owner: "own.app"),
+            process(7, "com.spotify.client"),
+        ]
+        let callers = ShareAudioExclusion.inputCallers(processes, ownPID: ownPID, ownBundleID: "own.app")
+        XCTAssertEqual(callers.apps, ["com.example.Call"])
+        XCTAssertEqual(callers.pids, [3])
+        let current = ShareAudioExclusion.current(processes, apps: [], calls: true, ownPID: ownPID, ownBundleID: "own.app")
+        XCTAssertFalse(current.muted.contains("own.app"), "свой bundle id не становится программой звонка")
+        let excluded = ShareAudioExclusion.excluded(processes, muted: current.muted, pids: current.pids, ownPID: ownPID, ownBundleID: "own.app")
+        // Mac Utils исключён как всегда (свой), Spotify — играет дальше.
+        XCTAssertEqual(excluded.map(\.pid), [1, 2, 3, ownPID, 5, 6])
+        XCTAssertFalse(excluded.contains { $0.pid == 7 })
+    }
+
+    /// «Не передавать звонки» выключено — микрофон ничего не исключает, остаются только выбранные вручную.
+    func testInputCallersIgnoredWhenMuteCallsOff() {
+        let processes = [input(1, "com.example.Call"), process(2, "com.spotify.client")]
+        let current = ShareAudioExclusion.current(processes, apps: ["com.spotify.client"], calls: false, ownPID: ownPID, ownBundleID: "own.app")
+        XCTAssertEqual(current.muted, ["com.spotify.client"])
+        XCTAssertEqual(current.pids, [])
+        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: current.muted, pids: current.pids, ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [2])
+    }
+
+    /// ScreenCaptureKit (запасной способ) получает тот же набор: программа звонка из списка программ SCK исключается
+    /// по bundle id, найденному по процессам Core Audio.
+    func testFallbackAppliesInputCallers() {
+        let audio = [input(1, "com.example.Call.helper", owner: "com.example.Call")]
+        let current = ShareAudioExclusion.current(audio, apps: [], calls: true, ownPID: ownPID, ownBundleID: "own.app")
+        let sckApps = [process(10, "com.example.Call"), process(11, "com.unitalk.desktop"), process(12, "com.spotify.client")]
+        XCTAssertEqual(ShareAudioExclusion.excluded(sckApps, muted: current.muted, pids: current.pids, ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [10, 11])
+    }
+
+    /// Звонок начался в уже открытой программе: меняется только вход процесса — сторож замечает по опросу, одна пересборка;
+    /// без изменений и после `stop` — ничего.
+    func testWatcherRebuildsWhenInputChanges() {
+        var signature: [AudioObjectID]? = []
+        var calls = 0
+        let watcher = ShareAudioWatcher(workspace: NotificationCenter(), coreAudio: false, inputSignature: { signature },
+                                        pollInput: false) { calls += 1 }
+        watcher.checkInput()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(calls, 0, "вход не менялся")
+        signature = [148]
+        watcher.checkInput()
+        watcher.checkInput()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(calls, 1, "начался звонок")
+        signature = []
+        watcher.checkInput()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(calls, 2, "звонок кончился")
+        watcher.stop()
+        signature = [149]
+        watcher.checkInput()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(calls, 2, "после stop — не работает")
+    }
+
+    /// Глобальный перехват 48 000 при выходе 44 100 (журнал 04.11, «колбэков 0») — сразу перехват потока выхода;
+    /// совпадают — глобальный; часы не выход — всегда глобальный.
+    func testTapModeFollowsRateMismatch() {
+        XCTAssertEqual(ShareTapMode.choose(tapRate: 48_000, clockRate: 44_100, clockIsOutput: true, deviceAfterFailure: false), .device)
+        XCTAssertEqual(ShareTapMode.choose(tapRate: 48_000, clockRate: 48_000, clockIsOutput: true, deviceAfterFailure: false), .global)
+        XCTAssertEqual(ShareTapMode.choose(tapRate: 0, clockRate: 44_100, clockIsOutput: true, deviceAfterFailure: false), .global, "частота неизвестна")
+        XCTAssertEqual(ShareTapMode.choose(tapRate: 48_000, clockRate: 48_000, clockIsOutput: true, deviceAfterFailure: true), .device)
+        XCTAssertEqual(ShareTapMode.choose(tapRate: 48_000, clockRate: 44_100, clockIsOutput: false, deviceAfterFailure: true), .global)
+    }
+
+    /// Лестница после неудачного запуска: поток выхода → встроенные часы → ScreenCaptureKit, без повторов по кругу.
+    func testTapRecoveryLadder() {
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .global, clockIsOutput: true, builtInAvailable: false), .deviceTap)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noData, mode: .global, clockIsOutput: true, builtInAvailable: true), .deviceTap)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .device, clockIsOutput: true, builtInAvailable: true), .builtInClock)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .device, clockIsOutput: true, builtInAvailable: false), .fallBack,
+                       "журнал 04.11: часы и так встроенный выход")
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noData, mode: .device, clockIsOutput: true, builtInAvailable: true), .fallBack)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .global, clockIsOutput: false, builtInAvailable: false), .fallBack)
+        // Перехват потока не создался (остался глобальный) и глобальный снова без звука — не по кругу, а дальше по лестнице.
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .global, clockIsOutput: true, deviceTried: true, builtInAvailable: true), .builtInClock)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noData, mode: .global, clockIsOutput: true, deviceTried: true, builtInAvailable: true), .fallBack)
     }
 }

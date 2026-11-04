@@ -15,6 +15,8 @@ package struct ShareAudioProcess: Equatable {
     package let bundleID: String?
     /// Программа, «ответственная» за процесс (Discord для Discord Helper); nil — не узнали.
     package let ownerBundleID: String?
+    /// Процесс сейчас пишет микрофон (`kAudioProcessPropertyIsRunningInput`) — так выглядит звонок.
+    package var capturesInput = false
 }
 
 /// Что не передавать в трансляцию: заглушённые программы вместе с их помощниками и сам Mac Utils.
@@ -26,17 +28,44 @@ package enum ShareAudioExclusion {
         "com.hnc.Discord", "com.hnc.DiscordPTB", "com.hnc.DiscordCanary",
         "ru.keepcoder.Telegram", "com.tdesktop.Telegram", "com.viber.osx", "net.whatsapp.WhatsApp", "desktop.WhatsApp",
         "us.zoom.xos", "com.microsoft.teams2", "com.microsoft.teams", "com.skype.skype", "com.tinyspeck.slackmacgap",
-        "com.apple.FaceTime", "com.apple.avconferenced",
+        "com.apple.FaceTime", "com.apple.avconferenced", "com.unitalk.desktop",
     ]
+
+    /// Звонок в программе, которой нет в `callApps`: её процесс пишет микрофон. Исключается вся программа — по
+    /// ответственной программе или своему bundle id (с помощниками), процесс без bundle id — по pid. Mac Utils
+    /// (запись встреч, микрофон без эха) сюда не попадает: свой процесс исключён и так, а свой bundle id не должен
+    /// становиться «программой звонка».
+    package static func inputCallers(_ processes: [ShareAudioProcess], ownPID: pid_t,
+                                     ownBundleID: String? = Bundle.main.bundleIdentifier) -> (apps: Set<String>, pids: Set<pid_t>) {
+        let own: Set<String> = ownBundleID.map { [$0] } ?? []
+        var apps: Set<String> = [], pids: Set<pid_t> = []
+        for process in processes where process.capturesInput && process.pid != ownPID {
+            guard !matches(process.bundleID, own), !matches(process.ownerBundleID, own) else { continue }
+            if let app = process.ownerBundleID ?? process.bundleID, !app.isEmpty { apps.insert(app) } else { pids.insert(process.pid) }
+        }
+        return (apps, pids)
+    }
+
+    /// Что исключить сейчас: выбранные программы, а при «Не передавать звонки» — ещё и известные программы звонков
+    /// и всё, что пишет микрофон (`processes` — процессы Core Audio).
+    package static func current(_ processes: [ShareAudioProcess], apps: Set<String>, calls: Bool, ownPID: pid_t,
+                                ownBundleID: String? = Bundle.main.bundleIdentifier) -> (muted: Set<String>, pids: Set<pid_t>) {
+        let base = muted(apps: apps, calls: calls)
+        guard calls else { return (base, []) }
+        let callers = inputCallers(processes, ownPID: ownPID, ownBundleID: ownBundleID)
+        return (base.union(callers.apps), callers.pids)
+    }
 
     /// Заглушённые bundle id: выбранные вручную и, если включено, программы звонков.
     package static func muted(apps: Set<String>, calls: Bool) -> Set<String> {
         calls ? apps.union(callApps) : apps
     }
 
-    package static var currentMuted: Set<String> {
-        muted(apps: Set(UserDefaults.standard.stringArray(forKey: Pref.shareMutedApps) ?? []),
-              calls: UserDefaults.standard.bool(forKey: Pref.shareMuteCalls))
+    /// `current` по настройкам пользователя.
+    package static func currentMuted(_ processes: [ShareAudioProcess]) -> (muted: Set<String>, pids: Set<pid_t>) {
+        current(processes, apps: Set(UserDefaults.standard.stringArray(forKey: Pref.shareMutedApps) ?? []),
+                calls: UserDefaults.standard.bool(forKey: Pref.shareMuteCalls),
+                ownPID: ProcessInfo.processInfo.processIdentifier)
     }
 
     /// Совпадение по bundle id: сама программа или её помощник (`com.hnc.Discord.helper`), но не другая
@@ -46,11 +75,11 @@ package enum ShareAudioExclusion {
         return muted.contains { bundleID == $0 || bundleID.hasPrefix($0 + ".") }
     }
 
-    package static func excluded(_ processes: [ShareAudioProcess], muted: Set<String>, ownPID: pid_t,
+    package static func excluded(_ processes: [ShareAudioProcess], muted: Set<String>, pids: Set<pid_t> = [], ownPID: pid_t,
                          ownBundleID: String? = Bundle.main.bundleIdentifier) -> [ShareAudioProcess] {
         let own: Set<String> = ownBundleID.map { [$0] } ?? []
         return processes.filter { process in
-            process.pid == ownPID || matches(process.bundleID, own) || matches(process.ownerBundleID, own)
+            process.pid == ownPID || pids.contains(process.pid) || matches(process.bundleID, own) || matches(process.ownerBundleID, own)
                 || matches(process.bundleID, muted) || matches(process.ownerBundleID, muted)
         }
     }
@@ -69,8 +98,17 @@ package enum ShareAudioExclusion {
             guard pid > 0 else { return nil }
             let bundleID = CoreAudioHelper.readString(object, kAudioProcessPropertyBundleID).flatMap { $0.isEmpty ? nil : $0 }
                 ?? NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
-            return ShareAudioProcess(object: object, pid: pid, bundleID: bundleID, ownerBundleID: ownerBundleID(of: pid))
+            return ShareAudioProcess(object: object, pid: pid, bundleID: bundleID, ownerBundleID: ownerBundleID(of: pid),
+                                     capturesInput: CoreAudioHelper.read(object, kAudioProcessPropertyIsRunningInput, default: UInt32(0)) != 0)
         }
+    }
+
+    /// Процессы Core Audio, которые сейчас пишут микрофон (для сторожа: начался ли звонок). Свойство есть с macOS 14.0,
+    /// где его нет — 0, то есть «не пишет».
+    package static func inputSignature() -> [AudioObjectID] {
+        CoreAudioHelper.readArray(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyProcessObjectList)
+            .filter { CoreAudioHelper.read($0, kAudioProcessPropertyIsRunningInput, default: UInt32(0)) != 0 }
+            .sorted()
     }
 
     /// Строка для журнала: только число и bundle id (это не личные данные).
@@ -176,6 +214,35 @@ package enum ShareTapClock {
     }
 }
 
+/// Какой перехват строить. Глобальный (`monoGlobalTapButExcludeProcesses`) не привязан к устройству, и его формат может
+/// не совпасть с выходом: журнал 04.11 — перехват 48 000, вход агрегата 48 000, встроенный выход 44 100 Гц, колбэков 0
+/// (так же в предыдущем случае «нет колбэков»). Агрегат идёт по часам выхода, а компенсация дрейфа выравнивает только
+/// дрейф часов, не другую частоту. Перехват потока самого выхода (`excludingProcesses:deviceUID:stream:`) по документации
+/// Core Audio имеет формат этого потока — частоты совпадают. Его берём, когда частоты разошлись (заранее) или когда
+/// глобальный не дал колбэков или данных (ступень перед встроенными часами и ScreenCaptureKit). Только если часы —
+/// сам выход: иначе (выход-агрегат, встроенные часы после «0 колбэков») звук играет не в устройство часов.
+package enum ShareTapMode: Equatable {
+    case global, device
+
+    package static func choose(tapRate: Double, clockRate: Double, clockIsOutput: Bool, deviceAfterFailure: Bool) -> ShareTapMode {
+        guard clockIsOutput else { return .global }
+        if deviceAfterFailure { return .device }
+        return tapRate > 0 && clockRate > 0 && abs(tapRate - clockRate) > 0.5 ? .device : .global
+    }
+
+    /// Что делать после неудачного запуска (сторож): перехват потока выхода, встроенные часы или запасной способ.
+    package enum Recovery: Equatable { case deviceTap, builtInClock, fallBack }
+
+    /// `deviceTried` — перехват потока выхода на этом выходе уже пробовали: если он не создался и остался глобальный,
+    /// второй раз ту же ступень не берём (иначе пересборка каждые 3 с без звука и без перехода на ScreenCaptureKit).
+    package static func recovery(verdict: ShareTapWatchdog.Verdict, mode: ShareTapMode, clockIsOutput: Bool,
+                                 deviceTried: Bool = false, builtInAvailable: Bool) -> Recovery {
+        if verdict != .ok, mode == .global, clockIsOutput, !deviceTried { return .deviceTap }
+        if verdict == .noCallbacks, builtInAvailable { return .builtInClock }
+        return .fallBack
+    }
+}
+
 /// Повтор перехвата после явной ошибки Core Audio: при постоянной ошибке не создавать и не разрушать перехват
 /// и агрегат на каждой пересборке, а пробовать раз на новую обстановку — сменился выход или набор программ.
 package struct ShareTapRetry: Equatable {
@@ -192,24 +259,42 @@ package struct ShareTapRetry: Equatable {
 
 /// Когда пересобирать список исключённых: программа запустилась или закрылась, процесс открыл или закрыл звук
 /// (так начинается звонок — голос Discord появляется в отдельном процессе уже после старта трансляции),
-/// сменился выход звука (перехват пересобирается на часах нового устройства).
-/// Без опроса: только события, и только пока идёт трансляция со звуком.
+/// сменился выход звука (перехват пересобирается на часах нового устройства), процесс начал или перестал писать
+/// микрофон (звонок в уже открытой программе — UniTalk: процесс есть с запуска, меняется только вход).
+/// Вход — опросом раз в `inputInterval` (только при «Не передавать звонки», дёшево: одно свойство на процесс);
+/// остальное — событиями. Всё — только пока идёт трансляция со звуком.
 @MainActor
 package final class ShareAudioWatcher {
+    package static let inputInterval: TimeInterval = 2
+
     private let workspace: NotificationCenter
     private var observers: [NSObjectProtocol] = []
     private var listeners: [(AudioObjectPropertySelector, AudioObjectPropertyListenerBlock)] = []
     private var scheduled = false
     private let onChange: @MainActor () -> Void
+    /// Кто пишет микрофон сейчас; nil — не следим («Не передавать звонки» выключено).
+    private let inputSignature: @MainActor () -> [AudioObjectID]?
+    private var lastInput: [AudioObjectID]?
+    private var inputTimer: Timer?
 
     package init(workspace: NotificationCenter = NSWorkspace.shared.notificationCenter, coreAudio: Bool = true,
-         onChange: @escaping @MainActor () -> Void) {
+                 inputSignature: @escaping @MainActor () -> [AudioObjectID]? = ShareAudioWatcher.liveInputSignature,
+                 pollInput: Bool = true, onChange: @escaping @MainActor () -> Void) {
         self.workspace = workspace
         self.onChange = onChange
+        self.inputSignature = inputSignature
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.schedule() }
             })
+        }
+        lastInput = inputSignature()
+        if pollInput {
+            let timer = Timer(timeInterval: Self.inputInterval, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.checkInput() }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            inputTimer = timer
         }
         guard coreAudio else { return }
         for selector in [kAudioHardwarePropertyProcessObjectList, kAudioHardwarePropertyDefaultOutputDevice] {
@@ -224,7 +309,23 @@ package final class ShareAudioWatcher {
     }
 
     /// Снять подписки (до освобождения: блок Core Audio держит систему, а не нас).
+    /// Настоящий источник: процессы Core Audio со входом, пока включено «Не передавать звонки».
+    package static func liveInputSignature() -> [AudioObjectID]? {
+        UserDefaults.standard.bool(forKey: Pref.shareMuteCalls) ? ShareAudioExclusion.inputSignature() : nil
+    }
+
+    /// Набор пишущих микрофон сменился (начался или кончился звонок, включили «Не передавать звонки») — пересборка.
+    package func checkInput() {
+        guard !observers.isEmpty else { return }
+        let now = inputSignature()
+        guard now != lastInput else { return }
+        lastInput = now
+        schedule()
+    }
+
     package func stop() {
+        inputTimer?.invalidate()
+        inputTimer = nil
         for observer in observers { workspace.removeObserver(observer) }
         observers = []
         for (selector, listener) in listeners {
@@ -282,6 +383,11 @@ package final class ShareAudioTap: @unchecked Sendable {
     /// Устройство часов агрегата (`ShareTapClock`); `builtInClock` — после «0 колбэков» взять встроенный выход.
     package private(set) var clockDevice = AudioObjectID(kAudioObjectUnknown)
     package private(set) var builtInClock = false
+    /// Вид перехвата этого запуска (`ShareTapMode`); `deviceAfterFailure` — глобальный уже не дал звука на этом выходе.
+    package private(set) var mode = ShareTapMode.global
+    package private(set) var deviceAfterFailure = false
+    /// UID выхода, чей поток перехватываем в режиме `.device`.
+    private var tapDeviceUID: String?
     /// Раскладка входа не сошлась — уже записано в журнал (только в `queue`).
     private var layoutLogged = false
     /// Входы выхода (микрофон AirPods/гарнитуры) — их число и выключены ли они для IOProc; пишутся до `AudioDeviceStart`.
@@ -317,7 +423,15 @@ package final class ShareAudioTap: @unchecked Sendable {
     }
 
     private func description(_ objects: [AudioObjectID]) -> CATapDescription {
-        let description = CATapDescription(monoGlobalTapButExcludeProcesses: objects)
+        let description: CATapDescription
+        if mode == .device, let tapDeviceUID {
+            // Поток 0 выхода (у встроенных динамиков, наушников, AirPods он один), сведённый в моно.
+            description = CATapDescription(excludingProcesses: objects, deviceUID: tapDeviceUID, stream: 0)
+            description.isMono = true
+            description.isMixdown = true
+        } else {
+            description = CATapDescription(monoGlobalTapButExcludeProcesses: objects)
+        }
         description.uuid = uuid
         description.muteBehavior = .unmuted
         description.isPrivate = true
@@ -328,11 +442,12 @@ package final class ShareAudioTap: @unchecked Sendable {
     private func start() throws {
         uuid = UUID()
         let current = CoreAudioHelper.defaultOutputDevice
-        // Другой выход — снова обычный выбор часов (встроенный — только после «0 колбэков» на этом выходе).
-        if current != outputDevice { builtInClock = false }
+        // Другой выход — снова обычный выбор часов и вида перехвата (запасные ступени — только для того выхода).
+        if current != outputDevice {
+            builtInClock = false
+            deviceAfterFailure = false
+        }
         outputDevice = current
-        var status = AudioHardwareCreateProcessTap(description(excluded), &tapID)
-        guard status == noErr else { throw AppVolumeTap.TapError.status("Перехват звука", status) }
         layoutLogged = false
         watchLock.lock(); watchdog = ShareTapWatchdog(); watchLock.unlock()
         generation += 1
@@ -342,6 +457,30 @@ package final class ShareAudioTap: @unchecked Sendable {
         clockDevice = (builtInClock ? builtIn : nil) ?? ShareTapClock.choose(output: outputInfo, builtIn: builtIn) ?? outputDevice
         guard let outputUID = CoreAudioHelper.readString(clockDevice, kAudioDevicePropertyDeviceUID) else {
             throw AppVolumeTap.TapError.status("Устройство вывода", -1)
+        }
+        tapDeviceUID = outputUID
+        mode = .global
+        var status = AudioHardwareCreateProcessTap(description(excluded), &tapID)
+        guard status == noErr else { throw AppVolumeTap.TapError.status("Перехват звука", status) }
+        // Частота глобального перехвата не совпала с часами (или он уже не дал звука) — перехват потока выхода.
+        let clockNominal = CoreAudioHelper.read(clockDevice, kAudioDevicePropertyNominalSampleRate, default: Float64(0))
+        let chosen = ShareTapMode.choose(tapRate: Self.tapFormat(tapID).mSampleRate, clockRate: clockNominal,
+                                         clockIsOutput: clockDevice == outputDevice, deviceAfterFailure: deviceAfterFailure)
+        if chosen == .device {
+            let globalRate = Self.tapFormat(tapID).mSampleRate
+            AudioHardwareDestroyProcessTap(tapID)
+            tapID = AudioObjectID(kAudioObjectUnknown)
+            mode = .device
+            status = AudioHardwareCreateProcessTap(description(excluded), &tapID)
+            if status != noErr {
+                // Перехват потока не создался — как раньше, глобальный (сторож решит, работает ли он).
+                Log.capture.error("Звук трансляции: перехват потока выхода не создан (\(status, privacy: .public)) — глобальный")
+                mode = .global
+                status = AudioHardwareCreateProcessTap(description(excluded), &tapID)
+                guard status == noErr else { throw AppVolumeTap.TapError.status("Перехват звука", status) }
+            } else {
+                Log.capture.info("Звук трансляции: перехват потока выхода (\(self.deviceAfterFailure ? "глобальный не дал звука" : "частоты разошлись", privacy: .public): глобальный \(globalRate, privacy: .public) Гц, выход \(clockNominal, privacy: .public) Гц)")
+            }
         }
         let aggregate = Self.aggregateDescription(outputUID: outputUID, tapUUID: uuid.uuidString, unique: UUID().uuidString)
         status = AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &aggregateID)
@@ -353,7 +492,7 @@ package final class ShareAudioTap: @unchecked Sendable {
             throw AppVolumeTap.TapError.status("Формат перехвата", -1)
         }
         convLock.lock()
-        converter = AVAudioConverter(from: input, to: output)
+        converter = Self.converter(from: input, to: output)
         inputFormat = input
         convLock.unlock()
         queue.sync { meter.reset() }
@@ -387,6 +526,15 @@ package final class ShareAudioTap: @unchecked Sendable {
         Log.capture.info("Звук трансляции: выход \(ShareTapClock.code(outputInfo.transport), privacy: .public), часы \(self.clockDevice == self.outputDevice ? "выход" : ShareTapClock.code(CoreAudioHelper.read(self.clockDevice, kAudioDevicePropertyTransportType, default: UInt32(0))), privacy: .public)\(self.builtInClock ? " (встроенный после 0 колбэков)" : "", privacy: .public), AudioDeviceStart \(status, privacy: .public), очередь macutils.share.tap, входных потоков \(inputs, privacy: .public), включено для IOProc \(enabled, privacy: .public)")
         guard status == noErr else { throw AppVolumeTap.TapError.status("Запуск перехвата", status) }
     }
+
+    /// Глобальный перехват не дал колбэков или данных: ещё раз — перехватом потока выхода (`ShareTapMode`).
+    package func retryWithDeviceTap() throws {
+        deviceAfterFailure = true
+        try restart()
+    }
+
+    /// Часы — сам выход по умолчанию (перехват потока выхода возможен).
+    package var clockIsOutput: Bool { clockDevice == outputDevice }
 
     /// «0 колбэков» на выбранных часах: ещё раз на встроенном выходе (если он есть и ещё не пробовали). false — нечего пробовать.
     package func retryWithBuiltInClock() throws -> Bool {
@@ -596,7 +744,7 @@ package final class ShareAudioTap: @unchecked Sendable {
            let corrected = Self.format(format, rate: rate) {
             Log.capture.info("\(ShareAudioRateLog.change(path: "перехват, по буферам", outputBefore: self.clockRate, outputNow: CoreAudioHelper.read(self.clockDevice, kAudioDevicePropertyNominalSampleRate, default: Float64(0)), buffers: rate, sent: ShareProtocol.sampleRate), privacy: .public)")
             convLock.lock()
-            self.converter = AVAudioConverter(from: corrected, to: output)
+            self.converter = Self.converter(from: corrected, to: output)
             inputFormat = corrected
             convLock.unlock()
             format = corrected
@@ -604,6 +752,13 @@ package final class ShareAudioTap: @unchecked Sendable {
             return convert(single: &single, frames: frames, format: format, converter: rebuilt)
         }
         convert(single: &single, frames: frames, format: format, converter: converter)
+    }
+
+    /// Конвертер в 24 кГц моно; если перехват всё же пришёл не моно (поток выхода), каналы сводятся, а не берётся левый.
+    private static func converter(from input: AVAudioFormat, to output: AVAudioFormat) -> AVAudioConverter? {
+        let converter = AVAudioConverter(from: input, to: output)
+        converter?.downmix = true
+        return converter
     }
 
     /// `mHostTime` метки входа в секундах (монотонных) — для измерителя частоты.
