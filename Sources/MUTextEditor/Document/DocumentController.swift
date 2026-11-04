@@ -61,6 +61,8 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     @Published package private(set) var pageCount = 1
     @Published package private(set) var currentPage = 1
     @Published package private(set) var currentSection = 1
+    /// Язык текста у курсора (`\lang`), для строки состояния.
+    @Published package private(set) var languageName: String?
     @Published package private(set) var wordCount = 0
     @Published package private(set) var selection = DocSelectionInfo()
 
@@ -143,6 +145,8 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         let sourceStart = rendering.map.sourceLocation(beforeUnit: oldSelection.location)
         let sourceEnd = rendering.map.sourceLocation(beforeUnit: NSMaxRange(oldSelection))
         let fresh = RTFReader.read(tab.text, fallback: tab.document.encoding)
+        // Шрифты Word (Calibri, Cambria…) — до раскладки, чтобы ширины строк были как у Word.
+        WordFonts.prepare(fresh.fonts.values.map(\.name))
         renderer.contentWidth = DocPageView.bodyRect(fresh.sections.first?.props ?? RTFSectionProps()).width
         // Полная перерисовка (первый показ, ¶) — весь текст заново; иначе заплатка на изменившиеся абзацы.
         let (next, patch) = renderer.render(fresh, previous: force ? nil : rendering)
@@ -165,6 +169,9 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         let headersChanged = force || headers != headerSignature
         headerSignature = headers
         if headersChanged { headerCache = [:] }
+        // Разрывы по правилам Word — заново после правки (`DocPagination` в конце раскладки).
+        for page in pagesView.pages { page.breakLimit = nil }
+        pagesView.paginationStamp += 1
         storage.beginEditing()
         storage.replaceCharacters(in: replaced, with: string)
         storage.endEditing()
@@ -197,9 +204,12 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         var count = 0
         var inWord = false
         for paragraph in story.paragraphs {
-            for run in paragraph.runs where !run.props.hidden && (run.kind == .text) {
+            for run in paragraph.runs where !run.props.hidden {
+                // Перевод строки, табуляция, поле, рисунок разделяют слова (`слово\lineслово` — два слова), в счёт не входят.
+                // Результат поля (номер страницы) Word считает словом, как и текст.
+                if case .field = run.kind {} else { guard run.kind == .text else { inWord = false; continue } }
                 for scalar in run.text.unicodeScalars {
-                    let letter = !scalar.properties.isWhitespace
+                    let letter = !scalar.properties.isWhitespace || scalar.value == 0xA0
                     if letter, !inWord { count += 1 }
                     inWord = letter
                 }
@@ -263,6 +273,14 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         }
     }
 
+    /// Перенос по словам — только там, где его делает Word (`WordLineBreaks`).
+    package nonisolated func layoutManager(_ layoutManager: NSLayoutManager, shouldBreakLineByWordBeforeCharacterAt charIndex: Int) -> Bool {
+        MainActor.assumeIsolated {
+            guard let text = layoutManager.textStorage?.mutableString else { return true }
+            return WordLineBreaks.allowsBreak(before: charIndex, in: text)
+        }
+    }
+
     private func completedLayout(_ container: NSTextContainer?, atEnd: Bool) {
         let containers = layoutManager.textContainers
         guard let container, container !== spare, let index = containers.firstIndex(where: { $0 === container }) else {
@@ -297,6 +315,10 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
                 }
                 pagesView.removePages(from: from)
             }
+        }
+        // Разрывы по правилам Word; если страницы сдвинулись — раскладка дойдёт до конца и вызовет нас снова.
+        if DocPagination.apply(pagesView, layoutManager: layoutManager) {
+            if let last = layoutManager.textContainers.last { layoutManager.ensureLayout(for: last) }
         }
         if pageCount != pagesView.pages.count { pageCount = pagesView.pages.count }
         updatePageSections()
@@ -422,14 +444,20 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
 
     // MARK: - Знаки $
 
+    /// Знаки `$` подсвечиваются, только пока открыта панель «Знаки $»; иначе страница — как в Word.
+    var showsDollarMarks = false {
+        didSet { if showsDollarMarks != oldValue { highlightDollars() } }
+    }
+
     /// Подсветка `$` на страницах: видимая часть диапазона значения (по окончательному правилу — до конца строки исходника).
+    /// Только заливка и подчёркивание: цвет текста — из документа, как в Word.
     package func highlightDollars() {
         guard let tab else { return }
         let full = NSRange(location: 0, length: storage.length)
-        let keys: [NSAttributedString.Key] = [.backgroundColor, .underlineStyle, .underlineColor, .foregroundColor]
+        let keys: [NSAttributedString.Key] = [.backgroundColor, .underlineStyle, .underlineColor]
         if highlighted { for key in keys { layoutManager.removeTemporaryAttribute(key, forCharacterRange: full) } }
         highlighted = false
-        guard storage.length > 0, tab.dollars.isCurrent || !tab.dollars.entries.isEmpty else { return }
+        guard showsDollarMarks, storage.length > 0, tab.dollars.isCurrent || !tab.dollars.entries.isEmpty else { return }
         let skip = max(tab.dollars.skip ?? 0, 0)
         let map = rendering.map
         for entry in tab.dollars.entries where !entry.isHidden {
@@ -440,15 +468,14 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
             let order = entry.order ?? 0
             if order < skip {
                 let faint: [NSAttributedString.Key: Any] = [
-                    .foregroundColor: NSColor(srgbRed: 0.55, green: 0.58, blue: 0.62, alpha: 1),
                     .underlineStyle: NSUnderlineStyle([.single, .patternDot]).rawValue,
+                    .underlineColor: NSColor(srgbRed: 0.55, green: 0.58, blue: 0.62, alpha: 1),
                 ]
                 for range in [NSRange(location: dollar, length: 1)] + parts { layoutManager.addTemporaryAttributes(faint, forCharacterRange: range) }
             } else {
                 let selected = tab.dollars.selected == mark.dollar
                 let fill = EditorStyle.hueFill(entry.hue, selected: selected)
-                layoutManager.addTemporaryAttributes([.foregroundColor: EditorStyle.hue(entry.hue), .backgroundColor: fill],
-                                                     forCharacterRange: NSRange(location: dollar, length: 1))
+                layoutManager.addTemporaryAttributes([.backgroundColor: fill], forCharacterRange: NSRange(location: dollar, length: 1))
                 for range in parts {
                     layoutManager.addTemporaryAttributes([
                         .backgroundColor: fill, .underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: EditorStyle.hue(entry.hue),
@@ -550,6 +577,7 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         MainActor.assumeIsolated {
             if composing { return true }
             guard ranges.count == 1, let replacement = replacementStrings?.first else {
+                show(notice: "Правка нескольких мест сразу не поддерживается — выделите одно")
                 Feedback.beep()
                 return false
             }
@@ -562,18 +590,39 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     @discardableResult
     package func perform(replacing units: NSRange, with text: String) -> Bool {
         guard let tab else { return false }
-        let result = DocTextEditor.replace(units, with: text, model: model, map: rendering.map, source: tab.text)
+        // ↩ в пустом пункте, Tab в начале пункта, ⌫ у номера — команды списка (E-2).
+        if let list = DocListEdit.intercept(units, text: text, model: model, rendering: rendering, source: tab.text) {
+            return perform(list)
+        }
+        // Автозамена (выключена по умолчанию): один набранный знак может заменить и знак слева («--» → «—»).
+        var units = units, text = text
+        if UserDefaults.standard.bool(forKey: Pref.docAutocorrect), !composing,
+           let fix = DocAutoCorrect.resolve(units: units, typed: text, shown: storage.string as NSString, isPlainText: { [rendering] in rendering.map.kind(at: $0) == .text }) {
+            units = fix.units
+            text = fix.text
+        }
+        var result = DocTextEditor.replace(units, with: text, model: model, map: rendering.map, source: tab.text)
         if let refusal = result.refusal {
             show(notice: refusal)
             Feedback.beep()
             return false
         }
         guard !result.edits.isEmpty else {
-            if units.length > 0 || !text.isEmpty { Feedback.beep() }
+            if units.length > 0 || !text.isEmpty {
+                // Границу ячейки, как в Word, Delete/⌫ не трогают и без подсказки (она вылезала бы на каждом ⌫ в начале ячейки);
+                // всё остальное — не тишина.
+                let onlyCellEnds = units.length > 0 && (units.location..<NSMaxRange(units)).allSatisfy { rendering.map.kind(at: $0) == .cellEnd }
+                if !onlyCellEnds { show(notice: text.isEmpty ? "Здесь нечего удалять. " + DocTextEditor.codeHint : "Здесь нельзя набирать. " + DocTextEditor.codeHint) }
+                Feedback.beep()
+            }
             return false
         }
+        // Новые и сдвинутые пункты списков — готовый номер `{\listtext}` переписывается вместе с правкой.
+        if units.length > 0 || text.contains(where: \.isNewline) {
+            (result.edits, result.caretSource) = DocListText.synced(result.edits, caret: result.caretSource, model: model, source: tab.text)
+        }
         let caret = result.caretSource
-        let single = result.edits.count == 1 && result.edits[0].range.length == 0 && !text.isEmpty
+        let single = result.edits.count == 1 && result.edits[0].range.length == 0 && !text.isEmpty && !text.contains(where: \.isNewline)
         // Набор подряд — один шаг отмены, как в Word: прошлый шаг отменяется и применяется вместе с новым символом.
         if single, let burst = typingBurst, burst.revision == tab.sourceRevision, tab.undo.canUndo, tab.undo.undoActionName == "Ввод",
            result.edits[0].range.location == burst.source + (burst.text as NSString).length,
@@ -582,17 +631,43 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
             tab.undo.undo()
             let end = burst.source + (combined as NSString).length
             let done = apply([DocEdit(range: NSRange(location: burst.source, length: 0), text: combined)], actionName: "Ввод") { rendering in
-                NSRange(location: rendering.map.firstUnit(atOrAfter: end), length: 0)
+                NSRange(location: rendering.caretUnit(atSource: end), length: 0)
             }
+            // Не вышло — возвращаем отменённый символ, а не теряем его.
+            if !done, tab.undo.canRedo { tab.undo.redo() }
             typingBurst = done ? TypingBurst(source: burst.source, text: combined, revision: tab.sourceRevision, time: Date()) : nil
             return done
         }
         let done = apply(result.edits, actionName: text.isEmpty ? "Удаление" : "Ввод") { rendering in
-            NSRange(location: rendering.map.firstUnit(atOrAfter: caret), length: 0)
+            NSRange(location: rendering.caretUnit(atSource: caret), length: 0)
         }
         typingBurst = done && single
             ? TypingBurst(source: result.edits[0].range.location, text: result.edits[0].text, revision: tab.sourceRevision, time: Date()) : nil
         return done
+    }
+
+    /// Команда списка: правки одним шагом отмены, курсор — в начале текста пункта.
+    @discardableResult
+    func perform(_ list: DocListEdit.Result) -> Bool {
+        typingBurst = nil
+        if let refusal = list.refusal {
+            show(notice: refusal)
+            Feedback.beep()
+            return false
+        }
+        guard !list.edits.isEmpty else {
+            Feedback.beep()
+            return false
+        }
+        let caret = list.caretSource
+        return apply(list.edits, actionName: list.actionName) { NSRange(location: $0.caretUnit(atSource: caret), length: 0) }
+    }
+
+    /// ⇧Tab: уровень пункта списка выше. `false` — не пункт списка (обычное поведение).
+    func backtab() -> Bool {
+        guard let tab, let list = DocListEdit.backtab(selectedUnits, model: model, rendering: rendering, source: tab.text) else { return false }
+        perform(list)
+        return true
     }
 
     /// Серия набора для склейки отмены: куда, что набрано, ревизия исходника после последнего символа, когда.
@@ -611,6 +686,7 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     package nonisolated func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,
                               toCharacterRange new: NSRange) -> NSRange {
         MainActor.assumeIsolated {
+            if let moved = DocListEdit.caretOutsideNumber(new, from: old, map: rendering.map) { return moved }
             guard new.length == 0, new.location > 0, new.location < rendering.map.count,
                   rendering.map.kind(at: new.location - 1) == .field, rendering.map.kind(at: new.location) == .field,
                   rendering.map.range(at: new.location - 1) == rendering.map.range(at: new.location) else { return new }
@@ -671,13 +747,30 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     /// Страница, раздел и свойства у курсора — строке состояния и панели форматирования.
     package func updateStatus() {
         let selection = textViews.first?.selectedRange() ?? NSRange(location: 0, length: 0)
-        if let view = textView(forUnit: selection.location), let page = view.page,
+        // Правка колонтитула: страница и раздел — те, где эта правка, а не те, где курсор основного текста.
+        if let page = DocFormatter.existing(for: self)?.headerSession?.page,
+           let index = pagesView.pages.firstIndex(where: { $0 === page }) {
+            if currentPage != index + 1 { currentPage = index + 1 }
+            if currentSection != page.section + 1 { currentSection = page.section + 1 }
+        } else if let view = textView(forUnit: selection.location), let page = view.page,
            let index = pagesView.pages.firstIndex(where: { $0 === page }) {
             if currentPage != index + 1 { currentPage = index + 1 }
             if currentSection != page.section + 1 { currentSection = page.section + 1 }
         }
+        let language = languageAtCaret(selection)
+        if language != languageName { languageName = language }
         let info = selectionInfo(selection)
         if info != self.selection { self.selection = info }
+        if tab?.mode == .document { tab?.dollars.caretMoved(to: sourceSelection) }  // статус «правится» в панели «$»
+    }
+
+    private func languageAtCaret(_ selection: NSRange) -> String? {
+        guard let tab, storage.length > 0 else { return nil }
+        let unit = min(selection.location, storage.length)
+        let location = rendering.map.sourceLocation(beforeUnit: unit)
+        let paragraph = rendering.paragraph(atUnit: min(unit, max(0, storage.length - 1))).flatMap { model.body.paragraphs[safe: $0] }
+        let start = paragraph?.regionStart ?? max(0, location - 2000)
+        return DocLanguage.name(lcid: DocLanguage.lcid(atSource: location, from: start, in: tab.text))
     }
 
     private func selectionInfo(_ selection: NSRange) -> DocSelectionInfo {

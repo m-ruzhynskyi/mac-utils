@@ -123,6 +123,9 @@ package final class ScreenShare: NSObject, ObservableObject {
     /// Повтор перехвата после ошибки — один раз на новую обстановку (выход, набор программ), а не на каждую пересборку.
     private var tapRetry = ShareTapRetry()
     private var heartbeat: Timer?
+    private var heartbeatWatch = ShareHeartbeatWatch()
+    /// Страховка переподключения (см. `ShareHostReconnect.watchdogLimit`).
+    private var reconnectWatchdog: Timer?
     private var sender: FrameSender?
     private var hud: NSPanel?
 
@@ -364,7 +367,8 @@ package final class ScreenShare: NSObject, ObservableObject {
             ShareAudioProcess(object: 0, pid: $0.processID, bundleID: $0.bundleIdentifier,
                               ownerBundleID: ShareAudioExclusion.ownerBundleID(of: $0.processID))
         }
-        let excluded = ShareAudioExclusion.excluded(processes, muted: ShareAudioExclusion.currentMuted,
+        // Те же правила, что у перехвата: только отмеченные программы и сам Mac Utils.
+        let excluded = ShareAudioExclusion.excluded(processes, muted: ShareAudioExclusion.mutedApps(),
                                                     ownPID: ProcessInfo.processInfo.processIdentifier)
         let pids = Set(excluded.map(\.pid))
         let filter = SCContentFilter(display: display, excludingApplications: content.applications.filter { pids.contains($0.processID) },
@@ -374,7 +378,7 @@ package final class ScreenShare: NSObject, ObservableObject {
 
     /// Исключаемые объекты Core Audio для перехвата.
     private static func tapExclusion() -> [ShareAudioProcess] {
-        ShareAudioExclusion.excluded(ShareAudioExclusion.audioProcesses(), muted: ShareAudioExclusion.currentMuted,
+        ShareAudioExclusion.excluded(ShareAudioExclusion.audioProcesses(), muted: ShareAudioExclusion.mutedApps(),
                                      ownPID: ProcessInfo.processInfo.processIdentifier)
     }
 
@@ -392,8 +396,8 @@ package final class ScreenShare: NSObject, ObservableObject {
         return config
     }
 
-    /// Список заглушённых изменился, программа запустилась или закрылась, процесс открыл звук (начался звонок) —
-    /// пересобираем список исключённых.
+    /// Список заглушённых изменился, программа запустилась или закрылась, процесс открыл звук (помощник отмеченной
+    /// программы) — пересобираем список исключённых.
     package func refreshAudioFilter() {
         // Откатились на SCK из-за ошибки перехвата — пробуем перехват снова, когда сменился выход или набор программ.
         if #available(macOS 14.2, *), audioTap == nil, let stream = audioStream, let sender,
@@ -455,6 +459,7 @@ package final class ScreenShare: NSObject, ObservableObject {
             guard fallbackAudioGate.mayAttach(sameBroadcast: self.sender === sender) else { try? await stream.stopCapture(); return }
             audioStream = stream
         }
+        audioWatcher?.stop()
         audioWatcher = ShareAudioWatcher { ScreenShare.shared.refreshAudioFilter() }
         // Свой процесс появляется в Core Audio только с началом перехвата — сразу и его в исключённые.
         refreshAudioFilter()
@@ -512,11 +517,28 @@ package final class ScreenShare: NSObject, ObservableObject {
                     }
                     return
                 }
-                // Часы агрегата не пошли — ещё раз на встроенном выходе, потом уже запасной способ.
-                if report.verdict == .noCallbacks, (try? tap.retryWithBuiltInClock()) == true {
-                    Log.capture.error("Звук трансляции: нет колбэков — перехват пересобран на встроенном выходе")
-                    share.watchTapStart(tap)
-                    return
+                // Глобальный перехват не дал звука — перехват потока выхода (его формат совпадает с часами), потом
+                // встроенный выход как часы, потом уже запасной способ.
+                let builtIn = !tap.builtInClock && ShareTapClock.builtInOutput().map { $0 != tap.clockDevice } == true
+                switch ShareTapMode.recovery(verdict: report.verdict, mode: tap.mode, clockIsOutput: tap.clockIsOutput,
+                                             deviceTried: tap.deviceAfterFailure, builtInAvailable: builtIn) {
+                case .deviceTap:
+                    do {
+                        try tap.retryWithDeviceTap()
+                        Log.capture.error("Звук трансляции: \(report.verdict == .noCallbacks ? "нет колбэков" : "нет данных", privacy: .public) — перехват пересобран на потоке выхода")
+                        share.watchTapStart(tap)
+                        return
+                    } catch {
+                        Log.capture.error("Звук трансляции: перехват потока выхода не запустился — \(error.localizedDescription, privacy: .public)")
+                    }
+                case .builtInClock:
+                    if (try? tap.retryWithBuiltInClock()) == true {
+                        Log.capture.error("Звук трансляции: нет колбэков — перехват пересобран на встроенном выходе")
+                        share.watchTapStart(tap)
+                        return
+                    }
+                case .fallBack:
+                    break
                 }
                 Log.capture.error("Звук трансляции: перехват не работает (\(report.verdict == .noCallbacks ? "нет колбэков" : "нет данных", privacy: .public)) — переходим на ScreenCaptureKit")
                 share.tapRetry.failed(in: ShareTapRetry.situation())
@@ -552,8 +574,7 @@ package final class ScreenShare: NSObject, ObservableObject {
     private func showAudioFallback() {
         guard !audioFallbackShown else { return }
         audioFallbackShown = true
-        Toast.show(ShareAudioFallback.message(muteCalls: UserDefaults.standard.bool(forKey: Pref.shareMuteCalls),
-                                              mutedApps: (UserDefaults.standard.stringArray(forKey: Pref.shareMutedApps) ?? []).count),
+        Toast.show(ShareAudioFallback.message(mutedApps: ShareAudioExclusion.mutedApps().count),
                    symbol: "exclamationmark.triangle.fill", tint: .orange)
     }
 
@@ -977,21 +998,46 @@ package final class ScreenShare: NSObject, ObservableObject {
 
     private func startHeartbeat(_ socket: URLSessionWebSocketTask) {
         heartbeat?.invalidate()
-        let timer = Timer(timeInterval: 20, repeats: true) { [weak self] _ in
-            socket.send(.string(#"{"type":"heartbeat"}"#)) { error in
-                guard let error else { return }
-                Log.capture.error("Трансляция: heartbeat не ушёл: \(error.localizedDescription, privacy: .public) close=\(socket.closeCode.rawValue)")
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        guard let self else { return }
-                        self.connectionLost(socket)
-                    }
-                }
+        heartbeatWatch = ShareHeartbeatWatch()
+        // Таймер — в главном цикле событий: тик выполняется на главном потоке и решает сам, не через главную очередь.
+        let timer = Timer(timeInterval: 20, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { return timer.invalidate() }
+                self.heartbeatTick(socket, timer: timer)
             }
         }
         timer.tolerance = 2
         RunLoop.main.add(timer, forMode: .common)
         heartbeat = timer
+    }
+
+    private func heartbeatTick(_ socket: URLSessionWebSocketTask, timer: Timer) {
+        // Таймер чужого (заменённого) сокета или закончившегося эфира: просто гасим.
+        guard heartbeat === timer, isLive, self.socket === socket || self.socket == nil else {
+            timer.invalidate()
+            if heartbeat === timer { heartbeat = nil }
+            return
+        }
+        switch heartbeatWatch.tick(socketAlive: socket.state == .running) {
+        case .send:
+            socket.send(.string(#"{"type":"heartbeat"}"#)) { [weak self] error in
+                guard let error else { return }
+                Log.capture.error("Трансляция: heartbeat не ушёл: \(error.localizedDescription, privacy: .public) close=\(socket.closeCode.rawValue)")
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard let self, self.heartbeat === timer else { return }
+                        self.heartbeatWatch.sendFailed()
+                        self.connectionLost(socket)
+                    }
+                }
+            }
+        case .reconnect:
+            Log.capture.error("Трансляция: сокет мёртв (state=\(socket.state.rawValue) close=\(socket.closeCode.rawValue)) — переподключаюсь")
+            connectionLost(socket)
+        case .end:
+            Log.capture.error("Трансляция: сокет мёртв \(ShareHeartbeatWatch.failureLimit) тика подряд, переподключение не началось — эфир завершён")
+            stop(reason: "Связь с сервером прервалась")
+        }
     }
 
     private func listen(_ socket: URLSessionWebSocketTask) {
@@ -1136,6 +1182,7 @@ package final class ScreenShare: NSObject, ObservableObject {
         socket.cancel(with: .goingAway, reason: nil)
         self.socket = nil
         Log.capture.info("Трансляция: переподключаюсь")
+        armReconnectWatchdog()
         Task {
             for delay in ShareHostReconnect.delays {
                 try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
@@ -1149,6 +1196,7 @@ package final class ScreenShare: NSObject, ObservableObject {
                     startHeartbeat(fresh)
                     sender?.resendLast()
                     reconnecting = false
+                    disarmReconnectWatchdog()
                     announceDisplays()
                     Log.capture.info("Трансляция: переподключено")
                     return
@@ -1167,6 +1215,27 @@ package final class ScreenShare: NSObject, ObservableObject {
         }
     }
 
+    /// Таймер цикла событий, а не задача: срабатывает, даже если задача переподключения зависла или не запустилась.
+    private func armReconnectWatchdog() {
+        disarmReconnectWatchdog()
+        let timer = Timer(timeInterval: ShareHostReconnect.watchdogLimit, repeats: false) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self, self.reconnectWatchdog === timer else { return }
+                self.reconnectWatchdog = nil
+                guard self.isLive, self.reconnecting else { return }
+                Log.capture.error("Трансляция: переподключение не закончилось за \(Int(ShareHostReconnect.watchdogLimit)) с — эфир завершён")
+                self.stop(reason: "Связь с сервером прервалась")
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        reconnectWatchdog = timer
+    }
+
+    private func disarmReconnectWatchdog() {
+        reconnectWatchdog?.invalidate()
+        reconnectWatchdog = nil
+    }
+
     /// Для проверки: оборвать связь, как при сбое сети (macutils://share-drop).
     package func simulateDrop() {
         socket?.cancel(with: .goingAway, reason: nil)
@@ -1175,6 +1244,7 @@ package final class ScreenShare: NSObject, ObservableObject {
     package func stop(reason: String? = nil) {
         attempts.cancel()
         reconnecting = false
+        disarmReconnectWatchdog()
         watchers = []
         audience = []
         if ShareGame.shared.peer != "host" { ShareGame.shared.peerGone() }
@@ -2632,7 +2702,6 @@ package struct ScreenSharePage: View {
     @AppStorage(Pref.shareServer) private var server = ""
     @AppStorage(Pref.shareAudio) private var shareAudio = true
     @AppStorage(Pref.shareName) private var shareName = ""
-    @AppStorage(Pref.shareMuteCalls) private var muteCalls = false
     @AppStorage(Pref.shareAllowMarks) private var allowMarks = true
     @AppStorage(Pref.shareAllowMonitorSwitch) private var allowMonitorSwitch = false
     @State private var code = ""
@@ -2722,15 +2791,9 @@ package struct ScreenSharePage: View {
         GroupLabel("Звук")
         ListCard {
             ToggleRow("Передавать звук системы",
-                      subtitle: "Зрители слышат то, что играет на Mac (видео, музыку, звонок). Микрофон не передаётся.",
+                      subtitle: "Зрители слышат всё, что играет на Mac: видео, музыку и звонки (UniTalk, Discord, Telegram…), кроме программ, отмеченных ниже. Микрофон не передаётся.",
                       systemImage: "speaker.wave.2", isOn: $shareAudio)
-            if shareAudio {
-                ToggleRow("Не передавать звонки",
-                          subtitle: "Звук звонков (Discord, Telegram, Zoom, FaceTime…) рекомендуется заглушить: иначе собеседник, который смотрит трансляцию, слышит сам себя.",
-                          systemImage: "phone.down", isOn: $muteCalls)
-            }
         }
-        .onChange(of: muteCalls) { share.refreshAudioFilter() }
         if shareAudio { MutedAppsList(demo: demo) }
 
         GroupLabel("Для собеседника на Windows")
@@ -3069,6 +3132,14 @@ package enum ShareHostReconnect {
     package static let quick: [UInt64] = [1, 2, 3, 5, 8, 10, 15]
     package static let slow: [UInt64] = Array(repeating: 30, count: 20)
     package static var delays: [UInt64] { quick + slow }
+    /// Сколько секунд отводится на одну попытку сверх паузы (рукопожатие висит не дольше системных 60 с).
+    package static let attemptAllowance: UInt64 = 60
+
+    /// Жёсткий предел переподключения ведущего: все паузы и попытки плюс запас. Таймер цикла событий завершает
+    /// эфир, если переподключение к этому времени так и не закончилось (задача зависла или не запустилась).
+    package static var watchdogLimit: TimeInterval {
+        TimeInterval(delays.reduce(0, +) + UInt64(delays.count) * attemptAllowance + 60)
+    }
 }
 
 /// Проигрывание звука трансляции у зрителя.
@@ -3267,7 +3338,8 @@ private final class Picker: NSObject, SCContentSharingPickerObserver {
     }
 }
 
-/// «Не передавать звук этих программ» — например, созвон, чтобы собеседники не слышали себя дважды.
+/// «Не передавать звук этих программ» — единственное, что не идёт зрителям (кроме самого Mac Utils): звонки и
+/// остальной звук системы передаются, пока программу здесь не отметили.
 /// Заглушённая программа — красный чип (как в окне зрителя и на Windows).
 private struct MutedAppsList: View {
     package var demo = false

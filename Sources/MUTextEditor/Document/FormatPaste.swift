@@ -76,6 +76,10 @@ extension DocFormatter {
             case .size(let halfPoints): differs = props.halfPoints != halfPoints
             case .font(let name): differs = info.fontName != name && FontSubstitution.baseName(info.fontName) != name
             case .color(let color): differs = (controller.model.color(props.color) ?? RTFColor(red: 0, green: 0, blue: 0)) != (color ?? RTFColor(red: 0, green: 0, blue: 0))
+            case .vertical(let vertical): differs = props.vertical != vertical
+            case .smallCaps(let on): differs = props.smallCaps != on
+            case .caps(let on): differs = props.caps != on
+            case .hidden(let on): differs = props.hidden != on
             case .highlight, .clear: differs = false
             }
             if differs {

@@ -121,8 +121,8 @@ package enum Pref {
     package static let shareHistory = "shareHistory"
     /// Программы, чей звук не идёт в трансляцию (bundle id).
     package static let shareMutedApps = "shareMutedApps"
-    /// «Не передавать звонки»: программы звонков (`ShareAudioExclusion.callApps`) заглушены для трансляции.
-    package static let shareMuteCalls = "shareMuteCalls"
+    /// Прежнее «Не передавать звонки» (`shareMuteCalls`) больше ничего не делает и не читается: звонки идут зрителям,
+    /// исключаются только программы из `shareMutedApps`. Сохранённое значение не трогаем.
     /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.
     package static let cheatSheetSticky = "cheatSheetSticky"
 
@@ -195,6 +195,8 @@ package enum Pref {
     /// Вид: невидимые символы и подсветка парных скобок.
     package static let editorInvisibles = "editorInvisibles"
     package static let editorBrackets = "editorBrackets"
+    /// «Документ»: автозамена «--» → «—» и кавычек в «ёлочки» (по умолчанию выключена).
+    package static let docAutocorrect = "docAutocorrect"
     /// Ширина табуляции в пробелах (табы ↔ пробелы, отступ таба на экране).
     package static let editorTabWidth = "editorTabWidth"
     /// Поиск в папке: последняя папка и маска имён.
@@ -265,7 +267,6 @@ package enum Pref {
             focusStrength: 0.6,
             shareAudio: true,
             shareAllowMarks: true,
-            shareMuteCalls: false,
             // Выключено, пока ведущий сам не включит: без этого зритель не видит другие его мониторы.
             shareAllowMonitorSwitch: false,
             shareServer: "https://mac-utils-relay.mako-62d.workers.dev",
@@ -327,6 +328,7 @@ package enum Pref {
             editorDollarPanel: true,
             editorInvisibles: false,
             editorBrackets: true,
+            docAutocorrect: false,
             editorTabWidth: 4,
             playerRememberPosition: true,
             playerSeekStep: 5,

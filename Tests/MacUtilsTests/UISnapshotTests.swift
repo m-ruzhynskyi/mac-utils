@@ -189,6 +189,7 @@ final class UISnapshotTests: XCTestCase {
     func testComponentsGallery() {
         bothThemes("components-gallery-settings", size: NSSize(width: 790, height: 2100), settle: 0.8) { ComponentsGallery(part: .settings) }
         bothThemes("components-gallery-surfaces", size: NSSize(width: 1000, height: 1300), settle: 0.8) { ComponentsGallery(part: .surfaces) }
+        bothThemes("components-gallery-ribbon", size: NSSize(width: 1000, height: 900), settle: 0.8) { ComponentsGallery(part: .ribbon) }
     }
 
     /// 1.6.6: «Не засыпать» — выключено и включено (демо: осталось 2 ч 15 мин), в узкой и обычной ширине.

@@ -25,6 +25,15 @@ package enum DocTextEditor {
                         source: NSString) -> Result {
         let story = story ?? model.body
         var result = Result()
+        // Пустой абзац у таблицы — удаляется целиком, как в Word (E-1).
+        if text.isEmpty, story.range == model.body.range,
+           let removal = DocTableEdit.emptyParagraphNearTable(units, model: model, map: map, source: source) {
+            result.edits = removal.edits
+            result.deletedUnits = [removal.removedUnit]
+            result.insertionUnit = removal.caretUnit
+            result.caretSource = removal.caretSource
+            return result
+        }
         let range = NSRange(location: min(units.location, map.count), length: max(0, min(NSMaxRange(units), map.count) - min(units.location, map.count)))
         var deletions: [NSRange] = []
         var fieldsDeleted = Set<Int>()
@@ -61,6 +70,11 @@ package enum DocTextEditor {
         // Ввод: куда встаёт текст и чем его записать.
         let insertion = insertionPoint(range, model: model, story: story, map: map)
         result.insertionUnit = insertion.unit
+        // Разрыв страницы в ячейке таблицы Word не ставит (E-4).
+        if text.utf16.contains(0x0C), story.paragraphs[safe: FormatEdits.firstParagraph(in: story, atOrAfter: insertion.source)]?.props.inTable == true {
+            result.refusal = "В таблице разрыв страницы не ставится — поставьте курсор вне таблицы"
+            return result
+        }
         if text.isEmpty {
             guard !deletions.isEmpty else {
                 result.refusal = range.length > 0 ? refusalReason(range, map: map) : nil
@@ -73,7 +87,8 @@ package enum DocTextEditor {
             // Пустой абзац со скрытым знаком конца: набранное иначе было бы невидимым.
             if insertion.run == nil, insertion.paragraphEnd?.endProps.hidden == true { encoded = "{\\v0 " + encoded + "}" }
             let prefix = needsDelimiter(before: insertion.source, source: source) ? " " : ""
-            var edits = deletions.map { DocEdit(range: $0, text: "") }
+            // Удалённый кусок не должен склеить управляющее слово со следующей буквой (`{\b` + `a` → `\ba`).
+            var edits = deletions.map { DocEdit(range: $0, text: delimiterAfterRemoval($0, source: source) ? " " : "") }
             // Набранное — на месте первого удалённого куска (его свойства), иначе — отдельной вставкой.
             if let index = edits.firstIndex(where: { $0.range.location == insertion.source }) {
                 edits[index].text = prefix + encoded
@@ -112,9 +127,10 @@ package enum DocTextEditor {
         for unit in range.location..<NSMaxRange(range) {
             switch map.kind(at: unit) {
             case .object: return "Рисунки и фигуры не правятся в «Документе». " + codeHint
-            case .cellEnd: return "Ячейки таблиц не удаляются в этом выпуске. " + codeHint
+            // Конец ячейки, как в Word, не удаляется и без подсказки: структура таблицы остаётся.
+            case .cellEnd: continue
             case .sectionEnd, .sectionBreak: return "Разрыв раздела не удаляется в «Документе». " + codeHint
-            case .listText: return "Номера списков правятся в следующем выпуске. " + codeHint
+            case .listText: return "Номер списка не правится как текст: ⌫ после номера снимает его. " + codeHint
             case .paragraphEnd: return "Абзацы таблицы и текста не склеиваются. " + codeHint
             default: continue
             }
@@ -136,8 +152,10 @@ package enum DocTextEditor {
         if first.props.inTable != second.props.inTable { return nil }
         if let a = first.cell, let b = second.cell, a != b { return nil }
         if first.props.inTable, first.cell == nil || second.cell == nil { return nil }
-        let start = second.regionStart, contentStart = second.contentStart
+        let start = second.regionStart, contentStart = second.textStart
         var tokens: [NSRange] = []
+        // Готовый номер второго абзаца (`{\listtext}`) уходит вместе с его свойствами.
+        if let group = second.listTextGroup, group.location >= start, NSMaxRange(group) <= contentStart { tokens.append(group) }
         if let pard = second.pard, pard.location >= start, NSMaxRange(pard) <= contentStart { tokens.append(pard) }
         for token in second.propTokens.values where token.location >= start && NSMaxRange(token) <= contentStart && token.location != end.location {
             tokens.append(token)
@@ -168,10 +186,14 @@ package enum DocTextEditor {
             unit = range.location
         }
         let count = map.count
+        // Перед номером списка набирать нельзя (номер не правится) — набранное встаёт за ним, в начало текста пункта.
+        while unit < count, map.kind(at: unit) == .listText { unit += 1 }
         // Курсор перед разрывом раздела или страницы в начале абзаца: набранное — после разрыва, в начало абзаца.
         while unit < count - 1, [.sectionBreak, .pageBreak].contains(map.kind(at: unit)), unit == 0 || !map.kind(at: unit - 1).isEditable {
             unit += 1
         }
+        // После последнего ¶ курсора в Word нет: набранное — в конец последнего абзаца, перед его концом.
+        if unit >= count, count > 0, [.paragraphEnd, .storyEnd, .sectionEnd].contains(map.kind(at: count - 1)) { unit = count - 1 }
         let previous = unit > 0 ? map.kind(at: unit - 1) : nil
         let next = unit < count ? map.kind(at: unit) : nil
         // Внутри или на границе неделимого поля — снаружи поля.
@@ -240,6 +262,7 @@ package enum DocTextEditor {
             case 0x0A, 0x0D, 0x2029: out += "\\par "
             case 0x2028, 0x0B: out += "\\line "
             case 0x09: out += "\\tab "
+            case 0x0C: out += "\\page "
             case 0x5C: out += "\\\\"
             case 0x7B: out += "\\{"
             case 0x7D: out += "\\}"

@@ -9,6 +9,8 @@ package struct ComponentsGallery: View {
         case settings
         /// Поповер, первый запуск, пустые состояния, плавающие панели, таблетки, кнопки во всех состояниях.
         case surfaces
+        /// Лента «Документа»: вкладки, группы, плитки-кнопки, поля-выпадашки, контекстные синие вкладки, свёрнутая лента.
+        case ribbon
     }
 
     package var part: Part = .settings
@@ -20,6 +22,9 @@ package struct ComponentsGallery: View {
     @State private var format = "mp4"
     @State private var speed = 1.4
     @State private var switcher = true
+    @State private var ribbonTab = "home"
+    @State private var tableTab = "table"
+    @State private var headerTab = "header"
 
     package var body: some View {
         ScrollView {
@@ -27,6 +32,7 @@ package struct ComponentsGallery: View {
                 switch part {
                 case .settings: settings
                 case .surfaces: surfaces
+                case .ribbon: ribbon
                 }
             }
             .padding(.vertical, DS.Space.pageVertical)
@@ -214,6 +220,120 @@ package struct ComponentsGallery: View {
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
             }
         }
+    }
+
+    // MARK: - Лента
+
+    private static let ribbonTabs = [DS.RibbonTabItem("home", "Главная"), DS.RibbonTabItem("insert", "Вставка"),
+                                     DS.RibbonTabItem("layout", "Макет"), DS.RibbonTabItem("view", "Вид")]
+
+    @ViewBuilder private var ribbon: some View {
+        GroupLabel("Главная — обычные вкладки")
+        DS.Ribbon(tabs: Self.ribbonTabs, selection: $ribbonTab) {
+            DS.RibbonGroup("Буфер") {
+                DS.RibbonButton("Вставить", systemImage: "doc.on.clipboard", size: .large, shortcut: "⌘V") {}
+                VStack(spacing: DS.Space.xxs) {
+                    DS.RibbonButton("Отменить", systemImage: "arrow.uturn.backward", shortcut: "⌘Z") {}
+                    DS.RibbonButton("Повторить", systemImage: "arrow.uturn.forward", shortcut: "⇧⌘Z") {}.disabled(true)
+                }
+            }
+            DS.RibbonGroup("Шрифт") {
+                VStack(alignment: .leading, spacing: DS.Space.xs) {
+                    HStack(spacing: DS.Space.xs) {
+                        DS.RibbonField("Шрифт", value: "Times New Roman", width: 172) { Button("Arial") {}; Button("Times New Roman") {} }
+                        DS.RibbonField("Размер", value: "12") { Button("11") {}; Button("12") {} }
+                    }
+                    HStack(spacing: DS.Space.xxs) {
+                        DS.RibbonButton("Полужирный", glyph: "Ж", isOn: true, shortcut: "⌘B") {}
+                        DS.RibbonButton("Курсив", glyph: "К", shortcut: "⌘I") {}
+                        DS.RibbonButton("Подчёркнутый", glyph: "Ч", shortcut: "⌘U") {}
+                        DS.RibbonButton("Зачёркнутый", systemImage: "strikethrough") {}
+                        DS.RibbonButton("Увеличить размер", glyph: "A▲", shortcut: "⇧⌘>") {}
+                    }
+                }
+            }
+            DS.RibbonGroup("Абзац") {
+                VStack(alignment: .leading, spacing: DS.Space.xs) {
+                    HStack(spacing: DS.Space.xxs) {
+                        DS.RibbonButton("Маркированный список", systemImage: "list.bullet") {}
+                        DS.RibbonButton("Нумерованный список", systemImage: "list.number") {}
+                        DS.RibbonField("Интервал", value: "1,15") { Button("1,0") {}; Button("1,15") {} }
+                    }
+                    HStack(spacing: DS.Space.xxs) {
+                        DS.RibbonButton("По левому краю", systemImage: "text.alignleft", isOn: true) {}
+                        DS.RibbonButton("По центру", systemImage: "text.aligncenter") {}
+                        DS.RibbonButton("По правому краю", systemImage: "text.alignright") {}
+                        DS.RibbonButton("По ширине", systemImage: "text.justify", shortcut: "⌘J") {}
+                    }
+                }
+            }
+            DS.RibbonGroup("Правка", last: true) {
+                DS.RibbonButton("Найти", systemImage: "magnifyingglass", size: .large, shortcut: "⌘F") {}
+                DS.RibbonButton("Знаки", systemImage: "paragraphsign", size: .large, isOn: true, shortcut: "⌘8") {}
+            }
+        }
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+
+        GroupLabel("Контекстная вкладка «Таблица» (синяя)")
+        DS.Ribbon(tabs: Self.ribbonTabs + [DS.RibbonTabItem("table", "Таблица", contextual: true)], selection: $tableTab) {
+            DS.RibbonGroup("Строки и столбцы") {
+                DS.RibbonButton("Удалить", systemImage: "trash", size: .large) {}
+                VStack(spacing: DS.Space.xxs) {
+                    DS.RibbonButton("Вставить выше", glyph: "Выше", shortcut: "⌥⌘↑") {}
+                    DS.RibbonButton("Вставить ниже", glyph: "Ниже", shortcut: "⌥⌘↓") {}
+                }
+            }
+            DS.RibbonGroup("Объединение") {
+                DS.RibbonButton("Объединить", systemImage: "rectangle.split.2x1", size: .large) {}
+                DS.RibbonButton("Разбить", systemImage: "rectangle.split.3x1", size: .large) {}.disabled(true)
+            }
+            DS.RibbonGroup("Границы и заливка", last: true) {
+                DS.RibbonField("Границы", value: "Все границы") { Button("Все границы") {}; Button("Нет") {} }
+                DS.RibbonButton("Заголовок", glyph: "Заголовок", isOn: true) {}
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+
+        GroupLabel("Контекстная «Колонтитулы» и свёрнутая лента")
+        DS.Ribbon(tabs: Self.ribbonTabs + [DS.RibbonTabItem("header", "Колонтитулы", contextual: true)], selection: $headerTab) {
+            DS.RibbonGroup("Вставить") {
+                DS.RibbonButton("Номер страницы", systemImage: "number", size: .large) {}
+                DS.RibbonButton("Всего страниц", systemImage: "doc.on.doc", size: .large) {}
+                DS.RibbonButton("Дата", systemImage: "calendar", size: .large) {}
+            }
+            DS.RibbonGroup("Параметры") {
+                VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                    DS.RibbonButton("Особый первой", glyph: "Особый первой", isOn: true) {}
+                    DS.RibbonButton("Как в предыдущем", glyph: "Как в предыдущем") {}
+                }
+            }
+            DS.RibbonGroup("Закрыть", last: true) {
+                DS.RibbonButton("Закрыть колонтитулы", systemImage: "xmark", size: .large, shortcut: "Esc") {}
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+        DS.Ribbon(tabs: Self.ribbonTabs, selection: .constant("home"), collapsed: true) { EmptyView() }
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
+
+        GroupLabel("Состояния плиток")
+        HStack(alignment: .center, spacing: DS.Space.s) {
+            DS.RibbonButton("Малая", systemImage: "bold") {}
+            DS.RibbonButton("Малая включена", systemImage: "bold", isOn: true) {}
+            DS.RibbonButton("Малая выключена", systemImage: "bold") {}.disabled(true)
+            DS.RibbonButton("Большая", systemImage: "tablecells", size: .large) {}
+            DS.RibbonButton("Включена", systemImage: "tablecells", size: .large, isOn: true) {}
+            DS.RibbonButton("Выключена", systemImage: "tablecells", size: .large) {}.disabled(true)
+            DS.RibbonField("Поле", value: "Обычный") { Button("Обычный") {} }
+            DS.RibbonField("Поле выключено", value: "Обычный") { Button("Обычный") {} }.disabled(true)
+        }
+        .padding(DS.Space.m)
+        .background(Color.dsPanel, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).strokeBorder(Color.dsLine, lineWidth: 1))
     }
 
     private static func name(_ tone: DS.Tone) -> String {

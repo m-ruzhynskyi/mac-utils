@@ -25,6 +25,17 @@ package struct DollarEntry: Identifiable, Equatable {
     package var isHidden: Bool { mark.hidden }
 }
 
+/// Статус знака в строке панели (макет «★3»): значение есть ✓ / пусто / правится (курсор в значении).
+package enum DollarStatus: Equatable {
+    case filled, empty, editing
+
+    /// `value` — значение, как его показывает панель (в «Документе» — `visibleValue`), чтобы статус и текст строки совпадали.
+    package static func of(value: String, editing: Bool) -> DollarStatus {
+        if editing { return .editing }
+        return value.allSatisfy(\.isWhitespace) ? .empty : .filled
+    }
+}
+
 /// «Пропускать первые N»: одна общая настройка для всех документов (по умолчанию включено, N = 3).
 package enum DollarSkip {
     package static let maxCount = 999
@@ -55,6 +66,12 @@ package final class DollarPanelModel: ObservableObject {
     @Published package var unbalancedAfterRemoval: Int?
     /// Скан ещё идёт (первый раз после открытия).
     @Published package private(set) var scanning = false
+    /// Знак, в значении которого стоит курсор (смещение `$`): строка панели — «правится…». Ставит вкладка (`caretMoved`).
+    @Published package private(set) var editing: Int?
+    /// Последнее выделение исходника: после пересчёта списка «правится» ищется заново (смещения могли сдвинуться).
+    private var caret: NSRange?
+    /// Знак, открытый в поповере правки (V2): «правится» он, где бы ни стоял курсор.
+    private var pinned: Int?
 
     /// Вызывается, когда список готов (для подсветки текста).
     package var onUpdate: (() -> Void)?
@@ -156,7 +173,46 @@ package final class DollarPanelModel: ObservableObject {
         self.entries = entries
         scanning = false
         if let selected, !entries.contains(where: { $0.mark.dollar == selected }) { self.selected = nil }
+        if let caret { caretMoved(to: caret) }
         onUpdate?()
+    }
+
+    // MARK: - Статусы
+
+    /// Курсор или выделение исходника сдвинулись (в «Коде» или в «Документе»): какой знак сейчас правится.
+    package func caretMoved(to selection: NSRange) {
+        caret = selection
+        let next = pinned ?? entry(containing: selection)?.mark.dollar
+        if next != editing { editing = next }
+    }
+
+    /// Поповер правки открыт на знаке (`nil` — закрыт): строка панели — «правится…».
+    package func pinEditing(_ dollar: Int?) {
+        pinned = dollar
+        let next = dollar ?? caret.flatMap { entry(containing: $0)?.mark.dollar }
+        if next != editing { editing = next }
+    }
+
+    /// Знак страницы, в значении которого стоит курсор: сразу после `$`, внутри значения или сразу за ним
+    /// (набор там дописывает значение). Выделение — если задевает значение. Служебные знаки RTF не правятся.
+    package func entry(containing selection: NSRange) -> DollarEntry? {
+        // Последний знак, у которого `$` левее конца выделения (двоичный поиск); знаки не пересекаются, так что раньше — только он.
+        let index = count(before: NSMaxRange(selection))
+        guard index > 0 else { return nil }
+        let entry = entries[index - 1]
+        guard selection.location <= NSMaxRange(entry.mark.whole), !entry.isHidden else { return nil }
+        return entry
+    }
+
+    package func status(of entry: DollarEntry, value: String) -> DollarStatus {
+        DollarStatus.of(value: value, editing: editing == entry.mark.dollar)
+    }
+
+    /// «Заполнено N из M» для строки состояния: среди подсвеченных знаков (без пропущенных и служебных) — с непустым значением.
+    /// `value` — то же значение, что в строке панели (`EditorTab.dollarValue`), поэтому счётчик совпадает со статусами строк.
+    package func fill(value: (DollarEntry) -> String) -> (filled: Int, total: Int) {
+        let active = split.active
+        return (active.reduce(0) { $0 + (value($1).allSatisfy(\.isWhitespace) ? 0 : 1) }, active.count)
     }
 
     package var currentGeneration: Int { generation }

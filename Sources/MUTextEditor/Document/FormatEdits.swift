@@ -37,6 +37,10 @@ package enum CharChange: Equatable {
     case highlight(RTFColor?)
     /// Шрифт и размер документа по умолчанию, без начертаний.
     case clear
+    /// Надстрочный / подстрочный / обычный (`\super`, `\sub`, `\nosupersub`) — E-4.
+    case vertical(RTFVertical)
+    /// Капитель (`\scaps`), все прописные (`\caps`), скрытый (`\v`).
+    case smallCaps(Bool), caps(Bool), hidden(Bool)
 
     package var actionName: String {
         switch self {
@@ -49,6 +53,15 @@ package enum CharChange: Equatable {
         case .color: return "Цвет текста"
         case .highlight: return "Цвет выделения"
         case .clear: return "Очистить формат"
+        case .vertical(let vertical):
+            switch vertical {
+            case .superscript: return "Надстрочный"
+            case .subscript: return "Подстрочный"
+            case .normal: return "Обычное положение"
+            }
+        case .smallCaps: return "Капитель"
+        case .caps: return "Все прописные"
+        case .hidden: return "Скрытый"
         }
     }
 }
@@ -65,11 +78,20 @@ package struct ParaChange: Equatable {
     package var lineSpacing: (value: Int, multiple: Bool)?
     /// Табуляции с линейки (`FormatEdits.tabs`).
     package var tabs: TabEdit?
+    /// Список `\lsN` (0 — не пункт списка) и уровень `\ilvlN` (`DocListEdit`).
+    package var list: Int?
+    package var listLevel: Int?
+    /// Флаги `\keepn`, `\keep`, `\pagebb` — пишутся своей командой (`FormatEdits.flag`), не через `settings`.
+    package var keepNext: Bool?
+    package var keepTogether: Bool?
+    package var pageBreakBefore: Bool?
 
     package static func == (lhs: ParaChange, rhs: ParaChange) -> Bool {
         lhs.tabs == rhs.tabs && lhs.alignment == rhs.alignment && lhs.left == rhs.left && lhs.right == rhs.right && lhs.firstLine == rhs.firstLine
             && lhs.spaceBefore == rhs.spaceBefore && lhs.spaceAfter == rhs.spaceAfter
             && lhs.lineSpacing?.value == rhs.lineSpacing?.value && lhs.lineSpacing?.multiple == rhs.lineSpacing?.multiple
+            && lhs.list == rhs.list && lhs.listLevel == rhs.listLevel
+            && lhs.keepNext == rhs.keepNext && lhs.keepTogether == rhs.keepTogether && lhs.pageBreakBefore == rhs.pageBreakBefore
     }
 
     /// «Очистить формат» для абзаца: без отступов и интервалов, по левому краю. Табуляции, рамки и стиль не трогаются.
@@ -77,7 +99,7 @@ package struct ParaChange: Equatable {
 
     /// Поля абзаца, которые команда пишет кодами: имя — как в `RTFParagraph.propTokens`.
     package enum Field: String, CaseIterable {
-        case align, li, lin, ri, rin, fi, sb, sa, sl, slmult
+        case align, li, lin, ri, rin, fi, sb, sa, sl, slmult, ls, ilvl
     }
 
     package var settings: [(Field, Int)] {
@@ -89,6 +111,8 @@ package struct ParaChange: Equatable {
         if let spaceBefore { result.append((.sb, spaceBefore)) }
         if let spaceAfter { result.append((.sa, spaceAfter)) }
         if let lineSpacing { result += [(.sl, lineSpacing.value), (.slmult, lineSpacing.multiple ? 1 : 0)] }
+        if let list { result.append((.ls, list)) }
+        if let listLevel { result.append((.ilvl, listLevel)) }
         return result
     }
 
@@ -104,6 +128,8 @@ package struct ParaChange: Equatable {
         case .sa: return props.spaceAfter
         case .sl: return props.lineSpacing
         case .slmult: return props.lineMultiple ? 1 : 0
+        case .ls: return props.list
+        case .ilvl: return props.listLevel
         }
     }
 
@@ -126,6 +152,11 @@ package struct ParaChange: Equatable {
             props.lineSpacing = lineSpacing.value
             props.lineMultiple = lineSpacing.multiple
         }
+        if let list { props.list = list }
+        if let listLevel { props.listLevel = listLevel }
+        if let keepNext { props.keepNext = keepNext }
+        if let keepTogether { props.keepTogether = keepTogether }
+        if let pageBreakBefore { props.pageBreakBefore = pageBreakBefore }
         switch tabs {
         case .add(let stop): props.tabs.append(stop)
         case .move(let index, let position) where props.tabs.indices.contains(index): props.tabs[index].position = position
@@ -371,6 +402,10 @@ package enum FormatEdits {
         case .color: return ["cf"]
         case .highlight: return ["highlight"]
         case .clear: return []
+        case .vertical: return ["super", "sub", "nosupersub"]
+        case .smallCaps: return ["scaps"]
+        case .caps: return ["caps"]
+        case .hidden: return ["v"]
         }
     }
 
@@ -393,6 +428,15 @@ package enum FormatEdits {
             guard let color else { return "\\highlight0" }
             guard let index = tables.colorIndex(color) else { return nil }
             return "\\highlight\(index)"
+        case .vertical(let vertical):
+            switch vertical {
+            case .superscript: return "\\super"
+            case .subscript: return "\\sub"
+            case .normal: return "\\nosupersub"
+            }
+        case .smallCaps(let on): return on ? "\\scaps" : "\\scaps0"
+        case .caps(let on): return on ? "\\caps" : "\\caps0"
+        case .hidden(let on): return on ? "\\v" : "\\v0"
         case .clear:
             // `\plain` ставит шрифт `\deff`; если у него другая кодировка `\'hh` — тот же шрифт с кодировкой куска.
             let defaultFont = model.font(nil)

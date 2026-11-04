@@ -211,4 +211,96 @@ final class DocWordLayoutTests: XCTestCase {
         // Правка по-прежнему в исходнике: показ заглавными его не меняет.
         XCTAssertTrue(document.tab?.text.contains("upper words") == true)
     }
+
+    /// `\trrh` > 0 — строка не ниже заданного (у `NSTextTable` `minimumHeight` блока не действует), и в ячейке из нескольких
+    /// абзацев высота не удваивается; в строке с вертикальным объединением высота — по тексту (гейт, .audit/doc-resume.md).
+    func testRowHeightAtLeastLikeWord() throws {
+        let row = #"\trowd\trgaph108\trleft0\trrh1000\cellx3000\cellx6000 "#
+        for cell in [#"\pard\intbl AAA\cell"#, #"\pard\intbl A1\par\pard\intbl A2\par\pard\intbl A3\cell"#] {
+            let body = #"\pard before\par "# + row + cell + #"\pard\intbl BBB\cell"# + row + #"\row "# + row
+                + #"\pard\intbl CCC\cell\pard\intbl DDD\cell"# + row + #"\row\pard after\par"#
+            let document = try open(body)
+            let top = try XCTUnwrap(lines(document, "BBB").first).minY, next = try XCTUnwrap(lines(document, "CCC").first).minY
+            XCTAssertEqual(next - top, 50, accuracy: 0.01, "\\trrh1000 = 50 pt")
+        }
+        let merged = #"\trowd\trgaph108\trleft0\trrh1000\clvmgf\cellx3000\cellx6000 "#
+        let below = #"\trowd\trgaph108\trleft0\trrh1000\clvmrg\cellx3000\cellx6000 "#
+        let body = merged + #"\pard\intbl MMM\cell\pard\intbl EEE\cell"# + merged + #"\row "# + below
+            + #"\pard\intbl \cell\pard\intbl FFF\cell"# + below + #"\row\pard after\par"#
+        let document = try open(body)
+        let top = try XCTUnwrap(lines(document, "EEE").first).minY, next = try XCTUnwrap(lines(document, "FFF").first).minY
+        XCTAssertLessThan(next - top, 50, "строка с объединением — по тексту")
+    }
+
+    /// Вложенная таблица (P-4): начинается у верха ячейки (без слияния рамок `NSTextTable` не сдвигает её на полпункта),
+    /// строка внешней с `\trrh` — своей высоты плюс полоса рамки (у Word рамка занимает место: здесь только верхняя `\brdrw10`,
+    /// половина линии — 0,24 pt); ячейка по центру выравнивается по оценке строк вложенной.
+    func testNestedTableTopAndOuterRowHeight() throws {
+        let outer = #"\trowd\trgaph108\trleft0\trrh3272\clbrdrt\brdrs\brdrw10 \cellx3000\clvertalc\clbrdrt\brdrs\brdrw10 \cellx9000 "#
+        let nprops = { (h: Int) in #"{\*\nesttableprops\trowd\trgaph28\trleft0\trrh"# + String(h) + #"\clbrdrt\brdrs\brdrw10 \cellx3000\clbrdrt\brdrs\brdrw10 \cellx6000\nestrow}{\nonesttables\par }"# }
+        let nrow = { (a: String, h: Int) in #"\pard\plain\intbl\itap2\fs20 "# + a + #"1\nestcell\pard\plain\intbl\itap2\fs20 "# + a + #"2\nestcell\pard\plain\intbl\itap2\fs20 "# + nprops(h) }
+        let top = outer.replacingOccurrences(of: #"\clvertalc"#, with: "")
+        for (row, centered) in [(top, false), (outer, true)] {
+            let body = #"\pard before\par "# + row + #"\pard\plain\intbl\itap1\fs20 LEFT\cell"# + nrow("NA", 480) + nrow("NB", 566)
+                + #"\pard\plain\intbl\itap1\fs20 \cell"# + row + #"\row "# + row + #"\pard\plain\intbl\itap1\fs20 SECOND\cell\pard\plain\intbl\itap1\fs20 X\cell"#
+                + row + #"\row\pard AFTER\par"#
+            let document = try open(body)
+            let left = try XCTUnwrap(lines(document, "LEFT").first).minY, nested = try XCTUnwrap(lines(document, "NA1").first).minY
+            let second = try XCTUnwrap(lines(document, "SECOND").first).minY
+            XCTAssertEqual(second - left, 163.6 + 0.24, accuracy: 0.05, "строка внешней — \\trrh3272 и полоса верхней рамки")
+            if centered {
+                // Содержимое: 24 + 28,3 pt вложенной и пустая строка — сдвиг по центру примерно (163,6 − ~64) / 2.
+                XCTAssertGreaterThan(nested - left, 40)
+                XCTAssertLessThan(nested - left, 60)
+            } else {
+                XCTAssertEqual(nested - left, 0, accuracy: 0.05, "вложенная — у верха ячейки (строка «точно» — без полос рамок)")
+            }
+        }
+    }
+
+    /// Интервал «Авто» (`\sbauto1`/`\saauto1`; `\sb100`/`\sa100` рядом — для старых читателей): 14 pt, у начала и конца ячейки — 0,
+    /// два «авто» подряд не складываются (f145: строки таблиц были на 5–7 pt выше Word).
+    func testAutoSpacingLikeWord() throws {
+        let row = #"\trowd\trgaph108\trleft0\cellx3000\cellx6000 "#
+        let auto = #"\pard\plain\intbl\sbauto1\saauto1\sb100\sa100\fs24 "#
+        let body = #"\pard before\par "# + row + auto + #"PA\par"# + auto + #"PB\cell\pard\plain\intbl\fs24 OTHER\cell"# + row + #"\row\pard\plain\fs24 AFTER\par"#
+        let document = try open(body)
+        let a = try XCTUnwrap(lines(document, "PA").first), b = try XCTUnwrap(lines(document, "PB").first)
+        let other = try XCTUnwrap(lines(document, "OTHER").first), after = try XCTUnwrap(lines(document, "AFTER").first)
+        XCTAssertEqual(a.minY, other.minY, accuracy: 0.05, "у начала ячейки «авто» сверху нет")
+        XCTAssertEqual(b.minY - a.minY, single(12) + 14, accuracy: 0.05, "между «авто» — 14 pt, не 28")
+        XCTAssertEqual(after.minY - b.maxY, 0, accuracy: 0.05, "у конца ячейки «авто» снизу нет")
+    }
+
+    /// Вертикаль как у Word (правила из .audit/wordcraft-eval.md): высоту строки задают её символы — крупный пробел или табуляция
+    /// строку не растят; при `\slmult` добавок множителя — под текстом; рамка ячейки занимает место в высоте строки таблицы.
+    func testLineHeightBaselineAndBorderBandLikeWord() throws {
+        let document = try open(#"\pard\plain\fs24 Small{\fs48   }text\par\pard\plain\fs24 NEXT\par\pard\plain\sl276\slmult1\fs24 MULTI\par\pard\plain\fs24 AFTER\par"#
+            + #"\trowd\trgaph108\trleft0\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx3000 \pard\plain\intbl\fs24 R1\cell\trowd\trgaph108\trleft0\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx3000\row"#
+            + #"\trowd\trgaph108\trleft0\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx3000 \pard\plain\intbl\fs24 R2\cell\trowd\trgaph108\trleft0\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx3000\row\pard END\par"#)
+        let small = try XCTUnwrap(lines(document, "Small").first), next = try XCTUnwrap(lines(document, "NEXT").first)
+        XCTAssertEqual(next.minY - small.minY, single(12), accuracy: 0.05, "пробел 24 pt строку не растит")
+        let manager = document.layoutManager
+        let multi = (document.storage.string as NSString).range(of: "MULTI").location
+        let glyph = manager.glyphIndexForCharacter(at: multi)
+        let rect = manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let font = NSFont(name: "Times New Roman", size: 12) ?? .systemFont(ofSize: 12)
+        XCTAssertEqual(rect.height, single(12) * 1.15, accuracy: 0.05)
+        XCTAssertEqual(manager.location(forGlyphAt: glyph).y, DocLineMetrics.metrics(font).above, accuracy: 0.05, "базовая линия — на ascent от верха")
+        let r1 = try XCTUnwrap(lines(document, "R1").first), r2 = try XCTUnwrap(lines(document, "R2").first)
+        XCTAssertEqual(r2.minY - r1.minY, single(12) + 0.48, accuracy: 0.05, "строка таблицы — текст и полосы рамок (по 0,24 pt)")
+    }
+
+    /// Полосы рамок не копятся по ячейкам строки: `NSTextTable` тянет каждую следующую ячейку до высоты строки, в которой
+    /// уже полоса предыдущей.
+    func testBorderBandsDoNotAddUpAcrossCells() throws {
+        let cells = (1...5).map { #"\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx\#($0 * 1500)"# }.joined()
+        func row(_ text: String) -> String {
+            #"\trowd\trgaph108\trleft0"# + cells + #"\pard\plain\intbl\fs24 "# + text + #"\cell"# + String(repeating: #"\pard\plain\intbl\fs24 \cell"#, count: 4)
+                + #"\trowd\trgaph108\trleft0"# + cells + #"\row"#
+        }
+        let document = try open(row("R1") + row("R2") + row("R3") + #"\pard END\par"#)
+        let r1 = try XCTUnwrap(lines(document, "R1").first), r3 = try XCTUnwrap(lines(document, "R3").first)
+        XCTAssertEqual(r3.minY - r1.minY, 2 * (single(12) + 0.48), accuracy: 0.05, "строка — текст и полосы, в 5 столбцов тоже")
+    }
 }

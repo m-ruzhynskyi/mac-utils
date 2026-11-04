@@ -113,6 +113,7 @@ package enum EditorMenus {
                 item("Перенос строк", #selector(C.editorToggleWrap(_:))),
                 item("Невидимые символы", #selector(C.editorToggleInvisibles(_:)), "i", [.command, .option]),
                 item("Парные скобки", #selector(C.editorToggleBrackets(_:))),
+                item("Автозамена в «Документе» («--» → «—», «ёлочки»)", #selector(C.editorToggleAutocorrect(_:))),
                 .separator(),
                 item("Крупнее", #selector(C.editorZoomIn(_:)), "="),
                 item("Мельче", #selector(C.editorZoomOut(_:)), "-"),

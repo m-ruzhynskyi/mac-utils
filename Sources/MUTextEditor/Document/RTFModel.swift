@@ -46,11 +46,18 @@ package struct RTFCharProps: Hashable {
     package var highlight = 0
     /// `\cbN` / `\chcbpatN` — заливка символов; 0 — нет.
     package var background = 0
+    /// `\chshdngN` (сотые доли процента) и `\chcfpatN` — узор заливки знаков: доля цвета узора поверх фона.
+    package var backgroundPercent = 0
+    package var backgroundPattern = 0
     /// `\v` — скрытый текст.
     package var hidden = false
     package var vertical = RTFVertical.normal
     package var caps = false
     package var smallCaps = false
+    /// `\kerningN` — кернинг пар с размера N полупунктов; 0 — без кернинга (как у Word по умолчанию).
+    package var kerning = 0
+    /// `\expndtwN` (`\expndN` — в четвертях пункта) — межзнаковый интервал в твипах, + разрежённый, − уплотнённый.
+    package var expand = 0
 }
 
 /// Граница абзаца или ячейки (`\brdrs\brdrw10\brdrcf1`).
@@ -89,7 +96,12 @@ package struct RTFParaProps: Hashable {
     package var lineMultiple = false
     package var tabs: [RTFTabStop] = []
     package var inTable = false
+    /// `\itapN` — глубина таблиц: 0 — вне таблицы, 1 — таблица, 2 — вложенная в её ячейку.
+    package var nesting = 0
     package var keepNext = false
+    /// `\keep` — не разрывать абзац между страницами; `\widctlpar` — без висячих строк (≥ 2 строки на каждой странице).
+    package var keepTogether = false
+    package var widowControl = false
     package var pageBreakBefore = false
     package var borderTop = RTFBorder()
     package var borderBottom = RTFBorder()
@@ -101,8 +113,33 @@ package struct RTFParaProps: Hashable {
     package var style: Int?
     /// `\contextualspace` — без интервалов `\sb`/`\sa` между соседними абзацами того же стиля.
     package var contextualSpace = false
+    /// `\sbauto1`/`\saauto1` — интервал «Авто» (как в HTML): `\sbN`/`\saN` рядом — только для старых читателей.
+    package var spaceBeforeAuto = false
+    package var spaceAfterAuto = false
+    /// `\lsN` — замена списка (`\listoverride`), 0 — не пункт списка; `\ilvlN` — уровень. Список стиля `\sN` Word
+    /// при чтении RTF не берёт (коды стиля — только в `{\stylesheet}`), поэтому и здесь — только свои коды абзаца.
+    package var list = 0
+    package var listLevel = 0
+
+    /// Рамка позиционирования (`\posx…`, `\posy…`, `\pv…`, `\ph…`, `\absw`/`\absh`).
+    package var frame = RTFFrame()
 
     package var hasBorders: Bool { borderTop.isVisible || borderBottom.isVisible || borderLeft.isVisible || borderRight.isVisible }
+}
+
+/// Рамка позиционирования абзаца. Рамка у абзаца (`\pvpara`) без сдвига по вертикали стоит рядом со следующим
+/// текстом (обтекание): места в потоке у Word не занимает — так в колонтитулах рамка номера страницы.
+package struct RTFFrame: Hashable {
+    package var isSet = false
+    /// По вертикали — от абзаца (`\pvpara`), иначе от поля или листа.
+    package var fromParagraph = false
+    /// `\posyN` (твипы); `\posyt`/`\posyc`/… — не 0.
+    package var y = 0
+    /// `\posxl`/`\posxc`/`\posxr` (`\posxi`/`\posxo` — как слева/справа), `\posxN` — слева.
+    package var x: RTFAlignment?
+
+    /// Рамка у правого края на месте абзаца (номер, штамп): текст идёт рядом слева, места она не занимает. Рамка по центру (f152) текст раздвигает.
+    package var besideNext: Bool { isSet && fromParagraph && y == 0 && x == .right }
 }
 
 /// Свойства раздела (страница, поля, колонтитулы).
@@ -370,6 +407,8 @@ package enum RTFParagraphEnd: Hashable {
     case paragraph
     /// `\cell` — конец ячейки таблицы.
     case cell
+    /// `\nestcell` — конец ячейки вложенной таблицы.
+    case nestedCell
     /// `\sect` — конец раздела.
     case section
     /// Конец истории (текста, колонтитула) без завершающего кода.
@@ -397,12 +436,21 @@ package struct RTFParagraph {
     package var section = 0
     /// Ячейка таблицы: номер таблицы, строки и ячейки (заполняется на `\row`).
     package var cell: RTFCellRef?
+    /// Абзац вложенной таблицы: ячейка внешней таблицы, в которой она стоит (`cell` — ячейка вложенной).
+    package var outerCell: RTFCellRef?
+    /// Группа готового номера `{\listtext …}` или `{\pntext …}` абзаца целиком.
+    package var listTextGroup: NSRange?
     /// Первая видимая единица абзаца в исходнике (или `endRange.location`, если абзац пуст).
     package var contentStart: Int {
         runs.first(where: { !$0.map.isEmpty })?.map.first?.location ?? endRange.location
     }
 
     package var plainText: String { runs.map(\.text).joined() }
+
+    /// Начало текста абзаца без готового номера списка.
+    package var textStart: Int {
+        runs.first(where: { !$0.map.isEmpty && $0.kind != .listText })?.map.first?.location ?? endRange.location
+    }
 }
 
 /// Где абзац лежит в таблице.
@@ -419,7 +467,10 @@ package struct RTFCellDef: Hashable {
     package var borderBottom = RTFBorder()
     package var borderLeft = RTFBorder()
     package var borderRight = RTFBorder()
+    /// `\clcbpatN` — фон ячейки; `\clshdngN` (сотые доли процента) и `\clcfpatN` — узор: доля его цвета поверх фона.
     package var shading = 0
+    package var shadingPercent = 0
+    package var shadingPattern = 0
     /// `\clvmgf` — первая из объединённых по вертикали, `\clvmrg` — продолжение.
     package var verticalMergeFirst = false
     package var verticalMerged = false
@@ -467,6 +518,9 @@ package struct RTFRow {
 
 package struct RTFTable {
     package var rows: [RTFRow] = []
+    /// Вложенная таблица (`\nestrow`): стоит в ячейке `parent` внешней.
+    package var nested = false
+    package var parent: RTFCellRef?
 }
 
 /// Текст одной истории: основной текст или колонтитул.
@@ -515,6 +569,8 @@ package struct RTFDocumentModel {
     package var body = RTFStory()
     package var sections: [RTFSection] = [RTFSection()]
     package var fields: [RTFField] = []
+    /// Списки (`\listtable`, `\listoverridetable`).
+    package var lists = RTFListTable()
     /// Где можно вставить свойство документа (`\facingp`): перед первым `\sectd` или первым абзацем.
     package var documentPropsInsertion = 0
     /// Начинается ли исходник с `{\rtf`.
