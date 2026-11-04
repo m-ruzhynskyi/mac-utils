@@ -367,7 +367,10 @@ package final class ScreenShare: NSObject, ObservableObject {
             ShareAudioProcess(object: 0, pid: $0.processID, bundleID: $0.bundleIdentifier,
                               ownerBundleID: ShareAudioExclusion.ownerBundleID(of: $0.processID))
         }
-        let excluded = ShareAudioExclusion.excluded(processes, muted: ShareAudioExclusion.currentMuted,
+        // Те же правила, что у перехвата: звонок, найденный по микрофону в процессах Core Audio, исключается и здесь
+        // (по программе — помощников ScreenCaptureKit в списке программ всё равно не знает).
+        let muted = ShareAudioExclusion.currentMuted(ShareAudioExclusion.audioProcesses())
+        let excluded = ShareAudioExclusion.excluded(processes, muted: muted.muted, pids: muted.pids,
                                                     ownPID: ProcessInfo.processInfo.processIdentifier)
         let pids = Set(excluded.map(\.pid))
         let filter = SCContentFilter(display: display, excludingApplications: content.applications.filter { pids.contains($0.processID) },
@@ -377,8 +380,10 @@ package final class ScreenShare: NSObject, ObservableObject {
 
     /// Исключаемые объекты Core Audio для перехвата.
     private static func tapExclusion() -> [ShareAudioProcess] {
-        ShareAudioExclusion.excluded(ShareAudioExclusion.audioProcesses(), muted: ShareAudioExclusion.currentMuted,
-                                     ownPID: ProcessInfo.processInfo.processIdentifier)
+        let processes = ShareAudioExclusion.audioProcesses()
+        let muted = ShareAudioExclusion.currentMuted(processes)
+        return ShareAudioExclusion.excluded(processes, muted: muted.muted, pids: muted.pids,
+                                            ownPID: ProcessInfo.processInfo.processIdentifier)
     }
 
     private static func audioConfiguration() -> SCStreamConfiguration {
@@ -458,6 +463,7 @@ package final class ScreenShare: NSObject, ObservableObject {
             guard fallbackAudioGate.mayAttach(sameBroadcast: self.sender === sender) else { try? await stream.stopCapture(); return }
             audioStream = stream
         }
+        audioWatcher?.stop()
         audioWatcher = ShareAudioWatcher { ScreenShare.shared.refreshAudioFilter() }
         // Свой процесс появляется в Core Audio только с началом перехвата — сразу и его в исключённые.
         refreshAudioFilter()
@@ -515,11 +521,27 @@ package final class ScreenShare: NSObject, ObservableObject {
                     }
                     return
                 }
-                // Часы агрегата не пошли — ещё раз на встроенном выходе, потом уже запасной способ.
-                if report.verdict == .noCallbacks, (try? tap.retryWithBuiltInClock()) == true {
-                    Log.capture.error("Звук трансляции: нет колбэков — перехват пересобран на встроенном выходе")
-                    share.watchTapStart(tap)
-                    return
+                // Глобальный перехват не дал звука — перехват потока выхода (его формат совпадает с часами), потом
+                // встроенный выход как часы, потом уже запасной способ.
+                let builtIn = !tap.builtInClock && ShareTapClock.builtInOutput().map { $0 != tap.clockDevice } == true
+                switch ShareTapMode.recovery(verdict: report.verdict, mode: tap.mode, clockIsOutput: tap.clockIsOutput, builtInAvailable: builtIn) {
+                case .deviceTap:
+                    do {
+                        try tap.retryWithDeviceTap()
+                        Log.capture.error("Звук трансляции: \(report.verdict == .noCallbacks ? "нет колбэков" : "нет данных", privacy: .public) — перехват пересобран на потоке выхода")
+                        share.watchTapStart(tap)
+                        return
+                    } catch {
+                        Log.capture.error("Звук трансляции: перехват потока выхода не запустился — \(error.localizedDescription, privacy: .public)")
+                    }
+                case .builtInClock:
+                    if (try? tap.retryWithBuiltInClock()) == true {
+                        Log.capture.error("Звук трансляции: нет колбэков — перехват пересобран на встроенном выходе")
+                        share.watchTapStart(tap)
+                        return
+                    }
+                case .fallBack:
+                    break
                 }
                 Log.capture.error("Звук трансляции: перехват не работает (\(report.verdict == .noCallbacks ? "нет колбэков" : "нет данных", privacy: .public)) — переходим на ScreenCaptureKit")
                 share.tapRetry.failed(in: ShareTapRetry.situation())
@@ -2778,7 +2800,7 @@ package struct ScreenSharePage: View {
                       systemImage: "speaker.wave.2", isOn: $shareAudio)
             if shareAudio {
                 ToggleRow("Не передавать звонки",
-                          subtitle: "Звук звонков (Discord, Telegram, Zoom, FaceTime…) рекомендуется заглушить: иначе собеседник, который смотрит трансляцию, слышит сам себя.",
+                          subtitle: "Звук звонков (Discord, Telegram, Zoom, FaceTime, UniTalk…) и любой программы, которая сейчас пишет микрофон, не идёт в трансляцию: иначе собеседник, который смотрит трансляцию, слышит сам себя.",
                           systemImage: "phone.down", isOn: $muteCalls)
             }
         }
