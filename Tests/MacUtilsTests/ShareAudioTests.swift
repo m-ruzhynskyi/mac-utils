@@ -71,7 +71,7 @@ final class ShareAudioTests: XCTestCase {
     func testWatcherRebuildsOnLaunchAndTerminate() {
         let center = NotificationCenter()
         var calls = 0
-        let watcher = ShareAudioWatcher(workspace: center, coreAudio: false) { calls += 1 }
+        let watcher = ShareAudioWatcher(workspace: center, coreAudio: false, inputSignature: { nil }, pollInput: false) { calls += 1 }
         center.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         center.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
@@ -332,5 +332,8 @@ final class ShareAudioTests: XCTestCase {
                        "журнал 04.11: часы и так встроенный выход")
         XCTAssertEqual(ShareTapMode.recovery(verdict: .noData, mode: .device, clockIsOutput: true, builtInAvailable: true), .fallBack)
         XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .global, clockIsOutput: false, builtInAvailable: false), .fallBack)
+        // Перехват потока не создался (остался глобальный) и глобальный снова без звука — не по кругу, а дальше по лестнице.
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .global, clockIsOutput: true, deviceTried: true, builtInAvailable: true), .builtInClock)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noData, mode: .global, clockIsOutput: true, deviceTried: true, builtInAvailable: true), .fallBack)
     }
 }

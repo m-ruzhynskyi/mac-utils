@@ -233,9 +233,11 @@ package enum ShareTapMode: Equatable {
     /// Что делать после неудачного запуска (сторож): перехват потока выхода, встроенные часы или запасной способ.
     package enum Recovery: Equatable { case deviceTap, builtInClock, fallBack }
 
+    /// `deviceTried` — перехват потока выхода на этом выходе уже пробовали: если он не создался и остался глобальный,
+    /// второй раз ту же ступень не берём (иначе пересборка каждые 3 с без звука и без перехода на ScreenCaptureKit).
     package static func recovery(verdict: ShareTapWatchdog.Verdict, mode: ShareTapMode, clockIsOutput: Bool,
-                                 builtInAvailable: Bool) -> Recovery {
-        if verdict != .ok, mode == .global, clockIsOutput { return .deviceTap }
+                                 deviceTried: Bool = false, builtInAvailable: Bool) -> Recovery {
+        if verdict != .ok, mode == .global, clockIsOutput, !deviceTried { return .deviceTap }
         if verdict == .noCallbacks, builtInAvailable { return .builtInClock }
         return .fallBack
     }
@@ -383,7 +385,7 @@ package final class ShareAudioTap: @unchecked Sendable {
     package private(set) var builtInClock = false
     /// Вид перехвата этого запуска (`ShareTapMode`); `deviceAfterFailure` — глобальный уже не дал звука на этом выходе.
     package private(set) var mode = ShareTapMode.global
-    private var deviceAfterFailure = false
+    package private(set) var deviceAfterFailure = false
     /// UID выхода, чей поток перехватываем в режиме `.device`.
     private var tapDeviceUID: String?
     /// Раскладка входа не сошлась — уже записано в журнал (только в `queue`).

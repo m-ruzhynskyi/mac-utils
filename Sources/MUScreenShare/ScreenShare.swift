@@ -524,7 +524,8 @@ package final class ScreenShare: NSObject, ObservableObject {
                 // Глобальный перехват не дал звука — перехват потока выхода (его формат совпадает с часами), потом
                 // встроенный выход как часы, потом уже запасной способ.
                 let builtIn = !tap.builtInClock && ShareTapClock.builtInOutput().map { $0 != tap.clockDevice } == true
-                switch ShareTapMode.recovery(verdict: report.verdict, mode: tap.mode, clockIsOutput: tap.clockIsOutput, builtInAvailable: builtIn) {
+                switch ShareTapMode.recovery(verdict: report.verdict, mode: tap.mode, clockIsOutput: tap.clockIsOutput,
+                                             deviceTried: tap.deviceAfterFailure, builtInAvailable: builtIn) {
                 case .deviceTap:
                     do {
                         try tap.retryWithDeviceTap()
