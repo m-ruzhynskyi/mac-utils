@@ -889,7 +889,7 @@ test("звонки (Discord и др.) исключаются из звука в�
     const args = host.spawned.at(-1);
     assert.equal(args[0], "capture");
     const names = args.slice(1).map((n) => n.toLowerCase());
-    for (const need of ["game.exe", "discord.exe", "zoom.exe", "teams.exe", "telegram.exe"]) assert.ok(names.includes(need), need);
+    for (const need of ["game.exe", "discord.exe", "zoom.exe", "teams.exe", "telegram.exe", "unitalk.exe"]) assert.ok(names.includes(need), need);
     assert.equal(names.filter((n) => n === "discord.exe").length, 1, "без повторов");
     host.fake.ipc.get("setMuteCalls")(page({ sender: { isDestroyed: () => false, send() {} } }), false);
     assert.deepEqual(host.spawned.at(-1), ["capture", "Game.exe", "discord.exe"], "галочку сняли — только отмеченное вручную");
