@@ -1073,6 +1073,7 @@ package final class DocRenderer {
         // Высоту текста для своего выравнивания `DocCellBlock` оценивает без блоков: вложенная таблица в такой оценке — столбик
         // строк, и сдвиг выходил больше, чем у Word (f078: +12,9 pt на строку); для неё — оценка по строкам вложенной.
         block.contentHeight = place.nestedContent
+        block.holdsNested = place.holdsNested
         if block.rowHeight != 0, cell.verticalAlign != .top {
             block.ownAlignment = cell.verticalAlign == .center ? 0.5 : 1
             block.verticalAlignment = .topAlignment
@@ -1170,6 +1171,9 @@ package final class DocCellBlock: NSTextTableBlock {
     package var ownAlignment: CGFloat = 0
     /// Высота содержимого, если её посчитали заранее (ячейка со вложенной таблицей), пункты.
     package var contentHeight: CGFloat?
+    /// В ячейке вложенная таблица: высоту содержимого для выравнивания меряет раскладкой (`nestedHeight`).
+    package var holdsNested = false
+    private var measured: (range: NSRange, width: CGFloat, height: CGFloat)?
     /// Полосы рамок сверху и снизу, пункты: у Word рамка ячейки занимает место в высоте строки.
     package var band: (top: CGFloat, bottom: CGFloat) = (0, 0)
 
@@ -1180,7 +1184,14 @@ package final class DocCellBlock: NSTextTableBlock {
         if ownAlignment > 0, rowHeight != 0, let storage = textContainer.layoutManager?.textStorage, charRange.length > 0,
            NSMaxRange(charRange) <= storage.length {
             let inner = abs(rowHeight) - width(for: .padding, edge: .minY) - width(for: .padding, edge: .maxY)
-            let content = contentHeight ?? MainActor.assumeIsolated { Self.height(of: storage.attributedSubstring(from: charRange), width: layout.width) }
+            let content = MainActor.assumeIsolated { () -> CGFloat in
+                let text = storage.attributedSubstring(from: charRange)
+                guard holdsNested else { return contentHeight ?? Self.height(of: text, width: layout.width) }
+                if let measured, measured.range == charRange, measured.width == layout.width { return measured.height }
+                let height = Self.nestedHeight(of: text, width: layout.width, outer: self)
+                measured = (charRange, layout.width, height)
+                return height
+            }
             shift = max(0, (inner - content) * ownAlignment)
         }
         layoutStart = (ObjectIdentifier(textContainer), layout.minY)
@@ -1218,6 +1229,44 @@ package final class DocCellBlock: NSTextTableBlock {
         var bottom: CGFloat = 0
         manager.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs)) { rect, _, _, _, _ in
             bottom = max(bottom, rect.maxY)
+        }
+        return bottom
+    }
+
+    /// Высота содержимого ячейки со вложенной таблицей, как её выравнивает Word: те же абзацы без блока этой ячейки (вложенные
+    /// блоки остаются), в ширину её текста; пустой абзац конца ячейки сразу после вложенной таблицы — не в счёт (f077/f078:
+    /// с ним и с оценкой вложенной по `\trrh` текст стоял на 2,4–3,5 pt выше Word).
+    @MainActor private static func nestedHeight(of text: NSAttributedString, width: CGFloat, outer: NSTextBlock) -> CGFloat {
+        let plain = NSMutableAttributedString(attributedString: text)
+        plain.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: plain.length)) { value, range, _ in
+            guard let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle else { return }
+            style.textBlocks = style.textBlocks.filter { $0 !== outer }
+            plain.addAttribute(.paragraphStyle, value: style, range: range)
+        }
+        let string = plain.string as NSString
+        let last = string.paragraphRange(for: NSRange(location: max(0, plain.length - 1), length: 0))
+        if last.location > 0, string.substring(with: last).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           (plain.attribute(.paragraphStyle, at: last.location, effectiveRange: nil) as? NSParagraphStyle)?.textBlocks.isEmpty == true,
+           (plain.attribute(.paragraphStyle, at: last.location - 1, effectiveRange: nil) as? NSParagraphStyle)?.textBlocks.isEmpty == false {
+            plain.deleteCharacters(in: last)
+        }
+        let storage = NSTextStorage(attributedString: plain)
+        let manager = NSLayoutManager()
+        manager.delegate = DocLineMetricsDelegate.shared
+        storage.addLayoutManager(manager)
+        let container = NSTextContainer(size: NSSize(width: max(1, width), height: 100_000))
+        container.lineFragmentPadding = 0
+        manager.addTextContainer(container)
+        manager.ensureLayout(for: container)
+        var bottom: CGFloat = 0
+        var seen = Set<ObjectIdentifier>()
+        manager.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs)) { rect, _, _, glyphs, _ in
+            bottom = max(bottom, rect.maxY)
+            let character = manager.characterIndexForGlyph(at: glyphs.location)
+            for block in (storage.attribute(.paragraphStyle, at: character, effectiveRange: nil) as? NSParagraphStyle)?.textBlocks ?? []
+            where seen.insert(ObjectIdentifier(block)).inserted {
+                bottom = max(bottom, manager.boundsRect(for: block, glyphRange: glyphs).maxY)
+            }
         }
         return bottom
     }

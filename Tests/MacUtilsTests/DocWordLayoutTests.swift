@@ -258,6 +258,22 @@ final class DocWordLayoutTests: XCTestCase {
         }
     }
 
+    /// Ячейка по центру со вложенной таблицей: центрируется сама вложенная таблица (её высота — по раскладке), пустой абзац
+    /// конца ячейки после неё — не в счёт (f077/f078: с ним и с оценкой по `\trrh` текст стоял на 2,4–3,5 pt выше Word).
+    func testCenteredCellCentersNestedTable() throws {
+        let row = #"\trowd\trgaph108\trleft0\trrh3272\cellx3000\clvertalc\cellx9000 "#
+        let nprops = { (h: Int) in #"{\*\nesttableprops\trowd\trgaph28\trleft0\trrh-"# + String(h) + #"\cellx3000\cellx6000\nestrow}{\nonesttables\par }"# }
+        let nrow = { (a: String, h: Int) in #"\pard\plain\intbl\itap2\fs20 "# + a + #"1\nestcell\pard\plain\intbl\itap2\fs20 "# + a + #"2\nestcell\pard\plain\intbl\itap2\fs20 "# + nprops(h) }
+        let body = #"\pard before\par "# + row + #"\pard\plain\intbl\itap1\fs20 LEFT\cell"# + nrow("NA", 480) + nrow("NB", 566)
+            + #"\pard\plain\intbl\itap1\fs20 \cell"# + row + #"\row "# + row + #"\pard\plain\intbl\itap1\fs20 SECOND\cell\pard\plain\intbl\itap1\fs20 X\cell"#
+            + row + #"\row\pard AFTER\par"#
+        let document = try open(body)
+        let left = try XCTUnwrap(lines(document, "LEFT").first).minY, nested = try XCTUnwrap(lines(document, "NA1").first).minY
+        let second = try XCTUnwrap(lines(document, "SECOND").first).minY
+        let table = 24 + 28.3
+        XCTAssertEqual(nested - left, (second - left - table) / 2, accuracy: 0.5, "вложенная (24 + 28,3 pt «точно») — посередине строки 163,6 pt")
+    }
+
     /// Вложенные таблицы в обеих ячейках строки: вторая ячейка — у того же верха, строка — ровно `\trrh` (f078: верх ячейки
     /// считался от текста вложенной, +1,08 pt на ячейку, и строка выходила выше `\trrh` на 2,2 pt).
     func testNestedTablesInBothCellsKeepRowHeight() throws {
