@@ -794,6 +794,9 @@ private final class RTFParser {
         case .clvertalt: cellInProgress.verticalAlign = .top
         case .clvertalc: cellInProgress.verticalAlign = .center
         case .clvertalb: cellInProgress.verticalAlign = .bottom
+        case .cltxlrtb, .cltxlrtbv: cellInProgress.textFlow = .rows
+        case .cltxbtlr: cellInProgress.textFlow = .bottomToTop
+        case .cltxtbrl, .cltxtbrlv: cellInProgress.textFlow = .topToBottom
         case .clbrdrt: top.border = .cellTop; cellInProgress.borderTop = RTFBorder()
         case .clbrdrb: top.border = .cellBottom; cellInProgress.borderBottom = RTFBorder()
         case .clbrdrl: top.border = .cellLeft; cellInProgress.borderLeft = RTFBorder()

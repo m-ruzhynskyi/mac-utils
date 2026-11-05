@@ -258,6 +258,23 @@ final class DocWordLayoutTests: XCTestCase {
         }
     }
 
+    /// Вертикальный текст ячейки (`\cltxbtlr`): в узком столбце не переносится по буквам в высокую строку — строку задают другие
+    /// ячейки, глифов в строках нет (их рисует ячейка повёрнутыми; f143/f144/f148/f150: строки по 50–110 pt выше Word).
+    func testVerticalTextCellDoesNotStretchRow() throws {
+        let row = #"\trowd\trgaph28\trleft0\trrh600\cellx500\cltxbtlr\cellx900\cellx6000 "#
+        let body = row + #"\pard\plain\intbl\fs20 A\cell\pard\plain\intbl\fs20 AB CD EF GH IJ KL MN\cell\pard\plain\intbl\fs20 TOP\cell"#
+            + row + #"\row "# + row + #"\pard\plain\intbl\fs20 B\cell\pard\plain\intbl\fs20 \cell\pard\plain\intbl\fs20 NEXT\cell"# + row + #"\row\pard END\par"#
+        let model = RTFReader.read(#"{\rtf1 "# + row + #"\pard\intbl a\cell\pard\intbl b\cell\pard\intbl c\cell"# + row + #"\row}"# as NSString)
+        XCTAssertEqual(model.body.tables.first?.rows.first?.cells.map(\.textFlow), [.rows, .bottomToTop, .rows])
+        let document = try open(body)
+        let top = try XCTUnwrap(lines(document, "TOP").first).minY, next = try XCTUnwrap(lines(document, "NEXT").first).minY
+        XCTAssertEqual(next - top, 30, accuracy: 0.05, "строка — \\trrh600, вертикальный текст её не растит")
+        let manager = document.layoutManager
+        let index = (document.storage.string as NSString).range(of: "AB CD").location
+        let glyph = manager.glyphIndexForCharacter(at: index)
+        XCTAssertEqual(manager.propertyForGlyph(at: glyph), .controlCharacter, "глифов вертикального текста в строке нет")
+    }
+
     /// Строка-продолжение вертикального объединения — с `\trrh`, когда текст объединённой ячейки помещается в `\trrh` её строк
     /// (f161: 13,35 pt было 12,43); строка, где объединение начинается, — по тексту (`NSTextTable` добавил бы высоту объединённой).
     func testMergeContinuationRowKeepsRowHeight() throws {
