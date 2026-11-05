@@ -23,10 +23,17 @@ package final class DocSpelling {
 
     deinit { NSSpellChecker.shared.closeSpellDocument(withTag: tag) }
 
-    /// Языки, для которых на этом Mac есть словарь.
-    package static func available(_ code: String) -> Bool {
-        NSSpellChecker.shared.availableLanguages.contains { $0 == code || $0.hasPrefix(code + "_") || $0.hasPrefix(code + "-") }
+    /// Словарь для кода языка: точный, а если такого нет (в списке `en`, а нужен `en_US`) — любой того же языка.
+    package static func resolve(_ code: String) -> String? {
+        let languages = NSSpellChecker.shared.availableLanguages
+        if languages.contains(code) { return code }
+        let base = code.split(whereSeparator: { $0 == "_" || $0 == "-" }).first.map(String.init) ?? code
+        if languages.contains(base) { return base }
+        return languages.first { $0.hasPrefix(base + "_") || $0.hasPrefix(base + "-") }
     }
+
+    /// Языки, для которых на этом Mac есть словарь.
+    package static func available(_ code: String) -> Bool { resolve(code) != nil }
 
     package func schedule(after delay: TimeInterval = 0.5) {
         work?.cancel()
@@ -108,7 +115,7 @@ package final class DocSpelling {
         while position < NSMaxRange(range), guardCount < 5000 {
             guardCount += 1
             let sub = text.substring(with: NSRange(location: 0, length: NSMaxRange(range)))
-            let bad = checker.checkSpelling(of: sub, startingAt: position, language: code, wrap: false, inSpellDocumentWithTag: tag, wordCount: nil)
+            let bad = checker.checkSpelling(of: sub, startingAt: position, language: Self.resolve(code) ?? code, wrap: false, inSpellDocumentWithTag: tag, wordCount: nil)
             guard bad.location != NSNotFound, bad.length > 0, bad.location < NSMaxRange(range) else { break }
             found.append(bad)
             position = NSMaxRange(bad)

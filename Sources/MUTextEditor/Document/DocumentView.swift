@@ -137,7 +137,7 @@ package final class DocTextView: NSTextView {
         if let range = (sender.representedObject as? NSValue)?.rangeValue { controller?.spelling.learn(range) }
     }
 
-    @objc func ignoreSpelling(_ sender: NSMenuItem) {
+    @objc func skipSpelling(_ sender: NSMenuItem) {
         if let range = (sender.representedObject as? NSValue)?.rangeValue { controller?.spelling.ignore(range) }
     }
 
@@ -153,7 +153,7 @@ package final class DocTextView: NSTextView {
                 let learn = NSMenuItem(title: "Добавить в словарь", action: #selector(learnSpelling(_:)), keyEquivalent: "")
                 learn.target = self
                 learn.representedObject = NSValue(range: range)
-                let skip = NSMenuItem(title: "Пропустить", action: #selector(ignoreSpelling(_:)), keyEquivalent: "")
+                let skip = NSMenuItem(title: "Пропустить", action: #selector(skipSpelling(_:)), keyEquivalent: "")
                 skip.target = self
                 skip.representedObject = NSValue(range: range)
                 menu.insertItem(learn, at: fixes.count)
