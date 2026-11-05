@@ -23,7 +23,8 @@ package struct ShortcutRecorder: View {
     @State private var monitor: Any?
     @State private var hint: String?
     /// Не мешает записи: сочетание сохраняется, под полем только предупреждение (например, оно занято «Клавишами Windows»).
-    @State private var warning: String?
+    /// Считается по сохранённому сочетанию, поэтому пропадает, когда его сбросили или записали другое.
+    private var warning: String? { recording ? nil : WinKeysConflict.warning(for: hotKey) }
 
     @State private var hovered = false
     @Environment(\.isEnabled) private var enabled
@@ -72,7 +73,7 @@ package struct ShortcutRecorder: View {
     private func start() {
         recording = true
         hint = nil
-        warning = nil
+        ShortcutRecording.begin()
         suspend(true)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 { // Esc
@@ -87,7 +88,6 @@ package struct ShortcutRecorder: View {
                 hint = problem
                 return nil
             }
-            warning = WinKeysConflict.warning(for: key)
             onChange(key)
             stop()
             return nil
@@ -99,6 +99,7 @@ package struct ShortcutRecorder: View {
         monitor = nil
         if recording {
             recording = false
+            ShortcutRecording.end()
             suspend(false)
         }
     }

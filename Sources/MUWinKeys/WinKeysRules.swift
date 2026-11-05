@@ -34,14 +34,16 @@ package enum WinKeysRules {
 
     /// Решение по событию. Только нажатия и отпускания (`keyDown`/`keyUp`); сопоставление по коду клавиши, а не по символу,
     /// поэтому работает и в русской раскладке. Ровно Control: с ⌘, ⌥ или ⇧ событие не трогаем. `customExcluded` — свой список
-    /// «Клавиш Windows» (точное совпадение или префикс с точкой на конце, как в `AppExclusions`).
+    /// «Клавиш Windows» (точное совпадение или префикс с точкой на конце, как в `AppExclusions`). `isRecordingShortcut` —
+    /// идёт запись сочетания в настройках Mac Utils: ⌃C должен попасть в запись как ⌃C, а не как ⌘C.
     package static func decision(type: CGEventType, flags: CGEventFlags, keyCode: Int64, bundleID: String?,
-                                 isExcluded: Bool, isSynthetic: Bool, customExcluded: [String] = []) -> Decision {
+                                 isExcluded: Bool, isSynthetic: Bool, customExcluded: [String] = [],
+                                 isRecordingShortcut: Bool = false) -> Decision {
         guard type == .keyDown || type == .keyUp else { return .passThrough }
         guard [keyX, keyC, keyV].contains(keyCode) else { return .passThrough }
         let modifiers: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
         guard flags.intersection(modifiers) == .maskControl else { return .passThrough }
-        if isSynthetic || isExcluded || isTerminal(bundleID) || AppExclusions.matches(bundleID, in: customExcluded) { return .passThrough }
+        if isSynthetic || isRecordingShortcut || isExcluded || isTerminal(bundleID) || AppExclusions.matches(bundleID, in: customExcluded) { return .passThrough }
         return .rewrite
     }
 

@@ -242,4 +242,28 @@ final class WinKeysTests: XCTestCase {
             XCTAssertEqual(warned, rewritten, "keycode \(code)")
         }
     }
+
+    func testRecordingShortcutPassesControlThrough() {
+        // Во время записи сочетания в настройках ⌃C/⌃V/⌃X не заменяются: иначе рекордер получил бы ⌘C и не предупредил.
+        for key in [WinKeysRules.keyC, WinKeysRules.keyV, WinKeysRules.keyX] {
+            for type in [CGEventType.keyDown, .keyUp] {
+                XCTAssertEqual(WinKeysRules.decision(type: type, flags: .maskControl, keyCode: key, bundleID: "com.apple.TextEdit",
+                                                     isExcluded: false, isSynthetic: false, isRecordingShortcut: true), .passThrough)
+            }
+        }
+        XCTAssertEqual(decide(.maskControl), .rewrite, "без записи — как раньше")
+    }
+
+    @MainActor
+    func testShortcutRecordingIsBalanced() {
+        XCTAssertFalse(ShortcutRecording.isActive)
+        ShortcutRecording.begin()
+        ShortcutRecording.begin()
+        ShortcutRecording.end()
+        XCTAssertTrue(ShortcutRecording.isActive, "второй рекордер ещё пишет")
+        ShortcutRecording.end()
+        XCTAssertFalse(ShortcutRecording.isActive)
+        ShortcutRecording.end()
+        XCTAssertEqual(ShortcutRecording.active, 0, "лишний end не уводит в минус")
+    }
 }

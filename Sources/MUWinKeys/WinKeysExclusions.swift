@@ -4,7 +4,7 @@ import MUCore
 /// Свой список программ, где Ctrl остаётся как есть, только для «Клавиш Windows» (общий список «Исключённые программы»
 /// не затрагивается). Хранится в `Pref.winKeysExcluded`; ключа нет — значения по умолчанию.
 @MainActor
-package final class WinKeysExclusions: ObservableObject {
+package final class WinKeysExclusions: AppListStore {
     package static let shared = WinKeysExclusions()
 
     @Published package private(set) var list: [String]

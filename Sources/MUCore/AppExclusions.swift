@@ -6,7 +6,7 @@ import Combine
 /// плавная прокрутка, исправление раскладки) не работают: виртуальные машины и удалённые рабочие столы сами забирают
 /// клавиатуру, и наш перехват только мешает (⌥Tab, ⌘-сочетания, колесо мыши должны дойти до гостевой системы).
 @MainActor
-package final class AppExclusions: ObservableObject {
+package final class AppExclusions: AppListStore {
     package static let shared = AppExclusions()
 
     package static let defaultsKey = "excludedApps"
@@ -106,4 +106,15 @@ package final class AppExclusions: ObservableObject {
         }
         return entry
     }
+}
+
+/// Список программ, который правят на странице настроек: общий «Исключённые программы» и свой у «Клавиш Windows».
+/// Запись — bundle id или префикс с точкой на конце.
+@MainActor
+package protocol AppListStore: ObservableObject {
+    var list: [String] { get }
+    func add(_ entry: String)
+    func remove(_ entry: String)
+    func resetToDefaults()
+    func isExcluded(_ bundleID: String?) -> Bool
 }
