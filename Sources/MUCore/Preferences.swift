@@ -9,6 +9,8 @@ package enum Pref {
 
     package static let cutPaste = "cutPasteEnabled"
     package static let cutPanel = "cutPanelEnabled"
+    /// Ctrl+C / Ctrl+V / Ctrl+X как ⌘C / ⌘V / ⌘X во всех программах (по умолчанию выключено).
+    package static let winKeys = "winKeysEnabled"
 
     package static let smoothScroll = "smoothScrollEnabled"
     package static let smoothSpeed = "smoothScrollSpeed"
@@ -232,6 +234,7 @@ package enum Pref {
         UserDefaults.standard.register(defaults: [
             cutPaste: true,
             cutPanel: true,
+            winKeys: false,
             smoothScroll: true,
             smoothSpeed: 1.0,
             smoothDuration: 0.35,

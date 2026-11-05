@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 import MUCore
 import MUDesign
 import MUCutPaste
+import MUWinKeys
 import MUFocus
 import MUSmoothScroll
 import MUAppSwitcher
@@ -351,6 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func syncFeatures() {
         FinderCutPaste.shared.sync()
+        WinKeys.shared.sync()
         SmoothScroll.shared.sync()
         AppSwitcher.shared.sync()
         ScreenshotService.shared.sync()
