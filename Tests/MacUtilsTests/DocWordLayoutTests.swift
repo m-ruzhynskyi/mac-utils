@@ -258,6 +258,20 @@ final class DocWordLayoutTests: XCTestCase {
         }
     }
 
+    /// Строка-продолжение вертикального объединения — с `\trrh`, когда текст объединённой ячейки помещается в `\trrh` её строк
+    /// (f161: 13,35 pt было 12,43); строка, где объединение начинается, — по тексту (`NSTextTable` добавил бы высоту объединённой).
+    func testMergeContinuationRowKeepsRowHeight() throws {
+        let first = #"\trowd\trgaph108\trleft0\trrh400\cellx3000\clvmgf\cellx6000 "#
+        let next = #"\trowd\trgaph108\trleft0\trrh400\cellx3000\clvmrg\cellx6000 "#
+        let plain = #"\trowd\trgaph108\trleft0\cellx3000\cellx6000 "#
+        let body = first + #"\pard\plain\intbl\fs24 RA\cell\pard\plain\intbl\fs24 M\cell"# + first + #"\row "#
+            + next + #"\pard\plain\intbl\fs24 RB\cell\pard\plain\intbl\fs24 \cell"# + next + #"\row "#
+            + plain + #"\pard\plain\intbl\fs24 RC\cell\pard\plain\intbl\fs24 X\cell"# + plain + #"\row\pard END\par"#
+        let document = try open(body)
+        let b = try XCTUnwrap(lines(document, "RB").first).minY, c = try XCTUnwrap(lines(document, "RC").first).minY
+        XCTAssertEqual(c - b, 20, accuracy: 0.05, "\\trrh400 = 20 pt у строки-продолжения")
+    }
+
     /// Ячейка по центру со вложенной таблицей: центрируется сама вложенная таблица (её высота — по раскладке), пустой абзац
     /// конца ячейки после неё — не в счёт (f077/f078: с ним и с оценкой по `\trrh` текст стоял на 2,4–3,5 pt выше Word).
     func testCenteredCellCentersNestedTable() throws {

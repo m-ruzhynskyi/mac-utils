@@ -870,6 +870,10 @@ package final class DocRenderer {
             let tableWidth = (grid.last ?? 0) - (grid.first ?? 0)
             for (rowIndex, row) in table.rows.enumerated() {
                 let exactHeight = table.nested ? nestedRowHeight(row, story: story, model: model) : nil
+                let heightSpoiled = Self.mergeSpoilsHeight(table, row: rowIndex) { start, cell, width in
+                    CGFloat(table.rows[start].padTop + table.rows[start].padBottom) / 20
+                        + self.textHeight(table.rows[start].paragraphs[safe: cell] ?? [], width: width, story: story, model: model)
+                }
                 var left = row.left
                 var cellIndex = 0
                 while cellIndex < row.cells.count {
@@ -906,7 +910,7 @@ package final class DocRenderer {
                     for offset in 0..<span {
                         var placed = place
                         if let parent { placed.outer = parent.outer + [parent] }
-                        placed.rowMerged = row.cells.contains { $0.verticalMergeFirst || $0.verticalMerged }
+                        placed.rowMerged = heightSpoiled
                         let ref = RTFCellRef(table: ordinal, row: rowIndex, cell: cellIndex)
                         placed.holdsNested = story.tables.contains { $0.parent == ref }
                         if placed.holdsNested {
@@ -977,6 +981,40 @@ package final class DocRenderer {
         let own = (story.tables[safe: ref.table]?.rows[safe: ref.row]?.paragraphs[safe: ref.cell] ?? [])
             .filter { story.paragraphs[safe: $0]?.outerCell == nil }
         return height + textHeight(own, width: width, story: story, model: model)
+    }
+
+    /// `\trrh` строки нельзя задать (`NSTextTable` сверх высот строк добавит высоту объединённой ячейки — f005, f085, f144):
+    /// в строке начинается вертикальное объединение или продолжается такое, текст которого не помещается в `\trrh` его строк.
+    /// Строка-продолжение с помещающимся текстом — с `\trrh`, как у Word (f161: строка 13,35 pt была 12,43).
+    private static func mergeSpoilsHeight(_ table: RTFTable, row index: Int, text: (_ start: Int, _ cell: Int, _ width: CGFloat) -> CGFloat) -> Bool {
+        let row = table.rows[index]
+        if row.cells.contains(where: \.verticalMergeFirst) { return true }
+        var left = row.left
+        for cell in row.cells {
+            defer { left = max(cell.right, left) }
+            guard cell.verticalMerged else { continue }
+            let right = max(cell.right, left)
+            var start = index
+            while start > 0, Self.cell(in: table.rows[start], left: left, right: right)?.verticalMergeFirst != true { start -= 1 }
+            var end = index
+            while end + 1 < table.rows.count, Self.cell(in: table.rows[end + 1], left: left, right: right)?.verticalMerged == true { end += 1 }
+            guard let first = Self.cellIndex(in: table.rows[start], left: left, right: right),
+                  table.rows[start...end].allSatisfy({ $0.height > 0 }) else { return true }
+            let margins = table.rows[start].margins(table.rows[start].cells[first])
+            let width = CGFloat(right - left - margins.left - margins.right) / 20
+            let rows = table.rows[start...end].reduce(CGFloat(0)) { $0 + CGFloat($1.height) / 20 }
+            if text(start, first, width) > rows { return true }
+        }
+        return false
+    }
+
+    private static func cellIndex(in row: RTFRow, left: Int, right: Int) -> Int? {
+        var edge = row.left
+        for (index, cell) in row.cells.enumerated() {
+            if edge == left, cell.right == right { return index }
+            edge = max(cell.right, edge)
+        }
+        return nil
     }
 
     private static func cell(in row: RTFRow, left: Int, right: Int) -> RTFCellDef? {
