@@ -29,6 +29,7 @@ struct WinKeysPage: View {
                     Button("Открыть список") {
                         NotificationCenter.default.post(name: .openSettingsSection, object: SettingsSection.exclusions)
                     }
+                    .buttonStyle(.graphite(.secondary, size: .compact))
                 }
             }
             Footnote("⌘C, ⌘V и ⌘X работают как раньше. Сочетания с Ctrl и ещё одной клавишей (⇧, ⌥, ⌘) не меняются.")
