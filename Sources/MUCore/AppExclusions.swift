@@ -52,7 +52,7 @@ package final class AppExclusions: ObservableObject {
     // MARK: - Чистая логика
 
     /// bundle id попадает в список: точное совпадение или префикс (запись, оканчивающаяся на «.»). Регистр не важен.
-    package static func matches(_ bundleID: String?, in list: [String]) -> Bool {
+    nonisolated package static func matches(_ bundleID: String?, in list: [String]) -> Bool {
         guard let id = bundleID?.lowercased(), !id.isEmpty else { return false }
         return list.contains { entry in
             let item = entry.lowercased()
