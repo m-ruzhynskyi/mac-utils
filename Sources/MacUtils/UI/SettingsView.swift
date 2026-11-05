@@ -244,6 +244,7 @@ struct SettingsSectionPage: View {
             case .textInput: TextInputPage()
             case .focus: FocusPage()
             case .cutPaste: CutPastePage()
+            case .winKeys: WinKeysPage()
             case .smoothScroll: SmoothScrollPage()
             case .switcher: SwitcherPage()
             case .screenshot: ScreenshotPage()

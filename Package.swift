@@ -22,6 +22,11 @@ let package = Package(
             path: "Sources/MUCutPaste"
         ),
         .target(
+            name: "MUWinKeys",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUWinKeys"
+        ),
+        .target(
             name: "MUFocus",
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUFocus"
@@ -145,7 +150,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -159,7 +164,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
             path: "Tests/MacUtilsTests"
         ),
     ]

@@ -35,6 +35,13 @@ package enum CutRules {
         return .move(alive: split.alive, goneCount: split.gone.count)
     }
 
+    /// ⌘X / ⌘V; с включёнными «Клавишами Windows» ещё и Ctrl+X / Ctrl+V (какой из двух перехватов сработает первым, не гарантировано).
+    package static func isCutPasteChord(flags: CGEventFlags, winKeys: Bool) -> Bool {
+        let modifiers: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
+        let held = flags.intersection(modifiers)
+        return held == .maskCommand || (winKeys && held == .maskControl)
+    }
+
     package static func goneMessage(_ count: Int) -> String {
         "Не найдено при вставке: \(count) \(plural(count, "объект", "объекта", "объектов")) (переименованы или удалены)"
     }
@@ -100,8 +107,7 @@ package final class FinderCutPaste: NSObject, ObservableObject {
 
     private func handle(type: CGEventType, event: CGEvent) -> Bool {
         guard type == .keyDown, finderIsFrontmost else { return true }
-        let modifiers: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
-        guard event.flags.intersection(modifiers) == .maskCommand else { return true }
+        guard CutRules.isCutPasteChord(flags: event.flags, winKeys: UserDefaults.standard.bool(forKey: Pref.winKeys)) else { return true }
 
         let key = event.getIntegerValueField(.keyboardEventKeycode)
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
