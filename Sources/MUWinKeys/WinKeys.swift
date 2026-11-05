@@ -39,7 +39,9 @@ package final class WinKeys: NSObject, ObservableObject {
             type: type, flags: event.flags, keyCode: key,
             bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
             isExcluded: AppExclusions.shared.isFrontExcluded,
-            isSynthetic: event.getIntegerValueField(.eventSourceUserData) == SelectedText.marker)
+            isSynthetic: event.getIntegerValueField(.eventSourceUserData) == SelectedText.marker,
+            customExcluded: WinKeysExclusions.shared.list,
+            isRecordingShortcut: ShortcutRecording.isActive)
         if decision == .rewrite { event.flags = WinKeysRules.rewritten(event.flags) }
     }
 }

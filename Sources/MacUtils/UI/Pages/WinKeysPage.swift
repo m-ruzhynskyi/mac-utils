@@ -32,7 +32,18 @@ struct WinKeysPage: View {
                     .buttonStyle(.graphite(.secondary, size: .compact))
                 }
             }
+            WinKeysExclusionsSection()
             Footnote("⌘C, ⌘V и ⌘X работают как раньше. Сочетания с Ctrl и ещё одной клавишей (⇧, ⌥, ⌘) не меняются.")
+        }
+    }
+}
+
+/// Свой список программ, где Ctrl остаётся как есть (только для «Клавиш Windows»): редакторы и среды разработки.
+private struct WinKeysExclusionsSection: View {
+    var body: some View {
+        AppListEditor(WinKeysExclusions.shared, fallbackSymbol: "chevron.left.forwardslash.chevron.right") {
+            Row("Свои исключения", subtitle: "Редакторы и среды разработки, где Ctrl+C, Ctrl+V и Ctrl+X нужны как есть. Запись с точкой на конце — все программы с таким началом.",
+                systemImage: "chevron.left.forwardslash.chevron.right") { EmptyView() }
         }
     }
 }

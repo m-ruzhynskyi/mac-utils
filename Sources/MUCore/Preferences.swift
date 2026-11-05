@@ -11,6 +11,8 @@ package enum Pref {
     package static let cutPanel = "cutPanelEnabled"
     /// Ctrl+C / Ctrl+V / Ctrl+X как ⌘C / ⌘V / ⌘X во всех программах (по умолчанию выключено).
     package static let winKeys = "winKeysEnabled"
+    /// Свой список программ, где Ctrl остаётся как есть (bundle id; запись с точкой на конце — префикс). Только для «Клавиш Windows».
+    package static let winKeysExcluded = "winKeysExcludedApps"
 
     package static let smoothScroll = "smoothScrollEnabled"
     package static let smoothSpeed = "smoothScrollSpeed"
