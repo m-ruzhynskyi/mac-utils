@@ -281,6 +281,21 @@ final class DocWordLayoutTests: XCTestCase {
         XCTAssertEqual(second - first, 30, accuracy: 0.05, "9 абзацев вертикального текста строку не растят")
     }
 
+    /// Вертикальный текст в ячейке уже одного столбца: Word абзац не переносит, строка — по длине абзаца (f150: столбцы
+    /// налезали на соседние ячейки); в ячейке шире столбца — по самому длинному слову, абзац переносится.
+    func testVerticalTextInCellNarrowerThanLineIsNotWrapped() throws {
+        let height = { (right: Int) throws -> CGFloat in
+            let row = #"\trowd\trgaph28\trleft0\cellx500\cltxbtlr\cellx"# + String(right) + #"\cellx6000 "#
+            let document = try self.open(row + #"\pard\plain\intbl\fs20 A\cell\pard\plain\intbl\fs20 ABCD EFGH IJKL MNOP QRST\cell\pard\plain\intbl\fs20 TOP\cell"#
+                + row + #"\row "# + row + #"\pard\plain\intbl\fs20 B\cell\pard\plain\intbl\fs20 \cell\pard\plain\intbl\fs20 NEXT\cell"# + row + #"\row\pard END\par"#)
+            return try XCTUnwrap(self.lines(document, "NEXT").first).minY - XCTUnwrap(self.lines(document, "TOP").first).minY
+        }
+        let narrow = try height(640), wide = try height(2500)
+        let line = NSAttributedString(string: "ABCD EFGH IJKL MNOP QRST", attributes: [.font: NSFont(name: "Times New Roman", size: 10) ?? .systemFont(ofSize: 10)]).size().width
+        XCTAssertGreaterThan(narrow, line, "столбец толще ячейки: строка не короче абзаца")
+        XCTAssertLessThan(wide, line / 2, "ячейка шире столбца: строка — по слову, абзац переносится")
+    }
+
     /// Строка-продолжение вертикального объединения — с `\trrh`, когда текст объединённой ячейки помещается в `\trrh` её строк
     /// (f161: 13,35 pt было 12,43); строка, где объединение начинается, — по тексту (`NSTextTable` добавил бы высоту объединённой).
     func testMergeContinuationRowKeepsRowHeight() throws {

@@ -1324,17 +1324,23 @@ package final class DocCellBlock: NSTextTableBlock {
         return bottom
     }
 
-    private var flowCache: (range: NSRange, length: Int, extent: CGFloat)?
+    private var flowCache: (range: NSRange, length: Int, across: CGFloat, extent: CGFloat)?
 
-    /// Длина самого длинного слова вертикального текста, пункты: строку оно растит, абзацы же переносятся по её высоте (как у Word).
-    private func verticalExtent(_ storage: NSTextStorage?, charRange: NSRange) -> CGFloat {
+    /// Высота вертикального текста: самое длинное слово, абзацы переносятся по высоте строки (как у Word). Но если и один
+    /// столбец толще ячейки, Word абзацы не переносит — тогда по самому длинному абзацу.
+    private func verticalExtent(_ storage: NSTextStorage?, charRange: NSRange, across: CGFloat) -> CGFloat {
         guard let storage, charRange.length > 0, NSMaxRange(charRange) <= storage.length else { return 0 }
-        if let flowCache, flowCache.range == charRange, flowCache.length == storage.length { return flowCache.extent }
-        var extent: CGFloat = 0
-        for paragraph in Self.verticalParagraphs(storage, charRange: charRange) {
-            for word in Self.words(paragraph.text) { extent = max(extent, ceil(paragraph.text.attributedSubstring(from: word).size().width)) }
+        if let flowCache, flowCache.range == charRange, flowCache.length == storage.length, flowCache.across == across { return flowCache.extent }
+        var word: CGFloat = 0, paragraph: CGFloat = 0, thickness: CGFloat = 0
+        for item in Self.verticalParagraphs(storage, charRange: charRange) {
+            for range in Self.words(item.text) { word = max(word, ceil(item.text.attributedSubstring(from: range).size().width)) }
+            paragraph = max(paragraph, ceil(item.text.size().width))
+            if item.text.length > 0, let font = item.text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont {
+                thickness = max(thickness, MainActor.assumeIsolated { DocLineMetrics.metrics(font).above + DocLineMetrics.metrics(font).below })
+            }
         }
-        flowCache = (charRange, storage.length, extent)
+        let extent = thickness > across + 0.01 ? paragraph : word
+        flowCache = (charRange, storage.length, across, extent)
         return extent
     }
 
@@ -1447,7 +1453,7 @@ package final class DocCellBlock: NSTextTableBlock {
                              characterRange charRange: NSRange) -> NSRect {
         var bounds = super.boundsRect(forContentRect: contentRect, in: rect, textContainer: textContainer, characterRange: charRange)
         let flowExtent: CGFloat = textFlow == .rows ? 0
-            : verticalExtent(textContainer.layoutManager?.textStorage, charRange: charRange) + width(for: .padding, edge: .minY) + width(for: .padding, edge: .maxY)
+            : verticalExtent(textContainer.layoutManager?.textStorage, charRange: charRange, across: contentRect.width) + width(for: .padding, edge: .minY) + width(for: .padding, edge: .maxY)
         if rowSpan > 1 {
             // Объединённая по вертикали ячейка: высоту на её строки делит `NSTextTable`, своя высота текста здесь ни при чём.
             let natural = max(bounds.height, flowExtent)
