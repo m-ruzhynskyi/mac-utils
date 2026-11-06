@@ -251,7 +251,7 @@ extension DS {
         package var size: RibbonButton.Size = .small
         @ViewBuilder package let items: () -> Items
         @Environment(\.isEnabled) private var enabled
-        @State private var hovered = false
+        @SwiftUI.State private var hovered = false
 
         package init(_ title: String, systemImage: String? = nil, glyph: String? = nil, size: RibbonButton.Size = .small,
                      @ViewBuilder items: @escaping () -> Items) {
