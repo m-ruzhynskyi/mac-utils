@@ -83,12 +83,12 @@ final class DocTableEditCellsTests: XCTestCase {
         var source = DocTableEditTests.wordTable
         Self.run(&source) { DocTableEdit.moveBoundary(table: 0, boundary: 2000, delta: 500, model: $0, source: $1) }
         XCTAssertEqual(rights(source), [[2500, 5000], [2500, 5000], [2500, 5000]])
-        // Не уже 100 твипов: левая ячейка от -108.
+        // Не уже 0,5 см (283 твипа): левая ячейка от -108.
         Self.run(&source) { DocTableEdit.moveBoundary(table: 0, boundary: 2500, delta: -10_000, model: $0, source: $1) }
-        XCTAssertEqual(rights(source).first, [-8, 5000])
+        XCTAssertEqual(rights(source).first, [175, 5000])
         // Правый край таблицы — только последняя ячейка.
         Self.run(&source) { DocTableEdit.moveBoundary(table: 0, boundary: 5000, delta: 700, model: $0, source: $1) }
-        XCTAssertEqual(rights(source).first, [-8, 5700])
+        XCTAssertEqual(rights(source).first, [175, 5700])
     }
 
     // MARK: - Объединить и разбить
@@ -253,7 +253,24 @@ final class DocTableEditCellsTests: XCTestCase {
     static func randomStep(_ harness: inout DocEditTests.Harness, random: inout SeededRandom) -> String {
         let model = harness.model
         let tables = model.body.tables
-        let choice = random.next(12)
+        let choice = random.next(14)
+        // TB2: протяжка границы столбца (в том числе только в одной строке, как с ⌥) и высота строки.
+        if choice >= 12, !tables.isEmpty {
+            let table = random.next(tables.count)
+            let rows = tables[table].rows
+            let row = random.next(rows.count)
+            if choice == 12 {
+                let edges = DocTableEdit.edges(rows[row])
+                let boundary = edges[random.next(edges.count)].right
+                let delta = random.next(4001) - 2000
+                let only: Int? = random.next(2) == 0 ? row : nil
+                run(&harness.source) { DocTableEdit.moveBoundary(table: table, boundary: boundary, delta: delta, model: $0, source: $1, rowOnly: only) }
+            } else {
+                let height = 100 + random.next(3000)
+                run(&harness.source) { DocTableEdit.setRowHeight(table: table, row: row, height: height, model: $0, source: $1) }
+            }
+            return "drag \(choice)"
+        }
         guard choice < 8, !tables.isEmpty else {
             if choice == 8 {
                 let paragraph = random.next(max(1, model.body.paragraphs.count))

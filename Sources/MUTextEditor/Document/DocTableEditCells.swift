@@ -60,7 +60,7 @@ extension DocTableEdit {
 
     // MARK: - Общая основа
 
-    private static func applying(_ edits: [DocEdit], to source: NSString) -> NSString? {
+    static func applying(_ edits: [DocEdit], to source: NSString) -> NSString? {
         let sorted = edits.sorted { $0.range.location < $1.range.location }
         for (a, b) in zip(sorted, sorted.dropFirst()) where NSMaxRange(a.range) > b.range.location { return nil }
         let result = NSMutableString(string: source)
@@ -72,7 +72,7 @@ extension DocTableEdit {
     }
 
     /// Итог команды: одна правка (общее отличие) и курсор (`caret` — место в новом исходнике).
-    private static func finish(_ old: NSString, _ new: NSString, caret: Int?) -> Result {
+    static func finish(_ old: NSString, _ new: NSString, caret: Int?) -> Result {
         var result = Result()
         let before = RTFReader.read(old), after = RTFReader.read(new)
         guard after.isRTF, DollarMarks.unbalancedBraces(in: new) <= DollarMarks.unbalancedBraces(in: old),
@@ -239,20 +239,28 @@ extension DocTableEdit {
 
     // MARK: - Ширина
 
-    /// Перенести границу столбцов `boundary` (правый край ячеек, твипы) на `delta`: во всех строках, где граница там же.
-    /// Соседние ячейки не уже `minimum`; правее границы ничего не сдвигается (ширина таблицы та же), кроме правого края.
-    package static func moveBoundary(table: Int, boundary: Int, delta: Int, model: RTFDocumentModel, source: NSString, minimum: Int = 100) -> Result {
+    /// Не ближе 0,5 см к соседней границе (Word не даёт сузить столбец ещё).
+    package static let minimumColumnWidth = 283
+
+    /// Перенести границу столбцов `boundary` (правый край ячеек, твипы) на `delta`: во всех строках, где граница там же, или только в
+    /// строке `rowOnly` (⌥ при протяжке). Ячейки по обе стороны не уже `minimum`; правее границы ничего не сдвигается (ширина таблицы та
+    /// же), кроме правого края. Ограничение — по самой тесной строке: граница не доходит до `minimum`, но и не отказывает.
+    package static func moveBoundary(table: Int, boundary: Int, delta: Int, model: RTFDocumentModel, source: NSString,
+                                     minimum: Int = DocTableEdit.minimumColumnWidth, rowOnly: Int? = nil) -> Result {
         let story = model.body
         guard let rows = story.tables[safe: table]?.rows, delta != 0 else { return Result(refusal: nil) }
         var low = Int.min, high = Int.max
         var touched: [(row: Int, cell: Int)] = []
-        for (index, row) in rows.enumerated() {
+        for (index, row) in rows.enumerated() where rowOnly == nil || rowOnly == index {
             let edges = edges(row)
             guard let at = edges.firstIndex(where: { abs($0.right - boundary) <= 1 }) else { continue }
             low = max(low, edges[at].left + minimum - edges[at].right)
             if at + 1 < edges.count { high = min(high, edges[at + 1].right - minimum - edges[at].right) }
             touched.append((index, at))
         }
+        // Ячейка уже тесней минимума — границу в эту сторону не двигаем (вправо/влево — свободно).
+        if low > 0 { low = 0 }
+        if high < 0 { high = 0 }
         let shift = min(max(delta, low), high)
         guard !touched.isEmpty, shift != 0 else { return Result(refusal: nil) }
         var edits: [DocEdit] = []
@@ -266,6 +274,70 @@ extension DocTableEdit {
             edits += definitions
         }
         guard let new = applying(edits, to: source) else { return Result(refusal: structureHint) }
+        return finish(source, new, caret: nil)
+    }
+
+    /// Куда граница `boundary` встанет при сдвиге на `delta` с теми же ограничениями (для подсказки при протяжке: линия не заходит в запрет).
+    package static func clampedShift(table: Int, boundary: Int, delta: Int, model: RTFDocumentModel, minimum: Int = DocTableEdit.minimumColumnWidth,
+                                     rowOnly: Int? = nil) -> Int {
+        guard let rows = model.body.tables[safe: table]?.rows else { return 0 }
+        var low = Int.min, high = Int.max
+        for (index, row) in rows.enumerated() where rowOnly == nil || rowOnly == index {
+            let edges = edges(row)
+            guard let at = edges.firstIndex(where: { abs($0.right - boundary) <= 1 }) else { continue }
+            low = max(low, edges[at].left + minimum - edges[at].right)
+            if at + 1 < edges.count { high = min(high, edges[at + 1].right - minimum - edges[at].right) }
+        }
+        if low > 0 { low = 0 }
+        if high < 0 { high = 0 }
+        return min(max(delta, low), high)
+    }
+
+    // MARK: - Очистить ячейки
+
+    /// Очистить содержимое ячеек (Delete при выделенных ячейках): текст, поля и рисунки уходят, ячейки и их оформление остаются.
+    package static func clearCells(table: Int, cells: Set<CellRef>, model: RTFDocumentModel, source: NSString) -> Result {
+        var edits: [DocEdit] = []
+        for ref in cells.sorted(by: { ($0.row, $0.cell) < ($1.row, $1.cell) }) {
+            edits += clearing(table, ref.row, ref.cell, withEnd: false, model: model, source: source)
+        }
+        guard !edits.isEmpty else { return Result(refusal: nil) }
+        guard let new = applying(edits, to: source) else { return Result(refusal: structureHint) }
+        return finish(source, new, caret: nil)
+    }
+
+    // MARK: - Высота строки
+
+    /// Высота строки не меньше `height` твипов (`\trrh` положительный) — во всех копиях определения строки: заменить свой `\trrh` (в том
+    /// числе «точно», отрицательный) или вписать перед первой ячейкой определения. Ничего больше не меняется.
+    package static func setRowHeight(table: Int, row: Int, height: Int, model: RTFDocumentModel, source: NSString) -> Result {
+        let story = model.body
+        guard let definition = story.tables[safe: table]?.rows[safe: row], let span = rowSpan(table: table, row: row, story: story, source: source) else {
+            return Result(refusal: structureHint)
+        }
+        let value = max(height, 1)
+        guard definition.height != value else { return Result(refusal: nil) }
+        var edits: [DocEdit] = []
+        var inRowProps = false
+        var found = false
+        for token in RTFLexer.tokens(source, in: span) {
+            guard token.kind == .word else { continue }
+            if token.name == "trowd" {
+                inRowProps = true
+                found = false
+                continue
+            }
+            guard inRowProps else { continue }
+            if token.name == "trrh" {
+                edits.append(DocEdit(range: token.wordRange, text: "\\trrh\(value)"))
+                found = true
+            } else if token.name.hasPrefix("cl") || token.name == "cellx" {
+                // Первая ячейка определения — конец свойств строки: нет своего `\trrh` — вписать сюда.
+                if !found { edits.append(DocEdit(range: NSRange(location: token.range.location, length: 0), text: "\\trrh\(value) ")) }
+                inRowProps = false
+            }
+        }
+        guard !edits.isEmpty, let new = applying(edits, to: source) else { return Result(refusal: structureHint) }
         return finish(source, new, caret: nil)
     }
 

@@ -57,6 +57,19 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     /// Таблица стилей `\stylesheet` для текущей версии исходника (S1).
     var styleCache: (revision: Int, sheet: DocStyleSheet)?
     var styleLookCache: (revision: Int, looks: [String: DocStyleLook]) = (-1, [:])
+    /// Выделение ячеек таблицы (TB2) и признак «выделение ставит сам документ» (чтобы не сбросить его своим же курсором).
+    var tableCellSelection: TableCellSelection?
+    var settingCellSelection = false
+    /// Выделение меняет пользователь (протяжка мышью, ⇧+стрелки), а не код (поиск, переходы по ячейкам): только такое превращается в
+    /// выделение ячеек. В тестах подменяется.
+    package var isUserSelectionGesture: () -> Bool = {
+        // Событие должно быть свежим: `currentEvent` держит последнее обработанное событие и после него (код, поиск) не обнуляется.
+        guard let event = NSApp?.currentEvent, [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .keyDown].contains(event.type) else { return false }
+        return abs(ProcessInfo.processInfo.systemUptime - event.timestamp) < 0.5
+    }
+    var keepCellSelectionOnce = false
+    /// Источник событий протяжки границы; `nil` — очередь окна (в тестах — готовая очередь синтетических событий).
+    package var dragEventSource: ((NSWindow) -> NSEvent?)?
     private var headerSignature = 0
     private var highlighted = false
     /// Совпадения поиска (показанные единицы) и текущее — `DocFind.swift`.
@@ -704,6 +717,13 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     package nonisolated func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,
                               toCharacterRange new: NSRange) -> NSRange {
         MainActor.assumeIsolated {
+            // TB2: выделение протянулось через несколько ячеек таблицы — это выделение ячеек (прямоугольник), текст не подсвечивается.
+            if !settingCellSelection, isUserSelectionGesture(), let cross = cellSelection(forTextRange: new) {
+                tableCellSelection = TableCellSelection(table: cross.table, cells: cross.cells, anchor: cross.anchor, focus: cross.focus)
+                keepCellSelectionOnce = true
+                for view in textViews { view.needsDisplay = true }
+                return NSRange(location: new.location, length: 0)
+            }
             if let moved = DocListEdit.caretOutsideNumber(new, from: old, map: rendering.map) { return moved }
             guard new.length == 0, new.location > 0, new.location < rendering.map.count,
                   rendering.map.kind(at: new.location - 1) == .field, rendering.map.kind(at: new.location) == .field,
@@ -755,7 +775,11 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     }
 
     package nonisolated func textViewDidChangeSelection(_ notification: Notification) {
-        MainActor.assumeIsolated { updateStatus() }
+        MainActor.assumeIsolated {
+            // Курсор или текстовое выделение сменилось не по протяжке через ячейки — выделение ячеек сбрасывается.
+            if keepCellSelectionOnce { keepCellSelectionOnce = false } else if !settingCellSelection { clearCellSelection() }
+            updateStatus()
+        }
     }
 
     package nonisolated func undoManager(for view: NSTextView) -> UndoManager? {

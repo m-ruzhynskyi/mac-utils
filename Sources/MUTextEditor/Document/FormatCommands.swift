@@ -71,6 +71,11 @@ package final class DocFormatter: ObservableObject {
     package func target() -> Target? {
         if let session = headerSession { return session.target() }
         guard let controller else { return nil }
+        // Выделены ячейки таблицы (TB2): команда абзаца действует на все их абзацы (знаки — нет: выделен не текст, а ячейки).
+        if let cells = controller.validCellSelection, let rows = controller.model.body.tables[safe: cells.table]?.rows {
+            let paragraphs = cells.cells.flatMap { ref in rows[safe: ref.row]?.paragraphs[safe: ref.cell] ?? [] }.sorted()
+            return Target(story: .body, span: NSRange(location: 0, length: 0), paragraphs: paragraphs, hasCharacters: false)
+        }
         let selection = controller.selectedUnits
         var units = selection
         if units.length == 0 {

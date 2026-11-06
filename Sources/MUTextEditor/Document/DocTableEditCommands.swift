@@ -50,6 +50,11 @@ extension DocumentController {
     }
 
     func applyTable(_ result: DocTableEdit.Result, actionName: String) -> Bool {
+        // Правки, после которых ячейки те же (ширина, высота, заливка, границы), выделение оставляют; остальные — сбрасывают.
+        let keeps = ["Ширина столбца", "Высота строки", "Заливка", "Границы"].contains(actionName)
+        let saved = tableCellSelection
+        if keeps { settingCellSelection = true } else { tableCellSelection = nil }
+        defer { if keeps { settingCellSelection = false; tableCellSelection = saved } }
         if let refusal = result.refusal {
             show(notice: refusal)
             Feedback.beep()
@@ -67,6 +72,8 @@ extension DocumentController {
 extension DocumentController {
     /// Таблица и ячейки выделения (только одной таблицы основного текста); у курсора — его ячейка.
     var selectedTableCells: (table: Int, cells: Set<DocTableEdit.CellRef>)? {
+        // Выделение ячеек (протяжкой, у края, ⇧+стрелки) — его ячейки; иначе — по тексту выделения.
+        if let selection = validCellSelection { return (selection.table, selection.cells) }
         let units = selectedUnits
         let first = rendering.paragraph(atUnit: min(units.location, max(0, rendering.length - 1)))
         let last = rendering.paragraph(atUnit: min(max(units.location, NSMaxRange(units) - 1), max(0, rendering.length - 1)))
@@ -227,30 +234,6 @@ extension DocumentController {
         let left = block.width(for: .padding, edge: .minX) + block.width(for: .border, edge: .minX)
         let right = block.width(for: .padding, edge: .maxX) + block.width(for: .border, edge: .maxX)
         return NSRect(x: line.minX - left, y: line.minY, width: line.width + left + right, height: line.height)
-    }
-
-    /// Перетаскивание границы: линия-подсказка, на отпускании — правка ширины (одна, с отменой).
-    func dragTableBoundary(_ event: NSEvent, in view: DocTextView) -> Bool {
-        let start = view.convert(event.locationInWindow, from: nil)
-        guard let hit = tableBoundary(at: start, in: view), let window = view.window else { return false }
-        let guide = NSBox(frame: NSRect(x: hit.x, y: view.bounds.minY, width: 1, height: view.bounds.height))
-        guide.boxType = .custom
-        guide.borderWidth = 0
-        guide.fillColor = .controlAccentColor
-        view.addSubview(guide)
-        defer { guide.removeFromSuperview() }
-        var last = start
-        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
-            last = view.convert(next.locationInWindow, from: nil)
-            guide.frame.origin.x = hit.x + last.x - start.x
-            NSCursor.resizeLeftRight.set()
-            if next.type == .leftMouseUp { break }
-        }
-        let delta = Int(((last.x - start.x) * 20).rounded())
-        guard delta != 0, let tab else { return true }
-        let result = DocTableEdit.moveBoundary(table: hit.table, boundary: hit.boundary, delta: delta, model: model, source: tab.text)
-        if result.refusal != nil || !result.edits.isEmpty { _ = applyTable(result, actionName: "Ширина столбца") }
-        return true
     }
 }
 

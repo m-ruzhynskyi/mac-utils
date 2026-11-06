@@ -94,10 +94,12 @@ package final class DocTextView: NSTextView {
     package override func draw(_ dirtyRect: NSRect) {
         if let page { NSBezierPath(rect: convert(page.bounds, from: page)).addClip() }
         super.draw(dirtyRect)
+        controller?.drawCellSelection(in: self)  // TB2: заливка выделенных ячеек
     }
 
     package override func mouseDown(with event: NSEvent) {
         if event.clickCount == 1, let controller, controller.dragTableBoundary(event, in: self) { return }
+        if event.clickCount == 1, let controller, controller.selectByEdgeClick(at: convert(event.locationInWindow, from: nil), in: self) { return }  // TB2
         if event.clickCount == 1, let controller, controller.clickDollar(event, in: self) { return }  // V2: поповер значения `$`
         if event.clickCount == 2, let handler = onDoubleClickOutside, handler(event) { return }
         super.mouseDown(with: event)
@@ -185,8 +187,8 @@ package final class DocTextView: NSTextView {
 
     // Граница ячеек таблицы: курсор «←→», перетаскивание — ширина столбца.
     package override func mouseMoved(with event: NSEvent) {
-        if let controller, controller.tableBoundary(at: convert(event.locationInWindow, from: nil), in: self) != nil {
-            NSCursor.resizeLeftRight.set()
+        if let controller, let hit = controller.tableHit(at: convert(event.locationInWindow, from: nil), in: self) {
+            hit.cursor.set()
             return
         }
         super.mouseMoved(with: event)
@@ -197,6 +199,14 @@ package final class DocTextView: NSTextView {
     package override func insertTab(_ sender: Any?) {
         if controller?.tabInTable(forward: true) != true { super.insertTab(sender) }
     }
+
+    // ⇧+стрелки при выделенных ячейках — расширить выделение на соседнюю ячейку (TB2); Delete — очистить ячейки.
+    package override func moveRightAndModifySelection(_ sender: Any?) { if controller?.extendCellSelection(dx: 1, dy: 0) != true { super.moveRightAndModifySelection(sender) } }
+    package override func moveLeftAndModifySelection(_ sender: Any?) { if controller?.extendCellSelection(dx: -1, dy: 0) != true { super.moveLeftAndModifySelection(sender) } }
+    package override func moveDownAndModifySelection(_ sender: Any?) { if controller?.extendCellSelection(dx: 0, dy: 1) != true { super.moveDownAndModifySelection(sender) } }
+    package override func moveUpAndModifySelection(_ sender: Any?) { if controller?.extendCellSelection(dx: 0, dy: -1) != true { super.moveUpAndModifySelection(sender) } }
+    package override func deleteBackward(_ sender: Any?) { if controller?.clearSelectedCells() != true { super.deleteBackward(sender) } }
+    package override func deleteForward(_ sender: Any?) { if controller?.clearSelectedCells() != true { super.deleteForward(sender) } }
 
     package override func insertBacktab(_ sender: Any?) {
         if controller?.tabInTable(forward: false) == true || controller?.backtab() == true { return }
