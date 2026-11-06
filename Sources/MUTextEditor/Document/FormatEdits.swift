@@ -41,9 +41,13 @@ package enum CharChange: Equatable {
     case vertical(RTFVertical)
     /// Капитель (`\scaps`), все прописные (`\caps`), скрытый (`\v`).
     case smallCaps(Bool), caps(Bool), hidden(Bool)
+    /// Знаковый стиль `\csN` (S1): его коды как в стиле (`words` — нужные для куска номера шрифта и цвета берутся из той же таблицы
+    /// файла) и свойства, которые стиль задаёт (`props` — по ним проверяется результат).
+    case characterStyle(number: Int, words: String, props: RTFCharProps)
 
     package var actionName: String {
         switch self {
+        case .characterStyle: return "Стиль знаков"
         case .bold: return "Полужирный"
         case .italic: return "Курсив"
         case .underline: return "Подчёркнутый"
@@ -406,6 +410,7 @@ package enum FormatEdits {
         case .smallCaps: return ["scaps"]
         case .caps: return ["caps"]
         case .hidden: return ["v"]
+        case .characterStyle: return []
         }
     }
 
@@ -437,6 +442,7 @@ package enum FormatEdits {
         case .smallCaps(let on): return on ? "\\scaps" : "\\scaps0"
         case .caps(let on): return on ? "\\caps" : "\\caps0"
         case .hidden(let on): return on ? "\\v" : "\\v0"
+        case .characterStyle(let number, let words, _): return "\\cs\(number)" + words
         case .clear:
             // `\plain` ставит шрифт `\deff`; если у него другая кодировка `\'hh` — тот же шрифт с кодировкой куска.
             let defaultFont = model.font(nil)

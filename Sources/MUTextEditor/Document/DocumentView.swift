@@ -8,6 +8,18 @@ package final class DocLayoutManager: NSLayoutManager {
     package var unitKind: ((Int) -> DocSourceMap.Kind?)?
     package static let markColor = NSColor(srgbRed: 0.27, green: 0.45, blue: 0.85, alpha: 1)
 
+    package override func setGlyphs(_ glyphs: UnsafePointer<CGGlyph>, properties props: UnsafePointer<NSLayoutManager.GlyphProperty>,
+                                    characterIndexes charIndexes: UnsafePointer<Int>, font aFont: NSFont, forGlyphRange glyphRange: NSRange) {
+        if let storage = textStorage,
+           let vertical = DocLineMetrics.verticalProperties(storage, properties: props, characterIndexes: charIndexes, count: glyphRange.length) {
+            vertical.withUnsafeBufferPointer {
+                super.setGlyphs(glyphs, properties: $0.baseAddress!, characterIndexes: charIndexes, font: aFont, forGlyphRange: glyphRange)
+            }
+        } else {
+            super.setGlyphs(glyphs, properties: props, characterIndexes: charIndexes, font: aFont, forGlyphRange: glyphRange)
+        }
+    }
+
     package override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
         guard showsInvisibles, let storage = textStorage, storage.length > 0 else { return }

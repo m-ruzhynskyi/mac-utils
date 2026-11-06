@@ -223,6 +223,21 @@ package enum FormatCheck {
             let font = new.font(props.font)
             guard font?.name == name.trimmingCharacters(in: .whitespaces), FormatTables.encoding(of: font, model: new) == encoding else { return false }
             expect.font = props.font
+        case .characterStyle(_, _, let style):
+            // Стиль задаёт те свойства, что у него отличны от значений по умолчанию; остальное у символа остаётся как было.
+            let base = RTFCharProps()
+            if style.font != base.font { expect.font = style.font }
+            if style.halfPoints != base.halfPoints { expect.halfPoints = style.halfPoints }
+            if style.bold != base.bold { expect.bold = style.bold }
+            if style.italic != base.italic { expect.italic = style.italic }
+            if style.underline != base.underline { expect.underline = style.underline }
+            if style.strike != base.strike { expect.strike = style.strike }
+            if style.color != base.color { expect.color = style.color }
+            if style.highlight != base.highlight { expect.highlight = style.highlight }
+            if style.hidden != base.hidden { expect.hidden = style.hidden }
+            if style.vertical != base.vertical { expect.vertical = style.vertical }
+            if style.caps != base.caps { expect.caps = style.caps }
+            if style.smallCaps != base.smallCaps { expect.smallCaps = style.smallCaps }
         case .clear:
             expect = RTFCharProps()
             let font = new.font(props.font)

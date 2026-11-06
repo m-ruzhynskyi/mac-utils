@@ -48,6 +48,32 @@ final class DocTableCommandTests: XCTestCase {
         }
     }
 
+    /// Правится колонтитул: команд таблицы нет совсем — ни кнопок, ни «Вставить таблицу» (она вставила бы таблицу в тело, к невидимому
+    /// курсору); `perform` ничего не делает.
+    func testNoTableCommandsWhileHeaderIsEdited() throws {
+        XCTAssertEqual(TableCommand.visible(in: Context(inHeader: true)), [])
+        XCTAssertEqual(TableCommand.visible(in: Context(inTable: true, rowEditable: true, selectedCells: 2, columns: 3, inHeader: true)), [])
+        let (workspace, tab) = DocDemo.tab()
+        tab.restoreMode(nil)
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 1000, height: 700), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: EditorRootView(workspace: workspace))
+        window.orderBack(nil)
+        defer { window.contentView = nil; window.close() }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        let document = try XCTUnwrap(tab.documentController)
+        let formatter = DocFormatter.of(document)
+        formatter.beginHeaderEditing(page: try XCTUnwrap(document.pagesView.pages.first), header: true)
+        XCTAssertNotNil(formatter.headerSession)
+        let before = tab.text as String
+        XCTAssertTrue(document.tableContext.inHeader)
+        XCTAssertFalse(document.perform(.insertTable))
+        XCTAssertEqual(tab.text as String, before, "в тело ничего не вставлено")
+        formatter.endHeaderEditing()
+        XCTAssertFalse(document.tableContext.inHeader)
+    }
+
     func testTitlesAreUnique() {
         XCTAssertEqual(Set(TableCommand.allCases.map(\.title)).count, TableCommand.allCases.count)
     }
