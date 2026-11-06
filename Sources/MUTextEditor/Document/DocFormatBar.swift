@@ -78,7 +78,8 @@ package struct DocFormatBar: View {
                 }
             }
         }
-        DS.RibbonGroup("Абзац", last: level >= 4) {
+        let hasStyles = document.styleContext.isDocument && !document.styleSheet.styles.isEmpty
+        DS.RibbonGroup("Абзац", last: level >= 4 && !hasStyles) {
             VStack(alignment: .leading, spacing: DS.Space.xs) {
                 if level < 4 {
                     HStack(spacing: DS.Space.xxs) {
@@ -103,6 +104,7 @@ package struct DocFormatBar: View {
                 }
             }
         }
+        if hasStyles { DocStylesGroup(document: document, formatter: formatter, level: level, last: level >= 4) }
         if level < 4 {
             DS.RibbonGroup("Правка", last: level == 0) {
                 if level == 0 {

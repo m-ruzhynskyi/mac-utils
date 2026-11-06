@@ -20,6 +20,8 @@ package struct DocFormatState: Equatable {
     package var alignment: RTFAlignment?
     package var paragraph: RTFParaProps?
     package var inTable = false
+    /// S1: номер знакового стиля `\csN` у курсора (для подсветки в списке стилей ленты).
+    package var characterStyle: Int?
 }
 
 /// Команды форматирования одной вкладки в режиме «Документ» (D-4): выделение → точечные правки (`FormatEdits`) →
@@ -198,6 +200,7 @@ package final class DocFormatter: ObservableObject {
         }
         guard let controller else { return }
         state = Self.state(in: controller.storage, selection: controller.selectedUnits, model: controller.model)
+        state.characterStyle = controller.currentCharacterStyle?.number
     }
 
     /// Свойства выделения по атрибутам показанного текста (у курсора — символ перед ним).
