@@ -45,11 +45,12 @@ extension DocumentController {
         reveal(range)
     }
 
-    /// «Заменить все»: каждое совпадение — своя точечная правка исходника, все вместе — один шаг отмены. Совпадения, которые «Документ» не правит
-    /// (номер списка, граница ячейки, рисунок), пропускаются и считаются. Строки без перевода строки и непересекающиеся правки применяются
-    /// одним вызовом; иначе — по одной с конца, в одной группе отмены.
-    package func replaceAll(_ ranges: [NSRange], with strings: [String]) -> (done: Int, skipped: Int) {
-        guard let tab, ranges.count == strings.count, !ranges.isEmpty else { return (0, 0) }
+    /// «Заменить все»: каждое совпадение — своя точечная правка исходника, все вместе (тело и колонтитулы) — один шаг отмены. Совпадения,
+    /// которые «Документ» не правит (номер списка, граница ячейки, рисунок), пропускаются и считаются. Строки без перевода строки и
+    /// непересекающиеся правки применяются одним вызовом; иначе — по одной с конца, в одной группе отмены (колонтитулы — первыми).
+    package func replaceAll(_ ranges: [NSRange], with strings: [String],
+                            headers: [(match: HeaderFindMatch, string: String)] = []) -> (done: Int, skipped: Int, headerDone: Int, headerSkipped: Int) {
+        guard let tab, ranges.count == strings.count, !(ranges.isEmpty && headers.isEmpty) else { return (0, 0, 0, 0) }
         typingBurst = nil
         var edits: [DocEdit] = []
         var applicable: [(NSRange, String)] = []
@@ -63,21 +64,32 @@ extension DocumentController {
             edits.append(contentsOf: result.edits)
             applicable.append((range, string))
         }
-        guard !applicable.isEmpty else { return (0, skipped) }
-        let sorted = edits.sorted { ($0.range.location, $0.range.length) < ($1.range.location, $1.range.length) }
+        let headerPlan = headerReplaceEdits(headers)
+        let headerEdits = headerPlan.edits
+        guard !applicable.isEmpty || !headerEdits.isEmpty else { return (0, skipped, 0, headerPlan.skipped) }
+        let combined = edits + headerEdits
+        let sorted = combined.sorted { ($0.range.location, $0.range.length) < ($1.range.location, $1.range.length) }
         let disjoint = zip(sorted, sorted.dropFirst()).allSatisfy { NSMaxRange($0.range) <= $1.range.location }
-        if disjoint, !strings.contains(where: { $0.contains(where: \.isNewline) }) {
-            if apply(sorted, actionName: "Заменить все", select: { _ in NSRange(location: 0, length: 0) }) { return (applicable.count, skipped) }
+        let noNewlines = !strings.contains(where: { $0.contains(where: \.isNewline) }) && !headers.contains(where: { $0.string.contains(where: \.isNewline) })
+        if disjoint, noNewlines {
+            if apply(sorted, actionName: "Заменить все", select: { _ in NSRange(location: 0, length: 0) }) {
+                return (applicable.count, skipped, headerPlan.done, headerPlan.skipped)
+            }
         }
-        // Запасной путь: с конца к началу показанные единицы слева остаются верными.
+        // Запасной путь: колонтитулы одной правкой, затем тело с конца к началу (показанные единицы слева остаются верными).
         tab.undo.beginUndoGrouping()
+        var headerDone = headerPlan.done, headerSkipped = headerPlan.skipped
+        if !headerEdits.isEmpty, !apply(headerEdits, actionName: "Заменить все") {
+            headerSkipped += headerDone
+            headerDone = 0
+        }
         var done = 0
         for (range, string) in applicable.reversed() {
             if perform(replacing: range, with: string) { done += 1 } else { skipped += 1 }
         }
         tab.undo.endUndoGrouping()
         tab.undo.setActionName("Заменить все")
-        return (done, skipped)
+        return (done, skipped, headerDone, headerSkipped)
     }
 
     private func hasProtectedUnit(_ range: NSRange) -> Bool {
