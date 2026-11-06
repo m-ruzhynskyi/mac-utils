@@ -97,7 +97,7 @@ extension DS {
         package let selected: Bool
         package var contextual = false
         package let action: () -> Void
-        @State private var hovered = false
+        @SwiftUI.State private var hovered = false
 
         package init(_ title: String, selected: Bool, contextual: Bool = false, action: @escaping () -> Void) {
             self.title = title
@@ -182,7 +182,7 @@ extension DS {
 
         @Environment(\.isEnabled) private var enabled
         @Environment(\.colorScheme) private var scheme
-        @State private var hovered = false
+        @SwiftUI.State private var hovered = false
 
         package init(_ title: String, systemImage: String? = nil, glyph: String? = nil, size: Size = .small, isOn: Bool = false,
                      shortcut: String? = nil, action: @escaping () -> Void) {
@@ -250,7 +250,7 @@ extension DS {
         package var size: RibbonButton.Size = .small
         @ViewBuilder package let items: () -> Items
         @Environment(\.isEnabled) private var enabled
-        @State private var hovered = false
+        @SwiftUI.State private var hovered = false
 
         package init(_ title: String, systemImage: String? = nil, glyph: String? = nil, size: RibbonButton.Size = .small,
                      @ViewBuilder items: @escaping () -> Items) {
