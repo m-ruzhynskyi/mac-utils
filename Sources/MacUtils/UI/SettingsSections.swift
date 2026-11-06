@@ -20,6 +20,7 @@ extension SettingsSection {
         case .textInput: return "ввод текста раскладка для приложения источник ввода язык"
         case .focus: return "фокус размытие фона затемнение"
         case .cutPaste: return "вырезать вставить finder перенос файлов ⌘x ⌘v"
+        case .winKeys: return "клавиши windows ctrl c ctrl v ctrl x копировать вставить вырезать контрол"
         case .smoothScroll: return "плавная прокрутка колесо мыши скорость инерция"
         case .switcher: return "переключатель приложений ⌘tab окна превью"
         case .screenshot: return "снимок скриншот разметка распознать текст ocr запись экрана видео gif длинный снимок шаги коллаж папка буфер"

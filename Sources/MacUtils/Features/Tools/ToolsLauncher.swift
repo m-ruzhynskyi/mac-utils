@@ -72,7 +72,7 @@ enum ToolsLauncher {
         for folder in targets {
             try? manager.createDirectory(at: folder, withIntermediateDirectories: true)
             if (try? replace(folder.appendingPathComponent(name), with: source)) != nil {
-                Log.window.info("Значок «Инструменты» установлен в \(folder.path, privacy: .public)")
+                Log.window.info("Значок «Инструменты» установлен в \(folder.path, privacy: .private)")
                 return
             }
         }

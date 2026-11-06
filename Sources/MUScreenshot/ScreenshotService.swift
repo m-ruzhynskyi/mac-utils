@@ -17,7 +17,9 @@ package final class ScreenshotService: ObservableObject {
     @Published package private(set) var isRunning = false
 
     private var windows: [CaptureWindow] = []
-    private var capturing = false
+    /// Когда начался захват экрана; nil — не идёт. Номер отличает захват от сброшенного зависшего.
+    private var capturingSince: Date?
+    private var captureGeneration = 0
     /// Перехват клавиш на время снимка: оверлей фонового приложения не всегда
     /// становится ключевым окном, поэтому клавиши ловятся независимо от фокуса.
     private var keyTap: EventTap?
@@ -57,35 +59,83 @@ package final class ScreenshotService: ObservableObject {
             recorder.stop()
             return false
         }
-        guard windows.isEmpty, !capturing, ScrollCapture.current == nil else { return false }
+        guard admit() else { return false }
         guard Permissions.screenRecording else {
             Permissions.requestScreenRecording()
             Toast.show("Разрешите Mac Utils «Запись экрана» в настройках конфиденциальности",
                        symbol: "exclamationmark.triangle.fill", tint: .orange)
             return false
         }
-        capturing = true
+        capturingSince = Date()
+        captureGeneration += 1
+        let generation = captureGeneration
         // Запоминаем программу до того, как оверлей заберёт фокус.
         ScreenshotLibrary.shared.captureApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
         // Панель шагов и предпросмотр коллажа прячутся и исключаются из кадра.
         let hidden = StepsSession.prepareForCapture()
         let snapFrames = WindowSnap.visibleWindowFrames()
         Task { @MainActor in
-            defer { self.capturing = false }
+            defer { if self.captureGeneration == generation { self.capturingSince = nil } }
             do {
-                let shots = try await ScreenGrabber.captureAllScreens(excluding: hidden)
+                // ScreenCaptureKit может не ответить (занят replayd, чужой поток захвата): без предела захват
+                // не заканчивался бы, и все следующие ⌘⇧X молча игнорировались.
+                let shots = try await TimeLimit.run(seconds: ShotGate.captureTimeout) {
+                    try await ScreenGrabber.captureAllScreens(excluding: hidden)
+                }
+                // Захват успели признать зависшим и сбросить: запоздавший кадр не показываем.
+                guard self.captureGeneration == generation else { return }
                 guard !shots.isEmpty else {
                     StepsSession.captureClosed()
                     return
                 }
                 self.present(shots: shots, snapFrames: snapFrames, mode: mode)
+            } catch is TimeLimitExceeded {
+                guard self.captureGeneration == generation else { return }
+                Log.capture.error("Снимок: ScreenCaptureKit не ответил за \(ShotGate.captureTimeout, privacy: .public) с — захват отменён")
+                StepsSession.captureClosed()
+                Toast.show(ShotGate.timeoutMessage, symbol: "exclamationmark.triangle.fill", tint: .orange)
             } catch {
+                guard self.captureGeneration == generation else { return }
                 StepsSession.captureClosed()
                 Toast.show("Не удалось сделать снимок: \(error.localizedDescription)",
                            symbol: "exclamationmark.triangle.fill", tint: .orange)
             }
         }
         return true
+    }
+
+    /// Пускает новый снимок или объясняет, почему нет. Зависшее состояние прошлого снимка сбрасывается.
+    private func admit() -> Bool {
+        let scroll = ScrollCapture.current.map { ShotGate.Scroll(showing: $0.isShowing, age: $0.age) }
+        let decision = ShotGate.decide(capturingFor: capturingSince.map { Date().timeIntervalSince($0) },
+                                       overlays: windows.count, visibleOverlays: windows.filter(\.isVisible).count,
+                                       scroll: scroll)
+        switch decision {
+        case .busy(let busy):
+            Log.capture.notice("Снимок: ⌘⇧X во время \(String(describing: busy), privacy: .public)")
+            if busy == .overlayOpen {
+                ScreenOutput.activateApp(ignoringOtherApps: true)
+                (windows.first { $0.isKeyWindow } ?? windows.first)?.makeKeyAndOrderFrontOnScreen()
+            }
+            if let message = ShotGate.message(busy) {
+                Toast.show(message, symbol: "hourglass", tint: .orange)
+            }
+            return false
+        case .proceed(let reset):
+            for stale in reset {
+                Log.capture.error("Снимок: сброшено зависшее состояние \(String(describing: stale), privacy: .public)")
+                switch stale {
+                case .capture:
+                    capturingSince = nil
+                    captureGeneration += 1
+                case .overlays:
+                    close()
+                case .scroll:
+                    ScrollCapture.current?.abandon()
+                }
+            }
+            return true
+        }
     }
 
     private func present(shots: [ScreenShot], snapFrames: [CGRect], mode: Mode) {

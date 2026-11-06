@@ -2,7 +2,7 @@ import Foundation
 import MUCore
 
 package enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, hotKeys, exclusions, panel, music, share, focus, textInput, cutPaste, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
+    case general, hotKeys, exclusions, panel, music, share, focus, textInput, cutPaste, winKeys, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, ai,
          uninstaller, monitor, tasks, cleanup, shots, textEditor, videoPlayer, remote
 
@@ -20,6 +20,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .videoPlayer: return "Плеер"
         case .remote: return "Удалённые"
         case .cutPaste: return "Вырезать"
+        case .winKeys: return "Ctrl"
         case .smoothScroll: return "Прокрутка"
         case .switcher: return "Переключатель"
         case .screenshot: return "Скриншоты"
@@ -56,6 +57,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .textInput: return "Ввод текста"
         case .focus: return "Фокус"
         case .cutPaste: return "Вырезать и вставить"
+        case .winKeys: return "Клавиши Windows"
         case .smoothScroll: return "Плавная прокрутка"
         case .switcher: return "Переключатель приложений"
         case .screenshot: return "Снимки экрана"
@@ -92,6 +94,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .textInput: return "character.cursor.ibeam"
         case .focus: return "scope"
         case .cutPaste: return "scissors"
+        case .winKeys: return "keyboard"
         case .smoothScroll: return "computermouse"
         case .switcher: return "rectangle.on.rectangle"
         case .screenshot: return "camera.viewfinder"

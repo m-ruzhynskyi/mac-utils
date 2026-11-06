@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 // Модули склеиваются в один скрипт (без import между ними), как в Worker после сборки.
-const source = ['limits.js', 'auth.js', 'index.js']
+const source = ['limits.js', 'auth.js', 'csp.js', 'index.js']
   .map((name) => fs.readFileSync(`${__dirname}/../src/${name}`, 'utf8'))
   .join('\n')
   .replace(/^import .*;$/gm, '')
@@ -202,7 +202,8 @@ test('game messages reach only the opponent, with the viewer ID stamped by the r
   assert.deepEqual(host.messages.at(-1), { type: 'game', action: 'invite', from: '1111111111', name: 'Alice' });
   assert.equal(bob.messages.length, 0);
   f.room.webSocketMessage(host, JSON.stringify({ type: 'game', action: 'accept', to: '1111111111', name: 'Mac' }));
-  assert.deepEqual(alice.messages.at(-1), { type: 'game', action: 'accept', name: 'Mac', from: 'host' });
+  // Игра ведущего проверяется так же, как игра зрителя (L5): лишние поля вроде name отбрасываются.
+  assert.deepEqual(alice.messages.at(-1), { type: 'game', action: 'accept', from: 'host' });
   assert.equal(bob.messages.length, 0);
 });
 
@@ -1280,4 +1281,116 @@ test('video-trouble: зритель просит ключевой и «не ус
   send(viewer, { key: 'yes', slow: 1 });
   assert.equal(asks().length, 3, 'не Bool — как отсутствие');
   assert.equal(host.messages.filter((m) => m.type === 'video-trouble').length, 0, 'само сообщение ведущему не пересылается');
+});
+
+// ---- Аудит безопасности 28.10: L2 (антиспам запросов), L3 (размер до разбора), L5 (игра и адресная доставка) ----
+const LIVE_HOST = { lastSeen: 1_000_000 };
+const enc = (o) => JSON.stringify(o);
+
+test('L2: пять отказов подряд — комната не принимает новых запросов 2 минуты; принятие обнуляет серию', async () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: Infinity });
+  const waiting = (i) => f.socket('viewer', { id: `10000000${String(i).padStart(2, '0')}`, name: 'v', rid: `r${i}`, approved: false, reqSent: true, auth: 'none', ip: `1.1.1.${i}` });
+  const connect = (id) => f.room.fetch(new Request(`https://room/1234567890?role=viewer&viewer=${id}&name=x`));
+  for (let i = 1; i <= 4; i++) {
+    const v = waiting(i);
+    f.room.webSocketMessage(host, enc({ type: 'decline', viewer: v.info.id }));
+  }
+  assert.equal((await connect('2000000001')).status, 101, 'четыре отказа — ещё можно');
+  // Принятие обнуляет серию.
+  const ok = waiting(5);
+  f.room.webSocketMessage(host, enc({ type: 'accept', viewer: ok.info.id }));
+  for (let i = 6; i <= 9; i++) f.room.webSocketMessage(host, enc({ type: 'decline', viewer: waiting(i).info.id }));
+  assert.equal((await connect('2000000002')).status, 101, 'серия началась заново');
+  f.room.webSocketMessage(host, enc({ type: 'decline', viewer: waiting(10).info.id }));
+  assert.equal((await connect('2000000003')).status, 429, 'пятый отказ подряд — пауза');
+  const alive = () => f.room.webSocketMessage(host, enc({ type: 'heartbeat' }));
+  f.advance(100_000); alive();
+  assert.equal((await connect('2000000004')).status, 429, 'пауза — две минуты');
+  f.advance(21_000); alive();
+  assert.equal((await connect('2000000005')).status, 101, 'через две минуты снова принимает');
+});
+
+test('L2: запросы по IP и по ключу за минуту; «свой» запрос владельца ID не считается', () => {
+  const f = fixture();
+  for (let i = 0; i < 12; i++) assert.equal(f.room.requestAllowed('5.5.5.5', '', false), true, `запрос ${i + 1}`);
+  assert.equal(f.room.requestAllowed('5.5.5.5', '', false), false, '13-й с одного IP за минуту');
+  assert.equal(f.room.requestAllowed('6.6.6.6', '', false), true, 'другой IP не затронут');
+  assert.equal(f.room.requestAllowed('5.5.5.5', '', true), true, 'свой запрос не ограничивается');
+  for (let i = 0; i < 4; i++) assert.equal(f.room.requestAllowed(`7.7.7.${i}`, 'KEY', false), true);
+  assert.equal(f.room.requestAllowed('7.7.7.9', 'KEY', false), false, '5-й запрос того же ключа, хотя IP новый');
+  f.advance(61_000);
+  assert.equal(f.room.requestAllowed('5.5.5.5', 'KEY', false), true, 'окно закончилось');
+});
+
+test('L3: heartbeat и ack больше 256 байт, а до проверки ключа — больше 1 КБ, отбрасываются без разбора', () => {
+  const f = fixture(), host = f.socket('host', LIVE_HOST);
+  const viewer = f.socket('viewer', { id: '1', approved: true, lastSeen: 1 });
+  f.room.webSocketMessage(viewer, enc({ type: 'heartbeat', pad: 'x'.repeat(400) }));
+  assert.equal(viewer.info.lastSeen, 1, 'тяжёлый heartbeat не принят');
+  f.room.webSocketMessage(viewer, enc({ type: 'heartbeat' }));
+  assert.equal(viewer.info.lastSeen, 1_000_000, 'обычный принят');
+  // Неподтверждённый зритель: auth до 1 КБ.
+  const parsed = [];
+  const pending = f.socket('viewer', { id: '2', auth: 'pending', rid: 'r', nonce: 'n', connectedAt: 1_000_000, ip: '' });
+  const contextJSON = vm.runInContext('JSON', f.context);
+  const originalParse = contextJSON.parse;
+  contextJSON.parse = (text) => { parsed.push(text.length); return originalParse(text); };
+  f.room.webSocketMessage(pending, enc({ type: 'auth', pad: 'x'.repeat(2000) }));
+  f.room.webSocketMessage(host, enc({ type: 'heartbeat', pad: 'x'.repeat(400) }));
+  contextJSON.parse = originalParse;
+  assert.deepEqual(parsed, [], 'ни одного JSON.parse для слишком больших сообщений');
+});
+
+test('L3: поток heartbeat ограничен отдельным счётом', () => {
+  const f = fixture();
+  const viewer = f.socket('viewer', { id: '1', approved: true, lastSeen: 1 });
+  let accepted = 0;
+  for (let i = 0; i < 100; i++) {
+    viewer.info.lastSeen = 1;
+    f.room.webSocketMessage(viewer, enc({ type: 'heartbeat' }));
+    if (viewer.info.lastSeen === 1_000_000) accepted += 1;
+  }
+  assert.ok(accepted >= 40 && accepted < 60, `принято ${accepted}`);
+  // Метки при этом не страдают: у них свой счёт.
+  const other = f.socket('viewer', { id: '3', approved: true });
+  f.socket('host', LIVE_HOST);
+  f.room.webSocketMessage(viewer, enc({ type: 'ping', x: 0.1, y: 0.2 }));
+  assert.equal(other.messages.at(-1)?.type, 'ping');
+});
+
+test('L5: игра ведущего проверяется как игра зрителя и адресуется по rid, а не по названному зрителем ID', () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000, auth: 'key', pub: 'H' });
+  const alice = f.socket('viewer', { id: '1111111111', name: 'Alice', rid: 'ra', approved: true });
+  const mallory = f.socket('viewer', { id: '1111111111', name: 'Mallory', rid: 'rm', approved: true });
+  f.room.webSocketMessage(alice, enc({ type: 'game', action: 'invite' }));
+  assert.equal(host.messages.at(-1).rid, 'ra', 'ведущий с ключом получает rid отправителя');
+  assert.equal(host.messages.at(-1).from, '1111111111');
+  // Ответ по rid — только Alice, хотя Mallory назвалась тем же ID.
+  f.room.webSocketMessage(host, enc({ type: 'game', action: 'accept', rid: 'ra', junk: 'x', html: '<b>' }));
+  assert.deepEqual(alice.messages.at(-1), { type: 'game', action: 'accept', from: 'host' });
+  assert.equal(mallory.messages.length, 0);
+  // Без rid (старый ведущий) — по ID, как раньше.
+  f.room.webSocketMessage(host, enc({ type: 'game', action: 'quit', to: '1111111111' }));
+  assert.equal(alice.messages.at(-1).action, 'quit');
+  assert.equal(mallory.messages.at(-1).action, 'quit');
+  // Негодные сообщения не доходят.
+  const before = alice.messages.length;
+  f.room.webSocketMessage(host, enc({ type: 'game', action: 'explode', rid: 'ra' }));
+  f.room.webSocketMessage(host, enc({ type: 'game', action: 'move', cell: 99, rid: 'ra' }));
+  assert.equal(alice.messages.length, before);
+});
+
+test('L5: ответ на переключение монитора адресуется по rid; accepted.name — строка не длиннее 60', () => {
+  const f = fixture(), host = f.socket('host', { lastSeen: 1_000_000, auth: 'key', pub: 'H' });
+  const alice = f.socket('viewer', { id: '1111111111', rid: 'ra', approved: true });
+  const mallory = f.socket('viewer', { id: '1111111111', rid: 'rm', approved: true });
+  f.room.webSocketMessage(host, enc({ type: 'switch-result', rid: 'ra', display: 1, result: 'ok' }));
+  assert.equal(alice.messages.at(-1)?.type, 'switch-result');
+  assert.equal(mallory.messages.length, 0);
+  const waiting = f.socket('viewer', { id: '2222222222', rid: 'rw', approved: false, reqSent: true, auth: 'none', ip: '' });
+  f.room.webSocketMessage(host, enc({ type: 'accept', viewer: '2222222222', rid: 'rw', name: 'я'.repeat(500) }));
+  assert.equal(waiting.messages.at(-1).name.length, 60);
+  const other = f.socket('viewer', { id: '3333333333', rid: 'ro', approved: false, reqSent: true, auth: 'none', ip: '' });
+  f.room.webSocketMessage(host, enc({ type: 'accept', viewer: '3333333333', rid: 'ro', name: { x: 1 } }));
+  assert.equal(other.messages.at(-1).name, '');
 });

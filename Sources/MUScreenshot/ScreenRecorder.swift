@@ -343,7 +343,7 @@ package final class ScreenRecorder: NSObject, ObservableObject {
         }
         let desktop = manager.urls(for: .desktopDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory())
-        Log.capture.error("Запись: папка недоступна: \(folder.path, privacy: .public)")
+        Log.capture.error("Запись: папка недоступна: \(folder.path, privacy: .private)")
         Toast.show("Папка для видео недоступна — сохраняю на Рабочий стол",
                    symbol: "exclamationmark.triangle.fill", tint: .orange)
         return desktop

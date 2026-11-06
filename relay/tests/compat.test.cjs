@@ -90,3 +90,12 @@ test('switch-request и switch-result: relay оставляет только п�
   for (const sample of displays.results.valid) assert.deepEqual(plain(relay.sanitizeSwitchResult(JSON.parse(sample.message))), sample.expected);
   for (const message of displays.results.invalid) assert.equal(relay.sanitizeSwitchResult(JSON.parse(message)), null, message);
 });
+
+// Звук ведущего Windows: зрители слышат всё, в том числе звонки (UniTalk, Discord…); исключается только отмеченное
+// в «Не передавать звук программ». Галочки «Не передавать звонки» нет, а прежним версиям приложения (они глушили звонки,
+// пока четвёртый аргумент choose не false) страница явно передаёт false.
+test('страница ведущего: звонки сами не исключаются, только отмеченные программы', () => {
+  assert.doesNotMatch(html, /setMuteCalls|muteCalls|mu-mute-calls/);
+  assert.match(html, /window\.mu\.choose\(source\.id, \$\("withAudio"\)\.checked, muted, false\)/);
+  assert.match(html, /window\.mu\.setMuted\(muted\)/, 'список в эфире по-прежнему меняется');
+});

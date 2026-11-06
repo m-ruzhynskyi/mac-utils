@@ -65,7 +65,7 @@ package final class ScrollCapture: NSObject, ObservableObject {
         let capture = ScrollCapture(rect: rect.intersection(screen.frame), screen: screen)
         current = capture
         capture.logHeader()
-        Log.capture.notice("Длинный снимок: старт, журнал \(capture.log?.url.lastPathComponent ?? "-", privacy: .public)")
+        Log.capture.notice("Длинный снимок: старт, журнал \(capture.log?.url.lastPathComponent ?? "-", privacy: .private)")
         // SCShareableContent может не ответить (завис replayd, открыт системный запрос): тогда съёмка без панелей
         // висела бы в `current`, а новые снимки молча не запускались.
         Task { @MainActor in
@@ -136,6 +136,20 @@ package final class ScrollCapture: NSObject, ObservableObject {
             }
             ScreenshotService.shared.deliverLongImage(image)
         }
+    }
+
+    /// Панели съёмки на экране (без них человек не видит, что съёмка идёт, и не может её закончить).
+    package var isShowing: Bool {
+        !stopped && (hudPanel?.isVisible == true || borderPanel?.isVisible == true)
+    }
+
+    /// Сколько секунд идёт съёмка.
+    package var age: TimeInterval { ProcessInfo.processInfo.systemUptime - started }
+
+    /// Зависшая съёмка без панелей: убрать молча, чтобы она не блокировала новые снимки.
+    package func abandon() {
+        guard !stopped else { return }
+        stop(reason: "stale")
     }
 
     package func cancel() {

@@ -220,7 +220,7 @@ package final class ScreenshotLibrary: ObservableObject {
                   let renamed = ShotNamer.renamed(URL(fileURLWithPath: path), to: name) else { return }
             records[index].path = renamed.path
             save()
-            Log.ai.info("Снимок назван: \(renamed.lastPathComponent, privacy: .public)")
+            Log.ai.info("Снимок назван: \(renamed.lastPathComponent, privacy: .private)")
         }
     }
 

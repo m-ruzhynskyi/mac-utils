@@ -55,6 +55,9 @@ plist_set MUGitCommit "$V_COMMIT"
 plist_set MUCommitsSinceRelease "$V_SINCE"
 echo "Версия: $V_SHORT ($V_CHANNEL, $V_COMMIT)"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# Значки документов (CFBundleTypeIconFile в Info.plist): рисуются при сборке, в git их нет. Проверка — те же файлы, что в plist.
+swift scripts/make-doc-icons.swift "$APP/Contents/Resources"
+./scripts/check-doc-icons.sh "$APP"
 # Шрифты интерфейса (Manrope, JetBrains Mono — SIL OFL 1.1) с лицензиями; регистрируются при запуске (DSFonts).
 cp -R Resources/Fonts "$APP/Contents/Resources/Fonts"
 
@@ -83,9 +86,14 @@ EXPLICIT_IDENTITY=0
 if [[ -z "$IDENTITY" ]] && security find-certificate -c "Mac Utils Signing" >/dev/null 2>&1; then
     IDENTITY="Mac Utils Signing"
 fi
+# Hardened Runtime (`--options runtime`): другая программа на этом Mac не может внедрить библиотеку (DYLD_INSERT_LIBRARIES) или
+# взять task port и пользоваться разрешениями Mac Utils. Entitlements — минимум (микрофон, Apple Events); подпись та же,
+# designated requirement не меняется — разрешения не сбрасываются.
+ENTITLEMENTS="Resources/MacUtils.entitlements"
+sign() { codesign --force --options runtime --sign "$1" "${@:2}"; }
 # Вложенное приложение подписывается первым, затем внешнее.
-if [[ -n "$IDENTITY" ]] && codesign --force --sign "$IDENTITY" "$APP/Contents/Resources/MUNowPlaying.dylib" \
-    && codesign --force --sign "$IDENTITY" "$TOOLS" && codesign --force --sign "$IDENTITY" "$APP"; then
+if [[ -n "$IDENTITY" ]] && sign "$IDENTITY" "$APP/Contents/Resources/MUNowPlaying.dylib" \
+    && sign "$IDENTITY" "$TOOLS" && sign "$IDENTITY" --entitlements "$ENTITLEMENTS" "$APP"; then
     echo "Подписано: $IDENTITY"
 else
     # SIGN_IDENTITY задан явно (релиз) — молчаливый ad-hoc оставил бы пользователей без автообновления.
@@ -94,11 +102,11 @@ else
         exit 1
     fi
     [[ -n "$IDENTITY" ]] && echo "Не удалось подписать «$IDENTITY», подписываю ad-hoc" >&2
-    codesign --force --sign - "$APP/Contents/Resources/MUNowPlaying.dylib"
-    codesign --force --sign - "$TOOLS"
-    codesign --force --sign - "$APP"
+    sign - "$APP/Contents/Resources/MUNowPlaying.dylib"
+    sign - "$TOOLS"
+    sign - --entitlements "$ENTITLEMENTS" "$APP"
 fi
-echo "Готово: $APP"
+echo "Готово: $APP ($(du -sh "$APP" | cut -f1))"
 
 if (( INSTALL )); then
     pkill -x "$EXECUTABLE" 2>/dev/null || true

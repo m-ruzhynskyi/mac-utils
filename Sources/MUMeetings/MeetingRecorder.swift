@@ -133,6 +133,17 @@ package final class MeetingRecorder: NSObject, ObservableObject {
         return documents.appendingPathComponent("Встречи", isDirectory: true)
     }
 
+    /// Папка встречи по имени из ссылки `macutils://meeting-report?<имя>`: только одно имя внутри корня встреч — без `/`, `..` и
+    /// подмен через символические ссылки. Иначе nil.
+    package nonisolated static func folder(named name: String, root: URL) -> URL? {
+        guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0"), !name.contains("..") else { return nil }
+        let folder = root.appendingPathComponent(name, isDirectory: true)
+        let base = root.resolvingSymlinksInPath().standardizedFileURL.path
+        let resolved = folder.resolvingSymlinksInPath().standardizedFileURL
+        guard resolved.deletingLastPathComponent().path == base else { return nil }
+        return folder
+    }
+
     // MARK: - Состояние
 
     /// Единственное место, где меняется `state`.

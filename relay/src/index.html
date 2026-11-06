@@ -312,8 +312,7 @@
   <label class="muted"><input type="checkbox" id="withAudio" checked style="width:auto"> Передавать звук системы</label>
   <label class="muted" id="allowSwitchBox" style="display:none"><input type="checkbox" id="allowSwitch" style="width:auto"> Зрители могут переключать мои мониторы<span class="new" id="allowSwitchNew">НОВОЕ</span></label>
   <p class="muted" id="allowSwitchHint" style="display:none">По умолчанию выключено. Включите — и зритель сам выберет монитор, вы увидите уведомление. Только когда показываете экран целиком; выбор запоминается.</p>
-  <div id="muteBox" class="muted" style="display:none; margin-top:6px">Не передавать звук программ (например, созвона):
-    <label id="muteCallsBox" style="display:none; white-space:nowrap"><input type="checkbox" id="muteCalls" checked style="width:auto"> Не передавать звонки (Discord, Zoom, Teams, Telegram…)</label>
+  <div id="muteBox" class="muted" style="display:none; margin-top:6px">Не передавать звук программ (остальной звук, в том числе звонки, зрители слышат):
     <div id="muteApps"></div></div>
   <div style="text-align:right; margin-top:10px"><button id="pickerCancel">Отмена</button></div>
 </div></div>
@@ -331,7 +330,6 @@
 <div id="game"></div>
 <div id="mutePanel" class="floatBox"><div class="head"><b>Не передавать звук программ</b><button id="muteClose" aria-label="Закрыть">✕</button></div>
   <p class="muted" style="margin:0 0 8px">Отмеченных программ зрители не слышат. Меняется сразу, прямо в эфире.</p>
-  <label id="muteCallsLive" style="display:none; margin-bottom:8px"><input type="checkbox" id="muteCallsLiveBox" style="width:auto"> Звонки (Discord, Zoom, Teams, Telegram…)</label>
   <div id="muteLive"></div></div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -342,7 +340,8 @@ let watching = false;
 let forceKey = true;
 
 function status(text) { $("status").innerHTML = text; $("status").style.display = text ? "" : "none"; }
-function digits(text) { const d = text.replace(/\D/g, ""); return d.length === 10 || d.length === 6 ? d : null; }
+// Только 10-значные ID: 6-значные relay больше не принимает.
+function digits(text) { const d = text.replace(/\D/g, ""); return d.length === 10 ? d : null; }
 function display(id) { return id.length === 10 ? `${id.slice(0, 3)} ${id.slice(3, 6)} ${id.slice(6)}` : id; }
 function esc(text) { const d = document.createElement("div"); d.textContent = String(text ?? ""); return d.innerHTML; }
 
@@ -367,7 +366,7 @@ $("myId").onclick = () => navigator.clipboard?.writeText(myId);
 const B64U_KEY = /^(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{87})$/;
 function appSigns(fn) { return !!(window.mu && typeof window.mu.identity === "function" && typeof window.mu[fn] === "function"); }
 // Подписанный /status — только ключом приложения; вход ведущего и зрителя — и ключом страницы.
-function canSign(fn) { return appSigns(fn) || (fn !== "signStatus" && !!pageKey); }
+function canSign(fn) { return appSigns(fn) || !!pageKey; }
 // Заголовок клиента ставит приложение (mu-share-1), поэтому проверку ключом страница просит сама: relay без неё не спрашивает.
 function authParam(fn) { return !appSigns(fn) && pageKey ? "auth=v2" : ""; }
 async function myIdentity() {
@@ -439,9 +438,23 @@ function pageKeySupported() {
 async function loadPageKey() {
   try {
     if (!pageKeySupported()) return;
-    const opening = openPageKey(window.crypto.subtle).then((key) => { if (key) pageKey = key; return key; }).catch(() => null);
+    const opening = openPageKey(window.crypto.subtle).then((key) => { if (key) pageKey = key; return key; }).catch(() => null)
+      .then(async (key) => { if (!key && !pageKey) await useSessionKey(); return key; });
     const timeout = new Promise((resolve) => setTimeout(resolve, 10000, null));
     await Promise.race([opening, timeout]);
+  } catch (_) {}
+}
+// Хранилище не отдало ключ и не приняло новый (приватное окно, IndexedDB закрыт): relay принимает только клиентов с ключом,
+// поэтому делаем ключ на время открытой страницы. Он не переживёт перезагрузку, и привязанный к нему ID тоже — свой ID на сессию.
+async function useSessionKey() {
+  try {
+    const subtle = window.crypto.subtle;
+    const pair = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+    const pub = b64u(await subtle.exportKey("raw", pair.publicKey));
+    if (pageKey) return;
+    pageKey = { pub, session: true, sign: async (text) => b64u(await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, new TextEncoder().encode(text))) };
+    if (!idFromApp) { myId = generateId(); $("myId").textContent = display(myId); }
+    status("Браузер не сохраняет ключ устройства: ID действует, пока открыта эта страница.");
   } catch (_) {}
 }
 let pageKeyReady = loadPageKey();
@@ -468,8 +481,9 @@ const AUTH_ERRORS = {
   "id-format": "Сервер не принял этот ID.",
   "auth-timeout": "Сервер не дождался подтверждения ключа. Попробуйте ещё раз.",
   "replaced": "Трансляция с вашим ID продолжена в другом окне или на другом устройстве с этим же ключом.",
-  "rate-limited": "Слишком много подключений. Подождите минуту и попробуйте снова.",
+  "rate-limited": "Слишком много подключений. Подождите пару минут и попробуйте снова.",
   "upgrade-required": "Сервер требует новую версию приложения — обновите Mac Utils Share.",
+  "no-storage": "Не удалось загрузить ключ этого устройства: хранилище браузера не ответило. Перезагрузите страницу (Ctrl+R) или перезапустите приложение и попробуйте ещё раз.",
   "no-key": "Сервер проверяет ключ устройства, а эта версия приложения так не умеет — обновите Mac Utils Share.",
 };
 const VIEW_ACK_EVERY = 10;
@@ -544,10 +558,16 @@ async function fetchLive(ids) {
   let limited = false;
   if (signedStatus && canSign("signStatus")) {
     try {
-      const { pub } = await myIdentity(), ts = Date.now();
-      const sig = await window.mu.signStatus(myId, ts, ids.join(","));
-      const response = await fetch("/status", { method: "POST", headers: { "content-type": "application/json" },
-                                                 body: JSON.stringify({ v: 2, id: myId, pub, ts, ids, sig }) });
+      const ts = Date.now();
+      let body;
+      if (appSigns("signStatus")) {
+        const { pub } = await myIdentity();
+        body = { v: 2, id: myId, pub, ts, ids, sig: await window.mu.signStatus(myId, ts, ids.join(",")) };
+      } else {
+        // Страница без ключа приложения подписывает своим ключом P-256 (alg es256).
+        body = { v: 2, alg: "es256", id: myId, pub: pageKey.pub, ts, ids, sig: await pageKey.sign(`mu-share/v2\nstatus\n${myId}\n${ts}\n${ids.join(",")}`) };
+      }
+      const response = await fetch("/status?auth=v2", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       // Лимит: GET уйдёт под тот же лимит, не удваиваем запросы.
       if (response.status === 429) limited = true;
       if (response.status === 404 || response.status === 405) signedStatus = false;
@@ -924,13 +944,22 @@ async function watch() {
   stopWatch();
   status("Подключаюсь…");
   watchingId = id;
-  viewRetries = 0; viewEverOpened = false;
+  viewRetries = 0; viewEverOpened = false; keyRetried = false;
   openView(id);
 }
 
 // Повторы после обрыва: как на Mac (`ShareViewerReconnect`) — 1, 2, 4, 8, 15, 15, 15 с, последний кадр остаётся на экране.
 const VIEW_RETRY_SECONDS = [1, 2, 4, 8, 15, 15, 15];
 let viewRetries = 0, viewRetryTimer = 0, viewEverOpened = false;
+// Relay ответил upgrade-required, хотя ключ мог бы быть: хранилище браузера отвечало медленно. Ждём ключ и повторяем один раз,
+// иначе говорим про хранилище, а не «обновите приложение». true — ключ появился.
+let keyRetried = false;
+async function recoverMissingKey() {
+  if (pageKey || keyRetried || !pageKeySupported()) return false;
+  keyRetried = true;
+  return retryPageKey();
+}
+const missingKeyText = (code) => (code === "upgrade-required" && pageKeySupported() && !pageKey ? AUTH_ERRORS["no-storage"] : null);
 function scheduleViewRetry(id) {
   if (viewRetries >= VIEW_RETRY_SECONDS.length) { status("Сейчас этот ID ничего не транслирует (или связь прервалась)"); return; }
   const delay = VIEW_RETRY_SECONDS[viewRetries++];
@@ -992,6 +1021,11 @@ function openView(id) {
   viewSocket.onclose = (event) => {
     if (event.code === 1000 || ws !== viewSocket) return;
     const code = CLOSE_CODES[event.code];
+    if (code === "upgrade-required" && !pageKey && pageKeySupported()) {
+      viewSocket = null;
+      recoverMissingKey().then((ok) => { if (watchingId === id && !viewSocket) { if (ok) openView(id); else status(missingKeyText(code) || authError(code)); } });
+      return;
+    }
     if (code) { status(authError(code, viewError?.message)); return; }
     // Обрыв сети, сон, перезапуск relay: до 7 попыток; не повторяем, если ведущий отказал (`declined`) или закончил (`ended`) —
     // там stopWatch сам закрывает сокет с кодом 1000 и сюда не попадаем.
@@ -1365,11 +1399,6 @@ $("gameInvite").onclick = () => gameInvite("host", hostName || display(watchingI
 async function showMutePanel() {
   const list = $("muteLive");
   const saved = store.get("mu-muted-apps", []);
-  // Звонки исключаются сами (приложение знает их по имени программы); здесь их можно вернуть в трансляцию.
-  const callsLive = $("muteCallsLive");
-  callsLive.style.display = window.mu.setMuteCalls ? "" : "none";
-  $("muteCallsLiveBox").checked = store.get("mu-mute-calls", true);
-  $("muteCallsLiveBox").onchange = () => { store.set("mu-mute-calls", $("muteCallsLiveBox").checked); window.mu.setMuteCalls($("muteCallsLiveBox").checked); };
   const apps = (await window.mu.audioApps()) || [];
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
@@ -1402,9 +1431,6 @@ async function showMuteApps() {
   const apps = await window.mu.audioApps();
   if (!apps) { box.style.display = "none"; return; }
   helperAvailable = true;
-  // Старое приложение звонки само не исключает — тогда и галочки нет.
-  $("muteCallsBox").style.display = window.mu.setMuteCalls ? "" : "none";
-  $("muteCalls").checked = store.get("mu-mute-calls", true);
   const names = [...new Set([...saved, ...apps])].sort((a, b) => a.localeCompare(b));
   list.innerHTML = "";
   if (!names.length) list.textContent = "Сейчас ни одна программа не играет звук — отметить можно и потом, прямо в эфире (кнопка «🔇 Звук»).";
@@ -1437,10 +1463,13 @@ function pickSource() {
         store.set("mu-muted-apps", muted);
         // Новые версии приложения: звук всегда через помощник — список можно менять в эфире.
         useHelperAudio = $("withAudio").checked && helperAvailable && !!window.mu.startAudio && (!!window.mu.setMuted || muted.length > 0);
-        const muteCalls = !window.mu.setMuteCalls || $("muteCalls").checked;
-        store.set("mu-mute-calls", muteCalls);
-        await window.mu.choose(source.id, $("withAudio").checked, muted, muteCalls);
-        resolve(true);
+        // Звонки сами не исключаются: только отмеченные программы. Явное false — для прежних версий приложения для
+        // Windows с «Не передавать звонки» (без него они глушили звонки); новые четвёртый аргумент не читают.
+        // Приложение отвечает false, если выбор не принят (клик не дошёл до окна, источник пропал): тогда оно не отдаст
+        // экран и getDisplayMedia, — сразу говорим об этом, а не «AbortError» после попыток захвата.
+        let accepted = false;
+        try { accepted = await window.mu.choose(source.id, $("withAudio").checked, muted, false); } catch (_) {}
+        resolve(accepted === false ? "not-chosen" : true);
       };
       grid.appendChild(item);
     }
@@ -1458,9 +1487,34 @@ function pickSource() {
   });
 }
 
+// Почему захват экрана не начался — по-русски, без имён исключений (WINNA-30). Имя ошибки — только в журнал приложения.
+const CAPTURE_NOT_CHOSEN = "Трансляция не началась: приложение не приняло выбор экрана. Нажмите «Транслировать свой экран» и выберите экран или окно ещё раз.";
+function captureFailureText(error, inApp) {
+  switch (error && error.name) {
+    case "NotAllowedError":
+      return inApp ? "Трансляция не началась: приложение не дало доступ к экрану. Обновите Mac Utils Share — перезапустите его и, когда оно предложит новую версию, нажмите «Перезапустить сейчас», — затем попробуйте снова."
+                   : "Трансляция не началась: экран не выбран или запись экрана запрещена (в браузере или в настройках системы).";
+    case "AbortError":
+      return inApp ? CAPTURE_NOT_CHOSEN : "Трансляция не началась: захват экрана прерван. Попробуйте ещё раз.";
+    case "NotReadableError":
+      return "Трансляция не началась: экран сейчас недоступен (его занимает другая программа или окно закрыто). Попробуйте ещё раз.";
+    case "NotFoundError":
+      return "Трансляция не началась: не найден экран для трансляции.";
+    case "NotSupportedError": case "TypeError":
+      if (!inApp) return "Трансляция не началась: здесь нельзя транслировать экран — откройте страницу в Chrome, Edge или Safari.";
+      // fallthrough
+    default:
+      return "Трансляция не началась. Попробуйте ещё раз.";
+  }
+}
+
 async function share() {
   stopHost();
-  if (window.mu && !(await pickSource())) return status("Трансляция отменена");
+  if (window.mu) {
+    const picked = await pickSource();
+    if (picked === "not-chosen") return status(CAPTURE_NOT_CHOSEN);
+    if (!picked) return status("Трансляция отменена");
+  }
   // Звук системы просим, только если он нужен (в приложении для Windows звук без выбранных программ идёт отдельно).
   const wantAudio = window.mu ? $("withAudio").checked && !useHelperAudio : true;
   let stream = null, failure = null;
@@ -1472,7 +1526,11 @@ async function share() {
       if (!window.mu && error && error.name === "NotAllowedError") break;
     }
   }
-  if (!stream) return status(`Трансляция не началась${failure ? ` (${failure.name}: ${failure.message})` : ""}`);
+  if (!stream) {
+    try { window.mu?.log?.(`capture failed name=${String(failure?.name || "none").replace(/[^A-Za-z]/g, "")}`); } catch (_) {}
+    return status(captureFailureText(failure, !!window.mu));
+  }
+  keyRetried = false;
   let ok = await openHost(myId);
   // ID закреплён за ключом страницы, а ключ не загрузился (медленная или зависшая IndexedDB): сначала грузим ключ ещё раз.
   if (!ok && !pageKey && pageKeySupported() && (await hostCheckReason()) === "id-claimed" && (await retryPageKey())) ok = await openHost(myId);
@@ -1537,6 +1595,10 @@ async function hostChallenge(ws, msg) {
 // Закрытие сокета ведущего: ошибки ключа — конец трансляции с объяснением, остальное — переподключение.
 function hostClosed(code, event) {
   const reason = CLOSE_CODES[event?.code];
+  if (reason === "upgrade-required" && !pageKey && pageKeySupported()) {
+    recoverMissingKey().then((ok) => { if (!capture) return; if (ok) reconnectHost(code); else stopHost(missingKeyText(reason)); });
+    return;
+  }
   if (reason && reason !== "auth-timeout" && reason !== "rate-limited") {
     // Ведущего без ключа вытеснил владелец ID с ключом: это не «другое окно», а чужое (или новое своё) устройство.
     const keyless = reason === "replaced" && !hostAuth?.keyed;
@@ -1570,7 +1632,7 @@ const requests = [];
 // Доверять можно только чужому ID из 10 цифр: свой и пустой/кривой ID подделывает любой зритель.
 function canTrust(id) { return id !== myId && /^\d{10}$/.test(id); }
 // Вид запроса: "key" — зритель подписал ключом; "none" — старый зритель у ведущего с ключом;
-// "legacy" — ведущий без ключа (relay не спрашивал): доверие по ID, ровно как раньше.
+// "legacy" — ведущий без ключа (relay не спрашивал): личность не проверена, зрителя всегда спрашиваем.
 function requestKind(msg) {
   if (msg.auth === "key" || msg.auth === "none") return msg.auth;
   return hostAuth?.keyed ? "none" : "legacy";
@@ -1581,7 +1643,8 @@ function onRequest(msg) {
   const kind = requestKind(msg);
   const pub = kind === "key" && typeof msg.pub === "string" && B64U_KEY.test(msg.pub) ? msg.pub : null;
   const entry = canTrust(viewer) ? trustedList().find((e) => e.id === viewer) : null;
-  if (kind === "legacy" && entry) return answer(viewer, true, rid);
+  // «legacy» (ведущий без ключа) и «none» (старый зритель) по ID не впускаются: ID называет сам зритель, а ID люди разглашают.
+  // Как на Mac — всегда вопрос; автоприём только по проверенному ключу (ниже).
   // Окно «сам себе»: relay сверил ключ зрителя с ключом владельца этого ID.
   if (kind === "key" && pub && msg.self === true && hostAuth?.keyed) return answer(viewer, true, rid, pub);
   // Автоприём только если ID принадлежит этому ключу: при idVerified:false он закреплён за другим устройством.
@@ -1594,7 +1657,8 @@ function showRequest() {
   const r = requests[0]; if (!r) { $("request").style.display = "none"; return; }
   $("requestTitle").textContent = `${r.name} хочет посмотреть ваш экран`;
   let text = `ID ${display(r.viewer)}. Зритель только смотрит и может ставить метки — управлять компьютером он не может.`;
-  const canAlways = canTrust(r.viewer) && (r.kind === "legacy" || (r.kind === "key" && !!r.pub && r.idVerified !== false));
+  // Без ключа (legacy и none) «Всегда разрешать» нет: ID называет сам зритель, запомнить по нему нельзя.
+  const canAlways = canTrust(r.viewer) && r.kind === "key" && !!r.pub && r.idVerified !== false;
   const confirmKey = canAlways && r.kind === "key" && r.entry && !r.entry.pub;
   if (r.kind === "key") {
     if (confirmKey) text = `${r.name} — в доверенных. Теперь проверяется ключ устройства: подтвердите один раз. Отпечаток ${r.fp || "—"}.`;
@@ -1603,7 +1667,7 @@ function showRequest() {
       if (r.entry?.pub && r.entry.pub !== r.pub) text += ` Ключ изменился: раньше был ${r.entry.fp || "другой"} — проверьте у зрителя.`;
     }
     if (r.idVerified === false) text += " ID не подтверждён: этот ID принадлежит другому ключу.";
-  } else if (r.kind === "none") {
+  } else if (r.kind === "none" || r.kind === "legacy") {
     text += " Старая версия приложения: личность зрителя не проверена, «Всегда разрешать» недоступно.";
   }
   if (r.viewer === myId) text += " Запрос с вашим собственным ID — это может быть не вы.";

@@ -64,7 +64,7 @@ package final class ShareRequestQueue: ObservableObject {
         items.removeAll { $0.id == id }
         timers[id] = nil
         refreshPanel()
-        item.answer(.decline)
+        item.answer(.timeout)
         onTimeout(item)
     }
 

@@ -9,6 +9,10 @@ package enum Pref {
 
     package static let cutPaste = "cutPasteEnabled"
     package static let cutPanel = "cutPanelEnabled"
+    /// Ctrl+C / Ctrl+V / Ctrl+X как ⌘C / ⌘V / ⌘X во всех программах (по умолчанию выключено).
+    package static let winKeys = "winKeysEnabled"
+    /// Свой список программ, где Ctrl остаётся как есть (bundle id; запись с точкой на конце — префикс). Только для «Клавиш Windows».
+    package static let winKeysExcluded = "winKeysExcludedApps"
 
     package static let smoothScroll = "smoothScrollEnabled"
     package static let smoothSpeed = "smoothScrollSpeed"
@@ -109,6 +113,8 @@ package enum Pref {
     /// Адрес ретранслятора трансляции экрана (relay/, Cloudflare Workers).
     package static let shareServer = "shareServer"
     package static let shareAudio = "shareAudio"
+    /// Имя ведущего/зрителя для трансляции (по умолчанию общее «Mac», без имени владельца компьютера).
+    package static let shareName = "shareName"
     /// Зрители могут ставить метки и рисовать поверх экрана ведущего.
     package static let shareAllowMarks = "shareAllowMarks"
     /// Зрители сами переключают, какой монитор ведущего транслируется (без вопроса; ведущему — уведомление).
@@ -119,8 +125,8 @@ package enum Pref {
     package static let shareHistory = "shareHistory"
     /// Программы, чей звук не идёт в трансляцию (bundle id).
     package static let shareMutedApps = "shareMutedApps"
-    /// «Не передавать звонки»: программы звонков (`ShareAudioExclusion.callApps`) заглушены для трансляции.
-    package static let shareMuteCalls = "shareMuteCalls"
+    /// Прежнее «Не передавать звонки» (`shareMuteCalls`) больше ничего не делает и не читается: звонки идут зрителям,
+    /// исключаются только программы из `shareMutedApps`. Сохранённое значение не трогаем.
     /// Шпаргалка остаётся открытой после удержания ⌘ и закрывается повторным нажатием ⌘.
     package static let cheatSheetSticky = "cheatSheetSticky"
 
@@ -234,6 +240,7 @@ package enum Pref {
         UserDefaults.standard.register(defaults: [
             cutPaste: true,
             cutPanel: true,
+            winKeys: false,
             smoothScroll: true,
             smoothSpeed: 1.0,
             smoothDuration: 0.35,
@@ -269,7 +276,6 @@ package enum Pref {
             focusStrength: 0.6,
             shareAudio: true,
             shareAllowMarks: true,
-            shareMuteCalls: false,
             // Выключено, пока ведущий сам не включит: без этого зритель не видит другие его мониторы.
             shareAllowMonitorSwitch: false,
             shareServer: "https://mac-utils-relay.mako-62d.workers.dev",

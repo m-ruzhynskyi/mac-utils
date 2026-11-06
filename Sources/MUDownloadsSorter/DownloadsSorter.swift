@@ -316,7 +316,7 @@ package final class DownloadsSorter: ObservableObject {
                 moved += 1
                 if root == nil { DocumentTagger.shared.enqueue(target.appendingPathComponent(name)) }
             } catch {
-                Log.window.error("Загрузки: не удалось переместить \(url.lastPathComponent, privacy: .public)")
+                Log.window.error("Загрузки: не удалось переместить \(url.lastPathComponent, privacy: .private)")
             }
         }
 
@@ -328,7 +328,7 @@ package final class DownloadsSorter: ObservableObject {
             if trashDays != nil || DownloadsRules.isTrashConfirmed(days: days) {
                 for url in candidates {
                     let done = trash?(url) ?? ((try? manager.trashItem(at: url, resultingItemURL: nil)) != nil)
-                    if done { trashed += 1 } else { Log.window.error("Загрузки: не удалось отправить в Корзину \(url.lastPathComponent, privacy: .public)") }
+                    if done { trashed += 1 } else { Log.window.error("Загрузки: не удалось отправить в Корзину \(url.lastPathComponent, privacy: .private)") }
                 }
                 trashPreview = []
             } else {

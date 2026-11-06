@@ -17,7 +17,7 @@ struct TextEditorPage: View {
     @AppStorage(Pref.editorAutosaveDrafts) private var drafts = true
     @AppStorage(Pref.editorTabWidth) private var tabWidth = 4
 
-    static let extensions = ["frm", "rtf", "txt", "log", "json", "xml", "csv"]
+    static let extensions = ["frm", "dsl", "rtf", "txt", "log", "json", "xml", "csv"]
 
     var body: some View {
         SettingsPage(.textEditor) {

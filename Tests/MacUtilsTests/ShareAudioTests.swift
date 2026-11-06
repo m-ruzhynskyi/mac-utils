@@ -3,10 +3,11 @@ import CoreAudio
 import XCTest
 @testable import MacUtils
 @testable import MUAudio
+@testable import MUCore
 @testable import MUScreenShare
 
-/// Что не передавать в трансляцию (эхо звонка): помощники программ, ответственный процесс, позднее появление,
-/// пересборка по событиям. Без захвата: ни экрана, ни звука.
+/// Что не передавать в трансляцию: только отмеченные программы (с помощниками, по ответственному процессу, в том числе
+/// появившимися позже) и сам Mac Utils; звонки сами не исключаются. Пересборка по событиям. Без захвата: ни экрана, ни звука.
 @MainActor
 final class ShareAudioTests: XCTestCase {
     private let ownPID: pid_t = 100
@@ -54,12 +55,49 @@ final class ShareAudioTests: XCTestCase {
         XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ["com.hnc.Discord"], ownPID: ownPID).map(\.pid), [1, 9])
     }
 
-    func testMuteCallsAddsKnownCallApps() {
-        let muted = ShareAudioExclusion.muted(apps: ["com.spotify.client"], calls: true)
-        XCTAssertTrue(muted.isSuperset(of: ["com.spotify.client", "com.hnc.Discord", "ru.keepcoder.Telegram", "com.viber.osx", "us.zoom.xos"]))
-        XCTAssertEqual(ShareAudioExclusion.muted(apps: ["com.spotify.client"], calls: false), ["com.spotify.client"])
-        let processes = [process(1, "ru.keepcoder.Telegram"), process(2, "com.hnc.Discord.helper"), process(3, "com.spotify.client")]
-        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ShareAudioExclusion.muted(apps: [], calls: true), ownPID: ownPID).map(\.pid), [1, 2])
+    /// Решение пользователя: зрители слышат весь звук, в том числе звонки. Неотмеченная программа звонка (UniTalk,
+    /// Discord с помощниками, Telegram, FaceTime/avconferenced) не исключается — ни перехватом, ни запасным способом.
+    func testUnpickedCallAppsAreNotExcluded() {
+        let processes = [
+            process(1, "com.unitalk.desktop"),
+            process(2, "com.hnc.Discord"),
+            process(3, "com.hnc.Discord.helper"),
+            process(4, nil, owner: "com.hnc.Discord"),
+            process(5, "ru.keepcoder.Telegram"),
+            process(6, "com.apple.avconferenced"),
+            process(7, "com.apple.FaceTime"),
+            process(8, "com.spotify.client"),
+        ]
+        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: [], ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [])
+        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ["com.spotify.client"], ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [8],
+                       "отмечен только Spotify — UniTalk и остальные звонки идут зрителям")
+    }
+
+    /// Отмеченная программа молчит целиком: сама, её помощники и процессы, за которые она отвечает; соседние — нет.
+    func testPickedAppAndItsHelpersAreExcluded() {
+        let processes = [
+            process(1, "com.unitalk.desktop"),
+            process(2, "com.hnc.Discord"),
+            process(3, "com.hnc.Discord.helper"),
+            process(4, "com.hnc.Discord.helper.Renderer"),
+            process(5, nil, owner: "com.hnc.Discord"),
+            process(6, "com.hnc.DiscordPTB"),
+        ]
+        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ["com.hnc.Discord"], ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [2, 3, 4, 5])
+        XCTAssertEqual(ShareAudioExclusion.excluded(processes, muted: ["com.unitalk.desktop"], ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [1],
+                       "UniTalk исключается, только если его отметили")
+    }
+
+    /// Список берётся только из «Не передавать звук программ»; прежний ключ «Не передавать звонки» (у пользователя — 1)
+    /// ни на что не влияет.
+    func testMutedAppsComeOnlyFromPickedList() throws {
+        let name = "ShareAudioTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(true, forKey: "shareMuteCalls")
+        XCTAssertEqual(ShareAudioExclusion.mutedApps(defaults), [])
+        defaults.set(["com.hnc.Discord"], forKey: Pref.shareMutedApps)
+        XCTAssertEqual(ShareAudioExclusion.mutedApps(defaults), ["com.hnc.Discord"])
     }
 
     func testSummaryHasOnlyCountAndBundleIDs() {
@@ -116,13 +154,18 @@ final class ShareAudioTests: XCTestCase {
     /// После ошибки перехвата — одна попытка на новую обстановку, а не на каждую пересборку.
     func testTapRetryOncePerSituation() {
         var retry = ShareTapRetry()
-        XCTAssertTrue(retry.shouldTry("out1-10"))
-        retry.failed(in: "out1-10")
-        XCTAssertFalse(retry.shouldTry("out1-10"), "та же обстановка — не повторяем")
-        XCTAssertTrue(retry.shouldTry("out2-10"), "сменился выход")
-        XCTAssertTrue(retry.shouldTry("out1-11"), "запустилась программа")
+        XCTAssertTrue(retry.shouldTry("out1"))
+        retry.failed(in: "out1")
+        XCTAssertFalse(retry.shouldTry("out1"), "тот же выход — не повторяем")
+        XCTAssertTrue(retry.shouldTry("out2"), "сменился выход")
         retry = ShareTapRetry()
-        XCTAssertTrue(retry.shouldTry("out1-10"), "после успеха — заново")
+        XCTAssertTrue(retry.shouldTry("out1"), "после успеха — заново")
+    }
+
+    /// Запуск и закрытие программ не меняют обстановку: иначе при постоянной ошибке перехват пересобирается
+    /// каждые несколько секунд и грузит систему.
+    @MainActor func testTapRetrySituationIgnoresAppCount() {
+        XCTAssertEqual(ShareTapRetry.situation(), "\(CoreAudioHelper.defaultOutputDevice)")
     }
 
     private func format(_ rate: Double, channels: UInt32 = 1) -> AudioStreamBasicDescription {
@@ -215,11 +258,11 @@ final class ShareAudioTests: XCTestCase {
         XCTAssertEqual(ShareTapClock.code(0), "0")
     }
 
-    /// Запасной способ (SCK) помощников не исключает — при «Не передавать звонки» говорим прямо про звонок.
-    func testFallbackMessageWarnsAboutCalls() {
-        XCTAssertTrue(ShareAudioFallback.message(muteCalls: true, mutedApps: 0).contains("звонок"))
-        XCTAssertTrue(ShareAudioFallback.message(muteCalls: false, mutedApps: 2).contains("заглушённые программы"))
-        XCTAssertEqual(ShareAudioFallback.message(muteCalls: false, mutedApps: 0), "Звук трансляции — запасным способом")
+    /// Запасной способ (SCK) помощников не исключает — есть отмеченные программы, говорим об этом; про звонки — ни слова.
+    func testFallbackMessageWarnsAboutMutedApps() {
+        XCTAssertTrue(ShareAudioFallback.message(mutedApps: 2).contains("заглушённые программы"))
+        XCTAssertEqual(ShareAudioFallback.message(mutedApps: 0), "Звук трансляции — запасным способом")
+        XCTAssertFalse(ShareAudioFallback.message(mutedApps: 1).contains("звонок"))
     }
 
     /// Смена списка исключённых: до первых колбэков — откладывается (не трогаем описание только что запущенного перехвата);
@@ -231,5 +274,35 @@ final class ShareAudioTests: XCTestCase {
         XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: false, rebuildOnChange: true), .deferred)
         XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: true, rebuildOnChange: false), .applied)
         XCTAssertEqual(ShareAudioTap.plan(changed: true, ioProven: true, rebuildOnChange: true), .rebuilt)
+    }
+
+    /// ScreenCaptureKit (запасной способ) получает тот же набор: отмеченная программа исключается, UniTalk — нет.
+    func testFallbackUsesOnlyPickedApps() {
+        let sckApps = [process(10, "com.hnc.Discord"), process(11, "com.unitalk.desktop"), process(12, "com.spotify.client")]
+        XCTAssertEqual(ShareAudioExclusion.excluded(sckApps, muted: ["com.hnc.Discord"], ownPID: ownPID, ownBundleID: "own.app").map(\.pid), [10])
+    }
+
+    /// Глобальный перехват 48 000 при выходе 44 100 (журнал 04.11, «колбэков 0») — сразу перехват потока выхода;
+    /// совпадают — глобальный; часы не выход — всегда глобальный.
+    func testTapModeFollowsRateMismatch() {
+        XCTAssertEqual(ShareTapMode.choose(tapRate: 48_000, clockRate: 44_100, clockIsOutput: true, deviceAfterFailure: false), .device)
+        XCTAssertEqual(ShareTapMode.choose(tapRate: 48_000, clockRate: 48_000, clockIsOutput: true, deviceAfterFailure: false), .global)
+        XCTAssertEqual(ShareTapMode.choose(tapRate: 0, clockRate: 44_100, clockIsOutput: true, deviceAfterFailure: false), .global, "частота неизвестна")
+        XCTAssertEqual(ShareTapMode.choose(tapRate: 48_000, clockRate: 48_000, clockIsOutput: true, deviceAfterFailure: true), .device)
+        XCTAssertEqual(ShareTapMode.choose(tapRate: 48_000, clockRate: 44_100, clockIsOutput: false, deviceAfterFailure: true), .global)
+    }
+
+    /// Лестница после неудачного запуска: поток выхода → встроенные часы → ScreenCaptureKit, без повторов по кругу.
+    func testTapRecoveryLadder() {
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .global, clockIsOutput: true, builtInAvailable: false), .deviceTap)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noData, mode: .global, clockIsOutput: true, builtInAvailable: true), .deviceTap)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .device, clockIsOutput: true, builtInAvailable: true), .builtInClock)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .device, clockIsOutput: true, builtInAvailable: false), .fallBack,
+                       "журнал 04.11: часы и так встроенный выход")
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noData, mode: .device, clockIsOutput: true, builtInAvailable: true), .fallBack)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .global, clockIsOutput: false, builtInAvailable: false), .fallBack)
+        // Перехват потока не создался (остался глобальный) и глобальный снова без звука — не по кругу, а дальше по лестнице.
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noCallbacks, mode: .global, clockIsOutput: true, deviceTried: true, builtInAvailable: true), .builtInClock)
+        XCTAssertEqual(ShareTapMode.recovery(verdict: .noData, mode: .global, clockIsOutput: true, deviceTried: true, builtInAvailable: true), .fallBack)
     }
 }

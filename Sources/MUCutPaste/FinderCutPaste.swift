@@ -35,6 +35,13 @@ package enum CutRules {
         return .move(alive: split.alive, goneCount: split.gone.count)
     }
 
+    /// ⌘X / ⌘V; с включёнными «Клавишами Windows» ещё и Ctrl+X / Ctrl+V (какой из двух перехватов сработает первым, не гарантировано).
+    package static func isCutPasteChord(flags: CGEventFlags, winKeys: Bool) -> Bool {
+        let modifiers: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
+        let held = flags.intersection(modifiers)
+        return held == .maskCommand || (winKeys && held == .maskControl)
+    }
+
     package static func goneMessage(_ count: Int) -> String {
         "Не найдено при вставке: \(count) \(plural(count, "объект", "объекта", "объектов")) (переименованы или удалены)"
     }
@@ -100,8 +107,7 @@ package final class FinderCutPaste: NSObject, ObservableObject {
 
     private func handle(type: CGEventType, event: CGEvent) -> Bool {
         guard type == .keyDown, finderIsFrontmost else { return true }
-        let modifiers: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
-        guard event.flags.intersection(modifiers) == .maskCommand else { return true }
+        guard CutRules.isCutPasteChord(flags: event.flags, winKeys: UserDefaults.standard.bool(forKey: Pref.winKeys)) else { return true }
 
         let key = event.getIntegerValueField(.keyboardEventKeycode)
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
@@ -253,6 +259,13 @@ package enum FinderScript {
     }
 
     private static func run(_ source: String) -> Result<String> {
+        switch runDescriptor(source) {
+        case .failure(let message): return .failure(message)
+        case .success(let output): return .success(output.stringValue ?? "")
+        }
+    }
+
+    private static func runDescriptor(_ source: String) -> Result<NSAppleEventDescriptor> {
         guard let script = NSAppleScript(source: source) else { return .failure("Ошибка AppleScript") }
         var error: NSDictionary?
         let output = script.executeAndReturnError(&error)
@@ -263,24 +276,29 @@ package enum FinderScript {
             }
             return .failure(error[NSAppleScript.errorMessage] as? String ?? "Finder не ответил")
         }
-        return .success(output.stringValue ?? "")
+        return .success(output)
+    }
+
+    /// Пути из списка AppleScript: каждый элемент — отдельный путь, поэтому имя файла с переводом строки не распадается на несколько путей.
+    package static func paths(from list: NSAppleEventDescriptor) -> [URL] {
+        guard list.numberOfItems > 0 else { return [] }
+        return (1...list.numberOfItems).compactMap { list.atIndex($0)?.stringValue }
+            .filter { !$0.isEmpty }.map { URL(fileURLWithPath: $0) }
     }
 
     package static func selection() -> Result<[URL]> {
         let source = """
         tell application "Finder"
-            set out to ""
+            set out to {}
             repeat with anItem in (get selection)
-                set out to out & POSIX path of (anItem as alias) & linefeed
+                set end of out to POSIX path of (anItem as alias)
             end repeat
             return out
         end tell
         """
-        switch run(source) {
+        switch runDescriptor(source) {
         case .failure(let message): return .failure(message)
-        case .success(let text):
-            let urls = text.split(separator: "\n").map { URL(fileURLWithPath: String($0)) }
-            return .success(urls)
+        case .success(let list): return .success(Self.paths(from: list))
         }
     }
 

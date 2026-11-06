@@ -37,8 +37,13 @@ package final class DocumentTagger: ObservableObject {
         ("Video", "🎬"), ("Audio", "🎵"), ("Code", "💻"), ("Data", "📑"), ("Font", "🔤"),
     ]
     package nonisolated static let otherEmoji = "📁"
-    package nonisolated static let textExtensions: Set<String> = ["pdf", "txt", "rtf", "doc", "docx", "pages", "odt", "md", "csv",
-                                                          "json", "html", "swift", "py", "js", "ts"]
+    /// Что читаем ради текста: PDF (PDFKit), RTF, docx и odt (с явным типом документа, без WebKit) и простой текст. html, doc и pages
+    /// не разбираем: разборщик html — WebKit в нашем процессе, он может подгрузить внешние ресурсы из файла, который человек не открывал.
+    package nonisolated static let textExtensions: Set<String> = ["pdf", "txt", "rtf", "docx", "odt", "md", "csv", "json", "swift", "py", "js", "ts"]
+    package nonisolated static let documentTypes: [String: NSAttributedString.DocumentType] = [
+        "rtf": .rtf, "docx": .officeOpenXML, "odt": .openDocument,
+    ]
+    package nonisolated static let maxDocumentBytes = 20 * 1024 * 1024
     package nonisolated static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "webp", "tiff", "gif"]
 
     private var queue: [URL] = []
@@ -90,6 +95,8 @@ package final class DocumentTagger: ObservableObject {
     /// «📋 Spec — notch app for AI agents».
     package nonisolated static func describe(_ url: URL) async throws -> String? {
         let ext = url.pathExtension.lowercased()
+        // Сначала — работает ли Ollama; иначе файл читали бы зря.
+        guard await Ollama.isReachable() else { return nil }
         let text = await Task.detached(priority: .utility) { () -> String in
             if textExtensions.contains(ext) { return extractText(url, limit: 1200) }
             if imageExtensions.contains(ext),
@@ -162,10 +169,48 @@ package final class DocumentTagger: ObservableObject {
            let data = try? PropertyListSerialization.data(fromPropertyList: comment, format: .binary, options: 0) {
             _ = data.withUnsafeBytes { setxattr(url.path, commentAttribute, $0.baseAddress, data.count, 0, 0) }
         }
-        Log.ai.info("Описание: \(url.lastPathComponent, privacy: .public)")
+        Log.ai.info("Описание: \(url.lastPathComponent, privacy: .private)")
     }
 
-    /// Текст документа: PDF — первые страницы, остальное — через NSAttributedString.
+    /// RTF, docx и odt — с явным `documentType` (формат по расширению не угадывается: иначе html и другие пошли бы через свои
+    /// разборщики), простой текст — прямым чтением с определением кодировки. Остальные расширения — nil.
+    package nonisolated static func attributedText(_ url: URL) -> NSAttributedString? {
+        let ext = url.pathExtension.lowercased()
+        guard textExtensions.contains(ext), ext != "pdf" else { return nil }
+        if let type = documentTypes[ext] {
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            guard size > 0, size <= maxDocumentBytes else { return nil }
+            return try? NSAttributedString(url: url, options: [.documentType: type], documentAttributes: nil)
+        }
+        // Читаем только начало: на подпись хватает ~1200 знаков.
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 256 * 1024), !data.isEmpty, let text = decodePlain(data) else { return nil }
+        return NSAttributedString(string: text)
+    }
+
+    /// Простой текст не только в UTF-8: сначала UTF-8 (обрезанный на середине знака хвост не мешает), потом автоопределение с
+    /// подсказкой «Windows-1251» (русские тексты из Windows), в крайнем случае — Windows-1251.
+    package nonisolated static func decodePlain(_ data: Data) -> String? {
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]) {
+            return String(data: data, encoding: .utf16)
+        }
+        var trimmed = data
+        for _ in 0..<4 {
+            if let text = String(data: trimmed, encoding: .utf8) { return text }
+            guard !trimmed.isEmpty else { break }
+            trimmed.removeLast()
+        }
+        var converted: NSString?
+        var lossy = ObjCBool(false)
+        let cp1251 = CFStringConvertEncodingToNSStringEncoding(CFStringConvertIANACharSetNameToEncoding("windows-1251" as CFString))
+        let encoding = NSString.stringEncoding(for: data, encodingOptions: [.suggestedEncodingsKey: [cp1251], .useOnlySuggestedEncodingsKey: true],
+                                               convertedString: &converted, usedLossyConversion: &lossy)
+        if encoding != 0, !lossy.boolValue, let converted { return converted as String }
+        return String(data: data, encoding: String.Encoding(rawValue: cp1251))
+    }
+
+    /// Текст документа: PDF — первые страницы, остальное — через `attributedText`.
     package nonisolated static func extractText(_ url: URL, limit: Int) -> String {
         var text = ""
         if url.pathExtension.lowercased() == "pdf", let document = PDFDocument(url: url) {
@@ -173,7 +218,7 @@ package final class DocumentTagger: ObservableObject {
                 text += (document.page(at: index)?.string ?? "") + "\n"
                 if text.count > limit { break }
             }
-        } else if let attributed = try? NSAttributedString(url: url, options: [:], documentAttributes: nil) {
+        } else if let attributed = Self.attributedText(url) {
             text = attributed.string
         }
         let compact = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
