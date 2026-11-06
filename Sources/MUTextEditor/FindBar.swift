@@ -251,13 +251,18 @@ package final class EditorSearch: ObservableObject {
         switch outcome {
         case .success(let plan):
             guard !plan.ranges.isEmpty else {
-                note = "Совпадений нет"
+                let inHeaders = doc.flatMap { try? $0.headerFindMatches(query: query, options: options) }?.count ?? 0
+                note = inHeaders > 0 ? "В тексте совпадений нет; в колонтитулах не заменено: \(inHeaders)" : "Совпадений нет"
                 return
             }
             if let doc {
                 let outcome = doc.replaceAll(plan.ranges, with: plan.strings)
                 refresh()
-                note = outcome.skipped > 0 ? "Заменено: \(outcome.done); пропущено: \(outcome.skipped) — их нельзя править в «Документе»" : "Заменено: \(outcome.done)"
+                var text = outcome.skipped > 0 ? "Заменено: \(outcome.done); пропущено: \(outcome.skipped) — их нельзя править в «Документе»" : "Заменено: \(outcome.done)"
+                // Колонтитулы рисуются отдельно от страниц и поиском пока не затрагиваются — не молча.
+                let inHeaders = (try? doc.headerFindMatches(query: query, options: options))?.count ?? 0
+                if inHeaders > 0 { text += "; в колонтитулах не заменено: \(inHeaders)" }
+                note = text
                 return
             }
             tab.textView.replace(plan.ranges, with: plan.strings, actionName: "Заменить все")
