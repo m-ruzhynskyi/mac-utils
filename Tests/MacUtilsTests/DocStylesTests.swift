@@ -197,4 +197,69 @@ final class DocStylesTests: XCTestCase {
         XCTAssertGreaterThan(checked, 5)
         XCTAssertEqual(failures, 0)
     }
+
+    // MARK: - Ревью: наследование свойств и то, что стиль не пишет
+
+    /// Абзацы без своего `\pard` наследуют свойства предыдущего, и `\sN` тоже: стиль, применённый к одному абзацу, не должен
+    /// переходить на следующие, которые его свойства наследовали (как у остальных команд абзаца — возврат прежнего значения).
+    func testParagraphStyleDoesNotLeakIntoInheritingParagraphs() throws {
+        let body = #"\pard\plain\s2\qj\li567\fi-284\f0\fs22 Shared A.\par Shared B.\par Shared C.\par"#
+            + #"\pard\plain\f0\fs24 Tail.\par}"#
+        let source = Self.source.components(separatedBy: #"\pard\plain\f0\fs24 First"#)[0] + body
+        let (tab, document, window) = try open(source)
+        defer { window.contentView = nil; window.close() }
+        let original = tab.text as String
+        func props(_ text: String) -> RTFParaProps? {
+            document.model.body.paragraphs.first { $0.runs.map(\.text).joined().hasPrefix(text) }?.props
+        }
+        XCTAssertEqual(props("Shared B")?.style, 2, "B и C наследуют \\s2 от A")
+        // К первому — заголовок: B и C остаются «Основной».
+        try select(document, "Shared A")
+        XCTAssertTrue(try apply(.paragraph, 1, document))
+        settle()
+        XCTAssertEqual(props("Shared A")?.style, 1)
+        XCTAssertEqual(props("Shared B")?.style, 2, "стиль не перешёл на следующий абзац")
+        XCTAssertEqual(props("Shared C")?.style, 2)
+        XCTAssertEqual(props("Shared B")?.alignment, .justify)
+        tab.undo.undo()
+        XCTAssertEqual(tab.text as String, original, "один шаг отмены — байт в байт")
+        settle()
+        // К среднему (своего `\pard` нет): C остаётся «Основной».
+        try select(document, "Shared B")
+        XCTAssertTrue(try apply(.paragraph, 1, document))
+        settle()
+        XCTAssertEqual(props("Shared B")?.style, 1)
+        XCTAssertEqual(props("Shared C")?.style, 2, "стиль не перешёл на следующий абзац")
+        XCTAssertEqual(props("Shared A")?.style, 2)
+        XCTAssertEqual(DocTableEdit.violations(RTFReader.read(tab.text)), 0)
+        tab.undo.undo()
+        XCTAssertEqual(tab.text as String, original)
+    }
+
+    /// В стиле есть то, что `ParaChange` не пишет (границы, табуляции): стиль применяется (номер, выравнивание, знаки), а абзац
+    /// не ломается — свои табуляции и рамка остаются, текст тот же, отмена байт в байт.
+    func testStyleWithBordersAndTabsKeepsParagraph() throws {
+        let sheet = Self.sheet.replacingOccurrences(of: #"{\*\cs10"#, with: #"{\s3\qr\brdrb\brdrs\brdrw10\tx1440\f0\fs24\i \sbasedon0 Bordered;}{\*\cs10"#)
+        let source = Self.source.replacingOccurrences(of: Self.sheet, with: sheet)
+            .replacingOccurrences(of: #"\pard\plain\f0\fs24 Third paragraph plain.\par"#,
+                                  with: #"\pard\plain\brdrt\brdrs\brdrw10\tx2880\f0\fs24 Name\tab Value\par"#)
+        let (tab, document, window) = try open(source)
+        defer { window.contentView = nil; window.close() }
+        let original = tab.text as String
+        let shownBefore = document.storage.string
+        let style = try XCTUnwrap(document.styleSheet.style(.paragraph, 3))
+        try select(document, "Name")
+        XCTAssertTrue(document.applyStyle(style), document.notice ?? "")
+        settle()
+        let paragraph = try XCTUnwrap(document.model.body.paragraphs.first { $0.runs.map(\.text).joined().hasPrefix("Name") })
+        XCTAssertEqual(paragraph.props.style, 3)
+        XCTAssertEqual(paragraph.props.alignment, .right, "выравнивание стиля")
+        XCTAssertEqual(paragraph.props.tabs.map(\.position), [2880], "свои табуляции абзаца на месте")
+        XCTAssertTrue(paragraph.props.borderTop.isVisible, "своя рамка абзаца на месте")
+        XCTAssertTrue(paragraph.runs.filter { FormatEdits.isTarget($0.kind) }.allSatisfy(\.props.italic), "знаки стиля")
+        XCTAssertEqual(document.storage.string, shownBefore, "текст тот же")
+        XCTAssertEqual(DocTableEdit.violations(RTFReader.read(tab.text)), 0)
+        tab.undo.undo()
+        XCTAssertEqual(tab.text as String, original, "один шаг отмены — байт в байт")
+    }
 }

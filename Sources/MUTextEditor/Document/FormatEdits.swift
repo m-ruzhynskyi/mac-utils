@@ -89,6 +89,9 @@ package struct ParaChange: Equatable {
     package var keepNext: Bool?
     package var keepTogether: Bool?
     package var pageBreakBefore: Bool?
+    /// Стиль абзаца `\sN` (S1, «применить стиль»): пишется как остальные поля — замена своего кода, после `\pard` или перед концом
+    /// абзаца, с возвратом прежнего номера следующим абзацам, которые его наследовали.
+    package var style: Int?
 
     package static func == (lhs: ParaChange, rhs: ParaChange) -> Bool {
         lhs.tabs == rhs.tabs && lhs.alignment == rhs.alignment && lhs.left == rhs.left && lhs.right == rhs.right && lhs.firstLine == rhs.firstLine
@@ -96,6 +99,7 @@ package struct ParaChange: Equatable {
             && lhs.lineSpacing?.value == rhs.lineSpacing?.value && lhs.lineSpacing?.multiple == rhs.lineSpacing?.multiple
             && lhs.list == rhs.list && lhs.listLevel == rhs.listLevel
             && lhs.keepNext == rhs.keepNext && lhs.keepTogether == rhs.keepTogether && lhs.pageBreakBefore == rhs.pageBreakBefore
+            && lhs.style == rhs.style
     }
 
     /// «Очистить формат» для абзаца: без отступов и интервалов, по левому краю. Табуляции, рамки и стиль не трогаются.
@@ -103,7 +107,7 @@ package struct ParaChange: Equatable {
 
     /// Поля абзаца, которые команда пишет кодами: имя — как в `RTFParagraph.propTokens`.
     package enum Field: String, CaseIterable {
-        case align, li, lin, ri, rin, fi, sb, sa, sl, slmult, ls, ilvl
+        case align, li, lin, ri, rin, fi, sb, sa, sl, slmult, ls, ilvl, s
     }
 
     package var settings: [(Field, Int)] {
@@ -117,6 +121,7 @@ package struct ParaChange: Equatable {
         if let lineSpacing { result += [(.sl, lineSpacing.value), (.slmult, lineSpacing.multiple ? 1 : 0)] }
         if let list { result.append((.ls, list)) }
         if let listLevel { result.append((.ilvl, listLevel)) }
+        if let style { result.append((.s, style)) }
         return result
     }
 
@@ -134,6 +139,7 @@ package struct ParaChange: Equatable {
         case .slmult: return props.lineMultiple ? 1 : 0
         case .ls: return props.list
         case .ilvl: return props.listLevel
+        case .s: return props.style ?? 0
         }
     }
 
@@ -161,6 +167,7 @@ package struct ParaChange: Equatable {
         if let keepNext { props.keepNext = keepNext }
         if let keepTogether { props.keepTogether = keepTogether }
         if let pageBreakBefore { props.pageBreakBefore = pageBreakBefore }
+        if let style { props.style = style }
         switch tabs {
         case .add(let stop): props.tabs.append(stop)
         case .move(let index, let position) where props.tabs.indices.contains(index): props.tabs[index].position = position

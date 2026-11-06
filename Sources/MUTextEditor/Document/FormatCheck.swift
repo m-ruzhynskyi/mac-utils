@@ -141,6 +141,8 @@ package enum FormatCheck {
             guard paragraph.end == fresh.end, paragraph.cell == fresh.cell, paragraph.section == fresh.section else { return "Изменилась структура абзацев" }
             var props = paragraph.props
             if isTarget, plan.paraTargets.contains(index), let change = plan.paraChange { props = change.apply(to: props) }
+            // Нет `\sN` и `\s0` — один стиль «Обычный»: возврат стиля следующим абзацам (`ParaChange.style`) пишет `\s0`.
+            if (props.style ?? 0) == (fresh.props.style ?? 0) { props.style = fresh.props.style }
             guard props == fresh.props else { return isTarget && plan.paraTargets.contains(index) ? "Свойства абзаца не применились" : "Изменились свойства другого абзаца" }
             if isTarget, let targets = plan.charTargets[index], let change = plan.charChange {
                 if let problem = compareUnits(paragraph, fresh, targets: targets, change: change, old: old, new: new) { return problem }
