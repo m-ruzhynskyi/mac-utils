@@ -40,6 +40,10 @@ package final class EditorSearch: ObservableObject {
 
     private var tab: EditorTab? { workspace?.current }
 
+    /// «Документ»: совпадения в колонтитулах и общий список (тело + колонтитулы) в порядке страниц.
+    private var headerMatches: [HeaderFindMatch] = []
+    private var items: [(item: DocFindItem, key: DocFindKey)] = []
+
     // В «Документе» ищем по видимому тексту страниц (не по кодам RTF): совпадения — показанные единицы, подсветка — на страницах,
     // замена — точечные правки исходника через `DocumentController`.
     private var doc: DocumentController? { tab?.mode == .document ? tab?.documentController : nil }
@@ -93,6 +97,8 @@ package final class EditorSearch: ObservableObject {
         current = nil
         error = nil
         note = nil
+        headerMatches = []
+        items = []
     }
 
     private var searchScope: NSRange? {
@@ -116,6 +122,8 @@ package final class EditorSearch: ObservableObject {
             count = 0
             truncated = false
             current = nil
+            headerMatches = []
+            items = []
             setMatches([], current: nil, in: tab)
             return
         }
@@ -151,8 +159,25 @@ package final class EditorSearch: ObservableObject {
         switch outcome {
         case .success(let result):
             error = nil
-            count = result.ranges.count
             truncated = result.truncated
+            if let doc {
+                // Тело и колонтитулы — одним списком в порядке страниц; «в выделении» колонтитулов не касается.
+                headerMatches = searchScope == nil ? ((try? doc.headerFindMatches(query: query, options: options)) ?? []) : []
+                items = doc.orderedFindItems(body: result.ranges, headers: headerMatches)
+                count = items.count
+                let anchor = selectionKey(doc)
+                let index = items.firstIndex { $0.key >= anchor } ?? (items.isEmpty ? nil : 0)
+                current = index
+                if let index, case .body(let bodyIndex) = items[index].item {
+                    setMatches(result.ranges, current: bodyIndex, in: tab)
+                } else {
+                    setMatches(result.ranges, current: nil, in: tab)
+                }
+                return
+            }
+            headerMatches = []
+            items = []
+            count = result.ranges.count
             let selection = currentSelection
             current = result.ranges.firstIndex { $0 == selection } ?? result.ranges.firstIndex { $0.location >= selection.location }
                 ?? (result.ranges.isEmpty ? nil : 0)
@@ -161,8 +186,26 @@ package final class EditorSearch: ObservableObject {
             error = timedOut ? "Выражение ищет слишком долго" : failure.localizedDescription
             count = 0
             current = nil
+            headerMatches = []
+            items = []
             setMatches([], current: nil, in: tab)
         }
+    }
+
+    /// Где сейчас курсор в порядке страниц: в открытой правке колонтитула — там, иначе в теле.
+    private func selectionKey(_ doc: DocumentController) -> DocFindKey {
+        if let session = doc.openHeaderSession, let page = session.page, let index = doc.pagesView.pages.firstIndex(where: { $0 === page }) {
+            return DocFindKey(page: index, band: session.isHeader ? 0 : 2, offset: session.textView.selectedRange().location)
+        }
+        let selection = doc.selectedUnits
+        return DocFindKey(page: doc.pageIndex(ofUnit: selection.location), band: 1, offset: selection.location)
+    }
+
+    /// Совпадение в колонтитуле, которое сейчас выделено в правке колонтитула.
+    private func selectedHeaderMatch(_ doc: DocumentController) -> HeaderFindMatch? {
+        guard let session = doc.openHeaderSession else { return nil }
+        let selection = session.textView.selectedRange()
+        return headerMatches.first { $0.section == session.section && $0.kind == session.kind && $0.units == selection }
     }
 
     /// Прервать фоновый поиск или замену (новый запрос, правка, другая вкладка, закрытие панели).
@@ -177,11 +220,15 @@ package final class EditorSearch: ObservableObject {
     /// ⌘G / ⇧⌘G: следующее или предыдущее совпадение, по кругу.
     package func next(backwards: Bool = false) {
         guard let tab else { return }
-        if pending != nil || (matchList.isEmpty && !searching) { refresh() }
+        if let doc, !items.isEmpty, pending == nil {
+            return nextInDocument(doc, backwards: backwards, tab: tab)
+        }
+        if pending != nil || (matchList.isEmpty && !searching && items.isEmpty) { refresh() }
         if searching {
             nextAfterSearch = backwards
             return
         }
+        if let doc, !items.isEmpty { return nextInDocument(doc, backwards: backwards, tab: tab) }
         guard let found = TextSearch.next(in: matchList, after: currentSelection, backwards: backwards) else {
             Feedback.beep()
             return
@@ -193,9 +240,37 @@ package final class EditorSearch: ObservableObject {
         if let doc { doc.revealFind(found.index) } else { tab.reveal(matches[found.index]) }
     }
 
+    /// ⌘G в «Документе»: следующее (предыдущее) совпадение тела или колонтитула по порядку страниц, по кругу.
+    private func nextInDocument(_ doc: DocumentController, backwards: Bool, tab: EditorTab) {
+        let anchor = selectionKey(doc)
+        var index: Int
+        if backwards {
+            if let before = items.lastIndex(where: { $0.key < anchor }) { index = before; wrapped = false } else { index = items.count - 1; wrapped = true }
+        } else {
+            if let after = items.firstIndex(where: { $0.key > anchor }) { index = after; wrapped = false } else { index = 0; wrapped = true }
+        }
+        current = index
+        switch items[index].item {
+        case .body(let bodyIndex):
+            doc.closeHeaderEditing()
+            setMatches(doc.findMatches, current: bodyIndex, in: tab)
+            doc.revealFind(bodyIndex)
+        case .header(let headerIndex):
+            setMatches(doc.findMatches, current: nil, in: tab)
+            doc.revealHeaderMatch(headerMatches[headerIndex])
+        }
+    }
+
     /// «Заменить»: текущее совпадение (если выделено оно) — и к следующему.
     package func replaceOne() {
         guard let tab, error == nil, !query.isEmpty else { return }
+        if let doc, let match = selectedHeaderMatch(doc), let session = doc.openHeaderSession,
+           let string = try? TextSearch.replacement(for: match.units, query, template: replacement, in: session.storage.string as NSString, options: options) {
+            session.replace(match.units, with: string)
+            refresh()
+            next()
+            return
+        }
         let selection = currentSelection
         if matchList.contains(selection),
            let string = try? TextSearch.replacement(for: selection, query, template: replacement, in: haystack, options: options) {
@@ -250,18 +325,30 @@ package final class EditorSearch: ObservableObject {
     private func apply(_ outcome: Result<(ranges: [NSRange], strings: [String]), Error>, timedOut: Bool, to tab: EditorTab) {
         switch outcome {
         case .success(let plan):
-            guard !plan.ranges.isEmpty else {
-                let inHeaders = doc.flatMap { try? $0.headerFindMatches(query: query, options: options) }?.count ?? 0
-                note = inHeaders > 0 ? "В тексте совпадений нет; в колонтитулах не заменено: \(inHeaders)" : "Совпадений нет"
+            // «Документ»: колонтитулы заменяются вместе с телом (в «в выделении» — нет).
+            var headerPairs: [(match: HeaderFindMatch, string: String)] = []
+            if let doc, searchScope == nil {
+                var headerOptions = options
+                headerOptions.inSelection = false
+                for target in doc.headerFindTargets() where target.string.length > 0 {
+                    guard let found = try? TextSearch.replacements(query, template: replacement, in: target.string, options: headerOptions, scope: nil) else { continue }
+                    for (range, string) in zip(found.ranges, found.strings) {
+                        headerPairs.append((HeaderFindMatch(section: target.section, kind: target.kind, page: target.page, units: range), string))
+                    }
+                }
+            }
+            guard !plan.ranges.isEmpty || !headerPairs.isEmpty else {
+                note = "Совпадений нет"
                 return
             }
             if let doc {
-                let outcome = doc.replaceAll(plan.ranges, with: plan.strings)
+                let outcome = doc.replaceAll(plan.ranges, with: plan.strings, headers: headerPairs)
                 refresh()
-                var text = outcome.skipped > 0 ? "Заменено: \(outcome.done); пропущено: \(outcome.skipped) — их нельзя править в «Документе»" : "Заменено: \(outcome.done)"
-                // Колонтитулы рисуются отдельно от страниц и поиском пока не затрагиваются — не молча.
-                let inHeaders = (try? doc.headerFindMatches(query: query, options: options))?.count ?? 0
-                if inHeaders > 0 { text += "; в колонтитулах не заменено: \(inHeaders)" }
+                let total = outcome.done + outcome.headerDone
+                var text = "Заменено: \(total)"
+                if outcome.headerDone > 0 { text += " (в колонтитулах: \(outcome.headerDone))" }
+                let skipped = outcome.skipped + outcome.headerSkipped
+                if skipped > 0 { text += "; пропущено: \(skipped) — их нельзя править в «Документе»" }
                 note = text
                 return
             }
