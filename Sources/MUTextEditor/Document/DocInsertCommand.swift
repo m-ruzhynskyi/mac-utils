@@ -92,6 +92,11 @@ extension DocumentController {
         let units = selectedUnits
         var context = InsertCommand.Context()
         context.hasFileName = tab.document.url != nil
+        // Правится колонтитул: поля идут в него (`DocFormatter.insertField`), пробные правки основного текста тут ни при чём.
+        if DocFormatter.existing(for: self)?.headerSession != nil {
+            context.inHeader = true
+            return context
+        }
         if let index = rendering.paragraph(atUnit: min(units.location, max(0, rendering.length - 1))) {
             context.inTableCell = model.body.paragraphs[safe: index]?.cell != nil
         }
@@ -114,6 +119,18 @@ extension DocumentController {
             return false
         }
         guard command.availability(in: context).isEnabled else { return false }
+        if context.inHeader, let formatter = DocFormatter.existing(for: self) {
+            // В колонтитуле доступны только поля (символ и разрыв выключены правилом) — в место курсора колонтитула, а не тела.
+            let field: HeaderField
+            switch command {
+            case .pageNumber: field = .page
+            case .field(let chosen): field = chosen
+            case .symbol, .pageBreak: return false
+            }
+            let revision = tab.sourceRevision
+            formatter.insertField(field)
+            return tab.sourceRevision != revision
+        }
         switch command {
         case .symbol(let text): return perform(replacing: selectedUnits, with: text)
         case .pageBreak: return perform(replacing: selectedUnits, with: "\u{0C}")

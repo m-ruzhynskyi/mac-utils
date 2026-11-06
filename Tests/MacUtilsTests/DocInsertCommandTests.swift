@@ -58,6 +58,43 @@ final class DocInsertCommandTests: XCTestCase {
         XCTAssertEqual(prefix + suffix, a.count, "байты вне правки те же", file: file, line: line)
     }
 
+    /// Правится колонтитул: поле с вкладки «Вставка» встаёт в колонтитул (как в Word), основной текст не меняется; символ и разрыв —
+    /// выключены. Раньше `insertContext` не знал о колонтитуле, и поле уходило в тело — к курсору, которого не видно.
+    func testFieldGoesIntoHeaderWhileItIsEdited() throws {
+        let (workspace, tab) = DocDemo.tab()
+        tab.restoreMode(nil)
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 1000, height: 700), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: EditorRootView(workspace: workspace).environment(\.controlActiveState, .key))
+        window.orderBack(nil)
+        defer { window.contentView = nil; window.close() }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let document = try XCTUnwrap(tab.documentController)
+        document.layoutManager.ensureLayout(for: document.layoutManager.textContainers.last!)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let formatter = DocFormatter.of(document)
+        let page = try XCTUnwrap(document.pagesView.pages.first)
+        formatter.beginHeaderEditing(page: page, header: true)
+        let session = try XCTUnwrap(formatter.headerSession)
+        session.textView.setSelectedRange(NSRange(location: (session.storage.string as NSString).range(of: "·").location, length: 0))
+        let original = tab.text as String
+        let body = document.storage.string
+        let fields = document.model.fields.count
+        let context = document.insertContext
+        XCTAssertTrue(context.inHeader)
+        XCTAssertFalse(InsertCommand.pageBreak.availability(in: context).isEnabled)
+        XCTAssertTrue(document.perform(.field(.numPages)))
+        XCTAssertEqual(document.model.fields.count, fields + 1)
+        XCTAssertTrue((tab.text as String).contains("NUMPAGES"))
+        XCTAssertEqual(document.storage.string, body, "основной текст не тронут — поле в колонтитуле")
+        XCTAssertFalse(document.perform(.pageBreak))
+        XCTAssertFalse(document.perform(.symbol("©")))
+        tab.undo.undo()
+        XCTAssertEqual(tab.text as String, original, "одна отмена — байт в байт")
+        formatter.endHeaderEditing()
+    }
+
     func testCommandsAreOnePointEditAndUndoIsByteForByte() throws {
         let (tab, document, window) = try open()
         defer { window.contentView = nil; window.close() }

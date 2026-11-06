@@ -10,6 +10,14 @@ final class DollarHistoryTests: XCTestCase {
         XCTAssertEqual(DollarHistory.name(forDollarAt: text.range(of: "$ООО").location, in: text), "ответчик")
         XCTAssertEqual(DollarHistory.name(forDollarAt: text.range(of: "$Иванов").location, in: text), "истец")
         XCTAssertEqual(DollarHistory.name(forDollarAt: 0, in: "$x" as NSString), "", "без подписи — пустое имя")
+        // Длинная подпись: имя — ближайшее к `$`, а не начало строки (иначе у всех знаков с одинаковым началом строки одна история).
+        let long = "Сведения о заявителе по делу № 123, фамилия: $Иванов\nСведения о заявителе по делу № 123, телефон: $555" as NSString
+        let surname = DollarHistory.name(forDollarAt: long.range(of: "$Иванов").location, in: long)
+        let phone = DollarHistory.name(forDollarAt: long.range(of: "$555").location, in: long)
+        XCTAssertTrue(surname.hasSuffix("фамилия"), surname)
+        XCTAssertTrue(phone.hasSuffix("телефон"), phone)
+        XCTAssertNotEqual(surname, phone)
+        XCTAssertLessThanOrEqual(surname.count, 40)
     }
 
     func testRecordsByNameMostRecentFirstWithoutDuplicates() {

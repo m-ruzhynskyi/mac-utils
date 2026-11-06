@@ -15,7 +15,8 @@ package final class DollarHistory {
 
     package init() {}
 
-    /// Имя знака: подпись перед `$` в его строке (без двоеточия и пробелов по краям, не длиннее 40 знаков, без учёта регистра).
+    /// Имя знака: подпись перед `$` в его строке (без двоеточия и пробелов по краям, без учёта регистра); у длинной — последние
+    /// 40 знаков, ближайшие к `$` («…, фамилия, имя, отчество: $»), а не начало строки.
     /// Знак без подписи получает пустое имя — у них общая история.
     package nonisolated static func name(forDollarAt offset: Int, in text: NSString) -> String {
         guard offset >= 0, offset <= text.length else { return "" }
@@ -23,7 +24,7 @@ package final class DollarHistory {
         let start = min(lineStart, offset)
         let label = text.substring(with: NSRange(location: start, length: offset - start))
         let trimmed = label.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ":：-–—\u{00A0}")))
-        return String(trimmed.lowercased().prefix(40))
+        return String(trimmed.lowercased().suffix(40)).trimmingCharacters(in: .whitespaces)
     }
 
     /// Запомнить введённое значение под именем знака; повтор поднимается наверх, пустые значения не запоминаются.

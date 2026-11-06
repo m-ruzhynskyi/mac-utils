@@ -44,18 +44,22 @@ package enum TableCommand: CaseIterable, Hashable {
         package var selectedCells = 0
         /// Столбцов в строке под курсором.
         package var columns = 0
+        /// Выделение задевает ячейки нескольких таблиц: курсор в таблице (вставки таблицы нет), но команды ячеек не применить.
+        package var severalTables = false
 
-        package init(inTable: Bool = false, rowEditable: Bool = false, selectedCells: Int = 0, columns: Int = 0) {
+        package init(inTable: Bool = false, rowEditable: Bool = false, selectedCells: Int = 0, columns: Int = 0, severalTables: Bool = false) {
             self.inTable = inTable
             self.rowEditable = rowEditable
             self.selectedCells = selectedCells
             self.columns = columns
+            self.severalTables = severalTables
         }
     }
 
     package func availability(in context: Context) -> Availability {
         if self == .insertTable { return context.inTable ? .hidden : .enabled }
         guard context.inTable else { return .hidden }
+        if context.severalTables { return .disabled("Выделение захватывает несколько таблиц — выделите ячейки одной") }
         switch self {
         case .insertTable: return .hidden
         case .rowAbove, .rowBelow, .deleteRow:
@@ -78,7 +82,12 @@ package enum TableCommand: CaseIterable, Hashable {
 extension DocumentController {
     /// Состояние курсора для `TableCommand.availability`.
     package var tableContext: TableCommand.Context {
-        guard let selection = selectedTableCells else { return TableCommand.Context() }
+        guard let selection = selectedTableCells else {
+            // Ячеек одной таблицы нет, но выделение задевает таблицы (две и больше): это не «вне таблицы» — иначе «Вставить таблицу»
+            // была бы доступна и отказала бы, а команды ячеек пропали бы.
+            let touches = paragraphs(in: selectedUnits).contains { model.body.paragraphs[safe: $0].map { $0.cell != nil || $0.props.inTable } ?? false }
+            return touches ? TableCommand.Context(inTable: true, severalTables: true) : TableCommand.Context()
+        }
         let columns = model.body.tables[safe: selection.table]?.rows[safe: selection.cells.min { ($0.row, $0.cell) < ($1.row, $1.cell) }?.row ?? 0]?.cells.count ?? 0
         return TableCommand.Context(inTable: true, rowEditable: cellAtSelection != nil, selectedCells: selection.cells.count, columns: columns)
     }

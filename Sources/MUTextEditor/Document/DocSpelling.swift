@@ -149,9 +149,18 @@ package final class DocSpelling {
         let text = controller.storage.string as NSString
         guard NSMaxRange(range) <= text.length else { return [] }
         let word = text.substring(with: range)
-        let code = DocLanguage.spellingCode(lcid: languageCode(at: range.location)) ?? "ru"
+        let code = spellingLanguage(at: range.location) ?? Self.resolve("ru") ?? "ru"
         return Array((NSSpellChecker.shared.guesses(forWordRange: NSRange(location: 0, length: (word as NSString).length), in: word, language: code,
                                                     inSpellDocumentWithTag: tag) ?? []).prefix(6))
+    }
+
+    /// Словарь для места: выбор в строке состояния (один язык на всё) или язык `\lang`; как при проверке — через `resolve`.
+    private func spellingLanguage(at unit: Int) -> String? {
+        switch choice {
+        case .off: return nil
+        case .fixed(let code): return Self.resolve(code)
+        case .automatic: return DocLanguage.spellingCode(lcid: languageCode(at: unit)).flatMap(Self.resolve)
+        }
     }
 
     private func languageCode(at unit: Int) -> Int {

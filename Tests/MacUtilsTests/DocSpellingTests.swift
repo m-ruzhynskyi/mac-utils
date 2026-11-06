@@ -123,6 +123,20 @@ final class DocSpellingTests: XCTestCase {
 
     @objc private func noop(_ sender: Any?) {}
 
+    /// Варианты исправления — из того же словаря, которым слово проверено: при выборе одного языка — из него, а не по `\lang` абзаца.
+    func testGuessesFollowChosenLanguage() throws {
+        try XCTSkipUnless(DocSpelling.available("en_US"), "нет словаря en")
+        UserDefaults.standard.set(true, forKey: Pref.docSpelling)
+        let source = #"{\rtf1\ansi\ansicpg1251\deff0\deflang1049{\fonttbl{\f0\froman\fcharset204 Times New Roman;}}\sectd"# + "\r\n"
+            + #"\pard\plain\f0\fs24 speling\par}"#
+        let (_, document) = try open(source)
+        document.spelling.choice = .fixed("en_US")
+        settle(0.8)
+        let word = (document.storage.string as NSString).range(of: "speling")
+        XCTAssertTrue(document.spelling.misspelled.contains(word), "английский словарь пометил слово в русском абзаце")
+        XCTAssertTrue(document.spelling.guesses(for: word).contains("spelling"), "варианты — английские: \(document.spelling.guesses(for: word))")
+    }
+
     func testChoiceFixedLanguageAndOff() throws {
         try XCTSkipUnless(DocSpelling.available("en"), "нет словаря en")
         UserDefaults.standard.set(true, forKey: Pref.docSpelling)

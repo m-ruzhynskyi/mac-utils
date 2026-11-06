@@ -31,12 +31,16 @@ extension DocumentController {
         }
     }
 
-    /// Перейти к совпадению: выделить и показать на странице (с переходом на нужную).
+    /// Перейти к совпадению: выделить и показать на странице (с переходом на нужную). Фокус переходит на страницу совпадения, только если
+    /// он уже на странице (⌘G из текста); из поля поиска — остаётся в поле, как в «Коде»: иначе следующий ↩ в поле вставил бы абзац в документ.
     package func revealFind(_ index: Int) {
         guard findMatches.indices.contains(index) else { return }
         let range = findMatches[index]
         guard let view = textView(forUnit: range.location) else { return }
-        view.window?.makeFirstResponder(view)
+        if let window = view.window, let focused = window.firstResponder as? DocTextView, focused !== view,
+           textViews.contains(where: { $0 === focused }) {
+            window.makeFirstResponder(view)
+        }
         view.setSelectedRange(range)
         reveal(range)
     }

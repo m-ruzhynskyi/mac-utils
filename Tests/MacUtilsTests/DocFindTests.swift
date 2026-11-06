@@ -84,6 +84,11 @@ final class DocFindTests: XCTestCase {
         XCTAssertEqual(workspace.search.count, 0)
         start(workspace, query: "\\'ea")
         XCTAssertEqual(workspace.search.count, 0, "\\'hh — не текст")
+        // С учётом регистра: «Кот» и «КОТ» не считаются.
+        workspace.search.options.caseSensitive = true
+        start(workspace, query: "кот")
+        XCTAssertEqual(workspace.search.count, 4, "ко|т, Скот, кот, «кот»")
+        workspace.search.options.caseSensitive = false
         // Целое слово: «Скот» не считается.
         workspace.search.options.wholeWord = true
         start(workspace, query: "кот")
@@ -104,6 +109,52 @@ final class DocFindTests: XCTestCase {
         XCTAssertEqual(document.storage.string, before, "подсветка не меняет текст")
         workspace.search.clear()
         XCTAssertNil(document.layoutManager.temporaryAttribute(.backgroundColor, atCharacterIndex: first.location, effectiveRange: nil), "закрыли поиск — подсветки нет")
+    }
+
+    /// ↩ в поле поиска — следующее совпадение, а фокус остаётся в поле (как в «Коде»): иначе второй ↩ вставил бы абзац в документ.
+    /// Со страницы (⌘G из текста) фокус идёт за совпадением.
+    func testNextKeepsFocusOutsideDocument() throws {
+        let (workspace, tab, document) = try open(Data(Self.cats.utf8))
+        let window = try XCTUnwrap(document.textViews.first?.window)
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+        window.contentView?.addSubview(field)
+        XCTAssertTrue(window.makeFirstResponder(field))
+        let responder = window.firstResponder
+        start(workspace, query: "кот")
+        let source = tab.text as String
+        workspace.search.next()
+        workspace.search.next()
+        XCTAssertTrue(window.firstResponder === responder, "фокус остался вне документа: \(String(describing: window.firstResponder))")
+        XCTAssertFalse(window.firstResponder is DocTextView)
+        XCTAssertEqual(tab.text as String, source)
+        // Фокус на странице — после перехода он на странице совпадения.
+        let page = try XCTUnwrap(document.textViews.first)
+        XCTAssertTrue(window.makeFirstResponder(page))
+        workspace.search.next()
+        XCTAssertTrue(window.firstResponder is DocTextView)
+        field.removeFromSuperview()
+    }
+
+    /// В ячейках таблицы ищется и заменяется как в абзацах: границы ячеек не трогаются, `\cell` = `\cellx`, отмена — байт в байт.
+    func testFindAndReplaceInTableCells() throws {
+        let (workspace, tab, document) = try open(Data(DocTableEditTests.wordTable.utf8))
+        let original = tab.text as String
+        start(workspace, query: "B3")
+        XCTAssertEqual(workspace.search.count, 2, "B3 и «B3 more» в последней ячейке")
+        workspace.search.options.caseSensitive = true
+        start(workspace, query: "b3")
+        XCTAssertEqual(workspace.search.count, 0, "с учётом регистра")
+        start(workspace, query: "B")
+        XCTAssertEqual(workspace.search.count, 5, "B1, B2, B3, B3 more, Before")
+        workspace.search.replacement = "Ц"
+        workspace.search.replaceAll()
+        settle(0.2)
+        XCTAssertEqual(workspace.search.note, "Заменено: 5")
+        XCTAssertEqual(DocTableEdit.violations(RTFReader.read(tab.text)), 0)
+        XCTAssertEqual(document.model.body.tables.first?.rows.count, 3)
+        XCTAssertTrue(document.storage.string.contains("Ц3 more"), document.storage.string)
+        tab.undo.undo()
+        XCTAssertEqual(tab.text as String, original, "одна отмена — байт в байт")
     }
 
     func testNextMovesAcrossPages() throws {
