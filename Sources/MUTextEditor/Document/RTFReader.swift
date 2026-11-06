@@ -686,7 +686,9 @@ private final class RTFParser {
         case .pagebb:
             top.para.pageBreakBefore = (number ?? 1) != 0
             token("pagebb", range)
-        case .s: top.para.style = number
+        case .s:
+            top.para.style = number
+            token("s", range)
         case .contextualspace: top.para.contextualSpace = (number ?? 1) != 0
         case .sbauto: top.para.spaceBeforeAuto = (number ?? 1) != 0
         case .saauto: top.para.spaceAfterAuto = (number ?? 1) != 0

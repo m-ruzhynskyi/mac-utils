@@ -125,17 +125,11 @@ extension DocumentController {
         guard let tab else { return false }
         let indexes = paragraphs(in: selectedUnits)
         guard !indexes.isEmpty else { return false }
-        // 1. `\sN`: заменить свой код абзаца или вписать после `\pard`.
-        var edits: [DocEdit] = []
-        let source = tab.text
-        for index in indexes {
-            guard let paragraph = model.body.paragraphs[safe: index] else { continue }
-            if let edit = styleCodeEdit(paragraph, number: style.number, source: source) { edits.append(edit) }
-        }
-        if !edits.isEmpty, !apply(edits, actionName: "Стиль") { return false }
-        // 2. Свойства абзаца, которые задаёт стиль.
+        // 1. `\sN` и свойства абзаца, которые задаёт стиль, — одной правкой `ParaChange`: свой код заменяется, нет — после `\pard`
+        // или перед концом абзаца, и следующие абзацы, которые наследовали свойства (без своего `\pard`), получают прежние.
         let props = properties.paragraph
         var change = ParaChange()
+        change.style = style.number
         change.alignment = props.alignment
         change.left = props.left
         change.right = props.right
@@ -166,23 +160,6 @@ extension DocumentController {
     /// Свойства знаков всех видимых прогонов абзацев.
     private func paragraphsText(_ indexes: [Int]) -> [RTFCharProps] {
         indexes.compactMap { model.body.paragraphs[safe: $0] }.flatMap(\.runs).filter { FormatEdits.isTarget($0.kind) }.map(\.props)
-    }
-
-    /// Правка кода `\sN` абзаца: замена существующего или вставка после `\pard`; `nil` — уже такой.
-    private func styleCodeEdit(_ paragraph: RTFParagraph, number: Int, source: NSString) -> DocEdit? {
-        if let pard = paragraph.pard {
-            let end = min(paragraph.contentStart, source.length)
-            let start = NSMaxRange(pard)
-            if end > start {
-                for token in RTFLexer.tokens(source, in: NSRange(location: start, length: end - start)) where token.kind == .word && token.name == "s" {
-                    if token.number == number { return nil }
-                    return DocEdit(range: token.wordRange, text: "\\s\(number)" + (token.hasDelimiter ? "" : " "))
-                }
-            }
-            return DocEdit(range: NSRange(location: NSMaxRange(pard), length: 0), text: "\\s\(number) ")
-        }
-        guard paragraph.props.style != number else { return nil }
-        return DocEdit(range: NSRange(location: paragraph.regionStart, length: 0), text: "\\s\(number) ")
     }
 
     // MARK: - Знаковый стиль
