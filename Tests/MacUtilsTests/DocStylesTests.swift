@@ -262,4 +262,30 @@ final class DocStylesTests: XCTestCase {
         tab.undo.undo()
         XCTAssertEqual(tab.text as String, original, "один шаг отмены — байт в байт")
     }
+
+    /// Подсветка в галерее (25f91d6) — стиль под курсором и в ячейке таблицы, и в правке колонтитула: в колонтитуле — стиль его
+    /// абзаца, а знаковый стиль — не тот, что у курсора основного текста.
+    func testGalleryHighlightInTableAndHeader() throws {
+        let source = Self.source
+            .replacingOccurrences(of: #"\sectd"#, with: #"\sectd{\header \pard\plain\s1\qc\f0\fs32\b Header title\par}"#)
+            .replacingOccurrences(of: #"\pard\plain\intbl\f0\fs24 Cell one text"#, with: #"\pard\plain\intbl\s2\f0\fs22 Cell one text"#)
+            .replacingOccurrences(of: #"\pard\plain\f0\fs24 Last paragraph with some words.\par}"#,
+                                  with: #"\pard\plain\f0\fs24 Last paragraph with {\cs11\i\cf2 some} words.\par}"#)
+        let (_, document, window) = try open(source)
+        defer { window.contentView = nil; window.close() }
+        let formatter = DocFormatter.of(document)
+        try select(document, "Cell one")
+        settle()
+        XCTAssertEqual(DocRibbonStyles.currentNumber(formatter.state.paragraph), 2, "ячейка: стиль её абзаца")
+        try select(document, "some")
+        settle()
+        XCTAssertEqual(formatter.state.characterStyle, 11, "знаковый стиль у курсора тела")
+        formatter.beginHeaderEditing(page: try XCTUnwrap(document.pagesView.pages.first), header: true)
+        let session = try XCTUnwrap(formatter.headerSession)
+        session.textView.setSelectedRange(NSRange(location: 2, length: 0))
+        formatter.updateState()
+        XCTAssertEqual(DocRibbonStyles.currentNumber(formatter.state.paragraph), 1, "колонтитул: стиль его абзаца (\\s1)")
+        XCTAssertNil(formatter.state.characterStyle, "в колонтитуле — не знаковый стиль курсора тела")
+        formatter.endHeaderEditing()
+    }
 }
