@@ -13,6 +13,8 @@ package enum Pref {
     package static let winKeys = "winKeysEnabled"
     /// Свой список программ, где Ctrl остаётся как есть (bundle id; запись с точкой на конце — префикс). Только для «Клавиш Windows».
     package static let winKeysExcluded = "winKeysExcludedApps"
+    /// Выключенные сочетания «Клавиш Windows» (массив `WinKeysShortcut.id`, например `["a", "f"]`). Нет значения — включены все.
+    package static let winKeysDisabled = "winKeysDisabledShortcuts"
 
     package static let smoothScroll = "smoothScrollEnabled"
     package static let smoothSpeed = "smoothScrollSpeed"
