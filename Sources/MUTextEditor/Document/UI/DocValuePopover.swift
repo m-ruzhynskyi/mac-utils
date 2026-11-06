@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
-import MUCore
 import MUDesign
+import MUCore
 
 // V2 (`.audit/plan-word-ui.md`, «★3»): правка значения знака `$` прямо на странице. Щелчок по `$` (или по строке панели «$»
 // в «Документе») — поповер с полем: ↩ — записать и перейти к следующему, Tab / ⇧Tab — пропустить, Esc — закрыть.
@@ -175,10 +175,8 @@ package final class DocValuePopover: NSObject, NSPopoverDelegate {
         var rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
         rect.origin.x += view.textContainerOrigin.x
         rect.origin.y += view.textContainerOrigin.y
-        // Под тестами поповер на экран не выводится (ScreenOutput): правка значения проверяется моделью.
-        if popover.isShown { popover.positioningRect = rect } else if ScreenOutput.mayShow("Поповер значения $") {
-            popover.show(relativeTo: rect, of: view, preferredEdge: .maxY)
-        }
+        // Показ — через ScreenOutput, как у остальных поповеров: под тестами поповер не вспыхивает на экране пользователя.
+        if popover.isShown { popover.positioningRect = rect } else if ScreenOutput.mayShow("Значение $") { popover.show(relativeTo: rect, of: view, preferredEdge: .maxY) }
     }
 
     package func close() {

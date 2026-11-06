@@ -94,7 +94,11 @@ final class DocSpellingTests: XCTestCase {
         XCTAssertEqual(tab.text as String, bytes, "подчёркивание не меняет байты")
         XCTAssertEqual(document.storage.string, text, "и видимый текст")
         XCTAssertFalse(tab.isDirty)
-        if DocSpelling.available("uk") { XCTAssertTrue(marked.contains("ристрою"), "украинская опечатка проверена украинским словарём: \(marked)") }
+        // Украинский — если словарь системы и правда знает слова: на раннере CI (macOS 15) «uk» в списке есть, но опечатку он не находит.
+        if let uk = DocSpelling.resolve("uk"),
+           NSSpellChecker.shared.checkSpelling(of: "ристрою", startingAt: 0, language: uk, wrap: false, inSpellDocumentWithTag: 0, wordCount: nil).length > 0 {
+            XCTAssertTrue(marked.contains("ристрою"), "украинская опечатка проверена украинским словарём: \(marked)")
+        }
         // Выключили — подчёркивание снято.
         UserDefaults.standard.set(false, forKey: Pref.docSpelling)
         document.spelling.clear()
