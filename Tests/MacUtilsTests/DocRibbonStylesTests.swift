@@ -139,7 +139,9 @@ final class DocRibbonStylesTests: XCTestCase {
         let original = tab.text as String
         var seen: Set<Int> = []
         var x: CGFloat = 4
-        while x < 440 {
+        // Только плитки (84 pt и промежуток 4 pt, внутри группы отступ 10 pt): дальше — кнопка «▾» с меню, а щелчок по меню ждёт событий.
+        let tilesEnd = 10 + CGFloat(DocRibbonStyles.tiles(document.styleSheet, usage: DocRibbonStyles.usage(document.model), current: 0, count: 4).count) * 88
+        while x < tilesEnd - 4 {
             click(window, x: x, y: 38)
             if let number = document.currentParagraphStyle?.number { seen.insert(number) }
             if (tab.text as String) != original {
