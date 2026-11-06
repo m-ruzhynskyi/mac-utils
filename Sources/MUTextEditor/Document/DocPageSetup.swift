@@ -125,10 +125,11 @@ package enum DocPageSetup {
 
     package static func cm(twips: Int) -> Double { (Double(twips) / 567 * 100).rounded() / 100 }
 
-    /// Число из поля ввода: «2,5», «2.5», «2,5 см»; `nil` — не число.
+    /// Число из поля ввода: «2,5», «2.5», «2,5 см»; `nil` — не число. Больше 1000 см — тоже не число полей: `twips(cm:)`
+    /// переводит в `Int`, а «1e20» за пределами `Int` остановило бы программу (проверка идёт на каждый ввод).
     package static func parse(cm text: String) -> Double? {
         let cleaned = text.replacingOccurrences(of: ",", with: ".").replacingOccurrences(of: "см", with: "").trimmingCharacters(in: .whitespaces)
-        guard let value = Double(cleaned), value.isFinite else { return nil }
+        guard let value = Double(cleaned), value.isFinite, abs(value) <= 1000 else { return nil }
         return value
     }
 
@@ -295,6 +296,10 @@ package enum DocPageSetupCommand {
         guard isDocument else { return .hidden }
         guard let page else { return .disabled("Нет страницы") }
         if case .margins(let margins) = change, let problem = DocPageSetup.problem(margins, page: page) { return .disabled(problem) }
+        // Ориентация и бумага: те же поля на новой странице должны оставить место под текст.
+        if case .margins = change {} else if let problem = DocPageSetup.problem(page.margins, page: DocPageSetup.result(of: change, on: page)) {
+            return .disabled(problem)
+        }
         return .enabled
     }
 

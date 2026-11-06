@@ -244,3 +244,57 @@ extension DocPageSetup {
     }
 }
 
+// MARK: - Ревью R4
+
+extension DocPageSetupTests {
+
+    /// Ввод в «Настраиваемые поля…»: огромное число («1e20») — не число полей, а не падение при переводе в твипы
+    /// (`Int(Double)` за пределами `Int` останавливает программу; проверка идёт в `body` поповера на каждый ввод).
+    func testHugeMarginInputIsRejectedNotCrash() {
+        XCTAssertNil(DocPageSetup.parse(cm: "1e20"))
+        XCTAssertNil(DocPageSetup.parse(cm: "-1e300"))
+        XCTAssertNil(DocRibbonPageSetup.margins(top: "1e20", bottom: "2", left: "3", right: "1,5"))
+        XCTAssertEqual(DocPageSetup.parse(cm: "2,5 см"), 2.5)
+        XCTAssertEqual(DocPageSetup.parse(cm: "-1"), -1, "отрицательное — число, отказ даёт проверка полей")
+    }
+
+    /// Ориентация и размер бумаги тоже проверяют поля: на новой странице под текст должно остаться не меньше 2,5 см.
+    func testOrientationAndPaperRespectMargins() throws {
+        let wide = #"{\rtf1\ansi\deff0"# + Self.font + #"\paperw15840\paperh12240\landscape\margl6000\margr6000\margt1134\margb1134\sectd\pard\plain\f0 Wide margins.\par}"#
+        let current = page(wide)
+        XCTAssertTrue(current.isLandscape)
+        for change in [Change.landscape(false), .paper(.a5)] {
+            guard case .disabled(let reason) = DocPageSetupCommand.availability(change, isDocument: true, page: current) else {
+                return XCTFail("\(change): поля 6000 + 6000 твипов не помещаются на новой странице — должно быть недоступно")
+            }
+            XCTAssertFalse(reason.isEmpty)
+        }
+        XCTAssertTrue(DocPageSetupCommand.availability(.paper(.legal), isDocument: true, page: current).isEnabled, "Legal альбомная шире — можно")
+        let (tab, document, window) = try open(wide)
+        defer { window.contentView = nil; window.close() }
+        let original = tab.text as String
+        XCTAssertFalse(document.perform(.landscape(false)))
+        XCTAssertEqual(tab.text as String, original, "правки не было")
+    }
+
+    /// Раздел без своего `\sectd` наследует коды предыдущего: правка первого раздела не должна молча менять второй —
+    /// либо второй остаётся как был, либо отказ с причиной.
+    func testSectionWithoutSectdIsNotChangedSilently() throws {
+        let source = #"{\rtf1\ansi\deff0"# + Self.font + #"\paperw11906\paperh16838\margl1701\margr851\margt1134\margb1134"#
+            + #"\sectd\pgwsxn11906\pghsxn16838\marglsxn1134\margrsxn1134\pard\plain\f0 One.\par\sect\pard\plain\f0 Two.\par}"#
+        let model = RTFReader.read(source as NSString)
+        XCTAssertEqual(model.sections.count, 2)
+        let before = page(source, section: 1)
+        switch DocPageSetup.plan(.margins(.narrow), section: 0, source: source as NSString, model: model) {
+        case .failure(let failure):
+            XCTAssertFalse(failure.reason.isEmpty)
+        case .success(let plan):
+            let after = try XCTUnwrap(FormatCheck.apply(plan.edits, to: source as NSString)) as String
+            XCTAssertEqual(page(after, section: 0).margins, .narrow)
+            XCTAssertEqual(page(after, section: 1), before, "второй раздел не изменился")
+        }
+        if case .success = DocPageSetup.plan(.margins(.narrow), section: 1, source: source as NSString, model: model) {
+            XCTFail("у второго раздела нет \\sectd — отказ, а не правка кодов первого")
+        }
+    }
+}
