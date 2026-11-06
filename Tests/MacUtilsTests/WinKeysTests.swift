@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 import Carbon.HIToolbox
 import CoreGraphics
 @testable import MUWinKeys
@@ -341,6 +342,51 @@ final class WinKeysTests: XCTestCase {
         XCTAssertTrue(event.flags.contains(.maskCommand))
         XCTAssertTrue(event.flags.contains(.maskShift))
         XCTAssertFalse(event.flags.contains(.maskControl))
+    }
+
+    /// Событие с клавиатуры несёт строку, посчитанную с Ctrl (управляющий знак), а AppKit берёт из неё `characters` и
+    /// `charactersIgnoringModifiers`. После замены строка — как у настоящего ⌘-сочетания: Ctrl+Y → «Z» (⇧⌘Z), Ctrl+C → «c».
+    /// События только в памяти, никуда не отправляются.
+    func testRewrittenEventCarriesCommandCharacters() throws {
+        let layout = try XCTUnwrap(WinKeysCharacters.currentLayout() ?? WinKeysCharacters.layout(id: "com.apple.keylayout.ABC"))
+        for shortcut in WinKeysShortcut.all {
+            let event = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(shortcut.keyCode), keyDown: true))
+            event.flags = .maskControl
+            let control = UniChar(shortcut.letter.lowercased().utf16.first! & 0x1F)
+            event.keyboardSetUnicodeString(stringLength: 1, unicodeString: [control])
+            XCTAssertEqual(NSEvent(cgEvent: event)?.charactersIgnoringModifiers?.utf16.first, control, "так приходит с клавиатуры")
+            var pairing = WinKeysRules.Pairing()
+            let out = try XCTUnwrap(translate(&pairing, .keyDown, event.flags, Int64(shortcut.keyCode)))
+            WinKeys.apply(out, to: event, layout: layout)
+            let expected = try XCTUnwrap(WinKeysCharacters.string(keyCode: Int64(shortcut.targetKeyCode), shift: shortcut.addsShift, layout: layout))
+            let ns = try XCTUnwrap(NSEvent(cgEvent: event))
+            XCTAssertEqual(ns.keyCode, UInt16(shortcut.targetKeyCode))
+            XCTAssertEqual(ns.characters, expected, shortcut.windows)
+            XCTAssertEqual(ns.charactersIgnoringModifiers, expected, shortcut.windows)
+            XCTAssertFalse(ns.characters!.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }, shortcut.windows)
+        }
+    }
+
+    func testCommandCharactersInLatinAndRussianLayouts() throws {
+        let abc = try XCTUnwrap(WinKeysCharacters.layout(id: "com.apple.keylayout.ABC") ?? WinKeysCharacters.layout(id: "com.apple.keylayout.US"))
+        XCTAssertEqual(WinKeysCharacters.string(keyCode: 6, shift: true, layout: abc), "Z", "Ctrl+Y → ⇧⌘Z")
+        XCTAssertEqual(WinKeysCharacters.string(keyCode: 8, shift: false, layout: abc), "c")
+        XCTAssertEqual(WinKeysCharacters.string(keyCode: 0, shift: false, layout: abc), "a")
+        guard let russian = WinKeysCharacters.layout(id: "com.apple.keylayout.Russian") else { throw XCTSkip("нет русской раскладки") }
+        // Как у настоящего ⌘ в русской раскладке: символ буквы на этой клавише.
+        XCTAssertEqual(WinKeysCharacters.string(keyCode: 6, shift: true, layout: russian), "Я")
+        XCTAssertEqual(WinKeysCharacters.string(keyCode: 8, shift: false, layout: russian), "с")
+    }
+
+    func testKeyUpAfterControlReleasedGetsLetterOfNewKey() throws {
+        let layout = try XCTUnwrap(WinKeysCharacters.layout(id: "com.apple.keylayout.ABC") ?? WinKeysCharacters.layout(id: "com.apple.keylayout.US"))
+        var pairing = WinKeysRules.Pairing()
+        _ = translate(&pairing, .keyDown, .maskControl, 16)
+        let up = try XCTUnwrap(translate(&pairing, .keyUp, [], 16))
+        let event = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: 16, keyDown: false))
+        event.keyboardSetUnicodeString(stringLength: 1, unicodeString: [0x79])
+        WinKeys.apply(up, to: event, layout: layout)
+        XCTAssertEqual(NSEvent(cgEvent: event)?.characters, "z", "отпускание — той же клавиши Z, что и нажатие")
     }
 
     func testDisabledShortcutPassesThroughOthersStayOn() {

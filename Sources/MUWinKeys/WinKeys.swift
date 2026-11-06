@@ -41,7 +41,16 @@ package final class WinKeys: NSObject, ObservableObject {
             customExcluded: WinKeysExclusions.shared.list, disabled: WinKeysShortcuts.shared.disabled,
             app: { (NSWorkspace.shared.frontmostApplication?.bundleIdentifier, AppExclusions.shared.isFrontExcluded) })
         guard let output else { return }
+        Self.apply(output, to: event, layout: WinKeysCharacters.currentLayout())
+    }
+
+    /// Применить замену к событию: флаги, код клавиши (у Ctrl+Y) и строку символов — как у настоящего ⌘-сочетания
+    /// (`WinKeysCharacters`): иначе в событии остаётся строка, посчитанная с Ctrl.
+    nonisolated package static func apply(_ output: WinKeysRules.Pairing.Output, to event: CGEvent, layout: Data?) {
         event.flags = output.flags
-        if output.keyCode != key { event.setIntegerValueField(.keyboardEventKeycode, value: output.keyCode) }
+        if output.keyCode != event.getIntegerValueField(.keyboardEventKeycode) {
+            event.setIntegerValueField(.keyboardEventKeycode, value: output.keyCode)
+        }
+        WinKeysCharacters.apply(to: event, keyCode: output.keyCode, shift: output.flags.contains(.maskShift), layout: layout)
     }
 }
