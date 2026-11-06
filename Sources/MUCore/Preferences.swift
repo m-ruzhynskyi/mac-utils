@@ -205,6 +205,8 @@ package enum Pref {
     package static let editorRecent = "editorRecent"
     /// Режим «Код» / «Документ» по расширению (последний выбор).
     package static let editorViewModes = "editorViewModes"
+    /// Выбранная вкладка ленты «Документа» (только её ключ: home, insert, layout, view).
+    package static let editorRibbonTab = "editorRibbonTab"
     /// Вкладка «Редактор» уже добавлена в панель 🔧 (один раз при обновлении).
     package static let panelTabsEditorAdded = "panelTabsEditorAdded"
 

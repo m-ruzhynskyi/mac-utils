@@ -37,13 +37,16 @@ extension DS {
         @Binding package var selection: String
         package var collapsed = false
         package var onDoubleClick: (() -> Void)?
+        /// `true` — полоса групп прокручивается вбок; `false` — по ширине окна (владелец сам ужимает, например `ViewThatFits`).
+        package var scrolls = true
         @ViewBuilder package let content: () -> Content
 
-        package init(tabs: [RibbonTabItem], selection: Binding<String>, collapsed: Bool = false,
+        package init(tabs: [RibbonTabItem], selection: Binding<String>, collapsed: Bool = false, scrolls: Bool = true,
                      onDoubleClick: (() -> Void)? = nil, @ViewBuilder content: @escaping () -> Content) {
             self.tabs = tabs
             self._selection = selection
             self.collapsed = collapsed
+            self.scrolls = scrolls
             self.onDoubleClick = onDoubleClick
             self.content = content
         }
@@ -62,11 +65,7 @@ extension DS {
                 .padding(.horizontal, 14)
                 .padding(.top, DS.Space.s)
                 if !collapsed {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(alignment: .top, spacing: 0) { content() }
-                            .padding(.vertical, DS.Space.s)
-                            .padding(.horizontal, DS.Space.xs)
-                    }
+                    strip
                     .frame(maxWidth: .infinity, alignment: .leading)
                     // Высота — по самой высокой группе, а не всё, что предложит родитель (подписи групп — на одной линии).
                     .fixedSize(horizontal: false, vertical: true)
@@ -78,6 +77,17 @@ extension DS {
             .overlay(alignment: .bottom) { Rectangle().fill(Color.dsLine).frame(height: 1) }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Лента")
+        }
+
+        @ViewBuilder private var strip: some View {
+            let groups = HStack(alignment: .top, spacing: 0) { content() }
+                .padding(.vertical, DS.Space.s)
+                .padding(.horizontal, DS.Space.xs)
+            if scrolls {
+                ScrollView(.horizontal, showsIndicators: false) { groups }
+            } else {
+                groups.frame(maxWidth: .infinity, alignment: .leading).clipped()
+            }
         }
     }
 
@@ -229,6 +239,64 @@ extension DS {
         private var border: Color {
             if isOn { return scheme == .light ? .dsAccLine : .clear }
             return hovered && enabled ? .dsLine : .clear
+        }
+    }
+
+    /// Кнопка-плитка с меню (Таблица, Регистр «Aa», Границы…): вид как у `RibbonButton`, щелчок — список.
+    package struct RibbonMenuButton<Items: View>: View {
+        package let title: String
+        package var systemImage: String?
+        package var glyph: String?
+        package var size: RibbonButton.Size = .small
+        @ViewBuilder package let items: () -> Items
+        @Environment(\.isEnabled) private var enabled
+        @State private var hovered = false
+
+        package init(_ title: String, systemImage: String? = nil, glyph: String? = nil, size: RibbonButton.Size = .small,
+                     @ViewBuilder items: @escaping () -> Items) {
+            self.title = title
+            self.systemImage = systemImage
+            self.glyph = glyph
+            self.size = size
+            self.items = items
+        }
+
+        package var body: some View {
+            let shape = RoundedRectangle(cornerRadius: RibbonMetrics.buttonRadius, style: .continuous)
+            Menu(content: items) {
+                Group {
+                    if size == .large {
+                        VStack(spacing: 3) {
+                            if let systemImage { Image(systemName: systemImage).font(.system(size: 22)).frame(height: 24) }
+                            HStack(spacing: 3) {
+                                Text(glyph ?? title).font(DS.Font.manrope(11.5, .semibold, relativeTo: .caption)).lineLimit(1)
+                                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold)).foregroundStyle(.dsMute)
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            if let systemImage { Image(systemName: systemImage).font(.system(size: 14, weight: .medium)) }
+                            if let glyph { Text(glyph).font(DS.Font.manrope(13, .bold, relativeTo: .callout)) }
+                            Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold)).foregroundStyle(.dsMute)
+                        }
+                    }
+                }
+                .foregroundStyle(Color.dsText)
+                .padding(.horizontal, 7)
+                .frame(minWidth: size == .large ? RibbonMetrics.largeButton.width : RibbonMetrics.button,
+                       minHeight: size == .large ? RibbonMetrics.largeButton.height : RibbonMetrics.button)
+                .background(hovered && enabled ? Color.dsField : .clear, in: shape)
+                .overlay(shape.strokeBorder(hovered && enabled ? Color.dsLine : .clear, lineWidth: 1))
+                .contentShape(shape)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .opacity(enabled ? 1 : DS.State.disabledOpacity)
+            .onHover { hovered = $0 }
+            .help(title)
+            .accessibilityLabel(title)
         }
     }
 

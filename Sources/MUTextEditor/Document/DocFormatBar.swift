@@ -1,10 +1,9 @@
 import SwiftUI
 import MUDesign
 
-/// Панель форматирования режима «Документ» (`d01`): полоса 44 pt под заголовком — отмена и повтор, шрифт, размер,
-/// Ж К Ч S, цвет текста и маркер, выравнивание, интервалы, отступы, списки и таблица (позже), очистить формат, ¶.
-/// На узком окне хвост уходит в «»» (`d06`). При правке колонтитула под ней — вкладка «Колонтитулы» (`d11`), ниже —
-/// линейка.
+/// Лента режима «Документ» (R1, `UI/DocRibbon.swift`) и линейка под ней. Здесь — «Главная» (R2): отмена и повтор, шрифт,
+/// размер, Ж К Ч S, индексы, регистр «Aa», цвет текста и маркер, очистить формат; выравнивание, интервалы, отступы, ¶, «Ещё»;
+/// «Найти» и «Заменить». На узком окне хвост уходит в «»» (уровни 0–5, `d06`). Сочетания клавиш работают на любой вкладке.
 package struct DocFormatBar: View {
     @ObservedObject package var tab: EditorTab
     @ObservedObject package var document: DocumentController
@@ -25,21 +24,9 @@ package struct DocFormatBar: View {
 
     package var body: some View {
         VStack(spacing: 0) {
-            // Колонка документа бывает узкой (рядом панель «$»): берётся первый уровень, который помещается.
-            ViewThatFits(in: .horizontal) {
-                bar(level: 0)
-                bar(level: 1)
-                bar(level: 2)
-                bar(level: 3)
-                bar(level: 4)
-                bar(level: 5)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 44)
-            .clipped()
-            .background(Color.dsSide)
-            .overlay(alignment: .bottom) { Rectangle().fill(Color.dsLine).frame(height: 1) }
-            if formatter.headerSession != nil { DocHeaderFooterBar(formatter: formatter) }
+            // Колонка документа бывает узкой (рядом панель «$»): «Главная» берёт первый уровень, который помещается.
+            DocRibbon(tab: tab, document: document, formatter: formatter) { level in home(level: level) }
+                .background(shortcuts)
             FormatRuler(document: document, formatter: formatter)
                 .frame(height: 26)
                 .background(Color.dsSide)
@@ -49,71 +36,127 @@ package struct DocFormatBar: View {
         .onAppear { sizeText = Self.sizeTitle(state.halfPoints) }
     }
 
-    // MARK: - Полоса
+    // MARK: - «Главная»
 
-    /// Уровень ужатия панели: 0 — всё; 1 — отступы и «Очистить» в «»»; 2 — и списки с таблицей; 3 — и зачёркнутый,
-    /// маркер, интервалы; 4 — как узкое окно `d06`: отмена, шрифт и размер, Ж К Ч, цвет и ¶; 5 — ещё уже.
-    private func bar(level: Int) -> some View {
-        HStack(spacing: 2) {
-            icon("Отменить (⌘Z)", "arrow.uturn.backward", enabled: tab.undo.canUndo) { tab.undo.undo() }
-            if level < 5 { icon("Повторить (⇧⌘Z)", "arrow.uturn.forward", enabled: tab.undo.canRedo) { tab.undo.redo() } }
-            divider
-            fontButton(width: level >= 4 ? 104 : 128)
-            sizeControl
-            divider
-            icon("Полужирный (⌘B)", "bold", active: state.bold, action: formatter.toggleBold).keyboardShortcut("b", modifiers: .command)
-            icon("Курсив (⌘I)", "italic", active: state.italic, action: formatter.toggleItalic).keyboardShortcut("i", modifiers: .command)
-            icon("Подчёркнутый (⌘U)", "underline", active: state.underline, action: formatter.toggleUnderline).keyboardShortcut("u", modifiers: .command)
-            if level < 3 {
-                icon("Зачёркнутый (⌘⇧X)", "strikethrough", active: state.strike, action: formatter.toggleStrike)
-                    .keyboardShortcut("x", modifiers: [.command, .shift])
-            }
-            colorButton
-            if level < 3 { highlightButton }
-            if level < 4 {
-                divider
-                ForEach(RTFAlignment.allCases, id: \.self) { alignment in
-                    let (title, symbol, key) = Self.alignment(alignment)
-                    let button = icon(title, symbol, active: state.alignment == alignment) { formatter.setAlignment(alignment) }
-                    // ⌘L занят «Перейти к строке» — у левого края сочетания нет.
-                    if let key { button.keyboardShortcut(key, modifiers: .command) } else { button }
+    /// Уровень ужатия: 0 — всё; 1 — «Очистить» и «Ещё» в «»», «Найти» мельче; 2 — и индексы с отступами; 3 — и зачёркнутый,
+    /// регистр, маркер, интервалы; 4 — как узкое окно `d06`: отмена, шрифт и размер, Ж К Ч, цвет и ¶; 5 — ещё уже.
+    @ViewBuilder
+    private func home(level: Int) -> some View {
+        DS.RibbonGroup("Буфер") {
+            VStack(spacing: DS.Space.xxs) {
+                DS.RibbonButton("Отменить", systemImage: "arrow.uturn.backward", shortcut: "⌘Z") { tab.undo.undo() }.disabled(!tab.undo.canUndo)
+                if level < 5 {
+                    DS.RibbonButton("Повторить", systemImage: "arrow.uturn.forward", shortcut: "⇧⌘Z") { tab.undo.redo() }.disabled(!tab.undo.canRedo)
                 }
-                if level < 3 { spacingMenu }
             }
-            if level == 0 {
-                icon("Уменьшить отступ", "decrease.indent") { formatter.stepIndent(-1) }
-                icon("Увеличить отступ", "increase.indent") { formatter.stepIndent(1) }
-            }
-            if level < 2 {
-                divider
-                icon("Маркированный список — скоро. Пока измените это в режиме «Код»", "list.bullet", enabled: false) {}
-                icon("Нумерованный список — скоро. Пока измените это в режиме «Код»", "list.number", enabled: false) {}
-                icon("Таблица — скоро. Пока измените это в режиме «Код»", "tablecells", enabled: false) {}
-            }
-            if level == 0 { icon("Очистить формат", "textformat.alt", action: formatter.clearFormatting) }
-            if level == 0 { moreFormatMenu }
-            divider
-            icon("Невидимые символы (⌥⌘I)", "paragraphsign", active: document.showsInvisibles) {
-                EditorWindowController.shared.workspace.showsInvisibles.toggle()
-            }
-            Spacer(minLength: 0)
-            if level > 0 { overflow(level: level) }
-            // Размер ⌘⇧< / ⌘⇧> — шаг по списку Word.
-            Group {
-                Button("") { formatter.stepSize(-1) }.keyboardShortcut("<", modifiers: .command)
-                Button("") { formatter.stepSize(1) }.keyboardShortcut(">", modifiers: .command)
-                // E-4 — сочетания Word.
-                Button("") { formatter.toggleVertical(.superscript) }.keyboardShortcut("=", modifiers: [.command, .shift])
-                Button("") { formatter.toggleVertical(.subscript) }.keyboardShortcut("=", modifiers: .command)
-                Button("") { formatter.toggleSmallCaps() }.keyboardShortcut("k", modifiers: [.command, .shift])
-                Button("") { formatter.toggleCaps() }.keyboardShortcut("a", modifiers: [.command, .shift])
-                Button("") { formatter.toggleHidden() }.keyboardShortcut("h", modifiers: [.command, .shift])
-                Button("") { formatter.insertPageBreak() }.keyboardShortcut(.return, modifiers: .command)
-                Button("") { formatter.updateFields() }.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF9FunctionKey)!)), modifiers: [])
-            }
-            .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
         }
-        .padding(.horizontal, DS.Space.m)
+        DS.RibbonGroup("Шрифт") {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                HStack(spacing: DS.Space.xs) {
+                    fontButton(width: level >= 4 ? 104 : 150)
+                    sizeControl
+                }
+                HStack(spacing: DS.Space.xxs) {
+                    DS.RibbonButton("Полужирный", glyph: "Ж", isOn: state.bold, shortcut: "⌘B", action: formatter.toggleBold)
+                    DS.RibbonButton("Курсив", glyph: "К", isOn: state.italic, shortcut: "⌘I", action: formatter.toggleItalic)
+                    DS.RibbonButton("Подчёркнутый", glyph: "Ч", isOn: state.underline, shortcut: "⌘U", action: formatter.toggleUnderline)
+                    if level < 3 {
+                        DS.RibbonButton("Зачёркнутый", systemImage: "strikethrough", isOn: state.strike, shortcut: "⇧⌘X", action: formatter.toggleStrike)
+                    }
+                    if level < 2 {
+                        DS.RibbonButton("Надстрочный", systemImage: "textformat.superscript", isOn: state.vertical == .superscript, shortcut: "⇧⌘=") {
+                            formatter.toggleVertical(.superscript)
+                        }
+                        DS.RibbonButton("Подстрочный", systemImage: "textformat.subscript", isOn: state.vertical == .subscript, shortcut: "⌘=") {
+                            formatter.toggleVertical(.subscript)
+                        }
+                    }
+                    if level < 3 { caseMenu }
+                    colorButton
+                    if level < 3 { highlightButton }
+                    if level == 0 { DS.RibbonButton("Очистить формат", systemImage: "eraser", action: formatter.clearFormatting) }
+                }
+            }
+        }
+        DS.RibbonGroup("Абзац", last: level >= 4) {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                if level < 4 {
+                    HStack(spacing: DS.Space.xxs) {
+                        ForEach(RTFAlignment.allCases, id: \.self) { alignment in
+                            let (title, symbol, key) = Self.alignment(alignment)
+                            DS.RibbonButton(title, systemImage: symbol, isOn: state.alignment == alignment, shortcut: key.map { "⌘" + String($0.character).uppercased() }) {
+                                formatter.setAlignment(alignment)
+                            }
+                        }
+                        if level < 3 { spacingMenu }
+                    }
+                }
+                HStack(spacing: DS.Space.xxs) {
+                    if level < 2 {
+                        DS.RibbonButton("Уменьшить отступ", systemImage: "decrease.indent", shortcut: "⌘[") { formatter.stepIndent(-1) }
+                        DS.RibbonButton("Увеличить отступ", systemImage: "increase.indent", shortcut: "⌘]") { formatter.stepIndent(1) }
+                    }
+                    DS.RibbonButton("Невидимые символы", systemImage: "paragraphsign", isOn: document.showsInvisibles, shortcut: "⌥⌘I") {
+                        EditorWindowController.shared.workspace.showsInvisibles.toggle()
+                    }
+                    if level == 0 { moreFormatMenu }
+                }
+            }
+        }
+        if level < 4 {
+            DS.RibbonGroup("Правка", last: level == 0) {
+                if level == 0 {
+                    DS.RibbonButton("Найти", systemImage: "magnifyingglass", size: .large, shortcut: "⌘F") { Self.find(replace: false) }
+                    DS.RibbonButton("Найти и заменить", systemImage: "arrow.left.arrow.right", glyph: "Заменить", size: .large, shortcut: "⌥⌘F") {
+                        Self.find(replace: true)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                        DS.RibbonButton("Найти", systemImage: "magnifyingglass", glyph: "Найти", shortcut: "⌘F") { Self.find(replace: false) }
+                        DS.RibbonButton("Найти и заменить", systemImage: "arrow.left.arrow.right", glyph: "Заменить", shortcut: "⌥⌘F") {
+                            Self.find(replace: true)
+                        }
+                    }
+                }
+            }
+        }
+        if level > 0 { overflow(level: level).padding(.leading, DS.Space.xs).frame(maxHeight: .infinity) }
+    }
+
+    /// «Найти» / «Найти и заменить» — общая панель поиска редактора (ищет по исходнику, переводит в «Код» с тем же местом).
+    package static func find(replace: Bool) { EditorWindowController.shared.showFind(replace: replace) }
+
+    /// Регистр «Aa»: меняются сами буквы выделения (`DocCase`).
+    private var caseMenu: some View {
+        DS.RibbonMenuButton("Регистр", glyph: "Aa") {
+            ForEach(DocCase.allCases, id: \.self) { mode in Button(mode.title) { formatter.changeCase(mode) } }
+        }
+    }
+
+    /// Сочетания Word на любой вкладке ленты (и при свёрнутой ленте): невидимые кнопки.
+    private var shortcuts: some View {
+        Group {
+            Button("") { formatter.toggleBold() }.keyboardShortcut("b", modifiers: .command)
+            Button("") { formatter.toggleItalic() }.keyboardShortcut("i", modifiers: .command)
+            Button("") { formatter.toggleUnderline() }.keyboardShortcut("u", modifiers: .command)
+            Button("") { formatter.toggleStrike() }.keyboardShortcut("x", modifiers: [.command, .shift])
+            // ⌘L занят «Перейти к строке» — у левого края сочетания нет.
+            Button("") { formatter.setAlignment(.center) }.keyboardShortcut("e", modifiers: .command)
+            Button("") { formatter.setAlignment(.right) }.keyboardShortcut("r", modifiers: .command)
+            Button("") { formatter.setAlignment(.justify) }.keyboardShortcut("j", modifiers: .command)
+            // Размер ⌘⇧< / ⌘⇧> — шаг по списку Word.
+            Button("") { formatter.stepSize(-1) }.keyboardShortcut("<", modifiers: .command)
+            Button("") { formatter.stepSize(1) }.keyboardShortcut(">", modifiers: .command)
+            // E-4 — сочетания Word.
+            Button("") { formatter.toggleVertical(.superscript) }.keyboardShortcut("=", modifiers: [.command, .shift])
+            Button("") { formatter.toggleVertical(.subscript) }.keyboardShortcut("=", modifiers: .command)
+            Button("") { formatter.toggleSmallCaps() }.keyboardShortcut("k", modifiers: [.command, .shift])
+            Button("") { formatter.toggleCaps() }.keyboardShortcut("a", modifiers: [.command, .shift])
+            Button("") { formatter.toggleHidden() }.keyboardShortcut("h", modifiers: [.command, .shift])
+            Button("") { formatter.insertPageBreak() }.keyboardShortcut(.return, modifiers: .command)
+            Button("") { formatter.updateFields() }.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF9FunctionKey)!)), modifiers: [])
+        }
+        .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
     }
 
     private var divider: some View {
@@ -263,14 +306,7 @@ package struct DocFormatBar: View {
     // MARK: - Интервалы и «»»
 
     private var spacingMenu: some View {
-        Menu {
-            spacingItems
-        } label: {
-            Image(systemName: "arrow.up.and.down.text.horizontal").font(.system(size: 15, weight: .medium))
-        }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 34, height: 30)
-        .help("Интервалы и отступы")
-        .accessibilityLabel("Интервалы и отступы")
+        DS.RibbonMenuButton("Интервалы и отступы", systemImage: "arrow.up.and.down.text.horizontal") { spacingItems }
     }
 
     @ViewBuilder
@@ -300,12 +336,7 @@ package struct DocFormatBar: View {
 
     /// Шрифт и абзац сверх кнопок (E-4): индексы, капитель, прописные, скрытый, флаги абзаца, разрыв страницы, поля.
     private var moreFormatMenu: some View {
-        Menu { moreFormatItems } label: {
-            Image(systemName: "textformat.superscript").font(.system(size: 15))
-        }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 34, height: 30)
-        .help("Ещё: индексы, капитель, скрытый, абзац, разрыв страницы, поля")
-        .accessibilityLabel("Ещё команды шрифта и абзаца")
+        DS.RibbonMenuButton("Ещё: индексы, капитель, скрытый, абзац, разрыв страницы, поля", systemImage: "ellipsis.circle") { moreFormatItems }
     }
 
     @ViewBuilder private var moreFormatItems: some View {
@@ -351,17 +382,21 @@ package struct DocFormatBar: View {
                 Button("Уменьшить отступ") { formatter.stepIndent(-1) }
                 Button("Увеличить отступ") { formatter.stepIndent(1) }
             }
+            if level >= 3 {
+                Menu("Регистр") { ForEach(DocCase.allCases, id: \.self) { mode in Button(mode.title) { formatter.changeCase(mode) } } }
+            }
             Button("Очистить формат") { formatter.clearFormatting() }
             Menu("Шрифт и абзац: ещё") { moreFormatItems }
-            if level >= 2 {
+            if level >= 4 {
                 Divider()
-                Button("Списки — скоро, пока в режиме «Код»") {}.disabled(true)
-                Button("Таблица — скоро, пока в режиме «Код»") {}.disabled(true)
+                Button("Найти (⌘F)") { Self.find(replace: false) }
+                Button("Найти и заменить (⌥⌘F)") { Self.find(replace: true) }
             }
         } label: {
             Image(systemName: "chevron.forward.2").font(.system(size: 15, weight: .semibold))
+                .frame(width: 34, height: DS.RibbonMetrics.button)
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 34, height: 30)
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .help("Ещё")
         .accessibilityLabel("Ещё команды форматирования")
     }
@@ -386,56 +421,52 @@ package struct DocFormatBar: View {
     }
 }
 
-/// Контекстная синяя вкладка «Колонтитулы» (макет «★2», компоненты `DS.Ribbon*`): перейти к верхнему/нижнему, вставить номер,
+/// Группы контекстной синей вкладки «Колонтитулы» ленты (макет «★2», `DocRibbon`): перейти к верхнему/нижнему, вставить номер,
 /// число страниц, дату или другое поле, параметры раздела (особый первой, чётные/нечётные, как в предыдущем), удалить, закрыть.
 /// Кнопки — только у тех действий, что уже работают: «Как в предыдущем» видна, когда у колонтитула есть предыдущий (H3).
-package struct DocHeaderFooterBar: View {
+package struct DocHeaderFooterGroups: View {
     @ObservedObject package var formatter: DocFormatter
-    private static let tabs = [DS.RibbonTabItem("header", "Колонтитулы", contextual: true)]
 
     package var body: some View {
-        DS.Ribbon(tabs: Self.tabs, selection: .constant("header")) {
-            let session = formatter.headerSession
-            DS.RibbonGroup("Колонтитул") {
-                VStack(alignment: .leading, spacing: DS.Space.xxs) {
-                    DS.RibbonButton("Верхний колонтитул", systemImage: "rectangle.topthird.inset.filled", glyph: "Верхний",
-                                    isOn: session?.isHeader == true) { go(header: true) }
-                    DS.RibbonButton("Нижний колонтитул", systemImage: "rectangle.bottomthird.inset.filled", glyph: "Нижний",
-                                    isOn: session?.isHeader == false) { go(header: false) }
-                }
-            }
-            DS.RibbonGroup("Вставить") {
-                DS.RibbonButton("Номер страницы", systemImage: "number", size: .large) { formatter.insertField(.page) }
-                DS.RibbonButton("Всего страниц", systemImage: "doc.on.doc", glyph: "Всего", size: .large) { formatter.insertField(.numPages) }
-                DS.RibbonButton("Дата", systemImage: "calendar", size: .large) { formatter.insertField(.date(HeaderField.datePictures[0])) }
-                DS.RibbonField("Вставить поле у курсора: «Стр. X из Y», дата, время, имя файла", value: "Поле…") { fieldMenu }
-            }
-            DS.RibbonGroup("Параметры") {
-                VStack(alignment: .leading, spacing: DS.Space.xxs) {
-                    DS.RibbonButton("Особый колонтитул первой страницы (\\titlepg)", glyph: "Особый первой", isOn: formatter.titlePageOn) {
-                        formatter.setTitlePage(!formatter.titlePageOn)
-                    }
-                    DS.RibbonButton("Разные колонтитулы чётных и нечётных страниц (\\facingp)", glyph: "Чётные / нечётные",
-                                    isOn: formatter.facingPagesOn) { formatter.setFacingPages(!formatter.facingPagesOn) }
-                }
-                if let link = formatter.headerLink {
-                    DS.RibbonButton("Как в предыдущем разделе: показывать колонтитул предыдущего", systemImage: "link",
-                                    glyph: "Как в предыдущем", size: .large, isOn: link == .linked) {
-                        formatter.setLinkedToPrevious(link != .linked)
-                    }
-                }
-            }
-            DS.RibbonGroup("Правка") {
-                DS.RibbonButton("Удалить этот колонтитул из файла", systemImage: "trash", glyph: "Удалить", size: .large) { formatter.removeHeader() }
-            }
-            DS.RibbonGroup("Закрыть", last: true) {
-                DS.RibbonButton("Закрыть колонтитулы", systemImage: "xmark", glyph: "Закрыть", size: .large, shortcut: "Esc") {
-                    formatter.endHeaderEditing()
-                }
-                .keyboardShortcut(.cancelAction)
+        let session = formatter.headerSession
+        DS.RibbonGroup("Колонтитул") {
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                DS.RibbonButton("Верхний колонтитул", systemImage: "rectangle.topthird.inset.filled", glyph: "Верхний",
+                                isOn: session?.isHeader == true) { go(header: true) }
+                DS.RibbonButton("Нижний колонтитул", systemImage: "rectangle.bottomthird.inset.filled", glyph: "Нижний",
+                                isOn: session?.isHeader == false) { go(header: false) }
             }
         }
-        .accessibilityLabel("Колонтитулы")
+        DS.RibbonGroup("Вставить") {
+            DS.RibbonButton("Номер страницы", systemImage: "number", size: .large) { formatter.insertField(.page) }
+            DS.RibbonButton("Всего страниц", systemImage: "doc.on.doc", glyph: "Всего", size: .large) { formatter.insertField(.numPages) }
+            DS.RibbonButton("Дата", systemImage: "calendar", size: .large) { formatter.insertField(.date(HeaderField.datePictures[0])) }
+            DS.RibbonField("Вставить поле у курсора: «Стр. X из Y», дата, время, имя файла", value: "Поле…") { fieldMenu }
+        }
+        DS.RibbonGroup("Параметры") {
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                DS.RibbonButton("Особый колонтитул первой страницы (\\titlepg)", glyph: "Особый первой", isOn: formatter.titlePageOn) {
+                    formatter.setTitlePage(!formatter.titlePageOn)
+                }
+                DS.RibbonButton("Разные колонтитулы чётных и нечётных страниц (\\facingp)", glyph: "Чётные / нечётные",
+                                isOn: formatter.facingPagesOn) { formatter.setFacingPages(!formatter.facingPagesOn) }
+            }
+            if let link = formatter.headerLink {
+                DS.RibbonButton("Как в предыдущем разделе: показывать колонтитул предыдущего", systemImage: "link",
+                                glyph: "Как в предыдущем", size: .large, isOn: link == .linked) {
+                    formatter.setLinkedToPrevious(link != .linked)
+                }
+            }
+        }
+        DS.RibbonGroup("Правка") {
+            DS.RibbonButton("Удалить этот колонтитул из файла", systemImage: "trash", glyph: "Удалить", size: .large) { formatter.removeHeader() }
+        }
+        DS.RibbonGroup("Закрыть", last: true) {
+            DS.RibbonButton("Закрыть колонтитулы", systemImage: "xmark", glyph: "Закрыть", size: .large, shortcut: "Esc") {
+                formatter.endHeaderEditing()
+            }
+            .keyboardShortcut(.cancelAction)
+        }
     }
 
     /// Перейти к верхнему или нижнему колонтитулу той же страницы.
