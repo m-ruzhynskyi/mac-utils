@@ -97,7 +97,6 @@ extension DS {
         package let selected: Bool
         package var contextual = false
         package let action: () -> Void
-        // Внутри `extension DS` имя `State` — токены `DS.State`; обёртка SwiftUI — только с полным именем (иначе CI не собирает).
         @SwiftUI.State private var hovered = false
 
         package init(_ title: String, selected: Bool, contextual: Bool = false, action: @escaping () -> Void) {
