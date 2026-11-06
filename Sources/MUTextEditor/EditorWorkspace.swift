@@ -71,6 +71,11 @@ package final class EditorWorkspace: ObservableObject {
         if let index { tabs.insert(tab, at: min(index, tabs.count)) } else { tabs.append(tab) }
         tabObservers[tab.id] = tab.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         tab.onEdit = { [weak self] in self?.onChange?() }
+        // Правка текста или смена вида («Код» ↔ «Документ») — совпадения поиска пересчитываются.
+        tab.onSearchInvalidated = { [weak self] in
+            guard let search = self?.search, search.isActive else { return }
+            search.schedule()
+        }
         tab.onDirtyChange = { [weak self] in self?.onChange?() }
         tab.textView.onFileDrop = { [weak self] in self?.onOpenFiles?($0) }
         tab.textView.onSwitchTab = { [weak self] in self?.select(offset: $0) }
