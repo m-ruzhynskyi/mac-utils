@@ -462,6 +462,10 @@ struct EditorDefaultsSnapshot {
     /// Один раз за процесс: следы прошлых запусков стираются.
     private static let cleanedOnce: Void = {
         for key in keys { UserDefaults.standard.removeObject(forKey: key) }
+        // Окна тестов — вне экрана (-20 000): системная анимация показа/закрытия окна (`_NSWindowTransformAnimation`, свой
+        // поток) там не кончается и навсегда занимает поток GCD. Окон за прогон сотни — к ~64-му пул пуст, и фоновые задачи
+        // (скан знаков $) не запускаются. Только в памяти процесса (регистрационный домен), на диск не пишется.
+        UserDefaults.standard.register(defaults: ["NSAutomaticWindowAnimationsEnabled": false])
     }()
 
     init() {

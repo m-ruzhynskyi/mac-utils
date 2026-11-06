@@ -60,6 +60,7 @@ final class DocTableCommandTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 900, height: 700), styleMask: [.borderless],
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none  // показ/закрытие без анимации: вне экрана она не кончается и навсегда занимает поток GCD
         window.contentView = NSHostingView(rootView: EditorRootView(workspace: workspace))
         window.orderBack(nil)
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
