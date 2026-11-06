@@ -46,8 +46,13 @@ package enum TableCommand: CaseIterable, Hashable {
         package var columns = 0
         /// Выделение задевает ячейки нескольких таблиц: курсор в таблице (вставки таблицы нет), но команды ячеек не применить.
         package var severalTables = false
+        /// Правится колонтитул: таблиц в колонтитуле команды пока не меняют и не вставляют (H5), а курсор тела не виден —
+        /// команд нет совсем (иначе «Вставить таблицу» на «Вставке» вставила бы её в основной текст).
+        package var inHeader = false
 
-        package init(inTable: Bool = false, rowEditable: Bool = false, selectedCells: Int = 0, columns: Int = 0, severalTables: Bool = false) {
+        package init(inTable: Bool = false, rowEditable: Bool = false, selectedCells: Int = 0, columns: Int = 0, severalTables: Bool = false,
+                     inHeader: Bool = false) {
+            self.inHeader = inHeader
             self.inTable = inTable
             self.rowEditable = rowEditable
             self.selectedCells = selectedCells
@@ -57,6 +62,7 @@ package enum TableCommand: CaseIterable, Hashable {
     }
 
     package func availability(in context: Context) -> Availability {
+        if context.inHeader { return .hidden }
         if self == .insertTable { return context.inTable ? .hidden : .enabled }
         guard context.inTable else { return .hidden }
         if context.severalTables { return .disabled("Выделение захватывает несколько таблиц — выделите ячейки одной") }
@@ -82,6 +88,7 @@ package enum TableCommand: CaseIterable, Hashable {
 extension DocumentController {
     /// Состояние курсора для `TableCommand.availability`.
     package var tableContext: TableCommand.Context {
+        if DocFormatter.existing(for: self)?.headerSession != nil { return TableCommand.Context(inHeader: true) }
         guard let selection = selectedTableCells else {
             // Ячеек одной таблицы нет, но выделение задевает таблицы (две и больше): это не «вне таблицы» — иначе «Вставить таблицу»
             // была бы доступна и отказала бы, а команды ячеек пропали бы.

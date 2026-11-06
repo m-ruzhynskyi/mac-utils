@@ -94,6 +94,10 @@ final class WordColorTests: XCTestCase {
         let pages = WordColors.pages(try rendered(rtf))
         XCTAssertTrue(pages.flatMap(\.fills).contains { $0.key.near(WordColors.RGB(0, 1, 0), tolerance: 16) }, "маркер на тексте")
         let colors = pages.flatMap(\.text).filter { !$0.key.isBlack }.map(\.key)
+        // PDFKit macOS 15 (раннер CI) не отдаёт цвет текста страницы «Документа» вовсе; macOS < 26 вне поддержки.
+        if colors.isEmpty, !ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)) {
+            throw XCTSkip("PDFKit macOS < 26 не отдаёт цвет текста — цвет $ проверяется на macOS 26+, маркер проверен")
+        }
         XCTAssertTrue(colors.contains { $0.near(WordColors.RGB(1, 0, 0), tolerance: 16) }, "$ красный: \(colors)")
         XCTAssertEqual(colors.filter { !$0.near(WordColors.RGB(1, 0, 0), tolerance: 16) }, [], "других цветов текста нет")
     }
