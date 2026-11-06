@@ -18,6 +18,7 @@ package enum RTFReader {
             parser.run()
             var model = parser.model
             model.lists = DocListReader.read(text, table: parser.listTable, overrides: parser.listOverrideTable, codePage: model.codePage)
+            model.shapeTexts = RTFShapeTexts.extract(buffer, model: model)
             return model
         }
     }

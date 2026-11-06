@@ -574,6 +574,8 @@ package struct RTFDocumentModel {
     package var fields: [RTFField] = []
     /// Списки (`\listtable`, `\listoverridetable`).
     package var lists = RTFListTable()
+    /// Абзацы текстов фигур (`RTFShapeTexts`): вне потока, для счёта слов.
+    package var shapeTexts: [String] = []
     /// Где можно вставить свойство документа (`\facingp`): перед первым `\sectd` или первым абзацем.
     package var documentPropsInsertion = 0
     /// Начинается ли исходник с `{\rtf`.
