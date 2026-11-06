@@ -60,7 +60,7 @@ extension DocumentController {
 
     /// Знаковый стиль под курсором: ближайшая объемлющая группа с `\csN` в начале.
     package var currentCharacterStyle: DocStyle? {
-        guard let tab else { return nil }
+        guard let tab, !styleSheet.characterStyles.isEmpty, tab.text.length <= 400_000 else { return nil }
         let source = tab.text
         let location = rendering.map.sourceLocation(beforeUnit: min(selectedUnits.location, rendering.map.count))
         let groups = RTFGroupIndex(source)
@@ -74,6 +74,9 @@ extension DocumentController {
         }
         return nil
     }
+
+    /// Номер знакового стиля у курсора по состоянию ленты (чтобы список обновлялся вместе с курсором).
+    package func currentCharacterStyleNumber(_ state: DocFormatState) -> Int? { state.characterStyle }
 
     package var styleContext: DocStyleCommand.Context {
         guard let tab, tab.mode == .document else { return DocStyleCommand.Context(isDocument: false) }

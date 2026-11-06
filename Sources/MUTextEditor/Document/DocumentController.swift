@@ -56,6 +56,7 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     private var headerCache: [String: DocRenderer.StoryRendering] = [:]
     /// Таблица стилей `\stylesheet` для текущей версии исходника (S1).
     var styleCache: (revision: Int, sheet: DocStyleSheet)?
+    var styleLookCache: (revision: Int, looks: [String: DocStyleLook]) = (-1, [:])
     private var headerSignature = 0
     private var highlighted = false
     /// Совпадения поиска (показанные единицы) и текущее — `DocFind.swift`.
