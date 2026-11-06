@@ -9,13 +9,15 @@ import MUWinKeys
 struct WinKeysPage: View {
     @AppStorage(Pref.winKeys) private var enabled = false
     @ObservedObject private var service = WinKeys.shared
+    @ObservedObject private var shortcuts = WinKeysShortcuts.shared
 
     var body: some View {
-        SettingsPage(.winKeys, isOn: $enabled, toggleLabel: "Копировать, вставлять и вырезать через Ctrl, как в Windows") {
+        SettingsPage(.winKeys, isOn: $enabled, toggleLabel: "Копировать, вставлять, отменять и другие сочетания через Ctrl, как в Windows") {
             ListCard {
-                HintRow(keys: ["Ctrl", "C"], text: "Копировать — как ⌘C")
-                HintRow(keys: ["Ctrl", "V"], text: "Вставить — как ⌘V")
-                HintRow(keys: ["Ctrl", "X"], text: "Вырезать — как ⌘X. В Finder перемещает файлы, если включено «Вырезать и вставить».")
+                ForEach(WinKeysShortcut.all) { shortcut in
+                    ToggleRow(shortcut.windows, subtitle: shortcut.summary, isOn: Binding(
+                        get: { shortcuts.isEnabled(shortcut) }, set: { shortcuts.setEnabled(shortcut, $0) }))
+                }
                 if enabled {
                     AccessibilityStatusRow(running: service.isRunning, readyText: "Работает во всех программах")
                 }
@@ -33,7 +35,7 @@ struct WinKeysPage: View {
                 }
             }
             WinKeysExclusionsSection()
-            Footnote("⌘C, ⌘V и ⌘X работают как раньше. Сочетания с Ctrl и ещё одной клавишей (⇧, ⌥, ⌘) не меняются.")
+            Footnote("Сочетания с ⌘ работают как раньше. Сочетания с Ctrl и ещё одной клавишей (⇧, ⌥, ⌘) не меняются.")
         }
     }
 }
@@ -42,7 +44,7 @@ struct WinKeysPage: View {
 private struct WinKeysExclusionsSection: View {
     var body: some View {
         AppListEditor(WinKeysExclusions.shared, fallbackSymbol: "chevron.left.forwardslash.chevron.right") {
-            Row("Свои исключения", subtitle: "Редакторы и среды разработки, где Ctrl+C, Ctrl+V и Ctrl+X нужны как есть. Запись с точкой на конце — все программы с таким началом.",
+            Row("Свои исключения", subtitle: "Редакторы и среды разработки, где сочетания с Ctrl нужны как есть. Запись с точкой на конце — все программы с таким началом.",
                 systemImage: "chevron.left.forwardslash.chevron.right") { EmptyView() }
         }
     }
