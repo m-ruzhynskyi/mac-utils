@@ -243,23 +243,63 @@ package struct DocValuePopoverView: View {
     }
 }
 
-/// Прежние значения чипами в строку (переносятся, если не помещаются).
+/// Прежние значения чипами в строку; не помещаются — переносятся на следующую (как в макете).
 private struct FlowChips: View {
     let values: [String]
     let pick: (String) -> Void
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: DS.Space.xs) { chips }
-            VStack(alignment: .leading, spacing: DS.Space.xs) { chips }
+        FlowLayout(spacing: DS.Space.xs) {
+            ForEach(values, id: \.self) { value in
+                Chip(value, selected: false) { pick(value) }
+                    .lineLimit(1)
+                    .help("Подставить «\(value)»")
+            }
+        }
+    }
+}
+
+/// Раскладка «потоком»: элементы слева направо, перенос на новую строку, когда ширины не хватает.
+package struct FlowLayout: Layout {
+    package var spacing: CGFloat
+
+    package init(spacing: CGFloat) { self.spacing = spacing }
+
+    package func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        let width = rows.map(\.width).max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: proposal.width.map { min($0, width) } ?? width, height: height)
+    }
+
+    package func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.items {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
         }
     }
 
-    @ViewBuilder private var chips: some View {
-        ForEach(values, id: \.self) { value in
-            Chip(value, selected: false) { pick(value) }
-                .lineLimit(1)
-                .help("Подставить «\(value)»")
+    /// Строки: какие элементы, ширина и высота строки.
+    package func arrange(width: CGFloat, subviews: Subviews) -> [(items: [Int], width: CGFloat, height: CGFloat)] {
+        var rows: [(items: [Int], width: CGFloat, height: CGFloat)] = []
+        var current: (items: [Int], width: CGFloat, height: CGFloat) = ([], 0, 0)
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let extra = current.items.isEmpty ? size.width : current.width + spacing + size.width
+            if !current.items.isEmpty, extra > width {
+                rows.append(current)
+                current = ([index], size.width, size.height)
+            } else {
+                current = (current.items + [index], extra, max(current.height, size.height))
+            }
         }
+        if !current.items.isEmpty { rows.append(current) }
+        return rows
     }
 }
