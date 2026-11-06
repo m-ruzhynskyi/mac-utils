@@ -273,6 +273,12 @@ final class DocWordLayoutTests: XCTestCase {
         let index = (document.storage.string as NSString).range(of: "AB CD").location
         let glyph = manager.glyphIndexForCharacter(at: index)
         XCTAssertEqual(manager.propertyForGlyph(at: glyph), .controlCharacter, "глифов вертикального текста в строке нет")
+        // Абзацы вертикального текста — столбцами, а не друг под другом (f150: 16 абзацев растили строку на 83 pt).
+        let many = String(repeating: #"\pard\plain\intbl\fs20 AB\par "#, count: 8) + #"\pard\plain\intbl\fs20 AB\cell"#
+        let stacked = try open(row + #"\pard\plain\intbl\fs20 A\cell"# + many + #"\pard\plain\intbl\fs20 TOP\cell"# + row + #"\row "#
+            + row + #"\pard\plain\intbl\fs20 B\cell\pard\plain\intbl\fs20 \cell\pard\plain\intbl\fs20 NEXT\cell"# + row + #"\row\pard END\par"#)
+        let first = try XCTUnwrap(lines(stacked, "TOP").first).minY, second = try XCTUnwrap(lines(stacked, "NEXT").first).minY
+        XCTAssertEqual(second - first, 30, accuracy: 0.05, "9 абзацев вертикального текста строку не растят")
     }
 
     /// Строка-продолжение вертикального объединения — с `\trrh`, когда текст объединённой ячейки помещается в `\trrh` её строк

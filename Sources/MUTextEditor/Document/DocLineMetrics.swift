@@ -130,6 +130,18 @@ package enum DocLineMetrics {
         storage.enumerateAttribute(.docBreakLine, in: characters) { value, _, stop in
             if value == nil { breakOnly = false; stop.pointee = true }
         }
+        // Строка вертикального текста ячейки — тоже: абзацы его стоят столбцами (рисует `DocCellBlock`), высоту строке таблицы
+        // задаёт его самое длинное слово, а не число абзацев (f150: 16 абзацев столбиком — строка на 83 pt ниже Word).
+        if !breakOnly {
+            var vertical = true
+            storage.enumerateAttribute(.docVerticalText, in: characters) { value, _, stop in
+                if value == nil { vertical = false; stop.pointee = true }
+            }
+            // Первая строка ячейки остаётся: ячейка без высоты строк `NSTextTable` раскладывает иначе (f019–f150 хуже).
+            if vertical, let block = (storage.attribute(.paragraphStyle, at: characters.location, effectiveRange: nil) as? NSParagraphStyle)?.textBlocks.last,
+               storage.range(of: block, at: characters.location).location == characters.location { vertical = false }
+            breakOnly = vertical
+        }
         if breakOnly {
             rect.size.height = 0
             used.size.height = 0
