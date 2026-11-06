@@ -333,4 +333,24 @@ final class DocRibbonTests: XCTestCase {
             windows = []
         }
     }
+
+    /// R4: «Макет» с группой «Параметры страницы»: 1440 и 760, светлая и тёмная (`r4-layout-*`).
+    func testLayoutTabSnapshots() throws {
+        guard let directory = ProcessInfo.processInfo.environment["MU_DOC_FORMAT_SNAPSHOTS"] else { throw XCTSkip("MU_DOC_FORMAT_SNAPSHOTS не задан") }
+        for (name, width, dark) in [("r4-layout-1440", 1440, false), ("r4-layout-760", 760, false), ("r4-layout-1440-dark", 1440, true), ("r4-layout-760-dark", 760, true)] as [(String, CGFloat, Bool)] {
+            UserDefaults.standard.set("layout", forKey: Pref.editorRibbonTab)
+            let (workspace, tab) = DocDemo.tab()
+            tab.restoreMode(nil)
+            let window = host(workspace, size: NSSize(width: width, height: 640), dark: dark)
+            let document = try XCTUnwrap(tab.documentController)
+            select("Демоград", in: document)
+            settle(0.5)
+            let view = try XCTUnwrap(window.contentView)
+            let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: directory).appendingPathComponent("\(name).png"))
+            for window in windows { window.contentView = nil; window.close() }
+            windows = []
+        }
+    }
 }

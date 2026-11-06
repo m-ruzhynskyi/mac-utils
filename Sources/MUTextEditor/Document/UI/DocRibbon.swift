@@ -86,7 +86,7 @@ package struct DocRibbon<Home: View>: View {
                     HStack(alignment: .top, spacing: 0) { home(5) }
                 }
             case .insert: DocRibbonInsert(document: document, formatter: formatter, table: document.tableContext, insert: document.insertContext)
-            case .layout: DocRibbonLayout(formatter: formatter)
+            case .layout: DocRibbonLayout(document: document, formatter: formatter)
             case .view: DocRibbonViewTab(document: document)
             case .table: DocRibbonTable(document: document, context: document.tableContext)
             case .header: DocHeaderFooterGroups(formatter: formatter)
@@ -202,9 +202,11 @@ package struct DocRibbonInsert: View {
 
 /// «Макет»: разрыв страницы, положение абзаца на странице (`\keepn`, `\keep`, `\pagebb`), отступы и интервалы.
 package struct DocRibbonLayout: View {
+    @ObservedObject package var document: DocumentController
     @ObservedObject package var formatter: DocFormatter
 
     package var body: some View {
+        DocPageSetupGroup(document: document, formatter: formatter)
         DS.RibbonGroup("Разрывы") {
             DS.RibbonButton("Разрыв страницы", systemImage: "doc.badge.plus", glyph: "Страница", size: .large, shortcut: "⌘↩") {
                 formatter.insertPageBreak()
