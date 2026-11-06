@@ -1,8 +1,9 @@
 import AppKit
 import MUCore
 
-/// Ctrl+C / Ctrl+V / Ctrl+X как ⌘C / ⌘V / ⌘X во всех программах, кроме терминалов, виртуальных машин и удалённых столов.
-/// Событие не создаётся заново: в нём меняется флаг Control на Command и оно идёт дальше.
+/// Ctrl+C / V / X / A / Z / Y / S / F как ⌘C … ⌘F (Ctrl+Y → ⇧⌘Z) во всех программах, кроме терминалов, виртуальных машин и
+/// удалённых столов. Событие не создаётся заново: в нём меняется флаг Control на Command (у Ctrl+Y ещё и код клавиши),
+/// и оно идёт дальше. Каждое сочетание включается отдельно (`WinKeysShortcuts`).
 @MainActor
 package final class WinKeys: NSObject, ObservableObject {
     package static let shared = WinKeys()
@@ -10,6 +11,7 @@ package final class WinKeys: NSObject, ObservableObject {
     @Published package private(set) var isRunning = false
 
     private var tap: EventTap?
+    private var pairing = WinKeysRules.Pairing()
 
     private override init() { super.init() }
 
@@ -32,16 +34,23 @@ package final class WinKeys: NSObject, ObservableObject {
 
     private func handle(type: CGEventType, event: CGEvent) {
         let key = event.getIntegerValueField(.keyboardEventKeycode)
-        // Дешёвые проверки первыми: узнавать активную программу нужно только для подходящего сочетания.
-        guard WinKeysRules.decision(type: type, flags: event.flags, keyCode: key, bundleID: nil,
-                                    isExcluded: false, isSynthetic: false) == .rewrite else { return }
-        let decision = WinKeysRules.decision(
+        let output = pairing.translate(
             type: type, flags: event.flags, keyCode: key,
-            bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-            isExcluded: AppExclusions.shared.isFrontExcluded,
             isSynthetic: event.getIntegerValueField(.eventSourceUserData) == SelectedText.marker,
-            customExcluded: WinKeysExclusions.shared.list,
-            isRecordingShortcut: ShortcutRecording.isActive)
-        if decision == .rewrite { event.flags = WinKeysRules.rewritten(event.flags) }
+            isRecordingShortcut: ShortcutRecording.isActive,
+            customExcluded: WinKeysExclusions.shared.list, disabled: WinKeysShortcuts.shared.disabled,
+            app: { (NSWorkspace.shared.frontmostApplication?.bundleIdentifier, AppExclusions.shared.isFrontExcluded) })
+        guard let output else { return }
+        Self.apply(output, to: event, layout: WinKeysCharacters.currentLayout())
+    }
+
+    /// Применить замену к событию: флаги, код клавиши (у Ctrl+Y) и строку символов — как у настоящего ⌘-сочетания
+    /// (`WinKeysCharacters`): иначе в событии остаётся строка, посчитанная с Ctrl.
+    nonisolated package static func apply(_ output: WinKeysRules.Pairing.Output, to event: CGEvent, layout: Data?) {
+        event.flags = output.flags
+        if output.keyCode != event.getIntegerValueField(.keyboardEventKeycode) {
+            event.setIntegerValueField(.keyboardEventKeycode, value: output.keyCode)
+        }
+        WinKeysCharacters.apply(to: event, keyCode: output.keyCode, shift: output.flags.contains(.maskShift), layout: layout)
     }
 }
