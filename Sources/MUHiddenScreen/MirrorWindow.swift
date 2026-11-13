@@ -164,8 +164,11 @@ public final class MirrorView: NSView, NSDraggingSource {
     /// Сочетания с ⌘ сначала приходят сюда, раньше главного меню Mac Utils: иначе ⌘V/⌘C/⌘A съело бы меню «Правка».
     /// Ctrl+V из «Клавиш Windows» к этому моменту уже ⌘V.
     override public func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard window?.firstResponder === self, event.type == .keyDown else { return super.performKeyEquivalent(with: event) }
-        switch MirrorKeys.route(code: event.keyCode, flags: flags(event)) {
+        // Первым ответчиком зеркало может и не быть (нажатие мыши перехвачено до него) — достаточно, что окно ключевое.
+        guard event.type == .keyDown, window?.isKeyWindow == true else { return super.performKeyEquivalent(with: event) }
+        let route = MirrorKeys.route(code: event.keyCode, flags: flags(event))
+        Log.hiddenScreen.info("зеркало: сочетание код \(event.keyCode), флаги \(event.modifierFlags.rawValue), первый ответчик — \(self.window?.firstResponder === self ? "зеркало" : "другой", privacy: .public), маршрут \(String(describing: route), privacy: .public)")
+        switch route {
         case .forward:
             onInput?(.key(code: event.keyCode, down: true, flags: flags(event), characters: event.charactersIgnoringModifiers))
             onInput?(.key(code: event.keyCode, down: false, flags: flags(event), characters: event.charactersIgnoringModifiers))

@@ -25,11 +25,12 @@ public final class HiddenScreenDebugSession {
     init(engine: HiddenScreenEngine, options: HiddenScreenOptions) {
         self.engine = engine
         engine.options = options
+        engine.useHelper = options.useHelper
         engine.mirrorHasTitleBar = true
     }
 
     private func start() {
-        Log.hiddenScreen.info("отладка: программы \(self.engine.options.apps.map(\.name).joined(separator: ", "), privacy: .public), щелчок \(self.engine.options.clickMode.rawValue, privacy: .public), прокрутка \(self.engine.options.scrollMode.rawValue, privacy: .public)")
+        Log.hiddenScreen.info("отладка: программы \(self.engine.options.apps.map(\.name).joined(separator: ", "), privacy: .public), щелчок \(self.engine.options.clickMode.rawValue, privacy: .public), нажатие \(self.engine.options.pressMode.rawValue, privacy: .public), прокрутка \(self.engine.options.scrollMode.rawValue, privacy: .public), ⌘-сочетания \(self.engine.options.keyMode.rawValue, privacy: .public), помощник \(self.engine.options.useHelper ? "да" : "нет", privacy: .public)")
         engine.onLeak = { leak in Log.hiddenScreen.error("отладка: утечка \(String(describing: leak), privacy: .public)") }
         let previous = engine.onChange
         engine.onChange = { [weak self] in
@@ -37,8 +38,16 @@ public final class HiddenScreenDebugSession {
             self?.changed()
         }
         installSignalHandlers()
+        // Дисплей создаёт помощник — зеркало появится, когда он ответит (`changed` добавит переключатель).
         engine.setMirrorShown(true)
-        guard engine.phase == .on, let window = engine.mirrorWindow else { return }
+        changed()
+    }
+
+    private var accessoryAdded = false
+
+    private func addPicker(to window: NSWindow) {
+        guard !accessoryAdded else { return }
+        accessoryAdded = true
         picker.segmentStyle = .texturedRounded
         picker.trackingMode = .selectOne
         picker.target = self
@@ -48,7 +57,6 @@ public final class HiddenScreenDebugSession {
         accessory.layoutAttribute = .trailing
         window.addTitlebarAccessoryViewController(accessory)
         window.title = "Скрытый экран — отладка"
-        changed()
     }
 
     public func stop() {
@@ -58,6 +66,7 @@ public final class HiddenScreenDebugSession {
     private var lastSummary = ""
 
     private func changed() {
+        if let window = engine.mirrorWindow { addPicker(to: window) }
         let apps = engine.statuses
         picker.segmentCount = apps.count
         for (index, status) in apps.enumerated() {

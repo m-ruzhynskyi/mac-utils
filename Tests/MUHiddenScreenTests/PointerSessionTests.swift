@@ -55,11 +55,11 @@ final class PointerSessionTests: XCTestCase {
         _ = session.down(.left, at: CGPoint(x: 100, y: 50), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor)
         let steps = session.dragged(to: CGPoint(x: 110, y: 50), mapping: mapping)
         XCTAssertEqual(steps, [
-            .hideCursor, .activateTarget, .warp(CGPoint(x: 2200, y: 1100)),
+            .activateTarget, .warp(CGPoint(x: 2200, y: 1100)),
             .postHID(SyntheticEvent(kind: .leftDown, location: CGPoint(x: 2200, y: 1100), clicks: 1)),
             .postHID(SyntheticEvent(kind: .leftDragged, location: CGPoint(x: 2220, y: 1100), clicks: 1)),
-            .showCursor, .beginHandoff(.drag),
-        ])
+            .warp(CGPoint(x: 2220, y: 1100)), .beginHandoff(.drag),
+        ], "нажатие — синтетическое в окне программы, курсор — туда, где уже протянули")
         XCTAssertEqual(session.handoff, .drag)
         // Пока курсор передан, зеркало ничего не шлёт.
         XCTAssertEqual(session.up(mapping: mapping, windowNumber: 7), [])
@@ -160,6 +160,14 @@ final class HiddenScreenOptionsTests: XCTestCase {
         XCTAssertEqual(options, HiddenScreenOptions(apps: [.claude], clickMode: .pid, scrollMode: .pid, displaySize: CGSize(width: 1280, height: 800)))
         let defaults = HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-size=99x99", "--hs-click=nope"], storedBundleIDs: nil)
         XCTAssertEqual(defaults, HiddenScreenOptions())
+        let modes = HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-keys=hid", "--hs-press=mirror", "--hs-helper=off"],
+                                              storedBundleIDs: nil)
+        XCTAssertEqual(modes?.keyMode, .hid)
+        XCTAssertEqual(modes?.pressMode, .mirror)
+        XCTAssertEqual(modes?.useHelper, false)
+        XCTAssertEqual(defaults?.keyMode, .active)
+        XCTAssertEqual(defaults?.pressMode, .tap)
+        XCTAssertEqual(defaults?.useHelper, true)
     }
 
     func testClipboardExport() {
@@ -174,31 +182,58 @@ final class HiddenScreenOptionsTests: XCTestCase {
 }
 
 final class HidingCheckTests: XCTestCase {
-    func gradient(_ shift: Int = 0) -> [UInt8] { (0..<256).map { UInt8(($0 + shift) % 256) } }
-
-    func testVerdict() {
-        XCTAssertEqual(HidingCheck.verdict(captured: gradient(), mirror: gradient()), false, "та же картинка — зеркало в захвате")
-        XCTAssertEqual(HidingCheck.verdict(captured: [UInt8](repeating: 30, count: 256), mirror: gradient()), true)
-        XCTAssertNil(HidingCheck.verdict(captured: gradient(), mirror: [UInt8](repeating: 200, count: 256)), "однотонное зеркало — не понять")
-        XCTAssertNil(HidingCheck.verdict(captured: [1, 2], mirror: gradient()))
+    func checker() -> [HidingCheck.RGB] {
+        (0..<16).map { HidingCheck.expected(row: $0 / 4, column: $0 % 4) }
     }
 
-    func testThumbnailOfSyntheticImage() throws {
-        let context = try XCTUnwrap(CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 64,
-                                              space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue))
-        context.setFillColor(gray: 1, alpha: 1)
-        context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
-        let image = try XCTUnwrap(context.makeImage())
-        let thumbnail = HidingCheck.thumbnail(image)
-        XCTAssertEqual(thumbnail.count, 256)
-        XCTAssertTrue(thumbnail.allSatisfy { $0 > 250 })
+    func testVerdictIsUnambiguousForProbe() {
+        XCTAssertEqual(HidingCheck.verdict(cells: checker()), false, "шахматка на снимке — окна с .none видно")
+        XCTAssertEqual(HidingCheck.verdict(cells: Array(repeating: HidingCheck.RGB(240, 240, 240), count: 16)), true, "под пробой белый фон")
+        XCTAssertEqual(HidingCheck.verdict(cells: Array(repeating: HidingCheck.RGB(250, 10, 250), count: 16)), true,
+                       "сплошной пурпурный фон совпадает только с половиной клеток — не шахматка")
+        // Цветовой профиль дисплея сдвигает насыщенные цвета, но клетки узнаются.
+        let shifted = checker().map { HidingCheck.RGB($0.r == 255 ? 235 : 40, $0.g == 255 ? 228 : 60, $0.b == 255 ? 232 : 50) }
+        XCTAssertEqual(HidingCheck.verdict(cells: shifted), false)
+        var partly = checker()
+        for i in 0..<8 { partly[i] = HidingCheck.RGB(255, 255, 255) }
+        XCTAssertNil(HidingCheck.verdict(cells: partly), "половина пробы — не понять")
+        XCTAssertNil(HidingCheck.verdict(cells: []))
+    }
+
+    func testProbeImageRoundTrip() throws {
+        let image = try XCTUnwrap(HidingCheck.probeImage(scale: 2))
+        XCTAssertEqual(image.width, 64)
+        XCTAssertEqual(HidingCheck.cellColors(image), checker(), "клетки читаются в том же порядке, в каком нарисованы")
+        XCTAssertEqual(HidingCheck.verdict(cells: HidingCheck.cellColors(image)), false)
     }
 
     func testCropRect() {
         let display = CGRect(x: 0, y: 0, width: 1512, height: 982)
-        XCTAssertEqual(HidingCheck.cropRect(mirror: CGRect(x: 100, y: 50, width: 400, height: 300), display: display, scale: 2),
-                       CGRect(x: 200, y: 100, width: 800, height: 600))
-        XCTAssertNil(HidingCheck.cropRect(mirror: CGRect(x: 2000, y: 0, width: 100, height: 100), display: display, scale: 2))
+        XCTAssertEqual(HidingCheck.cropRect(CGRect(x: 100, y: 50, width: 32, height: 32), display: display, scale: 2),
+                       CGRect(x: 200, y: 100, width: 64, height: 64))
+        XCTAssertNil(HidingCheck.cropRect(CGRect(x: 1500, y: 0, width: 32, height: 32), display: display, scale: 2), "проба частично за краем")
+    }
+}
+
+final class ShortcutTests: XCTestCase {
+    let paste = PasteKeystroke.events()
+
+    func testActiveModeActivatesWaitsAndReturns() {
+        let steps = PointerSession().shortcut(paste, mode: .active)
+        XCTAssertEqual(steps, [.activateTarget, .postToPid(paste[0]), .postToPid(paste[1]), .wait(PointerSession.shortcutSettle), .activateSelf])
+    }
+
+    func testHIDAndInactiveModes() {
+        XCTAssertEqual(PointerSession().shortcut(paste, mode: .hid).filter { if case .postHID = $0 { return true }; return false }.count, 2)
+        XCTAssertEqual(PointerSession().shortcut(paste, mode: .inactive), [.postToPid(paste[0]), .postToPid(paste[1])])
+        XCTAssertEqual(PointerSession().shortcut([], mode: .active), [])
+    }
+
+    func testDuringHandoffProgramIsAlreadyActive() {
+        var session = PointerSession()
+        let mapping = MirrorMapping(viewSize: CGSize(width: 400, height: 300), target: CGRect(x: 0, y: 0, width: 400, height: 300))
+        _ = session.down(.right, at: CGPoint(x: 10, y: 10), clicks: 1, flags: [], mapping: mapping, windowNumber: 1, cursor: .zero)
+        XCTAssertEqual(session.shortcut(paste, mode: .active), [.postToPid(paste[0]), .postToPid(paste[1])])
     }
 }
 

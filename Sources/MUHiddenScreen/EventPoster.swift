@@ -8,6 +8,9 @@ public protocol SyntheticEventSink: AnyObject {
 
 /// `SyntheticEvent` → `CGEvent`.
 enum SyntheticEventFactory {
+    /// Метка своих событий (`eventSourceUserData`, «MUHS»): перехват нажатий над зеркалом их пропускает.
+    static let marker: Int64 = 0x4D55_4853
+
     static func make(_ event: SyntheticEvent, source: CGEventSource?) -> CGEvent? {
         let cgEvent: CGEvent?
         switch event.kind {
@@ -38,6 +41,7 @@ enum SyntheticEventFactory {
         }
         guard let cgEvent else { return nil }
         cgEvent.flags = event.flags
+        cgEvent.setIntegerValueField(.eventSourceUserData, value: marker)
         if event.windowNumber != 0 {
             cgEvent.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(event.windowNumber))
             cgEvent.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(event.windowNumber))

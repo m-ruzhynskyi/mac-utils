@@ -8,6 +8,8 @@ import ScreenCaptureKit
 public final class HiddenScreenEngine {
     public enum Phase: Equatable, Sendable {
         case off
+        /// Помощник создаёт дисплей (обычно десятки миллисекунд).
+        case starting
         case on
         case failed(String)
     }
@@ -43,6 +45,7 @@ public final class HiddenScreenEngine {
         didSet {
             session.clickMode = options.clickMode
             session.scrollMode = options.scrollMode
+            clipboard.marksTransient = options.clipboardMarks
             guard phase == .on else { return }
             attachObservers()
             sweep()
@@ -71,7 +74,12 @@ public final class HiddenScreenEngine {
         return window.frame
     }
 
-    private var display: HiddenDisplay?
+    private var host: DisplayHosting?
+    private var displayID: CGDirectDisplayID = kCGNullDirectDisplay
+    /// Зеркало попросили показать, пока дисплей ещё создаётся.
+    private var mirrorRequested = false
+    /// Только для отладки: дисплей в процессе Mac Utils, без помощника (`--hs-helper=off`).
+    public var useHelper = true
     private var hidden: CGRect = .null
     private let mover = WindowMover()
     private let keys = PidEventPoster()
@@ -98,10 +106,20 @@ public final class HiddenScreenEngine {
     private var handoffTick = 0
     private var lastSurface: IOSurfaceRef?
     private var defaultsToken: NSObjectProtocol?
+    /// Перехват нажатий над зеркалом (`PressMode.tap`).
+    private var pressTap: EventTap?
+    /// Нажатие над зеркалом перехвачено, кнопка ещё не отпущена.
+    private var pressIntercepted = false
+    /// Протягивание отдано программе: синтетическое нажатие уже отправлено, физическая мышь идёт к ней.
+    private var dragLive = false
+    /// Кнопку отпустили раньше, чем программа получила синтетическое нажатие.
+    private var upBeforeLive = false
 
     public init(options: HiddenScreenOptions = HiddenScreenOptions()) {
         self.options = options
         session = PointerSession(clickMode: options.clickMode, scrollMode: options.scrollMode)
+        useHelper = options.useHelper
+        clipboard.marksTransient = options.clipboardMarks
         mirrorView.onInput = { [weak self] input in self?.handle(input) }
         mirrorView.onDrop = { [weak self] route, pasteboard in self?.paste(route, from: pasteboard) ?? false }
         mirrorView.onResize = { [weak self] size in self?.mirrorResized(size) }
@@ -111,25 +129,56 @@ public final class HiddenScreenEngine {
 
     // MARK: Включение и выключение
 
-    /// Создать скрытый дисплей за углом раскладки и перенести на него окна программ.
+    /// Создать скрытый дисплей (через процесс-помощник) за углом раскладки и перенести на него окна программ.
     public func enable() {
-        guard phase != .on else { return }
-        let display = HiddenDisplay(pointSize: options.displaySize)
-        do {
-            try display.open { [weak self] in
-                Task { @MainActor in self?.displayVanished() }
-            }
-            hidden = try display.moveBeyondCorner()
-        } catch {
-            display.close()
-            phase = .failed("Скрытый дисплей не создан: \(error)")
-            Log.hiddenScreen.error("enable: \(String(describing: error), privacy: .public)")
-            onChange?()
-            return
+        switch phase {
+        case .on, .starting: return
+        case .off, .failed: break
         }
-        self.display = display
+        phase = .starting
+        onChange?()
+        open(host: useHelper ? HelperDisplayHost() : InProcessDisplayHost())
+    }
+
+    private func open(host: DisplayHosting) {
+        self.host = host
+        let started = ProcessInfo.processInfo.systemUptime
+        host.open(size: options.displaySize, apps: hiddenBundleIDs, onReady: { [weak self, weak host] result in
+            guard let self, let host, self.host === host, self.phase == .starting else { return }
+            switch result {
+            case let .success(id):
+                Log.hiddenScreen.info("дисплей \(id) создан (\(host.name, privacy: .public)) за \(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) мс")
+                self.finishEnable(displayID: id)
+            case let .failure(error):
+                Log.hiddenScreen.error("дисплей (\(host.name, privacy: .public)): \(String(describing: error), privacy: .public)")
+                host.close(hiding: false)
+                if host is HelperDisplayHost {
+                    // Без помощника скрытие работает, но при падении Mac Utils окна выпадут на экран — это видно в журнале.
+                    Log.hiddenScreen.error("помощник недоступен — дисплей в процессе Mac Utils")
+                    self.open(host: InProcessDisplayHost())
+                } else {
+                    self.host = nil
+                    self.phase = .failed("Скрытый дисплей не создан: \(error)")
+                    self.onChange?()
+                }
+            }
+        }, onLost: { [weak self, weak host] in
+            guard let self, let host, self.host === host else { return }
+            self.displayVanished()
+        })
+    }
+
+    private func finishEnable(displayID id: CGDirectDisplayID) {
+        displayID = id
+        do {
+            hidden = try HiddenScreenLayout.moveBeyondCorner(id, size: options.displaySize)
+        } catch {
+            // Дисплей есть, но не отодвинут: работать можно, курсор сторожит `guardCursor`.
+            hidden = CGDisplayBounds(id)
+            Log.hiddenScreen.error("раскладка: \(String(describing: error), privacy: .public)")
+        }
         phase = .on
-        Log.hiddenScreen.info("enable: дисплей \(display.displayID) \(String(describing: self.hidden), privacy: .public)")
+        Log.hiddenScreen.info("enable: дисплей \(id) \(String(describing: self.hidden), privacy: .public)")
         attachObservers()
         let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
@@ -147,27 +196,44 @@ public final class HiddenScreenEngine {
         }
         startCursorGuard()
         onChange?()
+        if mirrorRequested {
+            mirrorRequested = false
+            setMirrorShown(true)
+        }
     }
+
+    /// bundle id всех программ из списка — помощнику, чтобы прятать их, если Mac Utils пропадёт.
+    var hiddenBundleIDs: [String] { options.apps.flatMap { $0.bundleIDs.sorted() } }
 
     /// Выключить: вернуть окна туда, где они были до переноса, закрыть зеркало, снять дисплей.
     public func disable() {
+        if phase == .starting {
+            mirrorRequested = false
+            host?.close(hiding: false)
+            host = nil
+            phase = .off
+            onChange?()
+            return
+        }
         guard phase == .on else { return }
         restoreWindows(of: options.apps)
-        tearDown()
+        tearDown(hiding: false)
         Log.hiddenScreen.info("disable: окна возвращены")
     }
 
     /// Выход Mac Utils: сначала спрятать программы (иначе macOS перенесёт их окна на настоящий экран — в демонстрацию),
-    /// потом снять дисплей. При падении процесса этого не произойдёт (см. отчёт: процесс-помощник).
+    /// потом снять дисплей. При падении Mac Utils то же делает помощник.
     public func shutdown() {
-        guard phase == .on else { return }
+        guard phase == .on || phase == .starting else { return }
         runningTargets.forEach { $0.hide() }
-        tearDown()
+        tearDown(hiding: true)
         Log.hiddenScreen.info("shutdown: программы спрятаны, дисплей снят")
     }
 
-    private func tearDown() {
+    private func tearDown(hiding: Bool) {
         endHandoffNow()
+        pressTap?.stop()
+        pressTap = nil
         sweepTimer?.invalidate()
         sweepTimer = nil
         stopCursorGuard()
@@ -181,12 +247,14 @@ public final class HiddenScreenEngine {
         Task { await stream?.stop() }
         if clipboard.isActive { clipboard.restore() }
         pointer.restoreCursor()
-        display?.close()
-        display = nil
+        host?.close(hiding: hiding)
+        host = nil
+        displayID = kCGNullDirectDisplay
         hidden = .null
         remembered.removeAll()
         mirrorWindow?.orderOut(nil)
         mirrorShown = false
+        mirrorRequested = false
         hidingVerified = nil
         lastSurface = nil
         if let defaultsToken { NotificationCenter.default.removeObserver(defaultsToken) }
@@ -198,9 +266,9 @@ public final class HiddenScreenEngine {
 
     private func displayVanished() {
         guard phase == .on else { return }
-        Log.hiddenScreen.error("дисплей снят системой — прячем программы")
+        Log.hiddenScreen.error("дисплей пропал — прячем программы")
         runningTargets.forEach { $0.hide() }
-        tearDown()
+        tearDown(hiding: true)
         phase = .failed("Скрытый дисплей пропал, программы спрятаны")
         onChange?()
     }
@@ -226,11 +294,11 @@ public final class HiddenScreenEngine {
 
     /// Окна программ на настоящих экранах → на скрытый; статусы для интерфейса; зеркало за своим окном.
     public func sweep() {
-        guard phase == .on, let display else { return }
+        guard phase == .on, displayID != kCGNullDirectDisplay else { return }
         let targets = runningTargets
         let windows = mover.windows(pids: Set(targets.map(\.processIdentifier)))
         lastWindows = windows
-        let physical = HiddenDisplay.physicalDisplays(excluding: display.displayID)
+        let physical = HiddenDisplay.physicalDisplays(excluding: displayID)
         let plan = HiddenWindowRules.plan(windows: windows, apps: options.apps, hidden: hidden, physical: physical)
         if !plan.isEmpty {
             let failed = mover.apply(plan, windows: windows) { [weak self] id, frame in
@@ -279,8 +347,8 @@ public final class HiddenScreenEngine {
 
     private func guardCursor() {
         guard session.handoff == nil, !runningSteps,
-              let display, let back = HiddenScreenGeometry.pullBack(pointer.location, hidden: hidden,
-                                                                    physical: HiddenDisplay.physicalDisplays(excluding: display.displayID))
+              displayID != kCGNullDirectDisplay, let back = HiddenScreenGeometry.pullBack(pointer.location, hidden: hidden,
+                                                                    physical: HiddenDisplay.physicalDisplays(excluding: displayID))
         else { return }
         pointer.warp(to: back)
     }
@@ -339,7 +407,7 @@ public final class HiddenScreenEngine {
     }
 
     private func pixelSize(_ size: CGSize) -> CGSize {
-        let scale = NSScreen.screens.first { $0.displayID == display?.displayID }?.backingScaleFactor ?? 2
+        let scale = NSScreen.screens.first { $0.displayID == displayID }?.backingScaleFactor ?? 2
         return CGSize(width: size.width * scale, height: size.height * scale)
     }
 
@@ -387,12 +455,14 @@ public final class HiddenScreenEngine {
     // MARK: Ввод
 
     private func handle(_ input: MirrorInput) {
-        guard phase == .on, let mirrorTarget, session.handoff == nil, let mapping else { return }
+        guard phase == .on, let mirrorTarget, let mapping else { return }
+        if case let .key(code, down, flags, characters) = input {
+            handleKey(code: code, down: down, flags: flags, characters: characters, pid: mirrorTarget.pid,
+                      translator: MirrorInputTranslator(mapping: mapping, windowNumber: mirrorTarget.windowID))
+            return
+        }
+        guard session.handoff == nil else { return }
         switch input {
-        case let .key(code, down, flags, characters):
-            let events = MirrorInputTranslator(mapping: mapping, windowNumber: mirrorTarget.windowID)
-                .translate(.key(code: code, down: down, flags: flags, characters: characters))
-            keys.post(events, to: mirrorTarget.pid)
         case let .mouse(.down, button, point, clicks, flags):
             run(session.down(button, at: point, clicks: clicks, flags: flags, mapping: mapping,
                              windowNumber: mirrorTarget.windowID, cursor: pointer.location))
@@ -400,11 +470,37 @@ public final class HiddenScreenEngine {
             run(session.dragged(to: point, mapping: mapping))
         case .mouse(.up, .left, _, _, _):
             run(session.up(mapping: mapping, windowNumber: mirrorTarget.windowID))
-        case .mouse(.up, .right, _, _, _), .moved:
+        case .mouse(.up, .right, _, _, _), .moved, .key:
             break
         case let .scroll(dx, dy, precise, point):
             run(session.scroll(dx: dx, dy: dy, precise: precise, at: point, mapping: mapping, windowNumber: mirrorTarget.windowID))
         }
+    }
+
+    /// Текст — `postToPid` без активации (проверено). ⌘-сочетания — по `KeyMode` (по умолчанию с активацией программы),
+    /// каждое — строкой в журнал: получено, маршрут, путь, pid.
+    private func handleKey(code: CGKeyCode, down: Bool, flags: CGEventFlags, characters: String?, pid: pid_t,
+                           translator: MirrorInputTranslator) {
+        let events = translator.translate(.key(code: code, down: down, flags: flags, characters: characters))
+        guard flags.contains(.maskCommand) else {
+            keys.post(events, to: pid)
+            return
+        }
+        // Пара «нажатие + отпускание» уходит по нажатию; настоящее отпускание с ⌘ не нужно.
+        guard down else { return }
+        let route = MirrorKeys.route(code: code, flags: flags)
+        guard !events.isEmpty else {
+            Log.hiddenScreen.info("⌘-сочетание: код \(code), маршрут \(String(describing: route), privacy: .public) — в программу не отправлено")
+            return
+        }
+        let up = events.map { event -> SyntheticEvent in
+            var event = event
+            event.kind = .keyUp
+            return event
+        }
+        let steps = session.shortcut(events + up, mode: options.keyMode)
+        Log.hiddenScreen.info("⌘-сочетание: код \(code), флаги \(flags.rawValue), путь \(self.options.keyMode.rawValue, privacy: .public)\(self.session.handoff != nil ? " (курсор у программы)" : ""), pid \(pid), шагов \(steps.count)")
+        run(steps)
     }
 
     /// Шаги выполняются строго по очереди; активация ждёт, пока программа действительно станет активной.
@@ -440,9 +536,15 @@ public final class HiddenScreenEngine {
                   ProcessInfo.processInfo.systemUptime - started < 0.3 {
                 try? await Task.sleep(nanoseconds: 5_000_000)
             }
-            Log.hiddenScreen.debug("активация: \(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) мс")
+            let activated = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+            Log.hiddenScreen.debug("активация: \(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) мс\(activated ? "" : " — НЕ активировалась", privacy: .public)")
         case .activateSelf:
             ScreenOutput.activateApp(ignoringOtherApps: true)
+            // Нажатие над зеркалом перехвачено и до зеркала не дошло — ключевым и первым ответчиком его делаем сами.
+            mirrorWindow?.makeKey()
+            mirrorWindow?.makeFirstResponder(mirrorView)
+        case let .wait(seconds):
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
         case let .warp(point):
             pointer.warp(to: point)
         case let .postHID(event):
@@ -463,6 +565,16 @@ public final class HiddenScreenEngine {
     private func beginHandoff(_ kind: HandoffKind) {
         watch = HandoffWatch(kind: kind, at: ProcessInfo.processInfo.systemUptime)
         Log.hiddenScreen.info("передача курсора: \(String(describing: kind), privacy: .public)")
+        if kind == .drag {
+            dragLive = true
+            if upBeforeLive {
+                // Кнопку уже отпустили: довести нажатие в программе до конца самим.
+                upBeforeLive = false
+                pointer.post(SyntheticEvent(kind: .leftUp, location: pointer.location, clicks: 1))
+                watch?.noteButtonUp()
+                Log.hiddenScreen.info("протягивание: отпускание раньше передачи — отпущено синтетически")
+            }
+        }
         let activity: (NSEvent) -> Void = { [weak self] event in
             MainActor.assumeIsolated { self?.handoffEvent(event) }
         }
@@ -472,7 +584,7 @@ public final class HiddenScreenEngine {
         if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { event in
             activity(event)
             if event.type == .leftMouseDragged || event.type == .leftMouseUp {
-                Log.hiddenScreen.error("передача: \(event.type.rawValue) пришло в Mac Utils, а не в программу")
+                Log.hiddenScreen.error("передача: \(event.type.rawValue) пришло в Mac Utils, а не в программу (перехват: \(self.pressTap != nil ? "есть" : "нет", privacy: .public))")
             }
             return event
         }) { handoffMonitors.append(local) }
@@ -514,6 +626,7 @@ public final class HiddenScreenEngine {
     }
 
     private func stopHandoffWatch() {
+        dragLive = false
         handoffTimer?.invalidate()
         handoffTimer = nil
         handoffMonitors.forEach(NSEvent.removeMonitor)
@@ -533,11 +646,85 @@ public final class HiddenScreenEngine {
         ScreenOutput.activateApp(ignoringOtherApps: true)
     }
 
+    // MARK: Перехват нажатий над зеркалом (протягивание)
+
+    /// Физическое нажатие над картинкой зеркала не доходит до зеркала: иначе WindowServer считает зеркало владельцем нажатия
+    /// и отдаёт ему всё протягивание (проверка 13.11: «передача: 6 пришло в Mac Utils»). Щелчок по-прежнему выполняется
+    /// по отпусканию; протягивание начинается синтетическим нажатием в окне программы — оно и становится владельцем.
+    private func installPressTap() {
+        guard options.pressMode == .tap, pressTap == nil else { return }
+        let tap = EventTap(types: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] type, event in
+            guard let self else { return true }
+            return !self.intercept(type, event)
+        }
+        tap.onDisabled = { [weak self] in
+            Log.hiddenScreen.error("перехват нажатий отключён системой — состояние сброшено")
+            self?.pressIntercepted = false
+        }
+        if tap.start() {
+            pressTap = tap
+            Log.hiddenScreen.info("перехват нажатий над зеркалом включён")
+        } else {
+            Log.hiddenScreen.error("перехват нажатий не создан (нет «Универсального доступа»?) — нажатия через события зеркала, протягивание не работает")
+        }
+    }
+
+    /// true — событие поглощено.
+    private func intercept(_ type: CGEventType, _ event: CGEvent) -> Bool {
+        if event.getIntegerValueField(.eventSourceUserData) == SyntheticEventFactory.marker { return false }
+        guard phase == .on, mirrorShown, let window = mirrorWindow, window.isVisible,
+              let target = mirrorTarget, let mapping, let rect = mirrorRect else {
+            pressIntercepted = false
+            return false
+        }
+        let location = event.location
+        let view = CGPoint(x: location.x - rect.minX, y: location.y - rect.minY)
+        switch type {
+        case .leftMouseDown:
+            guard session.state == .idle, rect.contains(location), mapping.toTarget(view) != nil,
+                  NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0) == window.windowNumber else { return false }
+            pressIntercepted = true
+            upBeforeLive = false
+            let clicks = Int(event.getIntegerValueField(.mouseEventClickState))
+            Log.hiddenScreen.debug("перехват: нажатие (\(Int(view.x)), \(Int(view.y))), щелчков \(clicks)")
+            run(session.down(.left, at: view, clicks: clicks, flags: event.flags, mapping: mapping,
+                             windowNumber: target.windowID, cursor: location))
+            return true
+        case .leftMouseDragged:
+            guard pressIntercepted else { return false }
+            if session.handoff == .drag { return !dragLive }
+            let steps = session.dragged(to: view, mapping: mapping)
+            if !steps.isEmpty {
+                Log.hiddenScreen.info("перехват: протягивание → программе")
+                run(steps)
+            }
+            return true
+        case .leftMouseUp:
+            guard pressIntercepted else { return false }
+            pressIntercepted = false
+            if session.handoff == .drag {
+                if dragLive {
+                    watch?.noteButtonUp()
+                    return false
+                }
+                upBeforeLive = true
+                return true
+            }
+            run(session.up(mapping: mapping, windowNumber: target.windowID))
+            return true
+        default:
+            return false
+        }
+    }
+
     // MARK: Вставка и перетаскивание
 
     /// Брошенное в зеркало: временный буфер → ⌘V в программу → через 1,5 с буфер пользователя назад.
     func paste(_ route: DropRoute, from pasteboard: NSPasteboard) -> Bool {
-        guard let pid = mirrorTarget?.pid else { return false }
+        guard let pid = mirrorTarget?.pid else {
+            Log.hiddenScreen.error("вставка: нет программы в зеркале")
+            return false
+        }
         let items: [[String: Data]]
         switch route {
         case let .imageFiles(urls):
@@ -561,9 +748,12 @@ public final class HiddenScreenEngine {
             return false
         }
         clipboard.begin(with: items)
-        keys.post(PasteKeystroke.events(), to: pid)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [clipboard] in clipboard.restore() }
-        Log.hiddenScreen.info("вставка: \(String(describing: route).prefix(40), privacy: .public)")
+        let steps = session.shortcut(PasteKeystroke.events(), mode: options.keyMode)
+        run(steps)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [clipboard] in
+            Log.hiddenScreen.info("вставка: буфер пользователя \(clipboard.restore() ? "возвращён" : "не тронут (в нём уже новое)", privacy: .public)")
+        }
+        Log.hiddenScreen.info("вставка: \(String(describing: route).prefix(40), privacy: .public) → ⌘V, путь \(self.options.keyMode.rawValue, privacy: .public), pid \(pid)")
         return true
     }
 
@@ -615,17 +805,26 @@ extension HiddenScreenEngine {
     /// Показать зеркало (включив скрытый экран, если он выключен) или спрятать его.
     public func setMirrorShown(_ shown: Bool) {
         guard shown else {
+            mirrorRequested = false
             mirrorWindow?.orderOut(nil)
             mirrorShown = false
+            pressTap?.stop()
+            pressTap = nil
             Task { await stopMirror() }
             onChange?()
             return
         }
-        if phase != .on { enable() }
-        guard phase == .on else { return }
+        if phase != .on {
+            // Дисплей создаётся асинхронно (помощник) — зеркало покажется, когда он будет готов.
+            mirrorRequested = true
+            enable()
+            return
+        }
         let window = ensureMirrorWindow()
         window.makeKeyAndOrderFrontOnScreen("Скрытый экран: зеркало")
+        window.makeFirstResponder(mirrorView)
         mirrorShown = true
+        installPressTap()
         onChange?()
         let app = mirroredApp ?? statuses.first(where: { $0.hiddenWindows > 0 })?.app ?? statuses.first(where: \.isRunning)?.app
         if let app { show(app) }
@@ -642,6 +841,7 @@ extension HiddenScreenEngine {
         options.apps.append(HiddenScreenOptions.defaultApps.first { $0.matches(bundleID: bundleID) }
             ?? HiddenApp(name: name, bundleIDs: [bundleID]))
         saveApps()
+        host?.update(apps: hiddenBundleIDs)
         refreshStatuses(windows: lastWindows)
     }
 
@@ -651,6 +851,7 @@ extension HiddenScreenEngine {
         if phase == .on { restoreWindows(of: [app]) }
         options.apps.removeAll { $0 == app }
         saveApps()
+        host?.update(apps: hiddenBundleIDs)
         if mirroredApp == app {
             Task { await stopMirror() }
         }
@@ -672,7 +873,7 @@ extension HiddenScreenEngine {
     }
 
     func restoreWindows(of apps: [HiddenApp]) {
-        let physical = HiddenDisplay.physicalDisplays(excluding: display?.displayID ?? kCGNullDirectDisplay)
+        let physical = HiddenDisplay.physicalDisplays(excluding: displayID)
         let pids = Set(NSWorkspace.shared.runningApplications
             .filter { running in apps.contains { $0.matches(bundleID: running.bundleIdentifier) } }
             .map(\.processIdentifier))
@@ -738,7 +939,7 @@ extension HiddenScreenEngine {
     /// сразу на скрытом дисплее, без кадра на основном (на Mac пользователя не проверено).
     private func revealOnHidden(_ running: NSRunningApplication) {
         guard phase == .on else { return }
-        let physical = HiddenDisplay.physicalDisplays(excluding: display?.displayID ?? kCGNullDirectDisplay)
+        let physical = HiddenDisplay.physicalDisplays(excluding: displayID)
         for (element, frame) in mover.axWindows(pid: running.processIdentifier) {
             guard let source = physical.first(where: { HiddenWindowRules.visibleArea(frame, $0) > 0 }) else { continue }
             if let id = AXWindowID.of(element), remembered[id] == nil { remembered[id] = frame }
@@ -749,7 +950,7 @@ extension HiddenScreenEngine {
 
     // MARK: Самопроверка скрытия
 
-    /// Через секунду после показа зеркала: снимок основного экрана и сравнение с кадром зеркала (`HidingCheck`).
+    /// Через секунду после показа зеркала — проба (`HidingCheck`): окно с `.none` и шахматкой, снимок дисплея, поиск шахматки.
     func verifyHidingSoon() {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -758,8 +959,25 @@ extension HiddenScreenEngine {
     }
 
     public func verifyHiding() async {
-        guard mirrorShown, let window = mirrorWindow, let surface = lastSurface,
-              let screen = window.screen, let displayID = screen.displayID else { return }
+        guard mirrorShown, let window = mirrorWindow, let screen = window.screen, let displayID = screen.displayID,
+              let image = HidingCheck.probeImage(scale: screen.backingScaleFactor) else { return }
+        // Проба — в левом верхнем углу зеркала, на 0,15 с.
+        let frame = CGRect(x: window.frame.minX + 8, y: window.frame.maxY - 8 - HidingCheck.side,
+                           width: HidingCheck.side, height: HidingCheck.side)
+        let probe = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        probe.isReleasedWhenClosed = false
+        probe.animationBehavior = .none
+        probe.ignoresMouseEvents = true
+        probe.hasShadow = false
+        probe.level = NSWindow.Level(rawValue: window.level.rawValue + 1)
+        MirrorView.protect(probe)
+        let view = NSView(frame: CGRect(origin: .zero, size: frame.size))
+        view.wantsLayer = true
+        view.layer?.contents = image
+        probe.contentView = view
+        probe.orderFrontRegardlessOnScreen("Скрытый экран: проба скрытия")
+        defer { probe.orderOut(nil) }
+        try? await Task.sleep(nanoseconds: 150_000_000)
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             guard let scDisplay = content.displays.first(where: { $0.displayID == displayID }) else { return }
@@ -770,12 +988,16 @@ extension HiddenScreenEngine {
             config.showsCursor = false
             let shot = try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: scDisplay, excludingWindows: []),
                                                                   configuration: config)
-            guard let mirrorRect,
-                  let crop = HidingCheck.cropRect(mirror: mirrorRect, display: CGDisplayBounds(displayID), scale: scale),
-                  let region = shot.cropping(to: crop),
-                  let frame = Self.image(from: surface) else { return }
-            let verdict = HidingCheck.verdict(captured: HidingCheck.thumbnail(region), mirror: HidingCheck.thumbnail(frame))
-            Log.hiddenScreen.info("самопроверка скрытия: \(verdict.map { $0 ? "не видно" : "ВИДНО" } ?? "не понять", privacy: .public)")
+            let probeRect = HiddenScreenGeometry.quartz(fromCocoa: probe.frame, primaryHeight: NSScreen.screens.first?.frame.height ?? 0)
+            let shotScale = CGFloat(shot.width) / CGDisplayBounds(displayID).width
+            guard let crop = HidingCheck.cropRect(probeRect, display: CGDisplayBounds(displayID), scale: shotScale),
+                  let region = shot.cropping(to: crop) else {
+                Log.hiddenScreen.error("самопроверка скрытия: проба вне снимка")
+                return
+            }
+            let colors = HidingCheck.cellColors(region)
+            let verdict = HidingCheck.verdict(cells: colors)
+            Log.hiddenScreen.info("самопроверка скрытия: \(verdict.map { $0 ? "не видно" : "ВИДНО" } ?? "не понять", privacy: .public) (клетки: \(colors.map { "\($0.r)/\($0.g)/\($0.b)" }.joined(separator: " "), privacy: .public))")
             if verdict != hidingVerified {
                 hidingVerified = verdict
                 onChange?()
@@ -783,10 +1005,5 @@ extension HiddenScreenEngine {
         } catch {
             Log.hiddenScreen.error("самопроверка скрытия: \(String(describing: error), privacy: .public)")
         }
-    }
-
-    static func image(from surface: IOSurfaceRef) -> CGImage? {
-        let image = CIImage(ioSurface: surface)
-        return CIContext(options: [.useSoftwareRenderer: false]).createCGImage(image, from: image.extent)
     }
 }

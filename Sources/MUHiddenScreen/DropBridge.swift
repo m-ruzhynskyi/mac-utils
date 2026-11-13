@@ -46,6 +46,9 @@ public final class ClipboardSwap {
     private let store: PasteboardStore
     private var saved: [[String: Data]]?
     private var ownChange: Int?
+    /// Пометки Transient/Concealed (менеджеры буфера не пишут в историю). `--hs-clip-marks=off` — без них, для проверки,
+    /// не мешают ли пометки вставке (13.11 картинка с пометкой не вставилась ни в Claude, ни в Discord).
+    public var marksTransient = true
 
     public init(store: PasteboardStore) {
         self.store = store
@@ -55,7 +58,7 @@ public final class ClipboardSwap {
     public func begin(with items: [[String: Data]]) {
         if saved == nil { saved = store.snapshot() }
         let marked = items.enumerated().map { index, item -> [String: Data] in
-            guard index == 0 else { return item }
+            guard index == 0, marksTransient else { return item }
             var item = item
             for marker in DropBridge.transientMarkers { item[marker] = Data() }
             return item

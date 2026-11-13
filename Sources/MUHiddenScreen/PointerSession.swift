@@ -17,6 +17,27 @@ public enum ScrollMode: String, Sendable, CaseIterable {
     case pid
 }
 
+/// Как ⌘-сочетания (⌘V, ⌘A, ⌘Z …) попадают в программу.
+/// Проверка 13.11: текст и Backspace через `postToPid` доходят до неактивной программы, а ⌘V — нет (Electron разбирает
+/// ⌘-сочетания через меню, а меню работает только у активной программы). ⌘V через `postToPid` в активный Claude вставлял.
+public enum KeyMode: String, Sendable, CaseIterable {
+    /// Активировать программу → `postToPid` → пауза → вернуть активность Mac Utils (по умолчанию).
+    case active
+    /// Активировать программу → нажатие через HID (уходит активной программе) → вернуть активность.
+    case hid
+    /// Как в первой версии: `postToPid` без активации (для сравнения).
+    case inactive
+}
+
+/// Как нажатие левой кнопки над зеркалом становится нажатием в программе.
+public enum PressMode: String, Sendable, CaseIterable {
+    /// Перехват на уровне сеанса (CGEventTap): нажатие над зеркалом не доходит до зеркала, вместо него — нажатие
+    /// в окне программы. Тогда протягивание (выделение, ползунки) достаётся программе (по умолчанию).
+    case tap
+    /// Через события зеркала (первая версия): щелчки работают, протягивание — нет (нажатие остаётся у зеркала).
+    case mirror
+}
+
 /// Чем занят настоящий курсор на скрытом дисплее.
 public enum HandoffKind: Equatable, Sendable {
     /// Перетаскивание (выделение текста, ползунок): до отпускания кнопки.
@@ -42,6 +63,8 @@ public enum PointerStep: Equatable, Sendable {
     case postToPid(SyntheticEvent)
     case beginHandoff(HandoffKind)
     case endHandoff(HandoffKind)
+    /// Пауза: программа должна разобрать события, пока она ещё активна.
+    case wait(TimeInterval)
 }
 
 /// Мышь в зеркале → шаги для настоящего окна на скрытом дисплее.
@@ -103,10 +126,12 @@ public struct PointerSession: Sendable {
               hypot(point.x - down.x, point.y - down.y) >= dragThreshold else { return [] }
         let now = mapping.toTarget(Self.clamp(point, to: mapping.contentRect)) ?? target
         state = .handoff(.drag, activated: true)
-        return [.hideCursor, .activateTarget, .warp(target),
+        // Нажатие в программе — синтетическое (физическое перехвачено и до зеркала не дошло), дальше физическая мышь
+        // ведёт протягивание сама: курсор уже на скрытом дисплее, отпускание достанется тому, кто получил нажатие.
+        return [.activateTarget, .warp(target),
                 .postHID(Self.mouse(.leftDown, target, clicks, flags, 0)),
                 .postHID(Self.mouse(.leftDragged, now, 1, flags, 0)),
-                .showCursor, .beginHandoff(.drag)]
+                .warp(now), .beginHandoff(.drag)]
     }
 
     public mutating func up(mapping: MirrorMapping, windowNumber: CGWindowID) -> [PointerStep] {
@@ -138,6 +163,25 @@ public struct PointerSession: Sendable {
             return [.warp(target), .postHID(SyntheticEvent(kind: kind, location: target)), .beginHandoff(.scroll)]
         }
     }
+
+    /// ⌘-сочетание (нажатие и отпускание) в программу. Пока курсор передан программе, она и так активна — без активации.
+    public func shortcut(_ events: [SyntheticEvent], mode: KeyMode) -> [PointerStep] {
+        guard !events.isEmpty else { return [] }
+        let inHandoff = handoff != nil
+        switch mode {
+        case .inactive:
+            return events.map { .postToPid($0) }
+        case .active:
+            return inHandoff ? events.map { .postToPid($0) }
+                : [.activateTarget] + events.map { .postToPid($0) } + [.wait(Self.shortcutSettle), .activateSelf]
+        case .hid:
+            return inHandoff ? events.map { .postHID($0) }
+                : [.activateTarget] + events.map { .postHID($0) } + [.wait(Self.shortcutSettle), .activateSelf]
+        }
+    }
+
+    /// Сколько ждать после ⌘-сочетания, прежде чем вернуть активность Mac Utils.
+    public static let shortcutSettle: TimeInterval = 0.06
 
     /// Конец передачи: курсор возвращается в ту точку зеркала, что соответствует его месту на скрытом дисплее
     /// (рука пользователя «продолжает» движение), но не за край зеркала.

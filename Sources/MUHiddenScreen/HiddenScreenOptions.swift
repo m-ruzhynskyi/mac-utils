@@ -6,6 +6,12 @@ public struct HiddenScreenOptions: Equatable, Sendable {
     public var apps: [HiddenApp]
     public var clickMode: ClickMode
     public var scrollMode: ScrollMode
+    public var keyMode: KeyMode = .active
+    public var pressMode: PressMode = .tap
+    /// Дисплей держит процесс-помощник (переживает падение Mac Utils). `--hs-helper=off` — в процессе Mac Utils.
+    public var useHelper = true
+    /// Пометки «временное» во временном буфере вставки (`--hs-clip-marks=off` — без них).
+    public var clipboardMarks = true
     /// Размер скрытого дисплея в точках (HiDPI ×2).
     public var displaySize: CGSize
 
@@ -34,7 +40,8 @@ public struct HiddenScreenOptions: Equatable, Sendable {
     }
 
     /// Ключ отладочного запуска: `open -a "Mac Utils" --args --hidden-screen-debug [--hs-apps=id,id] [--hs-click=warp|pid]
-    /// [--hs-scroll=handoff|pid] [--hs-size=1440x900]`. Без ключа — nil (обычный запуск). Ссылкой `macutils://` не включается.
+    /// [--hs-scroll=handoff|pid] [--hs-keys=active|hid|inactive] [--hs-press=tap|mirror] [--hs-helper=on|off] [--hs-clip-marks=on|off] [--hs-size=1440x900]`.
+    /// Без ключа — nil (обычный запуск). Ссылкой `macutils://` не включается.
     public static let debugFlag = "--hidden-screen-debug"
 
     public static func debug(arguments: [String], storedBundleIDs: [String]?) -> HiddenScreenOptions? {
@@ -50,6 +57,14 @@ public struct HiddenScreenOptions: Equatable, Sendable {
                 if let mode = ClickMode(rawValue: parts[1]) { options.clickMode = mode }
             case "--hs-scroll":
                 if let mode = ScrollMode(rawValue: parts[1]) { options.scrollMode = mode }
+            case "--hs-keys":
+                if let mode = KeyMode(rawValue: parts[1]) { options.keyMode = mode }
+            case "--hs-press":
+                if let mode = PressMode(rawValue: parts[1]) { options.pressMode = mode }
+            case "--hs-clip-marks":
+                options.clipboardMarks = parts[1] != "off"
+            case "--hs-helper":
+                if parts[1] == "off" { options.useHelper = false } else if parts[1] == "on" { options.useHelper = true }
             case "--hs-size":
                 let numbers = parts[1].lowercased().split(separator: "x").compactMap { Double($0) }
                 if numbers.count == 2, (640...3840).contains(numbers[0]), (480...2400).contains(numbers[1]) {

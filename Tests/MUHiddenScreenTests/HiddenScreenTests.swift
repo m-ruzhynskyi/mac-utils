@@ -206,6 +206,14 @@ final class DropBridgeTests: XCTestCase {
         XCTAssertEqual(board.items, [["public.utf8-plain-text": Data("новое".utf8)]])
     }
 
+    func testMarksCanBeTurnedOff() {
+        let board = FakePasteboard()
+        let swap = ClipboardSwap(store: board)
+        swap.marksTransient = false
+        swap.begin(with: [["public.png": Data([1])]])
+        XCTAssertEqual(board.items, [["public.png": Data([1])]])
+    }
+
     func testSecondBeginKeepsOriginalSnapshot() {
         let board = FakePasteboard()
         let swap = ClipboardSwap(store: board)

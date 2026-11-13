@@ -144,14 +144,9 @@ let package = Package(
             path: "Sources/MUVideoPlayer"
         ),
         // «Скрытый экран»: виртуальный дисплей для окон ИИ + окно-зеркало, которого нет в демонстрации экрана.
-        // Закрытые объявления CGVirtualDisplay — отдельной C-целью (в SDK заголовков нет).
-        .target(
-            name: "MUHiddenScreenPrivate",
-            path: "Sources/MUHiddenScreenPrivate"
-        ),
         .target(
             name: "MUHiddenScreen",
-            dependencies: ["MUCore", "MUHiddenScreenPrivate"],
+            dependencies: ["MUCore"],
             path: "Sources/MUHiddenScreen"
         ),
         .target(
@@ -164,13 +159,19 @@ let package = Package(
             dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUHiddenScreen"],
             path: "Sources/MacUtils"
         ),
+        // Процесс-помощник «Скрытого экрана»: держит виртуальный дисплей и прячет программы ИИ, если Mac Utils упала.
+        .executableTarget(
+            name: "HiddenScreenHelper",
+            dependencies: ["MUHiddenScreen"],
+            path: "Sources/HiddenScreenHelper"
+        ),
         .executableTarget(
             name: "ToolsLauncher",
             path: "Sources/ToolsLauncher"
         ),
         .testTarget(
             name: "MUHiddenScreenTests",
-            dependencies: ["MUHiddenScreen", "MUCore"],
+            dependencies: ["MUHiddenScreen"],
             path: "Tests/MUHiddenScreenTests"
         ),
         .testTarget(
