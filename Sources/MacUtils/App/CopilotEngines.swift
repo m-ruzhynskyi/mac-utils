@@ -479,12 +479,12 @@ final class WarmCopilotAI: CopilotAIClient, @unchecked Sendable {
                 }
             }
             // Тёплый процесс может замолчать (сеть, зависший ход): вопрос не висит дольше, чем холодный запуск.
-            let provider = provider
+            let silent = self.provider
             let watchdog = Task {
                 try? await Task.sleep(nanoseconds: UInt64(BackendCopilotAI.timeout * 1_000_000_000))
                 guard !Task.isCancelled else { return }
                 task.cancel()
-                continuation.finish(throwing: AIFailure.timeout(provider, seconds: BackendCopilotAI.timeout))
+                continuation.finish(throwing: AIFailure.timeout(silent, seconds: BackendCopilotAI.timeout))
             }
             continuation.onTermination = { _ in task.cancel(); watchdog.cancel() }
         }
