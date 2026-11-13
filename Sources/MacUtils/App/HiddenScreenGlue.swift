@@ -14,20 +14,19 @@ final class HiddenScreenGlue {
 
     /// Вызывается при запуске и после смены управления: регистрирует сочетания и подписывается на изменения.
     func sync() {
-        let center = HotKeyCenter.shared
-        for action in [HotKeyAction.hiddenScreen, .hiddenScreenWindow] {
-            let combo = HotKeyRegistry.combo(for: action)
-            center.register(id: action.hotKeyID, keyCode: combo.keyCode, modifiers: combo.modifiers) { [weak self] in
-                guard let self else { return }
-                if action == .hiddenScreen { self.controller.setEnabled(!self.controller.state.isEnabled) }
-                else { self.controller.setMirrorShown(!self.controller.state.mirrorShown) }
-            }
-        }
+        // То же действие, что у «Команд» и ссылок (`AppAction`), — как у остальных сочетаний (ShortcutsTests).
+        register(.hiddenScreen) { AppAction(hotKey: .hiddenScreen).run() }
+        register(.hiddenScreenWindow) { AppAction(hotKey: .hiddenScreenWindow).run() }
         let strip = MirrorStripController(controller)
         self.strip = strip
         let previous = controller.onChange
         controller.onChange = { previous?(); strip.refresh() }
         strip.refresh()
+    }
+
+    private func register(_ action: HotKeyAction, run: @escaping () -> Void) {
+        let combo = HotKeyRegistry.combo(for: action)
+        _ = HotKeyCenter.shared.register(id: action.hotKeyID, keyCode: combo.keyCode, modifiers: combo.modifiers, handler: run)
     }
 
     /// Пункты раздела для меню значка.
