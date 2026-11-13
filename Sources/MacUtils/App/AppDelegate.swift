@@ -4,6 +4,7 @@ import MUCore
 import MUDesign
 import MUCutPaste
 import MUWinKeys
+import MUCopilot
 import MUFocus
 import MUSmoothScroll
 import MUAppSwitcher
@@ -316,6 +317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Плеер: место запоминается и при выходе с открытым окном.
         for controller in PlayerWindowController.windows { controller.model.savePosition() }
+        CopilotGlue.shared.shutdown()
         WarmScreen.shared.shutdown()
         KeepAwake.shared.shutdown()
         AppSwitcher.shared.shutdown()
@@ -353,6 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func syncFeatures() {
         FinderCutPaste.shared.sync()
         WinKeys.shared.sync()
+        CopilotGlue.shared.registerHotKeys()
         SmoothScroll.shared.sync()
         AppSwitcher.shared.sync()
         ScreenshotService.shared.sync()

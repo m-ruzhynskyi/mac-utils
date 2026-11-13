@@ -6,6 +6,7 @@ import MUFocus
 import MUMusic
 import MUDownloadsSorter
 import MUScreenShare
+import MUCopilot
 import MUScreenshot
 import MUTextEditor
 
@@ -245,6 +246,7 @@ struct SettingsSectionPage: View {
             case .focus: FocusPage()
             case .cutPaste: CutPastePage()
             case .winKeys: WinKeysPage()
+            case .copilot: CopilotPage()
             case .smoothScroll: SmoothScrollPage()
             case .switcher: SwitcherPage()
             case .screenshot: ScreenshotPage()

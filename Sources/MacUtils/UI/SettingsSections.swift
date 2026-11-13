@@ -18,6 +18,7 @@ extension SettingsSection {
         case .music: return "сейчас играет музыка spotify apple music плеер обложка"
         case .share: return "трансляция экрана зрители id ретранслятор relay доверенные отпечаток ключ эфир"
         case .textInput: return "ввод текста раскладка для приложения источник ввода язык"
+        case .copilot: return "подсказчик на встрече собеседование созвон вопросы ответы ии codex claude панель невидимая демонстрация экрана расшифровка микрофон"
         case .focus: return "фокус размытие фона затемнение"
         case .cutPaste: return "вырезать вставить finder перенос файлов ⌘x ⌘v"
         case .winKeys: return "клавиши windows ctrl c ctrl v ctrl x копировать вставить вырезать контрол"

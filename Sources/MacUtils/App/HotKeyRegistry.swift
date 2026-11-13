@@ -10,7 +10,7 @@ import MUTextEditor
 /// а `HotKeyCenter` подставляет то, что пользователь выбрал в настройках (`HotKeyRegistry.resolve`).
 enum HotKeyAction: String, CaseIterable, Identifiable {
     case settings, tools, screenshot, screenshotOCR, dropShelf, annotate, windowPin, fixText, meeting, focus, qr,
-         appVolume, layoutFix, textEditor, videoPlayer, remoteConnections
+         appVolume, layoutFix, textEditor, videoPlayer, remoteConnections, copilot, copilotAnswer, copilotScreen, copilotPanel
 
     var id: String { rawValue }
 
@@ -32,6 +32,10 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .textEditor: return HotKeyID.textEditor
         case .videoPlayer: return HotKeyID.videoPlayer
         case .remoteConnections: return HotKeyID.remoteConnections
+        case .copilot: return HotKeyID.copilot
+        case .copilotAnswer: return HotKeyID.copilotAnswer
+        case .copilotScreen: return HotKeyID.copilotScreen
+        case .copilotPanel: return HotKeyID.copilotPanel
         }
     }
 
@@ -53,6 +57,10 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .textEditor: return "Текстовый редактор"
         case .videoPlayer: return "Видеоплеер"
         case .remoteConnections: return "Удалённые подключения"
+        case .copilot: return "Подсказчик: включить и выключить"
+        case .copilotAnswer: return "Подсказчик: ответить на вопрос"
+        case .copilotScreen: return "Подсказчик: посмотреть экран"
+        case .copilotPanel: return "Подсказчик: показать или спрятать панель"
         }
     }
 
@@ -73,6 +81,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .textEditor: return .textEditor
         case .videoPlayer: return .videoPlayer
         case .remoteConnections: return .remote
+        case .copilot, .copilotAnswer, .copilotScreen, .copilotPanel: return .copilot
         }
     }
 
@@ -98,6 +107,10 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         // ⌃⌥⌘A: ⌥⌘A занята в Finder («Снять выделение»); ⌃⌥A — рисование, раскладка окон берёт два модификатора.
         // Регистрируется, только когда выбран файл подключений (`RemoteConnectionsCenter.syncHotKey`).
         case .remoteConnections: return LayoutHotKey(keyCode: kVK_ANSI_A, modifiers: cmdKey | optionKey | controlKey)
+        case .copilot: return LayoutHotKey(keyCode: kVK_ANSI_M, modifiers: optionKey | shiftKey)
+        case .copilotAnswer: return LayoutHotKey(keyCode: kVK_ANSI_A, modifiers: optionKey | shiftKey)
+        case .copilotScreen: return LayoutHotKey(keyCode: kVK_ANSI_S, modifiers: optionKey | shiftKey)
+        case .copilotPanel: return LayoutHotKey(keyCode: kVK_ANSI_P, modifiers: optionKey | shiftKey)
         }
     }
 

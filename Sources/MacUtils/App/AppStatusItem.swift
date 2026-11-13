@@ -80,6 +80,10 @@ final class AppStatusItem: NSObject {
             off.indentationLevel = 1
         }
         menu.addItem(.separator())
+        let copilot = menu.addItem(withTitle: "Подсказчик на встрече", action: #selector(toggleCopilot), keyEquivalent: "")
+        copilot.target = self
+        copilot.state = CopilotGlue.shared.session.isOn ? .on : .off
+        menu.addItem(.separator())
         let open = menu.addItem(withTitle: "Открыть панель", action: #selector(openPanel), keyEquivalent: "")
         open.target = self
         item?.menu = menu
@@ -94,6 +98,8 @@ final class AppStatusItem: NSObject {
     }
 
     @objc private func keepAwakeOff() { KeepAwake.shared.stop() }
+
+    @objc private func toggleCopilot() { CopilotGlue.shared.toggle() }
 
     @objc private func openPanel() { _ = showTools() }
 

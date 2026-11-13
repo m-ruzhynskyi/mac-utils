@@ -19,4 +19,8 @@ package enum HotKeyID {
     package static let textEditor: UInt32 = 34
     package static let videoPlayer: UInt32 = 35
     package static let remoteConnections: UInt32 = 36
+    package static let copilot: UInt32 = 40
+    package static let copilotAnswer: UInt32 = 41
+    package static let copilotScreen: UInt32 = 42
+    package static let copilotPanel: UInt32 = 43
 }

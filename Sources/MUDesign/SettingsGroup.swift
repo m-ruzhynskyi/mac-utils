@@ -25,7 +25,7 @@ package enum SettingsGroup: String, CaseIterable, Identifiable {
     package var sections: [SettingsSection] {
         switch self {
         case .general: return [.general, .hotKeys, .exclusions, .panel]
-        case .capture: return [.screenshot, .shots, .annotate, .qr, .meetings]
+        case .capture: return [.screenshot, .shots, .annotate, .qr, .meetings, .copilot]
         case .windowsInput: return [.switcher, .windows, .volume, .layout, .smoothScroll, .cutPaste, .winKeys, .textInput]
         case .filesSystem: return [.shelf, .downloads, .textEditor, .videoPlayer, .cheatSheet, .uninstaller, .cleanup, .monitor, .tasks]
         case .more: return [.wellbeing, .focus, .music, .share, .remote, .ai]
@@ -53,6 +53,7 @@ extension SettingsSection {
         case .textInput: return "Автозамены macOS при наборе текста во всех программах."
         case .focus: return "Выбранная программа остаётся чёткой, а всё позади её окон размывается и чуть затемняется — ничего не отвлекает."
         case .cutPaste: return "⌘X — вырезать, ⌘V — переместить файлы и папки в Finder."
+        case .copilot: return "Слушает звонок и подсказывает ответы в невидимой панели"
         case .winKeys: return "Ctrl+C, Ctrl+V и Ctrl+X работают как ⌘C, ⌘V и ⌘X."
         case .smoothScroll: return "Колесо обычной мыши прокручивает плавно, как трекпад."
         case .windows: return "Как в Windows: перетащите окно за заголовок к краю экрана — оно займёт половину, к углу — четверть, к верхнему краю — весь экран."
