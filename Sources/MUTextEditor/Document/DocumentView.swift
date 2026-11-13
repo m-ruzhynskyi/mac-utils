@@ -8,6 +8,18 @@ package final class DocLayoutManager: NSLayoutManager {
     package var unitKind: ((Int) -> DocSourceMap.Kind?)?
     package static let markColor = NSColor(srgbRed: 0.27, green: 0.45, blue: 0.85, alpha: 1)
 
+    package override func setGlyphs(_ glyphs: UnsafePointer<CGGlyph>, properties props: UnsafePointer<NSLayoutManager.GlyphProperty>,
+                                    characterIndexes charIndexes: UnsafePointer<Int>, font aFont: NSFont, forGlyphRange glyphRange: NSRange) {
+        if let storage = textStorage,
+           let vertical = DocLineMetrics.verticalProperties(storage, properties: props, characterIndexes: charIndexes, count: glyphRange.length) {
+            vertical.withUnsafeBufferPointer {
+                super.setGlyphs(glyphs, properties: $0.baseAddress!, characterIndexes: charIndexes, font: aFont, forGlyphRange: glyphRange)
+            }
+        } else {
+            super.setGlyphs(glyphs, properties: props, characterIndexes: charIndexes, font: aFont, forGlyphRange: glyphRange)
+        }
+    }
+
     package override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
         guard showsInvisibles, let storage = textStorage, storage.length > 0 else { return }
@@ -128,9 +140,39 @@ package final class DocTextView: NSTextView {
 
     // MARK: Меню и перетаскивание
 
+    @objc func applySpelling(_ sender: NSMenuItem) {
+        guard let pair = sender.representedObject as? [Any], let range = (pair.first as? NSValue)?.rangeValue, let word = pair.last as? String else { return }
+        controller?.perform(replacing: range, with: word)
+    }
+
+    @objc func learnSpelling(_ sender: NSMenuItem) {
+        if let range = (sender.representedObject as? NSValue)?.rangeValue { controller?.spelling.learn(range) }
+    }
+
+    @objc func skipSpelling(_ sender: NSMenuItem) {
+        if let range = (sender.representedObject as? NSValue)?.rangeValue { controller?.spelling.ignore(range) }
+    }
+
     /// Контекстное меню: «Показать в коде» — то же место в исходнике; в таблице — строки.
     package override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for: event) ?? NSMenu()
+        // Опечатка под кликом: варианты исправления (обычная точечная правка), «Добавить в словарь», «Пропустить».
+        if let controller, controller.spelling.isEnabled {
+            let unit = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+            let fixes = controller.spelling.menuItems(forUnit: unit, target: self, apply: #selector(applySpelling(_:)))
+            if !fixes.isEmpty, let range = controller.spelling.misspelling(atUnit: unit) {
+                for (index, fix) in fixes.enumerated() { menu.insertItem(fix, at: index) }
+                let learn = NSMenuItem(title: "Добавить в словарь", action: #selector(learnSpelling(_:)), keyEquivalent: "")
+                learn.target = self
+                learn.representedObject = NSValue(range: range)
+                let skip = NSMenuItem(title: "Пропустить", action: #selector(skipSpelling(_:)), keyEquivalent: "")
+                skip.target = self
+                skip.representedObject = NSValue(range: range)
+                menu.insertItem(learn, at: fixes.count)
+                menu.insertItem(skip, at: fixes.count + 1)
+                menu.insertItem(.separator(), at: fixes.count + 2)
+            }
+        }
         let item = NSMenuItem(title: "Показать в коде", action: #selector(showInCode(_:)), keyEquivalent: "")
         item.target = self
         menu.insertItem(item, at: 0)

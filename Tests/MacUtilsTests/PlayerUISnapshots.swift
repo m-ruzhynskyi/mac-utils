@@ -48,6 +48,7 @@ final class PlayerUISnapshots: XCTestCase {
             let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: size.width, height: size.height),
                                   styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
+            window.animationBehavior = .none  // показ/закрытие без анимации: вне экрана она не кончается и навсегда занимает поток GCD
             window.appearance = appearance
             window.contentView = host
             window.orderBack(nil)

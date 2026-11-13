@@ -265,6 +265,7 @@ final class EditorMultiCaretTests: XCTestCase {
         window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 600, height: 300), styleMask: [.borderless],
                           backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none  // показ/закрытие без анимации: вне экрана она не кончается и навсегда занимает поток GCD
         tab.container.frame = NSRect(x: 0, y: 0, width: 600, height: 300)
         window.contentView = tab.container
         window.orderBack(nil)

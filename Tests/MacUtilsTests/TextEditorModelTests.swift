@@ -447,13 +447,29 @@ final class EditorWorkspaceTests: XCTestCase {
 
 /// Тесты меняют общие настройки редактора в домене xctest — после теста возвращаем как было, иначе соседние тесты
 /// (и параллельный прогон тестировщика) видят чужие значения.
+/// Снимок настроек редактора вокруг теста. Настройки тестового процесса (`com.apple.dt.xctest.tool`) сохраняются на диск между
+/// запусками: прерванный или убитый прогон оставлял в них `editorSkipFirst`/`editorDollarPanel` и т. п., и следующий запуск
+/// брал это «как исходное» и сам возвращал назад — тесты, ждущие список $, падали в зависимости от прошлых запусков. Поэтому
+/// перед первым снимком в процессе ключи очищаются один раз (каждый запуск начинается с настроек по умолчанию), а после теста
+/// возвращается то, что было видно в начале теста.
 struct EditorDefaultsSnapshot {
     static let keys = [Pref.editorSkipFirst, Pref.editorSkipCount, Pref.editorRestoreSession, Pref.editorAutosaveDrafts,
                        Pref.editorInvisibles, Pref.editorBrackets, Pref.editorWrap, Pref.editorZoom, Pref.editorDollarPanel,
-                       Pref.editorRecent, Pref.editorTabWidth, Pref.editorViewModes]
+                       Pref.editorRecent, Pref.editorTabWidth, Pref.editorViewModes, Pref.docSpelling, Pref.docAutocorrect,
+                       Pref.editorRibbonTab]
     private let values: [String: Any]
 
+    /// Один раз за процесс: следы прошлых запусков стираются.
+    private static let cleanedOnce: Void = {
+        for key in keys { UserDefaults.standard.removeObject(forKey: key) }
+        // Окна тестов — вне экрана (-20 000): системная анимация показа/закрытия окна (`_NSWindowTransformAnimation`, свой
+        // поток) там не кончается и навсегда занимает поток GCD. Окон за прогон сотни — к ~64-му пул пуст, и фоновые задачи
+        // (скан знаков $) не запускаются. Только в памяти процесса (регистрационный домен), на диск не пишется.
+        UserDefaults.standard.register(defaults: ["NSAutomaticWindowAnimationsEnabled": false])
+    }()
+
     init() {
+        _ = Self.cleanedOnce
         var values: [String: Any] = [:]
         for key in Self.keys { values[key] = UserDefaults.standard.object(forKey: key) }
         self.values = values
