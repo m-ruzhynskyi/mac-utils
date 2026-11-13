@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import MUCore
 import MUCopilot
@@ -50,6 +51,8 @@ final class WarmProcess: @unchecked Sendable {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = errors
+        // Запись в процесс, который уже завершился, — ошибка записи, а не SIGPIPE (он закрыл бы Mac Utils).
+        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
     }
 
     func start() throws {
@@ -81,11 +84,19 @@ final class WarmProcess: @unchecked Sendable {
     var stderrTail: String { lock.lock(); defer { lock.unlock() }; return String(decoding: errorTail, as: UTF8.self) }
     var isRunning: Bool { process.isRunning }
 
+    /// Закрыть ввод, SIGTERM процессу и его потомкам (codex — node, который запускает свою программу), через 2 с — SIGKILL.
     func terminate() {
         output.fileHandleForReading.readabilityHandler = nil
         errors.fileHandleForReading.readabilityHandler = nil
         try? input.fileHandleForWriting.close()
-        if process.isRunning { process.terminate() }
+        if process.isRunning {
+            let pid = process.processIdentifier
+            let tree = ProcessTree.descendants(of: pid) + [pid]
+            for p in tree { kill(p, SIGTERM) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                for p in tree where ProcessTree.isAlive(p) { kill(p, SIGKILL) }
+            }
+        }
         continuation.finish()
     }
 }
@@ -133,6 +144,8 @@ actor ClaudeWarmHost {
     private var spare: Task<Session?, Never>?
     private var uses = 0
     private var busy = false
+    /// Растёт при `shutdown()`: запуск, начатый до него, по окончании закрывает свой процесс, а не отдаёт его.
+    private var epoch = 0
     private(set) var lastInfo: Info?
 
     init(executable: String, system: String, model: String?, effort: String?) {
@@ -142,15 +155,17 @@ actor ClaudeWarmHost {
         self.effort = effort
     }
 
-    /// Запуск процесса и прогрев коротким запросом.
+    /// Запуск процесса и прогрев коротким запросом. Если за это время был `shutdown()` или задачу отменили — процесс закрывается.
     private func makeSession() async -> Session? {
+        let startedEpoch = epoch
         var arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
                          "--tools", "", "--strict-mcp-config", "--safe-mode", "--disable-slash-commands", "--no-session-persistence",
                          "--system-prompt", [system, AIRequest.textOnly].joined(separator: "\n")]
         if let effort { arguments += ["--effort", effort] }
         if let model { arguments += ["--model", model] }
-        let process = WarmProcess(executable: executable, arguments: arguments,
-                                  environment: await CLIEnvironment.shared.environment(for: executable), directory: AIWorkspace.directory)
+        let environment = await CLIEnvironment.shared.environment(for: executable)
+        guard epoch == startedEpoch, !Task.isCancelled else { return nil }
+        let process = WarmProcess(executable: executable, arguments: arguments, environment: environment, directory: AIWorkspace.directory)
         do { try process.start() } catch { return nil }
         let session = Session(process: process, reader: LineReader(process.lines))
         guard let message = WarmProtocol.claudeUserMessage(Self.primePrompt) else { return session }
@@ -165,16 +180,25 @@ actor ClaudeWarmHost {
                 if case .failure = event { process.terminate(); return nil }
             }
         }
+        guard epoch == startedEpoch, !Task.isCancelled else { process.terminate(); return nil }
         return session
     }
 
     func warmUp() async {
-        if current?.process.isRunning != true { current = await makeSession(); uses = 0 }
+        guard current?.process.isRunning != true else { return }
+        guard let session = await makeSession() else { return }
+        // Пока прогревали, вопрос мог сам завести сессию: лишнюю закрываем, а не теряем.
+        if current?.process.isRunning == true { session.process.terminate(); return }
+        current = session
+        uses = 0
     }
 
     func shutdown() {
+        epoch += 1
         current?.process.terminate(); current = nil
-        spare?.cancel(); spare = nil
+        // Отмена задачи процесс не закрывает: запасную закрываем сами, когда (если) она запустится.
+        if let spare { Task { await spare.value?.process.terminate() } }
+        spare = nil
         busy = false
     }
 
@@ -187,9 +211,12 @@ actor ClaudeWarmHost {
         uses = 0
         var next: Session?
         var cold = true
-        if let spare { next = await spare.value; self.spare = nil; cold = false }
+        if let spare { self.spare = nil; next = await spare.value; cold = false }
         if next?.process.isRunning != true { next = await makeSession(); cold = true }
         guard let next else { throw WarmFailure("Claude: процесс не запустился") }
+        // Пока ждали, мог прийти `shutdown()` или другой вопрос завёл свою сессию: эту не теряем.
+        if Task.isCancelled { next.process.terminate(); throw CancellationError() }
+        current?.process.terminate()
         current = next
         return (next, cold, Date().timeIntervalSince(started))
     }
@@ -238,6 +265,9 @@ actor CodexWarmHost {
     private var pending: [Int: CheckedContinuation<(threadID: String?, error: String?), Never>] = [:]
     private var turns: [String: AsyncThrowingStream<String, Error>.Continuation] = [:]
     private var ready = false
+    /// Идущий запуск: второй вопрос (гибрид) ждёт его, а не убивает и не запускает свой.
+    private var starting: Task<Void, Error>?
+    private var epoch = 0
 
     init(executable: String) { self.executable = executable }
 
@@ -253,9 +283,22 @@ actor CodexWarmHost {
 
     func warmUp() async throws {
         if ready, process?.isRunning == true { return }
-        shutdown()
-        let process = WarmProcess(executable: executable, arguments: ["app-server"],
-                                  environment: await CLIEnvironment.shared.environment(for: executable), directory: AIWorkspace.directory)
+        if let starting { return try await starting.value }
+        let task = Task { try await self.launch() }
+        starting = task
+        defer { if epochMatches(task) { starting = nil } }
+        try await task.value
+    }
+
+    private func epochMatches(_ task: Task<Void, Error>) -> Bool { starting == task }
+
+    private func launch() async throws {
+        stopProcess()
+        let startedEpoch = epoch
+        let environment = await CLIEnvironment.shared.environment(for: executable)
+        guard epoch == startedEpoch else { throw CancellationError() }
+        let process = WarmProcess(executable: executable, arguments: ["app-server"], environment: environment,
+                                  directory: AIWorkspace.directory)
         try process.start()
         self.process = process
         let lines = process.lines
@@ -264,12 +307,19 @@ actor CodexWarmHost {
             await self?.processEnded()
         }
         let result = await request { WarmProtocol.codexInitialize(id: $0) }
-        if let error = result.error { shutdown(); throw WarmFailure("Codex: \(error)") }
+        guard epoch == startedEpoch else { throw CancellationError() }
+        if let error = result.error { stopProcess(); throw WarmFailure("Codex: \(error)") }
         send(WarmProtocol.codexInitialized())
         ready = true
     }
 
     func shutdown() {
+        epoch += 1
+        starting = nil
+        stopProcess()
+    }
+
+    private func stopProcess() {
         reader?.cancel(); reader = nil
         process?.terminate(); process = nil
         ready = false
@@ -298,7 +348,9 @@ actor CodexWarmHost {
             c.finish(throwing: AIFailure.from(.codex, output: message))
         case .serverRequest(let idJSON):
             // Подсказчику ничего не разрешаем: отказ, чтобы ход не завис.
-            if let id = Int(idJSON) { send(WarmProtocol.codexReject(id: id)) }
+            // id может быть и строкой: отвечаем тем же значением, иначе ход ждал бы ответа до таймаута.
+            let id = (try? JSONSerialization.jsonObject(with: Data(idJSON.utf8), options: [.fragmentsAllowed])) ?? idJSON
+            send(WarmProtocol.codexReject(id: id))
         case .other:
             break
         }
@@ -318,7 +370,6 @@ actor CodexWarmHost {
         return stream
     }
 
-    func cancel(threadStream: Void) {}
 }
 
 // MARK: - Клиенты
@@ -380,7 +431,8 @@ final class WarmCopilotAI: CopilotAIClient, @unchecked Sendable {
     func warmUp(system: String) async {
         guard let executable = await CLIEnvironment.shared.executable(for: provider) else { return }
         switch provider {
-        case .claude: await claudeHost(system: system, profile: CopilotModels.warmEnabled() ? .fast : .main, executable: executable).warmUp()
+        // Прогреваем ту сессию, куда пойдёт вопрос: быстрая модель или основная — по настройке «Быстрые модели».
+        case .claude: await claudeHost(system: system, profile: CopilotPrefs.load().fastModels ? .fast : .main, executable: executable).warmUp()
         case .codex: try? await codexHost(executable: executable).warmUp()
         }
     }
@@ -426,7 +478,15 @@ final class WarmCopilotAI: CopilotAIClient, @unchecked Sendable {
                     } catch { continuation.finish(throwing: error) }
                 }
             }
-            continuation.onTermination = { _ in task.cancel() }
+            // Тёплый процесс может замолчать (сеть, зависший ход): вопрос не висит дольше, чем холодный запуск.
+            let provider = provider
+            let watchdog = Task {
+                try? await Task.sleep(nanoseconds: UInt64(BackendCopilotAI.timeout * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                task.cancel()
+                continuation.finish(throwing: AIFailure.timeout(provider, seconds: BackendCopilotAI.timeout))
+            }
+            continuation.onTermination = { _ in task.cancel(); watchdog.cancel() }
         }
     }
 }

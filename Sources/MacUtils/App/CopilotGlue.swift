@@ -1,6 +1,8 @@
 import AppKit
+import Combine
 import ScreenCaptureKit
 import MUCore
+import MUDesign
 import MUCopilot
 import MUAIBackend
 
@@ -35,18 +37,55 @@ final class CopilotGlue {
     }
     private var panel: CopilotPanel?
     private var panelHidden = false
+    private var phaseWatch: AnyCancellable?
 
+    /// Сочетания, которые нужны только при включённом подсказчике: зарегистрированные всегда, они глотали бы ввод
+    /// (⌥⇧A — «Å», ⌥⇧S — «Í», ⌥⇧P — «∏») и тогда, когда подсказчик выключен.
+    static let whileOnActions: [(HotKeyAction, AppAction)] = [(.copilotAnswer, .copilotAnswer), (.copilotScreen, .copilotScreen),
+                                                               (.copilotPanel, .copilotPanel)]
+
+    /// ⌥⇧M — всегда; остальные — пока подсказчик включён. Вызывается при запуске и при смене сочетаний.
     func registerHotKeys() {
-        let center = HotKeyCenter.shared
-        for (action, appAction) in [(HotKeyAction.copilot, AppAction.copilotToggle), (.copilotAnswer, .copilotAnswer),
-                                    (.copilotScreen, .copilotScreen), (.copilotPanel, .copilotPanel)] {
-            let combo = HotKeyRegistry.combo(for: action)
-            center.register(id: action.hotKeyID, keyCode: combo.keyCode, modifiers: combo.modifiers) { appAction.run() }
+        let combo = HotKeyRegistry.combo(for: .copilot)
+        HotKeyCenter.shared.register(id: HotKeyAction.copilot.hotKeyID, keyCode: combo.keyCode, modifiers: combo.modifiers) {
+            AppAction.copilotToggle.run()
         }
+        syncWhileOnHotKeys()
+        watchPhase()
+    }
+
+    private func syncWhileOnHotKeys() {
+        let center = HotKeyCenter.shared
+        for (action, appAction) in Self.whileOnActions {
+            if session.isOn {
+                let combo = HotKeyRegistry.combo(for: action)
+                center.register(id: action.hotKeyID, keyCode: combo.keyCode, modifiers: combo.modifiers) { appAction.run() }
+            } else {
+                center.unregister(id: action.hotKeyID)
+            }
+        }
+    }
+
+    /// Подсказчик выключается и сам (обрыв звука, нет доступа): тогда прячем панель, снимаем сочетания и показываем причину.
+    private func watchPhase() {
+        guard phaseWatch == nil else { return }
+        phaseWatch = session.$phase.removeDuplicates().dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.phaseChanged() }
+        }
+    }
+
+    private func phaseChanged() {
+        syncWhileOnHotKeys()
+        if !session.isOn {
+            panelHidden = false
+            if let error = session.error { Toast.show("Подсказчик выключен: \(error)", symbol: "exclamationmark.triangle.fill", tint: .orange) }
+        }
+        syncPanel()
     }
 
     func toggle() {
         session.toggle()
+        syncWhileOnHotKeys()
         syncPanel()
     }
 

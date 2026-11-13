@@ -78,6 +78,9 @@ package final class CopilotSession: ObservableObject {
     /// Замер «конец вопроса → первая строка» для статистики по сервисам (приложение пишет её и даёт совет).
     private let onLatency: (TimeInterval) -> Void
     private var task: Task<Void, Never>?
+    /// Прогрев и остановка тёплых процессов — строго по очереди: иначе быстрое «вкл → выкл» могло прогреть процесс
+    /// уже после остановки, и он жил бы при выключенном подсказчике.
+    private var lifecycle: Task<Void, Never>?
     private var meter = LatencyMeter()
     private var answeredQuestionID: UUID?
 
@@ -109,8 +112,12 @@ package final class CopilotSession: ObservableObject {
             try listener.start(language: settings().meetingLanguage, reactToPauses: settings().reactToPauses) { [weak self] in self?.feed($0) }
             phase = .listening
             error = nil
-            let ai = self.ai, system = CopilotPrompt.system(settings: settings())
-            Task { await ai.warmUp(system: system) }
+            let ai = self.ai, system = CopilotPrompt.system(settings: settings()), previous = lifecycle
+            lifecycle = Task {
+                await previous?.value
+                guard !Task.isCancelled else { return }
+                await ai.warmUp(system: system)
+            }
             log("Подсказчик: включён вручную")
         } catch {
             self.error = "Не удалось начать слушать: \(error.localizedDescription)"
@@ -124,8 +131,13 @@ package final class CopilotSession: ObservableObject {
         task?.cancel()
         task = nil
         listener.stop()
-        let ai = self.ai
-        Task { await ai.shutdown() }
+        // Незаконченный прогрев отменяется, остановка идёт после него.
+        let ai = self.ai, previous = lifecycle
+        previous?.cancel()
+        lifecycle = Task {
+            await previous?.value
+            await ai.shutdown()
+        }
         phase = .off
         transcript = []
         question = nil

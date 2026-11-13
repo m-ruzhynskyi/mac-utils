@@ -63,6 +63,7 @@ package final class CopilotPanel: NSPanel {
     private let session: CopilotSession
     private var timer: Timer?
     private var flagsMonitor: Any?
+    private var escapeMonitor: Any?
 
     package init(session: CopilotSession) {
         self.session = session
@@ -90,16 +91,33 @@ package final class CopilotPanel: NSPanel {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick(placement: placement, screen: screen) }
         }
+        removeMonitors() // show() зовётся при каждой смене места: прежние мониторы не копятся
         flagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             MainActor.assumeIsolated { self?.ignoresMouseEvents = CopilotPanelRules.ignoresMouse(optionHeld: event.modifierFlags.contains(.option)) }
+        }
+        // Esc сворачивает раскрытую панель. Панель не берёт фокус, поэтому слушаем глобально; нажатие не перехватывается
+        // и дойдёт до программы звонка как обычно.
+        escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            MainActor.assumeIsolated {
+                guard let self, self.session.expandedAt != nil else { return }
+                self.session.collapse()
+            }
         }
     }
 
     package func hide() {
         timer?.invalidate(); timer = nil
-        if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
-        flagsMonitor = nil
+        removeMonitors()
+        ignoresMouseEvents = true
         orderOut(nil)
+    }
+
+    private func removeMonitors() {
+        if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+        flagsMonitor = nil
+        escapeMonitor = nil
     }
 
     private func tick(placement: CopilotPlacement, screen: NSScreen?) {

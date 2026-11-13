@@ -38,9 +38,10 @@ final class LiveCopilotListener: NSObject, CopilotListening {
         task = Task { [weak self] in
             do {
                 try await system.start()
+                guard self?.generation == mine, !Task.isCancelled else { return }
                 try await me.start()
                 guard let self, self.generation == mine, !Task.isCancelled else { return }
-                try await self.beginCapture(system: system, mine: me)
+                try await self.beginCapture(system: system, mine: me, token: mine)
             } catch {
                 guard let self, self.generation == mine, !Task.isCancelled else { return }
                 self.fail(error.localizedDescription)
@@ -48,8 +49,11 @@ final class LiveCopilotListener: NSObject, CopilotListening {
         }
     }
 
-    private func beginCapture(system: StreamingTranscriber, mine: StreamingTranscriber) async throws {
+    /// `token` — номер включения. Между `await` подсказчик могли выключить (`stop()` увеличил `generation`): тогда всё,
+    /// что успели открыть, закрывается здесь же — иначе микрофон и звук остались бы открыты при выключенном подсказчике.
+    private func beginCapture(system: StreamingTranscriber, mine: StreamingTranscriber, token: Int) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard generation == token else { return }
         guard let display = content.displays.first else { throw CopilotError.noDisplay }
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let filter = SCContentFilter(display: display, excludingApplications: content.applications.filter { $0.processID == ownPID },
@@ -70,10 +74,22 @@ final class LiveCopilotListener: NSObject, CopilotListening {
         // Микрофон — с подавлением эха: голоса собеседников из динамиков не попадают в «вас».
         let mic = EchoFreeMicrophone { buffer, _ in mine.append(buffer) }
         try mic.start()
-        do { try await stream.startCapture() } catch { mic.stop(); throw error }
+        // Сразу в свойства: `stop()` во время `startCapture` закроет микрофон.
+        self.microphone = mic
         self.tap = tap
         self.stream = stream
-        self.microphone = mic
+        do {
+            try await stream.startCapture()
+        } catch {
+            if generation == token { mic.stop(); microphone = nil; self.stream = nil; self.tap = nil }
+            throw error
+        }
+        guard generation == token else {
+            // Выключили, пока поток запускался: `stop()` мог позвать stopCapture раньше, чем он запустился.
+            try? await stream.stopCapture()
+            withExtendedLifetime(tap) {}
+            return
+        }
         Log.ai.info("Подсказчик: слушаю звук звонка и микрофон")
     }
 
@@ -138,6 +154,8 @@ final class StreamingTranscriber: @unchecked Sendable {
     private var targetFormat: AVAudioFormat?
     private var finishBlock: (@Sendable () -> Void)?
     private var accepting = false
+    /// `finish()` уже вызван: запуск, который ещё шёл (скачивание модели, старт анализатора), сам всё закроет.
+    private var closed = false
 
     private let reactToPauses: Bool
     private var settler = VolatileSettler()
@@ -160,7 +178,7 @@ final class StreamingTranscriber: @unchecked Sendable {
     }
 
     func finish() {
-        lock.lock(); accepting = false; let block = finishBlock; finishBlock = nil; let ticker = self.ticker; self.ticker = nil; lock.unlock()
+        lock.lock(); closed = true; accepting = false; let block = finishBlock; finishBlock = nil; let ticker = self.ticker; self.ticker = nil; lock.unlock()
         ticker?.cancel()
         block?()
     }
@@ -202,10 +220,20 @@ final class StreamingTranscriber: @unchecked Sendable {
         let ticker: Task<Void, Never>? = reactToPauses ? Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 150_000_000)
-                self?.tick()
+                guard let self else { return }
+                self.tick()
             }
         } : nil
         lock.lock()
+        if closed {
+            // Подсказчик выключили, пока шёл запуск: ничего не оставляем работать.
+            lock.unlock()
+            continuation.finish()
+            reader.cancel()
+            ticker?.cancel()
+            await analyzer.cancelAndFinishNow()
+            return
+        }
         self.ticker = ticker
         self.targetFormat = format
         self.typed = continuation
