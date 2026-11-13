@@ -167,14 +167,18 @@ final class StreamingTranscriber: @unchecked Sendable {
         self.onText = onText
     }
 
+    /// SpeechAnalyzer — только в SDK macOS 26 (Swift 6.2+): на CI с SDK macOS 15 этот код не собирается, как и в записи встреч.
     func start() async throws {
-        guard #available(macOS 26.0, *) else { throw CopilotError.notConnected("Расшифровка на устройстве (нужна macOS 26)") }
-        try await startModern()
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) { return try await startModern() }
+        #endif
+        throw CopilotError.notConnected("Расшифровка на устройстве (нужна macOS 26)")
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
-        guard #available(macOS 26.0, *) else { return }
-        appendModern(buffer)
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) { appendModern(buffer) }
+        #endif
     }
 
     func finish() {
@@ -185,6 +189,7 @@ final class StreamingTranscriber: @unchecked Sendable {
 
     // MARK: macOS 26
 
+    #if compiler(>=6.2)
     @available(macOS 26.0, *)
     private func startModern() async throws {
         let module: any SpeechModule
@@ -262,6 +267,8 @@ final class StreamingTranscriber: @unchecked Sendable {
         lock.unlock()
         continuation.yield(AnalyzerInput(buffer: converted))
     }
+
+    #endif
 
     private static func convert(_ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
         let ratio = format.sampleRate / buffer.format.sampleRate
