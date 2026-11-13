@@ -111,6 +111,9 @@ package final class MirrorStripController {
 
     package init(_ controller: HiddenScreenControlling) { store = HiddenScreenStore(controller) }
 
+    /// Убрать полоску с экрана (управление подменили или подсказчик выключен).
+    package func hide() { panel?.attach(to: nil as NSWindow?) }
+
     package func refresh() {
         let c = store.controller
         if c.state.isEnabled, c.state.mirrorShown, let frame = c.mirrorFrame {

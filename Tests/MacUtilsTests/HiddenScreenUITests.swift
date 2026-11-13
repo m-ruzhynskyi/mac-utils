@@ -179,6 +179,38 @@ final class HiddenScreenShellTests: XCTestCase {
         XCTAssertTrue(HiddenScreenRules.defaultApps.contains { $0.bundleID == "com.openai.codex" })
     }
 
+    func testConnectSubscribesOnceNoMatterHowOftenSyncRuns() {
+        let saved = HiddenScreenUI.controller
+        defer { HiddenScreenUI.controller = saved }
+        let stub = StubHiddenScreenController(.demo)
+        var changes = 0
+        stub.onChange = { changes += 1 }
+        HiddenScreenUI.controller = stub
+        let glue = HiddenScreenGlue()
+        let before = glue.stripCreations
+        for _ in 0..<5 { glue.connect() }
+        XCTAssertEqual(glue.stripCreations, before + 1, "полоска одна")
+        changes = 0
+        stub.setEnabled(false)
+        XCTAssertEqual(changes, 1, "прежний обработчик вызывается один раз, цепочка не растёт")
+    }
+
+    func testReplacingTheControllerReconnectsOnce() {
+        let saved = HiddenScreenUI.controller
+        defer { HiddenScreenUI.controller = saved }
+        let glue = HiddenScreenGlue()
+        let first = StubHiddenScreenController(.demo), second = StubHiddenScreenController(.demo)
+        var changes = 0
+        second.onChange = { changes += 1 }
+        HiddenScreenUI.controller = first
+        glue.connect(); glue.connect()
+        HiddenScreenUI.controller = second
+        glue.connect(); glue.connect()
+        XCTAssertEqual(glue.stripCreations, 2)
+        second.setEnabled(false)
+        XCTAssertEqual(changes, 1)
+    }
+
     func testStripPanelIsHiddenFromSharing() {
         let store = HiddenScreenStore(StubHiddenScreenController())
         let panel = MirrorStripPanel(store: store)
