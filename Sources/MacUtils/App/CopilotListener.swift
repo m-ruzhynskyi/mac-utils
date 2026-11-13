@@ -21,15 +21,15 @@ final class LiveCopilotListener: NSObject, CopilotListening {
     private var task: Task<Void, Never>?
     private var generation = 0
 
-    func start(language: String?, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {
+    func start(language: String?, reactToPauses: Bool, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {
         guard #available(macOS 26.0, *) else { throw CopilotError.notConnected("Расшифровка на устройстве (нужна macOS 26)") }
         generation += 1
         let mine = generation
         let locale = Locale(identifier: CopilotLocale.identifier(for: language))
-        let system = StreamingTranscriber(locale: locale) { text in
+        let system = StreamingTranscriber(locale: locale, reactToPauses: reactToPauses) { text in
             Task { @MainActor in onUtterance(Utterance(.other, text)) }
         }
-        let me = StreamingTranscriber(locale: locale) { text in
+        let me = StreamingTranscriber(locale: locale, reactToPauses: reactToPauses) { text in
             Task { @MainActor in onUtterance(Utterance(.me, text)) }
         }
         self.system = system
@@ -139,8 +139,13 @@ final class StreamingTranscriber: @unchecked Sendable {
     private var finishBlock: (@Sendable () -> Void)?
     private var accepting = false
 
-    init(locale: Locale, onText: @escaping @Sendable (String) -> Void) {
+    private let reactToPauses: Bool
+    private var settler = VolatileSettler()
+    private var ticker: Task<Void, Never>?
+
+    init(locale: Locale, reactToPauses: Bool, onText: @escaping @Sendable (String) -> Void) {
         self.locale = locale
+        self.reactToPauses = reactToPauses
         self.onText = onText
     }
 
@@ -155,7 +160,8 @@ final class StreamingTranscriber: @unchecked Sendable {
     }
 
     func finish() {
-        lock.lock(); accepting = false; let block = finishBlock; finishBlock = nil; lock.unlock()
+        lock.lock(); accepting = false; let block = finishBlock; finishBlock = nil; let ticker = self.ticker; self.ticker = nil; lock.unlock()
+        ticker?.cancel()
         block?()
     }
 
@@ -164,16 +170,19 @@ final class StreamingTranscriber: @unchecked Sendable {
     @available(macOS 26.0, *)
     private func startModern() async throws {
         let module: any SpeechModule
-        let results: AsyncThrowingStream<String, Error>
+        let results: AsyncThrowingStream<(String, Bool), Error>
+        // С реакцией на паузу просим и промежуточный текст: он приходит раньше финала.
+        let reporting: Set<SpeechTranscriber.ReportingOption> = reactToPauses ? [.volatileResults, .fastResults] : []
+        let dictationReporting: Set<DictationTranscriber.ReportingOption> = reactToPauses ? [.volatileResults, .frequentFinalization] : []
         if let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) {
-            let m = SpeechTranscriber(locale: supported, transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
+            let m = SpeechTranscriber(locale: supported, transcriptionOptions: [], reportingOptions: reporting, attributeOptions: [])
             module = m
-            results = Self.texts(m.results.map { String($0.text.characters) })
+            results = Self.texts(m.results.map { (String($0.text.characters), $0.isFinal) })
         } else if let supported = await DictationTranscriber.supportedLocale(equivalentTo: locale) {
             let m = DictationTranscriber(locale: supported, contentHints: [], transcriptionOptions: [.punctuation],
-                                         reportingOptions: [], attributeOptions: [])
+                                         reportingOptions: dictationReporting, attributeOptions: [])
             module = m
-            results = Self.texts(m.results.map { String($0.text.characters) })
+            results = Self.texts(m.results.map { (String($0.text.characters), $0.isFinal) })
         } else {
             throw CopilotError.notConnected("Язык \(locale.identifier) для расшифровки")
         }
@@ -185,16 +194,19 @@ final class StreamingTranscriber: @unchecked Sendable {
         let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module])
         let (input, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         try await analyzer.start(inputSequence: input)
-        let onText = self.onText
-        let reader = Task {
+        let reader = Task { [weak self] in
             do {
-                for try await text in results {
-                    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !t.isEmpty { onText(t) }
-                }
+                for try await (text, isFinal) in results { self?.receive(text, isFinal: isFinal) }
             } catch {}
         }
+        let ticker: Task<Void, Never>? = reactToPauses ? Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                self?.tick()
+            }
+        } : nil
         lock.lock()
+        self.ticker = ticker
         self.targetFormat = format
         self.typed = continuation
         self.accepting = true
@@ -238,7 +250,25 @@ final class StreamingTranscriber: @unchecked Sendable {
         return status == .error || out.frameLength == 0 ? nil : out
     }
 
-    private static func texts<S: AsyncSequence & Sendable>(_ source: S) -> AsyncThrowingStream<String, Error> where S.Element == String {
+    /// Текст от расшифровки: без реакции на паузу — только финалы; с ней — новые слова после паузы ≥ 0,7 с и остаток финала.
+    private func receive(_ text: String, isFinal: Bool) {
+        var out: String?
+        if !reactToPauses {
+            if isFinal { out = text }
+        } else {
+            lock.lock()
+            if isFinal { out = settler.final(text) } else { settler.volatile(text, at: Date()) }
+            lock.unlock()
+        }
+        if let t = out?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { onText(t) }
+    }
+
+    private func tick() {
+        lock.lock(); let out = settler.tick(at: Date()); lock.unlock()
+        if let out, !out.isEmpty { onText(out) }
+    }
+
+    private static func texts<S: AsyncSequence & Sendable>(_ source: S) -> AsyncThrowingStream<(String, Bool), Error> where S.Element == (String, Bool) {
         AsyncThrowingStream { c in
             let task = Task {
                 do { for try await t in source { c.yield(t) }; c.finish() } catch { c.finish(throwing: error) }

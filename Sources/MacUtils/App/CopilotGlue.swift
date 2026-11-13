@@ -117,7 +117,7 @@ struct UnavailableCopilotAI: CopilotAIClient {
 @MainActor
 final class UnavailableCopilotListener: CopilotListening {
     var onFailure: (@MainActor (String) -> Void)?
-    func start(language: String?, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {
+    func start(language: String?, reactToPauses: Bool, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {
         throw CopilotError.notConnected("Звук и расшифровка")
     }
     func stop() {}

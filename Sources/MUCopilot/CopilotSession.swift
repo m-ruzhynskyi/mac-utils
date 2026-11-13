@@ -12,7 +12,7 @@ package protocol CopilotAIClient: Sendable {
 @MainActor
 package protocol CopilotListening: AnyObject {
     /// Начать слушать; реплики приходят в `onUtterance`.
-    func start(language: String?, onUtterance: @escaping @MainActor (Utterance) -> Void) throws
+    func start(language: String?, reactToPauses: Bool, onUtterance: @escaping @MainActor (Utterance) -> Void) throws
     /// Остановить и освободить микрофон и звук.
     func stop()
     /// Источник сам остановился (обрыв потока, нет доступа, нет языковой модели): подсказчик выключается и показывает причину.
@@ -82,7 +82,7 @@ package final class CopilotSession: ObservableObject {
                 self.stop()
                 self.error = message
             }
-            try listener.start(language: settings().meetingLanguage) { [weak self] in self?.feed($0) }
+            try listener.start(language: settings().meetingLanguage, reactToPauses: settings().reactToPauses) { [weak self] in self?.feed($0) }
             phase = .listening
             error = nil
             log("Подсказчик: включён вручную")

@@ -63,10 +63,13 @@ package struct CopilotSettings: Equatable {
     package var placement: CopilotPlacement
     /// Экран для панели в режиме «iPad / второй экран» (id); пусто — первый не основной.
     package var screenID: String?
+    /// Реагировать на паузу ≥ 0,7 с по промежуточному тексту, не дожидаясь финала расшифровки (быстрее на 1–2 с).
+    package var reactToPauses: Bool
 
     package init(meetingLanguage: String? = nil, answerLanguage: String? = nil, autoAnswer: Bool = true,
-                 about: String = "", placement: CopilotPlacement = .underCamera, screenID: String? = nil) {
+                 about: String = "", placement: CopilotPlacement = .underCamera, screenID: String? = nil, reactToPauses: Bool = true) {
         self.screenID = screenID
+        self.reactToPauses = reactToPauses
         self.meetingLanguage = meetingLanguage
         self.answerLanguage = answerLanguage
         self.autoAnswer = autoAnswer
@@ -88,6 +91,7 @@ package enum CopilotPrefs {
     package static let about = "copilotAbout"
     package static let placement = "copilotPlacement"
     package static let screenID = "copilotScreenID"
+    package static let reactToPauses = "copilotReactToPauses"
 
     package static func load(_ d: UserDefaults = .standard) -> CopilotSettings {
         CopilotSettings(
@@ -96,6 +100,7 @@ package enum CopilotPrefs {
             autoAnswer: d.object(forKey: autoAnswer) as? Bool ?? true,
             about: d.string(forKey: about) ?? "",
             placement: d.string(forKey: placement).flatMap(CopilotPlacement.init(rawValue:)) ?? .underCamera,
-            screenID: d.string(forKey: screenID).flatMap { $0.isEmpty ? nil : $0 })
+            screenID: d.string(forKey: screenID).flatMap { $0.isEmpty ? nil : $0 },
+            reactToPauses: d.object(forKey: reactToPauses) as? Bool ?? true)
     }
 }

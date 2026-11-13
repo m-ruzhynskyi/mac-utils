@@ -98,7 +98,7 @@ final class CopilotSessionTests: XCTestCase {
         var failure: Error?
         var handler: (@MainActor (Utterance) -> Void)?
         var onFailure: (@MainActor (String) -> Void)?
-        func start(language: String?, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {
+        func start(language: String?, reactToPauses: Bool, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {
             if let failure { throw failure }
             started += 1; handler = onUtterance
         }
@@ -344,7 +344,7 @@ final class CopilotRulesTests: XCTestCase {
 final class CopilotMergeSessionTests: XCTestCase {
     final class L: CopilotListening {
         var onFailure: (@MainActor (String) -> Void)?
-        func start(language: String?, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {}
+        func start(language: String?, reactToPauses: Bool, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {}
         func stop() {}
     }
     struct Silent: CopilotAIClient {
@@ -369,5 +369,87 @@ final class CopilotMergeSessionTests: XCTestCase {
         l.onFailure?("Звук звонка остановился")
         XCTAssertEqual(session.phase, .off)
         XCTAssertEqual(session.error, "Звук звонка остановился")
+    }
+}
+
+final class VolatileSettlerTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+    private func at(_ s: Double) -> Date { t0.addingTimeInterval(s) }
+
+    func testEmitsAfterStablePause() {
+        var s = VolatileSettler()
+        s.volatile("Как бы вы", at: at(0))
+        XCTAssertNil(s.tick(at: at(0.5)), "пауза ещё короче 0,7 с")
+        s.volatile("Как бы вы ускорили отчёт", at: at(0.6))
+        XCTAssertNil(s.tick(at: at(1.2)), "текст изменился в 0,6: отсчёт заново")
+        XCTAssertEqual(s.tick(at: at(1.4)), "Как бы вы ускорили отчёт")
+        XCTAssertNil(s.tick(at: at(2.0)), "то же самое второй раз не отдаётся")
+    }
+
+    func testFinalAddsOnlyTheRest() {
+        var s = VolatileSettler()
+        s.volatile("как бы вы ускорили", at: at(0))
+        XCTAssertEqual(s.tick(at: at(0.8)), "как бы вы ускорили")
+        XCTAssertEqual(s.final("Как бы вы ускорили этот отчёт?"), "этот отчёт?")
+        XCTAssertEqual(s.emittedWords, 0, "новая фраза")
+    }
+
+    func testFinalWithoutEarlierEmissionIsEmittedWhole() {
+        var s = VolatileSettler()
+        s.volatile("Привет", at: at(0))
+        XCTAssertEqual(s.final("Привет, коллеги."), "Привет, коллеги.")
+    }
+
+    func testFinalNotLongerThanEmittedAddsNothing() {
+        var s = VolatileSettler()
+        s.volatile("Расскажите про ваш опыт", at: at(0))
+        _ = s.tick(at: at(1))
+        XCTAssertNil(s.final("Расскажите про ваш опыт."))
+    }
+
+    func testRevisionOfEarlyWordsDoesNotRepeat() {
+        var s = VolatileSettler()
+        s.volatile("как бы вы ускорили", at: at(0))
+        _ = s.tick(at: at(1))
+        s.volatile("как бы ты ускорил этот отчёт", at: at(1.1))
+        XCTAssertNil(s.tick(at: at(1.5)))
+        XCTAssertEqual(s.tick(at: at(1.9)), "этот отчёт", "отдаются только слова после уже отданных")
+    }
+
+    func testPunctuationAndCaseDoNotRestartThePause() {
+        var s = VolatileSettler()
+        s.volatile("как бы вы", at: at(0))
+        s.volatile("Как бы вы,", at: at(0.4))
+        XCTAssertEqual(s.tick(at: at(0.8)), "Как бы вы,")
+    }
+
+    func testPauseIsConfigurableAndDefaultIsSevenTenths() {
+        XCTAssertEqual(VolatileSettler().pause, 0.7)
+        var s = VolatileSettler(pause: 0.3)
+        s.volatile("один два три", at: at(0))
+        XCTAssertEqual(s.tick(at: at(0.35)), "один два три")
+    }
+
+    func testEmptyInputNeverEmits() {
+        var s = VolatileSettler()
+        s.volatile("   ", at: at(0))
+        XCTAssertNil(s.tick(at: at(5)))
+        XCTAssertNil(s.final(""))
+    }
+
+    func testReactToPausesOptionDefaultsOnAndIsStored() {
+        let d = UserDefaults(suiteName: "copilot-react-\(UUID().uuidString)")!
+        XCTAssertTrue(CopilotPrefs.load(d).reactToPauses)
+        d.set(false, forKey: CopilotPrefs.reactToPauses)
+        XCTAssertFalse(CopilotPrefs.load(d).reactToPauses)
+    }
+
+    @MainActor func testSplitPhrasePiecesFlowIntoOneQuestion() {
+        // «Как бы вы» отдано после паузы, остаток финала приходит следом: сессия склеивает и ищет вопрос по целому.
+        let t = Date()
+        let a = Utterance(.other, "Ну скажите как бы вы", at: t)
+        let b = Utterance(.other, "ускорили этот отчёт", at: t.addingTimeInterval(0.9))
+        XCTAssertTrue(UtteranceMerge.continues(a, with: b))
+        XCTAssertTrue(QuestionDetector.isQuestion(a.text + " " + b.text))
     }
 }

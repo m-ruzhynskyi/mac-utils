@@ -12,6 +12,7 @@ struct CopilotPage: View {
     @AppStorage(CopilotPrefs.meetingLanguage) private var meetingLanguage = ""
     @AppStorage(CopilotPrefs.answerLanguage) private var answerLanguage = ""
     @AppStorage(CopilotPrefs.about) private var about = ""
+    @AppStorage(CopilotPrefs.reactToPauses) private var reactToPauses = true
     @AppStorage(CopilotPrefs.screenID) private var screenID = ""
     @State private var screens = CopilotGlue.screens()
     @ObservedObject private var session = CopilotGlue.shared.session
@@ -27,6 +28,8 @@ struct CopilotPage: View {
                 if let error = session.error {
                     FeatureStatusRow(tone: .danger, label: "Не включился", detail: error)
                 }
+                ToggleRow("Реагировать на паузу", subtitle: "Не ждать, пока расшифровка закончит фразу: пауза 0,7 с — и ответ уже готовится. Быстрее на 1–2 с, иногда ловит начало фразы",
+                          systemImage: "timer", isOn: $reactToPauses)
                 ToggleRow("Отвечать на вопросы сразу", subtitle: "Выключено — только по ⌥⇧A", systemImage: "bolt", isOn: $autoAnswer)
             }
             GroupLabel("Где панель")
