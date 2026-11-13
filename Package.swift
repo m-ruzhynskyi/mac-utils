@@ -146,7 +146,7 @@ let package = Package(
         // «Скрытый экран»: виртуальный дисплей для окон ИИ + окно-зеркало, которого нет в демонстрации экрана.
         .target(
             name: "MUHiddenScreen",
-            dependencies: ["MUCore"],
+            dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUHiddenScreen"
         ),
         .target(
@@ -181,7 +181,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUHiddenScreen", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
             path: "Tests/MacUtilsTests"
         ),
     ]

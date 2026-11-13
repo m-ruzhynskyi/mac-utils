@@ -14,6 +14,7 @@ import MUDownloadsSorter
 import MUDropShelf
 import MUAnnotate
 import MUScreenShare
+import MUHiddenScreen
 import MUScreenshot
 import MUVideoPlayer
 import MUTextEditor
@@ -94,6 +95,7 @@ enum AppAction: Equatable {
     case viewerMonitor(Int)
     case player, playerOpen(path: String), playerTogglePlay, playerContinue
     case remoteConnections
+    case hiddenScreenToggle, hiddenScreenWindow
     case dollarsRemove(path: String, skipFirst: Int?)
     case dollarsFind(path: String)
     case convertEncoding(path: String, TextEncoding, from: TextEncoding?)
@@ -121,6 +123,8 @@ enum AppAction: Equatable {
         case .textEditor: self = .editor(path: nil)
         case .videoPlayer: self = .player
         case .remoteConnections: self = .remoteConnections
+        case .hiddenScreen: self = .hiddenScreenToggle
+        case .hiddenScreenWindow: self = .hiddenScreenWindow
         }
     }
 
@@ -179,6 +183,12 @@ enum AppAction: Equatable {
         case .viewerMonitor(let n): ShareViewer.shared.requestDisplay(n)
         case .player: PlayerWindowController.show()
         case .remoteConnections: RemotePaletteController.shared.toggle()
+        case .hiddenScreenToggle:
+            let c = HiddenScreenUI.controller
+            c.setEnabled(!c.state.isEnabled)
+        case .hiddenScreenWindow:
+            let c = HiddenScreenUI.controller
+            c.setMirrorShown(!c.state.mirrorShown)
         case .playerOpen(let path): PlayerWindowController.open([Self.fileURL(path)])
         case .playerTogglePlay:
             if let controller = PlayerWindowController.current { controller.model.togglePlay() } else { PlayerWindowController.show() }
