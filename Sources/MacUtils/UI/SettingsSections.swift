@@ -34,7 +34,7 @@ extension SettingsSection {
         case .annotate: return "рисование на экране перо стрелка маркер презентация"
         case .wellbeing: return "перерывы глаза тёплый экран ночной режим 20-20-20 не засыпать сон caffeinate кофеин"
         case .meetings: return "записи встреч созвон микрофон расшифровка whisper отчёт"
-        case .ai: return "ии ollama модель исправить текст умные имена"
+        case .ai: return "ии chatgpt codex claude openai anthropic исправить текст умные имена"
         case .uninstaller: return "удаление программ остатки приложения"
         case .monitor: return "монитор системы процессор память диск сеть батарея"
         case .tasks: return "диспетчер задач процессы завершить"

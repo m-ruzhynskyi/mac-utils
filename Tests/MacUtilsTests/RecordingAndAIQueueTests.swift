@@ -33,26 +33,6 @@ final class RecordingAndAIQueueTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
         writer.discard() // повторный вызов безопасен
     }
-
-    // AI3: keep_alive на время очереди
-    func testKeepAliveOnlyWhileMoreQueued() {
-        XCTAssertEqual(BackgroundAIQueue.keepAlive(outstanding: 0), "0")
-        XCTAssertEqual(BackgroundAIQueue.keepAlive(outstanding: 1), "0")
-        XCTAssertEqual(BackgroundAIQueue.keepAlive(outstanding: 2), "30s")
-        XCTAssertEqual(BackgroundAIQueue.keepAlive(outstanding: 300), "30s")
-    }
-
-    func testQueueCounterDrainsToZeroKeepAlive() {
-        let queue = BackgroundAIQueue()
-        for _ in 0..<3 { queue.enter() }
-        XCTAssertEqual(queue.keepAlive, "30s")
-        queue.leave(); queue.leave()
-        XCTAssertEqual(queue.keepAlive, "0") // последний элемент
-        queue.leave(); queue.leave() // лишний leave не уходит в минус
-        XCTAssertEqual(queue.count, 0)
-        queue.enter()
-        XCTAssertEqual(queue.keepAlive, "0")
-    }
 }
 
 @MainActor

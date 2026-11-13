@@ -63,7 +63,7 @@ let package = Package(
         ),
         .target(
             name: "MUMeetings",
-            dependencies: ["MUCore", "MUDesign"],
+            dependencies: ["MUCore", "MUDesign", "MUAIBackend"],
             path: "Sources/MUMeetings"
         ),
         .target(
@@ -82,6 +82,12 @@ let package = Package(
             dependencies: ["MUCore"],
             path: "Sources/MUAudio"
         ),
+        // ИИ: ChatGPT (Codex) или Claude через их программы на этом Mac. Общее для функций с ИИ.
+        .target(
+            name: "MUAIBackend",
+            dependencies: ["MUCore"],
+            path: "Sources/MUAIBackend"
+        ),
         .target(
             name: "MULayoutFix",
             dependencies: ["MUCore", "MUDesign"],
@@ -99,17 +105,17 @@ let package = Package(
         ),
         .target(
             name: "MUAI",
-            dependencies: ["MUCore", "MUDesign"],
+            dependencies: ["MUCore", "MUDesign", "MUAIBackend"],
             path: "Sources/MUAI"
         ),
         .target(
             name: "MUDownloadsSorter",
-            dependencies: ["MUCore", "MUDesign"],
+            dependencies: ["MUCore", "MUDesign", "MUAIBackend"],
             path: "Sources/MUDownloadsSorter"
         ),
         .target(
             name: "MUDropShelf",
-            dependencies: ["MUCore", "MUDesign"],
+            dependencies: ["MUCore", "MUDesign", "MUAIBackend"],
             path: "Sources/MUDropShelf"
         ),
         // Удалённые подключения: вся логика без зависимости от приложения и других модулей
@@ -135,7 +141,7 @@ let package = Package(
         ),
         .target(
             name: "MUScreenshot",
-            dependencies: ["MUCore", "MUDesign", "MUDownloadsSorter", "MUSmoothScroll"],
+            dependencies: ["MUCore", "MUDesign", "MUAIBackend", "MUDownloadsSorter", "MUSmoothScroll"],
             path: "Sources/MUScreenshot"
         ),
         .target(
@@ -150,7 +156,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUAIBackend"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -164,7 +170,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUAIBackend"],
             path: "Tests/MacUtilsTests"
         ),
     ]

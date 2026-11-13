@@ -149,10 +149,12 @@ package enum Pref {
     /// Рисование поверх экрана (⌃⌥A).
     package static let annotate = "annotateEnabled"
 
-    /// ИИ через локальную Ollama: общий выключатель, адрес, модель и отдельные функции.
+    /// ИИ через ChatGPT (Codex) или Claude: общий выключатель, сервис ("codex" / "claude"), запасной и отдельные функции.
     package static let ai = "aiEnabled"
-    package static let aiURL = "aiURL"
-    package static let aiModel = "aiModel"
+    package static let aiProvider = "aiProvider"
+    /// Если выбранный сервис не ответил за `aiFallbackSeconds` секунд (или ошибся) — спросить второй.
+    package static let aiFallback = "aiFallback"
+    package static let aiFallbackSeconds = "aiFallbackSeconds"
     package static let aiFixText = "aiFixText"
     package static let aiShotNames = "aiShotNames"
     package static let aiShotSearch = "aiShotSearch"
@@ -234,7 +236,21 @@ package enum Pref {
     package static let playerRecent = "playerRecent"
     package static let playerFinished = "playerFinished"
 
+    /// Ключи прежнего ИИ на локальной модели (адрес сервера и имя модели): у ChatGPT (Codex) и Claude им нет пары.
+    package static let removedAIKeys = ["aiURL", "aiModel"]
+
+    /// Ключи, которые больше не нужны: прочитать (в журнал — только сам факт) и забыть. Повторный вызов ничего не меняет.
+    /// Возвращает забытые ключи.
+    @discardableResult
+    package static func forgetRemovedKeys(in defaults: UserDefaults = .standard) -> [String] {
+        let present = removedAIKeys.filter { defaults.object(forKey: $0) != nil }
+        for key in present { defaults.removeObject(forKey: key) }
+        if !present.isEmpty { Log.ai.info("Настройки прежнего ИИ забыты: \(present.joined(separator: ", "), privacy: .public)") }
+        return present
+    }
+
     package static func register() {
+        forgetRemovedKeys()
         UserDefaults.standard.register(defaults: [
             cutPaste: true,
             cutPanel: true,
@@ -306,8 +322,9 @@ package enum Pref {
             windowPinOpacity: 1.0,
             windowMemory: true,
             ai: true,
-            aiURL: "http://localhost:11434",
-            aiModel: "qwen2.5:7b",
+            aiProvider: "codex",
+            aiFallback: false,
+            aiFallbackSeconds: 20.0,
             aiFixText: true,
             aiShotNames: true,
             aiShotSearch: true,

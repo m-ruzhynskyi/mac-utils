@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MUAIBackend
 import MUCore
 import MUDesign
 import MUDownloadsSorter
@@ -11,7 +12,8 @@ import MUTextEditor
 struct AIPage: View {
     @ObservedObject private var hotKeys = HotKeyPrefs.shared
     @AppStorage(Pref.ai) private var enabled = true
-    @AppStorage(Pref.aiModel) private var model = "qwen2.5:7b"
+    @AppStorage(Pref.aiProvider) private var provider = AIProvider.standard.rawValue
+    @AppStorage(Pref.aiFallback) private var fallback = false
     @AppStorage(Pref.aiFixText) private var fixText = true
     @AppStorage(Pref.aiShotNames) private var shotNames = true
     @AppStorage(Pref.aiShotSearch) private var shotSearch = true
@@ -21,34 +23,26 @@ struct AIPage: View {
     @AppStorage(Pref.aiCleanup) private var cleanup = true
     @AppStorage(Pref.aiShelf) private var shelf = true
     @AppStorage(Pref.meetingsReport) private var meetings = true
-    @ObservedObject private var ollama = Ollama.shared
+    @ObservedObject private var status = AIStatus.shared
     @ObservedObject private var tagger = DocumentTagger.shared
-    /// Демо для снимков интерфейса: не опрашивает Ollama.
+    /// Демо для снимков интерфейса: не запускает codex и claude, состояния готовые.
     var demo = false
 
     var body: some View {
         SettingsPage(.ai, isOn: $enabled, toggleLabel: "ИИ-функции") {
-            GroupLabel("Модель")
+            GroupLabel("Сервис")
             ListCard {
-                statusRow
-                Row("Модель", systemImage: "cpu") {
-                    Picker("Модель", selection: $model) {
-                        ForEach(Array(Set(ollama.models + [model])).sorted(), id: \.self) { Text($0).tag($0) }
-                    }
-                    .graphitePicker()
-                    .onChange(of: model) { _, _ in ollama.refresh() }
+                Row("ИИ для всех функций", subtitle: "Через программу на этом Mac, под вашим аккаунтом.", systemImage: "sparkles") {
+                    Segmented(selection: providerBinding,
+                              options: AIProvider.allCases.map { (value: $0, title: $0.title) })
                 }
-                if ollama.status == .noModel {
-                    if let progress = ollama.pullProgress {
-                        Row("Скачиваю \(model)…", systemImage: "arrow.down.circle") {
-                            ProgressBar(value: progress).frame(width: 160)
-                        }
-                    } else {
-                        Row("Скачать \(model)", subtitle: "qwen2.5:7b — около 4,7 ГБ.", systemImage: "arrow.down.circle") {
-                            Button("Скачать \(model)") { ollama.pull() }.buttonStyle(.graphite(.primary, size: .compact))
-                        }
-                    }
+                ForEach(AIProvider.allCases, id: \.self) { item in
+                    AIConnectionRow(provider: item, connection: connection(item),
+                                    check: demo ? nil : { status.refresh() })
                 }
+                ToggleRow("Запасной сервис",
+                          subtitle: "Если \(selected.title) не ответил за \(Int(AI.fallbackSeconds)) с или ошибся — спросить \(selected.other.title).",
+                          systemImage: "arrow.triangle.branch", isOn: $fallback)
             }
             .disabled(!enabled)
             GroupLabel("Функции")
@@ -86,7 +80,17 @@ struct AIPage: View {
             }
             .disabled(!enabled)
         }
-        .onAppear { if !demo { ollama.refresh() } }
+        .onAppear { if !demo { status.refresh() } }
+    }
+
+    private var selected: AIProvider { AIProvider(stored: provider) }
+
+    private var providerBinding: Binding<AIProvider> {
+        Binding(get: { AIProvider(stored: provider) }, set: { provider = $0.rawValue })
+    }
+
+    private func connection(_ provider: AIProvider) -> AIConnection {
+        demo ? (provider == .codex ? .connected : .notLoggedIn) : status.state(provider)
     }
 
     private var taggerTitle: String {
@@ -94,19 +98,34 @@ struct AIPage: View {
         if tagger.tagged > 0 { return "Помечено документов: \(tagger.tagged)" }
         return "Подписи документов"
     }
+}
 
-    @ViewBuilder private var statusRow: some View {
-        let check = StatusAction(title: "Проверить", action: { ollama.refresh() })
-        switch ollama.status {
+/// Строка состояния сервиса: подключено / не найдено / как войти. Для страницы «ИИ» и быстрой панели.
+struct AIConnectionRow: View {
+    let provider: AIProvider
+    let connection: AIConnection
+    var check: (() -> Void)?
+
+    var body: some View {
+        let actions = check.map { [StatusAction(title: "Проверить", action: $0)] } ?? []
+        switch connection {
         case .unknown, .checking:
-            FeatureStatusRow(tone: .neutral, label: "Проверяю Ollama…", actions: [check])
-        case .ready:
-            FeatureStatusRow(tone: .success, label: "Готово: \(model)", actions: [check])
-        case .noServer:
-            FeatureStatusRow(tone: .warning, label: "Ollama не запущена",
-                             actions: [check, StatusAction(title: "Запустить Ollama", action: { ollama.launchServer() })])
-        case .noModel:
-            FeatureStatusRow(tone: .warning, label: "Модель \(model) не скачана", actions: [check])
+            FeatureStatusRow(tone: .neutral, label: "\(provider.title): проверяю…")
+        case .connected:
+            FeatureStatusRow(tone: .success, label: "\(provider.title): подключено", actions: actions)
+        case .notFound:
+            FeatureStatusRow(tone: .warning, label: "\(provider.title): не найден", detail: provider.installHint, actions: actions)
+        case .notLoggedIn:
+            FeatureStatusRow(tone: .warning, label: "\(provider.title): не выполнен вход",
+                             detail: "Войдите в Терминале: \(provider.loginCommand)",
+                             actions: [StatusAction(title: "Скопировать команду") { Self.copy(provider.loginCommand) }] + actions)
+        case .problem(let message):
+            FeatureStatusRow(tone: .warning, label: "\(provider.title): \(message)", actions: actions)
         }
+    }
+
+    private static func copy(_ command: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
     }
 }
