@@ -54,8 +54,16 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     private var renderedVersion = -1
     private var refreshScheduled = false
     private var headerCache: [String: DocRenderer.StoryRendering] = [:]
+    /// Таблица стилей `\stylesheet` для текущей версии исходника (S1).
+    var styleCache: (revision: Int, sheet: DocStyleSheet)?
+    var styleLookCache: (revision: Int, looks: [String: DocStyleLook]) = (-1, [:])
     private var headerSignature = 0
     private var highlighted = false
+    /// Совпадения поиска (показанные единицы) и текущее — `DocFind.swift`.
+    package internal(set) var findMatches: [NSRange] = []
+    package internal(set) var findCurrent: Int?
+    /// Орфография (`DocSpelling.swift`).
+    package lazy var spelling = DocSpelling(controller: self)
     private var observers: [NSObjectProtocol] = []
 
     @Published package private(set) var pageCount = 1
@@ -154,6 +162,7 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
         let string = patch.string
         model = fresh
         rendering = next
+        if spelling.isEnabled { spelling.schedule() }
         // Колонтитулы перерисовываются, только если изменились их группы (иначе — по кэшу).
         var hasher = Hasher()
         let source = tab.text
@@ -288,12 +297,20 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
             return
         }
         if index < pagesView.pages.count { pagesView.pages[index].refreshFloating() }
+        var atEnd = atEnd
         if !atEnd, index == pagesView.pages.count - 1 {
             // Текст не поместился — следующая страница: её раздел — у следующего символа.
             let glyphs = layoutManager.glyphRange(for: container)
             let next = NSMaxRange(layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil))
-            addPage(section: rendering.section(atUnit: next))
-        } else if atEnd {
+            // Не поместилась только пустая строка TextKit после последнего «\n» — у Word её нет, страница не нужна (f078):
+            // строка остаётся в запасном контейнере.
+            if next < (layoutManager.textStorage?.length ?? 0) {
+                addPage(section: rendering.section(atUnit: next))
+            } else {
+                atEnd = true
+            }
+        }
+        if atEnd {
             // Лишние страницы, разделы и колонтитулы — после прохода: раскладка бывает и во время рисования страниц.
             let keep = index + 1
             DispatchQueue.main.async { [weak self] in
@@ -453,6 +470,7 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     /// Только заливка и подчёркивание: цвет текста — из документа, как в Word.
     package func highlightDollars() {
         guard let tab else { return }
+        defer { paintFind() }  // подсветка `$` снимает фон со всего текста — совпадения поиска возвращаем
         let full = NSRange(location: 0, length: storage.length)
         let keys: [NSAttributedString.Key] = [.backgroundColor, .underlineStyle, .underlineColor]
         if highlighted { for key in keys { layoutManager.removeTemporaryAttribute(key, forCharacterRange: full) } }
@@ -671,14 +689,14 @@ package final class DocumentController: NSObject, ObservableObject, NSLayoutMana
     }
 
     /// Серия набора для склейки отмены: куда, что набрано, ревизия исходника после последнего символа, когда.
-    private struct TypingBurst {
+    struct TypingBurst {
         package var source: Int
         package var text: String
         package var revision: Int
         package var time: Date
     }
 
-    private var typingBurst: TypingBurst?
+    var typingBurst: TypingBurst?
     /// Пауза, после которой набор — уже новый шаг отмены.
     package static let typingBurstPause: TimeInterval = 2
 

@@ -258,6 +258,96 @@ final class DocWordLayoutTests: XCTestCase {
         }
     }
 
+    /// Вертикальный текст ячейки (`\cltxbtlr`): в узком столбце не переносится по буквам в высокую строку — строку задают другие
+    /// ячейки, глифов в строках нет (их рисует ячейка повёрнутыми; f143/f144/f148/f150: строки по 50–110 pt выше Word).
+    func testVerticalTextCellDoesNotStretchRow() throws {
+        let row = #"\trowd\trgaph28\trleft0\trrh600\cellx500\cltxbtlr\cellx900\cellx6000 "#
+        let body = row + #"\pard\plain\intbl\fs20 A\cell\pard\plain\intbl\fs20 AB CD EF GH IJ KL MN\cell\pard\plain\intbl\fs20 TOP\cell"#
+            + row + #"\row "# + row + #"\pard\plain\intbl\fs20 B\cell\pard\plain\intbl\fs20 \cell\pard\plain\intbl\fs20 NEXT\cell"# + row + #"\row\pard END\par"#
+        let model = RTFReader.read(#"{\rtf1 "# + row + #"\pard\intbl a\cell\pard\intbl b\cell\pard\intbl c\cell"# + row + #"\row}"# as NSString)
+        XCTAssertEqual(model.body.tables.first?.rows.first?.cells.map(\.textFlow), [.rows, .bottomToTop, .rows])
+        let document = try open(body)
+        let top = try XCTUnwrap(lines(document, "TOP").first).minY, next = try XCTUnwrap(lines(document, "NEXT").first).minY
+        XCTAssertEqual(next - top, 30, accuracy: 0.05, "строка — \\trrh600, вертикальный текст её не растит")
+        let manager = document.layoutManager
+        let index = (document.storage.string as NSString).range(of: "AB CD").location
+        let glyph = manager.glyphIndexForCharacter(at: index)
+        XCTAssertEqual(manager.propertyForGlyph(at: glyph), .controlCharacter, "глифов вертикального текста в строке нет")
+    }
+
+    /// Строка-продолжение вертикального объединения — с `\trrh`, когда текст объединённой ячейки помещается в `\trrh` её строк
+    /// (f161: 13,35 pt было 12,43); строка, где объединение начинается, — по тексту (`NSTextTable` добавил бы высоту объединённой).
+    func testMergeContinuationRowKeepsRowHeight() throws {
+        let first = #"\trowd\trgaph108\trleft0\trrh400\cellx3000\clvmgf\cellx6000 "#
+        let next = #"\trowd\trgaph108\trleft0\trrh400\cellx3000\clvmrg\cellx6000 "#
+        let plain = #"\trowd\trgaph108\trleft0\cellx3000\cellx6000 "#
+        let body = first + #"\pard\plain\intbl\fs24 RA\cell\pard\plain\intbl\fs24 M\cell"# + first + #"\row "#
+            + next + #"\pard\plain\intbl\fs24 RB\cell\pard\plain\intbl\fs24 \cell"# + next + #"\row "#
+            + plain + #"\pard\plain\intbl\fs24 RC\cell\pard\plain\intbl\fs24 X\cell"# + plain + #"\row\pard END\par"#
+        let document = try open(body)
+        let b = try XCTUnwrap(lines(document, "RB").first).minY, c = try XCTUnwrap(lines(document, "RC").first).minY
+        XCTAssertEqual(c - b, 20, accuracy: 0.05, "\\trrh400 = 20 pt у строки-продолжения")
+    }
+
+    /// Ячейка по центру со вложенной таблицей: центрируется сама вложенная таблица (её высота — по раскладке), пустой абзац
+    /// конца ячейки после неё — не в счёт (f077/f078: с ним и с оценкой по `\trrh` текст стоял на 2,4–3,5 pt выше Word).
+    func testCenteredCellCentersNestedTable() throws {
+        let row = #"\trowd\trgaph108\trleft0\trrh3272\cellx3000\clvertalc\cellx9000 "#
+        let nprops = { (h: Int) in #"{\*\nesttableprops\trowd\trgaph28\trleft0\trrh-"# + String(h) + #"\cellx3000\cellx6000\nestrow}{\nonesttables\par }"# }
+        let nrow = { (a: String, h: Int) in #"\pard\plain\intbl\itap2\fs20 "# + a + #"1\nestcell\pard\plain\intbl\itap2\fs20 "# + a + #"2\nestcell\pard\plain\intbl\itap2\fs20 "# + nprops(h) }
+        let body = #"\pard before\par "# + row + #"\pard\plain\intbl\itap1\fs20 LEFT\cell"# + nrow("NA", 480) + nrow("NB", 566)
+            + #"\pard\plain\intbl\itap1\fs20 \cell"# + row + #"\row "# + row + #"\pard\plain\intbl\itap1\fs20 SECOND\cell\pard\plain\intbl\itap1\fs20 X\cell"#
+            + row + #"\row\pard AFTER\par"#
+        let document = try open(body)
+        let left = try XCTUnwrap(lines(document, "LEFT").first).minY, nested = try XCTUnwrap(lines(document, "NA1").first).minY
+        let second = try XCTUnwrap(lines(document, "SECOND").first).minY
+        let table = 24 + 28.3
+        XCTAssertEqual(nested - left, (second - left - table) / 2, accuracy: 0.5, "вложенная (24 + 28,3 pt «точно») — посередине строки 163,6 pt")
+    }
+
+    /// Вложенные таблицы в обеих ячейках строки: вторая ячейка — у того же верха, строка — ровно `\trrh` (f078: верх ячейки
+    /// считался от текста вложенной, +1,08 pt на ячейку, и строка выходила выше `\trrh` на 2,2 pt).
+    func testNestedTablesInBothCellsKeepRowHeight() throws {
+        let row = #"\trowd\trgaph108\trleft0\trrh3272\cellx4500\cellx9000 "#
+        let nprops = #"{\*\nesttableprops\trowd\trgaph28\trleft0\trpaddt22\trpaddft3\trrh480\clbrdrt\brdrs\brdrw10 \cellx2000\clbrdrt\brdrs\brdrw10 \cellx4000\nestrow}{\nonesttables\par }"#
+        let nrow = { (a: String) in #"\pard\plain\intbl\itap2\fs20 "# + a + #"1\nestcell\pard\plain\intbl\itap2\fs20 "# + a + #"2\nestcell\pard\plain\intbl\itap2\fs20 "# + nprops }
+        let end = #"\pard\plain\intbl\itap1\fs20 \cell"#
+        let body = #"\pard before\par "# + row + nrow("NA") + nrow("NB") + end + nrow("NC") + nrow("ND") + end + row + #"\row "#
+            + row + nrow("NE") + end + nrow("NF") + end + row + #"\row\pard AFTER\par"#
+        let document = try open(body)
+        let left = try XCTUnwrap(lines(document, "NA1").first).minY, right = try XCTUnwrap(lines(document, "NC1").first).minY
+        let next = try XCTUnwrap(lines(document, "NE1").first).minY
+        XCTAssertEqual(right, left, accuracy: 0.05, "вложенная во второй ячейке — на той же высоте")
+        XCTAssertEqual(next - left, 163.6, accuracy: 0.05, "строка внешней — \\trrh3272")
+    }
+
+    /// Строка таблицы, не поместившаяся внизу страницы, на следующей — своей высоты (f161: `NSTextTable` помнил её низ
+    /// с прошлой страницы, ячейки тянулись на 803 pt и текст уходил на третью страницу).
+    func testTableRowMovedToNextPageKeepsItsHeight() throws {
+        // 51 строка — внизу остаётся место для первой строки ячеек, но не для всей строки таблицы (в третьей ячейке два абзаца).
+        let filler = String(repeating: #"\pard\plain\fs24 L\par "#, count: 51)
+        let row = #"\trowd\trgaph108\trleft0\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx3000\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx6000\clbrdrt\brdrs\brdrw10 \clbrdrb\brdrs\brdrw10 \cellx9000 "#
+        let cells = { (a: String) in #"\pard\plain\intbl\fs24 "# + a + #"1\cell\pard\plain\intbl\fs24 "# + a + #"2\cell\pard\plain\intbl\fs24 "# + a
+            + #"3\par\pard\plain\intbl\fs24 "# + a + #"4\cell"# }
+        let document = try open(filler + row + cells("RA") + row + #"\row "# + row + cells("RB") + row + #"\row\pard END\par"#)
+        XCTAssertEqual(document.pagesView.pages.count, 2)
+        let manager = document.layoutManager
+        let text = document.storage.string as NSString
+        let glyph = { (marker: String) in manager.glyphIndexForCharacter(at: text.range(of: marker).location) }
+        XCTAssertTrue(manager.textContainer(forGlyphAt: glyph("RA1"), effectiveRange: nil) === document.pagesView.pages[1].container)
+        XCTAssertTrue(manager.textContainer(forGlyphAt: glyph("END"), effectiveRange: nil) === document.pagesView.pages[1].container)
+        let a = try XCTUnwrap(lines(document, "RA3").first).minY, b = try XCTUnwrap(lines(document, "RB3").first).minY
+        XCTAssertEqual(b - a, 2 * single(12) + 0.48, accuracy: 0.05, "строка — текст и полосы рамок")
+    }
+
+    /// Пустая строка TextKit после последнего «\n» страницы не добавляет: у Word её нет (f078 — вторая пустая страница).
+    func testTrailingEmptyLineDoesNotAddPage() throws {
+        let full = try open(String(repeating: #"\pard\plain\fs24 L\par "#, count: 52))
+        XCTAssertEqual(full.pagesView.pages.count, 1, "52 строки по 13,8 pt в 728,5 pt — одна страница")
+        let over = try open(String(repeating: #"\pard\plain\fs24 L\par "#, count: 53))
+        XCTAssertEqual(over.pagesView.pages.count, 2)
+    }
+
     /// Интервал «Авто» (`\sbauto1`/`\saauto1`; `\sb100`/`\sa100` рядом — для старых читателей): 14 pt, у начала и конца ячейки — 0,
     /// два «авто» подряд не складываются (f145: строки таблиц были на 5–7 pt выше Word).
     func testAutoSpacingLikeWord() throws {
