@@ -153,6 +153,32 @@ final class HiddenScreenShellTests: XCTestCase {
         XCTAssertEqual(frame, CGRect(x: 100, y: 600, width: 640, height: MirrorStripPanel.height))
     }
 
+    func testStoreKeepsPreviousOnChangeHandler() {
+        let stub = StubHiddenScreenController(.demo)
+        var first = 0
+        stub.onChange = { first += 1 }
+        let store = HiddenScreenStore(stub)
+        stub.setEnabled(false)
+        XCTAssertEqual(first, 1)
+        XCTAssertFalse(store.state.isEnabled)
+    }
+
+    func testStripFollowsMirrorWindowAsChild() {
+        let stub = StubHiddenScreenController(.demo)
+        let host = NSWindow(contentRect: NSRect(x: 50, y: 60, width: 400, height: 300), styleMask: [.borderless], backing: .buffered, defer: true)
+        stub.mirrorHostWindow = host
+        let panel = MirrorStripPanel(store: HiddenScreenStore(stub))
+        panel.attach(to: host)
+        XCTAssertTrue(panel.parent === host)
+        XCTAssertEqual(panel.frame.minY, host.frame.maxY)
+        panel.attach(to: nil as NSWindow?)
+        XCTAssertNil(panel.parent)
+    }
+
+    func testCodexBundleIDIsDefaultApp() {
+        XCTAssertTrue(HiddenScreenRules.defaultApps.contains { $0.bundleID == "com.openai.codex" })
+    }
+
     func testStripPanelIsHiddenFromSharing() {
         let store = HiddenScreenStore(StubHiddenScreenController())
         let panel = MirrorStripPanel(store: store)

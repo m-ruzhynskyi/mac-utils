@@ -7,6 +7,8 @@ package enum HiddenScreenRules {
     package static let defaultApps: [(bundleID: String, name: String)] = [
         ("com.anthropic.claudefordesktop", "Claude"),
         ("com.openai.chat", "ChatGPT"),
+        // Новый ChatGPT для Mac (26.x) — тот же продукт под другим идентификатором.
+        ("com.openai.codex", "ChatGPT"),
     ]
 
     // MARK: Тексты

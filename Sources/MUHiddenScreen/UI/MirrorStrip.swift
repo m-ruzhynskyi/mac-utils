@@ -12,7 +12,9 @@ package final class HiddenScreenStore: ObservableObject {
     package init(_ controller: HiddenScreenControlling) {
         self.controller = controller
         self.state = controller.state
+        let previous = controller.onChange
         controller.onChange = { [weak self] in
+            previous?()
             guard let self else { return }
             self.state = self.controller.state
         }
@@ -72,6 +74,23 @@ package final class MirrorStripPanel: NSPanel {
 
     package override var canBecomeKey: Bool { false }
 
+    /// Зеркало, к которому цепляется полоска: едет вместе с ним, за пустое место полоски его можно двигать.
+    private weak var host: NSWindow?
+
+    package override func mouseDown(with event: NSEvent) {
+        if let host { host.performDrag(with: event) } else { super.mouseDown(with: event) }
+    }
+
+    package func attach(to window: NSWindow?) {
+        if host !== window {
+            host?.removeChildWindow(self)
+            host = window
+        }
+        guard let window else { orderOut(nil); return }
+        setFrame(Self.frame(above: window.frame), display: true)
+        if parent !== window { window.addChildWindow(self, ordered: .above) }
+    }
+
     /// Ставит полоску вплотную над рамкой окна-зеркала (координаты экрана, начало внизу слева).
     package static func frame(above mirror: CGRect) -> CGRect {
         CGRect(x: mirror.minX, y: mirror.maxY, width: mirror.width, height: height)
@@ -97,9 +116,9 @@ package final class MirrorStripController {
         if c.state.isEnabled, c.state.mirrorShown, let frame = c.mirrorFrame {
             let panel = self.panel ?? MirrorStripPanel(store: store)
             self.panel = panel
-            panel.attach(to: frame)
+            if let window = c.mirrorHostWindow { panel.attach(to: window) } else { panel.attach(to: frame) }
         } else {
-            panel?.orderOut(nil)
+            panel?.attach(to: nil as NSWindow?)
         }
     }
 }

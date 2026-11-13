@@ -20,7 +20,7 @@ package enum PreCallProbe {
             guard let entry = apps.first(where: { ($0["bundle-id"] as? String) == id }) else { continue }
             guard let enabled = PreCallRules.notificationsEnabled(flags: entry["flags"] as? Int) else { return .unknown }
             known += 1
-            if enabled { on.append(displayName(id)) }
+            if enabled, !on.contains(displayName(id)) { on.append(displayName(id)) }
         }
         if known == 0 { return .unknown }
         return on.isEmpty ? .off(apps: []) : .on(apps: on)

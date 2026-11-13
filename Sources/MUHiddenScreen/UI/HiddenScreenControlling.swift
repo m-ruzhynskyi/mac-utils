@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Программа, которую «Скрытый экран» уводит на невидимый экран.
@@ -48,6 +49,8 @@ package protocol HiddenScreenControlling: AnyObject {
     var onChange: (() -> Void)? { get set }
     /// Рамка окна-зеркала на экране (для полоски над ним); nil — зеркала нет.
     var mirrorFrame: CGRect? { get }
+    /// Окно-зеркало: полоска цепляется к нему дочерним окном и двигает его за пустое место; nil — зеркала нет.
+    var mirrorHostWindow: NSWindow? { get }
 
     func setEnabled(_ enabled: Bool)
     /// Показать или спрятать окно-зеркало.
@@ -65,6 +68,7 @@ package final class StubHiddenScreenController: HiddenScreenControlling {
     package private(set) var state: HiddenScreenState { didSet { onChange?() } }
     package var onChange: (() -> Void)?
     package var mirrorFrame: CGRect?
+    package var mirrorHostWindow: NSWindow?
     package private(set) var calls: [String] = []
 
     package init(_ state: HiddenScreenState = .demo, mirrorFrame: CGRect? = nil) {
