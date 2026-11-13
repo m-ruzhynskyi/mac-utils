@@ -4,6 +4,7 @@ import MUCore
 import MUDesign
 import MUCutPaste
 import MUWinKeys
+import MUHiddenScreen
 import MUFocus
 import MUSmoothScroll
 import MUAppSwitcher
@@ -353,6 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func syncFeatures() {
         FinderCutPaste.shared.sync()
         WinKeys.shared.sync()
+        HiddenScreenGlue.shared.sync()
         SmoothScroll.shared.sync()
         AppSwitcher.shared.sync()
         ScreenshotService.shared.sync()

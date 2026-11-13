@@ -10,7 +10,7 @@ import MUTextEditor
 /// а `HotKeyCenter` подставляет то, что пользователь выбрал в настройках (`HotKeyRegistry.resolve`).
 enum HotKeyAction: String, CaseIterable, Identifiable {
     case settings, tools, screenshot, screenshotOCR, dropShelf, annotate, windowPin, fixText, meeting, focus, qr,
-         appVolume, layoutFix, textEditor, videoPlayer, remoteConnections
+         appVolume, layoutFix, textEditor, videoPlayer, remoteConnections, hiddenScreen, hiddenScreenWindow
 
     var id: String { rawValue }
 
@@ -32,6 +32,8 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .textEditor: return HotKeyID.textEditor
         case .videoPlayer: return HotKeyID.videoPlayer
         case .remoteConnections: return HotKeyID.remoteConnections
+        case .hiddenScreen: return HotKeyID.hiddenScreen
+        case .hiddenScreenWindow: return HotKeyID.hiddenScreenWindow
         }
     }
 
@@ -53,6 +55,8 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .textEditor: return "Текстовый редактор"
         case .videoPlayer: return "Видеоплеер"
         case .remoteConnections: return "Удалённые подключения"
+        case .hiddenScreen: return "Скрытый экран: включить и выключить"
+        case .hiddenScreenWindow: return "Скрытый экран: показать окно ИИ"
         }
     }
 
@@ -73,6 +77,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .textEditor: return .textEditor
         case .videoPlayer: return .videoPlayer
         case .remoteConnections: return .remote
+        case .hiddenScreen, .hiddenScreenWindow: return .hiddenScreen
         }
     }
 
@@ -98,6 +103,8 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         // ⌃⌥⌘A: ⌥⌘A занята в Finder («Снять выделение»); ⌃⌥A — рисование, раскладка окон берёт два модификатора.
         // Регистрируется, только когда выбран файл подключений (`RemoteConnectionsCenter.syncHotKey`).
         case .remoteConnections: return LayoutHotKey(keyCode: kVK_ANSI_A, modifiers: cmdKey | optionKey | controlKey)
+        case .hiddenScreen: return LayoutHotKey(keyCode: kVK_ANSI_H, modifiers: optionKey | shiftKey)
+        case .hiddenScreenWindow: return LayoutHotKey(keyCode: kVK_Space, modifiers: optionKey)
         }
     }
 

@@ -26,6 +26,12 @@ let package = Package(
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUWinKeys"
         ),
+        // «Скрытый экран»: интерфейс (UI/) поверх протокола HiddenScreenControlling; движок — отдельной задачей.
+        .target(
+            name: "MUHiddenScreen",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUHiddenScreen"
+        ),
         .target(
             name: "MUFocus",
             dependencies: ["MUCore", "MUDesign"],
@@ -150,7 +156,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUHiddenScreen", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
             path: "Sources/MacUtils"
         ),
         .executableTarget(
@@ -164,7 +170,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUHiddenScreen", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor"],
             path: "Tests/MacUtilsTests"
         ),
     ]
