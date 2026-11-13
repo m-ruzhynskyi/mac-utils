@@ -83,7 +83,7 @@ enum AXDump {
 
     static func run(apps: [HiddenApp], mover: WindowMover) {
         let me = Bundle.main
-        emit("AX-дамп: доверие \(AXIsProcessTrusted() ? 1 : 0), Mac Utils pid \(getpid()), \(me.bundlePath)")
+        emit("AX-дамп: доверие \(AXIsProcessTrusted() ? 1 : 0), экран \(ScreenLock.isLocked ? "ЗАБЛОКИРОВАН (AX не отдаёт рамки окон)" : "не заблокирован"), Mac Utils pid \(getpid()), \(me.bundlePath)")
         var targets: [(String, NSRunningApplication)] = []
         for running in NSWorkspace.shared.runningApplications {
             if let app = apps.first(where: { $0.matches(bundleID: running.bundleIdentifier) }) { targets.append((app.name, running)) }
@@ -112,7 +112,11 @@ enum AXDump {
                                    windowsCount: AXWindowSource.elements(value).count,
                                    childrenError: childrenError.rawValue, childrenCount: AXWindowSource.elements(children).count,
                                    appRole: role, source: found.source,
-                                   axWindows: found.elements.map { element in (AXWindowID.of(element), mover.frame(of: element)) }))
+                                   axWindows: found.elements.map { element in (AXWindowID.of(element), mover.frame(of: element)) })
+                 + "; коды AXPosition/AXSize: " + found.elements.map { element in
+                     let read = AXGeometry.read(element)
+                     return "\(read.positionError)/\(read.sizeError)"
+                 }.joined(separator: ", "))
         }
     }
 

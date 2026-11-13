@@ -106,6 +106,8 @@ public final class HiddenScreenEngine {
     private var handoffTick = 0
     private var lastSurface: IOSurfaceRef?
     private var defaultsToken: NSObjectProtocol?
+    /// В журнале уже написано «экран заблокирован».
+    private var lockLogged = false
     /// Окна, о которых уже написано «утечка» (повтор — только после успешного переноса).
     private var reportedLeaks: Set<CGWindowID> = []
     /// Перехват нажатий над зеркалом (`PressMode.tap`).
@@ -298,6 +300,19 @@ public final class HiddenScreenEngine {
     /// Окна программ на настоящих экранах → на скрытый; статусы для интерфейса; зеркало за своим окном.
     public func sweep() {
         guard phase == .on, displayID != kCGNullDirectDisplay else { return }
+        // Экран заблокирован: AX отдаёт окна без позиции и размера — переносить нечем, ждём разблокировки.
+        if ScreenLock.isLocked {
+            if !lockLogged {
+                lockLogged = true
+                Log.hiddenScreen.info("экран заблокирован — перенос окон подождёт")
+            }
+            return
+        }
+        if lockLogged {
+            lockLogged = false
+            reportedLeaks.removeAll()
+            Log.hiddenScreen.info("экран разблокирован — переношу окна")
+        }
         let targets = runningTargets
         let windows = mover.windows(pids: Set(targets.map(\.processIdentifier)))
         lastWindows = windows
@@ -966,6 +981,15 @@ extension HiddenScreenEngine {
     }
 
     public func verifyHiding() async {
+        // На заблокированном экране снимок — это экран блокировки: пробы «не видно» при любом исходе. Не считаем.
+        if ScreenLock.isLocked {
+            Log.hiddenScreen.info("самопроверка скрытия: экран заблокирован — не проверяю")
+            if hidingVerified != nil {
+                hidingVerified = nil
+                onChange?()
+            }
+            return
+        }
         guard mirrorShown, let window = mirrorWindow, let screen = window.screen, let displayID = screen.displayID,
               let image = HidingCheck.probeImage(scale: screen.backingScaleFactor) else { return }
         // Проба — в левом верхнем углу зеркала, на 0,15 с.
