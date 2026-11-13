@@ -12,6 +12,7 @@ mode="${2:-cold}"
 export MU_COPILOT_EVAL="$backend"
 export MU_COPILOT_MODE="$mode"
 [ -n "$3" ] && export MU_COPILOT_ONLY="$3"
+[ -n "$MU_COPILOT_REPEAT" ] && export MU_COPILOT_REPEAT   # MU_COPILOT_REPEAT=2 scripts/copilot-eval.sh claude warm-fast — два круга подряд в одной сессии
 export MU_COPILOT_OUT="$PWD/.audit/copilot-eval"
 lockf -k .audit/build.lock swift test --filter CopilotEvalRunTests
 echo "Готово: $MU_COPILOT_OUT/$backend-$mode/summary.md"

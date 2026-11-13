@@ -104,18 +104,36 @@ struct WarmFailure: LocalizedError {
 
 // MARK: Claude
 
-/// Одна живая сессия `claude` на (системный текст, модель, «размышление»). После `recycleAfter` вопросов процесс обновляется,
-/// чтобы история сессии не росла: в каждом вопросе и так весь нужный контекст.
+/// Одна живая сессия `claude` на (системный текст, модель, «размышление»). Вопрос никогда не должен попасть на холодный процесс:
+/// - новая сессия сразу «прогревается» коротким запросом (соединение и кэш системного текста готовы до первого вопроса);
+/// - когда сессия подходит к обновлению (каждые `recycleAfter` вопросов, чтобы история не росла), следующая готовится
+///   в фоне и подменяет текущую без ожидания.
 actor ClaudeWarmHost {
     static let recycleAfter = 6
+    /// Короткий служебный запрос, чтобы прогреть сессию (ответ отбрасывается).
+    static let primePrompt = "Ответь одним словом: ок"
+
+    /// Как прошёл последний вопрос: для замеров (холодный процесс — это и есть хвост).
+    struct Info: Equatable, Sendable {
+        var cold: Bool
+        var usesBefore: Int
+        var startupSeconds: Double
+    }
+
+    private struct Session {
+        let process: WarmProcess
+        let reader: LineReader
+    }
+
     private let executable: String
     private let system: String
     private let model: String?
     private let effort: String?
-    private var process: WarmProcess?
-    private var reader: LineReader?
+    private var current: Session?
+    private var spare: Task<Session?, Never>?
     private var uses = 0
     private var busy = false
+    private(set) var lastInfo: Info?
 
     init(executable: String, system: String, model: String?, effort: String?) {
         self.executable = executable
@@ -124,7 +142,8 @@ actor ClaudeWarmHost {
         self.effort = effort
     }
 
-    private func spawn() async throws {
+    /// Запуск процесса и прогрев коротким запросом.
+    private func makeSession() async -> Session? {
         var arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
                          "--tools", "", "--strict-mcp-config", "--safe-mode", "--disable-slash-commands", "--no-session-persistence",
                          "--system-prompt", [system, AIRequest.textOnly].joined(separator: "\n")]
@@ -132,28 +151,62 @@ actor ClaudeWarmHost {
         if let model { arguments += ["--model", model] }
         let process = WarmProcess(executable: executable, arguments: arguments,
                                   environment: await CLIEnvironment.shared.environment(for: executable), directory: AIWorkspace.directory)
-        try process.start()
-        self.process = process
-        reader = LineReader(process.lines)
-        uses = 0
+        do { try process.start() } catch { return nil }
+        let session = Session(process: process, reader: LineReader(process.lines))
+        guard let message = WarmProtocol.claudeUserMessage(Self.primePrompt) else { return session }
+        process.write(message)
+        var answer = AIAnswer()
+        // Прогрев не должен висеть: если ответа нет 20 с, сессию всё равно отдаём (вопрос сам проверит).
+        let deadline = Date().addingTimeInterval(20)
+        while !answer.finished, Date() < deadline {
+            guard let line = await session.reader.next() else { process.terminate(); return nil }
+            if let event = ClaudeCLI.parse(line) {
+                _ = answer.consume(event)
+                if case .failure = event { process.terminate(); return nil }
+            }
+        }
+        return session
     }
 
-    func warmUp() async { if process?.isRunning != true { try? await spawn() } }
+    func warmUp() async {
+        if current?.process.isRunning != true { current = await makeSession(); uses = 0 }
+    }
 
-    func shutdown() { process?.terminate(); process = nil; reader = nil; busy = false }
+    func shutdown() {
+        current?.process.terminate(); current = nil
+        spare?.cancel(); spare = nil
+        busy = false
+    }
 
-    /// Один вопрос. Если прошлый не дочитан (его отменили), процесс начинается заново: чужие события не смешиваются.
+    /// Сессия для вопроса: текущая, готовая запасная или (в крайнем случае) новая.
+    private func session() async throws -> (Session, cold: Bool, startup: Double) {
+        let started = Date()
+        if !busy, uses < Self.recycleAfter, let current, current.process.isRunning { return (current, false, 0) }
+        current?.process.terminate()
+        current = nil
+        uses = 0
+        var next: Session?
+        var cold = true
+        if let spare { next = await spare.value; self.spare = nil; cold = false }
+        if next?.process.isRunning != true { next = await makeSession(); cold = true }
+        guard let next else { throw WarmFailure("Claude: процесс не запустился") }
+        current = next
+        return (next, cold, Date().timeIntervalSince(started))
+    }
+
+    /// Один вопрос. Если прошлый не дочитан (его отменили), сессия заменяется: чужие события не смешиваются.
     func ask(_ prompt: String, yield: @Sendable (String) -> Void) async throws {
-        if busy || process?.isRunning != true || uses >= Self.recycleAfter { shutdown(); try await spawn() }
-        guard let process, let message = WarmProtocol.claudeUserMessage(prompt) else { throw WarmFailure("Claude: не удалось собрать запрос") }
+        let usesBefore = uses
+        let (session, cold, startup) = try await session()
+        lastInfo = Info(cold: cold, usesBefore: usesBefore, startupSeconds: startup)
+        guard let message = WarmProtocol.claudeUserMessage(prompt) else { throw WarmFailure("Claude: не удалось собрать запрос") }
         busy = true
-        defer { if busy { busy = false } }
-        process.write(message)
+        session.process.write(message)
         var answer = AIAnswer()
         while true {
             if Task.isCancelled { shutdown(); throw CancellationError() }
-            guard let line = await reader?.next() else {
-                let tail = process.stderrTail
+            guard let line = await session.reader.next() else {
+                let tail = session.process.stderrTail
                 shutdown()
                 throw WarmFailure(tail.isEmpty ? "Claude: процесс завершился" : "Claude: \(tail.trimmingCharacters(in: .whitespacesAndNewlines))")
             }
@@ -162,9 +215,15 @@ actor ClaudeWarmHost {
             if case .failure(let message) = event { shutdown(); throw AIFailure.from(.claude, output: message) }
             if answer.finished { break }
         }
-        uses += 1
         busy = false
+        uses += 1
+        // Скоро обновление: следующую сессию готовим заранее, пока человек читает ответ.
+        if uses >= Self.recycleAfter - 1, spare == nil {
+            spare = Task { [self] in await self.makeSpare() }
+        }
     }
+
+    private func makeSpare() async -> Session? { await makeSession() }
 }
 
 // MARK: Codex
@@ -294,6 +353,10 @@ final class WarmCopilotAI: CopilotAIClient, @unchecked Sendable {
     private let lock = NSLock()
     private var claude: [String: ClaudeWarmHost] = [:]
     private var codex: CodexWarmHost?
+    private var info: ClaudeWarmHost.Info?
+
+    /// Как прошёл последний вопрос Claude (холодный процесс или тёплый, который по счёту) — для разбора хвостов.
+    var lastInfo: ClaudeWarmHost.Info? { lock.lock(); defer { lock.unlock() }; return info }
 
     init(provider: AIProvider) { self.provider = provider }
 
@@ -340,6 +403,10 @@ final class WarmCopilotAI: CopilotAIClient, @unchecked Sendable {
                     case .claude:
                         let host = claudeHost(system: system, profile: profile, executable: executable)
                         try await host.ask(prompt) { started = true; continuation.yield($0) }
+                        if let i = await host.lastInfo {
+                            lock.lock(); info = i; lock.unlock()
+                            Log.ai.info("Подсказчик: Claude \(i.cold ? "холодный старт" : "тёплая сессия", privacy: .public), вопрос №\(i.usesBefore + 1, privacy: .public)")
+                        }
                     case .codex:
                         let stream = try await codexHost(executable: executable).ask(
                             prompt: prompt, system: [system, AIRequest.textOnly].joined(separator: "\n"),

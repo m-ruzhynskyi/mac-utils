@@ -83,6 +83,9 @@ final class CopilotEvalRunTests: XCTestCase {
         let raw: String
         let grade: CopilotGrade
         let error: String?
+        /// Холодный ли процесс у этого вопроса (Claude тёплый режим) и который по счёту в сессии — для разбора хвостов.
+        let cold: Bool?
+        let sessionQuestion: Int?
     }
 
     private func client(backend: String, mode: String) throws -> CopilotAIClient {
@@ -129,11 +132,17 @@ final class CopilotEvalRunTests: XCTestCase {
         var startup: Double?
         if mode.hasPrefix("warm") || mode == "hybrid" {
             let t = Date()
-            await ai.warmUp(system: CopilotPrompt.system(settings: CopilotSettings(), part: mode == "hybrid" ? .sayOnly : .full))
+            // Прогреваем сессии для каждого языка диалогов: у каждого свой системный текст, как в приложении.
+            let part: CopilotPrompt.Part = mode == "hybrid" ? .sayOnly : .full
+            for lang in Set(dialogs.map(\.language)).sorted() {
+                await ai.warmUp(system: CopilotPrompt.system(settings: CopilotSettings(meetingLanguage: lang), part: part))
+            }
             startup = Date().timeIntervalSince(t)
         }
         var results: [Result] = []
-        for d in dialogs {
+        // MU_COPILOT_REPEAT=2 — те же диалоги ещё раз подряд в той же сессии: так видно хвосты установившегося режима.
+        let rounds = max(1, Int(env["MU_COPILOT_REPEAT"] ?? "") ?? 1)
+        for round in 1...rounds { for d in dialogs {
             let now = Date()
             let user = CopilotPrompt.user(settings: d.settings, utterances: d.utterances(now: now), now: now, mode: .lastQuestion)
             var raw = "", firstChunk: Double?, firstLine: Double?, total = 0.0, error: String?
@@ -168,12 +177,14 @@ final class CopilotEvalRunTests: XCTestCase {
                     (raw, firstChunk, firstLine, total) = (r.raw, r.firstChunk, r.firstLine, r.total)
                 }
             } catch let e { error = "\(e)" }
-            let result = Result(id: d.id, backend: backend, mode: mode, firstChunk: firstChunk, firstLine: firstLine, total: total, raw: raw,
-                                grade: CopilotEvalGrader.grade(raw: raw, dialog: d), error: error)
+            let info = (ai as? WarmCopilotAI)?.lastInfo
+            let result = Result(id: rounds > 1 ? "\(d.id)-r\(round)" : d.id, backend: backend, mode: mode, firstChunk: firstChunk, firstLine: firstLine,
+                                total: total, raw: raw, grade: CopilotEvalGrader.grade(raw: raw, dialog: d), error: error,
+                                cold: info?.cold, sessionQuestion: info.map { $0.usesBefore + 1 })
             results.append(result)
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(result).write(to: out.appendingPathComponent("\(d.id).json"))
-        }
+            try encoder.encode(result).write(to: out.appendingPathComponent("\(result.id).json"))
+        } }
         await ai.shutdown()
         try Self.summary(results, backend: backend, mode: mode, startup: startup).write(to: out.appendingPathComponent("summary.md"), atomically: true, encoding: .utf8)
     }
@@ -191,11 +202,17 @@ final class CopilotEvalRunTests: XCTestCase {
         s += "- до первого куска, с: \(stat(asked.compactMap(\.firstChunk)))\n"
         s += "- до конца первой строки, с (цель ≤ 2,5): \(stat(asked.compactMap(\.firstLine)))\n"
         s += "- до конца ответа, с (цель ≤ 6): \(stat(r.map(\.total)))\n"
+        let cold = r.filter { $0.cold == true }
+        if !r.compactMap(\.cold).isEmpty {
+            s += "- вопросов на холодном процессе: \(cold.count) из \(r.count)" + (cold.isEmpty ? "\n" : " (их первая строка: \(stat(cold.compactMap(\.firstLine))))\n")
+            let warmOnly = r.filter { $0.cold == false }.compactMap(\.firstLine)
+            if !warmOnly.isEmpty { s += "- первая строка только на тёплых: \(stat(warmOnly))\n" }
+        }
         if let startup { s += "- запуск тёплого процесса (платится один раз при включении), с: \(String(format: "%.1f", startup))\n" }
-        s += "\nАвтопроверка ловит явные провалы; качество оценивает человек (`<id>.json` → `raw`).\n\n| диалог | 1-й кусок | 1-я строка | всё | решение | пунктов | ключи | знаков в 1-й | заметки |\n|---|---|---|---|---|---|---|---|---|\n"
+        s += "\nАвтопроверка ловит явные провалы; качество оценивает человек (`<id>.json` → `raw`).\n\n| диалог | 1-й кусок | 1-я строка | всё | решение | пунктов | ключи | знаков в 1-й | сессия | заметки |\n|---|---|---|---|---|---|---|---|---|---|\n"
         func f(_ x: Double?) -> String { x.map { String(format: "%.1f", $0) } ?? "—" }
         for x in r {
-            s += "| \(x.id) | \(f(x.firstChunk)) | \(f(x.firstLine)) | \(f(x.total)) | \(x.grade.correctDecision ? "ок" : "нет") | \(x.grade.pointCount) | \(x.grade.keywordGroupsHit)/\(x.grade.keywordGroupsTotal) | \(x.grade.sayLength) | \(x.error ?? x.grade.notes.joined(separator: "; ")) |\n"
+            s += "| \(x.id) | \(f(x.firstChunk)) | \(f(x.firstLine)) | \(f(x.total)) | \(x.grade.correctDecision ? "ок" : "нет") | \(x.grade.pointCount) | \(x.grade.keywordGroupsHit)/\(x.grade.keywordGroupsTotal) | \(x.grade.sayLength) | \(x.cold.map { ($0 ? "холодная" : "тёплая") + " №\(x.sessionQuestion ?? 0)" } ?? "—") | \(x.error ?? x.grade.notes.joined(separator: "; ")) |\n"
         }
         return s
     }

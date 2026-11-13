@@ -75,12 +75,16 @@ package final class CopilotSession: ObservableObject {
     private let settings: () -> CopilotSettings
     private let now: () -> Date
     private let log: (String) -> Void
+    /// Замер «конец вопроса → первая строка» для статистики по сервисам (приложение пишет её и даёт совет).
+    private let onLatency: (TimeInterval) -> Void
     private var task: Task<Void, Never>?
     private var meter = LatencyMeter()
     private var answeredQuestionID: UUID?
 
     package init(ai: CopilotAIClient, listener: CopilotListening, settings: @escaping () -> CopilotSettings = { CopilotPrefs.load() },
-                 now: @escaping () -> Date = Date.init, log: @escaping (String) -> Void = { Log.ai.info("\($0, privacy: .public)") }) {
+                 now: @escaping () -> Date = Date.init, log: @escaping (String) -> Void = { Log.ai.info("\($0, privacy: .public)") },
+                 onLatency: @escaping (TimeInterval) -> Void = { _ in }) {
+        self.onLatency = onLatency
         self.ai = ai
         self.listener = listener
         self.settings = settings
@@ -244,7 +248,10 @@ package final class CopilotSession: ObservableObject {
                 if expandedAt == nil { expandedAt = now() }
             }
             if a.sayComplete { meter.lineComplete(at: now()) }
-            answer = a
+            // Слишком длинную первую строку (модель не послушалась) обрезаем для показа: её надо успеть сказать вслух.
+            var shown = a
+            shown.say = CopilotPrompt.trimSay(a.say)
+            answer = shown
         }
     }
 
@@ -261,6 +268,7 @@ package final class CopilotSession: ObservableObject {
         if case .answer(let a) = parsed, !a.say.isEmpty { meter.lineComplete(at: now()) }
         if let s = meter.seconds {
             lastLatency = s
+            onLatency(meter.lineCompleteSeconds ?? s)
             let complete = meter.lineCompleteSeconds.map { String(format: ", первая строка целиком через %.1f с", $0) } ?? ""
             log(String(format: "Подсказчик: первый кусок через %.1f с%@%@", s, complete, meter.withinTarget ? "" : " (дольше цели 2,5 с)"))
         }

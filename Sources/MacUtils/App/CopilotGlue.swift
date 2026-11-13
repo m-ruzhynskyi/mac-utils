@@ -14,7 +14,25 @@ final class CopilotGlue {
     var ai: CopilotAIClient = BackendCopilotAI()
     var listener: CopilotListening = LiveCopilotListener()
 
-    private(set) lazy var session = CopilotSession(ai: ai, listener: listener)
+    private(set) lazy var session = CopilotSession(ai: ai, listener: listener, onLatency: { seconds in
+        CopilotGlue.recordLatency(seconds)
+    })
+
+    /// Сервис подсказчика: свой выбор или тот, что в Mac Utils.
+    nonisolated static func effectiveProvider(choice: CopilotProviderChoice = CopilotProviderChoice.load(), system: AIProvider = AI.provider) -> AIProvider {
+        switch choice {
+        case .system: return system
+        case .claude: return .claude
+        case .codex: return .codex
+        }
+    }
+
+    /// Замер «до первой строки» по сервису: из него складывается совет «Claude отвечает быстрее».
+    nonisolated static func recordLatency(_ seconds: TimeInterval) {
+        var stats = LatencyStats.load()
+        stats.add(seconds, provider: effectiveProvider().rawValue)
+        stats.save()
+    }
     private var panel: CopilotPanel?
     private var panelHidden = false
 
@@ -123,13 +141,13 @@ final class UnavailableCopilotListener: CopilotListening {
     func stop() {}
 }
 
-/// Подсказчик через общий бэкенд ИИ: выбранный сервис (Codex по умолчанию или Claude). Тёплый процесс (по умолчанию) или
+/// Подсказчик через общий бэкенд ИИ: сервис по выбору подсказчика («Как в Mac Utils» — Codex по умолчанию, или Claude / ChatGPT). Тёплый процесс (по умолчанию) или
 /// запуск на каждый вопрос; быстрые модели у профиля `.fast`. Запасной сервис из страницы «ИИ» здесь не используется:
 /// подсказке нужен ответ сейчас, а не через 20 с.
 struct BackendCopilotAI: CopilotAIClient {
     static let timeout: TimeInterval = 45
 
-    private var provider: AIProvider { AI.provider }
+    private var provider: AIProvider { CopilotGlue.effectiveProvider() }
 
     func stream(prompt: String, system: String, images: [Data], profile: CopilotAIProfile) -> AsyncThrowingStream<String, Error> {
         guard AI.enabled else {

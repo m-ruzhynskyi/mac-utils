@@ -3,6 +3,7 @@ import SwiftUI
 import MUCore
 import MUDesign
 import MUCopilot
+import MUAIBackend
 
 // MARK: - Подсказчик на встрече
 
@@ -16,6 +17,8 @@ struct CopilotPage: View {
     @AppStorage(CopilotPrefs.fastModels) private var fastModels = true
     @AppStorage(CopilotPrefs.hybrid) private var hybrid = false
     @AppStorage(CopilotModels.warm) private var warm = true
+    @AppStorage(CopilotProviderChoice.key) private var providerChoice = CopilotProviderChoice.system.rawValue
+    @ObservedObject private var aiStatus = AIStatus.shared
     @AppStorage(CopilotPrefs.screenID) private var screenID = ""
     @State private var screens = CopilotGlue.screens()
     @ObservedObject private var session = CopilotGlue.shared.session
@@ -52,6 +55,17 @@ struct CopilotPage: View {
                         Segmented(selection: $screenID, options: [("", "Первый не основной")] + screens.filter { !$0.isMain }.map { ($0.id, $0.name) })
                     }
                 }
+                Row("Кто отвечает", subtitle: "Свой выбор для подсказчика: ответ нужен за пару секунд, а лучшая скорость — у Claude",
+                    systemImage: "sparkles") {
+                    Segmented(selection: $providerChoice, options: CopilotProviderChoice.allCases.map { ($0.rawValue, $0.title) })
+                }
+                if let advice = ProviderAdvice.suggest(effective: CopilotGlue.effectiveProvider().rawValue, stats: LatencyStats.load(),
+                                                       claudeConnected: aiStatus.state(.claude).isReady) {
+                    Row(advice.text, subtitle: "По вашим последним ответам", systemImage: "bolt.horizontal") {
+                        Button("Переключить на Claude") { providerChoice = CopilotProviderChoice.claude.rawValue }
+                            .buttonStyle(.graphite(.primary, size: .compact))
+                    }
+                }
                 Row("Язык встречи", systemImage: "globe") {
                     Segmented(selection: $meetingLanguage, options: CopilotSettings.languages.map { ($0.code ?? "", $0.title) })
                 }
@@ -75,9 +89,9 @@ struct CopilotPage: View {
                         .background(Color.dsField, in: RoundedRectangle(cornerRadius: DS.Radius.keycap, style: .continuous))
                 }
                 .padding(DS.Space.m)
-                Row("Кто отвечает", subtitle: "Через ваши подписки: ChatGPT (Codex) или Claude — выбор на странице «ИИ»", systemImage: "sparkles") { EmptyView() }
             }
             Footnote("Собеседников слышно из звука программы звонка, вас — из микрофона; расшифровка идёт на самом Mac. Выключен — микрофон и звук звонка не слушаются вообще.")
         }
+        .onAppear { aiStatus.refreshIfStale() }
     }
 }

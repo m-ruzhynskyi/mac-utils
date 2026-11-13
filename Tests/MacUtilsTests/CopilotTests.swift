@@ -2,6 +2,7 @@ import XCTest
 import Carbon.HIToolbox
 @testable import MacUtils
 @testable import MUCopilot
+import MUAIBackend
 import MUCore
 import MUDesign
 
@@ -679,5 +680,143 @@ enum CopilotTestDefaults {
         let d = UserDefaults(suiteName: name)!
         d.removePersistentDomain(forName: name)
         return d
+    }
+}
+
+final class CopilotStrictnessTests: XCTestCase {
+    func testStrictNoQuestionRulesInEveryFormat() {
+        for part in [CopilotPrompt.Part.full, .sayOnly, .pointsOnly] {
+            let s = CopilotPrompt.system(settings: CopilotSettings(), part: part)
+            XCTAssertTrue(s.contains("ХОТЯ БЫ ОДНО"), "\(part)")
+            XCTAssertTrue(s.contains("светская беседа"), "\(part)")
+            XCTAssertTrue(s.contains("уже ответил"), "\(part)")
+            XCTAssertTrue(s.contains("Сомневаешься"), "\(part)")
+        }
+        for part in [CopilotPrompt.Part.full, .sayOnly] {
+            XCTAssertTrue(CopilotPrompt.system(settings: CopilotSettings(), part: part).contains("НЕ БОЛЬШЕ 20 слов"))
+        }
+    }
+
+    func testTrimSayLeavesShortLinesAlone() {
+        let s = "Начну с плана запроса, потом индекс и сводная таблица."
+        XCTAssertEqual(CopilotPrompt.trimSay(s), s)
+    }
+
+    func testTrimSayCutsAtSentenceBoundary() {
+        let long = "Начну с плана запроса и посмотрю, где идёт полный проход по таблице. Потом добавлю составной индекс по дате и статусу и сделаю ежедневную сводную таблицу вместо подсчёта на лету."
+        let t = CopilotPrompt.trimSay(long)
+        XCTAssertEqual(t, "Начну с плана запроса и посмотрю, где идёт полный проход по таблице.")
+        XCTAssertLessThanOrEqual(t.count, 140)
+    }
+
+    func testTrimSayCutsByWordsWhenNoSentenceEnd() {
+        let long = (1...40).map { "слово\($0)" }.joined(separator: " ")
+        let t = CopilotPrompt.trimSay(long)
+        XCTAssertTrue(t.hasSuffix("…"))
+        XCTAssertLessThanOrEqual(t.split(separator: " ").count, 20)
+        XCTAssertLessThanOrEqual(t.count, 141)
+        XCTAssertFalse(t.contains("слово21"))
+    }
+
+    func testTrimSayByLengthWithFewWords() {
+        let long = String(repeating: "я", count: 200)
+        let t = CopilotPrompt.trimSay(long)
+        XCTAssertLessThanOrEqual(t.count, 141)
+    }
+
+    @MainActor func testSessionShowsTrimmedFirstLine() async {
+        final class L: CopilotListening {
+            var onFailure: (@MainActor (String) -> Void)?
+            func start(language: String?, reactToPauses: Bool, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {}
+            func stop() {}
+        }
+        struct Long: CopilotAIClient {
+            func stream(prompt: String, system: String, images: [Data], profile: CopilotAIProfile) -> AsyncThrowingStream<String, Error> {
+                let say = (1...40).map { "слово\($0)" }.joined(separator: " ")
+                return AsyncThrowingStream { $0.yield(say + "\n- а\n- б"); $0.finish() }
+            }
+        }
+        let session = CopilotSession(ai: Long(), listener: L(), settings: { CopilotSettings(autoAnswer: false) }, log: { _ in })
+        session.start()
+        session.feed(Utterance(.other, "Как бы вы ускорили этот отчёт?"))
+        session.answerLast()
+        for _ in 0..<20 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertTrue(session.answer.say.hasSuffix("…"))
+        XCTAssertLessThanOrEqual(session.answer.say.split(separator: " ").count, 20)
+    }
+
+    @MainActor func testLatencyCallbackReportsFirstLineSeconds() async {
+        final class L: CopilotListening {
+            var onFailure: (@MainActor (String) -> Void)?
+            func start(language: String?, reactToPauses: Bool, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {}
+            func stop() {}
+        }
+        struct Quick: CopilotAIClient {
+            func stream(prompt: String, system: String, images: [Data], profile: CopilotAIProfile) -> AsyncThrowingStream<String, Error> {
+                AsyncThrowingStream { $0.yield("Фраза.\n- а\n- б"); $0.finish() }
+            }
+        }
+        var reported: [TimeInterval] = []
+        let session = CopilotSession(ai: Quick(), listener: L(), settings: { CopilotSettings(autoAnswer: false) }, log: { _ in },
+                                     onLatency: { reported.append($0) })
+        session.start()
+        session.feed(Utterance(.other, "Как бы вы ускорили этот отчёт?"))
+        session.answerLast()
+        for _ in 0..<20 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(reported.count, 1)
+    }
+}
+
+final class ProviderAdviceTests: XCTestCase {
+    private func stats(codex: [Double] = [], claude: [Double] = []) -> LatencyStats {
+        var s = LatencyStats()
+        codex.forEach { s.add($0, provider: "codex") }
+        claude.forEach { s.add($0, provider: "claude") }
+        return s
+    }
+
+    func testAdviceWhenCodexSlowAndClaudeConnected() {
+        let a = ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5, 4.4]), claudeConnected: true)
+        XCTAssertEqual(a?.provider, "claude")
+        XCTAssertTrue(a?.text.contains("Claude отвечает быстрее") == true)
+    }
+
+    func testNoAdviceCases() {
+        XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5, 4.4]), claudeConnected: false), "Claude не подключён")
+        XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [2, 2.5, 2.2]), claudeConnected: true), "Codex быстрее 3 с")
+        XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5]), claudeConnected: true), "мало замеров")
+        XCTAssertNil(ProviderAdvice.suggest(effective: "claude", stats: stats(claude: [5, 5, 5]), claudeConnected: true), "уже Claude")
+        XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5, 4.4], claude: [6, 6, 6]), claudeConnected: true), "у Claude не лучше")
+    }
+
+    func testStatsWindowAndMean() {
+        var s = LatencyStats()
+        for i in 1...15 { s.add(Double(i), provider: "codex") }
+        XCTAssertEqual(s.samples["codex"]?.count, LatencyStats.window)
+        XCTAssertEqual(try XCTUnwrap(s.mean("codex")).seconds, 10.5, accuracy: 0.001)
+        XCTAssertNil(s.mean("claude"))
+    }
+
+    func testStatsAreStored() {
+        let d = CopilotTestDefaults.make("copilot-stats-")
+        var s = LatencyStats(); s.add(3.2, provider: "codex"); s.save(d)
+        XCTAssertEqual(LatencyStats.load(d).mean("codex")?.count, 1)
+    }
+
+    func testChoiceDefaultsToSystemAndPersists() {
+        let d = CopilotTestDefaults.make("copilot-provider-")
+        XCTAssertEqual(CopilotProviderChoice.load(d), .system)
+        d.set("claude", forKey: CopilotProviderChoice.key)
+        XCTAssertEqual(CopilotProviderChoice.load(d), .claude)
+        XCTAssertEqual(CopilotProviderChoice.allCases.map(\.title), ["Как в Mac Utils", "Claude", "ChatGPT"])
+    }
+
+    func testEffectiveProvider() {
+        XCTAssertEqual(CopilotGlue.effectiveProvider(choice: .system, system: .codex), .codex)
+        XCTAssertEqual(CopilotGlue.effectiveProvider(choice: .system, system: .claude), .claude)
+        XCTAssertEqual(CopilotGlue.effectiveProvider(choice: .claude, system: .codex), .claude)
+        XCTAssertEqual(CopilotGlue.effectiveProvider(choice: .codex, system: .claude), .codex)
     }
 }
