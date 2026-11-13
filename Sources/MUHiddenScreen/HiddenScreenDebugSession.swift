@@ -38,6 +38,7 @@ public final class HiddenScreenDebugSession {
             self?.changed()
         }
         installSignalHandlers()
+        if CommandLine.arguments.contains(AXDump.flag) { AXDump.run(apps: engine.options.apps, mover: WindowMover()) }
         // Дисплей создаёт помощник — зеркало появится, когда он ответит (`changed` добавит переключатель).
         engine.setMirrorShown(true)
         changed()

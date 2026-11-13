@@ -25,11 +25,7 @@ public final class WindowMover {
 
     /// Окна программы в AX с их рамками (координаты Quartz — как у CGWindowList).
     public func axWindows(pid: pid_t) -> [(element: AXUIElement, frame: CGRect)] {
-        let app = AXUIElementCreateApplication(pid)
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
-              let windows = value as? [AXUIElement] else { return [] }
-        return windows.compactMap { element in frame(of: element).map { (element, $0) } }
+        AXWindowSource.windows(pid: pid).elements.compactMap { element in frame(of: element).map { (element, $0) } }
     }
 
     public func frame(of element: AXUIElement) -> CGRect? {
@@ -60,12 +56,10 @@ public final class WindowMover {
     }
 
     /// Окна AX программы и код ошибки запроса списка (для журнала).
-    public func axCandidates(pid: pid_t) -> (windows: [(element: AXUIElement, windowID: CGWindowID?, frame: CGRect)], error: AXError) {
-        let app = AXUIElementCreateApplication(pid)
-        var value: CFTypeRef?
-        let error = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
-        guard error == .success, let windows = value as? [AXUIElement] else { return ([], error) }
-        return (windows.compactMap { element in frame(of: element).map { (element, AXWindowID.of(element), $0) } }, error)
+    public func axCandidates(pid: pid_t) -> (windows: [(element: AXUIElement, windowID: CGWindowID?, frame: CGRect)], error: AXError, source: String) {
+        let found = AXWindowSource.windows(pid: pid)
+        return (found.elements.compactMap { element in frame(of: element).map { (element, AXWindowID.of(element), $0) } },
+                found.error, found.source)
     }
 
     /// Элемент AX окна с этим номером (`HiddenWindowRules.pickAXWindow`).
@@ -90,7 +84,7 @@ public final class WindowMover {
         let candidates = lookup.windows
         guard let index = HiddenWindowRules.pickAXWindow(id: id, frame: info.frame, candidates: candidates.map { ($0.windowID, $0.frame) }) else {
             let list = candidates.map { "\($0.windowID.map(String.init) ?? "?")@\(Self.text($0.frame))" }.joined(separator: ", ")
-            return .failed("AX: окно не найдено (kAXWindows: \(lookup.error.rawValue), окон AX \(candidates.count): [\(list)], ищу \(id)@\(Self.text(info.frame)))")
+            return .failed("AX: окно не найдено (kAXWindows: \(lookup.error.rawValue), источник \(lookup.source), окон AX \(candidates.count): [\(list)], ищу \(id)@\(Self.text(info.frame)), доверие AX \(AXIsProcessTrusted() ? 1 : 0))")
         }
         let element = candidates[index].element
         var point = origin
