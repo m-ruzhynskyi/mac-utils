@@ -559,8 +559,14 @@ final class CopilotSpeedRulesTests: XCTestCase {
 
     func testGraderRejectsLongFirstLine() {
         let d = CopilotDialog(id: "x", language: "ru", kind: "work", about: "", utterances: [], expectQuestion: true, questionGist: "", keywordGroups: [])
-        XCTAssertTrue(CopilotEvalGrader.grade(raw: String(repeating: "я", count: 140) + "\n- а\n- б", dialog: d).passed)
-        XCTAssertFalse(CopilotEvalGrader.grade(raw: String(repeating: "я", count: 141) + "\n- а\n- б", dialog: d).passed)
+        let ok = CopilotEvalGrader.grade(raw: String(repeating: "я", count: 140) + "\n- а\n- б", dialog: d)
+        XCTAssertTrue(ok.passed)
+        XCTAssertFalse(ok.rawTooLong, "ровно 140 знаков — не длинная")
+        let over = CopilotEvalGrader.grade(raw: String(repeating: "я", count: 141) + "\n- а\n- б", dialog: d)
+        XCTAssertTrue(over.passed, "после обрезки укладывается")
+        XCTAssertTrue(over.rawTooLong, "но сырая — длинная")
+        let words = CopilotEvalGrader.grade(raw: (1...25).map { "ab\($0)" }.joined(separator: " ") + "\n- а\n- б", dialog: d)
+        XCTAssertTrue(words.rawTooLong, "больше 20 слов")
     }
 
     func testMeterTargetAndLineComplete() {
@@ -777,6 +783,35 @@ final class ProviderAdviceTests: XCTestCase {
         return s
     }
 
+    func testPriorAdviceBeforeAnyMeasurements() {
+        let a = ProviderAdvice.suggest(effective: "codex", stats: LatencyStats(), claudeConnected: true)
+        XCTAssertEqual(a?.provider, "claude")
+        XCTAssertEqual(a?.isPrior, true)
+        XCTAssertTrue(a?.text.contains("Claude · быстрый") == true)
+        XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: LatencyStats(), claudeConnected: false), "Claude не подключён — совета нет")
+        XCTAssertNil(ProviderAdvice.suggest(effective: "claude", stats: LatencyStats(), claudeConnected: true))
+    }
+
+    func testPromptsHaveShortExamplesInThreeLanguages() {
+        for part in [CopilotPrompt.Part.full, .sayOnly] {
+            let s = CopilotPrompt.system(settings: CopilotSettings(), part: part)
+            XCTAssertTrue(s.contains("до 15 слов"))
+            XCTAssertTrue(s.contains("Начну с плана запроса"))
+            XCTAssertTrue(s.contains("Я б почав з плану запиту"))
+            XCTAssertTrue(s.contains("I'd start with the query plan"))
+        }
+        XCTAssertFalse(CopilotPrompt.system(settings: CopilotSettings(), part: .pointsOnly).contains("до 15 слов"))
+    }
+
+    func testExampleLinesAreShortEnough() {
+        for line in ["Начну с плана запроса, потом посмотрю индексы и проверю на реальных данных.",
+                     "Я б почав з плану запиту, потім перевірив індекси й реальні дані.",
+                     "I'd start with the query plan, then check the indexes and test on real data."] {
+            XCTAssertLessThanOrEqual(line.split(separator: " ").count, 15)
+            XCTAssertLessThanOrEqual(line.count, CopilotPrompt.maxSayLength)
+        }
+    }
+
     func testAdviceWhenCodexSlowAndClaudeConnected() {
         let a = ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5, 4.4]), claudeConnected: true)
         XCTAssertEqual(a?.provider, "claude")
@@ -786,7 +821,7 @@ final class ProviderAdviceTests: XCTestCase {
     func testNoAdviceCases() {
         XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5, 4.4]), claudeConnected: false), "Claude не подключён")
         XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [2, 2.5, 2.2]), claudeConnected: true), "Codex быстрее 3 с")
-        XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5]), claudeConnected: true), "мало замеров")
+        XCTAssertEqual(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5]), claudeConnected: true)?.isPrior, true, "мало замеров — совет по известным цифрам")
         XCTAssertNil(ProviderAdvice.suggest(effective: "claude", stats: stats(claude: [5, 5, 5]), claudeConnected: true), "уже Claude")
         XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5, 4.4], claude: [6, 6, 6]), claudeConnected: true), "у Claude не лучше")
     }

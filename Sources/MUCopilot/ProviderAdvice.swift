@@ -59,13 +59,21 @@ package enum ProviderAdvice {
     package struct Suggestion: Equatable {
         package let provider: String
         package let text: String
+        /// Совет по замерам этого Mac (false) или заранее известный (true: своих замеров ещё нет).
+        package let isPrior: Bool
     }
 
-    /// Совет «Claude отвечает быстрее»: выбран Codex, его среднее медленнее 3 с, Claude подключён и не медленнее.
+    /// Совет «Claude · быстрый». Выбор остаётся как в Mac Utils (Codex по умолчанию): подсказчик только предлагает.
+    /// - есть замеры Codex (≥ 3): советуем, если среднее > 3 с и у Claude не хуже;
+    /// - замеров ещё нет, а Claude подключён: советуем по известным цифрам (Claude ≈ 1 с, ChatGPT ≈ 4 с до первой строки).
     package static func suggest(effective: String, stats: LatencyStats, claudeConnected: Bool) -> Suggestion? {
-        guard effective == "codex", claudeConnected, let codex = stats.mean("codex"),
-              codex.count >= minSamples, codex.seconds > slowSeconds else { return nil }
+        guard effective == "codex", claudeConnected else { return nil }
+        guard let codex = stats.mean("codex"), codex.count >= minSamples else {
+            return Suggestion(provider: "claude", text: "Claude · быстрый: первая строка примерно за 1 с, у ChatGPT — около 4 с", isPrior: true)
+        }
+        guard codex.seconds > slowSeconds else { return nil }
         if let claude = stats.mean("claude"), claude.count >= minSamples, claude.seconds >= codex.seconds { return nil }
-        return Suggestion(provider: "claude", text: String(format: "Claude отвечает быстрее: у ChatGPT первая строка в среднем через %.1f с", codex.seconds))
+        return Suggestion(provider: "claude", text: String(format: "Claude отвечает быстрее: у ChatGPT первая строка в среднем через %.1f с", codex.seconds),
+                          isPrior: false)
     }
 }

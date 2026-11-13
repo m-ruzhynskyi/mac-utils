@@ -57,7 +57,11 @@ final class CopilotFixturesTests: XCTestCase {
         XCTAssertEqual(good.keywordGroupsHit, good.keywordGroupsTotal)
         XCTAssertFalse(CopilotEvalGrader.grade(raw: "NO_QUESTION", dialog: q).passed)
         XCTAssertFalse(CopilotEvalGrader.grade(raw: "Фраза.\n- один", dialog: q).passed)
-        XCTAssertFalse(CopilotEvalGrader.grade(raw: String(repeating: "я", count: 400) + "\n- а\n- б", dialog: q).passed)
+        let long = CopilotEvalGrader.grade(raw: String(repeating: "я", count: 400) + "\n- а\n- б", dialog: q)
+        XCTAssertTrue(long.passed, "оценка — по строке после обрезки")
+        XCTAssertTrue(long.rawTooLong)
+        XCTAssertEqual(long.rawSayLength, 400)
+        XCTAssertLessThanOrEqual(long.sayLength, 141)
         let n = try XCTUnwrap(dialogs.first { !$0.expectQuestion })
         XCTAssertTrue(CopilotEvalGrader.grade(raw: "NO_QUESTION", dialog: n).passed)
         XCTAssertFalse(CopilotEvalGrader.grade(raw: "Ответ.\n- а\n- б", dialog: n).passed)
@@ -197,8 +201,9 @@ final class CopilotEvalRunTests: XCTestCase {
 
     private static func summary(_ r: [Result], backend: String, mode: String, startup: Double?) -> String {
         let asked = r.filter { $0.error == nil && $0.grade.sayLength > 0 }
+        let rawLong = asked.filter { $0.grade.rawTooLong }.count
         let passed = r.filter { $0.grade.passed && $0.error == nil }.count
-        var s = "# Подсказчик: \(backend), режим \(mode)\n\nАвтопроверка: \(passed) из \(r.count) (первая строка ≤ \(CopilotPrompt.maxSayLength) знаков).\n\n"
+        var s = "# Подсказчик: \(backend), режим \(mode)\n\nАвтопроверка: \(passed) из \(r.count) (первая строка — после обрезки в показе, ≤ \(CopilotPrompt.maxSayLength) знаков).\nСырых первых строк длиннее \(CopilotPrompt.maxSayLength) знаков или \(CopilotPrompt.maxSayWords) слов: \(rawLong) из \(asked.count) (в показе режутся, но модель стоит поправить).\n\n"
         s += "- до первого куска, с: \(stat(asked.compactMap(\.firstChunk)))\n"
         s += "- до конца первой строки, с (цель ≤ 2,5): \(stat(asked.compactMap(\.firstLine)))\n"
         s += "- до конца ответа, с (цель ≤ 6): \(stat(r.map(\.total)))\n"

@@ -32,7 +32,11 @@ package struct CopilotDialog: Codable, Equatable {
 package struct CopilotGrade: Codable, Equatable {
     package var parsedOK: Bool
     package var correctDecision: Bool
+    /// Длина первой строки так, как её увидит человек (после `trimSay`).
     package var sayLength: Int
+    /// Длина сырой строки от модели и признак «длиннее 140 знаков или 20 слов»: в показе её режет `trimSay`, но модель стоит поправить.
+    package var rawSayLength: Int = 0
+    package var rawTooLong: Bool = false
     package var sayShortEnough: Bool
     package var pointCount: Int
     package var pointsInRange: Bool
@@ -58,11 +62,16 @@ package enum CopilotEvalGrader {
         case .answer(let answer):
             grade.correctDecision = dialog.expectQuestion
             if !dialog.expectQuestion { grade.notes.append("ответ там, где вопроса к пользователю нет") }
-            grade.sayLength = answer.say.count
+            // Оценка — по строке, которую увидит человек (после обрезки); сырая длинная считается отдельно.
+            let shown = CopilotPrompt.trimSay(answer.say)
+            grade.sayLength = shown.count
+            grade.rawSayLength = answer.say.count
+            grade.rawTooLong = answer.say.count > maxSayLength || answer.say.split(whereSeparator: \.isWhitespace).count > CopilotPrompt.maxSayWords
             grade.parsedOK = !answer.say.isEmpty
             if answer.say.isEmpty { grade.notes.append("нет первой строки") }
-            grade.sayShortEnough = answer.say.count <= maxSayLength
-            if !grade.sayShortEnough { grade.notes.append("первая строка длиннее \(maxSayLength) знаков") }
+            grade.sayShortEnough = shown.count <= maxSayLength + 1
+            if !grade.sayShortEnough { grade.notes.append("первая строка длиннее \(maxSayLength) знаков и после обрезки") }
+            if grade.rawTooLong { grade.notes.append("сырая первая строка \(answer.say.count) знаков (режется в показе)") }
             grade.pointCount = answer.points.count
             if dialog.expectQuestion {
                 grade.pointsInRange = (2...4).contains(answer.points.count)

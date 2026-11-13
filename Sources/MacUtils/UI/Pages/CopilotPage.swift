@@ -61,8 +61,12 @@ struct CopilotPage: View {
                 }
                 if let advice = ProviderAdvice.suggest(effective: CopilotGlue.effectiveProvider().rawValue, stats: LatencyStats.load(),
                                                        claudeConnected: aiStatus.state(.claude).isReady) {
-                    Row(advice.text, subtitle: "По вашим последним ответам", systemImage: "bolt.horizontal") {
-                        Button("Переключить на Claude") { providerChoice = CopilotProviderChoice.claude.rawValue }
+                    Row(advice.text, subtitle: advice.isPrior ? "Выбор остаётся как в Mac Utils, пока вы не переключите" : "По вашим последним ответам",
+                        systemImage: "bolt.horizontal") {
+                        Button("Переключить на Claude · быстрый") {
+                            providerChoice = CopilotProviderChoice.claude.rawValue
+                            fastModels = true
+                        }
                             .buttonStyle(.graphite(.primary, size: .compact))
                     }
                 }
