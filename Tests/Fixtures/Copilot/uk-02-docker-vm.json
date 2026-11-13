@@ -1,0 +1,27 @@
+{
+  "id": "uk-02-docker-vm",
+  "language": "uk",
+  "kind": "interview",
+  "about": "Backend-разработчик, 6 лет, Python и PostgreSQL, немного Go. Собеседование на Senior Backend.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Поясніть, будь ласка, чим Docker-контейнер відрізняється від віртуальної машини?",
+      "secondsAgo": 35
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "Docker vs VM",
+  "keywordGroups": [
+    [
+      "ядр",
+      "kernel"
+    ],
+    [
+      "образ",
+      "ізоляц",
+      "легк",
+      "швидк"
+    ]
+  ]
+}

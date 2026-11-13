@@ -1,0 +1,26 @@
+{
+  "id": "en-08-already-answered",
+  "language": "en",
+  "kind": "negative",
+  "about": "Backend-разработчик, 6 лет, Python и PostgreSQL, немного Go. Собеседование на Senior Backend.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "How would you speed up that report?",
+      "secondsAgo": 50
+    },
+    {
+      "speaker": "me",
+      "text": "I would start with the query plan, check the indexes and then consider a pre-aggregated table for the monthly numbers.",
+      "secondsAgo": 30
+    },
+    {
+      "speaker": "other",
+      "text": "Okay, that makes sense. Let me take a note.",
+      "secondsAgo": 10
+    }
+  ],
+  "expectQuestion": false,
+  "questionGist": "вопрос уже отвечен самим пользователем",
+  "keywordGroups": []
+}

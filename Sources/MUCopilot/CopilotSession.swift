@@ -15,6 +15,8 @@ package protocol CopilotListening: AnyObject {
     func start(language: String?, onUtterance: @escaping @MainActor (Utterance) -> Void) throws
     /// Остановить и освободить микрофон и звук.
     func stop()
+    /// Источник сам остановился (обрыв потока, нет доступа, нет языковой модели): подсказчик выключается и показывает причину.
+    var onFailure: (@MainActor (String) -> Void)? { get set }
 }
 
 /// Измеряет задержку «конец вопроса → первая строка ответа».
@@ -75,6 +77,11 @@ package final class CopilotSession: ObservableObject {
     package func start() {
         guard !isOn else { return }
         do {
+            listener.onFailure = { [weak self] message in
+                guard let self else { return }
+                self.stop()
+                self.error = message
+            }
             try listener.start(language: settings().meetingLanguage) { [weak self] in self?.feed($0) }
             phase = .listening
             error = nil
@@ -107,7 +114,14 @@ package final class CopilotSession: ObservableObject {
         guard isOn else { return }
         let text = utterance.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        transcript.append(Utterance(utterance.speaker, text, at: utterance.at))
+        let incoming = Utterance(utterance.speaker, text, at: utterance.at)
+        if let last = transcript.last, UtteranceMerge.continues(last, with: incoming) {
+            // Склеиваем куски одной реплики; если на прежний вопрос уже ответили, это новый вопрос.
+            let merged = Utterance(last.speaker, last.text + " " + text, at: incoming.at)
+            transcript[transcript.count - 1] = last.id == answeredQuestionID ? merged : Utterance(id: last.id, merged)
+        } else {
+            transcript.append(incoming)
+        }
         let cutoff = now().addingTimeInterval(-CopilotPrompt.contextSeconds * 2)
         transcript.removeAll { $0.at < cutoff }
         guard settings().autoAnswer, utterance.speaker == .other,

@@ -23,6 +23,13 @@ package enum QuestionDetector {
         "how would you", "what would you", "how do you", "what do you think", "your experience", "your opinion",
     ]
 
+    /// «Как видите…» и подобные — вводные слова, а не вопрос.
+    private static let notQuestions: [String] = [
+        "как видите", "как видно", "как известно", "как вы знаете", "как вы видите", "как я говорил", "как я уже", "как мы обсуждали", "как мы договорились",
+        "як бачите", "як видно", "як відомо", "як ви знаєте", "як я казав", "як ми обговорювали",
+        "as you can see", "as you know", "as we discussed", "as i said", "what i mean", "that's what",
+    ]
+
     package static func words(_ text: String) -> [String] {
         text.lowercased().split { !$0.isLetter && !$0.isNumber && $0 != "'" }.map(String.init)
     }
@@ -39,6 +46,7 @@ package enum QuestionDetector {
         // Вопрос — обычно последняя фраза; смотрим начало последнего предложения.
         let last = lastSentence(lower)
         let lw = words(last).joined(separator: " ")
+        if notQuestions.contains(where: { lw.hasPrefix($0) }) { return false }
         return starters.contains { lw == $0 || lw.hasPrefix($0 + " ") }
     }
 

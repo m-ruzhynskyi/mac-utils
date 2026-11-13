@@ -4,14 +4,14 @@ import MUCore
 import MUCopilot
 
 /// Подсказчик в приложении: сочетания, панель, снимок экрана. Включается только вручную; включённость не сохраняется.
-/// Бэкенд ИИ (`MUAIBackend`) и расшифровка звука подключаются отдельно: до этого `ai` и `listener` честно отвечают «не подключено».
+/// Звук и расшифровка — `LiveCopilotListener`; бэкенд ИИ (`MUAIBackend`) подключается отдельно: до этого `ai` отвечает «не подключено».
 @MainActor
 final class CopilotGlue {
     static let shared = CopilotGlue()
 
     /// Подставляются, когда готовы `feature/ai-backend` и расшифровка (`MUMeetings`).
     var ai: CopilotAIClient = UnavailableCopilotAI()
-    var listener: CopilotListening = UnavailableCopilotListener()
+    var listener: CopilotListening = LiveCopilotListener()
 
     private(set) lazy var session = CopilotSession(ai: ai, listener: listener)
     private var panel: CopilotPanel?
@@ -45,10 +45,23 @@ final class CopilotGlue {
         if session.isOn, !panelHidden {
             let panel = self.panel ?? CopilotPanel(session: session)
             self.panel = panel
-            panel.show(placement: CopilotPrefs.load().placement, on: nil)
+            let settings = CopilotPrefs.load()
+            let screens = Self.screens()
+            let chosen = ScreenChoice.pick(screens, preferred: settings.screenID, placement: settings.placement)
+            let screen = chosen.flatMap { c in NSScreen.screens.first { Self.id(of: $0) == c.id } }
+            panel.show(placement: settings.placement, on: screen)
         } else {
             panel?.hide()
         }
+    }
+
+    static func id(of screen: NSScreen) -> String {
+        ((screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value).map(String.init) ?? screen.localizedName
+    }
+
+    /// Подключённые экраны для выбора «iPad / второй экран» (iPad в режиме Sidecar виден как обычный экран).
+    static func screens() -> [CopilotScreen] {
+        NSScreen.screens.map { CopilotScreen(id: id(of: $0), name: $0.localizedName, isMain: $0 == NSScreen.screens.first) }
     }
 
     /// ⌥⇧S: снимок экрана под курсором (окна Mac Utils исключены) уходит в запрос.
@@ -102,6 +115,7 @@ struct UnavailableCopilotAI: CopilotAIClient {
 
 @MainActor
 final class UnavailableCopilotListener: CopilotListening {
+    var onFailure: (@MainActor (String) -> Void)?
     func start(language: String?, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {
         throw CopilotError.notConnected("Звук и расшифровка")
     }

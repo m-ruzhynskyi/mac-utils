@@ -1,0 +1,32 @@
+{
+  "id": "en-06-data-question",
+  "language": "en",
+  "kind": "work",
+  "about": "Product analyst. Q3 retention dropped 4% after the pricing change.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Thanks for the deck.",
+      "secondsAgo": 40
+    },
+    {
+      "speaker": "other",
+      "text": "What do you think caused the drop in retention in Q3?",
+      "secondsAgo": 15
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "cause of retention drop",
+  "keywordGroups": [
+    [
+      "pric"
+    ],
+    [
+      "cohort",
+      "retention",
+      "segment",
+      "hypothes",
+      "data"
+    ]
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "en-03-walkthrough",
+  "language": "en",
+  "kind": "interview",
+  "about": "Backend-разработчик, 6 лет, Python и PostgreSQL, немного Go. Собеседование на Senior Backend.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "You mentioned a migration project on your resume.",
+      "secondsAgo": 70
+    },
+    {
+      "speaker": "other",
+      "text": "Can you walk me through how you planned and executed it?",
+      "secondsAgo": 45
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "walk through a migration",
+  "keywordGroups": [
+    [
+      "plan",
+      "step",
+      "phase"
+    ],
+    [
+      "migrat",
+      "rollback",
+      "risk",
+      "test"
+    ]
+  ]
+}

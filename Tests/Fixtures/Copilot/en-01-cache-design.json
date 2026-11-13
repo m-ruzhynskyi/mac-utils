@@ -1,0 +1,33 @@
+{
+  "id": "en-01-cache-design",
+  "language": "en",
+  "kind": "interview",
+  "about": "Backend-разработчик, 6 лет, Python и PostgreSQL, немного Go. Собеседование на Senior Backend.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Let's do a system design question.",
+      "secondsAgo": 90
+    },
+    {
+      "speaker": "other",
+      "text": "Imagine a service that serves product pages to millions of users. How would you design the caching layer?",
+      "secondsAgo": 60
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "caching design",
+  "keywordGroups": [
+    [
+      "cache",
+      "cdn",
+      "redis"
+    ],
+    [
+      "invalidat",
+      "ttl",
+      "consisten",
+      "evict"
+    ]
+  ]
+}

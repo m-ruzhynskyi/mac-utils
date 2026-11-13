@@ -1,0 +1,40 @@
+{
+  "id": "ru-01-sql-slow-report",
+  "language": "ru",
+  "kind": "interview",
+  "about": "Backend-разработчик, 6 лет, Python и PostgreSQL, немного Go. Собеседование на Senior Backend.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Хорошо, переходим к практике.",
+      "secondsAgo": 95
+    },
+    {
+      "speaker": "other",
+      "text": "У нас таблица заказов на 40 миллионов строк, и отчёт за месяц строится почти минуту.",
+      "secondsAgo": 80
+    },
+    {
+      "speaker": "other",
+      "text": "Как бы вы ускорили этот отчёт?",
+      "secondsAgo": 70
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "как ускорить отчёт по большой таблице",
+  "keywordGroups": [
+    [
+      "индекс"
+    ],
+    [
+      "explain",
+      "план"
+    ],
+    [
+      "агрег",
+      "сводн",
+      "предагрег",
+      "партиц"
+    ]
+  ]
+}

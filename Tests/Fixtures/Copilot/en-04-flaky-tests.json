@@ -1,0 +1,33 @@
+{
+  "id": "en-04-flaky-tests",
+  "language": "en",
+  "kind": "interview",
+  "about": "QA-инженер, 5 лет: ручное и автотесты (Python, pytest, Selenium), API-тесты, CI в GitLab. Interview for Senior QA.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Our CI has a lot of flaky UI tests lately.",
+      "secondsAgo": 55
+    },
+    {
+      "speaker": "other",
+      "text": "How do you usually deal with flaky tests?",
+      "secondsAgo": 35
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "flaky tests",
+  "keywordGroups": [
+    [
+      "flak"
+    ],
+    [
+      "isolat",
+      "retry",
+      "wait",
+      "root cause",
+      "quarantine",
+      "stabil"
+    ]
+  ]
+}

@@ -6,11 +6,20 @@ package enum CopilotSpeaker: String, Equatable {
 }
 
 package struct Utterance: Equatable, Identifiable {
-    package let id = UUID()
+    package let id: UUID
     package let speaker: CopilotSpeaker
     package let text: String
     package let at: Date
+    /// Та же реплика, продлённая следующим куском: идентификатор сохраняется.
+    package init(id: UUID, _ other: Utterance) {
+        self.id = id
+        speaker = other.speaker
+        text = other.text
+        at = other.at
+    }
+
     package init(_ speaker: CopilotSpeaker, _ text: String, at: Date = Date()) {
+        id = UUID()
         self.speaker = speaker
         self.text = text
         self.at = at
@@ -52,9 +61,12 @@ package struct CopilotSettings: Equatable {
     package var autoAnswer: Bool
     package var about: String
     package var placement: CopilotPlacement
+    /// Экран для панели в режиме «iPad / второй экран» (id); пусто — первый не основной.
+    package var screenID: String?
 
     package init(meetingLanguage: String? = nil, answerLanguage: String? = nil, autoAnswer: Bool = true,
-                 about: String = "", placement: CopilotPlacement = .underCamera) {
+                 about: String = "", placement: CopilotPlacement = .underCamera, screenID: String? = nil) {
+        self.screenID = screenID
         self.meetingLanguage = meetingLanguage
         self.answerLanguage = answerLanguage
         self.autoAnswer = autoAnswer
@@ -75,6 +87,7 @@ package enum CopilotPrefs {
     package static let autoAnswer = "copilotAutoAnswer"
     package static let about = "copilotAbout"
     package static let placement = "copilotPlacement"
+    package static let screenID = "copilotScreenID"
 
     package static func load(_ d: UserDefaults = .standard) -> CopilotSettings {
         CopilotSettings(
@@ -82,6 +95,7 @@ package enum CopilotPrefs {
             answerLanguage: d.string(forKey: answerLanguage).flatMap { $0.isEmpty ? nil : $0 },
             autoAnswer: d.object(forKey: autoAnswer) as? Bool ?? true,
             about: d.string(forKey: about) ?? "",
-            placement: d.string(forKey: placement).flatMap(CopilotPlacement.init(rawValue:)) ?? .underCamera)
+            placement: d.string(forKey: placement).flatMap(CopilotPlacement.init(rawValue:)) ?? .underCamera,
+            screenID: d.string(forKey: screenID).flatMap { $0.isEmpty ? nil : $0 })
     }
 }

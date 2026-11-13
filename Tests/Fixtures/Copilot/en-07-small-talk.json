@@ -1,0 +1,26 @@
+{
+  "id": "en-07-small-talk",
+  "language": "en",
+  "kind": "negative",
+  "about": "Candidate at an interview, small talk before questions.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Hi, thanks for joining. How was your morning?",
+      "secondsAgo": 20
+    },
+    {
+      "speaker": "me",
+      "text": "Good, thanks, a bit of traffic but fine.",
+      "secondsAgo": 15
+    },
+    {
+      "speaker": "other",
+      "text": "Great, let me just open your resume here.",
+      "secondsAgo": 8
+    }
+  ],
+  "expectQuestion": false,
+  "questionGist": "small talk, not a question that needs an answer",
+  "keywordGroups": []
+}

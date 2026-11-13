@@ -12,6 +12,8 @@ struct CopilotPage: View {
     @AppStorage(CopilotPrefs.meetingLanguage) private var meetingLanguage = ""
     @AppStorage(CopilotPrefs.answerLanguage) private var answerLanguage = ""
     @AppStorage(CopilotPrefs.about) private var about = ""
+    @AppStorage(CopilotPrefs.screenID) private var screenID = ""
+    @State private var screens = CopilotGlue.screens()
     @ObservedObject private var session = CopilotGlue.shared.session
 
     var body: some View {
@@ -31,6 +33,12 @@ struct CopilotPage: View {
             ListCard {
                 Row("Где стоит панель", subtitle: "Мышь проходит сквозь неё; чтобы нажать в панели, держите ⌥", systemImage: "rectangle.topthird.inset.filled") {
                     Segmented(selection: $placement, options: CopilotPlacement.allCases.map { ($0.rawValue, $0.title) })
+                }
+                if placement == CopilotPlacement.secondScreen.rawValue {
+                    Row("Экран для панели", subtitle: ScreenChoice.note(screens, preferred: screenID) ?? "iPad (Sidecar) или второй монитор; на основном ничего не появится",
+                        systemImage: "ipad.landscape") {
+                        Segmented(selection: $screenID, options: [("", "Первый не основной")] + screens.filter { !$0.isMain }.map { ($0.id, $0.name) })
+                    }
                 }
                 Row("Язык встречи", systemImage: "globe") {
                     Segmented(selection: $meetingLanguage, options: CopilotSettings.languages.map { ($0.code ?? "", $0.title) })

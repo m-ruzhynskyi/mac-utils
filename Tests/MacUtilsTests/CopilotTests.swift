@@ -16,7 +16,7 @@ final class CopilotDetectorTests: XCTestCase {
     }
 
     func testNotQuestions() {
-        for text in ["Хорошо, спасибо", "У нас таблица на 40 миллионов строк", "Давайте перейдём к следующему пункту", "Ок", "That sounds great to me"] {
+        for text in ["Хорошо, спасибо", "У нас таблица на 40 миллионов строк", "Давайте перейдём к следующему пункту", "Как видите, пик пришёлся на вторник", "Як бачите, графік зріс", "As you can see the load grew", "Ок", "That sounds great to me"] {
             XCTAssertFalse(QuestionDetector.isQuestion(text), text)
         }
     }
@@ -97,6 +97,7 @@ final class CopilotSessionTests: XCTestCase {
         var started = 0, stopped = 0
         var failure: Error?
         var handler: (@MainActor (Utterance) -> Void)?
+        var onFailure: (@MainActor (String) -> Void)?
         func start(language: String?, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {
             if let failure { throw failure }
             started += 1; handler = onUtterance
@@ -299,5 +300,74 @@ final class CopilotShellTests: XCTestCase {
     func testSectionNextToMeetings() {
         let s = SettingsSection.meetings.group.sections
         XCTAssertEqual(s.firstIndex(of: .copilot), s.firstIndex(of: .meetings).map { $0 + 1 })
+    }
+}
+
+final class CopilotRulesTests: XCTestCase {
+    private let screens = [CopilotScreen(id: "1", name: "Встроенный", isMain: true), CopilotScreen(id: "7", name: "iPad", isMain: false),
+                           CopilotScreen(id: "9", name: "Монитор", isMain: false)]
+
+    func testScreenChoice() {
+        XCTAssertEqual(ScreenChoice.pick(screens, preferred: nil, placement: .underCamera)?.id, "1")
+        XCTAssertEqual(ScreenChoice.pick(screens, preferred: "9", placement: .side)?.id, "1")
+        XCTAssertEqual(ScreenChoice.pick(screens, preferred: nil, placement: .secondScreen)?.id, "7")
+        XCTAssertEqual(ScreenChoice.pick(screens, preferred: "9", placement: .secondScreen)?.id, "9")
+        XCTAssertEqual(ScreenChoice.pick(screens, preferred: "404", placement: .secondScreen)?.id, "7", "iPad отключили — первый не основной")
+        XCTAssertEqual(ScreenChoice.pick([screens[0]], preferred: "7", placement: .secondScreen)?.id, "1", "второго нет — основной")
+        XCTAssertNil(ScreenChoice.pick([], preferred: nil, placement: .secondScreen))
+    }
+
+    func testScreenNote() {
+        XCTAssertNotNil(ScreenChoice.note([screens[0]], preferred: nil))
+        XCTAssertNotNil(ScreenChoice.note(screens, preferred: "404"))
+        XCTAssertNil(ScreenChoice.note(screens, preferred: "7"))
+        XCTAssertNil(ScreenChoice.note(screens, preferred: ""))
+    }
+
+    func testMergeRule() {
+        let t = Date()
+        let a = Utterance(.other, "Как бы вы", at: t)
+        XCTAssertTrue(UtteranceMerge.continues(a, with: Utterance(.other, "ускорили отчёт", at: t.addingTimeInterval(1))))
+        XCTAssertFalse(UtteranceMerge.continues(a, with: Utterance(.other, "ускорили отчёт", at: t.addingTimeInterval(3))))
+        XCTAssertFalse(UtteranceMerge.continues(a, with: Utterance(.me, "ускорили отчёт", at: t.addingTimeInterval(1))))
+        XCTAssertFalse(UtteranceMerge.continues(Utterance(.other, "Хорошо.", at: t), with: Utterance(.other, "Дальше", at: t.addingTimeInterval(1))))
+    }
+
+    func testLocale() {
+        XCTAssertEqual(CopilotLocale.identifier(for: "uk"), "uk_UA")
+        XCTAssertEqual(CopilotLocale.identifier(for: "en"), "en_US")
+        XCTAssertEqual(CopilotLocale.identifier(for: nil), "ru_RU")
+    }
+}
+
+@MainActor
+final class CopilotMergeSessionTests: XCTestCase {
+    final class L: CopilotListening {
+        var onFailure: (@MainActor (String) -> Void)?
+        func start(language: String?, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {}
+        func stop() {}
+    }
+    struct Silent: CopilotAIClient {
+        func stream(prompt: String, system: String, images: [Data]) -> AsyncThrowingStream<String, Error> { AsyncThrowingStream { $0.finish() } }
+    }
+
+    func testSplitQuestionIsMergedBeforeDetection() {
+        let session = CopilotSession(ai: Silent(), listener: L(), settings: { CopilotSettings(autoAnswer: false) }, log: { _ in })
+        session.start()
+        let t = Date()
+        session.feed(Utterance(.other, "Ну а теперь скажите", at: t))
+        session.feed(Utterance(.other, "как бы вы ускорили отчёт", at: t.addingTimeInterval(1)))
+        XCTAssertEqual(session.transcript.count, 1)
+        XCTAssertEqual(session.transcript[0].text, "Ну а теперь скажите как бы вы ускорили отчёт")
+    }
+
+    func testListenerFailureTurnsItOffWithReason() {
+        let l = L()
+        let session = CopilotSession(ai: Silent(), listener: l, log: { _ in })
+        session.start()
+        XCTAssertTrue(session.isOn)
+        l.onFailure?("Звук звонка остановился")
+        XCTAssertEqual(session.phase, .off)
+        XCTAssertEqual(session.error, "Звук звонка остановился")
     }
 }

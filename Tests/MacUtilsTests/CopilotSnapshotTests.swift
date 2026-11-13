@@ -75,6 +75,7 @@ final class CopilotSnapshotTests: XCTestCase {
     }
 
     @MainActor private final class DemoListener: CopilotListening {
+        var onFailure: (@MainActor (String) -> Void)?
         func start(language: String?, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {}
         func stop() {}
     }

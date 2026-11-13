@@ -1,0 +1,27 @@
+{
+  "id": "ru-09-estimate",
+  "language": "ru",
+  "kind": "work",
+  "about": "Разработчик, в спринте перегруз, задача — экспорт отчётов в Excel.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Как думаете, сколько займёт экспорт отчётов в Excel?",
+      "secondsAgo": 20
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "оценка задачи",
+  "keywordGroups": [
+    [
+      "оценк",
+      "дн",
+      "час",
+      "неделя"
+    ],
+    [
+      "excel",
+      "экспорт"
+    ]
+  ]
+}

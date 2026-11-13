@@ -1,0 +1,26 @@
+{
+  "id": "ru-10-no-question",
+  "language": "ru",
+  "kind": "negative",
+  "about": "Разработчик на рабочем созвоне.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Итак, коллеги, я поделюсь экраном.",
+      "secondsAgo": 40
+    },
+    {
+      "speaker": "other",
+      "text": "Вот здесь у нас график загрузки за последнюю неделю.",
+      "secondsAgo": 25
+    },
+    {
+      "speaker": "other",
+      "text": "Как видите, пик пришёлся на вторник.",
+      "secondsAgo": 10
+    }
+  ],
+  "expectQuestion": false,
+  "questionGist": "вопроса к пользователю нет",
+  "keywordGroups": []
+}

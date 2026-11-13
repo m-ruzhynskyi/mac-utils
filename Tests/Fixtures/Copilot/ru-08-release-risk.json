@@ -1,0 +1,31 @@
+{
+  "id": "ru-08-release-risk",
+  "language": "ru",
+  "kind": "work",
+  "about": "QA-лид релиза 4.2. Нашли два критичных бага, один исправлен.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Мы готовы катить в пятницу?",
+      "secondsAgo": 30
+    },
+    {
+      "speaker": "other",
+      "text": "Какие риски вы видите по качеству?",
+      "secondsAgo": 18
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "риски релиза",
+  "keywordGroups": [
+    [
+      "риск",
+      "баг",
+      "критич"
+    ],
+    [
+      "пятниц",
+      "релиз"
+    ]
+  ]
+}

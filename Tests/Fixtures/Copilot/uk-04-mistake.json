@@ -1,0 +1,26 @@
+{
+  "id": "uk-04-mistake",
+  "language": "uk",
+  "kind": "interview",
+  "about": "Backend-разработчик, 6 лет, Python и PostgreSQL, немного Go. Собеседование на Senior Backend.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Розкажіть про вашу найбільшу професійну помилку і чого вона вас навчила.",
+      "secondsAgo": 30
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "поведінкове: помилка",
+  "keywordGroups": [
+    [
+      "помилк"
+    ],
+    [
+      "навчи",
+      "висновк",
+      "урок",
+      "процес"
+    ]
+  ]
+}
