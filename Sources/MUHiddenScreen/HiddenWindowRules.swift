@@ -114,6 +114,30 @@ public enum HiddenWindowRules {
         return candidates.count == 1 ? candidates[0].id : nil
     }
 
+    /// Какой элемент AX — окно с номером `id` и рамкой `frame` (из CGWindowList). По порядку:
+    /// номер (`_AXUIElementGetWindow`), рамка ±1 pt, единственное окно того же размера, единственное окно программы.
+    /// `candidates` — окна AX программы: номер (если отдался) и рамка.
+    public static func pickAXWindow(id: CGWindowID, frame: CGRect, candidates: [(windowID: CGWindowID?, frame: CGRect)]) -> Int? {
+        if let exact = candidates.firstIndex(where: { $0.windowID == id }) { return exact }
+        func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= 1 }
+        let sameFrame = candidates.indices.filter {
+            let f = candidates[$0].frame
+            return near(f.minX, frame.minX) && near(f.minY, frame.minY) && near(f.width, frame.width) && near(f.height, frame.height)
+        }
+        if sameFrame.count == 1 { return sameFrame[0] }
+        let sameSize = candidates.indices.filter {
+            near(candidates[$0].frame.width, frame.width) && near(candidates[$0].frame.height, frame.height) && candidates[$0].windowID == nil
+        }
+        if sameSize.count == 1 { return sameSize[0] }
+        return candidates.count == 1 && candidates[0].windowID == nil ? 0 : nil
+    }
+
+    /// Окно действительно стоит там, куда его ставили (±2 pt): у AX бывает «успех» без переноса и наоборот.
+    public static func arrived(_ frame: CGRect?, at origin: CGPoint) -> Bool {
+        guard let frame else { return false }
+        return abs(frame.minX - origin.x) <= 2 && abs(frame.minY - origin.y) <= 2
+    }
+
     /// Какое окно показывать в зеркале: самое большое обычное окно программы на скрытом дисплее.
     public static func mirrorCandidate(windows: [HiddenWindowInfo], app: HiddenApp, hidden: CGRect) -> HiddenWindowInfo? {
         windows

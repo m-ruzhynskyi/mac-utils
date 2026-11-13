@@ -271,6 +271,28 @@ final class HiddenWindowRulesExtraTests: XCTestCase {
         XCTAssertNil(HiddenWindowRules.restoreOrigin(remembered: nil, current: .zero, hidden: hidden, physical: []))
     }
 
+    /// Окна с Mac Utils 13.11: ChatGPT 20199 1280×820 @0,39 и Claude 20169 1217×724 @208,147.
+    func testPickAXWindowFallbacks() {
+        let claude = CGRect(x: 208, y: 147, width: 1217, height: 724)
+        // Номер отдался — по номеру, даже если рамка у AX чуть другая.
+        XCTAssertEqual(HiddenWindowRules.pickAXWindow(id: 20169, frame: claude, candidates: [(20000, claude), (20169, claude.offsetBy(dx: 0, dy: 3))]), 1)
+        // Номера нет — по рамке.
+        XCTAssertEqual(HiddenWindowRules.pickAXWindow(id: 20169, frame: claude, candidates: [(nil, CGRect(x: 0, y: 0, width: 300, height: 200)), (nil, claude)]), 1)
+        // Рамка у AX сдвинута (тень, строка заголовка), но размер тот же и такое окно одно.
+        XCTAssertEqual(HiddenWindowRules.pickAXWindow(id: 20169, frame: claude, candidates: [(nil, claude.offsetBy(dx: 0, dy: 28)), (nil, CGRect(x: 0, y: 0, width: 300, height: 200))]), 0)
+        // Единственное окно программы без номера.
+        XCTAssertEqual(HiddenWindowRules.pickAXWindow(id: 20199, frame: CGRect(x: 0, y: 39, width: 1280, height: 820), candidates: [(nil, CGRect(x: 0, y: 25, width: 1280, height: 834))]), 0)
+        // У окна свой, другой номер — не подменяем чужим.
+        XCTAssertNil(HiddenWindowRules.pickAXWindow(id: 20199, frame: claude, candidates: [(31, CGRect(x: 0, y: 0, width: 10, height: 10))]))
+        XCTAssertNil(HiddenWindowRules.pickAXWindow(id: 1, frame: claude, candidates: []))
+    }
+
+    func testArrived() {
+        XCTAssertTrue(HiddenWindowRules.arrived(CGRect(x: 1918, y: 1220, width: 10, height: 10), at: CGPoint(x: 1919, y: 1221)))
+        XCTAssertFalse(HiddenWindowRules.arrived(CGRect(x: 208, y: 147, width: 10, height: 10), at: CGPoint(x: 1918, y: 1220)), "AX ответил «успех», а окно на месте")
+        XCTAssertFalse(HiddenWindowRules.arrived(nil, at: .zero))
+    }
+
     func testQuartzFromCocoa() {
         XCTAssertEqual(HiddenScreenGeometry.quartz(fromCocoa: CGRect(x: 100, y: 82, width: 400, height: 300), primaryHeight: 982),
                        CGRect(x: 100, y: 600, width: 400, height: 300))

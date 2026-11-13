@@ -59,27 +59,73 @@ public final class WindowMover {
         return AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, value) == .success
     }
 
-    /// Элемент AX окна с этим номером: сначала `_AXUIElementGetWindow` (MUCore `AXWindowID`), иначе — по рамке.
-    public func element(for id: CGWindowID, pid: pid_t, known windows: [HiddenWindowInfo]) -> AXUIElement? {
-        let candidates = axWindows(pid: pid)
-        if let exact = candidates.first(where: { AXWindowID.of($0.element) == id }) { return exact.element }
-        let same = windows.filter { $0.pid == pid }
-        return candidates.first { HiddenWindowRules.windowID(forAXFrame: $0.frame, pid: pid, in: same) == id }?.element
+    /// Окна AX программы и код ошибки запроса списка (для журнала).
+    public func axCandidates(pid: pid_t) -> (windows: [(element: AXUIElement, windowID: CGWindowID?, frame: CGRect)], error: AXError) {
+        let app = AXUIElementCreateApplication(pid)
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
+        guard error == .success, let windows = value as? [AXUIElement] else { return ([], error) }
+        return (windows.compactMap { element in frame(of: element).map { (element, AXWindowID.of(element), $0) } }, error)
     }
 
-    /// Применить план. Возвращает то, что перенести не вышло (утечки из плана и окна, которые AX не сдвинул).
-    /// `moved` — номер окна и рамка до переноса (чтобы при выключении вернуть окно на место).
+    /// Элемент AX окна с этим номером (`HiddenWindowRules.pickAXWindow`).
+    public func element(for id: CGWindowID, pid: pid_t, known windows: [HiddenWindowInfo]) -> AXUIElement? {
+        guard let frame = windows.first(where: { $0.id == id })?.frame else { return nil }
+        let candidates = axCandidates(pid: pid).windows
+        return HiddenWindowRules.pickAXWindow(id: id, frame: frame, candidates: candidates.map { ($0.windowID, $0.frame) })
+            .map { candidates[$0].element }
+    }
+
+    /// Результат переноса: новая рамка или подробности для журнала.
+    public enum MoveOutcome {
+        case moved(CGRect)
+        case failed(String)
+    }
+
+    /// Перенести окно `id` в точку: позиция; не доехало — позиция, размер и ещё раз позиция (как `WindowTiler.setFrame`:
+    /// при переезде на другой дисплей macOS может подрезать размер). Успех — по фактической рамке, а не по коду AX.
+    public func moveWindow(id: CGWindowID, pid: pid_t, known windows: [HiddenWindowInfo], to origin: CGPoint) -> MoveOutcome {
+        guard let info = windows.first(where: { $0.id == id }) else { return .failed("окна \(id) нет в списке") }
+        let lookup = axCandidates(pid: pid)
+        let candidates = lookup.windows
+        guard let index = HiddenWindowRules.pickAXWindow(id: id, frame: info.frame, candidates: candidates.map { ($0.windowID, $0.frame) }) else {
+            let list = candidates.map { "\($0.windowID.map(String.init) ?? "?")@\(Self.text($0.frame))" }.joined(separator: ", ")
+            return .failed("AX: окно не найдено (kAXWindows: \(lookup.error.rawValue), окон AX \(candidates.count): [\(list)], ищу \(id)@\(Self.text(info.frame)))")
+        }
+        let element = candidates[index].element
+        var point = origin
+        guard let position = AXValueCreate(.cgPoint, &point) else { return .failed("AXValueCreate") }
+        let first = AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, position)
+        if let now = frame(of: element), HiddenWindowRules.arrived(now, at: origin) { return .moved(now) }
+        var size = info.frame.size
+        let extent = AXValueCreate(.cgSize, &size)
+        let sized = extent.map { AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, $0) } ?? .failure
+        let second = AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, position)
+        let after = frame(of: element)
+        if HiddenWindowRules.arrived(after, at: origin) { return .moved(after ?? info.frame) }
+        return .failed("AXPosition \(first.rawValue)/\(second.rawValue), AXSize \(sized.rawValue), рамка после: \(after.map(Self.text) ?? "—"), цель \(Int(origin.x)),\(Int(origin.y))")
+    }
+
+    static func text(_ rect: CGRect) -> String {
+        "\(Int(rect.minX)),\(Int(rect.minY)) \(Int(rect.width))×\(Int(rect.height))"
+    }
+
+    /// Применить план. Возвращает то, что перенести не вышло: утечки из плана и окна, которые AX не сдвинул
+    /// (с причиной — для журнала). `moved` — номер окна и рамка до переноса (чтобы при выключении вернуть на место).
     public func apply(_ actions: [HiddenWindowAction], windows: [HiddenWindowInfo],
-                      moved: (CGWindowID, CGRect) -> Void = { _, _ in }) -> [HiddenWindowAction] {
-        var failed: [HiddenWindowAction] = []
+                      moved: (CGWindowID, CGRect) -> Void = { _, _ in }) -> [(action: HiddenWindowAction, reason: String)] {
+        var failed: [(HiddenWindowAction, String)] = []
         for action in actions {
-            guard case let .move(id, origin) = action,
-                  let info = windows.first(where: { $0.id == id }) else { failed.append(action); continue }
-            if let element = element(for: id, pid: info.pid, known: windows), move(element, to: origin) {
-                moved(id, info.frame)
-                continue
+            switch action {
+            case let .leak(_, layer):
+                failed.append((action, "слой \(layer): меню или подсказка, AX не переносит"))
+            case let .move(id, origin):
+                guard let info = windows.first(where: { $0.id == id }) else { continue }
+                switch moveWindow(id: id, pid: info.pid, known: windows, to: origin) {
+                case .moved: moved(id, info.frame)
+                case let .failed(reason): failed.append((.leak(id, layer: info.layer), reason))
+                }
             }
-            failed.append(.leak(id, layer: info.layer))
         }
         return failed
     }

@@ -106,6 +106,8 @@ public final class HiddenScreenEngine {
     private var handoffTick = 0
     private var lastSurface: IOSurfaceRef?
     private var defaultsToken: NSObjectProtocol?
+    /// Окна, о которых уже написано «утечка» (повтор — только после успешного переноса).
+    private var reportedLeaks: Set<CGWindowID> = []
     /// Перехват нажатий над зеркалом (`PressMode.tap`).
     private var pressTap: EventTap?
     /// Нажатие над зеркалом перехвачено, кнопка ещё не отпущена.
@@ -252,6 +254,7 @@ public final class HiddenScreenEngine {
         displayID = kCGNullDirectDisplay
         hidden = .null
         remembered.removeAll()
+        reportedLeaks.removeAll()
         mirrorWindow?.orderOut(nil)
         mirrorShown = false
         mirrorRequested = false
@@ -303,10 +306,14 @@ public final class HiddenScreenEngine {
         if !plan.isEmpty {
             let failed = mover.apply(plan, windows: windows) { [weak self] id, frame in
                 if self?.remembered[id] == nil { self?.remembered[id] = frame }
+                self?.reportedLeaks.remove(id)
                 Log.hiddenScreen.info("окно \(id) перенесено с \(String(describing: frame), privacy: .public)")
             }
-            for leak in failed {
-                Log.hiddenScreen.error("утечка: \(String(describing: leak), privacy: .public)")
+            // Одна строка на окно, пока оно не перенесётся (13.11 было 368 одинаковых строк за 30 с).
+            for (leak, reason) in failed {
+                guard case let .leak(id, _) = leak, !reportedLeaks.contains(id) else { continue }
+                reportedLeaks.insert(id)
+                Log.hiddenScreen.error("утечка: \(String(describing: leak), privacy: .public) — \(reason, privacy: .public)")
                 onLeak?(leak)
             }
         }

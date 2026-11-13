@@ -8,17 +8,19 @@ final class HiddenScreenGeometryTests: XCTestCase {
     let main = CGRect(x: 0, y: 0, width: 1512, height: 982)
     let right = CGRect(x: 1512, y: -200, width: 2560, height: 1440)
 
-    func testCornerOriginTouchesOnlyAtCorner() {
+    func testHiddenDisplaySharesShortEdgeWithoutOverlap() {
         for displays in [[main], [main, right], [right, main]] {
             let size = CGSize(width: 1440, height: 900)
             let origin = HiddenScreenGeometry.cornerOrigin(size: size, beside: displays)
             let hidden = CGRect(origin: origin, size: size)
-            for display in displays {
-                XCTAssertFalse(display.intersects(hidden), "\(display) ∩ \(hidden)")
-                XCTAssertEqual(HiddenScreenGeometry.sharedEdgeLength(display, hidden), 0, "общий край с \(display)")
-            }
+            for display in displays { XCTAssertFalse(display.intersects(hidden), "\(display) ∩ \(hidden)") }
+            // Связная раскладка: общий край с одним дисплеем ровно 40 pt (не только угол — 13.11 при угле окна не переносились).
+            XCTAssertEqual(displays.map { HiddenScreenGeometry.sharedEdgeLength($0, hidden) }.max(), HiddenScreenGeometry.sharedEdge)
         }
-        XCTAssertEqual(HiddenScreenGeometry.cornerOrigin(size: CGSize(width: 10, height: 10), beside: [main]), CGPoint(x: 1512, y: 982))
+        XCTAssertEqual(HiddenScreenGeometry.cornerOrigin(size: CGSize(width: 10, height: 10), beside: [main]), CGPoint(x: 1512, y: 942))
+        // Как на Mac пользователя 13.11: основной 1710×1112.
+        XCTAssertEqual(HiddenScreenGeometry.cornerOrigin(size: CGSize(width: 1440, height: 900), beside: [CGRect(x: 0, y: 0, width: 1710, height: 1112)]),
+                       CGPoint(x: 1710, y: 1072))
     }
 
     func testCornerOriginSkipsDisplayBelowTheCorner() {

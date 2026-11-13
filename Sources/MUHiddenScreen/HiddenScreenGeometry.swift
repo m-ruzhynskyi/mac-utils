@@ -15,16 +15,19 @@ public enum HiddenScreenGeometry {
         return 0
     }
 
-    /// Начало скрытого дисплея: правый нижний угол самого «правого нижнего» настоящего дисплея.
-    /// Скрытый дисплей касается раскладки только углом — курсор попадает на него, лишь пройдя точно через угол.
-    /// macOS может сдвинуть дисплей, чтобы раскладка была связной (без запуска не проверить), поэтому после
-    /// `CGConfigureDisplayOrigin` начало перечитывается и при общем крае включается `CursorGuard`.
-    public static func cornerOrigin(size: CGSize, beside displays: [CGRect]) -> CGPoint {
+    /// Сколько точек правого края основного дисплея скрытый дисплей делит с ним (внизу, у правого нижнего угла).
+    /// 13.11: когда дисплей касался раскладки только углом (1710, 1112), ни одно окно не переносилось через AX;
+    /// в первой проверке macOS поставила его вплотную к краю — и перенос работал. Связная раскладка — как у обычных
+    /// мониторов; курсор, попавший на скрытый дисплей через эти 40 pt, возвращает `pullBack`.
+    public static let sharedEdge: CGFloat = 40
+
+    /// Начало скрытого дисплея: справа от самого «правого нижнего» настоящего дисплея, общий край — нижние `sharedEdge` точек.
+    public static func cornerOrigin(size: CGSize, beside displays: [CGRect], sharedEdge: CGFloat = HiddenScreenGeometry.sharedEdge) -> CGPoint {
         guard let anchor = displays.max(by: { ($0.maxX + $0.maxY, $0.maxX) < ($1.maxX + $1.maxY, $1.maxX) }) else {
             return .zero
         }
-        var origin = CGPoint(x: anchor.maxX, y: anchor.maxY)
-        // Другой дисплей может лежать правее или ниже угла: тогда отодвигаемся за него, пока нет пересечений.
+        var origin = CGPoint(x: anchor.maxX, y: max(anchor.minY, anchor.maxY - min(sharedEdge, anchor.height)))
+        // Другой дисплей может лежать правее: тогда отодвигаемся за него, пока нет пересечений.
         for _ in 0..<displays.count {
             let candidate = CGRect(origin: origin, size: size)
             guard let blocker = displays.first(where: { $0.intersects(candidate) }) else { break }
