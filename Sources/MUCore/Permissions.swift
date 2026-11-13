@@ -36,6 +36,15 @@ package enum Permissions {
         }
     }
 
+    /// Камера: нужна только «Взгляду в камеру», и только пока он включён.
+    package static var camera: Level { microphoneLevel(AVCaptureDevice.authorizationStatus(for: .video)) }
+
+    package static func requestCamera(_ done: @escaping (Bool) -> Void) {
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+            DispatchQueue.main.async { done(granted) }
+        }
+    }
+
     /// «Полный доступ к диску»: пробуем прочитать защищённые TCC места.
     /// nil — проверить не на чем (ни одного такого пути нет).
     package static var fullDiskAccess: Bool? {
@@ -95,6 +104,7 @@ package enum Permissions {
         case screenRecording = "Privacy_ScreenCapture"
         case automation = "Privacy_Automation"
         case microphone = "Privacy_Microphone"
+        case camera = "Privacy_Camera"
     }
 
     package static func open(_ pane: Pane) {
