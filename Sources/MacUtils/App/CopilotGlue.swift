@@ -2,15 +2,16 @@ import AppKit
 import ScreenCaptureKit
 import MUCore
 import MUCopilot
+import MUAIBackend
 
 /// Подсказчик в приложении: сочетания, панель, снимок экрана. Включается только вручную; включённость не сохраняется.
-/// Звук и расшифровка — `LiveCopilotListener`; бэкенд ИИ (`MUAIBackend`) подключается отдельно: до этого `ai` отвечает «не подключено».
+/// Звук и расшифровка — `LiveCopilotListener`; ИИ — `BackendCopilotAI` (Codex или Claude по выбору на странице «ИИ»).
 @MainActor
 final class CopilotGlue {
     static let shared = CopilotGlue()
 
     /// Подставляются, когда готовы `feature/ai-backend` и расшифровка (`MUMeetings`).
-    var ai: CopilotAIClient = UnavailableCopilotAI()
+    var ai: CopilotAIClient = BackendCopilotAI()
     var listener: CopilotListening = LiveCopilotListener()
 
     private(set) lazy var session = CopilotSession(ai: ai, listener: listener)
@@ -120,4 +121,36 @@ final class UnavailableCopilotListener: CopilotListening {
         throw CopilotError.notConnected("Звук и расшифровка")
     }
     func stop() {}
+}
+
+/// Подсказчик через общий бэкенд ИИ: выбранный сервис (Codex по умолчанию или Claude), запасной, если включён на странице «ИИ».
+struct BackendCopilotAI: CopilotAIClient {
+    /// Подсказка нужна сразу: ждём первый кусок недолго, дальше — запасной (если включён) или ошибка.
+    static let timeout: TimeInterval = 45
+
+    func stream(prompt: String, system: String, images: [Data]) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var files: [URL] = []
+                defer { files.forEach { try? FileManager.default.removeItem(at: $0) } }
+                do {
+                    guard AI.enabled else {
+                        throw CopilotError.notConnected("ИИ выключен: включите его на странице «ИИ»")
+                    }
+                    for data in images {
+                        let url = FileManager.default.temporaryDirectory.appendingPathComponent("copilot-\(UUID().uuidString).png")
+                        try data.write(to: url)
+                        files.append(url)
+                    }
+                    let request = AIRequest(prompt: prompt, system: [system, AIRequest.textOnly].joined(separator: "\n"),
+                                            images: files, timeout: Self.timeout)
+                    for try await piece in AI.stream(request) { continuation.yield(piece) }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 }
