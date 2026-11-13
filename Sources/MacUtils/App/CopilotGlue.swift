@@ -109,7 +109,7 @@ enum CopilotError: LocalizedError {
 }
 
 struct UnavailableCopilotAI: CopilotAIClient {
-    func stream(prompt: String, system: String, images: [Data]) -> AsyncThrowingStream<String, Error> {
+    func stream(prompt: String, system: String, images: [Data], profile: CopilotAIProfile) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { $0.finish(throwing: CopilotError.notConnected("ИИ (Codex / Claude)")) }
     }
 }
@@ -123,34 +123,47 @@ final class UnavailableCopilotListener: CopilotListening {
     func stop() {}
 }
 
-/// Подсказчик через общий бэкенд ИИ: выбранный сервис (Codex по умолчанию или Claude), запасной, если включён на странице «ИИ».
+/// Подсказчик через общий бэкенд ИИ: выбранный сервис (Codex по умолчанию или Claude). Тёплый процесс (по умолчанию) или
+/// запуск на каждый вопрос; быстрые модели у профиля `.fast`. Запасной сервис из страницы «ИИ» здесь не используется:
+/// подсказке нужен ответ сейчас, а не через 20 с.
 struct BackendCopilotAI: CopilotAIClient {
-    /// Подсказка нужна сразу: ждём первый кусок недолго, дальше — запасной (если включён) или ошибка.
     static let timeout: TimeInterval = 45
 
-    func stream(prompt: String, system: String, images: [Data]) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                var files: [URL] = []
-                defer { files.forEach { try? FileManager.default.removeItem(at: $0) } }
-                do {
-                    guard AI.enabled else {
-                        throw CopilotError.notConnected("ИИ выключен: включите его на странице «ИИ»")
-                    }
-                    for data in images {
-                        let url = FileManager.default.temporaryDirectory.appendingPathComponent("copilot-\(UUID().uuidString).png")
-                        try data.write(to: url)
-                        files.append(url)
-                    }
-                    let request = AIRequest(prompt: prompt, system: [system, AIRequest.textOnly].joined(separator: "\n"),
-                                            images: files, timeout: Self.timeout)
-                    for try await piece in AI.stream(request) { continuation.yield(piece) }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
+    private var provider: AIProvider { AI.provider }
+
+    func stream(prompt: String, system: String, images: [Data], profile: CopilotAIProfile) -> AsyncThrowingStream<String, Error> {
+        guard AI.enabled else {
+            return AsyncThrowingStream { $0.finish(throwing: CopilotError.notConnected("ИИ выключен: включите его на странице «ИИ»")) }
         }
+        let provider = self.provider
+        let client: CopilotAIClient = CopilotModels.warmEnabled() ? CopilotWarmRegistry.shared.client(provider) : ColdCopilotAI(provider: provider)
+        return client.stream(prompt: prompt, system: system, images: images, profile: profile)
+    }
+
+    func warmUp(system: String) async {
+        guard AI.enabled, CopilotModels.warmEnabled() else { return }
+        await CopilotWarmRegistry.shared.client(provider).warmUp(system: system)
+    }
+
+    func shutdown() async { await CopilotWarmRegistry.shared.shutdownAll() }
+}
+
+/// Тёплые клиенты по сервисам: переключили Codex ↔ Claude — прежний останавливается при выключении подсказчика.
+final class CopilotWarmRegistry: @unchecked Sendable {
+    static let shared = CopilotWarmRegistry()
+    private let lock = NSLock()
+    private var clients: [AIProvider: WarmCopilotAI] = [:]
+
+    func client(_ provider: AIProvider) -> WarmCopilotAI {
+        lock.lock(); defer { lock.unlock() }
+        if let c = clients[provider] { return c }
+        let c = WarmCopilotAI(provider: provider)
+        clients[provider] = c
+        return c
+    }
+
+    func shutdownAll() async {
+        lock.lock(); let all = Array(clients.values); lock.unlock()
+        for c in all { await c.shutdown() }
     }
 }

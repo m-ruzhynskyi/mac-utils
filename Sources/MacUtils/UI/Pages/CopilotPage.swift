@@ -13,6 +13,9 @@ struct CopilotPage: View {
     @AppStorage(CopilotPrefs.answerLanguage) private var answerLanguage = ""
     @AppStorage(CopilotPrefs.about) private var about = ""
     @AppStorage(CopilotPrefs.reactToPauses) private var reactToPauses = true
+    @AppStorage(CopilotPrefs.fastModels) private var fastModels = true
+    @AppStorage(CopilotPrefs.hybrid) private var hybrid = false
+    @AppStorage(CopilotModels.warm) private var warm = true
     @AppStorage(CopilotPrefs.screenID) private var screenID = ""
     @State private var screens = CopilotGlue.screens()
     @ObservedObject private var session = CopilotGlue.shared.session
@@ -30,6 +33,12 @@ struct CopilotPage: View {
                 }
                 ToggleRow("Реагировать на паузу", subtitle: "Не ждать, пока расшифровка закончит фразу: пауза 0,7 с — и ответ уже готовится. Быстрее на 1–2 с, иногда ловит начало фразы",
                           systemImage: "timer", isOn: $reactToPauses)
+                ToggleRow("Быстрые модели", subtitle: "Малое «размышление» и быстрая модель: первая строка за пару секунд. Выключено — основные модели, ответы подробнее и медленнее",
+                          systemImage: "hare", isOn: $fastModels)
+                ToggleRow("Держать ИИ наготове", subtitle: "Пока подсказчик включён, программа Codex или Claude уже запущена: вопрос не ждёт запуска",
+                          systemImage: "flame", isOn: $warm)
+                ToggleRow("Гибрид: фраза и пункты отдельно", subtitle: "Первая строка — от быстрой модели, пункты — от основной, одновременно. Два запроса вместо одного: быстрее, но расходует подписку вдвое",
+                          systemImage: "square.split.2x1", isOn: $hybrid)
                 ToggleRow("Отвечать на вопросы сразу", subtitle: "Выключено — только по ⌥⇧A", systemImage: "bolt", isOn: $autoAnswer)
             }
             GroupLabel("Где панель")

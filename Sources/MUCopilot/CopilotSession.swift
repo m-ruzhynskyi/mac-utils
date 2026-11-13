@@ -5,8 +5,20 @@ import MUCore
 /// модуль не зависел от него и проверялся на заглушке.
 package protocol CopilotAIClient: Sendable {
     /// Куски текста ответа по мере поступления. Отмена задачи должна останавливать процесс ИИ.
-    func stream(prompt: String, system: String, images: [Data]) -> AsyncThrowingStream<String, Error>
+    /// `profile`: `.fast` — быстрая модель с малым «размышлением» (первая строка), `.main` — основная.
+    func stream(prompt: String, system: String, images: [Data], profile: CopilotAIProfile) -> AsyncThrowingStream<String, Error>
+    /// Заранее запустить процесс ИИ (при включении подсказчика), чтобы первый вопрос не ждал запуска.
+    func warmUp(system: String) async
+    /// Остановить тёплые процессы (при выключении подсказчика).
+    func shutdown() async
 }
+
+extension CopilotAIClient {
+    package func warmUp(system: String) async {}
+    package func shutdown() async {}
+}
+
+package enum CopilotAIProfile: String, Equatable, Sendable { case main, fast }
 
 /// Источник звука и расшифровки (собеседники — звук программы звонка, вы — микрофон). Запускается только вручную.
 @MainActor
@@ -21,14 +33,22 @@ package protocol CopilotListening: AnyObject {
 
 /// Измеряет задержку «конец вопроса → первая строка ответа».
 package struct LatencyMeter: Equatable {
-    package static let target: TimeInterval = 4
+    /// Цель: от конца вопроса до первой строки (без учёта расшифровки).
+    package static let target: TimeInterval = 2.5
     package private(set) var questionAt: Date?
     package private(set) var firstLineAt: Date?
+    package private(set) var lineCompleteAt: Date?
 
     package init() {}
 
-    package mutating func questionEnded(at date: Date) { questionAt = date; firstLineAt = nil }
+    package mutating func questionEnded(at date: Date) { questionAt = date; firstLineAt = nil; lineCompleteAt = nil }
     package mutating func firstLine(at date: Date) { if firstLineAt == nil { firstLineAt = date } }
+    /// Первая строка пришла целиком (за ней перевод строки или конец ответа).
+    package mutating func lineComplete(at date: Date) { if lineCompleteAt == nil { lineCompleteAt = date } }
+    package var lineCompleteSeconds: TimeInterval? {
+        guard let q = questionAt, let f = lineCompleteAt else { return nil }
+        return f.timeIntervalSince(q)
+    }
     package var seconds: TimeInterval? {
         guard let q = questionAt, let f = firstLineAt else { return nil }
         return f.timeIntervalSince(q)
@@ -85,6 +105,8 @@ package final class CopilotSession: ObservableObject {
             try listener.start(language: settings().meetingLanguage, reactToPauses: settings().reactToPauses) { [weak self] in self?.feed($0) }
             phase = .listening
             error = nil
+            let ai = self.ai, system = CopilotPrompt.system(settings: settings())
+            Task { await ai.warmUp(system: system) }
             log("Подсказчик: включён вручную")
         } catch {
             self.error = "Не удалось начать слушать: \(error.localizedDescription)"
@@ -98,6 +120,8 @@ package final class CopilotSession: ObservableObject {
         task?.cancel()
         task = nil
         listener.stop()
+        let ai = self.ai
+        Task { await ai.shutdown() }
         phase = .off
         transcript = []
         question = nil
@@ -149,23 +173,44 @@ package final class CopilotSession: ObservableObject {
         let started = now()
         meter.questionEnded(at: questionUtterance?.at ?? started)
         let settings = settings()
-        let system = CopilotPrompt.system(settings: settings)
         let prompt = CopilotPrompt.user(settings: settings, utterances: transcript, now: started, mode: mode,
                                         previous: mode == .shorter ? answer : nil)
         let previousAnswer = answer
         isAnswering = true
         error = nil
         if mode != .shorter { answer = .empty }
-        let stream = ai.stream(prompt: prompt, system: system, images: images)
+        hybrid = HybridAnswer()
+        let ai = self.ai
+        // Гибрид: фраза — быстрой моделью, пункты — основной, одновременно. Со снимком экрана и «Короче» — один запрос.
+        let hybrid = settings.hybrid && images.isEmpty && mode != .shorter
+        let profile: CopilotAIProfile = settings.fastModels ? .fast : .main
         task = Task { [weak self] in
-            var raw = ""
             do {
-                for try await chunk in stream {
-                    guard let self, !Task.isCancelled else { return }
-                    raw += chunk
-                    self.apply(CopilotPrompt.parse(raw))
+                if hybrid {
+                    try await withThrowingTaskGroup(of: Void.self) { group in
+                        for (part, leg) in [(CopilotPrompt.Part.sayOnly, CopilotAIProfile.fast), (.pointsOnly, .main)] {
+                            let stream = ai.stream(prompt: prompt, system: CopilotPrompt.system(settings: settings, part: part), images: [], profile: leg)
+                            group.addTask { [weak self] in
+                                for try await piece in stream {
+                                    try Task.checkCancellation()
+                                    await self?.hybridPiece(part: part, piece: piece)
+                                }
+                                await self?.hybridDone(part: part)
+                            }
+                        }
+                        try await group.waitForAll()
+                    }
+                    if let self { self.finish(parsed: self.hybrid.parsed, previous: previousAnswer) }
+                } else {
+                    var raw = ""
+                    let stream = ai.stream(prompt: prompt, system: CopilotPrompt.system(settings: settings), images: images, profile: profile)
+                    for try await chunk in stream {
+                        guard let self, !Task.isCancelled else { return }
+                        raw += chunk
+                        self.apply(CopilotPrompt.parse(raw))
+                    }
+                    self?.finish(parsed: CopilotPrompt.parse(raw), previous: previousAnswer)
                 }
-                self?.finish(raw: raw, previous: previousAnswer)
             } catch is CancellationError {
             } catch {
                 guard let self, !Task.isCancelled else { return }
@@ -176,6 +221,20 @@ package final class CopilotSession: ObservableObject {
         }
     }
 
+    // Гибрид: две половины приходят в разном порядке; общее состояние держит главный поток.
+    private var hybrid = HybridAnswer()
+
+    private func hybridPiece(part: CopilotPrompt.Part, piece: String) {
+        if part == .sayOnly { hybrid.appendSay(piece) } else { hybrid.appendPoints(piece) }
+        if case .noQuestion = hybrid.parsed { return }
+        apply(hybrid.parsed)
+    }
+
+    private func hybridDone(part: CopilotPrompt.Part) {
+        if part == .sayOnly { hybrid.finishSay() } else { hybrid.finishPoints() }
+        apply(hybrid.parsed)
+    }
+
     private func apply(_ parsed: CopilotPrompt.Parsed) {
         switch parsed {
         case .noQuestion: break
@@ -184,22 +243,26 @@ package final class CopilotSession: ObservableObject {
                 meter.firstLine(at: now())
                 if expandedAt == nil { expandedAt = now() }
             }
+            if a.sayComplete { meter.lineComplete(at: now()) }
             answer = a
         }
     }
 
-    private func finish(raw: String, previous: CopilotAnswer) {
+    private func finish(parsed: CopilotPrompt.Parsed, previous: CopilotAnswer) {
         isAnswering = false
-        if case .noQuestion = CopilotPrompt.parse(raw) {
+        if case .noQuestion = parsed {
             answer = previous.isEmpty ? .empty : previous
             question = nil
             expandedAt = nil
             log("Подсказчик: модель не нашла вопроса")
             return
         }
+        // Ответ пришёл одним куском: строка закончилась вместе с ответом.
+        if case .answer(let a) = parsed, !a.say.isEmpty { meter.lineComplete(at: now()) }
         if let s = meter.seconds {
             lastLatency = s
-            log(String(format: "Подсказчик: первая строка через %.1f с%@", s, meter.withinTarget ? "" : " (дольше цели 4 с)"))
+            let complete = meter.lineCompleteSeconds.map { String(format: ", первая строка целиком через %.1f с", $0) } ?? ""
+            log(String(format: "Подсказчик: первый кусок через %.1f с%@%@", s, complete, meter.withinTarget ? "" : " (дольше цели 2,5 с)"))
         }
         expandedAt = now()
     }

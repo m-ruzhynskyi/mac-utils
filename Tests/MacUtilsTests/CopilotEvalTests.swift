@@ -1,5 +1,7 @@
 import XCTest
+@testable import MacUtils
 @testable import MUCopilot
+import MUAIBackend
 
 /// Диалоги для оценки ответов и прогонщик. Обычный `swift test` только проверяет сами диалоги и оценщик (без ИИ).
 /// Настоящий прогон — команда менеджера:
@@ -62,89 +64,139 @@ final class CopilotFixturesTests: XCTestCase {
     }
 }
 
-/// Прогон на настоящем ИИ через его командную строку. Включается только `MU_COPILOT_EVAL=codex|claude`: это расход подписки.
-/// После появления `MUAIBackend` прогон пойдёт через него (`CopilotAIClient`); командные строки здесь — те же, что в задаче бэкенда.
+/// Прогон на настоящем ИИ. Включается только `MU_COPILOT_EVAL=codex|claude`: это расход подписки.
+/// Режимы (`MU_COPILOT_MODE`):
+///   cold         как раньше: CLI на каждый вопрос, основная модель
+///   cold-fast    CLI на каждый вопрос, малое «размышление»
+///   warm         тёплый процесс, основная модель
+///   warm-fast    тёплый процесс, быстрая модель и малое «размышление» (по умолчанию в приложении)
+///   hybrid       тёплые процессы: первая строка — быстрая модель, пункты — основная, одновременно
+/// Замеряется поток: до первого куска, до конца первой строки, до конца ответа; отдельно — цена запуска процесса.
 final class CopilotEvalRunTests: XCTestCase {
     private struct Result: Codable {
         let id: String
         let backend: String
-        let seconds: Double
+        let mode: String
+        let firstChunk: Double?
+        let firstLine: Double?
+        let total: Double
         let raw: String
         let grade: CopilotGrade
         let error: String?
     }
 
+    private func client(backend: String, mode: String) throws -> CopilotAIClient {
+        let provider: AIProvider = backend == "codex" ? .codex : .claude
+        switch mode {
+        case "cold", "cold-fast": return ColdCopilotAI(provider: provider)
+        case "warm", "warm-fast", "hybrid": return WarmCopilotAI(provider: provider)
+        default: throw XCTSkip("Неизвестный режим \(mode)")
+        }
+    }
+
+    /// Один ответ потоком; время — от запроса.
+    private func measure(_ client: CopilotAIClient, system: String, user: String, profile: CopilotAIProfile,
+                         onPiece: ((String) -> Void)? = nil) async throws -> (raw: String, firstChunk: Double?, firstLine: Double?, total: Double) {
+        let started = Date()
+        var raw = "", firstChunk: Double?, firstLine: Double?
+        for try await piece in client.stream(prompt: user, system: system, images: [], profile: profile) {
+            raw += piece
+            let t = Date().timeIntervalSince(started)
+            if firstChunk == nil { firstChunk = t }
+            if firstLine == nil, raw.contains("\n") { firstLine = t }
+            onPiece?(piece)
+        }
+        let total = Date().timeIntervalSince(started)
+        // Ответ без перевода строки (одна строка или NO_QUESTION): строка закончилась вместе с ответом.
+        return (raw, firstChunk, firstLine ?? (raw.isEmpty ? nil : total), total)
+    }
+
     func testRunDialogsOnRealBackend() async throws {
         let env = ProcessInfo.processInfo.environment
         guard let backend = env["MU_COPILOT_EVAL"], ["codex", "claude"].contains(backend) else {
-            throw XCTSkip("Настоящий прогон: scripts/copilot-eval.sh codex|claude (расход подписки, только по команде менеджера)")
+            throw XCTSkip("Настоящий прогон: scripts/copilot-eval.sh codex|claude [режим] (расход подписки, только по команде менеджера)")
         }
+        let mode = env["MU_COPILOT_MODE"] ?? "cold"
         let only = env["MU_COPILOT_ONLY"]
         let out = URL(fileURLWithPath: env["MU_COPILOT_OUT"] ?? FileManager.default.currentDirectoryPath + "/.audit/copilot-eval")
-            .appendingPathComponent(backend, isDirectory: true)
+            .appendingPathComponent("\(backend)-\(mode)", isDirectory: true)
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        let ai = try client(backend: backend, mode: mode)
+        let fast = mode.hasSuffix("fast")
         let dialogs = try CopilotFixtures.load().filter { only == nil || $0.id.hasPrefix(only!) }
+
+        // Цена запуска: тёплый режим — время до готовности процесса; холодный — её платит каждый вопрос.
+        var startup: Double?
+        if mode.hasPrefix("warm") || mode == "hybrid" {
+            let t = Date()
+            await ai.warmUp(system: CopilotPrompt.system(settings: CopilotSettings(), part: mode == "hybrid" ? .sayOnly : .full))
+            startup = Date().timeIntervalSince(t)
+        }
         var results: [Result] = []
         for d in dialogs {
             let now = Date()
-            let system = CopilotPrompt.system(settings: d.settings)
             let user = CopilotPrompt.user(settings: d.settings, utterances: d.utterances(now: now), now: now, mode: .lastQuestion)
-            let started = Date()
-            var raw = "", error: String?
-            do { raw = try await Self.run(backend: backend, system: system, user: user) } catch let e { error = "\(e)" }
-            let seconds = Date().timeIntervalSince(started)
-            let result = Result(id: d.id, backend: backend, seconds: seconds, raw: raw, grade: CopilotEvalGrader.grade(raw: raw, dialog: d), error: error)
+            var raw = "", firstChunk: Double?, firstLine: Double?, total = 0.0, error: String?
+            do {
+                if mode == "hybrid" {
+                    // Две половины одновременно, как в приложении; первая строка — как только быстрая половина её закончила.
+                    let started = Date()
+                    var h = HybridAnswer()
+                    let stream: (CopilotPrompt.Part, CopilotAIProfile) async throws -> Void = { part, profile in
+                        let system = CopilotPrompt.system(settings: d.settings, part: part)
+                        for try await piece in ai.stream(prompt: user, system: system, images: [], profile: profile) {
+                            await MainActor.run {
+                                if part == .sayOnly { h.appendSay(piece) } else { h.appendPoints(piece) }
+                                let t = Date().timeIntervalSince(started)
+                                if firstChunk == nil, part == .sayOnly { firstChunk = t }
+                            }
+                        }
+                        await MainActor.run {
+                            if part == .sayOnly { h.finishSay(); if firstLine == nil { firstLine = Date().timeIntervalSince(started) } } else { h.finishPoints() }
+                        }
+                    }
+                    try await withThrowingTaskGroup(of: Void.self) { group in
+                        group.addTask { try await stream(.sayOnly, .fast) }
+                        group.addTask { try await stream(.pointsOnly, .main) }
+                        try await group.waitForAll()
+                    }
+                    total = Date().timeIntervalSince(started)
+                    if case .noQuestion = h.parsed { raw = CopilotPrompt.noQuestionMarker }
+                    else if case .answer(let a) = h.parsed { raw = a.say + "\n" + a.points.map { "- " + $0 }.joined(separator: "\n") }
+                } else {
+                    let r = try await measure(ai, system: CopilotPrompt.system(settings: d.settings), user: user, profile: fast ? .fast : .main)
+                    (raw, firstChunk, firstLine, total) = (r.raw, r.firstChunk, r.firstLine, r.total)
+                }
+            } catch let e { error = "\(e)" }
+            let result = Result(id: d.id, backend: backend, mode: mode, firstChunk: firstChunk, firstLine: firstLine, total: total, raw: raw,
+                                grade: CopilotEvalGrader.grade(raw: raw, dialog: d), error: error)
             results.append(result)
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(result).write(to: out.appendingPathComponent("\(d.id).json"))
         }
-        try Self.summary(results, backend: backend).write(to: out.appendingPathComponent("summary.md"), atomically: true, encoding: .utf8)
+        await ai.shutdown()
+        try Self.summary(results, backend: backend, mode: mode, startup: startup).write(to: out.appendingPathComponent("summary.md"), atomically: true, encoding: .utf8)
     }
 
-    private static func summary(_ r: [Result], backend: String) -> String {
+    private static func stat(_ values: [Double]) -> String {
+        let v = values.sorted()
+        guard !v.isEmpty else { return "—" }
+        return String(format: "медиана %.1f, p90 %.1f, макс %.1f", v[v.count / 2], v[min(v.count - 1, Int(Double(v.count) * 0.9))], v.last!)
+    }
+
+    private static func summary(_ r: [Result], backend: String, mode: String, startup: Double?) -> String {
+        let asked = r.filter { $0.error == nil && $0.grade.sayLength > 0 }
         let passed = r.filter { $0.grade.passed && $0.error == nil }.count
-        let times = r.map(\.seconds).sorted()
-        let median = times.isEmpty ? 0 : times[times.count / 2]
-        var s = "# Прогон подсказчика на \(backend)\n\nПрошли автопроверку: \(passed) из \(r.count). Время ответа целиком: медиана \(String(format: "%.1f", median)) с, максимум \(String(format: "%.1f", times.last ?? 0)) с (до первой строки меньше: ответ приходит целиком).\n\nАвтопроверка ловит только явные провалы (формат, решение «вопрос / не вопрос», длина, ключевые слова). Качество ответов оценивает человек: читать `<id>.json` → `raw`.\n\n| диалог | с | решение | пунктов | ключи | заметки |\n|---|---|---|---|---|---|\n"
+        var s = "# Подсказчик: \(backend), режим \(mode)\n\nАвтопроверка: \(passed) из \(r.count) (первая строка ≤ \(CopilotPrompt.maxSayLength) знаков).\n\n"
+        s += "- до первого куска, с: \(stat(asked.compactMap(\.firstChunk)))\n"
+        s += "- до конца первой строки, с (цель ≤ 2,5): \(stat(asked.compactMap(\.firstLine)))\n"
+        s += "- до конца ответа, с (цель ≤ 6): \(stat(r.map(\.total)))\n"
+        if let startup { s += "- запуск тёплого процесса (платится один раз при включении), с: \(String(format: "%.1f", startup))\n" }
+        s += "\nАвтопроверка ловит явные провалы; качество оценивает человек (`<id>.json` → `raw`).\n\n| диалог | 1-й кусок | 1-я строка | всё | решение | пунктов | ключи | знаков в 1-й | заметки |\n|---|---|---|---|---|---|---|---|---|\n"
+        func f(_ x: Double?) -> String { x.map { String(format: "%.1f", $0) } ?? "—" }
         for x in r {
-            s += "| \(x.id) | \(String(format: "%.1f", x.seconds)) | \(x.grade.correctDecision ? "ок" : "нет") | \(x.grade.pointCount) | \(x.grade.keywordGroupsHit)/\(x.grade.keywordGroupsTotal) | \(x.error ?? x.grade.notes.joined(separator: "; ")) |\n"
+            s += "| \(x.id) | \(f(x.firstChunk)) | \(f(x.firstLine)) | \(f(x.total)) | \(x.grade.correctDecision ? "ок" : "нет") | \(x.grade.pointCount) | \(x.grade.keywordGroupsHit)/\(x.grade.keywordGroupsTotal) | \(x.grade.sayLength) | \(x.error ?? x.grade.notes.joined(separator: "; ")) |\n"
         }
         return s
-    }
-
-    /// Команды как в задаче бэкенда: без инструментов и файлов, одноразовая сессия.
-    private static func run(backend: String, system: String, user: String) async throws -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let work = FileManager.default.temporaryDirectory.appendingPathComponent("copilot-eval-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: work) }
-        let process = Process()
-        let outFile = work.appendingPathComponent("answer.txt")
-        if backend == "codex" {
-            process.executableURL = home.appendingPathComponent(".local/node/bin/codex")
-            process.arguments = ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral", "--color", "never",
-                                 "-C", work.path, "-o", outFile.path, "-"]
-        } else {
-            process.executableURL = home.appendingPathComponent(".local/bin/claude")
-            process.arguments = ["-p", "--output-format", "text", "--tools", "", "--no-session-persistence", "--system-prompt", system]
-        }
-        process.currentDirectoryURL = work
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = home.appendingPathComponent(".local/node/bin").path + ":" + home.appendingPathComponent(".local/bin").path + ":" + (env["PATH"] ?? "/usr/bin:/bin")
-        process.environment = env
-        let input = Pipe(), output = Pipe(), errors = Pipe()
-        process.standardInput = input; process.standardOutput = output; process.standardError = errors
-        try process.run()
-        let prompt = backend == "codex" ? system + "\n\n" + user : user
-        input.fileHandleForWriting.write(Data(prompt.utf8))
-        try input.fileHandleForWriting.close()
-        let stdout = output.fileHandleForReading.readDataToEndOfFile()
-        let stderr = errors.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw NSError(domain: "eval", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: String(decoding: stderr.suffix(400), as: UTF8.self)])
-        }
-        if backend == "codex" { return (try? String(contentsOf: outFile, encoding: .utf8)) ?? String(decoding: stdout, as: UTF8.self) }
-        return String(decoding: stdout, as: UTF8.self)
     }
 }

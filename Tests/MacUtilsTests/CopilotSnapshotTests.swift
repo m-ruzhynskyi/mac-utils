@@ -66,7 +66,7 @@ final class CopilotSnapshotTests: XCTestCase {
     }
 
     private struct DemoAI: CopilotAIClient {
-        func stream(prompt: String, system: String, images: [Data]) -> AsyncThrowingStream<String, Error> {
+        func stream(prompt: String, system: String, images: [Data], profile: CopilotAIProfile) -> AsyncThrowingStream<String, Error> {
             AsyncThrowingStream { c in
                 c.yield("Начну с плана запроса, потом индекс и предагрегация.\n- EXPLAIN ANALYZE: где полный проход по таблице\n- Составной индекс (created_at, status)\n- Ежедневная сводная таблица вместо подсчёта на лету")
                 c.finish()

@@ -44,8 +44,8 @@ package struct CopilotGrade: Codable, Equatable {
 }
 
 package enum CopilotEvalGrader {
-    /// Фразу вслух не стоит делать длиннее ~280 знаков (2 предложения).
-    package static let maxSayLength = 280
+    /// Первая строка — не длиннее 140 знаков: её надо успеть сказать вслух.
+    package static let maxSayLength = CopilotPrompt.maxSayLength
 
     package static func grade(raw: String, dialog: CopilotDialog) -> CopilotGrade {
         let parsed = CopilotPrompt.parse(raw)
