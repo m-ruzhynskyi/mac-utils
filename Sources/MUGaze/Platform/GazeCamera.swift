@@ -30,20 +30,35 @@ final class GazeCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
     enum StartError: Error { case noCamera, cannotOpen }
 
+    /// Размер кадра на выходе: 16:9 больше 720p — ужимаем до 1280×720; другое соотношение не трогаем (не растягивать лицо).
+    static func outputSize(width: Int, height: Int) -> (width: Int, height: Int)? {
+        guard width > 1280, width * 9 == height * 16 else { return nil }
+        return (1280, 720)
+    }
+
     func start() throws {
         guard let device = Self.preferredDevice() else { throw StartError.noCamera }
         session.beginConfiguration()
-        session.sessionPreset = session.canSetSessionPreset(.hd1280x720) ? .hd1280x720 : .high
         session.inputs.forEach { session.removeInput($0) }
         guard let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else {
             session.commitConfiguration(); throw StartError.cannotOpen
         }
         session.addInput(input)
+        // Пресет — после входа: до него canSetSessionPreset не знает камеру (живая проверка: пришло 1920×1080).
+        session.sessionPreset = session.canSetSessionPreset(.hd1280x720) ? .hd1280x720 : .high
+        let dims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+        var settings: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+        ]
+        // Камера всё равно отдаёт больше 720p при 16:9 — масштабирует сам вывод: вдвое меньше работы на кадр.
+        if let size = Self.outputSize(width: Int(dims.width), height: Int(dims.height)) {
+            settings[kCVPixelBufferWidthKey as String] = size.width
+            settings[kCVPixelBufferHeightKey as String] = size.height
+        }
+        output.videoSettings = settings
+        Log.gaze.info("camera: format \(dims.width, privacy: .public)x\(dims.height, privacy: .public)")
         if session.outputs.isEmpty {
-            output.videoSettings = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
-            ]
             output.alwaysDiscardsLateVideoFrames = true
             output.setSampleBufferDelegate(self, queue: queue)
             if session.canAddOutput(output) { session.addOutput(output) }

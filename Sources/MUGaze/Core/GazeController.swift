@@ -28,6 +28,26 @@ package struct GazeState: OptionSet, Sendable, Hashable {
     package static let blink = GazeState(rawValue: 4)
     package static let irisLost = GazeState(rawValue: 8)
     package static let lookingFarAway = GazeState(rawValue: 16)
+    /// Глаз прищурен или опущен: переносить почти нечего, правка ослаблена.
+    package static let narrowEyes = GazeState(rawValue: 32)
+    /// Радужка у самого уголка (сильный взгляд в сторону): сдвигать её — тёмный клин и размытие, правка ослаблена.
+    package static let sideGaze = GazeState(rawValue: 64)
+}
+
+/// Что сейчас применено к кадру — для индикатора в отладке и для разбора записей.
+package struct GazeApplied: Equatable, Sendable {
+    /// Сдвиг радужки в пикселях кадра (среднее по глазам, в осях глаза): x — вбок (+ вправо на кадре), y — вверх (+).
+    package var pixels = Vec2.zero
+    /// Итоговая сила 0…1+ (включение, моргание, узкие глаза, взгляд в сторону и ползунок «Сила»).
+    package var strength = 0.0
+    /// Множители по отдельности: узкие глаза и взгляд в сторону (1 — не ослаблено).
+    package var openFactor = 1.0
+    package var sideFactor = 1.0
+    /// Положение радужки в глазу по горизонтали, доли полуширины (больший по модулю из двух глаз).
+    package var irisSide = 0.0
+    /// Положение радужек по горизонтали отдельно (слева на кадре, справа), доли полуширины: для разбора сведения глаз.
+    package var eyeX: [Double] = []
+    package init() {}
 }
 
 package struct GazeOutput: Sendable {
@@ -43,6 +63,7 @@ package struct GazeOutput: Sendable {
     package var measured: Vec2?
     package var target: Vec2
     package var state: GazeState
+    package var applied = GazeApplied()
 }
 
 /// Логика «Взгляда в камеру» без кадров и детекторов: по положению радужки и повороту головы решает,
@@ -66,6 +87,7 @@ package final class GazeController {
     private var lastShapes: [EyeShape?] = [nil, nil]
     private var headOff = false
     private var farOff = false
+    private var sideSmooth: Double?
 
     package init(settings: GazeSettings = GazeSettings(), seed: UInt64 = 0x6A2E) {
         self.settings = settings
@@ -75,7 +97,7 @@ package final class GazeController {
 
     package func reset() {
         gazeFilter.reset(); baseline.reset(); mainFade = Fade(0); blinkFade = Fade(1)
-        openBaseline = nil; lastTime = nil; lastShift = .zero; lastEyes = []; headOff = false; farOff = false
+        openBaseline = nil; lastTime = nil; lastShift = .zero; lastEyes = []; headOff = false; farOff = false; sideSmooth = nil
         eyeFilters = [OneEuroFilter(), OneEuroFilter()]; lastIris = [nil, nil]; lastShiftV2 = .zero
         shapeSmoothers = [EyeShapeSmoother(), EyeShapeSmoother()]; lastShapes = [nil, nil]
     }
@@ -166,8 +188,28 @@ package final class GazeController {
         mainFade.advance(toward: active ? 1 : 0, dt: dt, duration: L.fadeSeconds)
         blinkFade.advance(toward: blink ? 0 : 1, dt: dt, duration: L.blinkFadeSeconds)
         var out = output(weight: mainFade.value * blinkFade.value, shift: shift, target: target, state: state)
-        out.edits = edits(weight: out.weight, shift: shiftV2, face: face)
+        let side = sideFactor(face: face, dt: dt)
+        out.applied.irisSide = side.position
+        out.applied.eyeX = face.eyes.prefix(2).map { e in e.iris.map { e.frame.local($0).x } ?? .nan }
+        out.edits = edits(weight: out.weight, shift: shiftV2, face: face, sideFactor: side.factor, applied: &out.applied)
+        if out.applied.openFactor < 0.9 { out.state.insert(.narrowEyes) }
+        if side.factor < 0.9 { out.state.insert(.sideGaze) }
         return out
+    }
+
+    /// Взгляд сильно в сторону: радужка у уголка, часть её под углом века. Тянуть её к центру — тёмный клин
+    /// и размазанная радужка (живая проверка GAZE-33), поэтому правка плавно гаснет от `sideGazeFull` до `sideGazeOff`.
+    /// Сглажено во времени, чтобы на саккаде в сторону и обратно не было рывка.
+    private func sideFactor(face: FaceInput, dt: Double) -> (factor: Double, position: Double) {
+        let L = settings.limits
+        let positions = face.eyes.prefix(2).compactMap { e in e.iris.map { e.frame.local($0).x - settings.calibration.bias.x } }
+        guard let side = positions.max(by: { abs($0) < abs($1) }) else { return (sideSmooth ?? 1, 0) }
+        let raw = 1 - smoothstep(L.sideGazeFull, L.sideGazeOff, abs(side))
+        // Гаснет быстро (радужка уже у уголка), возвращается медленнее.
+        let tau = raw < (sideSmooth ?? raw) ? 0.06 : 0.25
+        let next = sideSmooth.map { $0 + (raw - $0) * (1 - exp(-dt / tau)) } ?? raw
+        sideSmooth = next
+        return (next, side)
     }
 
     /// Насколько глаз открыт для правки (по точным векам): видимая высота радужки к её диаметру.
@@ -179,13 +221,20 @@ package final class GazeController {
         return smoothstep(GazeLimits.narrowEyeOff, GazeLimits.narrowEyeOn, open / max(2 * shape.irisRadius, 1))
     }
 
-    private func edits(weight rawWeight: Double, shift: Vec2, face: FaceInput) -> [EyeEdit] {
-        guard rawWeight > 0 else { return [] }
+    private func edits(weight rawWeight: Double, shift rawShift: Vec2, face: FaceInput, sideFactor: Double, applied: inout GazeApplied) -> [EyeEdit] {
         // Одинаково для обоих глаз, чтобы взгляд не расходился.
         let open = face.eyes.prefix(2).compactMap { e in e.shape.map { Self.openFactor($0, frame: e.frame) } }.min() ?? 1
-        let weight = rawWeight * open
-        guard weight > 0.01 else { return [] }
-        let s = shift * weight
+        applied.openFactor = open; applied.sideFactor = sideFactor
+        let L = settings.limits
+        let weight = rawWeight * open * sideFactor
+        guard weight > 0.01, settings.strength > 0.01 else { return [] }
+        // «Сила» масштабирует сдвиг; пределы — после неё, чтобы ползунок не выводил радужку за веко.
+        var s = rawShift * (weight * settings.strength)
+        s.x = min(max(s.x, -L.maxShiftX), L.maxShiftX)
+        s.y = min(max(s.y, -L.maxLiftStrong), L.maxShiftY)
+        applied.strength = weight * settings.strength
+        let eyes = face.eyes.prefix(2)
+        applied.pixels = eyes.map { Vec2(s.x * $0.frame.halfWidth, -s.y * $0.frame.halfWidth) }.reduce(.zero, +) / Double(max(eyes.count, 1))
         let cal = settings.calibration
         return face.eyes.prefix(2).enumerated().compactMap { k, e in
             guard let iris = lastIris[k] else { return nil }

@@ -15,7 +15,8 @@ struct GazePage: View {
     @AppStorage(Pref.gazePointPitch) private var pointPitch = 0.0
     @AppStorage(Pref.gazeFreedom) private var freedom = "normal"
     @AppStorage(Pref.gazeCalibrated) private var calibrated = false
-    @AppStorage(Pref.gazeScreenLift) private var screenLift = 0.15
+    @AppStorage(Pref.gazeScreenLift) private var screenLift = GazeCalibration.defaultScreenLift
+    @AppStorage(Pref.gazeStrength) private var strength = 1.0
 
     private var isOn: Binding<Bool> {
         Binding(get: { service.isOn }, set: { service.setOn($0) })
@@ -37,6 +38,8 @@ struct GazePage: View {
                 Row("Свобода движения", subtitle: "Мелкие движения глаз, как у живого человека. Моргания не меняются") {
                     Segmented(selection: $freedom, options: [("low", "Мало"), ("normal", "Обычно"), ("high", "Много")])
                 }
+                SliderRow("Сила", subtitle: "Насколько заметно поднимать взгляд. Если в звонке глаза всё ещё смотрят вниз — прибавьте",
+                          value: $strength, in: GazeSettings.strengthRange) { String(format: "%.0f %%", $0 * 100) }
                 Row("Когда голова сильно повёрнута", subtitle: "Поправка плавно выключается, чтобы глаза не выглядели странно") { EmptyView() }
             }
 
@@ -105,7 +108,7 @@ struct GazePage: View {
 
     private var calibrationSubtitle: String {
         if calibrated {
-            let angle = GazeCalibrationRecorder.Result(biasX: 0, screenLift: screenLift).screenAngleDegrees()
+            let angle = GazeCalibrationRecorder.Result(biasX: 0, screenLift: GazeCalibration.liftAfterCalibration(screenLift)).screenAngleDegrees()
             return String(format: "Готово: экран ниже камеры примерно на %.0f°", angle)
         }
         return "Две секунды смотрите в камеру, затем две — в середину экрана. Без калибровки экран считается чуть ниже камеры"

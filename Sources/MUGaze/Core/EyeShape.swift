@@ -26,6 +26,32 @@ package struct EyeShape: Equatable, Codable, Sendable {
         return EyeShape(cornerA: lower.first!, cornerB: lower.last!, upper: upper, lower: lower, iris: c, irisRadius: r)
     }
 
+    /// Индексы Face Landmarker v2 (FaceMesh, 478 точек) для глаза слева на кадре (0) и справа (1): уголки, верхнее
+    /// и нижнее веко от уголка к уголку, центр радужки и 4 точки её края.
+    package struct FaceMeshEye: Sendable {
+        package let corners: (Int, Int), upper: [Int], lower: [Int], iris: Int, irisEdge: [Int]
+    }
+    package static let faceMeshEyes = [
+        FaceMeshEye(corners: (33, 133), upper: [246, 161, 160, 159, 158, 157, 173], lower: [7, 163, 144, 145, 153, 154, 155],
+                    iris: 468, irisEdge: [469, 470, 471, 472]),
+        FaceMeshEye(corners: (362, 263), upper: [398, 384, 385, 386, 387, 388, 466], lower: [382, 381, 380, 374, 373, 390, 249],
+                    iris: 473, irisEdge: [474, 475, 476, 477]),
+    ]
+
+    /// Глаз из точек Face Landmarker (в координатах кадра). Веки — его, радужка — `iris`, если дана (модель Iris
+    /// точнее по радужке: у неё свой кроп 64×64 на глаз), иначе своя из FaceMesh.
+    package static func fromFaceMesh(_ points: [Vec2], eye: Int, iris: (center: Vec2, radius: Double)? = nil, axis: Vec2) -> EyeShape? {
+        guard points.count >= 478, faceMeshEyes.indices.contains(eye) else { return nil }
+        let e = faceMeshEyes[eye]
+        let a = points[e.corners.0], b = points[e.corners.1]
+        var upper = [a] + e.upper.map { points[$0] } + [b]
+        var lower = [a] + e.lower.map { points[$0] } + [b]
+        if (b - a).dot(axis) < 0 { upper.reverse(); lower.reverse() }
+        let center = iris?.center ?? points[e.iris]
+        let radius = iris?.radius ?? e.irisEdge.map { (points[$0] - points[e.iris]).length }.reduce(0, +) / 4
+        return EyeShape(cornerA: lower.first!, cornerB: lower.last!, upper: upper, lower: lower, iris: center, irisRadius: radius)
+    }
+
     /// Рамка глаза: центр — середина уголков, ось — общая ось глаз, полуширина — по уголкам, полувысота — по векам.
     package func frame(axis: Vec2) -> EyeFrame {
         let ex = axis.normalized, ey = ex.perpendicular

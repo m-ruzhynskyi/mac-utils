@@ -13,6 +13,8 @@ package struct GazeStats: Equatable, Sendable {
     package var faceFound = false
     package var weight = 0.0
     package var state: GazeState = []
+    /// Что применено к последнему кадру (для индикатора на кадре в отладке).
+    package var applied = GazeApplied()
     package init() {}
 }
 
@@ -35,15 +37,18 @@ final class GazePipeline {
     var onFrame: ((CVPixelBuffer, CVPixelBuffer) -> Void)?
     /// Положение радужки для калибровки (nil — глаз не видно). На очереди конвейера.
     var onMeasure: ((Vec2?) -> Void)?
+    /// Найденное лицо (до сглаживания) — для разбора записей в тестах. На очереди конвейера.
+    var onFace: ((FaceInput?) -> Void)?
 
-    init(iris: IrisModel?, settings: GazeSettings) {
-        tracker = FaceTracker(iris: iris)
+    init(iris: IrisModel?, faceMesh: FaceMeshModel? = nil, settings: GazeSettings) {
+        tracker = FaceTracker(iris: iris, faceMesh: faceMesh)
+        tracker.useFaceMesh = settings.useFaceMesh
         controller = GazeController(settings: settings)
     }
 
     var snapshot: GazeStats { lock.lock(); defer { lock.unlock() }; return stats }
 
-    func update(settings: GazeSettings) { queue.async { self.controller.settings = settings } }
+    func update(settings: GazeSettings) { queue.async { self.controller.settings = settings; self.tracker.useFaceMesh = settings.useFaceMesh } }
 
     func reset() { queue.async { self.controller.reset(); self.tracker.reset(); self.times = [] } }
 
@@ -52,6 +57,7 @@ final class GazePipeline {
         let started = CACurrentMediaTime()
         let pts = CMSampleBufferGetPresentationTimeStamp(sample).seconds
         let face = tracker.track(input)
+        onFace?(face)
         let out = controller.step(time: pts, face: face)
         let measured: Vec2? = face?.eyes.contains(where: { $0.shape != nil }) == true && !out.state.contains(.blink) ? out.measured : nil
         onMeasure?(measured)
@@ -79,6 +85,7 @@ final class GazePipeline {
         stats.faceFound = face != nil
         stats.weight = out.weight
         stats.state = out.state
+        stats.applied = bypass ? GazeApplied() : out.applied
         lock.unlock()
     }
 

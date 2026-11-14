@@ -25,17 +25,21 @@ package struct EyeEdit: Equatable, Codable, Sendable {
     }
 
     /// Сколько не хватает низу радужки до нижнего века после подъёма: столько растягиваем вниз (без полоски белка).
-    /// Если радужка и так перекрыта веком больше, чем на подъём, — ноль.
+    /// Если радужка и так перекрыта веком больше, чем на подъём, — ноль. Если под радужкой уже был виден белок
+    /// (широко открытые глаза), тоже ноль: подъём честно открывает белок, а растяжка тянула тёмный лимб пятном вниз
+    /// (живая проверка GAZE-33). Между «касается века» и «белок 2 px» — плавный переход.
     package static func lowerGap(for frame: EyeFrame, lids: LidCurves?, iris: Vec2, irisRadius: Double, shift: Vec2) -> Double {
         let d = iris - frame.center
         let u = d.dot(frame.ex), v = d.dot(frame.ey)
         let lift = -shift.dot(frame.ey)
         guard lift > 0 else { return 0 }
         let bottom = lids?.bottom(u) ?? frame.halfHeight * max(0, 1 - (u / frame.halfWidth) * (u / frame.halfWidth)).squareRoot()
-        let overlap = v + irisRadius - bottom // насколько низ радужки ушёл под веко
-        return min(max(lift - max(overlap, 0), 0), lift)
+        let overlap = v + irisRadius - bottom // насколько низ радужки ушёл под веко (< 0 — под ней белок)
+        return min(max(lift - max(overlap, 0), 0), lift) * smoothstep(-scleraShowFade, 0, overlap)
     }
 
+    /// Сколько белка под радужкой (px) уже достаточно, чтобы не растягивать её низ.
+    package static let scleraShowFade = 2.0
     /// Как далеко над веком (в полуширинах глаза) подъём века сходит на нет: складка века, но не бровь.
     package static let lidReach = 0.9
     /// То же для нижнего века: подъём затухает к щеке.
@@ -131,7 +135,11 @@ package struct EyeEdit: Equatable, Codable, Sendable {
     /// чтобы край века остался как был.
     func openingSources(_ l: Vec2) -> [(Vec2, Double)] {
         let toLower = newBottom(l.x) - l.y
-        let keep = 1 - smoothstep(0, Self.lowerLidBlend, toLower)
+        // Если низ радужки уже дотянут до века растяжкой, «плоская» полоса не нужна: в ней остаётся исходный низ
+        // радужки (круг шире полуэллипса), и у века по бокам виден тёмный штрих (живая запись GAZE-34).
+        let lift = max(-localShift.y, 0)
+        let covered = lift > 1e-9 ? min(irisStretchDown / lift, 1) : 0
+        let keep = (1 - smoothstep(0, Self.lowerLidBlend, toLower)) * (1 - covered)
         let (q, bl) = openingSource(l)
         var list: [(Vec2, Double)]
         if keep > 0, abs(localShift.y) > 1e-9 || abs(lidRaise) > 1e-9 {
@@ -151,15 +159,33 @@ package struct EyeEdit: Equatable, Codable, Sendable {
         return list.map { (image($0.0), $0.1) }.filter { $0.1 > 1e-6 }
     }
 
+    /// Обратное отображение растянутой вниз радужки: точка относительно нового центра → точка исходной радужки.
+    /// По каждому лучу: внутренняя часть сжимается, полоса ободка шириной `limbusBand(r)` и белок за ней — сдвиг без сжатия.
+    static func stretchedSource(_ rel0: Vec2, radius r: Double, stretch: Double) -> Vec2 {
+        guard rel0.y > 0, stretch > 0 else { return rel0 }
+        let rt = rel0.length
+        guard rt > 1e-9 else { return rel0 }
+        let c = rel0.x / rt, sn = rel0.y / rt, rs = r + stretch
+        let boundary = 1 / (c * c / (r * r) + sn * sn / (rs * rs)).squareRoot()
+        let w = limbusBand(r)
+        let src = rt >= boundary - w ? rt - (boundary - r) : rt * (r - w) / (boundary - w)
+        return rel0 * (src / rt)
+    }
+
+    /// Ширина тёмного ободка радужки, px: не меньше 2 px и не больше половины радиуса.
+    static func limbusBand(_ r: Double) -> Double { min(max(2, 0.2 * r), 0.5 * r) }
+
     /// Источник внутри раскрытия (локальные координаты): радужка целиком или белок, плюс сглаживание края радужки.
     func openingSource(_ l: Vec2) -> (Vec2, (Vec2, Double)?) {
         let s = localShift
         let oldIris = local(iris)
         let newIris = oldIris + s
         let r = irisRadius
-        // Ниже центра радужка растянута на irisStretchDown: в координатах исходной радужки сжимаем по вертикали.
+        // Ниже центра радужка растянута на irisStretchDown (граница — полуэллипс). Тянется только середина радужки:
+        // тёмный ободок (лимб) сохраняет толщину и уходит под веко, как в исходнике. Прежняя растяжка по вертикали
+        // утолщала ободок, и у нижнего века оставалась тёмная дуга (живая запись GAZE-34).
         let rel0 = l - newIris
-        let rel = rel0.y > 0 && irisStretchDown > 0 ? Vec2(rel0.x, rel0.y * r / (r + irisStretchDown)) : rel0
+        let rel = Self.stretchedSource(rel0, radius: r, stretch: irisStretchDown)
         let rho = rel.length
         let irisSrc = irisSource(rel: rel, oldIris: oldIris)
         let scleraSrc = scleraSource(l, rel: rel, rho: rho, newIris: newIris, oldIris: oldIris)

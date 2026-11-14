@@ -14,6 +14,7 @@ package final class GazeDebugWindowController: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
     private let before = SurfaceView(), after = SurfaceView()
+    private let overlay = CATextLayer()
     private let frames = LatestFrames()
     private var timer: Timer?
 
@@ -35,6 +36,16 @@ package final class GazeDebugWindowController: NSObject, NSWindowDelegate {
         w.delegate = self
         w.isReleasedWhenClosed = false
         let pair = NSStackView(views: [labeled(before, "до (камера)"), labeled(after, "после (то, что получает OBS)")])
+        // Индикатор прямо на кадре «после»: сколько пикселей сдвинуто, итоговая сила и почему ослаблено.
+        overlay.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .semibold)
+        overlay.fontSize = 13
+        overlay.foregroundColor = NSColor.white.cgColor
+        overlay.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor
+        overlay.cornerRadius = 6
+        overlay.isWrapped = true
+        overlay.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        overlay.frame = CGRect(x: 8, y: 8, width: 600, height: 44)
+        after.layer?.addSublayer(overlay)
         pair.distribution = .fillEqually
         pair.spacing = 8
         let controls = NSHostingView(rootView: GazeDebugControls(service: .shared))
@@ -63,6 +74,29 @@ package final class GazeDebugWindowController: NSObject, NSWindowDelegate {
     private func tick() {
         guard let (b, a) = frames.take() else { return }
         before.show(b); after.show(a)
+        let service = GazeService.shared
+        let text = service.bypass ? " поправка выключена (сравнение)" : Self.overlayText(service.liveStats ?? GazeStats())
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        overlay.string = text
+        overlay.frame.origin.y = max(after.bounds.height - overlay.frame.height - 8, 8)
+        CATransaction.commit()
+    }
+
+    /// «поправка: 9 px вверх / 1 px вбок, сила 0.92» и вторая строка — почему ослаблена.
+    nonisolated static func overlayText(_ s: GazeStats) -> String {
+        let a = s.applied
+        let up = a.pixels.y, side = a.pixels.x
+        var line = String(format: " поправка: %.0f px %@ / %.0f px вбок, сила %.2f", abs(up), up >= 0 ? "вверх" : "вниз", abs(side), a.strength)
+        var why: [String] = []
+        if !s.faceFound { why.append("нет лица") }
+        if s.state.contains(.headTurned) { why.append("голова повёрнута") }
+        if s.state.contains(.blink) { why.append("моргание") }
+        if s.state.contains(.irisLost) { why.append("радужка не найдена") }
+        if s.state.contains(.lookingFarAway) { why.append("смотрит далеко") }
+        if s.state.contains(.narrowEyes) { why.append(String(format: "узкие глаза ×%.2f", a.openFactor)) }
+        if s.state.contains(.sideGaze) { why.append(String(format: "взгляд в сторону ×%.2f (радужка %.2f)", a.sideFactor, a.irisSide)) }
+        line += "\n " + (why.isEmpty ? "не ослаблена" : "ослаблена: " + why.joined(separator: ", "))
+        return line
     }
 
     package func windowWillClose(_ notification: Notification) {
@@ -100,10 +134,12 @@ private final class SurfaceView: NSView {
 private struct GazeDebugControls: View {
     @ObservedObject var service: GazeService
     @State private var correction = true
-    @State private var lift = 0.15
+    @State private var lift = GazeCalibration.defaultScreenLift
+    @AppStorage(Pref.gazeStrength) private var strength = 1.0
     @State private var lidFollow = 0.8
     @State private var freedom: GazeFreedom = .normal
     @State private var precise = true
+    @State private var faceMeshLids = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -116,10 +152,13 @@ private struct GazeDebugControls: View {
                 .pickerStyle(.segmented).frame(width: 260).onChange(of: freedom) { _, _ in push() }
                 Toggle("Точные веки (MediaPipe)", isOn: $precise).onChange(of: precise) { _, _ in push() }
                     .help("Выключить — отрисовка по контуру Vision, как A v2 (для сравнения)")
+                Toggle("Веки: Face Landmarker", isOn: $faceMeshLids).onChange(of: faceMeshLids) { _, _ in push() }
+                    .help("Выключить — веки от модели Iris, как в GAZE-33 (для сравнения)")
             }
             HStack(spacing: 18) {
-                slider("Экран ниже камеры", $lift, 0...0.3) { String(format: "%.2f (≈%.0f°)", $0, asin(min($0 / 0.4, 1)) * 180 / .pi) }
+                slider("Экран ниже камеры", $lift, 0...0.3) { String(format: "%.2f (≈%.0f°)", $0, asin(min($0 / GazeCalibration.eyeballGain, 1)) * 180 / .pi) }
                 slider("Веко за радужкой", $lidFollow, 0...1) { String(format: "%.2f", $0) }
+                slider("Сила", $strength, GazeSettings.strengthRange) { String(format: "%.0f %%", $0 * 100) }
             }
             HStack(spacing: 10) {
                 Button(service.recording ? "Идёт запись…" : "Записать 10 с «до | после»") { service.recordDebugClip() }
@@ -140,12 +179,13 @@ private struct GazeDebugControls: View {
     }
 
     private func push() {
-        let (lift, lidFollow, freedom, precise) = (lift, lidFollow, freedom, precise)
+        let (lift, lidFollow, freedom, precise, faceMeshLids) = (lift, lidFollow, freedom, precise, faceMeshLids)
         service.debugOverrides = { s in
             s.calibration.screenLift = lift
             s.calibration.lidFollow = lidFollow
             s.freedom = freedom
             s.useEyeShape = precise
+            s.useFaceMesh = faceMeshLids
         }
     }
 
@@ -162,9 +202,10 @@ private struct GazeDebugControls: View {
         var parts = [String(format: "%2.0f к/с", s.fps), String(format: "обработка %.1f мс", s.processingMs),
                      String(format: "камера→кадр %.0f мс", s.latencyMs), "лицо: \(s.faceFound ? "да" : "нет")",
                      String(format: "сила %.2f", s.weight)]
-        if !s.state.isEmpty { parts.append("выкл.: " + Self.describe(s.state)) }
+        if !s.state.isEmpty { parts.append("ослаблена: " + Self.describe(s.state)) }
         parts.append(service.obsFPS > 0 ? String(format: "OBS: %.0f к/с", service.obsFPS) : "OBS: не подключён")
         if !service.preciseEyes { parts.append("модель Iris не загрузилась") }
+        if !service.preciseLids { parts.append("Face Landmarker не загрузился") }
         if let name = service.cameraName { parts.append("камера: \(name)") }
         switch service.status {
         case .running: break
@@ -193,6 +234,8 @@ private struct GazeDebugControls: View {
         if s.contains(.blink) { out.append("моргание") }
         if s.contains(.irisLost) { out.append("радужка не найдена") }
         if s.contains(.lookingFarAway) { out.append("смотрит далеко в сторону") }
+        if s.contains(.narrowEyes) { out.append("узкие глаза") }
+        if s.contains(.sideGaze) { out.append("взгляд в сторону") }
         return out.joined(separator: ", ")
     }
 }

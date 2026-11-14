@@ -245,6 +245,8 @@ package enum Pref {
     package static let gazeScreenLift = "gazeScreenLift"
     package static let gazeBiasX = "gazeBiasX"
     package static let gazeCalibrated = "gazeCalibrated"
+    /// Ползунок «Сила»: множитель поправки, 0…1,5.
+    package static let gazeStrength = "gazeStrength"
 
     package static func register() {
         UserDefaults.standard.register(defaults: [
@@ -252,7 +254,8 @@ package enum Pref {
             gazePointYaw: 0.0,
             gazePointPitch: 0.0,
             gazeFreedom: "normal",
-            gazeScreenLift: 0.15,
+            gazeScreenLift: 0.22,
+            gazeStrength: 1.0,
             gazeBiasX: 0.0,
             gazeCalibrated: false,
             cutPaste: true,

@@ -28,11 +28,15 @@ struct BufferLuma: LumaSampler {
     }
 }
 
-/// Лицо на кадре: Vision (поворот головы, грубые глаза) + точная форма глаз из модели Iris.
+/// Лицо на кадре: Vision (поворот головы, грубые глаза) + точная форма глаз: веки — Face Landmarker, радужка — Iris.
+/// Без Face Landmarker (не загрузился или выключен в отладке) веки — из Iris, как в GAZE-33.
 /// Поиск лица — раз в `rectEvery` кадров, контуры — на каждом кадре. Вызывается на очереди конвейера.
 final class FaceTracker {
     var rectEvery = 3
     private let iris: IrisModel?
+    private let faceMesh: FaceMeshModel?
+    /// Веки из Face Landmarker (выключение — только для сравнения в отладке).
+    var useFaceMesh = true
     private var frameIndex = 0
     private var lastRect: VNFaceObservation?
 
@@ -47,9 +51,9 @@ final class FaceTracker {
         return r
     }()
 
-    init(iris: IrisModel?) { self.iris = iris }
+    init(iris: IrisModel?, faceMesh: FaceMeshModel? = nil) { self.iris = iris; self.faceMesh = faceMesh }
 
-    func reset() { lastRect = nil; frameIndex = 0; iris?.reset() }
+    func reset() { lastRect = nil; frameIndex = 0; iris?.reset(); faceMesh?.reset() }
 
     func track(_ buffer: CVPixelBuffer) -> FaceInput? {
         defer { frameIndex += 1 }
@@ -77,7 +81,22 @@ final class FaceTracker {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         let luma = BufferLuma(locked: buffer)
-        let shapes: [EyeShape?] = iris?.shapes(frames: frames, luma: luma, buffer: buffer) ?? [nil, nil]
+        var shapes: [EyeShape?] = iris?.shapes(frames: frames, luma: luma, buffer: buffer) ?? [nil, nil]
+        if useFaceMesh, let faceMesh {
+            let bb = obs.boundingBox
+            let rect = CGRect(x: bb.minX * w, y: (1 - bb.maxY) * h, width: bb.width * w, height: bb.height * h)
+            if let points = faceMesh.landmarks(faceRect: rect, axis: axis, luma: luma) {
+                for k in 0..<2 {
+                    let iris = shapes[k].map { (center: $0.iris, radius: $0.irisRadius) }
+                    // Глаз FaceMesh должен лежать там же, где глаз Vision, иначе (сбой, чужое лицо) — веки от Iris.
+                    guard let mesh = EyeShape.fromFaceMesh(points, eye: k, iris: iris, axis: axis),
+                          ((mesh.cornerA + mesh.cornerB) / 2 - frames[k].center).length < frames[k].halfWidth * 0.6 else { continue }
+                    shapes[k] = mesh
+                }
+            } else {
+                faceMesh.reset()
+            }
+        }
         let eyes = frames.indices.map { k -> EyeInput in
             // Радужка: из модели, иначе — поиск по градиентам (если модели нет).
             let fallback = shapes[k] == nil ? IrisLocator.locate(in: frames[k], image: luma)?.center : nil

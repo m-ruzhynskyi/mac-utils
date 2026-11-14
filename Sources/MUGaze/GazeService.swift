@@ -32,6 +32,8 @@ package final class GazeService: ObservableObject {
     @Published package private(set) var cameraName: String?
     /// Модель Iris не нашлась или не скомпилировалась — работает запасной поиск радужки (хуже).
     @Published package private(set) var preciseEyes = true
+    /// Face Landmarker загрузился (веки точнее на узких и широко раскрытых глазах).
+    @Published package private(set) var preciseLids = true
     @Published package private(set) var recording = false
     @Published package private(set) var lastRecording: URL?
 
@@ -49,6 +51,8 @@ package final class GazeService: ObservableObject {
     package var debugFrames: ((CVPixelBuffer, CVPixelBuffer) -> Void)? { didSet { sink?.setDebugFrames(debugFrames) } }
     /// Отладка: правка выключена, кадры идут как есть.
     package var bypass = false { didSet { pipeline?.bypass = bypass } }
+    /// Свежее состояние конвейера (не раз в полсекунды, как `stats`) — для индикатора на кадре в отладке.
+    package var liveStats: GazeStats? { pipeline?.snapshot }
 
     private init() {}
 
@@ -81,7 +85,15 @@ package final class GazeService: ObservableObject {
             Log.gaze.error("iris model: \(String(describing: error), privacy: .public)")
         }
         preciseEyes = iris != nil
-        let pipeline = GazePipeline(iris: iris, settings: Self.settingsFromPrefs())
+        var faceMesh: FaceMeshModel?
+        do {
+            if let url = try FaceMeshModel.compiledURL() { faceMesh = try FaceMeshModel(compiledURL: url) }
+        } catch {
+            Log.gaze.error("face mesh model: \(String(describing: error), privacy: .public)")
+        }
+        preciseLids = faceMesh != nil
+        Log.gaze.info("models: iris \(iris != nil, privacy: .public) faceMesh \(faceMesh != nil, privacy: .public)")
+        let pipeline = GazePipeline(iris: iris, faceMesh: faceMesh, settings: Self.settingsFromPrefs())
         pipeline.bypass = bypass
         let syphon = SyphonServer(name: Self.syphonName)
         let sink = GazeFrameSink(syphon: syphon)
@@ -137,7 +149,13 @@ package final class GazeService: ObservableObject {
         default: s.target = .camera
         }
         s.freedom = GazeFreedom(rawValue: d.string(forKey: Pref.gazeFreedom) ?? "") ?? .normal
-        if d.object(forKey: Pref.gazeScreenLift) != nil { s.calibration.screenLift = d.double(forKey: Pref.gazeScreenLift) }
+        // Сохранённое значение — через то же правило: старые калибровки (до GAZE-34) могли записать почти ноль.
+        if d.object(forKey: Pref.gazeScreenLift) != nil {
+            s.calibration.screenLift = GazeCalibration.liftAfterCalibration(d.double(forKey: Pref.gazeScreenLift))
+        }
+        if d.object(forKey: Pref.gazeStrength) != nil {
+            s.strength = min(max(d.double(forKey: Pref.gazeStrength), GazeSettings.strengthRange.lowerBound), GazeSettings.strengthRange.upperBound)
+        }
         s.calibration.bias.x = d.double(forKey: Pref.gazeBiasX)
         return s
     }
@@ -193,7 +211,7 @@ package final class GazeService: ObservableObject {
             UserDefaults.standard.set(r.biasX, forKey: Pref.gazeBiasX)
             UserDefaults.standard.set(true, forKey: Pref.gazeCalibrated)
             calibration = .done(r)
-            Log.gaze.info("calibration: lift \(r.screenLift, privacy: .public) biasX \(r.biasX, privacy: .public)")
+            Log.gaze.info("calibration: lift \(r.screenLift, privacy: .public) measured \(r.measuredLift, privacy: .public) biasX \(r.biasX, privacy: .public)")
         case let .failure(f):
             calibration = .failed(Self.message(f))
         }

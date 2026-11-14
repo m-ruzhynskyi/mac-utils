@@ -17,12 +17,16 @@ package struct GazeCalibrationRecorder: Sendable {
         package var biasX: Double
         /// Насколько радужку поднимать, чтобы взгляд со середины экрана стал взглядом в камеру (> 0 — экран ниже камеры).
         package var screenLift: Double
+        /// Что намерено по радужке (до поправки на занижение) — в журнал.
+        package var measuredLift: Double
 
-        package init(biasX: Double, screenLift: Double) { self.biasX = biasX; self.screenLift = screenLift }
+        package init(biasX: Double, screenLift: Double, measuredLift: Double? = nil) {
+            self.biasX = biasX; self.screenLift = screenLift; self.measuredLift = measuredLift ?? screenLift
+        }
 
-        /// Тот же подъём в градусах взгляда — для подписи в настройках.
-        package func screenAngleDegrees(gainY: Double = GazeCalibration().gainY) -> Double {
-            asin(min(max(screenLift / gainY, -1), 1)) * 180 / .pi
+        /// Тот же подъём в градусах взгляда — для подписи в настройках (по геометрии глаза, см. `eyeballGain`).
+        package func screenAngleDegrees(gain: Double = GazeCalibration.eyeballGain) -> Double {
+            asin(min(max(screenLift / gain, -1), 1)) * 180 / .pi
         }
     }
 
@@ -55,7 +59,7 @@ package struct GazeCalibrationRecorder: Sendable {
         }
         let cam = Self.median(camera), scr = Self.median(screen)
         let lift = min(max(scr.y - cam.y, Self.liftRange.lowerBound), Self.liftRange.upperBound)
-        return .success(Result(biasX: cam.x, screenLift: lift))
+        return .success(Result(biasX: cam.x, screenLift: GazeCalibration.liftAfterCalibration(lift), measuredLift: lift))
     }
 
     static func median(_ v: [Double]) -> Double {

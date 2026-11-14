@@ -13,9 +13,10 @@ final class GazeCalibrationTests: XCTestCase {
         samples(Vec2(0.04, -0.05), n: 40, jitter: 0.02, seed: 1).forEach { r.add($0, step: .camera) }
         samples(Vec2(0.03, 0.10), n: 40, jitter: 0.02, seed: 2).forEach { r.add($0, step: .screen) }
         let res = try r.result().get()
-        XCTAssertEqual(res.screenLift, 0.15, accuracy: 0.02)
+        XCTAssertEqual(res.measuredLift, 0.15, accuracy: 0.02)
+        XCTAssertEqual(res.screenLift, GazeCalibration.defaultScreenLift, "намерено меньше обычного — подъём не уменьшаем (GAZE-34)")
         XCTAssertEqual(res.biasX, 0.04, accuracy: 0.02)
-        XCTAssertEqual(res.screenAngleDegrees(), asin(0.15 / 0.4) * 180 / .pi, accuracy: 3)
+        XCTAssertEqual(res.screenAngleDegrees(), asin(0.22 / 0.8) * 180 / .pi, accuracy: 1, "≈16°: камера над экраном ноутбука")
     }
 
     func testBlinksAndMissingEyesAreIgnoredButTooFewFail() {
@@ -101,10 +102,17 @@ final class GazeProductTests: XCTestCase {
         XCTAssertEqual(s.target, .camera); XCTAssertEqual(s.freedom, .normal)
         XCTAssertEqual(s.calibration.screenLift, GazeCalibration().screenLift, "без калибровки — подъём по умолчанию")
         d.set("point", forKey: Pref.gazeTarget); d.set(6.0, forKey: Pref.gazePointYaw); d.set(-3.0, forKey: Pref.gazePointPitch)
-        d.set("high", forKey: Pref.gazeFreedom); d.set(0.21, forKey: Pref.gazeScreenLift); d.set(0.03, forKey: Pref.gazeBiasX)
+        d.set("high", forKey: Pref.gazeFreedom); d.set(0.27, forKey: Pref.gazeScreenLift); d.set(0.03, forKey: Pref.gazeBiasX)
+        d.set(1.3, forKey: Pref.gazeStrength)
         s = GazeService.settingsFromPrefs(d)
         XCTAssertEqual(s.target, .point(yaw: 6, pitch: -3)); XCTAssertEqual(s.freedom, .high)
-        XCTAssertEqual(s.calibration.screenLift, 0.21); XCTAssertEqual(s.calibration.bias.x, 0.03)
+        XCTAssertEqual(s.calibration.screenLift, 0.27); XCTAssertEqual(s.calibration.bias.x, 0.03)
+        XCTAssertEqual(s.strength, 1.3)
+        // Калибровка до GAZE-34 на живой проверке записала 0,017 — читаем как подъём по умолчанию.
+        d.set(0.0166, forKey: Pref.gazeScreenLift); d.set(9.0, forKey: Pref.gazeStrength)
+        s = GazeService.settingsFromPrefs(d)
+        XCTAssertEqual(s.calibration.screenLift, GazeCalibration.defaultScreenLift)
+        XCTAssertEqual(s.strength, GazeSettings.strengthRange.upperBound, "сила в пределах ползунка")
     }
 
     @MainActor
@@ -116,9 +124,11 @@ final class GazeProductTests: XCTestCase {
     func testModelResourceIsShippedWithLicense() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let models = root.appendingPathComponent("Resources/Models")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: models.appendingPathComponent("IrisLandmarks.mlpackage/Manifest.json").path))
-        let license = try String(contentsOf: models.appendingPathComponent("IrisLandmarks-LICENSE.txt"), encoding: .utf8)
-        XCTAssertTrue(license.contains("Apache License"))
+        for name in ["IrisLandmarks", "FaceLandmarks"] {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: models.appendingPathComponent("\(name).mlpackage/Manifest.json").path), name)
+            let license = try String(contentsOf: models.appendingPathComponent("\(name)-LICENSE.txt"), encoding: .utf8)
+            XCTAssertTrue(license.contains("Apache License"), name)
+        }
         let build = try String(contentsOf: root.appendingPathComponent("build.sh"), encoding: .utf8)
         XCTAssertTrue(build.contains("Resources/Models"), "build.sh кладёт модель в бандл")
     }
