@@ -80,6 +80,8 @@ final class AppStatusItem: NSObject {
             off.indentationLevel = 1
         }
         menu.addItem(.separator())
+        HiddenScreenGlue.shared.menuItems().forEach { menu.addItem($0) }
+        menu.addItem(.separator())
         let open = menu.addItem(withTitle: "Открыть панель", action: #selector(openPanel), keyEquivalent: "")
         open.target = self
         item?.menu = menu

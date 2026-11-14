@@ -39,6 +39,8 @@ APP="build/$APP_NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/$EXECUTABLE" "$APP/Contents/MacOS/$EXECUTABLE"
+# «Скрытый экран»: процесс-помощник держит виртуальный дисплей и прячет окна ИИ, если Mac Utils упадёт.
+cp "$BIN_DIR/HiddenScreenHelper" "$APP/Contents/MacOS/HiddenScreenHelper"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 # Версия — из Info.plist (X.Y.0) и тегов, см. scripts/version.sh и docs/VERSIONING.md.
@@ -93,6 +95,7 @@ ENTITLEMENTS="Resources/MacUtils.entitlements"
 sign() { codesign --force --options runtime --sign "$1" "${@:2}"; }
 # Вложенное приложение подписывается первым, затем внешнее.
 if [[ -n "$IDENTITY" ]] && sign "$IDENTITY" "$APP/Contents/Resources/MUNowPlaying.dylib" \
+    && sign "$IDENTITY" "$APP/Contents/MacOS/HiddenScreenHelper" \
     && sign "$IDENTITY" "$TOOLS" && sign "$IDENTITY" --entitlements "$ENTITLEMENTS" "$APP"; then
     echo "Подписано: $IDENTITY"
 else
@@ -103,6 +106,7 @@ else
     fi
     [[ -n "$IDENTITY" ]] && echo "Не удалось подписать «$IDENTITY», подписываю ad-hoc" >&2
     sign - "$APP/Contents/Resources/MUNowPlaying.dylib"
+    sign - "$APP/Contents/MacOS/HiddenScreenHelper"
     sign - "$TOOLS"
     sign - --entitlements "$ENTITLEMENTS" "$APP"
 fi

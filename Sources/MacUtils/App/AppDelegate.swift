@@ -25,6 +25,7 @@ import MUScreenShare
 import MUScreenshot
 import MUVideoPlayer
 import MUTextEditor
+import MUHiddenScreen
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения
@@ -34,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var trustTimer: Timer?
     private var lastTrusted = false
     private var syncScheduled = false
+    /// «Скрытый экран» в отладочном запуске (`--hidden-screen-debug`), без интерфейса.
+    private var hiddenScreenDebug: HiddenScreenDebugSession?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Шрифты интерфейса (Graphite) — до первого окна; не вышло — системный шрифт.
@@ -58,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         BusyRegistry.shared.installDefaultProviders()
         observeSystemShutdown()
         PanelTabs.migrate()
+        hiddenScreenDebug = HiddenScreenDebugSession.startIfRequested()
         HotKeyCenter.shared.resolver = { HotKeyRegistry.resolve(id: $0, requested: $1) }
         RemoteConnectionsCenter.addPanelTabOnce()
         MainMenu.install()
@@ -316,9 +320,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Плеер: место запоминается и при выходе с открытым окном.
         for controller in PlayerWindowController.windows { controller.model.savePosition() }
+        HiddenScreenEngine.shared.shutdown()
         WarmScreen.shared.shutdown()
         KeepAwake.shared.shutdown()
         AppSwitcher.shared.shutdown()
+        // Сначала спрятать Claude/ChatGPT, потом снять скрытый дисплей — иначе их окна выпадут на основной экран.
+        hiddenScreenDebug?.stop()
     }
 
     @objc private func defaultsChanged() {
@@ -353,6 +360,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func syncFeatures() {
         FinderCutPaste.shared.sync()
         WinKeys.shared.sync()
+        HiddenScreenUI.controller = HiddenScreenEngine.shared
+        HiddenScreenGlue.shared.sync()
         SmoothScroll.shared.sync()
         AppSwitcher.shared.sync()
         ScreenshotService.shared.sync()
