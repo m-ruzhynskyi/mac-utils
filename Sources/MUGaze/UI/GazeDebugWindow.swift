@@ -20,11 +20,12 @@ package final class GazeDebugWindowController: NSObject, NSWindowDelegate {
 
     package func show() {
         if window == nil { build() }
-        window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFrontOnScreen("gaze-debug")
+        ScreenOutput.activateApp(ignoringOtherApps: true)
         let service = GazeService.shared
         service.debugFrames = { [frames] b, a in frames.set(b, a) }
         service.setOn(true)
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -82,11 +83,14 @@ package final class GazeDebugWindowController: NSObject, NSWindowDelegate {
         CATransaction.commit()
     }
 
-    /// «поправка: 9 px вверх / 1 px вбок, сила 0.92» и вторая строка — почему ослаблена.
+    /// «видно: 6 px вверх / 1 px вбок, сила 0.92 (радужка +8 px)» и вторая строка — почему ослаблена.
+    /// Первое число — видимый сдвиг (центр видимой части радужки), его и видит зритель; в скобках — сдвиг самой радужки,
+    /// часть которого уходит под веко (CHK-3, п. 6).
     nonisolated static func overlayText(_ s: GazeStats) -> String {
         let a = s.applied
-        let up = a.pixels.y, side = a.pixels.x
-        var line = String(format: " поправка: %.0f px %@ / %.0f px вбок, сила %.2f", abs(up), up >= 0 ? "вверх" : "вниз", abs(side), a.strength)
+        let up = a.visiblePixels.y, side = a.visiblePixels.x
+        var line = String(format: " видно: %.0f px %@ / %.0f px вбок, сила %.2f (радужка %+.0f px)",
+                          abs(up), up >= 0 ? "вверх" : "вниз", abs(side), a.strength, a.pixels.y)
         var why: [String] = []
         if !s.faceFound { why.append("нет лица") }
         if s.state.contains(.headTurned) { why.append("голова повёрнута") }

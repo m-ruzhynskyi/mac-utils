@@ -143,6 +143,14 @@ final class GazeRecorder {
         writer.startSession(atSourceTime: .zero)
     }
 
+    /// Дописать файл (10 с прошли или функцию выключили посреди записи) — без недописанного .mov.
+    func finish(completion: @escaping (URL) -> Void) {
+        guard !finished else { return }
+        finished = true
+        input.markAsFinished()
+        writer.finishWriting { [url] in DispatchQueue.main.async { completion(url) } }
+    }
+
     /// Добавить пару кадров. Возвращает true, когда запись закончена (10 с).
     func append(before: CVPixelBuffer, after: CVPixelBuffer, completion: @escaping (URL) -> Void) -> Bool {
         guard !finished else { return true }
@@ -150,9 +158,7 @@ final class GazeRecorder {
         if start == nil { start = now }
         let t = now - start!
         if t >= seconds {
-            finished = true
-            input.markAsFinished()
-            writer.finishWriting { [url] in DispatchQueue.main.async { completion(url) } }
+            finish(completion: completion)
             return true
         }
         guard input.isReadyForMoreMediaData, let pool = adaptor.pixelBufferPool,

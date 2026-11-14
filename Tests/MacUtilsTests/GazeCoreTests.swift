@@ -106,7 +106,7 @@ final class GazeControllerTests: XCTestCase {
 
     func testLooksAtCameraWhenUserLooksAtScreen() {
         let c = GazeController(settings: GazeSettings(target: .camera, freedom: .low))
-        let look = Vec2(0.3, 0.02) // вправо и чуть вниз, на экран (вертикаль в пределах maxShiftY)
+        let look = Vec2(0.06, 0.02) // чуть вправо и чуть вниз, на экран (вертикаль в пределах maxShiftY)
         let outs = run(c, seconds: 3) { _ in face(irisLocal: look) }
         let last = outs.suffix(30)
         XCTAssertEqual(last.last!.weight, 1, accuracy: 1e-9)
@@ -114,6 +114,11 @@ final class GazeControllerTests: XCTestCase {
             let iris = outputIris(o, measured: look)
             XCTAssertLessThan((iris - o.target).length, 0.06, "радужка у цели в пределах «свободы»")
         }
+        // GAZE-35: смотрит на край экрана — по горизонтали к центру не тянем (клин и двойной край радужки).
+        let side = GazeController(settings: GazeSettings(target: .camera, freedom: .low))
+        let o = run(side, seconds: 3) { _ in face(irisLocal: Vec2(0.3, 0.02)) }.last!
+        XCTAssertEqual(o.shift.x, 0, accuracy: 0.005)
+        XCTAssertLessThan(abs(o.shift.y - outs.last!.shift.y), 0.01, "вертикаль та же")
     }
 
     func testSlightlyBelowAndCustomPointMoveTarget() {

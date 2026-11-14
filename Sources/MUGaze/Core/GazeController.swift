@@ -47,6 +47,9 @@ package struct GazeApplied: Equatable, Sendable {
     package var irisSide = 0.0
     /// Положение радужек по горизонтали отдельно (слева на кадре, справа), доли полуширины: для разбора сведения глаз.
     package var eyeX: [Double] = []
+    /// Видимый сдвиг (px, оси как у `pixels`): центр видимой части радужки после правки минус до неё. Верх радужки
+    /// уходит под веко, поэтому он меньше `pixels` — именно его видит зритель (CHK-3, п. 6).
+    package var visiblePixels = Vec2.zero
     package init() {}
 }
 
@@ -140,12 +143,14 @@ package final class GazeController {
         else { headOff = yaw > L.headYawOff || pitch > L.headPitchOff }
         if headOff { state.insert(.headTurned) }
 
-        // Моргание: раскрытие заметно меньше обычного для этого человека.
-        let openness = face.eyes.map(\.frame.openness).reduce(0, +) / Double(face.eyes.count)
+        // Моргание: раскрытие заметно меньше обычного для этого человека. Берём меньшее из сглаженного и сырого:
+        // на быстром закрытии сглаживание формы отстаёт на кадр, и правка шла полной на первом кадре моргания (CHK-3, п. 3).
+        let smoothOpen = face.eyes.map(\.frame.openness).reduce(0, +) / Double(face.eyes.count)
+        let openness = min(smoothOpen, rawOpenness(rawFace, axes: face.eyes.map(\.frame.ex)) ?? smoothOpen)
         if let base = openBaseline {
-            if openness > base * 0.8 { openBaseline = base + (openness - base) * (1 - exp(-dt / 2.0)) }
+            if smoothOpen > base * 0.8 { openBaseline = base + (smoothOpen - base) * (1 - exp(-dt / 2.0)) }
         } else {
-            openBaseline = openness
+            openBaseline = smoothOpen
         }
         let blink = openness < (openBaseline ?? openness) * L.blinkRatio
         if blink { state.insert(.blink) }
@@ -171,6 +176,8 @@ package final class GazeController {
             let keep = ((g - base) * p.keepGain).clampedLength(p.keepRadius)
             let desired = target + keep + micro.offset(at: time, parameters: p)
             shift = desired - g
+            // По горизонтали — только доводка рядом с целью; смотрит в сторону — радужку к центру не тянем.
+            shift.x *= 1 - smoothstep(L.horizontalFull, L.horizontalOff, abs(g.x - target.x))
             shift.x = min(max(shift.x, -L.maxShiftX), L.maxShiftX)
             shift.y = min(max(shift.y, -L.maxShiftY), L.maxShiftY)
             // A v2: горизонталь та же, вертикаль — подъём «экран ниже камеры» плюс свои движения и микросаккады.
@@ -186,12 +193,13 @@ package final class GazeController {
         // Во время моргания поправка держится прежней (её гасит blinkFade); радужка потеряна без моргания — плавно выключаем.
         let active = !headOff && !farOff && gazeFilter.current != nil && (measuring || blink)
         mainFade.advance(toward: active ? 1 : 0, dt: dt, duration: L.fadeSeconds)
-        blinkFade.advance(toward: blink ? 0 : 1, dt: dt, duration: L.blinkFadeSeconds)
+        // Закрытие — сразу в этом кадре (иначе тёмный «горб» радужки над веком), открытие — плавно.
+        if blink { blinkFade = Fade(0) } else { blinkFade.advance(toward: 1, dt: dt, duration: L.blinkFadeSeconds) }
         var out = output(weight: mainFade.value * blinkFade.value, shift: shift, target: target, state: state)
-        let side = sideFactor(face: face, dt: dt)
+        let side = sideFactor(face: face, dt: dt, frozen: blink)
         out.applied.irisSide = side.position
         out.applied.eyeX = face.eyes.prefix(2).map { e in e.iris.map { e.frame.local($0).x } ?? .nan }
-        out.edits = edits(weight: out.weight, shift: shiftV2, face: face, sideFactor: side.factor, applied: &out.applied)
+        out.edits = edits(weight: out.weight, shift: shiftV2, face: face, rawFace: rawFace, sideFactor: side.factor, applied: &out.applied)
         if out.applied.openFactor < 0.9 { out.state.insert(.narrowEyes) }
         if side.factor < 0.9 { out.state.insert(.sideGaze) }
         return out
@@ -200,8 +208,10 @@ package final class GazeController {
     /// Взгляд сильно в сторону: радужка у уголка, часть её под углом века. Тянуть её к центру — тёмный клин
     /// и размазанная радужка (живая проверка GAZE-33), поэтому правка плавно гаснет от `sideGazeFull` до `sideGazeOff`.
     /// Сглажено во времени, чтобы на саккаде в сторону и обратно не было рывка.
-    private func sideFactor(face: FaceInput, dt: Double) -> (factor: Double, position: Double) {
+    private func sideFactor(face: FaceInput, dt: Double, frozen: Bool) -> (factor: Double, position: Double) {
         let L = settings.limits
+        // В моргании радужка закрытого глаза ненадёжна: фактор держим прежним, без «пульса» после моргания.
+        if frozen, let held = sideSmooth { return (held, 0) }
         let positions = face.eyes.prefix(2).compactMap { e in e.iris.map { e.frame.local($0).x - settings.calibration.bias.x } }
         guard let side = positions.max(by: { abs($0) < abs($1) }) else { return (sideSmooth ?? 1, 0) }
         let raw = 1 - smoothstep(L.sideGazeFull, L.sideGazeOff, abs(side))
@@ -221,9 +231,25 @@ package final class GazeController {
         return smoothstep(GazeLimits.narrowEyeOff, GazeLimits.narrowEyeOn, open / max(2 * shape.irisRadius, 1))
     }
 
-    private func edits(weight rawWeight: Double, shift rawShift: Vec2, face: FaceInput, sideFactor: Double, applied: inout GazeApplied) -> [EyeEdit] {
-        // Одинаково для обоих глаз, чтобы взгляд не расходился.
-        let open = face.eyes.prefix(2).compactMap { e in e.shape.map { Self.openFactor($0, frame: e.frame) } }.min() ?? 1
+    /// Раскрытие по несглаженным формам (как `EyeFrame.openness`), nil — форм нет.
+    private func rawOpenness(_ raw: FaceInput?, axes: [Vec2]) -> Double? {
+        guard let raw, settings.useEyeShape else { return nil }
+        let values = raw.eyes.prefix(2).enumerated().compactMap { k, e in e.shape.map { $0.frame(axis: k < axes.count ? axes[k] : e.frame.ex).openness } }
+        return values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+    }
+
+    private func edits(weight rawWeight: Double, shift rawShift: Vec2, face: FaceInput, rawFace: FaceInput?, sideFactor: Double, applied: inout GazeApplied) -> [EyeEdit] {
+        // Одинаково для обоих глаз, чтобы взгляд не расходился. Сырая форма не даёт сглаживанию опоздать на кадр,
+        // когда глаз быстро закрывается.
+        let opens = face.eyes.prefix(2).compactMap { e in e.shape.map { Self.openFactor($0, frame: e.frame) } }
+        var open = opens.min() ?? 1
+        if let raw = rawFace, settings.useEyeShape {
+            let rawOpen = raw.eyes.prefix(2).enumerated().compactMap { k, e in
+                e.shape.map { Self.openFactor($0, frame: $0.frame(axis: k < face.eyes.count ? face.eyes[k].frame.ex : e.frame.ex)) }
+            }.min()
+            // Только заметное падение (не шум формы): глаз закрывается быстрее, чем догоняет сглаживание.
+            if let r = rawOpen, r < open - 0.15 { open = r }
+        }
         applied.openFactor = open; applied.sideFactor = sideFactor
         let L = settings.limits
         let weight = rawWeight * open * sideFactor
@@ -236,19 +262,30 @@ package final class GazeController {
         let eyes = face.eyes.prefix(2)
         applied.pixels = eyes.map { Vec2(s.x * $0.frame.halfWidth, -s.y * $0.frame.halfWidth) }.reduce(.zero, +) / Double(max(eyes.count, 1))
         let cal = settings.calibration
-        return face.eyes.prefix(2).enumerated().compactMap { k, e in
-            guard let iris = lastIris[k] else { return nil }
+        let list: [EyeEdit] = face.eyes.prefix(2).enumerated().compactMap { k, e in
+            guard var iris = lastIris[k] else { return nil }
+            // На саккаде сглаженный центр отстаёт от радужки: вырезали бы круг не там, и край настоящей радужки остался
+            // бы вторым контуром (запись B, кадр 172). Чем больше расхождение с сырым центром, тем ближе к сырому.
+            if let sh = e.shape, let raw = rawFace?.eyes[safe: k]?.shape?.iris {
+                let d = (raw - iris).length, r = sh.irisRadius
+                iris = iris + (raw - iris) * smoothstep(0.05 * r, 0.15 * r, d)
+            }
             let a = e.frame.halfWidth
             if let sh = e.shape {
                 // Радиус с запасом на тёмный лимб: переносим радужку вместе с её краем.
                 let lids = sh.lidCurves(in: e.frame), r = sh.irisRadius * 1.08 + 0.5, shift = e.frame.imageVector(s)
-                var edit = EyeEdit(frame: e.frame, iris: iris, irisRadius: r, shift: shift, lidRaise: -s.y * cal.lidFollow * a, lids: lids)
-                edit.irisStretchDown = EyeEdit.lowerGap(for: e.frame, lids: lids, iris: iris, irisRadius: sh.irisRadius, shift: shift)
-                return edit
+                // Нижнее веко чуть поднимается и закрывает часть белка, открывшегося под радужкой (без растяжки радужки).
+                let gap = EyeEdit.lowerGap(for: e.frame, lids: lids, iris: iris, irisRadius: sh.irisRadius, shift: shift)
+                let lower = min(gap * L.lowerLidFollow, L.maxLowerRaise * a)
+                return EyeEdit(frame: e.frame, iris: iris, irisRadius: r, shift: shift, lidRaise: -s.y * cal.lidFollow * a, lids: lids, lowerRaise: lower)
             }
             return EyeEdit(frame: e.frame, iris: iris, irisRadius: IrisLocator.radiusRatio * a * 1.1,
                            shift: e.frame.imageVector(s), lidRaise: -s.y * cal.lidFollow * a)
         }
+        if !list.isEmpty {
+            applied.visiblePixels = list.map { e -> Vec2 in let v = e.visibleShift; return Vec2(v.x, -v.y) }.reduce(.zero, +) / Double(list.count)
+        }
+        return list
     }
 
     private func output(weight: Double, shift: Vec2, target: Vec2, state: GazeState) -> GazeOutput {
@@ -256,4 +293,8 @@ package final class GazeController {
         let warps = weight > 0 ? lastEyes.map { EyeWarp(frame: $0, shift: $0.imageVector(s)) } : []
         return GazeOutput(weight: weight, shift: s, warps: warps, measured: gazeFilter.current, target: target, state: state)
     }
+}
+
+private extension Array {
+    subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
 }

@@ -137,8 +137,10 @@ final class GazeEyeRendererTests: XCTestCase {
             let l = e.local(p)
             // У нижнего века правка намеренно сходит на исходные пиксели — там проверять нечего.
             guard abs(l.x) < 20, l.y < e.bottom(l.x) - EyeEdit.lowerLidBlend, l.y >= e.newTop(l.x) else { continue }
-            // Не изнутри старой радужки. У самых век, где в строке белка нет вовсе, допускается её край.
-            XCTAssertGreaterThanOrEqual((e.source(for: p).0 - iris).length, 8.4, "\(p)")
+            // Не изнутри старой радужки — или из подложки, где старой радужки нет (залита белком).
+            for (q, _, layer) in e.layeredSources(for: p) where layer == .original {
+                XCTAssertGreaterThanOrEqual((q - iris).length, 8.4, "\(p)")
+            }
         } }
     }
 

@@ -60,17 +60,22 @@ package final class GazeService: ObservableObject {
 
     package func setOn(_ on: Bool) { on ? turnOn() : turnOff() }
 
+    /// Номер включения: ответ на системный запрос камеры относится только к тому включению, в котором его задали.
+    private var generation = 0
+
     private func turnOn() {
         guard !isOn else { return }
         isOn = true
+        generation += 1
         status = .starting
         switch Permissions.camera {
         case .granted: start()
         case .denied: status = .cameraDenied; isOn = false
         case .notAsked:
+            let asked = generation
             Permissions.requestCamera { [weak self] granted in
                 MainActor.assumeIsolated {
-                    guard let self, self.isOn else { return }
+                    guard let self, self.isOn, self.generation == asked, self.camera == nil else { return }
                     if granted { self.start() } else { self.status = .cameraDenied; self.isOn = false }
                 }
             }
@@ -78,6 +83,7 @@ package final class GazeService: ObservableObject {
     }
 
     private func start() {
+        guard camera == nil else { return }
         var iris: IrisModel?
         do {
             if let url = try IrisModel.compiledURL() { iris = try IrisModel(compiledURL: url) }
@@ -124,7 +130,11 @@ package final class GazeService: ObservableObject {
     private func turnOff() {
         guard isOn || camera != nil else { return }
         isOn = false
+        generation += 1
         camera?.stop()
+        // Кадр, уже взятый конвейером, дописывается до остановки сервера — после stop() публиковать некуда.
+        pipeline?.queue.sync {}
+        sink?.finishRecording()
         syphon?.stop()
         statsTimer?.invalidate()
         calibrationTask?.cancel()

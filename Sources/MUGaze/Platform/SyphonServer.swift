@@ -9,7 +9,8 @@ import MUCore
 final class SyphonServer {
     let name: String
     let uuid = SyphonProtocol.makeServerUUID()
-    private let queue = DispatchQueue(label: "com.mruzhynskyi.macutils.gaze.syphon", qos: .userInteractive)
+    /// Очередь сервера (не private — тест задерживает её, чтобы проверить, что кадры не копятся).
+    let queue = DispatchQueue(label: "com.mruzhynskyi.macutils.gaze.syphon", qos: .userInteractive)
     private var port: CFMessagePort?
     private var registry = SyphonClientRegistry()
     private var senders: [String: CFMessagePort] = [:]
@@ -17,16 +18,36 @@ final class SyphonServer {
     private var running = false
     private let lock = NSLock()
     private var _frameClients = 0
+    private var _framesCopied = 0
 
     /// `broadcasts: false` — без объявлений на всю систему (тесты): клиент должен знать UUID.
     private let broadcasts: Bool
 
-    init(name: String, broadcasts: Bool = true) { self.name = name; self.broadcasts = broadcasts }
+    /// Кадр, ждущий отправки: не больше одного. Новый кадр заменяет старый — если OBS подвис, очередь не растёт.
+    private var pending: CVPixelBuffer?
+    private var drainScheduled = false
+    private static let onQueue = DispatchSpecificKey<ObjectIdentifier>()
+
+    /// Сколько ждать клиента: «новый кадр» не ждём дольше кадра, служебные сообщения — чуть дольше.
+    static let frameSendTimeout: CFTimeInterval = 0.05
+    static let controlSendTimeout: CFTimeInterval = 0.25
+
+    init(name: String, broadcasts: Bool = true) {
+        self.name = name; self.broadcasts = broadcasts
+        queue.setSpecific(key: Self.onQueue, value: ObjectIdentifier(self))
+    }
 
     deinit { stop() }
 
+    /// Код на очереди сервера (deinit последней ссылки из замыкания, колбэк порта) — без `queue.sync` на саму себя.
+    private func onQueue(_ work: () -> Void) {
+        if DispatchQueue.getSpecific(key: Self.onQueue) == ObjectIdentifier(self) { work() } else { queue.sync(execute: work) }
+    }
+
     /// Сколько клиентов забирает кадры (OBS) — для строки состояния.
     var frameClientCount: Int { lock.lock(); defer { lock.unlock() }; return _frameClients }
+    /// Сколько кадров скопировано в поверхность (для тестов: при занятой очереди кадры заменяются, а не копятся).
+    var framesCopied: Int { lock.lock(); defer { lock.unlock() }; return _framesCopied }
 
     private var description: [String: Any] {
         let appName = NSRunningApplication.current.localizedName ?? ProcessInfo.processInfo.processName
@@ -34,7 +55,7 @@ final class SyphonServer {
     }
 
     func start() {
-        queue.sync {
+        onQueue {
             guard !running else { return }
             var context = CFMessagePortContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
             let callback: CFMessagePortCallBack = { _, msgid, data, info in
@@ -61,7 +82,7 @@ final class SyphonServer {
 
     func stop() {
         var wasRunning = false
-        queue.sync {
+        onQueue {
             guard running else { return }
             wasRunning = true
             for client in registry.info { send(.retireServer, nil, to: client) }
@@ -71,6 +92,7 @@ final class SyphonServer {
             if let port { CFMessagePortInvalidate(port) }
             port = nil
             surface = nil
+            lock.lock(); pending = nil; lock.unlock()
             running = false
             setFrameClients(0)
         }
@@ -88,9 +110,30 @@ final class SyphonServer {
 
     /// Новый кадр: копия в поверхность сервера и «новый кадр» подписчикам. Вызывается с очереди конвейера.
     func publish(_ buffer: CVPixelBuffer) {
+        lock.lock()
+        pending = buffer
+        let schedule = !drainScheduled
+        drainScheduled = true
+        lock.unlock()
+        guard schedule else { return }
+        // Слабая ссылка: кадр, пришедший после stop(), не продлевает жизнь сервера (иначе deinit на своей очереди).
+        queue.async { [weak self] in self?.drain() }
+    }
+
+    /// На очереди сервера: забрать последний ожидающий кадр (более ранние уже заменены).
+    private func drain() {
+        lock.lock()
+        let next = pending
+        pending = nil
+        drainScheduled = false
+        lock.unlock()
+        guard let next, running else { return }
+        copyAndNotify(next)
+    }
+
+    private func copyAndNotify(_ buffer: CVPixelBuffer) {
         let w = CVPixelBufferGetWidth(buffer), h = CVPixelBufferGetHeight(buffer)
-        queue.async { [self] in
-            guard running else { return }
+        do {
             if surface == nil || surface!.width != w || surface!.height != h {
                 // Ключ строкой: kIOSurfaceIsGlobal объявлен устаревшим, но Syphon и OBS открывают поверхность по номеру,
                 // а это работает только для глобальной. Формат пикселя задаём явно — без него OBS (Metal) видит 0×0.
@@ -106,13 +149,15 @@ final class SyphonServer {
                 }
             }
             guard let surface else { return }
-            surface.lock(options: [], seed: nil)
             CVPixelBufferLockBaseAddress(buffer, .readOnly)
-            let src = CVPixelBufferGetBaseAddress(buffer)!, srb = CVPixelBufferGetBytesPerRow(buffer)
+            defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+            guard let src = CVPixelBufferGetBaseAddress(buffer) else { return }
+            let srb = CVPixelBufferGetBytesPerRow(buffer)
+            surface.lock(options: [], seed: nil)
             let dst = surface.baseAddress, drb = surface.bytesPerRow
             for y in 0..<h { memcpy(dst + y * drb, src + y * srb, min(srb, drb, w * 4)) }
-            CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
             surface.unlock(options: [], seed: nil)
+            lock.lock(); _framesCopied += 1; lock.unlock()
             for client in registry.frames { send(.newFrame, nil, to: client) }
         }
     }
@@ -143,7 +188,8 @@ final class SyphonServer {
             remote = created
         }
         let data = SyphonProtocol.encode(payload).map { $0 as CFData }
-        let result = CFMessagePortSendRequest(remote, type.rawValue, data, 1.0, 0, nil, nil)
+        let timeout = type == .newFrame ? Self.frameSendTimeout : Self.controlSendTimeout
+        let result = CFMessagePortSendRequest(remote, type.rawValue, data, timeout, 0, nil, nil)
         if result == kCFMessagePortIsInvalid { drop(client) }
     }
 

@@ -54,7 +54,7 @@ final class GazeLiveTests: XCTestCase {
     // MARK: Взгляд в сторону
 
     func testModerateSideGazeKeepsCorrection() {
-        let o = settle(GazeController(), irisX: 0.3)
+        let o = settle(GazeController(), irisX: 0.2) // взгляд в экран на записях пользователя — |x| ≤ 0,2
         XCTAssertEqual(o.applied.sideFactor, 1, accuracy: 0.01)
         XCTAssertFalse(o.state.contains(.sideGaze))
         XCTAssertFalse(o.edits.isEmpty)
@@ -93,24 +93,6 @@ final class GazeLiveTests: XCTestCase {
         XCTAssertEqual(EyeEdit.lowerGap(for: fr, lids: lids, iris: Vec2(100, 103), irisRadius: 10, shift: Vec2(0, -6)), 5, accuracy: 1e-9)
     }
 
-    func testStretchKeepsLimbusThicknessAndIsContinuous() {
-        let r = 12.0, s = 5.0, w = EyeEdit.limbusBand(r)
-        // Вверх от центра — без изменений.
-        XCTAssertEqual(EyeEdit.stretchedSource(Vec2(3, -7), radius: r, stretch: s), Vec2(3, -7))
-        // Строго вниз: граница r+s → r, полоса ободка той же толщины, белок — сдвиг на s.
-        XCTAssertEqual(EyeEdit.stretchedSource(Vec2(0, r + s), radius: r, stretch: s).y, r, accuracy: 1e-9)
-        XCTAssertEqual(EyeEdit.stretchedSource(Vec2(0, r + s - w), radius: r, stretch: s).y, r - w, accuracy: 1e-9)
-        XCTAssertEqual(EyeEdit.stretchedSource(Vec2(0, r + s + 3), radius: r, stretch: s).y, r + 3, accuracy: 1e-9)
-        // Непрерывность по лучу.
-        var prev = 0.0
-        for k in 1...200 {
-            let y = Double(k) * 0.1
-            let v = EyeEdit.stretchedSource(Vec2(0, y), radius: r, stretch: s).y
-            XCTAssertLessThan(abs(v - prev), 0.11, "без скачков на y=\(y)")
-            prev = v
-        }
-    }
-
     // MARK: Face Landmarker
 
     func testFaceMeshEyeTakesLidsFromMeshAndIrisFromIrisModel() throws {
@@ -143,10 +125,11 @@ final class GazeLiveTests: XCTestCase {
     func testDebugOverlaySaysWhatAndWhy() {
         var s = GazeStats()
         s.faceFound = true
-        s.applied.pixels = Vec2(-1.2, 7.6); s.applied.strength = 0.78; s.applied.openFactor = 0.78
+        s.applied.pixels = Vec2(-1.4, 9.2); s.applied.visiblePixels = Vec2(-1.2, 7.6); s.applied.strength = 0.78; s.applied.openFactor = 0.78
         s.state = [.narrowEyes]
         let text = GazeDebugWindowController.overlayText(s)
-        XCTAssertTrue(text.contains("8 px вверх"), text)
+        XCTAssertTrue(text.contains("видно: 8 px вверх"), text)
+        XCTAssertTrue(text.contains("радужка +9 px"), text)
         XCTAssertTrue(text.contains("1 px вбок"), text)
         XCTAssertTrue(text.contains("сила 0.78"), text)
         XCTAssertTrue(text.contains("ослаблена: узкие глаза ×0.78"), text)

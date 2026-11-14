@@ -13,21 +13,18 @@ package struct EyeEdit: Equatable, Codable, Sendable {
     package var lidRaise: Double
     /// Точные веки (A v3). Без них веки — эллипс по рамке (A v2).
     package var lids: LidCurves?
-    /// На сколько поднять нижнее веко в середине (> 0 — вверх). Сейчас контроллер его не двигает: на месте края века
-    /// у радужки в исходнике её тёмный низ, и он переносился бы вверх линией. Оставлено для опытов.
+    /// На сколько поднять нижнее веко в середине (> 0 — вверх): при взгляде вверх оно чуть поднимается вслед за
+    /// радужкой. Край века берётся из подложки — без тёмного низа старой радужки.
     package var lowerRaise: Double
-    /// На сколько растянуть низ радужки вниз (px), чтобы после подъёма он всё ещё уходил под нижнее веко.
-    package var irisStretchDown: Double = 0
 
     package init(frame: EyeFrame, iris: Vec2, irisRadius: Double, shift: Vec2, lidRaise: Double, lids: LidCurves? = nil, lowerRaise: Double = 0) {
         self.frame = frame; self.iris = iris; self.irisRadius = irisRadius; self.shift = shift; self.lidRaise = lidRaise; self.lids = lids
         self.lowerRaise = lowerRaise
     }
 
-    /// Сколько не хватает низу радужки до нижнего века после подъёма: столько растягиваем вниз (без полоски белка).
+    /// Сколько белка откроется под радужкой после подъёма (px): часть его закрывает поднятое нижнее веко.
     /// Если радужка и так перекрыта веком больше, чем на подъём, — ноль. Если под радужкой уже был виден белок
-    /// (широко открытые глаза), тоже ноль: подъём честно открывает белок, а растяжка тянула тёмный лимб пятном вниз
-    /// (живая проверка GAZE-33). Между «касается века» и «белок 2 px» — плавный переход.
+    /// (широко открытые глаза), тоже ноль: веко не трогаем. Между «касается века» и «белок 2 px» — плавный переход.
     package static func lowerGap(for frame: EyeFrame, lids: LidCurves?, iris: Vec2, irisRadius: Double, shift: Vec2) -> Double {
         let d = iris - frame.center
         let u = d.dot(frame.ex), v = d.dot(frame.ey)
@@ -92,13 +89,18 @@ package struct EyeEdit: Equatable, Codable, Sendable {
         return (-a, a, t - max(lidRaise, 0) - Self.lidReach * a - 1, b + Self.lowerReach * a + 1)
     }
 
-    /// Обратное отображение: из каких точек исходного кадра (с весами, сумма 1) брать пиксель для точки `p`.
+    /// Откуда брать пиксель: исходный кадр (радужка переезжает с рисунком) или «подложка» — тот же кадр, где старая
+    /// радужка и полоса у нижнего века под ней заполнены белком и краем века по соседям (гармоническая заливка).
+    package enum Layer: Sendable { case original, clean }
+
+    /// Обратное отображение: из каких точек (с весами, сумма 1) и какого слоя брать пиксель для точки `p`.
     /// Несколько точек — только на границах (край века, край радужки, нижнее веко): там цвета смешиваются,
-    /// чтобы не было ступенек.
-    package func sources(for p: Vec2) -> [(Vec2, Double)] {
+    /// чтобы не было ступенек. Всё, кроме самой радужки, берётся из подложки: белок под и рядом с поднятой радужкой
+    /// не собирается из кусков строк (GAZE-35: швы и заплатки при взгляде вбок), а продолжает настоящий белок.
+    package func layeredSources(for p: Vec2) -> [(Vec2, Double, Layer)] {
         let l = local(p)
         let a = frame.halfWidth
-        if abs(l.x) >= a { return [(p, 1)] }
+        if abs(l.x) >= a { return [(p, 1, .original)] }
         let nt = newTop(l.x), nb = newBottom(l.x)
         let aa = Self.edgeBlend
         // Под нижним веком: кожа поднимается вместе с краем века, к щеке — до нуля; на краю ±aa смешиваем с раскрытием.
@@ -107,22 +109,25 @@ package struct EyeEdit: Equatable, Codable, Sendable {
             let h = 1 - smoothstep(0, Self.lowerReach * a, d)
             return image(Vec2(l.x, l.y + lowerRaise * g(l.x) * h))
         }
-        if l.y >= nb + aa { return [(lowerSkin(), 1)] }
+        if l.y >= nb + aa { return [(lowerSkin(), 1, .clean)] }
         let tLower = smoothstep(nb - aa, nb + aa, l.y)
         // Верхнее веко: над новым краем — веко и кожа, под ним — раскрытие; на краю ±aa смешиваем.
         let tOpen = smoothstep(nt - aa, nt + aa, l.y)
-        var out: [(Vec2, Double)] = []
+        var out: [(Vec2, Double, Layer)] = []
         if tOpen < 1 {
             let d = max(nt - l.y, 0)
             let h = 1 - smoothstep(0, Self.lidReach * a, d)
-            out.append((image(Vec2(l.x, l.y + lidRaise * g(l.x) * h)), 1 - tOpen))
+            out.append((image(Vec2(l.x, l.y + lidRaise * g(l.x) * h)), 1 - tOpen, .clean))
         }
         if tOpen > 0 {
-            if tLower < 1 { for (q, w) in openingSources(l) { out.append((q, w * tOpen * (1 - tLower))) } }
-            if tLower > 0 { out.append((lowerSkin(), tOpen * tLower)) }
+            if tLower < 1 { for (q, w, k) in openingSources(l) { out.append((q, w * tOpen * (1 - tLower), k)) } }
+            if tLower > 0 { out.append((lowerSkin(), tOpen * tLower, .clean)) }
         }
         return out.filter { $0.1 > 1e-9 }
     }
+
+    /// Точки без слоя (для проверок геометрии).
+    package func sources(for p: Vec2) -> [(Vec2, Double)] { layeredSources(for: p).map { ($0.0, $0.1) } }
 
     /// Совместимость: главный источник и, если есть, второй с его долей.
     package func source(for p: Vec2) -> (Vec2, blend: (Vec2, Double)?) {
@@ -130,70 +135,53 @@ package struct EyeEdit: Equatable, Codable, Sendable {
         return (s[0].0, s.count > 1 ? (s[1].0, s[1].1) : nil)
     }
 
-    /// Раскрытие глаза с учётом нижнего века. У нижнего века (оно не двигается) подъём сходит на нет на полосе
-    /// 1,5 px — там остаётся только горизонтальный сдвиг, — а на последних ±0,75 px цвет смешивается с исходным,
-    /// чтобы край века остался как был.
-    func openingSources(_ l: Vec2) -> [(Vec2, Double)] {
-        let toLower = newBottom(l.x) - l.y
-        // Если низ радужки уже дотянут до века растяжкой, «плоская» полоса не нужна: в ней остаётся исходный низ
-        // радужки (круг шире полуэллипса), и у века по бокам виден тёмный штрих (живая запись GAZE-34).
-        let lift = max(-localShift.y, 0)
-        let covered = lift > 1e-9 ? min(irisStretchDown / lift, 1) : 0
-        let keep = (1 - smoothstep(0, Self.lowerLidBlend, toLower)) * (1 - covered)
-        let (q, bl) = openingSource(l)
-        var list: [(Vec2, Double)]
-        if keep > 0, abs(localShift.y) > 1e-9 || abs(lidRaise) > 1e-9 {
-            // «Плоский» вариант: тот же горизонтальный сдвиг, без подъёма; нижнее веко — как в основной правке.
-            let flat = EyeEdit(frame: frame, iris: iris, irisRadius: irisRadius, shift: frame.ex * localShift.x, lidRaise: 0, lids: lids, lowerRaise: lowerRaise)
-            let (qf, blf) = flat.openingSource(l)
-            func mix(_ a: Vec2, _ b: Vec2) -> Vec2 { a + (b - a) * keep }
-            switch (bl, blf) {
-            case let (x?, y?): list = [(mix(q, qf), 1 - (x.1 * (1 - keep) + y.1 * keep)), (mix(x.0, y.0), x.1 * (1 - keep) + y.1 * keep)]
-            case let (x?, nil): list = [(mix(q, qf), 1 - x.1 * (1 - keep)), (mix(x.0, qf), x.1 * (1 - keep))]
-            case let (nil, y?): list = [(mix(q, qf), 1 - y.1 * keep), (mix(q, y.0), y.1 * keep)]
-            default: list = [(mix(q, qf), 1)]
-            }
-        } else {
-            list = bl.map { [(q, 1 - $0.1), ($0.0, $0.1)] } ?? [(q, 1)]
-        }
-        return list.map { (image($0.0), $0.1) }.filter { $0.1 > 1e-6 }
-    }
-
-    /// Обратное отображение растянутой вниз радужки: точка относительно нового центра → точка исходной радужки.
-    /// По каждому лучу: внутренняя часть сжимается, полоса ободка шириной `limbusBand(r)` и белок за ней — сдвиг без сжатия.
-    static func stretchedSource(_ rel0: Vec2, radius r: Double, stretch: Double) -> Vec2 {
-        guard rel0.y > 0, stretch > 0 else { return rel0 }
-        let rt = rel0.length
-        guard rt > 1e-9 else { return rel0 }
-        let c = rel0.x / rt, sn = rel0.y / rt, rs = r + stretch
-        let boundary = 1 / (c * c / (r * r) + sn * sn / (rs * rs)).squareRoot()
-        let w = limbusBand(r)
-        let src = rt >= boundary - w ? rt - (boundary - r) : rt * (r - w) / (boundary - w)
-        return rel0 * (src / rt)
-    }
-
-    /// Ширина тёмного ободка радужки, px: не меньше 2 px и не больше половины радиуса.
-    static func limbusBand(_ r: Double) -> Double { min(max(2, 0.2 * r), 0.5 * r) }
-
-    /// Источник внутри раскрытия (локальные координаты): радужка целиком или белок, плюс сглаживание края радужки.
-    func openingSource(_ l: Vec2) -> (Vec2, (Vec2, Double)?) {
-        let s = localShift
+    /// Раскрытие глаза: подложка (белок без старой радужки) переносится по вертикали из нового раскрытия в старое,
+    /// поверх — радужка целиком на новом месте, её край сглажен на полосе ±1,25 px.
+    func openingSources(_ l: Vec2) -> [(Vec2, Double, Layer)] {
+        let nt = newTop(l.x), nb = newBottom(l.x), t = top(l.x), bt = bottom(l.x)
+        let vs = nb - nt > 0.01 ? t + (l.y - nt) * (bt - t) / (nb - nt) : l.y
+        let background = image(Vec2(l.x, vs))
         let oldIris = local(iris)
-        let newIris = oldIris + s
+        let rel = l - (oldIris + localShift)
         let r = irisRadius
-        // Ниже центра радужка растянута на irisStretchDown (граница — полуэллипс). Тянется только середина радужки:
-        // тёмный ободок (лимб) сохраняет толщину и уходит под веко, как в исходнике. Прежняя растяжка по вертикали
-        // утолщала ободок, и у нижнего века оставалась тёмная дуга (живая запись GAZE-34).
-        let rel0 = l - newIris
-        let rel = Self.stretchedSource(rel0, radius: r, stretch: irisStretchDown)
-        let rho = rel.length
-        let irisSrc = irisSource(rel: rel, oldIris: oldIris)
-        let scleraSrc = scleraSource(l, rel: rel, rho: rho, newIris: newIris, oldIris: oldIris)
-        // Край радужки (лимб) сглаживается на полосе ±1,25 px.
-        let edge = smoothstep(r - 1.25, r + 1.25, rho)
-        if edge <= 0 { return (irisSrc, nil) }
-        if edge >= 1 { return (scleraSrc, nil) }
-        return (irisSrc, (scleraSrc, edge))
+        let edge = smoothstep(r - 1.25, r + 1.25, rel.length)
+        if edge >= 1 { return [(background, 1, .clean)] }
+        let irisSrc = image(irisSource(rel: rel, oldIris: oldIris))
+        if edge <= 0 { return [(irisSrc, 1, .original)] }
+        return [(irisSrc, 1 - edge, .original), (background, edge, .clean)]
+    }
+
+    /// Сколько белка вокруг старой радужки заменяется подложкой: тёмный лимб и размытый край, плюс запас на ошибку
+    /// центра радужки у модели (B 184: край старой радужки оставался вторым контуром).
+    package static let cleanPad = 1.5, cleanPadRatio = 0.12
+    /// Радиус области подложки вокруг старой радужки, px.
+    package var cleanRadius: Double { irisRadius * (1 + Self.cleanPadRatio) + Self.cleanPad }
+    /// Полоса под нижним веком в столбцах радужки (px), которая тоже идёт в подложку: в исходнике там размытый низ
+    /// радужки, и после подъёма он оставался тёмной дугой вдоль века (CHK-3, B 127).
+    package static let cleanLowerBand = 2.0
+
+    /// Видимый сдвиг радужки (локальные оси, px): центр видимой части круга радужки после правки минус до неё.
+    /// Верх радужки под веком не виден, поэтому видимый подъём может быть меньше сдвига — индикатор показывает его.
+    package var visibleShift: Vec2 {
+        let oldIris = local(iris), newIris = oldIris + localShift
+        let r = max(irisRadius - 0.5, 1), step = 0.5
+        func centroid(_ c: Vec2, _ inside: (Vec2) -> Bool) -> Vec2? {
+            var sum = Vec2.zero, n = 0.0
+            var y = -r
+            while y <= r {
+                var x = -r
+                while x <= r {
+                    if x * x + y * y <= r * r { let q = c + Vec2(x, y); if inside(q) { sum += q; n += 1 } }
+                    x += step
+                }
+                y += step
+            }
+            return n > 0 ? sum / n : nil
+        }
+        let a = frame.halfWidth
+        guard let before = centroid(oldIris, { abs($0.x) < a && $0.y > self.top($0.x) && $0.y < self.bottom($0.x) }),
+              let after = centroid(newIris, { abs($0.x) < a && $0.y > self.newTop($0.x) && $0.y < self.newBottom($0.x) }) else { return .zero }
+        return after - before
     }
 
     /// Отступ от края века внутрь, в пикселях: край века (ресницы, тень) не должен переноситься вместе с радужкой.
@@ -232,48 +220,6 @@ package struct EyeEdit: Equatable, Codable, Sendable {
         }
         return oldIris
     }
-
-    /// Белок построчно. Строка сначала переносится по вертикали из нового раскрытия (веко поднято) в старое,
-    /// затем в строке белок между радужкой и уголком растягивается или сжимается линейно:
-    /// отрезок [край новой радужки, уголок] → [край старой радужки + запас на лимб, уголок].
-    /// Так белок берётся только из белка той же строки: без второй радужки и без затягивания края века.
-    func scleraSource(_ l: Vec2, rel: Vec2, rho: Double, newIris: Vec2, oldIris: Vec2) -> Vec2 {
-        // Вертикаль: новое раскрытие [newTop, bottom] → старое [top, bottom] в этом столбце.
-        let nt = newTop(l.x), nbt = newBottom(l.x), t = top(l.x), bt = bottom(l.x)
-        // Без отступа от века: на краю раскрытия белок должен непрерывно переходить в веко.
-        var vs = nbt - nt > 0.01 ? t + (l.y - nt) * (bt - t) / (nbt - nt) : l.y
-        // Хорды радужки в строке: старая (с запасом на тёмный лимб) и новая.
-        let limbus = irisRadius + 1.5 * min(1, localShift.length / 2)
-        func half(_ dv: Double, _ r: Double) -> Double { (max(0, r * r - dv * dv)).squareRoot() }
-        let right = l.x >= newIris.x
-        func cornerAt(_ v: Double) -> Double { openingEdge(v, right: right) }
-        // У века в строке может не быть белка (старая радужка до уголка) — берём ближайшую к середине строку, где он есть.
-        func hasSclera(_ v: Double) -> Bool {
-            let h = half(v - oldIris.y, limbus), c = cornerAt(v)
-            return right ? c > oldIris.x + h + 1 : -c < oldIris.x - h - 1
-        }
-        if localShift.length > 0.05, !hasSclera(vs) {
-            var v = vs
-            let step = vs > 0 ? -0.5 : 0.5
-            while abs(v) > 0.25, !hasSclera(v) { v += step }
-            vs = v
-        }
-        let dvN = l.y - newIris.y
-        let hN = half(dvN > 0 && irisStretchDown > 0 ? dvN * irisRadius / (irisRadius + irisStretchDown) : dvN, irisRadius)
-        let hO = half(vs - oldIris.y, limbus)
-        let corner = cornerAt(vs)
-        let oL = oldIris.x - hO, oR = oldIris.x + hO, nL = newIris.x - hN, nR = newIris.x + hN
-        var us = l.x
-        if l.x >= nR {
-            us = corner - nR > 0.5 ? oR + (l.x - nR) * (corner - oR) / (corner - nR) : l.x
-        } else if l.x <= nL {
-            us = -corner - nL < -0.5 ? -corner + (l.x + corner) * (oL + corner) / (nL + corner) : l.x
-        } else {
-            // Внутри хорды новой радужки (полоса сглаживания края): ближайший край старой хорды.
-            us = l.x >= newIris.x ? oR : oL
-        }
-        return Vec2(min(max(us, -corner), corner), vs)
-    }
 }
 
 /// Пиксели кадра: 4 байта на точку (порядок каналов не важен), строки по `rowBytes`.
@@ -308,25 +254,106 @@ package enum EyeRenderer {
         for y in 0..<ch {
             memcpy(&src[y * cw * 4], v.base + (y0 + y) * v.rowBytes + x0 * 4, cw * 4)
         }
+        let clean = cleanPlate(e, src: src, w: cw, h: ch, ox: x0, oy: y0)
         src.withUnsafeBufferPointer { s in
-            let sampler = Bicubic(px: s.baseAddress!, w: cw, h: ch, ox: x0, oy: y0)
-            for y in y0...y1 {
-                let row = v.base + y * v.rowBytes
-                for x in x0...x1 {
-                    let p = Vec2(Double(x) + 0.5, Double(y) + 0.5)
-                    let srcs = e.sources(for: p)
-                    if srcs.count == 1, abs(srcs[0].0.x - p.x) < 1e-6, abs(srcs[0].0.y - p.y) < 1e-6 { continue }
-                    var c = [0.0, 0.0, 0.0, 0.0]
-                    for (q, w) in srcs {
-                        let v = sampler.sample(q)
-                        for k in 0..<4 { c[k] += v[k] * w }
+            clean.withUnsafeBufferPointer { c in
+                let original = Bicubic(px: s.baseAddress!, w: cw, h: ch, ox: x0, oy: y0)
+                let plate = Bicubic(px: c.baseAddress!, w: cw, h: ch, ox: x0, oy: y0)
+                for y in y0...y1 {
+                    let row = v.base + y * v.rowBytes
+                    for x in x0...x1 {
+                        let p = Vec2(Double(x) + 0.5, Double(y) + 0.5)
+                        let srcs = e.layeredSources(for: p)
+                        if srcs.count == 1, srcs[0].2 == .original, abs(srcs[0].0.x - p.x) < 1e-6, abs(srcs[0].0.y - p.y) < 1e-6 { continue }
+                        var acc = [0.0, 0.0, 0.0, 0.0]
+                        for (q, w, layer) in srcs {
+                            let val = (layer == .original ? original : plate).sample(q)
+                            for k in 0..<4 { acc[k] += val[k] * w }
+                        }
+                        let o = row + x * 4
+                        for k in 0..<4 { o[k] = UInt8(min(max(acc[k].rounded(), 0), 255)) }
                     }
-                    let o = row + x * 4
-                    for k in 0..<4 { o[k] = UInt8(min(max(c[k].rounded(), 0), 255)) }
                 }
             }
         }
     }
+
+    /// Подложка: копия области, где старая радужка с лимбом (и полоса под нижним веком в её столбцах) заполнена
+    /// по соседям гармонически — как будто радужки там нет. Белок заливается только от белка (ни ресницы, ни кожа века
+    /// не затягиваются: через края век условие «без потока»), полоса у нижнего века — только от края века и кожи
+    /// под ним (иначе вдоль века светлая линия). Без белка вокруг (глаз почти закрыт) подложка равна исходнику.
+    static func cleanPlate(_ e: EyeEdit, src: [UInt8], w: Int, h: Int, ox: Int, oy: Int) -> [UInt8] {
+        let R = e.cleanRadius, a = e.frame.halfWidth, band = EyeEdit.cleanLowerBand
+        let cx = e.iris.x - Double(ox), cy = e.iris.y - Double(oy)
+        let bx0 = max(1, Int(floor(cx - R - 3))), bx1 = min(w - 2, Int(ceil(cx + R + 3)))
+        let by0 = max(1, Int(floor(cy - R - 3))), by1 = min(h - 2, Int(ceil(cy + R + 3 + band)))
+        guard bx1 > bx0, by1 > by0 else { return src }
+        // Зона: 0 — не участвует (веко сверху, вне глаза), 1 — раскрытие, 2 — полоса у нижнего века, 3 — кожа под ней.
+        var zone = [UInt8](repeating: 0, count: w * h)
+        var unknown = [Bool](repeating: false, count: w * h)
+        var list: [Int] = []
+        var knownOpen = 0
+        for y in by0...by1 {
+            for x in bx0...bx1 {
+                let p = Vec2(Double(x + ox) + 0.5, Double(y + oy) + 0.5)
+                let l = e.local(p)
+                guard abs(l.x) < a - 0.5, l.y > e.top(l.x) else { continue }
+                let i = y * w + x
+                let bt = e.bottom(l.x)
+                zone[i] = l.y < bt ? 1 : (l.y < bt + band ? 2 : 3)
+                if zone[i] != 3, (p - e.iris).length < R { unknown[i] = true; list.append(i) } else if zone[i] == 1 { knownOpen += 1 }
+            }
+        }
+        guard !list.isEmpty, knownOpen >= 4 else { return src }
+        // Соседи, от которых берётся цвет: белок — только от белка (край века остаётся резким, как в исходнике),
+        // полоса у века — от полосы и кожи под ней.
+        @inline(__always) func usable(_ from: UInt8, _ to: UInt8) -> Bool { from == 1 ? to == 1 : (to == 2 || to == 3) }
+        var f = [Float](repeating: 0, count: w * h * 3)
+        for i in 0..<(w * h) where zone[i] != 0 { for c in 0..<3 { f[i * 3 + c] = Float(src[i * 4 + c]) } }
+        // Начальное приближение: по строке между ближайшими известными точками той же зоны.
+        for i in list {
+            let y = i / w, x = i % w, z = zone[i]
+            var left: Int?, right: Int?
+            var k = x - 1
+            while k >= bx0 { let j = y * w + k; if zone[j] != z { break }; if !unknown[j] { left = j; break }; k -= 1 }
+            k = x + 1
+            while k <= bx1 { let j = y * w + k; if zone[j] != z { break }; if !unknown[j] { right = j; break }; k += 1 }
+            for c in 0..<3 {
+                switch (left, right) {
+                case let (l?, r?):
+                    let t = Float(x - l % w) / Float(r % w - l % w)
+                    f[i * 3 + c] = f[l * 3 + c] * (1 - t) + f[r * 3 + c] * t
+                case let (l?, nil): f[i * 3 + c] = f[l * 3 + c]
+                case let (nil, r?): f[i * 3 + c] = f[r * 3 + c]
+                default: break
+                }
+            }
+        }
+        // Гаусс — Зейдель с верхней релаксацией: уравнение Лапласа по допустимым соседям.
+        let omega: Float = 1.7
+        let offsets = [-1, 1, -w, w]
+        for _ in 0..<EyeRenderer.cleanIterations {
+            for i in list {
+                let z = zone[i]
+                var s0: Float = 0, s1: Float = 0, s2: Float = 0, n: Float = 0
+                for d in offsets {
+                    let j = i + d
+                    guard usable(z, zone[j]) else { continue }
+                    s0 += f[j * 3]; s1 += f[j * 3 + 1]; s2 += f[j * 3 + 2]; n += 1
+                }
+                guard n > 0 else { continue }
+                f[i * 3] += omega * (s0 / n - f[i * 3])
+                f[i * 3 + 1] += omega * (s1 / n - f[i * 3 + 1])
+                f[i * 3 + 2] += omega * (s2 / n - f[i * 3 + 2])
+            }
+        }
+        var out = src
+        for i in list { for c in 0..<3 { out[i * 4 + c] = UInt8(min(max(f[i * 3 + c].rounded(), 0), 255)) } }
+        return out
+    }
+
+    /// Итераций заливки подложки: область — круг радужки (на 1080p ~ 30 px в поперечнике).
+    static let cleanIterations = 60
 }
 
 /// Бикубическая выборка Catmull — Rom по копии области; координаты — в пикселях кадра (центр пикселя = +0,5).

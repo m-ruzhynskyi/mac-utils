@@ -52,6 +52,15 @@ final class GazeFrameSink: @unchecked Sendable {
 
     private var recorderDone: ((URL?) -> Void)?
 
+    /// Выключение посреди записи: дописать то, что есть. Вызывается после остановки камеры.
+    func finishRecording() {
+        let (rec, done) = lock.withLock { () -> (GazeRecorder?, ((URL?) -> Void)?) in
+            defer { recorder = nil; recorderDone = nil; pendingRecording = nil }
+            return (recorder, recorderDone)
+        }
+        if let rec { rec.finish { url in done?(url) } } else { done?(nil) }
+    }
+
     func measure(_ g: Vec2?) {
         lock.withLock { if let step = collecting { samples.append((step, g)) } }
     }

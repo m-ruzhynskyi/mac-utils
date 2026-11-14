@@ -37,6 +37,8 @@ final class FaceTracker {
     private let faceMesh: FaceMeshModel?
     /// Веки из Face Landmarker (выключение — только для сравнения в отладке).
     var useFaceMesh = true
+    /// Уточнять центр радужки по изображению (`IrisRefiner`). Выключается только для сравнения на записях.
+    var refineIris = true
     private var frameIndex = 0
     private var lastRect: VNFaceObservation?
 
@@ -96,6 +98,10 @@ final class FaceTracker {
             } else {
                 faceMesh.reset()
             }
+        }
+        // Центр радужки — по изображению (модель на сильном взгляде в сторону ошибается к середине глаза).
+        if refineIris {
+            for k in shapes.indices { if let sh = shapes[k] { shapes[k] = IrisRefiner.refine(sh, frame: sh.frame(axis: axis), image: luma) } }
         }
         let eyes = frames.indices.map { k -> EyeInput in
             // Радужка: из модели, иначе — поиск по градиентам (если модели нет).

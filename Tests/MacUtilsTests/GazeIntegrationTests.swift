@@ -16,7 +16,9 @@ private final class FakeSyphonClient {
         var ctx = CFMessagePortContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
         port = CFMessagePortCreateLocal(nil, uuid as CFString, { _, msgid, data, info in
             let me = Unmanaged<FakeSyphonClient>.fromOpaque(info!).takeUnretainedValue()
-            me.lock.withLock { me.messages.append((msgid, data as Data?)) }
+            // Копия байтов: CF отдаёт CFData поверх буфера mach-сообщения, после колбэка он освобождается.
+            let copy = data.map { Data(bytes: CFDataGetBytePtr($0), count: CFDataGetLength($0)) }
+            me.lock.withLock { me.messages.append((msgid, copy)) }
             return nil
         }, &ctx, nil)
         CFMessagePortSetDispatchQueue(port!, queue)
@@ -60,7 +62,7 @@ final class GazeSyphonLoopbackTests: XCTestCase {
         server.publish(buffer)
 
         let idData = try XCTUnwrap(client.wait(for: .updateSurfaceID), "сервер прислал номер поверхности")
-        let id = try XCTUnwrap(SyphonProtocol.decodeSurfaceID(idData))
+        let id = try XCTUnwrap(SyphonProtocol.decodeSurfaceID(idData), "номер поверхности не разобрался: \(idData.map { $0.count } ?? -1) байт")
         XCTAssertNotNil(client.wait(for: .newFrame), "и «новый кадр»")
         let surface = try XCTUnwrap(IOSurfaceLookup(id), "поверхность глобальная — открывается по номеру, как в OBS")
         XCTAssertEqual(IOSurfaceGetPixelFormat(surface), kCVPixelFormatType_32BGRA, "формат задан явно (иначе OBS Metal видит 0×0)")
@@ -93,7 +95,7 @@ final class GazePipelineClipTests: XCTestCase {
         // Разбор записи: MU_GAZE_DUMP=<папка> — видео «после» и строка на кадр (что применено и почему ослаблено).
         let dump = env["MU_GAZE_DUMP"].map { URL(fileURLWithPath: $0, isDirectory: true) }
         var writer: ClipWriter?
-        var csv = "frame,t,face,weight,strength,open,side,irisSide,px_x,px_up,state,xL,xR\n"
+        var csv = "frame,t,face,weight,strength,open,side,irisSide,px_x,px_up,state,xL,xR,vis_x,vis_up\n"
         var faces: [FaceInput?] = []
         if dump != nil { pipeline.onFace = { faces.append($0) } }
         var outputs = 0
@@ -115,9 +117,9 @@ final class GazePipelineClipTests: XCTestCase {
             frames += 1
             let s = pipeline.snapshot
             let a = s.applied
-            csv += String(format: "%d,%.3f,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%d,%.3f,%.3f\n", frames - 1, Double(frames - 1) / 30, s.faceFound ? 1 : 0,
+            csv += String(format: "%d,%.3f,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%d,%.3f,%.3f,%.2f,%.2f\n", frames - 1, Double(frames - 1) / 30, s.faceFound ? 1 : 0,
                           s.weight, a.strength, a.openFactor, a.sideFactor, a.irisSide, a.pixels.x, a.pixels.y, s.state.rawValue,
-                          a.eyeX.first ?? .nan, a.eyeX.dropFirst().first ?? .nan)
+                          a.eyeX.first ?? .nan, a.eyeX.dropFirst().first ?? .nan, a.visiblePixels.x, a.visiblePixels.y)
             if s.faceFound { found += 1 }
             if s.weight > 0.5 { active += 1 }
         }
