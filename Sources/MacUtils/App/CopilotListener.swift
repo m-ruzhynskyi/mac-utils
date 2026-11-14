@@ -12,6 +12,7 @@ import MUCopilot
 @MainActor
 final class LiveCopilotListener: NSObject, CopilotListening {
     var onFailure: (@MainActor (String) -> Void)?
+    var onActivity: (@MainActor () -> Void)?
 
     private var stream: SCStream?
     private var microphone: EchoFreeMicrophone?
@@ -26,12 +27,15 @@ final class LiveCopilotListener: NSObject, CopilotListening {
         generation += 1
         let mine = generation
         let locale = Locale(identifier: CopilotLocale.identifier(for: language))
-        let system = StreamingTranscriber(locale: locale, reactToPauses: reactToPauses) { text in
-            Task { @MainActor in onUtterance(Utterance(.other, text)) }
+        let system = StreamingTranscriber(locale: locale, reactToPauses: reactToPauses) { text, span in
+            Task { @MainActor in onUtterance(Utterance(.other, text, spoke: span)) }
         }
-        let me = StreamingTranscriber(locale: locale, reactToPauses: reactToPauses) { text in
-            Task { @MainActor in onUtterance(Utterance(.me, text)) }
+        let me = StreamingTranscriber(locale: locale, reactToPauses: reactToPauses) { text, span in
+            Task { @MainActor in onUtterance(Utterance(.me, text, spoke: span)) }
         }
+        let activity: @Sendable () -> Void = { [weak self] in Task { @MainActor in self?.onActivity?() } }
+        system.onActivity = activity
+        me.onActivity = activity
         self.system = system
         self.mine = me
         // Всё долгое (модель, поток звука) — вне главного потока; ошибки приходят в `onFailure`.
@@ -146,7 +150,9 @@ private final class SystemAudioTap: NSObject, SCStreamOutput, SCStreamDelegate, 
 /// Для языков, которых нет у SpeechTranscriber (русский, украинский), — DictationTranscriber, как в записи встреч.
 final class StreamingTranscriber: @unchecked Sendable {
     private let locale: Locale
-    private let onText: @Sendable (String) -> Void
+    private let onText: @Sendable (String, SpeechSpan?) -> Void
+    /// Промежуточный текст изменился: кто-то говорит.
+    var onActivity: (@Sendable () -> Void)?
     private let lock = NSLock()
     /// `AsyncStream<AnalyzerInput>.Continuation` (тип доступен с macOS 26, поэтому хранится как `Any`).
     private var typed: Any?
@@ -161,7 +167,7 @@ final class StreamingTranscriber: @unchecked Sendable {
     private var settler = VolatileSettler()
     private var ticker: Task<Void, Never>?
 
-    init(locale: Locale, reactToPauses: Bool, onText: @escaping @Sendable (String) -> Void) {
+    init(locale: Locale, reactToPauses: Bool, onText: @escaping @Sendable (String, SpeechSpan?) -> Void) {
         self.locale = locale
         self.reactToPauses = reactToPauses
         self.onText = onText
@@ -306,19 +312,21 @@ final class StreamingTranscriber: @unchecked Sendable {
     /// `date` — момент прихода текста; в реплее аудиофайлов время виртуальное.
     func receive(_ text: String, isFinal: Bool, at date: Date = Date()) {
         var out: String?
+        var span: SpeechSpan?
         if !reactToPauses {
             if isFinal { out = text }
         } else {
             lock.lock()
-            if isFinal { out = settler.final(text) } else { settler.volatile(text, at: date) }
+            if isFinal { out = settler.final(text); span = settler.lastSpan } else { settler.volatile(text, at: date) }
             lock.unlock()
+            if !isFinal { onActivity?() }
         }
-        if let t = out?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { onText(t) }
+        if let t = out?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { onText(t, span) }
     }
 
     func tick(at date: Date = Date()) {
-        lock.lock(); let out = settler.tick(at: date); lock.unlock()
-        if let out, !out.isEmpty { onText(out) }
+        lock.lock(); let out = settler.tick(at: date); let span = settler.lastSpan; lock.unlock()
+        if let out, !out.isEmpty { onText(out, span) }
     }
 
     private static func texts<S: AsyncSequence & Sendable>(_ source: S) -> AsyncThrowingStream<(String, Bool), Error> where S.Element == (String, Bool) {

@@ -35,7 +35,8 @@ package enum ScreenChoice {
 
 /// Склейка кусков одной реплики: расшифровка отдаёт куски по паузам, а вопрос может быть разбит надвое.
 package enum UtteranceMerge {
-    package static let gap: TimeInterval = 1.5
+    /// Пауза в речи (не во времени прихода), внутри которой следующий кусок — продолжение.
+    package static let gap: TimeInterval = 2.0
 
     static func endsSentence(_ text: String) -> Bool {
         guard let last = text.trimmingCharacters(in: .whitespacesAndNewlines).last else { return true }
@@ -43,8 +44,10 @@ package enum UtteranceMerge {
     }
 
     /// Продолжение ли `new` предыдущей реплики `last` того же говорящего.
-    package static func continues(_ last: Utterance, with new: Utterance) -> Bool {
-        last.speaker == new.speaker && !endsSentence(last.text) && new.at.timeIntervalSince(last.at) <= gap
+    /// `spokeUntil` — когда в последний раз звучал кто-то ещё (ваша реплика посреди вопроса): пауза считается от неё.
+    package static func continues(_ last: Utterance, with new: Utterance, spokeUntil: Date? = nil) -> Bool {
+        let silenceFrom = max(last.ended, spokeUntil ?? last.ended)
+        return last.speaker == new.speaker && !endsSentence(last.text) && new.started.timeIntervalSince(silenceFrom) <= gap
     }
 }
 

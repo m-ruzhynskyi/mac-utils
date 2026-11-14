@@ -5,24 +5,38 @@ package enum CopilotSpeaker: String, Equatable {
     case other, me
 }
 
+/// Когда фраза звучала (по расшифровке), а не когда пришла в подсказчик: между ними проходят пауза и доразбор.
+package struct SpeechSpan: Equatable, Sendable {
+    package var start: Date
+    package var end: Date
+    package init(start: Date, end: Date) { self.start = start; self.end = end }
+}
+
 package struct Utterance: Equatable, Identifiable {
     package let id: UUID
     package let speaker: CopilotSpeaker
     package let text: String
+    /// Момент прихода в подсказчик.
     package let at: Date
+    /// Когда звучала; если расшифровка не знает — как `at`.
+    package let spoke: SpeechSpan
+    package var started: Date { spoke.start }
+    package var ended: Date { spoke.end }
     /// Та же реплика, продлённая следующим куском: идентификатор сохраняется.
     package init(id: UUID, _ other: Utterance) {
         self.id = id
         speaker = other.speaker
         text = other.text
         at = other.at
+        spoke = other.spoke
     }
 
-    package init(_ speaker: CopilotSpeaker, _ text: String, at: Date = Date()) {
+    package init(_ speaker: CopilotSpeaker, _ text: String, at: Date = Date(), spoke: SpeechSpan? = nil) {
         id = UUID()
         self.speaker = speaker
         self.text = text
         self.at = at
+        self.spoke = spoke ?? SpeechSpan(start: at, end: at)
     }
 }
 

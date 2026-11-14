@@ -29,6 +29,12 @@ package protocol CopilotListening: AnyObject {
     func stop()
     /// Источник сам остановился (обрыв потока, нет доступа, нет языковой модели): подсказчик выключается и показывает причину.
     var onFailure: (@MainActor (String) -> Void)? { get set }
+    /// Кто-то говорит (текст расшифровки изменился): пока говорят, незаконченный вопрос ждёт продолжения.
+    var onActivity: (@MainActor () -> Void)? { get set }
+}
+
+extension CopilotListening {
+    package var onActivity: (@MainActor () -> Void)? { get { nil } set {} }
 }
 
 /// Измеряет задержку «конец вопроса → первая строка ответа».
@@ -83,6 +89,10 @@ package final class CopilotSession: ObservableObject {
     private var lifecycle: Task<Void, Never>?
     private var meter = LatencyMeter()
     private var answeredQuestionID: UUID?
+    /// Вопрос без «?» и законченной мысли ждёт вторую паузу: если за это время пришло продолжение, уйдёт один запрос с полным вопросом.
+    package static let holdSeconds: TimeInterval = 1.5
+    private var hold: (id: UUID, deadline: Date)?
+    private var holdTimer: Task<Void, Never>?
 
     package init(ai: CopilotAIClient, listener: CopilotListening, settings: @escaping () -> CopilotSettings = { CopilotPrefs.load() },
                  now: @escaping () -> Date = Date.init, log: @escaping (String) -> Void = { Log.ai.info("\($0, privacy: .public)") },
@@ -109,6 +119,7 @@ package final class CopilotSession: ObservableObject {
                 self.stop()
                 self.error = message
             }
+            listener.onActivity = { [weak self] in self?.speechActivity() }
             try listener.start(language: settings().meetingLanguage, reactToPauses: settings().reactToPauses) { [weak self] in self?.feed($0) }
             phase = .listening
             error = nil
@@ -130,6 +141,9 @@ package final class CopilotSession: ObservableObject {
         guard isOn || task != nil else { return }
         task?.cancel()
         task = nil
+        hold = nil
+        holdTimer?.cancel()
+        holdTimer = nil
         listener.stop()
         // Незаконченный прогрев отменяется, остановка идёт после него.
         let ai = self.ai, previous = lifecycle
@@ -154,19 +168,72 @@ package final class CopilotSession: ObservableObject {
         guard isOn else { return }
         let text = utterance.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        let incoming = Utterance(utterance.speaker, text, at: utterance.at)
-        if let last = transcript.last, UtteranceMerge.continues(last, with: incoming) {
-            // Склеиваем куски одной реплики; если на прежний вопрос уже ответили, это новый вопрос.
-            let merged = Utterance(last.speaker, last.text + " " + text, at: incoming.at)
-            transcript[transcript.count - 1] = last.id == answeredQuestionID ? merged : Utterance(id: last.id, merged)
+        let incoming = Utterance(utterance.speaker, text, at: utterance.at, spoke: utterance.spoke)
+        merge(incoming)
+        let cutoff = now().addingTimeInterval(-CopilotPrompt.contextSeconds * 2)
+        transcript.removeAll { $0.at < cutoff }
+        guard settings().autoAnswer else { return }
+        if utterance.speaker == .me { speechActivity(); return }
+        guard let q = QuestionDetector.pendingQuestion(in: transcript), q.id != answeredQuestionID else { return }
+        if QuestionDetector.isIncomplete(q.text) {
+            // Обрывок: ждём продолжение. Если пришло и вопрос дополнился, а ответ на обрывок уже шёл, `ask` его заменит.
+            hold = (q.id, now().addingTimeInterval(Self.holdSeconds))
+            startHoldTimer()
+            return
+        }
+        hold = nil
+        ask(.lastQuestion, questionUtterance: q)
+    }
+
+    /// Склеивает куски одной реплики (по времени речи, а не прихода). Ваша реплика посреди вопроса не мешает:
+    /// вопрос собеседника дополняется и встаёт после неё, чтобы «вы уже ответили» не отменило его.
+    private func merge(_ incoming: Utterance) {
+        var index = transcript.count - 1
+        var aside: Date?
+        if incoming.speaker == .other {
+            while index >= 0, transcript[index].speaker == .me { aside = max(aside ?? .distantPast, transcript[index].ended); index -= 1 }
+        }
+        // Вопрос, на который уже ответили и который выглядит законченным, не дополняется: следующая фраза — новая.
+        let extendable = index >= 0 && (transcript[index].id != answeredQuestionID || QuestionDetector.isIncomplete(transcript[index].text))
+            && (aside == nil || QuestionDetector.isIncomplete(transcript[index].text))
+        if extendable, UtteranceMerge.continues(transcript[index], with: incoming, spokeUntil: aside) {
+            let last = transcript[index]
+            let text = last.text + " " + incoming.text
+            let span = SpeechSpan(start: last.started, end: max(incoming.ended, last.ended))
+            let merged = Utterance(last.speaker, text, at: incoming.at, spoke: span)
+            // Если на прежний вопрос уже ответили, дополненный — новый вопрос (новый номер).
+            let result = last.id == answeredQuestionID ? merged : Utterance(id: last.id, merged)
+            transcript.remove(at: index)
+            transcript.append(result)
         } else {
             transcript.append(incoming)
         }
-        let cutoff = now().addingTimeInterval(-CopilotPrompt.contextSeconds * 2)
-        transcript.removeAll { $0.at < cutoff }
-        guard settings().autoAnswer, utterance.speaker == .other,
-              let q = QuestionDetector.pendingQuestion(in: transcript), q.id != answeredQuestionID else { return }
+    }
+
+    /// Пока кто-то говорит, ожидание продолжения вопроса продлевается.
+    package func speechActivity() {
+        guard hold != nil else { return }
+        hold?.deadline = now().addingTimeInterval(Self.holdSeconds)
+    }
+
+    /// Вторая пауза прошла, продолжения нет: уходит то, что есть. Зовёт таймер; в проверках — время вручную.
+    package func poll() {
+        guard isOn, let h = hold, now() >= h.deadline else { return }
+        hold = nil
+        guard settings().autoAnswer, let q = QuestionDetector.pendingQuestion(in: transcript), q.id == h.id, q.id != answeredQuestionID else { return }
         ask(.lastQuestion, questionUtterance: q)
+    }
+
+    private func startHoldTimer() {
+        guard holdTimer == nil else { return }
+        holdTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard let self, !Task.isCancelled else { return }
+                self.poll()
+                if self.hold == nil { self.holdTimer = nil; return }
+            }
+        }
     }
 
     // MARK: Запросы
