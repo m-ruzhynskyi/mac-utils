@@ -175,6 +175,23 @@ final class StreamingTranscriber: @unchecked Sendable {
         throw CopilotError.notConnected("Расшифровка на устройстве (нужна macOS 26)")
     }
 
+    /// Модель расшифровки для языка уже установлена (проверка без скачивания: реплей не меняет систему).
+    static func modelInstalled(for locale: Locale) async -> Bool {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            if let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) {
+                let m = SpeechTranscriber(locale: supported, transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
+                return await AssetInventory.status(forModules: [m]) == .installed
+            }
+            if let supported = await DictationTranscriber.supportedLocale(equivalentTo: locale) {
+                let m = DictationTranscriber(locale: supported, contentHints: [], transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
+                return await AssetInventory.status(forModules: [m]) == .installed
+            }
+        }
+        #endif
+        return false
+    }
+
     func append(_ buffer: AVAudioPCMBuffer) {
         #if compiler(>=6.2)
         if #available(macOS 26.0, *) { appendModern(buffer) }
@@ -286,20 +303,21 @@ final class StreamingTranscriber: @unchecked Sendable {
     }
 
     /// Текст от расшифровки: без реакции на паузу — только финалы; с ней — новые слова после паузы ≥ 0,7 с и остаток финала.
-    private func receive(_ text: String, isFinal: Bool) {
+    /// `date` — момент прихода текста; в реплее аудиофайлов время виртуальное.
+    func receive(_ text: String, isFinal: Bool, at date: Date = Date()) {
         var out: String?
         if !reactToPauses {
             if isFinal { out = text }
         } else {
             lock.lock()
-            if isFinal { out = settler.final(text) } else { settler.volatile(text, at: Date()) }
+            if isFinal { out = settler.final(text) } else { settler.volatile(text, at: date) }
             lock.unlock()
         }
         if let t = out?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { onText(t) }
     }
 
-    private func tick() {
-        lock.lock(); let out = settler.tick(at: Date()); lock.unlock()
+    func tick(at date: Date = Date()) {
+        lock.lock(); let out = settler.tick(at: date); lock.unlock()
         if let out, !out.isEmpty { onText(out) }
     }
 
