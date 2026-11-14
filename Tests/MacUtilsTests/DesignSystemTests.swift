@@ -33,7 +33,7 @@ final class DesignSystemTests: XCTestCase {
         XCTAssertEqual(SettingsGroup.general.sections.map(\.title),
                        ["Общие", "Горячие клавиши", "Исключённые программы", "Панель в строке меню"])
         XCTAssertEqual(SettingsGroup.capture.sections.map(\.title),
-                       ["Снимки экрана", "Мои снимки", "Рисование на экране", "QR-коды", "Записи встреч"])
+                       ["Снимки экрана", "Мои снимки", "Рисование на экране", "QR-коды", "Записи встреч", "Подсказчик на встрече"])
         XCTAssertEqual(SettingsGroup.windowsInput.sections.map(\.title),
                        ["Переключатель приложений", "Окна", "Громкость", "Раскладка", "Плавная прокрутка", "Вырезать и вставить", "Клавиши Windows", "Ввод текста"])
         XCTAssertEqual(SettingsGroup.filesSystem.sections.map(\.title),

@@ -41,14 +41,13 @@ final class CopilotGlue {
 
     /// Сочетания, которые нужны только при включённом подсказчике: зарегистрированные всегда, они глотали бы ввод
     /// (⌥⇧A — «Å», ⌥⇧S — «Í», ⌥⇧P — «∏») и тогда, когда подсказчик выключен.
-    static let whileOnActions: [(HotKeyAction, AppAction)] = [(.copilotAnswer, .copilotAnswer), (.copilotScreen, .copilotScreen),
-                                                               (.copilotPanel, .copilotPanel)]
+    static let whileOnActions: [HotKeyAction] = [.copilotAnswer, .copilotScreen, .copilotPanel]
 
     /// ⌥⇧M — всегда; остальные — пока подсказчик включён. Вызывается при запуске и при смене сочетаний.
     func registerHotKeys() {
         let combo = HotKeyRegistry.combo(for: .copilot)
         HotKeyCenter.shared.register(id: HotKeyAction.copilot.hotKeyID, keyCode: combo.keyCode, modifiers: combo.modifiers) {
-            AppAction.copilotToggle.run()
+            AppAction(hotKey: .copilot).run()
         }
         syncWhileOnHotKeys()
         watchPhase()
@@ -56,13 +55,23 @@ final class CopilotGlue {
 
     private func syncWhileOnHotKeys() {
         let center = HotKeyCenter.shared
-        for (action, appAction) in Self.whileOnActions {
+        for action in Self.whileOnActions {
             if session.isOn {
                 let combo = HotKeyRegistry.combo(for: action)
-                center.register(id: action.hotKeyID, keyCode: combo.keyCode, modifiers: combo.modifiers) { appAction.run() }
+                center.register(id: action.hotKeyID, keyCode: combo.keyCode, modifiers: combo.modifiers) { Self.run(action) }
             } else {
                 center.unregister(id: action.hotKeyID)
             }
+        }
+    }
+
+    /// То же действие, что у ссылки и «Команд» (`AppAction(hotKey:)`), — проверяет ShortcutsTests.
+    private static func run(_ action: HotKeyAction) {
+        switch action {
+        case .copilotAnswer: AppAction(hotKey: .copilotAnswer).run()
+        case .copilotScreen: AppAction(hotKey: .copilotScreen).run()
+        case .copilotPanel: AppAction(hotKey: .copilotPanel).run()
+        default: AppAction(hotKey: .copilot).run()
         }
     }
 
