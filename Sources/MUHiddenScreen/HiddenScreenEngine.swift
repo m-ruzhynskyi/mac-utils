@@ -112,8 +112,14 @@ public final class HiddenScreenEngine {
     public private(set) var mirrorFocused = false
     /// Перехват клавиатуры при фокусе у зеркала.
     private var keyTap: EventTap?
-    /// Свои активации — чтобы не принять их уведомления за переключение пользователя.
+    /// Свои возвраты активности программе пользователя — чтобы не принять их уведомления за переключение пользователя.
     private var echo = ActivationEcho()
+    /// Возвраты активности, когда ИИ снова стал активным сам.
+    private var reclaims = ReclaimLimiter()
+    private var reclaimPausedLogged = false
+    /// Протягивание: событий кнопки, из них с переадресованной точкой (для журнала в конце передачи).
+    private var dragEvents = 0
+    private var dragRewritten = 0
     /// Правая кнопка над зеркалом перехвачена (её отпускание тоже поглощаем).
     private var rightIntercepted = false
     /// В журнале уже написано «экран заблокирован».
@@ -192,7 +198,7 @@ public final class HiddenScreenEngine {
             Log.hiddenScreen.error("раскладка: \(String(describing: error), privacy: .public)")
         }
         phase = .on
-        Log.hiddenScreen.info("enable: дисплей \(id) \(String(describing: self.hidden), privacy: .public)")
+        Log.hiddenScreen.info("enable: дисплей \(id) \(String(describing: self.hidden), privacy: .public); активная программа — по \(Activator.readsWindowServer ? "WindowServer" : "NSWorkspace", privacy: .public); наведение \(self.options.hover ? "да" : "нет", privacy: .public)")
         attachObservers()
         let center = NSWorkspace.shared.notificationCenter
         workspaceTokens.append(center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
@@ -240,17 +246,47 @@ public final class HiddenScreenEngine {
     /// Активной стала другая программа. ИИ не нашим шагом (Dock, ⌘Tab, сама) — вернуть программе пользователя;
     /// пользователь сам перешёл в другую программу — запомнить её, клавиши больше не перехватывать.
     private func applicationActivated(_ app: NSRunningApplication?) {
-        let ours = runningSteps || !steps.isEmpty
-            || app.map { echo.consume($0.processIdentifier, at: ProcessInfo.processInfo.systemUptime) } == true
-        if !ours, !isTarget(app), app?.processIdentifier != getpid() {
+        let target = isTarget(app)
+        // Эхо — только наших возвратов программе пользователя; активацию ИИ им не гасим.
+        let isEcho = !target && app.map { echo.consume($0.processIdentifier, at: ProcessInfo.processInfo.systemUptime) } == true
+        switch FocusRules.reaction(isTarget: target, isSelf: app?.processIdentifier == getpid(), isEcho: isEcho,
+                                   stepsRunning: runningSteps || !steps.isEmpty, mirrorShown: mirrorShown, handoff: session.handoff) {
+        case .userSwitched:
             noteActivated(app)
             setMirrorFocused(false, reason: "активна \(app?.bundleIdentifier ?? "?")")
+        case .reclaim:
+            checkFocus(reason: "уведомление")
+        case .ignore:
+            break
+        }
+    }
+
+    /// ИИ активен (по WindowServer), а мышь и шаги свободны — вернуть активность программе пользователя.
+    /// Вызывается из уведомления, повторных проверок после возврата и опроса `sweep`.
+    private func checkFocus(reason: String) {
+        guard phase == .on, mirrorShown, session.handoff == nil, !runningSteps, steps.isEmpty,
+              let front = Activator.frontPID(), runningTargets.contains(where: { $0.processIdentifier == front }) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard reclaims.allow(at: now) else {
+            if !reclaimPausedLogged {
+                reclaimPausedLogged = true
+                Log.hiddenScreen.error("ИИ (pid \(front)) снова и снова становится активным — пауза в возвратах на \(Int(ReclaimLimiter.window)) с")
+            }
             return
         }
-        guard FocusRules.shouldReclaim(activatedIsTarget: isTarget(app), mirrorShown: mirrorShown,
-                                       handoff: session.handoff, stepsRunning: ours) else { return }
-        Log.hiddenScreen.info("активной стала \(app?.bundleIdentifier ?? "?", privacy: .public) — возвращаю программе пользователя")
+        reclaimPausedLogged = false
+        let bundle = NSRunningApplication(processIdentifier: front)?.bundleIdentifier ?? "pid \(front)"
+        Log.hiddenScreen.info("активной стала \(bundle, privacy: .public) (\(reason, privacy: .public)) — возвращаю программе пользователя")
         run([.returnFocus])
+    }
+
+    /// После каждого возврата: не активировался ли ИИ сам чуть позже (нажатие, дошедшее до него с опозданием).
+    private func scheduleFocusRechecks() {
+        for delay in FocusRules.recheckDelays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                MainActor.assumeIsolated { self?.checkFocus(reason: "проверка через \(Int(delay * 1000)) мс") }
+            }
+        }
     }
 
     /// Активность — программе пользователя (не ИИ, не Mac Utils): тогда строка меню основного экрана показывает её.
@@ -442,6 +478,7 @@ public final class HiddenScreenEngine {
         }
         refreshStatuses(windows: windows)
         rescueMirrorIfHidden()
+        checkFocus(reason: "опрос")
     }
 
     /// Статусы программ для интерфейса (и когда скрытый экран выключен: запущена ли, окон — 0).
@@ -594,6 +631,17 @@ public final class HiddenScreenEngine {
         }
         guard session.handoff == nil else { return }
         switch input {
+        case let .moved(point):
+            hover(at: point, mapping: mapping, windowNumber: mirrorTarget.windowID, pid: mirrorTarget.pid)
+            return
+        case .exited:
+            guard options.hover, !runningSteps, steps.isEmpty else { return }
+            postHover(session.hoverExit(mapping: mapping, windowNumber: mirrorTarget.windowID), pid: mirrorTarget.pid)
+            return
+        default:
+            break
+        }
+        switch input {
         case let .mouse(.down, button, point, clicks, flags):
             run(session.down(button, at: point, clicks: clicks, flags: flags, mapping: mapping,
                              windowNumber: mirrorTarget.windowID, cursor: pointer.location))
@@ -601,10 +649,31 @@ public final class HiddenScreenEngine {
             run(session.dragged(to: point, mapping: mapping))
         case .mouse(.up, .left, _, _, _):
             run(session.up(mapping: mapping, windowNumber: mirrorTarget.windowID))
-        case .mouse(.up, .right, _, _, _), .moved, .key:
+        case .mouse(.up, .right, _, _, _), .moved, .exited, .key:
             break
         case let .scroll(dx, dy, precise, point):
             run(session.scroll(dx: dx, dy: dy, precise: precise, at: point, mapping: mapping, windowNumber: mirrorTarget.windowID))
+        }
+    }
+
+    /// Наведение — сразу (`postToPid`), мимо очереди шагов; пока шаги идут (щелчок, ⌘-сочетание), не шлём.
+    private func hover(at point: CGPoint, mapping: MirrorMapping, windowNumber: CGWindowID, pid: pid_t) {
+        guard options.hover, !runningSteps, steps.isEmpty, !pressIntercepted else { return }
+        postHover(session.hover(at: point, mapping: mapping, windowNumber: windowNumber), pid: pid)
+    }
+
+    private var hoverLogged = false
+
+    private func postHover(_ hoverSteps: [PointerStep], pid: pid_t) {
+        for case let .postToPid(event) in hoverSteps {
+            let before = pointer.location
+            keys.post([event], to: pid)
+            // Первое наведение — в журнал, с проверкой, что курсор пользователя не сдвинулся.
+            if !hoverLogged {
+                hoverLogged = true
+                let after = pointer.location
+                Log.hiddenScreen.info("наведение: первое движение в окно (\(Int(event.location?.x ?? 0)), \(Int(event.location?.y ?? 0))), pid \(pid); курсор \(before == after ? "на месте" : "СДВИНУЛСЯ \(before) → \(after)", privacy: .public)")
+            }
         }
     }
 
@@ -660,11 +729,11 @@ public final class HiddenScreenEngine {
         case .activateTarget:
             guard let pid else { return }
             let started = ProcessInfo.processInfo.systemUptime
-            echo.note(pid, at: ProcessInfo.processInfo.systemUptime)
             let path = await Activator.activate(pid: pid, mode: options.activationMode, timeout: 0.3)
             Log.hiddenScreen.debug("активация ИИ: \(path, privacy: .public), \(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) мс")
         case .returnFocus:
             await returnFocus()
+            scheduleFocusRechecks()
         case let .wait(seconds):
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
         case let .warp(point):
@@ -686,6 +755,8 @@ public final class HiddenScreenEngine {
 
     private func beginHandoff(_ kind: HandoffKind) {
         watch = HandoffWatch(kind: kind, at: ProcessInfo.processInfo.systemUptime)
+        dragEvents = 0
+        dragRewritten = 0
         Log.hiddenScreen.info("передача курсора: \(String(describing: kind), privacy: .public)")
         if kind == .drag {
             dragLive = true
@@ -740,9 +811,11 @@ public final class HiddenScreenEngine {
         if watch.kind == .menu, handoffTick % 6 == 0, let pid = mirrorTarget?.pid {
             watch.noteMenu(visible: HiddenWindowRules.hasMenu(windows: mover.windows(pids: [pid]), pid: pid, hidden: hidden), at: now)
         }
+        let ending = watch.takeEnd(at: now)
         self.watch = watch
-        if watch.shouldEnd(at: now) {
-            Log.hiddenScreen.info("передача закончена через \(Int((now - watch.started) * 1000)) мс")
+        if ending {
+            let drag = watch.kind == .drag ? "; событий кнопки \(dragEvents), переадресовано в окно \(dragRewritten)" : ""
+            Log.hiddenScreen.info("передача закончена через \(Int((now - watch.started) * 1000)) мс\(drag, privacy: .public)")
             run(session.endHandoff(cursorNow: cursor, mapping: mapping, mirrorRect: mirrorRect))
         }
     }
@@ -835,7 +908,11 @@ public final class HiddenScreenEngine {
             return true
         case .leftMouseDragged:
             guard pressIntercepted else { return false }
-            if session.handoff == .drag { return !dragLive }
+            if session.handoff == .drag {
+                guard dragLive else { return true }
+                redirectDrag(event, mapping: mapping, mirrorRect: rect)
+                return false
+            }
             let steps = session.dragged(to: view, mapping: mapping)
             if !steps.isEmpty {
                 Log.hiddenScreen.info("перехват: протягивание → программе")
@@ -847,6 +924,7 @@ public final class HiddenScreenEngine {
             pressIntercepted = false
             if session.handoff == .drag {
                 if dragLive {
+                    redirectDrag(event, mapping: mapping, mirrorRect: rect)
                     watch?.noteButtonUp()
                     return false
                 }
@@ -858,6 +936,16 @@ public final class HiddenScreenEngine {
         default:
             return false
         }
+    }
+
+    /// Протягивание у программы: событие кнопки не со скрытого дисплея (курсор увели на основной экран или его ставит
+    /// инструмент проверки — 768c91b: точки над зеркалом, выделения не было) — точку переводим в окно программы.
+    /// Событие то же (session tap), программа получает его как обычное протягивание.
+    private func redirectDrag(_ event: CGEvent, mapping: MirrorMapping, mirrorRect: CGRect) {
+        dragEvents += 1
+        guard let point = PointerSession.dragLocation(event.location, hidden: hidden, mirrorRect: mirrorRect, mapping: mapping) else { return }
+        event.location = point
+        dragRewritten += 1
     }
 
     // MARK: Вставка и перетаскивание

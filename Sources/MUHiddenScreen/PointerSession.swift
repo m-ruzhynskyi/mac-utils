@@ -90,6 +90,8 @@ public struct PointerSession: Sendable {
     /// Точек на «строку» колёсика без точной прокрутки.
     public var lineHeight: Double = 10
     public private(set) var state: State = .idle
+    /// Куда последним ушло наведение (точка на скрытом дисплее): одинаковые движения не повторяются.
+    public private(set) var lastHover: CGPoint?
 
     public init(clickMode: ClickMode = .warp, scrollMode: ScrollMode = .handoff) {
         self.clickMode = clickMode
@@ -145,7 +147,10 @@ public struct PointerSession: Sendable {
         case .pid:
             return [.postToPid(down), .postToPid(up)]
         case .warp:
-            return [.hideCursor, .activateTarget, .warp(target), .postHID(down), .postHID(up), .warp(cursor), .showCursor, .returnFocus]
+            // Пауза перед возвратом: программа должна разобрать нажатие, пока она активна. Иначе (768c91b, 14.11) нажатие
+            // доходило до уже неактивного Claude, и он через 0,1–1 с активировал себя сам.
+            return [.hideCursor, .activateTarget, .warp(target), .postHID(down), .postHID(up), .warp(cursor), .showCursor,
+                    .wait(Self.clickSettle), .returnFocus]
         }
     }
 
@@ -182,8 +187,42 @@ public struct PointerSession: Sendable {
         }
     }
 
-    /// Сколько ждать после ⌘-сочетания, прежде чем вернуть активность Mac Utils.
+    /// Сколько ждать после ⌘-сочетания, прежде чем вернуть активность программе пользователя.
     public static let shortcutSettle: TimeInterval = 0.06
+    /// Сколько ждать после щелчка (курсор уже на зеркале), прежде чем вернуть активность программе пользователя.
+    public static let clickSettle: TimeInterval = 0.05
+
+    /// Наведение: движение над зеркалом → `mouseMoved` в окно программы (`postToPid`, без активации и без переноса курсора),
+    /// чтобы появлялись элементы «при наведении» (крестик у вложения). Только когда мышь ничем не занята.
+    /// Точка вне картинки окна (поля зеркала) — как уход мыши.
+    public mutating func hover(at point: CGPoint, mapping: MirrorMapping, windowNumber: CGWindowID) -> [PointerStep] {
+        guard state == .idle else { return [] }
+        guard let target = mapping.toTarget(point) else { return hoverExit(mapping: mapping, windowNumber: windowNumber) }
+        if let last = lastHover, abs(last.x - target.x) < 1, abs(last.y - target.y) < 1 { return [] }
+        lastHover = target
+        return [.postToPid(SyntheticEvent(kind: .moved, location: target, windowNumber: windowNumber))]
+    }
+
+    /// Мышь ушла с зеркала: одно движение за край окна — программа снимает подсветку «при наведении».
+    public mutating func hoverExit(mapping: MirrorMapping, windowNumber: CGWindowID) -> [PointerStep] {
+        guard state == .idle, lastHover != nil else { return [] }
+        lastHover = nil
+        return [.postToPid(SyntheticEvent(kind: .moved, location: Self.outside(mapping.target), windowNumber: windowNumber))]
+    }
+
+    /// Точка чуть левее и выше окна.
+    static func outside(_ target: CGRect) -> CGPoint { CGPoint(x: target.minX - 20, y: target.minY - 20) }
+
+    /// Протягивание отдано программе, а событие пришло не со скрытого дисплея (рука увела курсор на основной экран,
+    /// инструмент проверки шлёт точки над зеркалом): точка над зеркалом → точка в окне, за краем — к краю.
+    /// nil — событие уже на скрытом дисплее, менять нечего.
+    public static func dragLocation(_ location: CGPoint, hidden: CGRect, mirrorRect: CGRect, mapping: MirrorMapping) -> CGPoint? {
+        if hidden.contains(location) { return nil }
+        let content = mapping.contentRect
+        guard content.width > 0 else { return nil }
+        let view = clamp(CGPoint(x: location.x - mirrorRect.minX, y: location.y - mirrorRect.minY), to: content)
+        return mapping.toTarget(view)
+    }
 
     /// Конец передачи: курсор возвращается в ту точку зеркала, что соответствует его месту на скрытом дисплее
     /// (рука пользователя «продолжает» движение), но не за край зеркала.
@@ -202,6 +241,8 @@ public struct PointerSession: Sendable {
     }
 
     public static func returnPoint(_ cursor: CGPoint, mapping: MirrorMapping, mirrorRect: CGRect) -> CGPoint {
+        // Курсор уже над зеркалом (протягивание вели над ним) — оставить где есть.
+        if mirrorRect.contains(cursor) { return cursor }
         let view = clamp(mapping.toView(cursor), to: CGRect(origin: .zero, size: mapping.viewSize))
         return CGPoint(x: mirrorRect.minX + view.x, y: mirrorRect.minY + view.y)
     }
@@ -224,6 +265,8 @@ public struct HandoffWatch: Sendable {
     private(set) var menuSeen = false
     private(set) var menuGoneSince: TimeInterval?
     private(set) var buttonReleased = false
+    /// Конец уже объявлен: таймер кадров успевает сработать ещё раз до шага `endHandoff` (768c91b: «передача закончена» дважды).
+    private(set) var ended = false
 
     /// Пауза в прокрутке (с инерцией), после которой курсор возвращается.
     public static let scrollIdle: TimeInterval = 0.35
@@ -253,6 +296,13 @@ public struct HandoffWatch: Sendable {
         } else if menuSeen, menuGoneSince == nil {
             menuGoneSince = time
         }
+    }
+
+    /// true — ровно один раз, когда передачу пора заканчивать.
+    public mutating func takeEnd(at time: TimeInterval) -> Bool {
+        guard !ended, shouldEnd(at: time) else { return false }
+        ended = true
+        return true
     }
 
     public func shouldEnd(at time: TimeInterval) -> Bool {

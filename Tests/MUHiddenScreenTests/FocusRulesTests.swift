@@ -43,6 +43,46 @@ final class FocusRulesTests: XCTestCase {
         XCTAssertFalse(FocusRules.shouldReclaim(activatedIsTarget: true, mirrorShown: false, handoff: nil, stepsRunning: false))
     }
 
+    // 768c91b (14.11): Claude активировал себя сам через 0,1–1 с после щелчка, уведомление гасилось как эхо нашей активации.
+    func testAISelfActivationIsReclaimedEvenRightAfterOurClick() {
+        XCTAssertEqual(FocusRules.reaction(isTarget: true, isSelf: false, isEcho: false, stepsRunning: false, mirrorShown: true, handoff: nil),
+                       .reclaim)
+        XCTAssertEqual(FocusRules.reaction(isTarget: true, isSelf: false, isEcho: true, stepsRunning: false, mirrorShown: true, handoff: nil),
+                       .reclaim, "эхо для ИИ не в счёт")
+        XCTAssertEqual(FocusRules.reaction(isTarget: true, isSelf: false, isEcho: false, stepsRunning: true, mirrorShown: true, handoff: nil),
+                       .ignore, "наш щелчок ещё идёт")
+        XCTAssertEqual(FocusRules.reaction(isTarget: true, isSelf: false, isEcho: false, stepsRunning: false, mirrorShown: true, handoff: .menu),
+                       .ignore, "меню открыто")
+    }
+
+    func testUserSwitchVersusOurReturn() {
+        XCTAssertEqual(FocusRules.reaction(isTarget: false, isSelf: false, isEcho: false, stepsRunning: false, mirrorShown: true, handoff: nil),
+                       .userSwitched)
+        XCTAssertEqual(FocusRules.reaction(isTarget: false, isSelf: false, isEcho: true, stepsRunning: false, mirrorShown: true, handoff: nil),
+                       .ignore, "наш возврат в Finder — фокус зеркала не снимать")
+        XCTAssertEqual(FocusRules.reaction(isTarget: false, isSelf: true, isEcho: false, stepsRunning: false, mirrorShown: true, handoff: nil),
+                       .ignore)
+        XCTAssertEqual(FocusRules.reaction(isTarget: false, isSelf: false, isEcho: false, stepsRunning: true, mirrorShown: true, handoff: nil),
+                       .ignore)
+    }
+
+    func testRechecksCoverLateSelfActivation() {
+        XCTAssertLessThanOrEqual(FocusRules.recheckDelays.first ?? 1, 0.15, "первая проверка — раньше, чем пользователь начнёт печатать")
+        XCTAssertGreaterThanOrEqual(FocusRules.recheckDelays.last ?? 0, 1.0, "14.11 Claude активировался до 1 с спустя")
+    }
+
+    func testReclaimLimiterBacksOff() {
+        var limiter = ReclaimLimiter()
+        for index in 0..<ReclaimLimiter.maximum { XCTAssertTrue(limiter.allow(at: Double(index) * 0.1)) }
+        XCTAssertFalse(limiter.allow(at: 0.7), "не бороться бесконечно")
+        XCTAssertTrue(limiter.allow(at: 3.05), "окно прошло")
+    }
+
+    func testHoverArgument() {
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug"], storedBundleIDs: nil)?.hover, true)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-hover=off"], storedBundleIDs: nil)?.hover, false)
+    }
+
     func testActivationModeArgument() {
         XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-activate=skylight"], storedBundleIDs: nil)?.activationMode, .skylight)
         XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug"], storedBundleIDs: nil)?.activationMode, .auto)

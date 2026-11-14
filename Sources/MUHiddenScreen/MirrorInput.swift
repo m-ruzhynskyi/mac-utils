@@ -8,6 +8,8 @@ public enum MirrorInput: Equatable, Sendable {
 
     case mouse(Phase, Button, at: CGPoint, clicks: Int, flags: CGEventFlags)
     case moved(at: CGPoint)
+    /// Мышь ушла с зеркала.
+    case exited
     /// Прокрутка в точках (`scrollingDeltaX/Y` при `hasPreciseScrollingDeltas`), иначе в строках.
     case scroll(dx: Double, dy: Double, precise: Bool, at: CGPoint)
     /// `characters` — строка из NSEvent зеркала: Mac Utils активна, поэтому строка посчитана по раскладке пользователя.
@@ -116,6 +118,8 @@ public struct MirrorInputTranslator: Sendable {
             let x = Int32((dx * factor).rounded()), y = Int32((dy * factor).rounded())
             guard x != 0 || y != 0 else { return [] }
             return [SyntheticEvent(kind: .scroll(dx: x, dy: y, pixels: true), location: location, windowNumber: windowNumber)]
+        case .exited:
+            return []
         case let .key(code, down, flags, characters):
             guard MirrorKeys.route(code: code, flags: flags) == .forward else { return [] }
             var event = SyntheticEvent(kind: down ? .keyDown : .keyUp, keyCode: code, flags: flags)

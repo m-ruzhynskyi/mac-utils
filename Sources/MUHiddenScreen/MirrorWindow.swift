@@ -112,7 +112,9 @@ public final class MirrorView: NSView, NSDraggingSource {
     override public func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
+        // `.activeAlways`: зеркало не бывает ключевым (активна программа пользователя), а наведение нужно (768c91b, 14.11).
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self))
     }
 
     private func point(_ event: NSEvent) -> CGPoint { convert(event.locationInWindow, from: nil) }
@@ -153,6 +155,7 @@ public final class MirrorView: NSView, NSDraggingSource {
         onInput?(.mouse(.up, .right, at: point(event), clicks: event.clickCount, flags: flags(event)))
     }
     override public func mouseMoved(with event: NSEvent) { onInput?(.moved(at: point(event))) }
+    override public func mouseExited(with event: NSEvent) { onInput?(.exited) }
 
     override public func scrollWheel(with event: NSEvent) {
         let precise = event.hasPreciseScrollingDeltas

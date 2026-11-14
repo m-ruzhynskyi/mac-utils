@@ -65,6 +65,47 @@ extension FocusRules {
     public static func isUserApp(isRegular: Bool, isTarget: Bool, isSelf: Bool, bundleID: String?) -> Bool {
         isRegular && !isTarget && !isSelf && bundleID != "com.apple.loginwindow"
     }
+
+    public enum ActivationReaction: Equatable, Sendable {
+        /// Пользователь сам перешёл в другую программу: запомнить её, клавиши больше не перехватывать.
+        case userSwitched
+        /// ИИ стал активным не нашим шагом — вернуть активность программе пользователя.
+        case reclaim
+        case ignore
+    }
+
+    /// Уведомление «активной стала программа X». `isEcho` — эхо нашего возврата активности программе пользователя.
+    /// Эхо активации самого ИИ в расчёт не берётся: 768c91b (14.11) после щелчка Claude через 0,1–1 с активировал себя
+    /// сам (нажатие дошло до него уже неактивного), и уведомление об этом гасилось как «наше» — Claude оставался активным.
+    /// Наша активация ИИ безвредна и без эха: пока идут шаги, возврата нет, а после них ИИ и так уже не активен.
+    public static func reaction(isTarget: Bool, isSelf: Bool, isEcho: Bool, stepsRunning: Bool,
+                                mirrorShown: Bool, handoff: HandoffKind?) -> ActivationReaction {
+        if isTarget {
+            return shouldReclaim(activatedIsTarget: true, mirrorShown: mirrorShown, handoff: handoff, stepsRunning: stepsRunning)
+                ? .reclaim : .ignore
+        }
+        return isSelf || isEcho || stepsRunning ? .ignore : .userSwitched
+    }
+
+    /// Повторные проверки «не активен ли снова ИИ» после возврата активности (секунды). Дальше — опрос раз в 0,25 с.
+    public static let recheckDelays: [TimeInterval] = [0.15, 0.4, 1.0]
+}
+
+/// Не бороться с программой бесконечно: если ИИ снова и снова становится активным, после `maximum` возвратов за
+/// `window` секунд — пауза до конца окна (и строка в журнал).
+public struct ReclaimLimiter: Sendable {
+    public static let window: TimeInterval = 3
+    public static let maximum = 6
+    private var times: [TimeInterval] = []
+
+    public init() {}
+
+    public mutating func allow(at time: TimeInterval) -> Bool {
+        times = times.filter { time - $0 < Self.window }
+        guard times.count < Self.maximum else { return false }
+        times.append(time)
+        return true
+    }
 }
 
 /// Уведомление «активной стала программа X» приходит асинхронно — иногда уже после того, как наши шаги закончились.

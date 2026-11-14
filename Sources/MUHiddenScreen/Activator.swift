@@ -22,10 +22,44 @@ enum Activator {
         return unsafeBitCast(symbol, to: GetProcess.self)
     }()
 
+    private typealias GetFront = @convention(c) (UnsafeMutableRawPointer) -> Int32
+    private typealias GetPID = @convention(c) (UnsafeRawPointer, UnsafeMutablePointer<pid_t>) -> Int32
+
+    /// `_SLPSGetFrontProcess(psn)` (SkyLight, закрытая; только чтение — как у yabai).
+    private static let getFront: GetFront? = {
+        guard let handle = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY),
+              let symbol = dlsym(handle, "_SLPSGetFrontProcess") else { return nil }
+        return unsafeBitCast(symbol, to: GetFront.self)
+    }()
+
+    /// `GetProcessPID` (HIServices).
+    private static let getPID: GetPID? = {
+        guard let handle = dlopen(nil, RTLD_NOW), let symbol = dlsym(handle, "GetProcessPID") else { return nil }
+        return unsafeBitCast(symbol, to: GetPID.self)
+    }()
+
     private static let userGenerated: UInt32 = 0x200
 
+    /// Активная программа — по WindowServer, а не по `NSWorkspace.frontmostApplication`: та обновляется уведомлениями
+    /// в нашем run loop и может отставать (14.11 внешний процесс видел Claude, а Mac Utils — «Finder»).
+    static func frontPID() -> pid_t? {
+        if let getFront, let getPID {
+            var psn = ProcessSerialNumber()
+            var pid: pid_t = 0
+            let ok = withUnsafeMutableBytes(of: &psn) { raw -> Bool in
+                guard getFront(raw.baseAddress!) == 0 else { return false }
+                return getPID(UnsafeRawPointer(raw.baseAddress!), &pid) == 0
+            }
+            if ok, pid > 0 { return pid }
+        }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier
+    }
+
+    /// Для журнала: активная программа читается у WindowServer (иначе — `NSWorkspace`).
+    static var readsWindowServer: Bool { getFront != nil && getPID != nil }
+
     static func isFront(_ pid: pid_t) -> Bool {
-        NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+        frontPID() == pid
     }
 
     /// Возвращает путь для журнала: «уже», «обычная», «skylight», «НЕ удалось (…)».

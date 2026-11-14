@@ -19,8 +19,8 @@ final class PointerSessionTests: XCTestCase {
             .hideCursor, .activateTarget, .warp(target),
             .postHID(SyntheticEvent(kind: .leftDown, location: target, clicks: 1)),
             .postHID(SyntheticEvent(kind: .leftUp, location: target, clicks: 1)),
-            .warp(cursor), .showCursor, .returnFocus,
-        ])
+            .warp(cursor), .showCursor, .wait(PointerSession.clickSettle), .returnFocus,
+        ], "пауза перед возвратом: Claude разбирает нажатие, пока активен (иначе 14.11 активировал себя сам)")
         XCTAssertEqual(session.state, .idle)
     }
 
@@ -107,6 +107,53 @@ final class PointerSessionTests: XCTestCase {
         let point = PointerSession.returnPoint(CGPoint(x: 5000, y: -10), mapping: mapping, mirrorRect: CGRect(x: 100, y: 100, width: 400, height: 300))
         XCTAssertEqual(point, CGPoint(x: 499, y: 100))
     }
+
+    func testReturnPointKeepsCursorAlreadyOverMirror() {
+        let mirrorRect = CGRect(x: 100, y: 100, width: 400, height: 300)
+        XCTAssertEqual(PointerSession.returnPoint(CGPoint(x: 250, y: 180), mapping: mapping, mirrorRect: mirrorRect), CGPoint(x: 250, y: 180),
+                       "протягивание вели над зеркалом — курсор не прыгает")
+    }
+
+    // 768c91b (14.11): протягивание 734,651 → 790,651 над зеркалом не выделяло — события шли в окно с точками основного экрана.
+    func testDragLocationFromMirrorGoesIntoWindow() {
+        let hidden = CGRect(x: 1710, y: 1072, width: 1440, height: 900)
+        let mirrorRect = CGRect(x: 100, y: 200, width: 400, height: 300)
+        XCTAssertEqual(PointerSession.dragLocation(CGPoint(x: 200, y: 250), hidden: hidden, mirrorRect: mirrorRect, mapping: mapping),
+                       CGPoint(x: 2200, y: 1100), "точка над зеркалом → та же точка окна")
+        XCTAssertNil(PointerSession.dragLocation(CGPoint(x: 2300, y: 1200), hidden: hidden, mirrorRect: mirrorRect, mapping: mapping),
+                     "курсор уже на скрытом дисплее — событие не трогаем")
+        XCTAssertEqual(PointerSession.dragLocation(CGPoint(x: 0, y: 900), hidden: hidden, mirrorRect: mirrorRect, mapping: mapping),
+                       CGPoint(x: 2000, y: 1598), "за краем зеркала — к краю окна (выделение до края)")
+    }
+
+    func testHoverPostsMovesWithoutActivationAndDeduplicates() {
+        var session = PointerSession()
+        XCTAssertEqual(session.hover(at: CGPoint(x: 100, y: 50), mapping: mapping, windowNumber: 7),
+                       [.postToPid(SyntheticEvent(kind: .moved, location: CGPoint(x: 2200, y: 1100), windowNumber: 7))],
+                       "только postToPid: ни активации, ни переноса курсора")
+        XCTAssertEqual(session.hover(at: CGPoint(x: 100.2, y: 50.2), mapping: mapping, windowNumber: 7), [], "то же место — не повторять")
+        XCTAssertEqual(session.hover(at: CGPoint(x: 101, y: 50), mapping: mapping, windowNumber: 7).count, 1)
+        XCTAssertEqual(session.hoverExit(mapping: mapping, windowNumber: 7),
+                       [.postToPid(SyntheticEvent(kind: .moved, location: CGPoint(x: 1980, y: 980), windowNumber: 7))],
+                       "уход с зеркала — движение за край окна, подсветка снимается")
+        XCTAssertEqual(session.hoverExit(mapping: mapping, windowNumber: 7), [], "второй раз — нечего снимать")
+    }
+
+    func testHoverIsSilentWhileMouseIsBusy() {
+        var session = PointerSession()
+        _ = session.down(.left, at: CGPoint(x: 100, y: 50), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor)
+        XCTAssertEqual(session.hover(at: CGPoint(x: 120, y: 60), mapping: mapping, windowNumber: 7), [], "кнопка нажата")
+        _ = session.dragged(to: CGPoint(x: 130, y: 60), mapping: mapping)
+        XCTAssertEqual(session.hover(at: CGPoint(x: 140, y: 60), mapping: mapping, windowNumber: 7), [], "протягивание у программы")
+    }
+
+    func testHoverOverMirrorMarginActsAsExit() {
+        let wide = MirrorMapping(viewSize: CGSize(width: 600, height: 300), target: CGRect(x: 2000, y: 1000, width: 800, height: 600))
+        var session = PointerSession()
+        _ = session.hover(at: CGPoint(x: 300, y: 150), mapping: wide, windowNumber: 7)
+        XCTAssertEqual(session.hover(at: CGPoint(x: 10, y: 150), mapping: wide, windowNumber: 7).count, 1, "поле сбоку — снять наведение")
+        XCTAssertNil(session.lastHover)
+    }
 }
 
 final class HandoffWatchTests: XCTestCase {
@@ -116,6 +163,15 @@ final class HandoffWatchTests: XCTestCase {
         watch.noteButtonUp()
         XCTAssertTrue(watch.shouldEnd(at: 105))
         XCTAssertTrue(HandoffWatch(kind: .drag, at: 0).shouldEnd(at: 121))
+    }
+
+    // 768c91b: «передача закончена» дважды — таймер кадров успевал сработать ещё раз до шага endHandoff.
+    func testEndIsAnnouncedOnce() {
+        var watch = HandoffWatch(kind: .drag, at: 0)
+        XCTAssertFalse(watch.takeEnd(at: 0.3))
+        watch.noteButtonUp()
+        XCTAssertTrue(watch.takeEnd(at: 0.686))
+        XCTAssertFalse(watch.takeEnd(at: 0.716))
     }
 
     func testScrollEndsAfterIdle() {
