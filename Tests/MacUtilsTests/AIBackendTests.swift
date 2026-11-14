@@ -64,15 +64,14 @@ final class AIBackendTests: XCTestCase {
     {"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}
     {"type":"turn.started"}
     {"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"**Fixing typos**"}}
-    {"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"ls","status":"in_progress"}}
     {"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Привет, мир!"}}
     {"type":"turn.completed","usage":{"input_tokens":24763,"cached_input_tokens":24448,"output_tokens":122}}
     """
 
     func testCodexStreamYieldsOnlyAgentMessage() {
         let events = codexSample.split(separator: "\n").compactMap { CodexCLI.parse(String($0)) }
-        XCTAssertEqual(events, [.message("Привет, мир!"), .done(nil)])
-        var answer = AIAnswer()
+        XCTAssertEqual(events, [.progress, .message("Привет, мир!"), .done(nil)])
+        var answer = AIAnswer(lastMessageOnly: true)
         let pieces = events.compactMap { answer.consume($0) }
         XCTAssertEqual(pieces, ["Привет, мир!"])
         XCTAssertEqual(answer.text, "Привет, мир!")
@@ -93,6 +92,100 @@ final class AIBackendTests: XCTestCase {
         XCTAssertTrue(CodexCLI.isLoggedIn(status: 0, output: "Logged in using ChatGPT"))
         XCTAssertFalse(CodexCLI.isLoggedIn(status: 1, output: "Not logged in"))
         XCTAssertFalse(CodexCLI.isLoggedIn(status: 0, output: "Not logged in"))
+    }
+
+    // MARK: - Codex: только последний ответ, без инструментов (AIB-31)
+
+    func testCodexKeepsOnlyTheLastAgentMessage() {
+        var answer = AIAnswer(lastMessageOnly: true)
+        XCTAssertNil(answer.consume(.message("Сейчас исправлю опечатки…")), "предисловие не отдаётся")
+        XCTAssertNil(answer.consume(.progress))
+        XCTAssertNil(answer.consume(.message("Исправленный текст.")), "до конца хода — ничего")
+        XCTAssertEqual(answer.consume(.done(nil)), "Исправленный текст.")
+        XCTAssertEqual(answer.text, "Исправленный текст.")
+        XCTAssertNil(answer.flush(), "уже отдан")
+
+        var noTurnEnd = AIAnswer(lastMessageOnly: true)
+        _ = noTurnEnd.consume(.message("ответ"))
+        XCTAssertEqual(noTurnEnd.flush(), "ответ", "программа вышла без turn.completed — последнее сообщение всё равно отдаётся")
+
+        var failed = AIAnswer(lastMessageOnly: true)
+        _ = failed.consume(.message("начало"))
+        _ = failed.consume(.failure("stream disconnected"))
+        XCTAssertNil(failed.flush(), "при ошибке хода ответа нет")
+
+        var claude = AIAnswer()
+        XCTAssertEqual(claude.consume(.message("один")), "один", "у Claude поведение прежнее")
+    }
+
+    func testCodexArgumentsDisableTools() {
+        let args = CodexCLI.arguments(request: AIRequest(prompt: "x", images: [URL(fileURLWithPath: "/tmp/a.png")]), workspace: workspace)
+        for feature in ["shell_tool", "view_image", "computer_use", "browser_use", "plugins", "apps"] {
+            let pairs = zip(args, args.dropFirst()).filter { $0.0 == "--disable" && $0.1 == feature }
+            XCTAssertEqual(pairs.count, 1, feature)
+        }
+        XCTAssertFalse(args.contains("--enable"))
+        XCTAssertEqual(args.last, "-", "запрос — по-прежнему со stdin, последним")
+        XCTAssertLessThan(args.firstIndex(of: "--disable") ?? .max, args.count - 1)
+    }
+
+    func testCodexToolItemsAreRecognisedAndOtherItemsAreSignsOfLife() {
+        for kind in ["command_execution", "file_change", "mcp_tool_call", "collab_tool_call", "local_shell_call"] {
+            XCTAssertEqual(CodexCLI.parse(#"{"type":"item.started","item":{"id":"i","type":"\#(kind)"}}"#), .tool(kind), kind)
+            XCTAssertEqual(CodexCLI.parse(#"{"type":"item.completed","item":{"id":"i","type":"\#(kind)"}}"#), .tool(kind), kind)
+        }
+        XCTAssertEqual(CodexCLI.parse(#"{"type":"item.started","item":{"id":"i","type":"reasoning"}}"#), .progress)
+        XCTAssertEqual(CodexCLI.parse(#"{"type":"item.updated","item":{"id":"i","type":"todo_list"}}"#), .progress)
+        XCTAssertEqual(CodexCLI.parse(#"{"type":"item.started","item":{"id":"i","type":"agent_message","text":""}}"#), .progress)
+        XCTAssertNil(CodexCLI.parse(#"{"type":"turn.started"}"#), "начало хода — не признак жизни: приходит до связи с сервером")
+        XCTAssertNil(CodexCLI.parse(#"{"type":"thread.started","thread_id":"x"}"#))
+    }
+
+    func testOldCodexWithoutFeatureFlagAsksToUpdate() {
+        let failure = AIFailure.from(.codex, output: "Error: Unknown feature flag: shell_tool")
+        XCTAssertTrue(failure.message.contains("codex update"), failure.message)
+        XCTAssertEqual(failure.kind, .failed)
+    }
+
+    func testCodexEngineReturnsOnlyTheFinalAnswer() async throws {
+        let script = try fakeCodex("""
+        echo '{"type":"thread.started","thread_id":"t"}'
+        echo '{"type":"turn.started"}'
+        echo '{"type":"item.completed","item":{"id":"0","type":"agent_message","text":"Сейчас исправлю…"}}'
+        echo '{"type":"item.completed","item":{"id":"1","type":"reasoning","text":"думаю"}}'
+        echo '{"type":"item.completed","item":{"id":"2","type":"agent_message","text":"Исправленный текст."}}'
+        echo '{"type":"turn.completed","usage":{}}'
+        """)
+        let text = try await CLIEngine(.codex, executable: script.path).generate(AIRequest(prompt: "x", timeout: 20))
+        XCTAssertEqual(text, "Исправленный текст.")
+    }
+
+    func testCodexEngineStopsOnToolUseAndKillsTheProcess() async throws {
+        let marker = "mu-ai-tool-\(UUID().uuidString.prefix(8))"
+        let script = try fakeCodex("""
+        echo '{"type":"turn.started"}'
+        echo '{"type":"item.started","item":{"id":"1","type":"command_execution","command":"cat ~/.ssh/id_ed25519","status":"in_progress"}}'
+        /bin/sh -c 'sleep 30; :' \(marker)
+        echo '{"type":"item.completed","item":{"id":"2","type":"agent_message","text":"секрет"}}'
+        echo '{"type":"turn.completed","usage":{}}'
+        """)
+        let started = Date()
+        do {
+            _ = try await CLIEngine(.codex, executable: script.path).generate(AIRequest(prompt: "x", timeout: 60))
+            XCTFail("ответ с командой должен быть отброшен")
+        } catch let failure as AIFailure {
+            XCTAssertEqual(failure.provider, .codex)
+            XCTAssertTrue(failure.message.contains("command_execution"), failure.message)
+            XCTAssertTrue(failure.message.contains("остановлено"), failure.message)
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 10, "не ждём конца команды")
+        // SIGTERM — сразу; потомок, родившийся в момент остановки, добивает SIGKILL группе через 2 с.
+        var alive = true
+        for _ in 0..<40 where alive {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            alive = processExists(marker)
+        }
+        XCTAssertFalse(alive, "процесс codex и его потомки убиты")
     }
 
     // MARK: - Claude: аргументы и stdin
@@ -293,6 +386,71 @@ final class AIBackendTests: XCTestCase {
         XCTAssertEqual(calls.cancelled, [.codex])
     }
 
+    func testSignOfLifeKeepsPrimaryPastTheFirstPieceDeadline() async throws {
+        let calls = Calls()
+        let router = fakeRouter(calls, [.codex: .aliveThenReply(0.8, "ответ Codex"), .claude: .reply(["не нужен"])])
+        let text = try await collect(router.stream(AIRequest(prompt: "x"), order: [.codex, .claude], firstPieceWithin: 0.3))
+        XCTAssertEqual(text, "ответ Codex", "codex работает (item.*), хотя текста ещё нет — к запасному не уходим")
+        XCTAssertEqual(calls.providers, [.codex])
+    }
+
+    func testCodexEngineSignOfLifeReachesTheRouter() async throws {
+        let script = try fakeCodex("""
+        echo '{"type":"turn.started"}'
+        echo '{"type":"item.started","item":{"id":"1","type":"reasoning"}}'
+        sleep 1
+        echo '{"type":"item.completed","item":{"id":"2","type":"agent_message","text":"медленно, но верно"}}'
+        echo '{"type":"turn.completed","usage":{}}'
+        """)
+        let calls = Calls()
+        let router = AIRouter { provider in
+            provider == .codex ? CLIEngine(.codex, executable: script.path) as any AIEngine
+                : FakeEngine(provider: provider, behavior: .reply(["Claude"]), calls: calls)
+        }
+        let text = try await collect(router.stream(AIRequest(prompt: "x", timeout: 20), order: [.codex, .claude], firstPieceWithin: 0.4))
+        XCTAssertEqual(text, "медленно, но верно")
+        XCTAssertEqual(calls.providers, [], "Claude не спрашивали")
+    }
+
+    func testSilentCodexStillFallsBackAfterDeadline() async throws {
+        let script = try fakeCodex("""
+        echo '{"type":"turn.started"}'
+        echo '{"type":"error","message":"Reconnecting... 1/5"}'
+        sleep 30
+        """)
+        let calls = Calls()
+        let router = AIRouter { provider in
+            provider == .codex ? CLIEngine(.codex, executable: script.path) as any AIEngine
+                : FakeEngine(provider: provider, behavior: .reply(["Claude"]), calls: calls)
+        }
+        let started = Date()
+        let text = try await collect(router.stream(AIRequest(prompt: "x", timeout: 60), order: [.codex, .claude], firstPieceWithin: 0.4))
+        XCTAssertEqual(text, "Claude", "начало хода и переподключения — не жизнь: запасной по таймеру")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+    }
+
+    func testWhenBothFailTheErrorNamesBoth() async {
+        let calls = Calls()
+        let router = fakeRouter(calls, [.codex: .fail(.notLoggedIn(.codex)), .claude: .fail(.notFound(.claude))])
+        do {
+            _ = try await collect(router.stream(AIRequest(prompt: "x"), order: [.codex, .claude], firstPieceWithin: 5))
+            XCTFail("ожидалась ошибка")
+        } catch let failure as AIFailure {
+            XCTAssertTrue(failure.message.contains("Войдите в Codex"), failure.message)
+            XCTAssertTrue(failure.message.contains("Claude не найден"), failure.message)
+            XCTAssertEqual(failure.kind, .notLoggedIn, "вид — от выбранного сервиса")
+            XCTAssertEqual(failure.provider, .codex)
+        } catch {
+            XCTFail("\(error)")
+        }
+        XCTAssertEqual(calls.providers, [.codex, .claude])
+    }
+
+    func testCombinedFailureOfOneIsItself() {
+        XCTAssertEqual(AIFailure.combined([.empty(.claude)]), .empty(.claude))
+        XCTAssertEqual(AIFailure.combined([]).kind, .failed)
+    }
+
     // MARK: - Перевод функций
 
     func testMeetingReportIsOneRequestWithWholeTranscript() async throws {
@@ -350,8 +508,38 @@ final class AIBackendTests: XCTestCase {
         let registered = UserDefaults.standard.volatileDomain(forName: UserDefaults.registrationDomain)
         XCTAssertEqual(registered[Pref.aiProvider] as? String, "codex")
         XCTAssertEqual(registered[Pref.aiFallback] as? Bool, false)
+        // Ручные функции — включены, фоновые (сами отправляют содержимое в облако) — выключены до явного включения.
+        for key in [Pref.ai, Pref.aiFixText, Pref.aiShotSearch, Pref.aiDownloads, Pref.aiTasks, Pref.aiCleanup] {
+            XCTAssertEqual(registered[key] as? Bool, true, key)
+        }
+        XCTAssertEqual(Set(Pref.aiBackgroundKeys), [Pref.aiShotNames, Pref.aiDownloadsTags, Pref.aiShelf])
+        for key in Pref.aiBackgroundKeys { XCTAssertEqual(registered[key] as? Bool, false, key) }
         XCTAssertNil(registered["aiModel"])
         XCTAssertNil(registered["aiURL"])
+    }
+
+    func testBackgroundAIChoiceFromOllamaTimesIsForgottenOnce() throws {
+        let name = "mac-utils.ai-cloud-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.register(defaults: [Pref.aiShotNames: false, Pref.aiDownloadsTags: false, Pref.aiShelf: false])
+        for key in Pref.aiBackgroundKeys { defaults.set(true, forKey: key) }
+        defaults.set(false, forKey: Pref.aiFixText)
+        XCTAssertEqual(Set(Pref.resetBackgroundAIAfterCloudMove(in: defaults)), Set(Pref.aiBackgroundKeys))
+        for key in Pref.aiBackgroundKeys { XCTAssertFalse(defaults.bool(forKey: key), "\(key): после перехода — выключено") }
+        XCTAssertEqual(defaults.object(forKey: Pref.aiFixText) as? Bool, false, "ручные функции не трогаются")
+        // Человек включил сам — выбор сохраняется при следующих запусках.
+        defaults.set(true, forKey: Pref.aiShotNames)
+        XCTAssertEqual(Pref.resetBackgroundAIAfterCloudMove(in: defaults), [])
+        XCTAssertTrue(defaults.bool(forKey: Pref.aiShotNames))
+    }
+
+    func testBackgroundFeaturesStayOffUntilEnabled() throws {
+        let name = "mac-utils.ai-bg-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        XCTAssertEqual(Pref.resetBackgroundAIAfterCloudMove(in: defaults), [], "новый пользователь: сбрасывать нечего")
+        XCTAssertTrue(defaults.bool(forKey: Pref.aiCloudMigrated))
     }
 
     // MARK: - Процесс: таймаут, отмена, потомки (только /bin/sh, cat, sleep)
@@ -420,6 +608,18 @@ final class AIBackendTests: XCTestCase {
         XCTAssertFalse(processExists(marker))
     }
 
+    func testTimeoutAfterExitWhileGrandchildHoldsOutputIsNotATimeout() async throws {
+        let marker = "mu-ai-pipe-\(UUID().uuidString.prefix(8))"
+        // Процесс сразу выходит с кодом 0, но внук держит stdout ещё 3 с: чтение ждёт конец вывода до 2 с,
+        // и таймаут 0,3 с срабатывает в это окно — успешный ответ не должен стать «не ответил».
+        let command = CLICommand(executable: URL(fileURLWithPath: "/bin/sh"),
+                                 arguments: ["-c", "echo ответ; /bin/sh -c 'sleep 3; :' \(marker) &"],
+                                 directory: URL(fileURLWithPath: "/tmp"))
+        var lines: [String] = []
+        for try await line in CLIProcess.lines(command, timeout: 0.3) { lines.append(line) }
+        XCTAssertEqual(lines, ["ответ"])
+    }
+
     func testMissingProgramIsLaunchFailure() async {
         let command = CLICommand(executable: URL(fileURLWithPath: "/nonexistent/codex"), arguments: [],
                                  directory: URL(fileURLWithPath: "/tmp"))
@@ -453,6 +653,17 @@ final class AIBackendTests: XCTestCase {
         return args[index + 1]
     }
 
+    /// Подставной codex: shell-скрипт, печатающий JSONL как `codex exec --json`. Аргументы и stdin не читает.
+    private func fakeCodex(_ body: String) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mu-fake-codex-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("codex")
+        try ("#!/bin/sh\n" + body + "\n").write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url
+    }
+
     private func processExists(_ marker: String) -> Bool {
         let pipe = Pipe()
         let ps = Process()
@@ -474,6 +685,8 @@ private enum FakeBehavior: Sendable {
     case hang
     case partThenFail(String)
     case delayed(TimeInterval, String)
+    /// Сразу «модель работает» (как codex `item.started`), текст — через столько секунд.
+    case aliveThenReply(TimeInterval, String)
 }
 
 private final class Calls: @unchecked Sendable {
@@ -494,6 +707,10 @@ private struct FakeEngine: AIEngine {
     let calls: Calls
 
     func stream(_ request: AIRequest) -> AsyncThrowingStream<String, Error> {
+        stream(request, alive: {})
+    }
+
+    func stream(_ request: AIRequest, alive: @escaping @Sendable () -> Void) -> AsyncThrowingStream<String, Error> {
         calls.started(provider, request)
         let provider = provider, behavior = behavior, calls = calls
         return AsyncThrowingStream { continuation in
@@ -511,6 +728,11 @@ private struct FakeEngine: AIEngine {
                     continuation.yield(piece)
                     continuation.finish(throwing: AIFailure.empty(provider))
                 case .delayed(let seconds, let text):
+                    try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                    continuation.yield(text)
+                    continuation.finish()
+                case .aliveThenReply(let seconds, let text):
+                    alive()
                     try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
                     continuation.yield(text)
                     continuation.finish()

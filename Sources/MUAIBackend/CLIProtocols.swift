@@ -12,17 +12,25 @@ package enum AIEvent: Equatable, Sendable {
     case failure(String)
     /// Предупреждение (codex переподключается): ход продолжается, текст пригодится, если ответа так и не будет.
     case notice(String)
+    /// Модель работает (codex `item.started` / `item.completed` — рассуждение, начало ответа), текста ещё нет.
+    case progress
+    /// Модель взялась за инструмент (команда, правка файла, MCP) — ответ отбрасывается. Значение — тип элемента.
+    case tool(String)
 }
 
 /// Сборка ответа из событий: куски отдаются сразу; готовое сообщение — только если его куски не приходили.
+/// `lastMessageOnly` (codex): сообщений за ход бывает несколько («Сейчас исправлю…», потом ответ) — отдаётся
+/// только последнее и только в конце хода, иначе предисловие попало бы в документ вместе с исправленным текстом.
 package struct AIAnswer: Equatable, Sendable {
     private(set) package var text = ""
     private var streamedSinceMessage = false
+    private let lastMessageOnly: Bool
+    private var lastMessage: String?
     private(set) package var finished = false
     private(set) package var failure: String?
     private(set) package var lastNotice: String?
 
-    package init() {}
+    package init(lastMessageOnly: Bool = false) { self.lastMessageOnly = lastMessageOnly }
 
     /// Что отдать потребителю для этого события (nil — ничего).
     package mutating func consume(_ event: AIEvent) -> String? {
@@ -34,22 +42,35 @@ package struct AIAnswer: Equatable, Sendable {
             return piece
         case .message(let message):
             defer { streamedSinceMessage = false }
+            if lastMessageOnly {
+                if !message.isEmpty { lastMessage = message }
+                return nil
+            }
             guard !streamedSinceMessage, !message.isEmpty else { return nil }
             let piece = text.isEmpty ? message : "\n\n" + message
             text += piece
             return piece
         case .done(let result):
             finished = true
-            guard text.isEmpty, let result, !result.isEmpty else { return nil }
-            text = result
-            return result
+            guard text.isEmpty, let answer = lastMessage ?? result, !answer.isEmpty else { return nil }
+            text = answer
+            return answer
         case .failure(let message):
             failure = message
             return nil
         case .notice(let message):
             lastNotice = message
             return nil
+        case .progress, .tool:
+            return nil
         }
+    }
+
+    /// Программа закончила без конца хода: отдать последнее сообщение, если оно было (и ошибки не было).
+    package mutating func flush() -> String? {
+        guard lastMessageOnly, text.isEmpty, failure == nil, let lastMessage, !lastMessage.isEmpty else { return nil }
+        text = lastMessage
+        return lastMessage
     }
 }
 
@@ -63,8 +84,13 @@ private func jsonLine(_ line: String) -> [String: Any]? {
 
 /// `codex exec` (Codex CLI 0.16x): аргументы и разбор `--json` (JSONL-события).
 package enum CodexCLI {
+    /// Инструменты, которые выключаются: команды shell, просмотр картинок с диска, управление компьютером и браузером,
+    /// плагины и приложения. Ответ — только текст: песочница «только чтение» не мешает читать `$HOME`.
+    /// Имена проверены по `codex features list` (0.162.1); неизвестное имя codex не принимает («Unknown feature flag»).
+    package static let disabledFeatures = ["shell_tool", "view_image", "computer_use", "browser_use", "plugins", "apps"]
+
     /// Аргументы: без сохранения сессии, без git-проверки, песочница «только чтение», рабочая папка — пустая,
-    /// пользовательский config.toml и правила не читаются (вход в аккаунт — по-прежнему из CODEX_HOME).
+    /// без инструментов (`--disable`), пользовательский config.toml и правила не читаются (вход — из CODEX_HOME).
     /// Картинки — `--image=<файл>`: с `=` значение одно, и следующий аргумент не принимается за ещё одну картинку.
     /// Запрос — со stdin (`-` последним аргументом).
     package static func arguments(request: AIRequest, workspace: String, model: String? = nil) -> [String] {
@@ -72,6 +98,7 @@ package enum CodexCLI {
         var arguments = ["exec"] + request.images.map { "--image=\($0.path)" }
         arguments += ["--json", "--color", "never", "--sandbox", "read-only", "--skip-git-repo-check",
                       "--ephemeral", "--ignore-user-config", "--ignore-rules", "--cd", workspace]
+        arguments += disabledFeatures.flatMap { ["--disable", $0] }
         if request.quick { arguments += ["-c", "model_reasoning_effort=\"low\""] }
         if let model, !model.isEmpty { arguments += ["--model", model] }
         arguments.append("-")
@@ -84,13 +111,22 @@ package enum CodexCLI {
         return Data("\(system)\n\n---\n\n\(request.prompt)".utf8)
     }
 
+    /// Элементы-инструменты: команда, правка файла, вызов MCP и подобные (`*_tool_call`).
+    package static func isTool(_ kind: String) -> Bool {
+        ["command_execution", "file_change", "local_shell_call", "patch_apply"].contains(kind) || kind.hasSuffix("tool_call")
+    }
+
     /// Строка `--json` → событие. Неизвестные события и не-JSON (предупреждения) — nil.
+    /// `item.*` — признак жизни (`.progress`): у codex нет потоковых кусков, первый текст приходит вместе с готовым
+    /// ответом, и ждать «первый кусок» — значит ждать весь ответ. `turn.started` жизнью не считается: он приходит
+    /// сразу, ещё до связи с сервером (при обрыве сети дальше идут только «Reconnecting…»).
     package static func parse(_ line: String) -> AIEvent? {
         guard let json = jsonLine(line), let type = json["type"] as? String else { return nil }
         switch type {
-        case "item.completed":
-            guard let item = json["item"] as? [String: Any],
-                  let kind = item["type"] as? String, kind == "agent_message" || kind == "assistant_message" else { return nil }
+        case "item.started", "item.updated", "item.completed":
+            guard let item = json["item"] as? [String: Any], let kind = item["type"] as? String else { return .progress }
+            if isTool(kind) { return .tool(kind) }
+            guard type == "item.completed", kind == "agent_message" || kind == "assistant_message" else { return .progress }
             return .message(item["text"] as? String ?? "")
         case "turn.completed":
             return .done(nil)

@@ -590,7 +590,8 @@ package final class MeetingRecorder: NSObject, ObservableObject {
             Toast.show(meeting.hasReport ? "Отчёт о встрече готов" : "Расшифровка готова", symbol: "doc.text.fill",
                        action: Toast.Action(title: "Открыть") { NSWorkspace.shared.open(target) })
         } catch {
-            Log.audio.error("Встреча: \(error.localizedDescription, privacy: .public)")
+            // .private: в тексте ошибки ИИ бывает до 300 символов вывода codex/claude.
+            Log.audio.error("Встреча: \(error.localizedDescription, privacy: .private)")
             lastError = error.localizedDescription
             reload()
             Toast.show(error.localizedDescription, symbol: "exclamationmark.triangle.fill", tint: .orange)
