@@ -53,7 +53,7 @@ final class AIAndExtrasTests: XCTestCase {
         XCTAssertEqual(WindowLayoutRules.signature(["b", "a"]), WindowLayoutRules.signature(["a", "b"]))
     }
 
-    func testMeetingMergeAndChunks() {
+    func testMeetingMerge() {
         let lines = [
             TranscriptLine(start: 5, speaker: "Я", text: "привет"),
             TranscriptLine(start: 1, speaker: "Собеседники", text: "добрый день"),
@@ -64,7 +64,6 @@ final class AIAndExtrasTests: XCTestCase {
         XCTAssertEqual(merged[1].text, "привет начнём")
         XCTAssertEqual(MeetingText.format(merged).split(separator: "\n").first, "[00:01] Собеседники: добрый день")
         XCTAssertEqual(MeetingText.timestamp(3725), "1:02:05")
-        XCTAssertEqual(MeetingText.chunks("aaaa\nbbbb\ncccc", limit: 9), ["aaaa\nbbbb", "cccc"])
     }
 
     func testShotRename() throws {

@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import SwiftUI
 import UniformTypeIdentifiers
+import MUAIBackend
 import MUCore
 import MUDesign
 
@@ -302,7 +303,7 @@ package struct DropShelfView: View {
                     Text("\(shelf.items.count)").font(DS.Font.mono(12, relativeTo: .caption)).foregroundStyle(.dsMute)
                 }
                 Spacer()
-                if Ollama.isOn(Pref.aiShelf), shelf.items.count >= 2 {
+                if AI.isOn(Pref.aiShelf), shelf.items.count >= 2 {
                     if shelf.grouping {
                         ProgressView().controlSize(.small)
                     } else {
