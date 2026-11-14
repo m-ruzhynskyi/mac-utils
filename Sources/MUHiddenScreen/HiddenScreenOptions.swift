@@ -10,6 +10,8 @@ public struct HiddenScreenOptions: Equatable, Sendable {
     public var pressMode: PressMode = .tap
     /// Дисплей держит процесс-помощник (переживает падение Mac Utils). `--hs-helper=off` — в процессе Mac Utils.
     public var useHelper = true
+    /// Как Mac Utils возвращает себе активность (`--hs-activate=auto|public|skylight`).
+    public var activationMode: ActivationMode = .auto
     /// Пометки «временное» во временном буфере вставки (`--hs-clip-marks=off` — без них).
     public var clipboardMarks = true
     /// Размер скрытого дисплея в точках (HiDPI ×2).
@@ -40,7 +42,7 @@ public struct HiddenScreenOptions: Equatable, Sendable {
     }
 
     /// Ключ отладочного запуска: `open -a "Mac Utils" --args --hidden-screen-debug [--hs-apps=id,id] [--hs-click=warp|pid]
-    /// [--hs-scroll=handoff|pid] [--hs-keys=active|hid|inactive] [--hs-press=tap|mirror] [--hs-helper=on|off] [--hs-clip-marks=on|off] [--hs-ax-dump] [--hs-size=1440x900]`.
+    /// [--hs-scroll=handoff|pid] [--hs-keys=active|hid|inactive] [--hs-press=tap|mirror] [--hs-helper=on|off] [--hs-clip-marks=on|off] [--hs-activate=auto|public|skylight] [--hs-ax-dump] [--hs-size=1440x900]`.
     /// Без ключа — nil (обычный запуск). Ссылкой `macutils://` не включается.
     public static let debugFlag = "--hidden-screen-debug"
 
@@ -61,6 +63,8 @@ public struct HiddenScreenOptions: Equatable, Sendable {
                 if let mode = KeyMode(rawValue: parts[1]) { options.keyMode = mode }
             case "--hs-press":
                 if let mode = PressMode(rawValue: parts[1]) { options.pressMode = mode }
+            case "--hs-activate":
+                if let mode = ActivationMode(rawValue: parts[1]) { options.activationMode = mode }
             case "--hs-clip-marks":
                 options.clipboardMarks = parts[1] != "off"
             case "--hs-helper":

@@ -185,6 +185,10 @@ public final class HiddenScreenEngine {
         Log.hiddenScreen.info("enable: дисплей \(id) \(String(describing: self.hidden), privacy: .public)")
         attachObservers()
         let center = NSWorkspace.shared.notificationCenter
+        workspaceTokens.append(center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            let activated = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated { self?.applicationActivated(activated) }
+        })
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             workspaceTokens.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
@@ -200,10 +204,25 @@ public final class HiddenScreenEngine {
         }
         startCursorGuard()
         onChange?()
+        // Окна ИИ уже на скрытом дисплее, но активной могла остаться программа ИИ — её строка меню на основном экране выдаёт.
+        if let front = NSWorkspace.shared.frontmostApplication, options.apps.contains(where: { $0.matches(bundleID: front.bundleIdentifier) }) {
+            Log.hiddenScreen.info("после переноса активна \(front.bundleIdentifier ?? "?", privacy: .public) — делаю активной Mac Utils")
+            run([.activateSelf])
+        }
         if mirrorRequested {
             mirrorRequested = false
             setMirrorShown(true)
         }
+    }
+
+    /// Программа ИИ стала активной не нашим шагом — вернуть фокус зеркалу (строка меню основного экрана не должна
+    /// показывать ИИ, а набор с клавиатуры — уходить ему мимо зеркала; 14.11 «тест» ушёл в ChatGPT).
+    private func applicationActivated(_ app: NSRunningApplication?) {
+        let isTarget = options.apps.contains { $0.matches(bundleID: app?.bundleIdentifier) }
+        guard FocusRules.shouldReclaim(activatedIsTarget: isTarget, mirrorShown: mirrorShown,
+                                       handoff: session.handoff, stepsRunning: runningSteps || !steps.isEmpty) else { return }
+        Log.hiddenScreen.info("активной стала \(app?.bundleIdentifier ?? "?", privacy: .public) — возвращаю фокус зеркалу")
+        run([.activateSelf])
     }
 
     /// bundle id всех программ из списка — помощнику, чтобы прятать их, если Mac Utils пропадёт.
@@ -333,6 +352,7 @@ public final class HiddenScreenEngine {
             }
         }
         refreshStatuses(windows: windows)
+        rescueMirrorIfHidden()
     }
 
     /// Статусы программ для интерфейса (и когда скрытый экран выключен: запущена ли, окон — 0).
@@ -561,10 +581,9 @@ public final class HiddenScreenEngine {
             let activated = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
             Log.hiddenScreen.debug("активация: \(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) мс\(activated ? "" : " — НЕ активировалась", privacy: .public)")
         case .activateSelf:
-            ScreenOutput.activateApp(ignoringOtherApps: true)
-            // Нажатие над зеркалом перехвачено и до зеркала не дошло — ключевым и первым ответчиком его делаем сами.
-            mirrorWindow?.makeKey()
-            mirrorWindow?.makeFirstResponder(mirrorView)
+            // Нажатие над зеркалом перехвачено и до Mac Utils не дошло: «вежливая» активация macOS 14+ её может не пустить.
+            let path = await SelfActivation.activate(window: mirrorWindow, firstResponder: mirrorView, mode: options.activationMode)
+            Log.hiddenScreen.info("Mac Utils активна: \(path, privacy: .public); активная программа — \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?", privacy: .public)")
         case let .wait(seconds):
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
         case let .warp(point):
@@ -843,9 +862,13 @@ extension HiddenScreenEngine {
             return
         }
         let window = ensureMirrorWindow()
+        rescueMirrorIfHidden()
         window.makeKeyAndOrderFrontOnScreen("Скрытый экран: зеркало")
         window.makeFirstResponder(mirrorView)
         mirrorShown = true
+        rescueMirrorIfHidden()
+        // Без этого активной остаётся прежняя программа (14.11 — ChatGPT, и его строка меню на основном экране).
+        run([.activateSelf])
         installPressTap()
         onChange?()
         let app = mirroredApp ?? statuses.first(where: { $0.hiddenWindows > 0 })?.app ?? statuses.first(where: \.isRunning)?.app
@@ -914,7 +937,7 @@ extension HiddenScreenEngine {
         let visible = NSScreen.screens.first?.visibleFrame.size ?? CGSize(width: 1200, height: 800)
         let size = CGSize(width: min(900, visible.width * 0.7), height: min(700, visible.height * 0.75))
         let window = MirrorWindow(title: "Скрытый экран", size: size, titleBar: mirrorHasTitleBar, view: mirrorView)
-        window.center()
+        placeMirrorOnRealScreen(window)
         mirrorWindow = window
         applyLevel()
         defaultsToken = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -922,6 +945,27 @@ extension HiddenScreenEngine {
         }
         window.onMoveOrResize = { [weak self] in self?.onChange?() }
         return window
+    }
+
+    /// Зеркало — на настоящий экран (с курсором или со строкой меню), по центру. Не `center()`: тот берёт экран
+    /// ключевого окна активной программы, а оно может быть уже на скрытом дисплее.
+    func placeMirrorOnRealScreen(_ window: NSWindow) {
+        let screens = NSScreen.screens.compactMap { screen in
+            screen.displayID.map { FocusRules.Screen(id: $0, frame: screen.frame, visibleFrame: screen.visibleFrame) }
+        }
+        guard let screen = FocusRules.mirrorScreen(screens, hidden: displayID, mouse: NSEvent.mouseLocation) else { return }
+        let frame = FocusRules.centered(window.frame.size, in: screen.visibleFrame)
+        window.setFrame(frame, display: false)
+        Log.hiddenScreen.info("зеркало: на экране \(screen.id), \(String(describing: frame), privacy: .public)")
+    }
+
+    /// Сторож: зеркало оказалось на скрытом дисплее (перетащили, macOS переставила) — вернуть.
+    func rescueMirrorIfHidden() {
+        guard mirrorShown, let window = mirrorWindow, displayID != kCGNullDirectDisplay,
+              let hiddenScreen = NSScreen.screens.first(where: { $0.displayID == displayID }),
+              FocusRules.needsRescue(mirror: window.frame, hiddenCocoa: hiddenScreen.frame) else { return }
+        Log.hiddenScreen.error("зеркало на скрытом дисплее — возвращаю на основной экран")
+        placeMirrorOnRealScreen(window)
     }
 
     private func applyLevel() {
