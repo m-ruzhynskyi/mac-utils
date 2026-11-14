@@ -33,6 +33,7 @@ extension SettingsSection {
         case .qr: return "qr код ссылка распознать"
         case .annotate: return "рисование на экране перо стрелка маркер презентация"
         case .wellbeing: return "перерывы глаза тёплый экран ночной режим 20-20-20 не засыпать сон caffeinate кофеин"
+        case .gaze: return "взгляд в камеру глаза зрачки звонок zoom discord meet teams telegram obs syphon виртуальная камера смотреть в камеру"
         case .meetings: return "записи встреч созвон микрофон расшифровка whisper отчёт"
         case .ai: return "ии ollama модель исправить текст умные имена"
         case .uninstaller: return "удаление программ остатки приложения"

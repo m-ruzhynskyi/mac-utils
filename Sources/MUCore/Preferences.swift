@@ -238,8 +238,30 @@ package enum Pref {
     package static let playerRecent = "playerRecent"
     package static let playerFinished = "playerFinished"
 
+    /// «Взгляд в камеру». Само включение не хранится: функция включается только вручную и только до выхода.
+    /// Куда смотреть: "camera", "below", "point" (тогда углы gazePointYaw / gazePointPitch, градусы).
+    package static let gazeTarget = "gazeTarget"
+    package static let gazePointYaw = "gazePointYaw"
+    package static let gazePointPitch = "gazePointPitch"
+    /// Свобода движения: "low", "normal", "high".
+    package static let gazeFreedom = "gazeFreedom"
+    /// Калибровка: насколько экран ниже камеры (сдвиг радужки, доли полуширины глаза) и положение «в камеру» по горизонтали.
+    package static let gazeScreenLift = "gazeScreenLift"
+    package static let gazeBiasX = "gazeBiasX"
+    package static let gazeCalibrated = "gazeCalibrated"
+    /// Ползунок «Сила»: множитель поправки, 0…1,5.
+    package static let gazeStrength = "gazeStrength"
+
     package static func register() {
         UserDefaults.standard.register(defaults: [
+            gazeTarget: "camera",
+            gazePointYaw: 0.0,
+            gazePointPitch: 0.0,
+            gazeFreedom: "normal",
+            gazeScreenLift: 0.22,
+            gazeStrength: 1.0,
+            gazeBiasX: 0.0,
+            gazeCalibrated: false,
             cutPaste: true,
             cutPanel: true,
             winKeys: false,

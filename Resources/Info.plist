@@ -330,6 +330,8 @@
     <string>Mac Utils меняет громкость отдельных приложений и передаёт звук системы в трансляцию без заглушённых программ (например, звонка). Ничего не записывается.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Mac Utils расшифровывает записи встреч прямо на этом Mac.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>«Взгляд в камеру»: Mac Utils берёт картинку с камеры, поправляет направление взгляда и передаёт её в OBS. Камера открыта, только пока функция включена; картинка никуда не отправляется.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Mac Utils записывает ваш голос с микрофона: в записи встреч (для расшифровки и отчёта) и в записи экрана, если это включено в настройках. Звук обрабатывается на этом Mac.</string>
     <key>NSScreenCaptureUsageDescription</key>

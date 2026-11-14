@@ -60,6 +60,8 @@ swift scripts/make-doc-icons.swift "$APP/Contents/Resources"
 ./scripts/check-doc-icons.sh "$APP"
 # Шрифты интерфейса (Manrope, JetBrains Mono — SIL OFL 1.1) с лицензиями; регистрируются при запуске (DSFonts).
 cp -R Resources/Fonts "$APP/Contents/Resources/Fonts"
+# Модель точек глаза для «Взгляда в камеру» (MediaPipe Iris, Apache-2.0); компилируется при первом включении.
+cp -R Resources/Models "$APP/Contents/Resources/Models"
 
 # Действия Mac Utils в «Командах» и фразы Siri: Contents/Resources/Metadata.appintents (до подписи).
 ./scripts/appintents-metadata.sh extract "$APP"
