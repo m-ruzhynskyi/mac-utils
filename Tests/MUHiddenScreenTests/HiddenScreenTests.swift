@@ -154,8 +154,9 @@ final class MirrorInputTests: XCTestCase {
 
     func testReservedShortcutsStayOutOfTheApp() {
         XCTAssertEqual(MirrorKeys.route(code: MirrorKeys.q, flags: .maskCommand), .drop)
-        XCTAssertEqual(MirrorKeys.route(code: MirrorKeys.w, flags: .maskCommand), .keepLocal)
-        XCTAssertEqual(MirrorKeys.route(code: MirrorKeys.h, flags: [.maskCommand, .maskAlternate]), .keepLocal)
+        XCTAssertEqual(MirrorKeys.route(code: MirrorKeys.w, flags: .maskCommand), .drop, "закрыл бы окно Zoom или ИИ")
+        XCTAssertEqual(MirrorKeys.route(code: MirrorKeys.h, flags: [.maskCommand, .maskAlternate]), .drop)
+        XCTAssertEqual(MirrorKeys.route(code: MirrorKeys.tab, flags: .maskCommand), .keepLocal)
         XCTAssertEqual(MirrorKeys.route(code: MirrorKeys.v, flags: .maskCommand), .forward)
         XCTAssertEqual(translator.translate(.key(code: MirrorKeys.q, down: true, flags: .maskCommand, characters: "q")), [])
     }

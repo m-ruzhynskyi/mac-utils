@@ -48,3 +48,50 @@ final class FocusRulesTests: XCTestCase {
         XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug"], storedBundleIDs: nil)?.activationMode, .auto)
     }
 }
+
+/// Строка меню не должна показывать ИИ (14.11): активность — программе пользователя, клавиши — через перехват.
+final class KeyboardFocusTests: XCTestCase {
+    func testKeysGoToMirrorOnlyWhenFocused() {
+        XCTAssertEqual(FocusRules.keyDecision(code: 0, flags: [], mirrorFocused: false, handoff: nil), .pass)
+        XCTAssertEqual(FocusRules.keyDecision(code: 0, flags: [], mirrorFocused: true, handoff: nil), .forward)
+        XCTAssertEqual(FocusRules.keyDecision(code: MirrorKeys.v, flags: .maskCommand, mirrorFocused: true, handoff: nil), .forward)
+        XCTAssertEqual(FocusRules.keyDecision(code: 0, flags: [], mirrorFocused: true, handoff: .menu), .pass,
+                       "меню открыто — программа активна, стрелки и Return идут ей напрямую")
+    }
+
+    func testReservedShortcutsNeverReachZoomOrAI() {
+        for code in [MirrorKeys.q, MirrorKeys.w, MirrorKeys.h, MirrorKeys.m, MirrorKeys.comma] {
+            XCTAssertEqual(FocusRules.keyDecision(code: code, flags: .maskCommand, mirrorFocused: true, handoff: nil), .drop, "код \(code)")
+        }
+        XCTAssertEqual(FocusRules.keyDecision(code: MirrorKeys.tab, flags: .maskCommand, mirrorFocused: true, handoff: nil), .pass, "⌘Tab — системе")
+    }
+
+    func testWinKeysRewrite() {
+        let v = MirrorKeys.winKeysRewrite(code: MirrorKeys.v, flags: .maskControl, enabled: true, disabled: [])
+        XCTAssertEqual(v.code, MirrorKeys.v)
+        XCTAssertEqual(v.flags, .maskCommand)
+        let y = MirrorKeys.winKeysRewrite(code: 16, flags: .maskControl, enabled: true, disabled: [])   // kVK_ANSI_Y → ⇧⌘Z
+        XCTAssertEqual(y.code, 6)
+        XCTAssertEqual(y.flags, [.maskCommand, .maskShift])
+        XCTAssertEqual(MirrorKeys.winKeysRewrite(code: MirrorKeys.v, flags: .maskControl, enabled: false, disabled: []).flags, .maskControl)
+        XCTAssertEqual(MirrorKeys.winKeysRewrite(code: MirrorKeys.v, flags: .maskControl, enabled: true, disabled: ["v"]).flags, .maskControl)
+        XCTAssertEqual(MirrorKeys.winKeysRewrite(code: 5, flags: .maskControl, enabled: true, disabled: []).flags, .maskControl, "Ctrl+G не трогаем")
+    }
+
+    func testUserAppIsNeitherAINorSelfNorLoginWindow() {
+        XCTAssertTrue(FocusRules.isUserApp(isRegular: true, isTarget: false, isSelf: false, bundleID: "us.zoom.xos"))
+        XCTAssertFalse(FocusRules.isUserApp(isRegular: true, isTarget: true, isSelf: false, bundleID: "com.openai.codex"))
+        XCTAssertFalse(FocusRules.isUserApp(isRegular: false, isTarget: false, isSelf: true, bundleID: "com.mruzhynskyi.macutils"))
+        XCTAssertFalse(FocusRules.isUserApp(isRegular: true, isTarget: false, isSelf: false, bundleID: "com.apple.loginwindow"))
+    }
+
+    func testOwnActivationEchoIsIgnoredOnce() {
+        var echo = ActivationEcho()
+        echo.note(500, at: 10)
+        XCTAssertTrue(echo.consume(500, at: 10.3), "наш возврат в Zoom — не переключение пользователя")
+        XCTAssertFalse(echo.consume(500, at: 10.4), "второй раз — уже пользователь")
+        echo.note(600, at: 20)
+        XCTAssertFalse(echo.consume(600, at: 21.5), "через секунду — не эхо")
+        XCTAssertFalse(echo.consume(700, at: 20))
+    }
+}

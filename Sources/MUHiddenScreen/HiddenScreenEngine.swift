@@ -106,6 +106,16 @@ public final class HiddenScreenEngine {
     private var handoffTick = 0
     private var lastSurface: IOSurfaceRef?
     private var defaultsToken: NSObjectProtocol?
+    /// Программа, в которой пользователь был до ИИ (Zoom, презентация): ей возвращается активность после щелчка.
+    private var userApp: NSRunningApplication?
+    /// Клавиши идут в зеркало (после щелчка по нему, до щелчка мимо или переключения программ).
+    public private(set) var mirrorFocused = false
+    /// Перехват клавиатуры при фокусе у зеркала.
+    private var keyTap: EventTap?
+    /// Свои активации — чтобы не принять их уведомления за переключение пользователя.
+    private var echo = ActivationEcho()
+    /// Правая кнопка над зеркалом перехвачена (её отпускание тоже поглощаем).
+    private var rightIntercepted = false
     /// В журнале уже написано «экран заблокирован».
     private var lockLogged = false
     /// Окна, о которых уже написано «утечка» (повтор — только после успешного переноса).
@@ -205,9 +215,10 @@ public final class HiddenScreenEngine {
         startCursorGuard()
         onChange?()
         // Окна ИИ уже на скрытом дисплее, но активной могла остаться программа ИИ — её строка меню на основном экране выдаёт.
-        if let front = NSWorkspace.shared.frontmostApplication, options.apps.contains(where: { $0.matches(bundleID: front.bundleIdentifier) }) {
-            Log.hiddenScreen.info("после переноса активна \(front.bundleIdentifier ?? "?", privacy: .public) — делаю активной Mac Utils")
-            run([.activateSelf])
+        noteActivated(NSWorkspace.shared.frontmostApplication)
+        if let front = NSWorkspace.shared.frontmostApplication, isTarget(front) {
+            Log.hiddenScreen.info("после переноса активна \(front.bundleIdentifier ?? "?", privacy: .public) — возвращаю программе пользователя")
+            run([.returnFocus])
         }
         if mirrorRequested {
             mirrorRequested = false
@@ -215,14 +226,91 @@ public final class HiddenScreenEngine {
         }
     }
 
-    /// Программа ИИ стала активной не нашим шагом — вернуть фокус зеркалу (строка меню основного экрана не должна
-    /// показывать ИИ, а набор с клавиатуры — уходить ему мимо зеркала; 14.11 «тест» ушёл в ChatGPT).
+    func isTarget(_ app: NSRunningApplication?) -> Bool {
+        options.apps.contains { $0.matches(bundleID: app?.bundleIdentifier) }
+    }
+
+    /// Запомнить программу пользователя (обычная, не ИИ, не Mac Utils).
+    private func noteActivated(_ app: NSRunningApplication?) {
+        guard let app, FocusRules.isUserApp(isRegular: app.activationPolicy == .regular, isTarget: isTarget(app),
+                                            isSelf: app.processIdentifier == getpid(), bundleID: app.bundleIdentifier) else { return }
+        userApp = app
+    }
+
+    /// Активной стала другая программа. ИИ не нашим шагом (Dock, ⌘Tab, сама) — вернуть программе пользователя;
+    /// пользователь сам перешёл в другую программу — запомнить её, клавиши больше не перехватывать.
     private func applicationActivated(_ app: NSRunningApplication?) {
-        let isTarget = options.apps.contains { $0.matches(bundleID: app?.bundleIdentifier) }
-        guard FocusRules.shouldReclaim(activatedIsTarget: isTarget, mirrorShown: mirrorShown,
-                                       handoff: session.handoff, stepsRunning: runningSteps || !steps.isEmpty) else { return }
-        Log.hiddenScreen.info("активной стала \(app?.bundleIdentifier ?? "?", privacy: .public) — возвращаю фокус зеркалу")
-        run([.activateSelf])
+        let ours = runningSteps || !steps.isEmpty
+            || app.map { echo.consume($0.processIdentifier, at: ProcessInfo.processInfo.systemUptime) } == true
+        if !ours, !isTarget(app), app?.processIdentifier != getpid() {
+            noteActivated(app)
+            setMirrorFocused(false, reason: "активна \(app?.bundleIdentifier ?? "?")")
+            return
+        }
+        guard FocusRules.shouldReclaim(activatedIsTarget: isTarget(app), mirrorShown: mirrorShown,
+                                       handoff: session.handoff, stepsRunning: ours) else { return }
+        Log.hiddenScreen.info("активной стала \(app?.bundleIdentifier ?? "?", privacy: .public) — возвращаю программе пользователя")
+        run([.returnFocus])
+    }
+
+    /// Активность — программе пользователя (не ИИ, не Mac Utils): тогда строка меню основного экрана показывает её.
+    /// Неизвестна или закрыта — Finder (нейтральное меню).
+    private func returnFocus() async {
+        let target = (userApp.flatMap { $0.isTerminated ? nil : $0 })
+            ?? NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first
+        guard let target else { return }
+        echo.note(target.processIdentifier, at: ProcessInfo.processInfo.systemUptime)
+        let path = await Activator.activate(pid: target.processIdentifier, mode: options.activationMode)
+        Log.hiddenScreen.info("фокус — \(target.bundleIdentifier ?? "?", privacy: .public): \(path, privacy: .public); активная программа — \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?", privacy: .public)")
+    }
+
+    /// Фокус у зеркала: клавиши перехватываются и идут в программу ИИ (`postToPid`), активной остаётся программа пользователя.
+    private func setMirrorFocused(_ focused: Bool, reason: String) {
+        guard focused != mirrorFocused else { return }
+        mirrorFocused = focused
+        mirrorView.showFocus(focused)
+        if focused { installKeyTap() } else { keyTap?.stop(); keyTap = nil }
+        Log.hiddenScreen.info("фокус клавиатуры: \(focused ? "зеркало" : "не зеркало", privacy: .public) (\(reason, privacy: .public))")
+        onChange?()
+    }
+
+    private func installKeyTap() {
+        guard keyTap == nil else { return }
+        let tap = EventTap(types: [.keyDown, .keyUp]) { [weak self] type, event in
+            guard let self else { return true }
+            return !self.interceptKey(type, event)
+        }
+        tap.onDisabled = { Log.hiddenScreen.error("перехват клавиатуры отключён системой") }
+        if tap.start() {
+            keyTap = tap
+        } else {
+            Log.hiddenScreen.error("перехват клавиатуры не создан — набор в зеркало не работает")
+        }
+    }
+
+    /// true — клавиша поглощена (ушла в ИИ или отброшена).
+    private func interceptKey(_ type: CGEventType, _ event: CGEvent) -> Bool {
+        if event.getIntegerValueField(.eventSourceUserData) == SyntheticEventFactory.marker { return false }
+        guard phase == .on, mirrorShown, let mirrorTarget, let mapping else { return false }
+        let rewritten = MirrorKeys.winKeysRewrite(code: CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)), flags: event.flags,
+                                                  enabled: UserDefaults.standard.bool(forKey: Pref.winKeys),
+                                                  disabled: WinKeysShortcut.loadDisabled())
+        switch FocusRules.keyDecision(code: rewritten.code, flags: rewritten.flags, mirrorFocused: mirrorFocused, handoff: session.handoff) {
+        case .pass:
+            if rewritten.flags.contains(.maskCommand), rewritten.code == MirrorKeys.tab { setMirrorFocused(false, reason: "⌘Tab") }
+            return false
+        case .drop:
+            if type == .keyDown { Log.hiddenScreen.info("клавиатура: ⌘-сочетание код \(rewritten.code) отброшено") }
+            return true
+        case .forward:
+            var length = 0
+            var units = [UniChar](repeating: 0, count: 8)
+            event.keyboardGetUnicodeString(maxStringLength: units.count, actualStringLength: &length, unicodeString: &units)
+            let characters = length > 0 ? String(utf16CodeUnits: units, count: length) : nil
+            handleKey(code: rewritten.code, down: type == .keyDown, flags: rewritten.flags, characters: characters, pid: mirrorTarget.pid,
+                      translator: MirrorInputTranslator(mapping: mapping, windowNumber: mirrorTarget.windowID))
+            return true
+        }
     }
 
     /// bundle id всех программ из списка — помощнику, чтобы прятать их, если Mac Utils пропадёт.
@@ -255,6 +343,7 @@ public final class HiddenScreenEngine {
 
     private func tearDown(hiding: Bool) {
         endHandoffNow()
+        setMirrorFocused(false, reason: "выключение")
         pressTap?.stop()
         pressTap = nil
         sweepTimer?.invalidate()
@@ -569,21 +658,13 @@ public final class HiddenScreenEngine {
         case .showCursor:
             pointer.showCursor()
         case .activateTarget:
-            guard let pid, ScreenOutput.mayShow("Скрытый экран: активация программы"),
-                  let app = NSRunningApplication(processIdentifier: pid) else { return }
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { return }
-            app.activate()
+            guard let pid else { return }
             let started = ProcessInfo.processInfo.systemUptime
-            while NSWorkspace.shared.frontmostApplication?.processIdentifier != pid,
-                  ProcessInfo.processInfo.systemUptime - started < 0.3 {
-                try? await Task.sleep(nanoseconds: 5_000_000)
-            }
-            let activated = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
-            Log.hiddenScreen.debug("активация: \(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) мс\(activated ? "" : " — НЕ активировалась", privacy: .public)")
-        case .activateSelf:
-            // Нажатие над зеркалом перехвачено и до Mac Utils не дошло: «вежливая» активация macOS 14+ её может не пустить.
-            let path = await SelfActivation.activate(window: mirrorWindow, firstResponder: mirrorView, mode: options.activationMode)
-            Log.hiddenScreen.info("Mac Utils активна: \(path, privacy: .public); активная программа — \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?", privacy: .public)")
+            echo.note(pid, at: ProcessInfo.processInfo.systemUptime)
+            let path = await Activator.activate(pid: pid, mode: options.activationMode, timeout: 0.3)
+            Log.hiddenScreen.debug("активация ИИ: \(path, privacy: .public), \(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) мс")
+        case .returnFocus:
+            await returnFocus()
         case let .wait(seconds):
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
         case let .warp(point):
@@ -684,7 +765,7 @@ public final class HiddenScreenEngine {
         _ = session.endHandoff(cursorNow: .zero, mapping: fallback, mirrorRect: .zero)
         stopHandoffWatch()
         if let back { pointer.warp(to: back) }
-        ScreenOutput.activateApp(ignoringOtherApps: true)
+        Task { @MainActor in await returnFocus() }
     }
 
     // MARK: Перехват нажатий над зеркалом (протягивание)
@@ -694,7 +775,7 @@ public final class HiddenScreenEngine {
     /// по отпусканию; протягивание начинается синтетическим нажатием в окне программы — оно и становится владельцем.
     private func installPressTap() {
         guard options.pressMode == .tap, pressTap == nil else { return }
-        let tap = EventTap(types: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] type, event in
+        let tap = EventTap(types: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown]) { [weak self] type, event in
             guard let self else { return true }
             return !self.intercept(type, event)
         }
@@ -720,10 +801,31 @@ public final class HiddenScreenEngine {
         }
         let location = event.location
         let view = CGPoint(x: location.x - rect.minX, y: location.y - rect.minY)
+        let overMirror = rect.contains(location) && mapping.toTarget(view) != nil
+            && NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0) == window.windowNumber
         switch type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            // Нажатие мимо зеркала (пока курсор не передан программе) — клавиши снова идут активной программе.
+            if !overMirror, session.handoff == nil { setMirrorFocused(false, reason: "щелчок мимо зеркала") }
+        default:
+            break
+        }
+        switch type {
+        case .rightMouseDown:
+            guard overMirror, session.state == .idle else { return false }
+            // Правая кнопка тоже перехватывается: настоящий щелчок по зеркалу сделал бы активной Mac Utils.
+            rightIntercepted = true
+            setMirrorFocused(true, reason: "правая кнопка по зеркалу")
+            run(session.down(.right, at: view, clicks: Int(event.getIntegerValueField(.mouseEventClickState)), flags: event.flags,
+                             mapping: mapping, windowNumber: target.windowID, cursor: location))
+            return true
+        case .rightMouseUp:
+            guard rightIntercepted else { return false }
+            rightIntercepted = false
+            return true
         case .leftMouseDown:
-            guard session.state == .idle, rect.contains(location), mapping.toTarget(view) != nil,
-                  NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0) == window.windowNumber else { return false }
+            guard session.state == .idle, overMirror else { return false }
+            setMirrorFocused(true, reason: "щелчок по зеркалу")
             pressIntercepted = true
             upBeforeLive = false
             let clicks = Int(event.getIntegerValueField(.mouseEventClickState))
@@ -849,6 +951,7 @@ extension HiddenScreenEngine {
             mirrorRequested = false
             mirrorWindow?.orderOut(nil)
             mirrorShown = false
+            setMirrorFocused(false, reason: "зеркало спрятано")
             pressTap?.stop()
             pressTap = nil
             Task { await stopMirror() }
@@ -863,12 +966,12 @@ extension HiddenScreenEngine {
         }
         let window = ensureMirrorWindow()
         rescueMirrorIfHidden()
-        window.makeKeyAndOrderFrontOnScreen("Скрытый экран: зеркало")
-        window.makeFirstResponder(mirrorView)
+        // Не делаем Mac Utils активной: у неё нет своей строки меню, и macOS показала бы меню последней обычной программы
+        // (14.11 — ChatGPT). Зеркало просто поверх; клавиши — через перехват после щелчка по нему.
+        window.orderFrontRegardlessOnScreen("Скрытый экран: зеркало")
         mirrorShown = true
         rescueMirrorIfHidden()
-        // Без этого активной остаётся прежняя программа (14.11 — ChatGPT, и его строка меню на основном экране).
-        run([.activateSelf])
+        if isTarget(NSWorkspace.shared.frontmostApplication) { run([.returnFocus]) }
         installPressTap()
         onChange?()
         let app = mirroredApp ?? statuses.first(where: { $0.hiddenWindows > 0 })?.app ?? statuses.first(where: \.isRunning)?.app

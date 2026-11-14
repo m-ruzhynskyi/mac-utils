@@ -84,6 +84,12 @@ public final class MirrorView: NSView, NSDraggingSource {
         CATransaction.commit()
     }
 
+    /// Рамка «клавиатура идёт сюда» (фокус у зеркала; активной при этом остаётся программа пользователя).
+    public func showFocus(_ focused: Bool) {
+        layer?.borderWidth = focused ? 2 : 0
+        layer?.borderColor = NSColor.controlAccentColor.cgColor
+    }
+
     /// Курсор-подсказка, пока настоящий курсор на скрытом дисплее (перетаскивание, меню, прокрутка). nil — убрать.
     public func showHandoffCursor(at point: CGPoint?) {
         CATransaction.begin()

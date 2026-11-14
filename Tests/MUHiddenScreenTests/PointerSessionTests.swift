@@ -19,7 +19,7 @@ final class PointerSessionTests: XCTestCase {
             .hideCursor, .activateTarget, .warp(target),
             .postHID(SyntheticEvent(kind: .leftDown, location: target, clicks: 1)),
             .postHID(SyntheticEvent(kind: .leftUp, location: target, clicks: 1)),
-            .warp(cursor), .showCursor, .activateSelf,
+            .warp(cursor), .showCursor, .returnFocus,
         ])
         XCTAssertEqual(session.state, .idle)
     }
@@ -67,7 +67,7 @@ final class PointerSessionTests: XCTestCase {
 
         let mirrorRect = CGRect(x: 100, y: 200, width: 400, height: 300)
         let end = session.endHandoff(cursorNow: CGPoint(x: 2400, y: 1300), mapping: mapping, mirrorRect: mirrorRect)
-        XCTAssertEqual(end, [.warp(CGPoint(x: 300, y: 350)), .activateSelf, .endHandoff(.drag)])
+        XCTAssertEqual(end, [.warp(CGPoint(x: 300, y: 350)), .returnFocus, .endHandoff(.drag)])
         XCTAssertEqual(session.state, .idle)
     }
 
@@ -77,7 +77,7 @@ final class PointerSessionTests: XCTestCase {
         XCTAssertEqual(steps.first, .activateTarget)
         XCTAssertEqual(steps.last, .beginHandoff(.menu))
         XCTAssertTrue(steps.contains(.postHID(SyntheticEvent(kind: .rightDown, location: CGPoint(x: 2400, y: 1300), clicks: 1))))
-        XCTAssertFalse(steps.contains(.activateSelf), "меню закроется, если вернуть активность Mac Utils сразу")
+        XCTAssertFalse(steps.contains(.returnFocus), "меню закроется, если вернуть активность Mac Utils сразу")
     }
 
     func testScrollHandoffDoesNotActivate() {
@@ -220,7 +220,7 @@ final class ShortcutTests: XCTestCase {
 
     func testActiveModeActivatesWaitsAndReturns() {
         let steps = PointerSession().shortcut(paste, mode: .active)
-        XCTAssertEqual(steps, [.activateTarget, .postToPid(paste[0]), .postToPid(paste[1]), .wait(PointerSession.shortcutSettle), .activateSelf])
+        XCTAssertEqual(steps, [.activateTarget, .postToPid(paste[0]), .postToPid(paste[1]), .wait(PointerSession.shortcutSettle), .returnFocus])
     }
 
     func testHIDAndInactiveModes() {

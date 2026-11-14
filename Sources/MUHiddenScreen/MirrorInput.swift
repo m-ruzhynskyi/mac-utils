@@ -1,4 +1,5 @@
 import CoreGraphics
+import MUCore
 
 /// Ввод в окне-зеркале (координаты зеркала: точки, начало слева сверху).
 public enum MirrorInput: Equatable, Sendable {
@@ -37,9 +38,10 @@ public struct SyntheticEvent: Equatable, Sendable {
 public enum ShortcutRoute: Equatable, Sendable {
     /// Отправить в программу (⌘V, ⌘C, ⌘A, ⌘Z, ⌘↩ …).
     case forward
-    /// Оставить Mac Utils (⌘Tab, ⌘H, ⌘M, ⌘W закрывает зеркало, а не окно ИИ).
+    /// Пропустить дальше — системе и активной программе (⌘Tab, ⌘`: переключение программ и окон).
     case keepLocal
-    /// Никуда: ⌘Q закрыл бы саму программу ИИ, она бы исчезла с виртуального дисплея и выдала себя при следующем запуске.
+    /// Никуда: ⌘Q и ⌘W закрыли бы программу ИИ или окно активной программы (Zoom), ⌘H и ⌘M — спрятали бы,
+    /// ⌘, — открыл бы настройки.
     case drop
 }
 
@@ -52,10 +54,21 @@ public enum MirrorKeys {
     public static func route(code: CGKeyCode, flags: CGEventFlags) -> ShortcutRoute {
         guard flags.contains(.maskCommand) else { return .forward }
         switch code {
-        case q: return .drop
-        case w, h, m, tab, grave, comma: return .keepLocal
+        case q, w, h, m, comma: return .drop
+        case tab, grave: return .keepLocal
         default: return .forward
         }
+    }
+
+    /// «Клавиши Windows» для набора в зеркало: Ctrl+C/V/X/A/Z/S/F → ⌘ (Ctrl+Y → ⇧⌘Z), если функция включена и сочетание
+    /// не выключено. Перехват клавиатуры зеркала может сработать раньше перехвата «Клавиш Windows» — переписываем сами.
+    public static func winKeysRewrite(code: CGKeyCode, flags: CGEventFlags, enabled: Bool, disabled: Set<String>)
+        -> (code: CGKeyCode, flags: CGEventFlags) {
+        guard enabled, flags.contains(.maskControl), !flags.contains(.maskCommand),
+              let shortcut = WinKeysShortcut.forKeyCode(Int(code)), !disabled.contains(shortcut.id) else { return (code, flags) }
+        var rewritten = flags.subtracting(.maskControl).union(.maskCommand)
+        if shortcut.addsShift { rewritten.insert(.maskShift) }
+        return (CGKeyCode(shortcut.targetKeyCode), rewritten)
     }
 
     /// Печатный текст: не пустой, без управляющих символов и без «функциональной» области AppKit (стрелки, F-клавиши: U+F700…U+F8FF).

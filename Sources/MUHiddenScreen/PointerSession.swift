@@ -54,8 +54,10 @@ public enum PointerStep: Equatable, Sendable {
     case showCursor
     /// Сделать программу ИИ активной и дождаться этого (строка меню основного экрана при этом не меняется — проверено с Sidecar).
     case activateTarget
-    /// Вернуть активность Mac Utils: зеркало снова получает клавиатуру, а ввод уходит в программу через `postToPid`.
-    case activateSelf
+    /// Вернуть активность программе, в которой пользователь был до этого (Zoom, презентация; не ИИ и не Mac Utils):
+    /// строка меню основного экрана показывает её. Mac Utils — accessory без своего меню: пока она активна, macOS
+    /// показывает меню последней обычной программы — 14.11 это был ChatGPT. Клавиши в зеркало идут через перехват.
+    case returnFocus
     /// `CGWarpMouseCursorPosition` (глобальные координаты Quartz).
     case warp(CGPoint)
     /// Событие на уровне HID (`.cghidEventTap`): WindowServer сам находит окно под курсором.
@@ -143,7 +145,7 @@ public struct PointerSession: Sendable {
         case .pid:
             return [.postToPid(down), .postToPid(up)]
         case .warp:
-            return [.hideCursor, .activateTarget, .warp(target), .postHID(down), .postHID(up), .warp(cursor), .showCursor, .activateSelf]
+            return [.hideCursor, .activateTarget, .warp(target), .postHID(down), .postHID(up), .warp(cursor), .showCursor, .returnFocus]
         }
     }
 
@@ -173,10 +175,10 @@ public struct PointerSession: Sendable {
             return events.map { .postToPid($0) }
         case .active:
             return inHandoff ? events.map { .postToPid($0) }
-                : [.activateTarget] + events.map { .postToPid($0) } + [.wait(Self.shortcutSettle), .activateSelf]
+                : [.activateTarget] + events.map { .postToPid($0) } + [.wait(Self.shortcutSettle), .returnFocus]
         case .hid:
             return inHandoff ? events.map { .postHID($0) }
-                : [.activateTarget] + events.map { .postHID($0) } + [.wait(Self.shortcutSettle), .activateSelf]
+                : [.activateTarget] + events.map { .postHID($0) } + [.wait(Self.shortcutSettle), .returnFocus]
         }
     }
 
@@ -189,7 +191,7 @@ public struct PointerSession: Sendable {
         guard case let .handoff(kind, activated) = state else { return [] }
         state = .idle
         var steps: [PointerStep] = [.warp(Self.returnPoint(cursorNow, mapping: mapping, mirrorRect: mirrorRect))]
-        if activated { steps.append(.activateSelf) }
+        if activated { steps.append(.returnFocus) }
         steps.append(.endHandoff(kind))
         return steps
     }
