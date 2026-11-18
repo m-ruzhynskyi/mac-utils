@@ -90,6 +90,18 @@ public enum HiddenWindowRules {
         return placement(of: current, from: hidden, into: first)
     }
 
+    /// Какие окна AX вернуть со скрытого дисплея и куда: каждое, что хоть немного на нём (по номеру — запомненное место).
+    public static func restorePlan(windows: [(windowID: CGWindowID?, frame: CGRect)], remembered: [CGWindowID: CGRect],
+                                   hidden: CGRect, physical: [CGRect]) -> [(index: Int, origin: CGPoint)] {
+        guard !hidden.isNull else { return [] }
+        return windows.enumerated().compactMap { index, window in
+            guard window.frame.intersects(hidden),
+                  let origin = restoreOrigin(remembered: window.windowID.flatMap { remembered[$0] }, current: window.frame,
+                                             hidden: hidden, physical: physical) else { return nil }
+            return (index, origin)
+        }
+    }
+
     /// Новое начало окна на скрытом дисплее: то же место относительно дисплея, но целиком внутри.
     public static func placement(of frame: CGRect, from source: CGRect, into hidden: CGRect) -> CGPoint {
         func clamp(_ value: CGFloat, _ low: CGFloat, _ high: CGFloat) -> CGFloat { min(max(value, low), max(low, high)) }

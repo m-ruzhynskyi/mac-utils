@@ -34,6 +34,9 @@ public struct SyntheticEvent: Equatable, Sendable {
     public var text: String?
     /// Номер окна для полей 91/92 (`mouseEventWindowUnderMousePointer…`): без них AppKit ищет окно по точке.
     public var windowNumber: CGWindowID = 0
+    /// Левый верхний угол окна (Quartz): у событий в процесс (`postToPid`) точка в окне ставится сама
+    /// (`CGEventSetWindowLocation`) — без WindowServer её некому посчитать, и AppKit видел движение не там.
+    public var windowOrigin: CGPoint?
 }
 
 /// Что делать с сочетанием клавиш в зеркале.

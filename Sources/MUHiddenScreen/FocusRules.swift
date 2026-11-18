@@ -87,6 +87,11 @@ extension FocusRules {
         return isSelf || isEcho || stepsRunning ? .ignore : .userSwitched
     }
 
+    /// Активация завершена, только когда и WindowServer, и `NSWorkspace` (уведомление программы) называют её.
+    public static func activated(windowServer: pid_t?, workspace: pid_t?, pid: pid_t) -> Bool {
+        windowServer == pid && workspace == pid
+    }
+
     /// Повторные проверки «не активен ли снова ИИ» после возврата активности (секунды). Дальше — опрос раз в 0,25 с.
     public static let recheckDelays: [TimeInterval] = [0.15, 0.4, 1.0]
 }
@@ -139,4 +144,27 @@ public enum ActivationMode: String, Sendable, CaseIterable {
     case `public`
     /// Сразу SkyLight.
     case skylight
+}
+
+/// Журнал наведения: первое движение, каждое `every`-е и каждый уход с зеркала (проверка 643b753: одна строка — мало).
+public enum HoverLog {
+    public static let every = 25
+
+    public static func shouldLog(count: Int, exit: Bool) -> Bool {
+        exit || count == 1 || count % every == 0
+    }
+}
+
+/// Нажатия в рамке зеркала, которые перехват пропустил: чьё окно было сверху.
+enum MissedPressLog {
+    static let limit = 20
+
+    static func owner(of windowID: CGWindowID) -> String {
+        guard windowID != 0,
+              let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID) as? [[String: Any]])?.first else { return "—" }
+        let name = info[kCGWindowOwnerName as String] as? String ?? "?"
+        let pid = info[kCGWindowOwnerPID as String] as? Int ?? 0
+        let layer = info[kCGWindowLayer as String] as? Int ?? 0
+        return "\(name), pid \(pid), слой \(layer)"
+    }
 }

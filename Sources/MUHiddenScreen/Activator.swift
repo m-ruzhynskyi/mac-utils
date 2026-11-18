@@ -58,8 +58,11 @@ enum Activator {
     /// Для журнала: активная программа читается у WindowServer (иначе — `NSWorkspace`).
     static var readsWindowServer: Bool { getFront != nil && getPID != nil }
 
+    /// Активна по-настоящему: и WindowServer, и сама программа об этом знают. 643b753 проверял только WindowServer —
+    /// тот отвечает «активна» через 4–8 мс, раньше, чем Claude получил активацию, и ⌘C/⌘V (меню Electron) уходили
+    /// в ещё неактивную программу. `NSWorkspace` обновляется уведомлением, которое приходит после программы (12–29 мс).
     static func isFront(_ pid: pid_t) -> Bool {
-        frontPID() == pid
+        FocusRules.activated(windowServer: frontPID(), workspace: NSWorkspace.shared.frontmostApplication?.processIdentifier, pid: pid)
     }
 
     /// Возвращает путь для журнала: «уже», «обычная», «skylight», «НЕ удалось (…)».

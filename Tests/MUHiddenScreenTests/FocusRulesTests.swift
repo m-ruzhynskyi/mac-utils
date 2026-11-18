@@ -66,6 +66,20 @@ final class FocusRulesTests: XCTestCase {
                        .ignore)
     }
 
+    // 643b753: WindowServer называл Claude активным через 4–8 мс, сама программа — позже; ⌘C/⌘V терялись.
+    func testActivationNeedsBothWindowServerAndProgram() {
+        XCTAssertFalse(FocusRules.activated(windowServer: 36492, workspace: 412, pid: 36492), "программа ещё не знает")
+        XCTAssertFalse(FocusRules.activated(windowServer: 412, workspace: 36492, pid: 36492))
+        XCTAssertTrue(FocusRules.activated(windowServer: 36492, workspace: 36492, pid: 36492))
+        XCTAssertFalse(FocusRules.activated(windowServer: nil, workspace: nil, pid: 1))
+    }
+
+    // 643b753: первые щелчки без движения перед ними — окно сверху искали там, где курсор был раньше.
+    func testQuartzToCocoaPoint() {
+        XCTAssertEqual(HiddenScreenGeometry.cocoa(fromQuartz: CGPoint(x: 734, y: 579), primaryHeight: 1112), CGPoint(x: 734, y: 533))
+        XCTAssertEqual(HiddenScreenGeometry.cocoa(fromQuartz: CGPoint(x: 0, y: 0), primaryHeight: 1112), CGPoint(x: 0, y: 1112))
+    }
+
     func testRechecksCoverLateSelfActivation() {
         XCTAssertLessThanOrEqual(FocusRules.recheckDelays.first ?? 1, 0.15, "первая проверка — раньше, чем пользователь начнёт печатать")
         XCTAssertGreaterThanOrEqual(FocusRules.recheckDelays.last ?? 0, 1.0, "14.11 Claude активировался до 1 с спустя")

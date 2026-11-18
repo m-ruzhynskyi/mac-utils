@@ -132,7 +132,7 @@ public struct PointerSession: Sendable {
         state = .handoff(.drag, activated: true)
         // Нажатие в программе — синтетическое (физическое перехвачено и до зеркала не дошло), дальше физическая мышь
         // ведёт протягивание сама: курсор уже на скрытом дисплее, отпускание достанется тому, кто получил нажатие.
-        return [.activateTarget, .warp(target),
+        return [.activateTarget, .wait(Self.activationSettle), .warp(target),
                 .postHID(Self.mouse(.leftDown, target, clicks, flags, 0)),
                 .postHID(Self.mouse(.leftDragged, now, 1, flags, 0)),
                 .warp(now), .beginHandoff(.drag)]
@@ -180,15 +180,18 @@ public struct PointerSession: Sendable {
             return events.map { .postToPid($0) }
         case .active:
             return inHandoff ? events.map { .postToPid($0) }
-                : [.activateTarget] + events.map { .postToPid($0) } + [.wait(Self.shortcutSettle), .returnFocus]
+                : [.activateTarget, .wait(Self.activationSettle)] + events.map { .postToPid($0) } + [.wait(Self.shortcutSettle), .returnFocus]
         case .hid:
             return inHandoff ? events.map { .postHID($0) }
-                : [.activateTarget] + events.map { .postHID($0) } + [.wait(Self.shortcutSettle), .returnFocus]
+                : [.activateTarget, .wait(Self.activationSettle)] + events.map { .postHID($0) } + [.wait(Self.shortcutSettle), .returnFocus]
         }
     }
 
     /// Сколько ждать после ⌘-сочетания, прежде чем вернуть активность программе пользователя.
     public static let shortcutSettle: TimeInterval = 0.06
+    /// После активации ИИ, прежде чем слать ⌘-сочетание или нажатие протягивания: окно программы становится ключевым
+    /// чуть позже, чем сама программа — активной.
+    public static let activationSettle: TimeInterval = 0.03
     /// Сколько ждать после щелчка (курсор уже на зеркале), прежде чем вернуть активность программе пользователя.
     public static let clickSettle: TimeInterval = 0.05
 
@@ -200,14 +203,15 @@ public struct PointerSession: Sendable {
         guard let target = mapping.toTarget(point) else { return hoverExit(mapping: mapping, windowNumber: windowNumber) }
         if let last = lastHover, abs(last.x - target.x) < 1, abs(last.y - target.y) < 1 { return [] }
         lastHover = target
-        return [.postToPid(SyntheticEvent(kind: .moved, location: target, windowNumber: windowNumber))]
+        return [.postToPid(SyntheticEvent(kind: .moved, location: target, windowNumber: windowNumber, windowOrigin: mapping.target.origin))]
     }
 
     /// Мышь ушла с зеркала: одно движение за край окна — программа снимает подсветку «при наведении».
     public mutating func hoverExit(mapping: MirrorMapping, windowNumber: CGWindowID) -> [PointerStep] {
         guard state == .idle, lastHover != nil else { return [] }
         lastHover = nil
-        return [.postToPid(SyntheticEvent(kind: .moved, location: Self.outside(mapping.target), windowNumber: windowNumber))]
+        return [.postToPid(SyntheticEvent(kind: .moved, location: Self.outside(mapping.target), windowNumber: windowNumber,
+                                          windowOrigin: mapping.target.origin))]
     }
 
     /// Точка чуть левее и выше окна.

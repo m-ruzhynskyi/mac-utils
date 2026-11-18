@@ -11,6 +11,24 @@ enum SyntheticEventFactory {
     /// Метка своих событий (`eventSourceUserData`, «MUHS»): перехват нажатий над зеркалом их пропускает.
     static let marker: Int64 = 0x4D55_4853
 
+    private typealias SetWindowLocation = @convention(c) (CGEvent, CGPoint) -> Void
+    private typealias GetWindowLocation = @convention(c) (CGEvent) -> CGPoint
+
+    /// `CGEventSetWindowLocation` (CoreGraphics, закрытая): точка события в координатах окна (начало слева сверху).
+    private static let setWindowLocation: SetWindowLocation? = {
+        guard let handle = dlopen(nil, RTLD_NOW), let symbol = dlsym(handle, "CGEventSetWindowLocation") else { return nil }
+        return unsafeBitCast(symbol, to: SetWindowLocation.self)
+    }()
+
+    private static let getWindowLocation: GetWindowLocation? = {
+        guard let handle = dlopen(nil, RTLD_NOW), let symbol = dlsym(handle, "CGEventGetWindowLocation") else { return nil }
+        return unsafeBitCast(symbol, to: GetWindowLocation.self)
+    }()
+
+    /// Для журнала: точка в окне, которая ушла с событием (nil — функции нет).
+    static func windowLocation(of event: CGEvent) -> CGPoint? { getWindowLocation?(event) }
+    static var setsWindowLocation: Bool { setWindowLocation != nil }
+
     static func make(_ event: SyntheticEvent, source: CGEventSource?) -> CGEvent? {
         let cgEvent: CGEvent?
         switch event.kind {
@@ -40,6 +58,9 @@ enum SyntheticEventFactory {
             }
         }
         guard let cgEvent else { return nil }
+        if let origin = event.windowOrigin, let location = event.location, let setWindowLocation {
+            setWindowLocation(cgEvent, CGPoint(x: location.x - origin.x, y: location.y - origin.y))
+        }
         cgEvent.flags = event.flags
         cgEvent.setIntegerValueField(.eventSourceUserData, value: marker)
         if event.windowNumber != 0 {
@@ -61,6 +82,15 @@ public final class PidEventPoster: SyntheticEventSink {
         for event in events {
             SyntheticEventFactory.make(event, source: source)?.postToPid(pid)
         }
+    }
+
+    /// Одно событие; возвращает точку в окне, которая ушла с ним (для журнала наведения).
+    @discardableResult
+    public func postReadingBack(_ event: SyntheticEvent, to pid: pid_t) -> CGPoint? {
+        guard let cgEvent = SyntheticEventFactory.make(event, source: source) else { return nil }
+        let windowLocation = SyntheticEventFactory.windowLocation(of: cgEvent)
+        cgEvent.postToPid(pid)
+        return windowLocation
     }
 }
 

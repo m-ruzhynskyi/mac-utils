@@ -41,6 +41,11 @@ public enum HiddenScreenGeometry {
         CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
     }
 
+    /// Точка Quartz (начало слева сверху основного экрана) → точка AppKit (слева снизу).
+    public static func cocoa(fromQuartz point: CGPoint, primaryHeight: CGFloat) -> CGPoint {
+        CGPoint(x: point.x, y: primaryHeight - point.y)
+    }
+
     /// Курсор на скрытом дисплее → ближайшая точка на настоящих дисплеях (куда его вернуть), иначе nil.
     public static func pullBack(_ cursor: CGPoint, hidden: CGRect, physical: [CGRect]) -> CGPoint? {
         guard hidden.contains(cursor), !physical.isEmpty else { return nil }

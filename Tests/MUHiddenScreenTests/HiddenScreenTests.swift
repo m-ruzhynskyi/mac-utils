@@ -226,3 +226,27 @@ final class DropBridgeTests: XCTestCase {
         XCTAssertEqual(board.items, [["public.utf8-plain-text": Data("моё".utf8)]])
     }
 }
+
+/// 643b753: на выходе ChatGPT остался на (1710, 1111) — окно спрятанной программы на снятом дисплее.
+final class RestorePlanTests: XCTestCase {
+    let hidden = CGRect(x: 1710, y: 1072, width: 1440, height: 900)
+    let physical = [CGRect(x: 0, y: 0, width: 1710, height: 1112)]
+
+    func testEveryWindowOnHiddenGoesBack() {
+        let plan = HiddenWindowRules.restorePlan(
+            windows: [(20469, CGRect(x: 1918, y: 1259, width: 900, height: 700)),
+                      (20858, CGRect(x: 1710, y: 1111, width: 1280, height: 820)),
+                      (nil, CGRect(x: 1800, y: 1100, width: 400, height: 300)),
+                      (99, CGRect(x: 100, y: 100, width: 400, height: 300))],
+            remembered: [20858: CGRect(x: 0, y: 39, width: 1280, height: 820)], hidden: hidden, physical: physical)
+        XCTAssertEqual(plan.map(\.index), [0, 1, 2], "окно на настоящем экране не трогаем")
+        XCTAssertEqual(plan[1].origin, CGPoint(x: 0, y: 39), "ChatGPT — туда, где был до переноса")
+        XCTAssertTrue(physical[0].contains(plan[0].origin), "не запомнено — на настоящий экран")
+        XCTAssertTrue(physical[0].contains(plan[2].origin), "без номера — на настоящий экран")
+    }
+
+    func testNothingWithoutHiddenDisplay() {
+        XCTAssertTrue(HiddenWindowRules.restorePlan(windows: [(1, CGRect(x: 0, y: 0, width: 10, height: 10))], remembered: [:],
+                                                    hidden: .null, physical: physical).isEmpty)
+    }
+}

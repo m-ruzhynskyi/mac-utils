@@ -55,7 +55,7 @@ final class PointerSessionTests: XCTestCase {
         _ = session.down(.left, at: CGPoint(x: 100, y: 50), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor)
         let steps = session.dragged(to: CGPoint(x: 110, y: 50), mapping: mapping)
         XCTAssertEqual(steps, [
-            .activateTarget, .warp(CGPoint(x: 2200, y: 1100)),
+            .activateTarget, .wait(PointerSession.activationSettle), .warp(CGPoint(x: 2200, y: 1100)),
             .postHID(SyntheticEvent(kind: .leftDown, location: CGPoint(x: 2200, y: 1100), clicks: 1)),
             .postHID(SyntheticEvent(kind: .leftDragged, location: CGPoint(x: 2220, y: 1100), clicks: 1)),
             .warp(CGPoint(x: 2220, y: 1100)), .beginHandoff(.drag),
@@ -129,14 +129,33 @@ final class PointerSessionTests: XCTestCase {
     func testHoverPostsMovesWithoutActivationAndDeduplicates() {
         var session = PointerSession()
         XCTAssertEqual(session.hover(at: CGPoint(x: 100, y: 50), mapping: mapping, windowNumber: 7),
-                       [.postToPid(SyntheticEvent(kind: .moved, location: CGPoint(x: 2200, y: 1100), windowNumber: 7))],
-                       "только postToPid: ни активации, ни переноса курсора")
+                       [.postToPid(SyntheticEvent(kind: .moved, location: CGPoint(x: 2200, y: 1100), windowNumber: 7,
+                                                  windowOrigin: CGPoint(x: 2000, y: 1000)))],
+                       "только postToPid: ни активации, ни переноса курсора; точка в окне — от его угла")
         XCTAssertEqual(session.hover(at: CGPoint(x: 100.2, y: 50.2), mapping: mapping, windowNumber: 7), [], "то же место — не повторять")
         XCTAssertEqual(session.hover(at: CGPoint(x: 101, y: 50), mapping: mapping, windowNumber: 7).count, 1)
         XCTAssertEqual(session.hoverExit(mapping: mapping, windowNumber: 7),
-                       [.postToPid(SyntheticEvent(kind: .moved, location: CGPoint(x: 1980, y: 980), windowNumber: 7))],
+                       [.postToPid(SyntheticEvent(kind: .moved, location: CGPoint(x: 1980, y: 980), windowNumber: 7,
+                                                  windowOrigin: CGPoint(x: 2000, y: 1000)))],
                        "уход с зеркала — движение за край окна, подсветка снимается")
         XCTAssertEqual(session.hoverExit(mapping: mapping, windowNumber: 7), [], "второй раз — нечего снимать")
+    }
+
+    // 643b753: наведение уходило, а подсветки не было — у события в процесс не было точки в окне.
+    func testPidMoveCarriesWindowLocation() throws {
+        let event = SyntheticEvent(kind: .moved, location: CGPoint(x: 2345, y: 1600), windowNumber: 20469, windowOrigin: CGPoint(x: 1918, y: 1259))
+        let cgEvent = try XCTUnwrap(SyntheticEventFactory.make(event, source: nil))
+        XCTAssertEqual(cgEvent.getIntegerValueField(.mouseEventWindowUnderMousePointer), 20469)
+        XCTAssertEqual(cgEvent.location, CGPoint(x: 2345, y: 1600))
+        try XCTSkipUnless(SyntheticEventFactory.setsWindowLocation, "нет CGEventSetWindowLocation")
+        XCTAssertEqual(SyntheticEventFactory.windowLocation(of: cgEvent), CGPoint(x: 427, y: 341))
+    }
+
+    func testHoverLogCadence() {
+        XCTAssertTrue(HoverLog.shouldLog(count: 1, exit: false))
+        XCTAssertFalse(HoverLog.shouldLog(count: 2, exit: false))
+        XCTAssertTrue(HoverLog.shouldLog(count: HoverLog.every, exit: false))
+        XCTAssertTrue(HoverLog.shouldLog(count: 7, exit: true), "уход — всегда")
     }
 
     func testHoverIsSilentWhileMouseIsBusy() {
@@ -276,7 +295,9 @@ final class ShortcutTests: XCTestCase {
 
     func testActiveModeActivatesWaitsAndReturns() {
         let steps = PointerSession().shortcut(paste, mode: .active)
-        XCTAssertEqual(steps, [.activateTarget, .postToPid(paste[0]), .postToPid(paste[1]), .wait(PointerSession.shortcutSettle), .returnFocus])
+        XCTAssertEqual(steps, [.activateTarget, .wait(PointerSession.activationSettle), .postToPid(paste[0]), .postToPid(paste[1]),
+                               .wait(PointerSession.shortcutSettle), .returnFocus],
+                       "643b753: ⌘C/⌘V уходили, когда Claude ещё не получил активацию — пауза после неё")
     }
 
     func testHIDAndInactiveModes() {

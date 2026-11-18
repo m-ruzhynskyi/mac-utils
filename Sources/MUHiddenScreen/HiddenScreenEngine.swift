@@ -363,9 +363,9 @@ public final class HiddenScreenEngine {
             return
         }
         guard phase == .on else { return }
-        restoreWindows(of: options.apps)
+        let restored = restoreWindows(of: options.apps)
         tearDown(hiding: false)
-        Log.hiddenScreen.info("disable: окна возвращены")
+        Log.hiddenScreen.info("disable: окон возвращено \(restored.moved), не сдвинулось \(restored.failed)")
     }
 
     /// Выход Mac Utils: сначала спрятать программы (иначе macOS перенесёт их окна на настоящий экран — в демонстрацию),
@@ -373,8 +373,11 @@ public final class HiddenScreenEngine {
     public func shutdown() {
         guard phase == .on || phase == .starting else { return }
         runningTargets.forEach { $0.hide() }
+        // Окна спрятанных программ — на прежние места, пока дисплей ещё есть: иначе (643b753) ChatGPT остался на
+        // (1710, 1111), а macOS переставляет окна спрятанной программы только при показе. AX двигает и их.
+        let restored = restoreWindows(of: options.apps)
         tearDown(hiding: true)
-        Log.hiddenScreen.info("shutdown: программы спрятаны, дисплей снят")
+        Log.hiddenScreen.info("shutdown: программы спрятаны, окон возвращено \(restored.moved), не сдвинулось \(restored.failed), дисплей снят")
     }
 
     private func tearDown(hiding: Bool) {
@@ -643,6 +646,7 @@ public final class HiddenScreenEngine {
         }
         switch input {
         case let .mouse(.down, button, point, clicks, flags):
+            Log.hiddenScreen.info("зеркало: нажатие пришло окну зеркала (\(Int(point.x)), \(Int(point.y))), перехват \(self.pressTap != nil ? "есть" : "нет", privacy: .public)")
             run(session.down(button, at: point, clicks: clicks, flags: flags, mapping: mapping,
                              windowNumber: mirrorTarget.windowID, cursor: pointer.location))
         case let .mouse(.dragged, _, point, _, _):
@@ -662,18 +666,20 @@ public final class HiddenScreenEngine {
         postHover(session.hover(at: point, mapping: mapping, windowNumber: windowNumber), pid: pid)
     }
 
-    private var hoverLogged = false
+    /// Движений наведения отправлено (журнал — первое, каждое `HoverLog.every`-е и уход с зеркала).
+    private var hoverCount = 0
 
     private func postHover(_ hoverSteps: [PointerStep], pid: pid_t) {
         for case let .postToPid(event) in hoverSteps {
             let before = pointer.location
-            keys.post([event], to: pid)
-            // Первое наведение — в журнал, с проверкой, что курсор пользователя не сдвинулся.
-            if !hoverLogged {
-                hoverLogged = true
-                let after = pointer.location
-                Log.hiddenScreen.info("наведение: первое движение в окно (\(Int(event.location?.x ?? 0)), \(Int(event.location?.y ?? 0))), pid \(pid); курсор \(before == after ? "на месте" : "СДВИНУЛСЯ \(before) → \(after)", privacy: .public)")
-            }
+            let inWindow = keys.postReadingBack(event, to: pid)
+            hoverCount += 1
+            let exit = event.location.map { !(mapping?.target.contains($0) ?? true) } ?? false
+            guard HoverLog.shouldLog(count: hoverCount, exit: exit) else { continue }
+            let after = pointer.location
+            let local = inWindow.map { "(\(Int($0.x)), \(Int($0.y)))" } ?? "— (нет CGEventSetWindowLocation)"
+            let cursor = before == after ? "на месте" : "СДВИНУЛСЯ \(before) → \(after)"
+            Log.hiddenScreen.info("наведение: \(exit ? "уход" : "движение", privacy: .public) №\(self.hoverCount) → (\(Int(event.location?.x ?? 0)), \(Int(event.location?.y ?? 0))), в окне \(local, privacy: .public), окно \(event.windowNumber), pid \(pid); курсор \(cursor, privacy: .public)")
         }
     }
 
@@ -874,8 +880,17 @@ public final class HiddenScreenEngine {
         }
         let location = event.location
         let view = CGPoint(x: location.x - rect.minX, y: location.y - rect.minY)
-        let overMirror = rect.contains(location) && mapping.toTarget(view) != nil
-            && NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0) == window.windowNumber
+        // Окно сверху — в точке самого события, а не там, где курсор сейчас (`NSEvent.mouseLocation`): нажатие без
+        // движения перед ним (инструмент проверки, планшет) приходит раньше, чем курсор туда переедет (643b753:
+        // первые три щелчка после запуска прошли мимо перехвата).
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        let topWindow = rect.contains(location)
+            ? NSWindow.windowNumber(at: HiddenScreenGeometry.cocoa(fromQuartz: location, primaryHeight: primaryHeight), belowWindowWithWindowNumber: 0)
+            : 0
+        let overMirror = rect.contains(location) && mapping.toTarget(view) != nil && topWindow == window.windowNumber
+        if type == .leftMouseDown, rect.contains(location), !overMirror {
+            logMissedPress(location: location, view: view, topWindow: topWindow, mirror: window.windowNumber)
+        }
         switch type {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
             // Нажатие мимо зеркала (пока курсор не передан программе) — клавиши снова идут активной программе.
@@ -909,9 +924,8 @@ public final class HiddenScreenEngine {
         case .leftMouseDragged:
             guard pressIntercepted else { return false }
             if session.handoff == .drag {
-                guard dragLive else { return true }
-                redirectDrag(event, mapping: mapping, mirrorRect: rect)
-                return false
+                if dragLive { forwardDrag(event, kind: .leftDragged, mapping: mapping, mirrorRect: rect) }
+                return true
             }
             let steps = session.dragged(to: view, mapping: mapping)
             if !steps.isEmpty {
@@ -924,9 +938,9 @@ public final class HiddenScreenEngine {
             pressIntercepted = false
             if session.handoff == .drag {
                 if dragLive {
-                    redirectDrag(event, mapping: mapping, mirrorRect: rect)
+                    forwardDrag(event, kind: .leftUp, mapping: mapping, mirrorRect: rect)
                     watch?.noteButtonUp()
-                    return false
+                    return true
                 }
                 upBeforeLive = true
                 return true
@@ -938,14 +952,26 @@ public final class HiddenScreenEngine {
         }
     }
 
-    /// Протягивание у программы: событие кнопки не со скрытого дисплея (курсор увели на основной экран или его ставит
-    /// инструмент проверки — 768c91b: точки над зеркалом, выделения не было) — точку переводим в окно программы.
-    /// Событие то же (session tap), программа получает его как обычное протягивание.
-    private func redirectDrag(_ event: CGEvent, mapping: MirrorMapping, mirrorRect: CGRect) {
+    /// Протягивание у программы: каждое событие кнопки (физическое или инструмента проверки) поглощается и уходит заново
+    /// через HID — так же, как нажатие, с которого протягивание началось, и как работающий щелчок. Точка не со скрытого
+    /// дисплея (курсор над зеркалом) переводится в окно. 643b753 правил точку прямо в событии: все 19 событий
+    /// переадресованы, а выделения не было — нажатие шло через HID, а протягивание — чужим потоком событий.
+    private func forwardDrag(_ event: CGEvent, kind: SyntheticEvent.Kind, mapping: MirrorMapping, mirrorRect: CGRect) {
         dragEvents += 1
-        guard let point = PointerSession.dragLocation(event.location, hidden: hidden, mirrorRect: mirrorRect, mapping: mapping) else { return }
-        event.location = point
-        dragRewritten += 1
+        let mapped = PointerSession.dragLocation(event.location, hidden: hidden, mirrorRect: mirrorRect, mapping: mapping)
+        if mapped != nil { dragRewritten += 1 }
+        let clicks = Int(event.getIntegerValueField(.mouseEventClickState))
+        pointer.post(SyntheticEvent(kind: kind, location: mapped ?? event.location, clicks: max(clicks, 1), flags: event.flags))
+    }
+
+    /// Нажатие в рамке зеркала, но не перехвачено — почему (первые `MissedPressLog.limit` за запуск).
+    private var missedPresses = 0
+
+    private func logMissedPress(location: CGPoint, view: CGPoint, topWindow: Int, mirror: Int) {
+        missedPresses += 1
+        guard missedPresses <= MissedPressLog.limit else { return }
+        let owner = MissedPressLog.owner(of: CGWindowID(clamping: topWindow))
+        Log.hiddenScreen.info("перехват: нажатие (\(Int(location.x)), \(Int(location.y))) в рамке зеркала НЕ перехвачено — сверху окно \(topWindow) (\(owner, privacy: .public)), зеркало \(mirror), точка зеркала (\(Int(view.x)), \(Int(view.y))), состояние \(String(describing: self.session.state), privacy: .public)")
     }
 
     // MARK: Вставка и перетаскивание
@@ -1108,19 +1134,36 @@ extension HiddenScreenEngine {
         UserDefaults.standard.set(options.apps.flatMap { $0.bundleIDs.sorted() }, forKey: Pref.hiddenScreenApps)
     }
 
-    func restoreWindows(of apps: [HiddenApp]) {
+    /// Окна программ со скрытого дисплея — туда, где были до переноса (или на первый настоящий экран). Через AX, а не
+    /// CGWindowList: у спрятанной программы (выход Mac Utils) окон в списке экрана нет, а AX их видит и двигает.
+    @discardableResult
+    func restoreWindows(of apps: [HiddenApp]) -> (moved: Int, failed: Int) {
+        guard !hidden.isNull else { return (0, 0) }
         let physical = HiddenDisplay.physicalDisplays(excluding: displayID)
-        let pids = Set(NSWorkspace.shared.runningApplications
-            .filter { running in apps.contains { $0.matches(bundleID: running.bundleIdentifier) } }
-            .map(\.processIdentifier))
-        let windows = mover.windows(pids: pids)
-        for window in windows where window.layer == 0 && hidden.intersects(window.frame) {
-            guard let origin = HiddenWindowRules.restoreOrigin(remembered: remembered[window.id], current: window.frame,
-                                                                hidden: hidden, physical: physical),
-                  let element = mover.element(for: window.id, pid: window.pid, known: windows) else { continue }
-            mover.move(element, to: origin)
-            remembered[window.id] = nil
+        let targets = NSWorkspace.shared.runningApplications.filter { running in apps.contains { $0.matches(bundleID: running.bundleIdentifier) } }
+        var moved = 0, failed = 0
+        for app in targets {
+            let candidates = mover.axCandidates(pid: app.processIdentifier).windows
+            let plan = HiddenWindowRules.restorePlan(windows: candidates.map { ($0.windowID, $0.frame) }, remembered: remembered,
+                                                     hidden: hidden, physical: physical)
+            for item in plan {
+                let element = candidates[item.index].element
+                let frame = candidates[item.index].frame
+                mover.move(element, to: item.origin)
+                if !HiddenWindowRules.arrived(mover.frame(of: element), at: item.origin) {
+                    // Как при переносе: на другом дисплее macOS может подрезать размер — размер, потом ещё раз позиция.
+                    mover.resize(element, to: frame.size)
+                    mover.move(element, to: item.origin)
+                }
+                let now = mover.frame(of: element)
+                let ok = HiddenWindowRules.arrived(now, at: item.origin)
+                if ok { moved += 1 } else { failed += 1 }
+                if let id = candidates[item.index].windowID { remembered[id] = nil }
+                let result = ok ? "ок" : "НЕ сдвинулось, сейчас \(now.map(WindowMover.text) ?? "—")"
+                Log.hiddenScreen.info("возврат окна \(app.bundleIdentifier ?? "?", privacy: .public) \(candidates[item.index].windowID.map(String.init) ?? "?", privacy: .public): \(WindowMover.text(frame), privacy: .public) → \(Int(item.origin.x)),\(Int(item.origin.y)) \(result, privacy: .public)")
+            }
         }
+        return (moved, failed)
     }
 
     private func ensureMirrorWindow() -> MirrorWindow {
