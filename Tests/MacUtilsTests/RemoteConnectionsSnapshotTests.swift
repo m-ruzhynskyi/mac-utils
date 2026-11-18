@@ -67,6 +67,7 @@ final class RemoteConnectionsSnapshotTests: XCTestCase {
             let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: size.width, height: size.height),
                                   styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
+            window.animationBehavior = .none  // показ/закрытие без анимации: вне экрана она не кончается и навсегда занимает поток GCD
             window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             window.contentView = host
             host.layoutSubtreeIfNeeded()

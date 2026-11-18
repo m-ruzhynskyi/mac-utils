@@ -479,6 +479,9 @@ package struct RTFCellDef: Hashable {
     package var horizontalMerged = false
     package enum VerticalAlign: Hashable { case top, center, bottom }
     package var verticalAlign = VerticalAlign.top
+    /// Направление текста: `\cltxbtlr` — снизу вверх, `\cltxtbrl`/`\cltxtbrlv` — сверху вниз, иначе — по строкам.
+    package enum TextFlow: Hashable { case rows, bottomToTop, topToBottom }
+    package var textFlow = TextFlow.rows
     /// Поля ячейки, твипы, при единице 3 (твипы): `\clpadt`/`\clpadft` — левое (Word меняет местами `l` и `t`),
     /// `\clpadr`/`\clpadfr` — правое. Иначе — поля строки.
     package var padLeft = 0, padLeftUnit = 0

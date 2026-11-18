@@ -686,7 +686,9 @@ private final class RTFParser {
         case .pagebb:
             top.para.pageBreakBefore = (number ?? 1) != 0
             token("pagebb", range)
-        case .s: top.para.style = number
+        case .s:
+            top.para.style = number
+            token("s", range)
         case .contextualspace: top.para.contextualSpace = (number ?? 1) != 0
         case .sbauto: top.para.spaceBeforeAuto = (number ?? 1) != 0
         case .saauto: top.para.spaceAfterAuto = (number ?? 1) != 0
@@ -794,6 +796,9 @@ private final class RTFParser {
         case .clvertalt: cellInProgress.verticalAlign = .top
         case .clvertalc: cellInProgress.verticalAlign = .center
         case .clvertalb: cellInProgress.verticalAlign = .bottom
+        case .cltxlrtb, .cltxlrtbv: cellInProgress.textFlow = .rows
+        case .cltxbtlr: cellInProgress.textFlow = .bottomToTop
+        case .cltxtbrl, .cltxtbrlv: cellInProgress.textFlow = .topToBottom
         case .clbrdrt: top.border = .cellTop; cellInProgress.borderTop = RTFBorder()
         case .clbrdrb: top.border = .cellBottom; cellInProgress.borderBottom = RTFBorder()
         case .clbrdrl: top.border = .cellLeft; cellInProgress.borderLeft = RTFBorder()

@@ -321,7 +321,7 @@ package final class EditorTab: NSObject, ObservableObject, Identifiable, NSTextV
         refreshLineEnding()
         dollars.removedCount = nil
         dollars.textChanged { [weak self] in self?.text ?? "" }
-        if !matches.isEmpty { onSearchInvalidated?() }
+        if !matches.isEmpty || documentController?.findMatches.isEmpty == false { onSearchInvalidated?() }
         ruler.updateThickness()
         ruler.needsDisplay = true
         highlightEdit()

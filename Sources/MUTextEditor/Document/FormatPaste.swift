@@ -80,7 +80,7 @@ extension DocFormatter {
             case .smallCaps(let on): differs = props.smallCaps != on
             case .caps(let on): differs = props.caps != on
             case .hidden(let on): differs = props.hidden != on
-            case .highlight, .clear: differs = false
+            case .highlight, .clear, .characterStyle: differs = false
             }
             if differs {
                 needed = true

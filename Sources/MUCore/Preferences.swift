@@ -205,6 +205,8 @@ package enum Pref {
     package static let editorBrackets = "editorBrackets"
     /// «Документ»: автозамена «--» → «—» и кавычек в «ёлочки» (по умолчанию выключена).
     package static let docAutocorrect = "docAutocorrect"
+    /// «Документ»: проверка орфографии (по умолчанию выключена — подчёркивание попадает в офскрин-снимки для сверки с Word).
+    package static let docSpelling = "docSpelling"
     /// Ширина табуляции в пробелах (табы ↔ пробелы, отступ таба на экране).
     package static let editorTabWidth = "editorTabWidth"
     /// Поиск в папке: последняя папка и маска имён.
@@ -213,6 +215,8 @@ package enum Pref {
     package static let editorRecent = "editorRecent"
     /// Режим «Код» / «Документ» по расширению (последний выбор).
     package static let editorViewModes = "editorViewModes"
+    /// Выбранная вкладка ленты «Документа» (только её ключ: home, insert, layout, view).
+    package static let editorRibbonTab = "editorRibbonTab"
     /// Вкладка «Редактор» уже добавлена в панель 🔧 (один раз при обновлении).
     package static let panelTabsEditorAdded = "panelTabsEditorAdded"
 
@@ -271,10 +275,32 @@ package enum Pref {
         return enabled
     }
 
+    /// «Взгляд в камеру». Само включение не хранится: функция включается только вручную и только до выхода.
+    /// Куда смотреть: "camera", "below", "point" (тогда углы gazePointYaw / gazePointPitch, градусы).
+    package static let gazeTarget = "gazeTarget"
+    package static let gazePointYaw = "gazePointYaw"
+    package static let gazePointPitch = "gazePointPitch"
+    /// Свобода движения: "low", "normal", "high".
+    package static let gazeFreedom = "gazeFreedom"
+    /// Калибровка: насколько экран ниже камеры (сдвиг радужки, доли полуширины глаза) и положение «в камеру» по горизонтали.
+    package static let gazeScreenLift = "gazeScreenLift"
+    package static let gazeBiasX = "gazeBiasX"
+    package static let gazeCalibrated = "gazeCalibrated"
+    /// Ползунок «Сила»: множитель поправки, 0…1,5.
+    package static let gazeStrength = "gazeStrength"
+
     package static func register() {
         forgetRemovedKeys()
         resetBackgroundAIAfterCloudMove()
         UserDefaults.standard.register(defaults: [
+            gazeTarget: "camera",
+            gazePointYaw: 0.0,
+            gazePointPitch: 0.0,
+            gazeFreedom: "normal",
+            gazeScreenLift: 0.22,
+            gazeStrength: 1.0,
+            gazeBiasX: 0.0,
+            gazeCalibrated: false,
             cutPaste: true,
             cutPanel: true,
             winKeys: false,
@@ -376,6 +402,7 @@ package enum Pref {
             editorInvisibles: false,
             editorBrackets: true,
             docAutocorrect: false,
+            docSpelling: false,
             editorTabWidth: 4,
             playerRememberPosition: true,
             playerSeekStep: 5,
