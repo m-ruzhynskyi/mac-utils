@@ -25,7 +25,7 @@ package enum SettingsGroup: String, CaseIterable, Identifiable {
     package var sections: [SettingsSection] {
         switch self {
         case .general: return [.general, .hotKeys, .exclusions, .panel]
-        case .capture: return [.screenshot, .shots, .annotate, .qr, .meetings]
+        case .capture: return [.screenshot, .shots, .annotate, .qr, .meetings, .gaze]
         case .windowsInput: return [.switcher, .windows, .volume, .layout, .smoothScroll, .cutPaste, .winKeys, .textInput]
         case .filesSystem: return [.shelf, .downloads, .textEditor, .videoPlayer, .cheatSheet, .uninstaller, .cleanup, .monitor, .tasks]
         case .more: return [.wellbeing, .focus, .music, .share, .remote, .ai]
@@ -63,6 +63,7 @@ extension SettingsSection {
         case .qr: return "Одно сочетание для двух дел: сделать QR-код из выделенного текста или прочитать QR-код с экрана."
         case .annotate: return "Стрелки, рамки, маркер и перо прямо поверх экрана — во время созвона, демонстрации или записи экрана (рисунки попадают в запись)."
         case .meetings: return "Записывает звук созвона (собеседников и ваш микрофон отдельно), расшифровывает прямо на Mac (Whisper или распознавание Apple), а локальная модель (Ollama) делает отчёт: итог, решения, задачи."
+        case .gaze: return "В звонке глаза смотрят туда, куда вы выбрали, даже когда вы смотрите на экран."
         case .ai: return "Всё работает на локальной модели через Ollama — тексты, снимки и файлы не уходят в интернет."
         case .textEditor: return "Вкладки, кодировки и знаки $ для .frm и других текстов"
         case .videoPlayer: return "Плейлист, субтитры, дорожки и запоминание места"

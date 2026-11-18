@@ -258,6 +258,7 @@ struct SettingsSectionPage: View {
             case .annotate: AnnotatePage()
             case .wellbeing: WellbeingPage()
             case .meetings: MeetingsPage()
+            case .gaze: GazePage()
             case .ai: AIPage()
             case .uninstaller: UninstallerPage(compact: compact)
             case .monitor: SystemMonitorView(model: .shared, compact: compact).navigationTitle("Монитор системы")
