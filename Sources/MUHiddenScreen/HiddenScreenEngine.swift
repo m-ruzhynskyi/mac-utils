@@ -217,6 +217,7 @@ public final class HiddenScreenEngine {
         Log.hiddenScreen.info("enable: дисплей \(id) \(String(describing: self.hidden), privacy: .public); активная программа — по \(Activator.readsWindowServer ? "WindowServer" : "NSWorkspace", privacy: .public); наведение \(self.options.hover.rawValue, privacy: .public)")
         attachObservers()
         for app in runningTargets { wasHidden[app.processIdentifier] = app.isHidden }
+        Log.hiddenScreen.info("видимость до: \(self.visibilityText(self.runningTargets.map { ($0, $0.isHidden) }), privacy: .public)")
         let center = NSWorkspace.shared.notificationCenter
         workspaceTokens.append(center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             let activated = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
@@ -384,34 +385,48 @@ public final class HiddenScreenEngine {
         let visibility = visibilityPlan()
         tearDown(hiding: false)
         applyVisibility(visibility)
-        Log.hiddenScreen.info("disable: окон возвращено \(restored.moved), не сдвинулось \(restored.failed); показаны снова \(visibility.unhide.count), спрятаны \(visibility.hide.count)")
+        Log.hiddenScreen.info("disable: окон возвращено \(restored.moved), не сдвинулось \(restored.failed)")
     }
 
-    /// Выход Mac Utils: сначала спрятать программы (иначе macOS перенесёт их окна на настоящий экран — в демонстрацию),
-    /// потом снять дисплей. При падении Mac Utils то же делает помощник.
+    /// Выход Mac Utils: окна — на прежние места и размеры, пока дисплей ещё есть, потом снять дисплей; видимость —
+    /// как до включения. Прячем заранее только те программы, что были спрятаны: видимые и так окажутся на экране
+    /// (так было до включения), а прятать-и-тут-же-показывать — гонка (deedf02: Claude остался спрятан).
+    /// При падении Mac Utils помощник по-прежнему просто прячет все.
     public func shutdown() {
         guard phase == .on || phase == .starting else { return }
-        runningTargets.forEach { $0.hide() }
-        // Окна спрятанных программ — на прежние места, пока дисплей ещё есть: иначе (643b753) ChatGPT остался на
-        // (1710, 1111), а macOS переставляет окна спрятанной программы только при показе. AX двигает и их.
+        // Видимость запоминается при включении; выход ещё во время запуска (дисплея нет, окна не тронуты) — не трогаем.
+        let visibility: (unhide: [pid_t], hide: [pid_t]) = phase == .on ? visibilityPlan() : ([], [])
+        visibility.hide.forEach { NSRunningApplication(processIdentifier: $0)?.hide() }
+        // AX двигает окна и у спрятанных программ: иначе (643b753) ChatGPT остался на (1710, 1111) — macOS переставляет
+        // окна спрятанной программы только при показе.
         let restored = restoreWindows(of: options.apps)
-        let visibility = visibilityPlan()
-        // Программы уже спрятаны и окна на местах — помощнику прятать ещё раз незачем (иначе он спрятал бы их после
-        // нашего показа ниже).
+        // Помощнику прятать незачем (иначе он спрятал бы программы после нашего показа ниже).
         tearDown(hiding: false)
         applyVisibility(visibility)
-        Log.hiddenScreen.info("shutdown: окон возвращено \(restored.moved), не сдвинулось \(restored.failed), дисплей снят; показаны снова \(visibility.unhide.count), спрятаны \(visibility.hide.count)")
+        Log.hiddenScreen.info("shutdown: окон возвращено \(restored.moved), не сдвинулось \(restored.failed), дисплей снят")
     }
 
     /// Какие программы ИИ показать и какие спрятать, чтобы стало как до включения.
     private func visibilityPlan() -> (unhide: [pid_t], hide: [pid_t]) {
-        let now = Dictionary(runningTargets.map { ($0.processIdentifier, $0.isHidden) }, uniquingKeysWith: { $1 })
-        return VisibilityRestore.plan(wasHidden: wasHidden, isHidden: now)
+        VisibilityRestore.plan(wasHidden: wasHidden, running: runningTargets.map(\.processIdentifier))
     }
 
     private func applyVisibility(_ plan: (unhide: [pid_t], hide: [pid_t])) {
-        plan.unhide.forEach { NSRunningApplication(processIdentifier: $0)?.unhide() }
-        plan.hide.forEach { NSRunningApplication(processIdentifier: $0)?.hide() }
+        let unhide = plan.unhide.compactMap { NSRunningApplication(processIdentifier: $0) }
+        let hide = plan.hide.compactMap { NSRunningApplication(processIdentifier: $0) }
+        unhide.forEach { $0.unhide() }
+        hide.forEach { $0.hide() }
+        Log.hiddenScreen.info("видимость после: показаны: \(self.bundles(unhide), privacy: .public); спрятаны: \(self.bundles(hide), privacy: .public)")
+    }
+
+    private func bundles(_ apps: [NSRunningApplication]) -> String {
+        apps.isEmpty ? "—" : apps.map { $0.bundleIdentifier ?? "pid \($0.processIdentifier)" }.joined(separator: ", ")
+    }
+
+    private func visibilityText(_ apps: [(NSRunningApplication, Bool)]) -> String {
+        apps.isEmpty ? "программ ИИ нет"
+            : apps.map { "\($0.0.localizedName ?? $0.0.bundleIdentifier ?? "?") [\($0.0.bundleIdentifier ?? "?")] \($0.1 ? "спрятана" : "видима")" }
+                .joined(separator: ", ")
     }
 
     private func tearDown(hiding: Bool) {

@@ -171,9 +171,17 @@ final class HoverPeekAndExitTests: XCTestCase {
 
     func testVisibilityAsBeforeEnable() {
         // Claude (1) был виден, ChatGPT (2) спрятан; программа 3 запущена во время работы (не запомнена).
-        let plan = VisibilityRestore.plan(wasHidden: [1: false, 2: true], isHidden: [1: true, 2: true, 3: true])
-        XCTAssertEqual(plan.unhide, [1, 3], "Claude — показать снова; запущенная позже — видима")
+        let plan = VisibilityRestore.plan(wasHidden: [1: false, 2: true], running: [3, 2, 1])
+        XCTAssertEqual(plan.unhide, [1, 3], "Claude — показать; запущенная позже — видима")
+        XCTAssertEqual(plan.hide, [2], "спрятанная до включения — спрятать")
+    }
+
+    // deedf02: Claude видим до запуска, после выхода спрятан — план читал isHidden сразу после асинхронного hide().
+    func testPlanDoesNotDependOnCurrentHiddenState() {
+        // Как на Mac 18.11: оба видимы до включения (Claude — быстрый чат, ChatGPT — `open -g`).
+        let plan = VisibilityRestore.plan(wasHidden: [27390: false, 40010: false], running: [40010, 27390])
+        XCTAssertEqual(plan.unhide, [27390, 40010], "показать обоих, как бы ни отвечал isHidden в эту миллисекунду")
         XCTAssertEqual(plan.hide, [])
-        XCTAssertEqual(VisibilityRestore.plan(wasHidden: [2: true], isHidden: [2: false]).hide, [2], "выключение без выхода — спрятать, как было")
+        XCTAssertEqual(VisibilityRestore.plan(wasHidden: [:], running: []).unhide, [])
     }
 }
