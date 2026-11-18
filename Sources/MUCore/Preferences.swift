@@ -15,6 +15,8 @@ package enum Pref {
     package static let winKeysExcluded = "winKeysExcludedApps"
     /// Выключенные сочетания «Клавиш Windows» (массив `WinKeysShortcut.id`, например `["a", "f"]`). Нет значения — включены все.
     package static let winKeysDisabled = "winKeysDisabledShortcuts"
+    /// «Скрытый экран»: bundle id программ, окна которых живут на скрытом дисплее. Нет значения — Claude и ChatGPT.
+    package static let hiddenScreenApps = "hiddenScreenApps"
 
     package static let smoothScroll = "smoothScrollEnabled"
     package static let smoothSpeed = "smoothScrollSpeed"
@@ -149,10 +151,12 @@ package enum Pref {
     /// Рисование поверх экрана (⌃⌥A).
     package static let annotate = "annotateEnabled"
 
-    /// ИИ через локальную Ollama: общий выключатель, адрес, модель и отдельные функции.
+    /// ИИ через ChatGPT (Codex) или Claude: общий выключатель, сервис ("codex" / "claude"), запасной и отдельные функции.
     package static let ai = "aiEnabled"
-    package static let aiURL = "aiURL"
-    package static let aiModel = "aiModel"
+    package static let aiProvider = "aiProvider"
+    /// Если выбранный сервис не ответил за `aiFallbackSeconds` секунд (или ошибся) — спросить второй.
+    package static let aiFallback = "aiFallback"
+    package static let aiFallbackSeconds = "aiFallbackSeconds"
     package static let aiFixText = "aiFixText"
     package static let aiShotNames = "aiShotNames"
     package static let aiShotSearch = "aiShotSearch"
@@ -238,8 +242,67 @@ package enum Pref {
     package static let playerRecent = "playerRecent"
     package static let playerFinished = "playerFinished"
 
+    /// Ключи прежнего ИИ на локальной модели (адрес сервера и имя модели): у ChatGPT (Codex) и Claude им нет пары.
+    package static let removedAIKeys = ["aiURL", "aiModel"]
+
+    /// Ключи, которые больше не нужны: прочитать (в журнал — только сам факт) и забыть. Повторный вызов ничего не меняет.
+    /// Возвращает забытые ключи.
+    @discardableResult
+    package static func forgetRemovedKeys(in defaults: UserDefaults = .standard) -> [String] {
+        let present = removedAIKeys.filter { defaults.object(forKey: $0) != nil }
+        for key in present { defaults.removeObject(forKey: key) }
+        if !present.isEmpty { Log.ai.info("Настройки прежнего ИИ забыты: \(present.joined(separator: ", "), privacy: .public)") }
+        return present
+    }
+
+    /// Фоновые ИИ-функции: сами, без действия человека, отправляют содержимое в ChatGPT (Codex) или Claude —
+    /// текст каждого снимка экрана, начало каждого скачанного файла, файлы на полке, расшифровку каждой встречи.
+    /// По умолчанию выключены: включаются только явно, на странице «ИИ» (отчёты — и на странице «Встречи»).
+    /// Ручные (исправление текста, панель, кнопка «Сделать отчёт» у встречи) — включены.
+    package static let aiBackgroundKeys = [aiShotNames, aiDownloadsTags, aiShelf, meetingsReport]
+    /// Отметка: переход с локальной модели на облачные сервисы уже сделан (фоновые функции сброшены один раз).
+    package static let aiCloudMigrated = "aiCloudMigrated"
+
+    /// Один раз после перехода с Ollama: прежнее «включено» у фоновых функций было согласием на локальную модель,
+    /// а не на отправку в облако, — забыть его (станет «выключено» по умолчанию). Дальше выбор человека сохраняется.
+    /// Возвращает сброшенные ключи.
+    @discardableResult
+    package static func resetBackgroundAIAfterCloudMove(in defaults: UserDefaults = .standard) -> [String] {
+        guard !defaults.bool(forKey: aiCloudMigrated) else { return [] }
+        defaults.set(true, forKey: aiCloudMigrated)
+        // Включённые: до `register()` значение может быть только сохранённым (своё «включено» времён Ollama).
+        let enabled = aiBackgroundKeys.filter { defaults.bool(forKey: $0) }
+        for key in aiBackgroundKeys { defaults.removeObject(forKey: key) }
+        if !enabled.isEmpty { Log.ai.info("Фоновые функции ИИ выключены до явного включения: \(enabled.joined(separator: ", "), privacy: .public)") }
+        return enabled
+    }
+
+    /// «Взгляд в камеру». Само включение не хранится: функция включается только вручную и только до выхода.
+    /// Куда смотреть: "camera", "below", "point" (тогда углы gazePointYaw / gazePointPitch, градусы).
+    package static let gazeTarget = "gazeTarget"
+    package static let gazePointYaw = "gazePointYaw"
+    package static let gazePointPitch = "gazePointPitch"
+    /// Свобода движения: "low", "normal", "high".
+    package static let gazeFreedom = "gazeFreedom"
+    /// Калибровка: насколько экран ниже камеры (сдвиг радужки, доли полуширины глаза) и положение «в камеру» по горизонтали.
+    package static let gazeScreenLift = "gazeScreenLift"
+    package static let gazeBiasX = "gazeBiasX"
+    package static let gazeCalibrated = "gazeCalibrated"
+    /// Ползунок «Сила»: множитель поправки, 0…1,5.
+    package static let gazeStrength = "gazeStrength"
+
     package static func register() {
+        forgetRemovedKeys()
+        resetBackgroundAIAfterCloudMove()
         UserDefaults.standard.register(defaults: [
+            gazeTarget: "camera",
+            gazePointYaw: 0.0,
+            gazePointPitch: 0.0,
+            gazeFreedom: "normal",
+            gazeScreenLift: 0.22,
+            gazeStrength: 1.0,
+            gazeBiasX: 0.0,
+            gazeCalibrated: false,
             cutPaste: true,
             cutPanel: true,
             winKeys: false,
@@ -310,21 +373,22 @@ package enum Pref {
             windowPinOpacity: 1.0,
             windowMemory: true,
             ai: true,
-            aiURL: "http://localhost:11434",
-            aiModel: "qwen2.5:7b",
+            aiProvider: "codex",
+            aiFallback: false,
+            aiFallbackSeconds: 20.0,
             aiFixText: true,
-            aiShotNames: true,
+            aiShotNames: false,
             aiShotSearch: true,
             aiDownloads: true,
-            aiDownloadsTags: true,
+            aiDownloadsTags: false,
             aiTasks: true,
             aiCleanup: true,
-            aiShelf: true,
+            aiShelf: false,
             meetings: true,
             meetingsMicrophone: true,
             meetingsLanguage: "auto",
             meetingsEngine: "whisper",
-            meetingsReport: true,
+            meetingsReport: false,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,

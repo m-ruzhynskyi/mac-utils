@@ -4,8 +4,8 @@
 Для каждого target из Package.swift:
   1. каждый `import MU*` в его исходниках должен быть объявлен в dependencies (иначе локальная
      инкрементальная сборка может пройти, а чистая — упасть, как с MUUpdate → MUAppSwitcher);
-  2. слои по .audit/plan-modules.md: MUCore ни от чего; MUDesign и MUAudio — только от MUCore;
-     функциональный модуль — только от MUCore/MUDesign/MUAudio, не от приложения и не от другой функции;
+  2. слои по .audit/plan-modules.md: MUCore ни от чего; MUDesign, MUAudio и MUAIBackend — только от MUCore;
+     функциональный модуль — только от MUCore/MUDesign/MUAudio/MUAIBackend, не от приложения и не от другой функции;
   3. в Package.swift нет зависимостей от несуществующих target и нет папок Sources/* без target.
 Объявленная, но неиспользуемая зависимость — только предупреждение.
 
@@ -13,9 +13,9 @@
 """
 import os, re, sys
 
-BASE = {"MUCore", "MUDesign", "MUAudio"}
+BASE = {"MUCore", "MUDesign", "MUAudio", "MUAIBackend"}
 # Нижние слои: от кого каждый из них может зависеть.
-LAYER = {"MUCore": set(), "MUDesign": {"MUCore"}, "MUAudio": {"MUCore"}}
+LAYER = {"MUCore": set(), "MUDesign": {"MUCore"}, "MUAudio": {"MUCore"}, "MUAIBackend": {"MUCore"}}
 # Связи, которые уже были до разбивки (шаги 1–16). Новых функциональных связей не добавлять.
 LAYER["MUScreenshot"] = BASE | {"MUDownloadsSorter", "MUSmoothScroll"}
 APP = {"MacUtils", "ToolsLauncher"}  # исполняемые: могут зависеть от любых модулей

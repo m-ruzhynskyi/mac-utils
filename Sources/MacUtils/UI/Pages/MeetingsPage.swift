@@ -16,7 +16,7 @@ struct MeetingsPage: View {
     @AppStorage(Pref.meetingsLanguage) private var language = "auto"
     @AppStorage(Pref.meetingsEngine) private var engine = "whisper"
     @ObservedObject private var whisper = Whisper.shared
-    @AppStorage(Pref.meetingsReport) private var report = true
+    @AppStorage(Pref.meetingsReport) private var report = false
     @ObservedObject private var recorder = MeetingRecorder.shared
     @State private var deleting: MeetingRecorder.Meeting?
     /// Демо для снимков интерфейса: вместо записей этого Mac — несуществующие папки.
@@ -81,7 +81,8 @@ struct MeetingsPage: View {
                     }
                     .graphitePicker()
                 }
-                ToggleRow("Отчёт ИИ после расшифровки", systemImage: "doc.text", isOn: $report)
+                ToggleRow("Отчёт ИИ после расшифровки", subtitle: "Вся расшифровка уходит в ChatGPT или Claude. Без этого отчёт — по кнопке у встречи.",
+                          systemImage: "doc.text", isOn: $report)
             }
             .disabled(!enabled)
             Footnote("Нужны разрешения «Запись экрана» (звук системы) и «Микрофон». «Определять сам» — Whisper узнаёт язык по каждой дорожке.")
