@@ -256,6 +256,9 @@ public final class WindowStream: NSObject, SCStreamOutput, SCStreamDelegate {
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = false
         config.queueDepth = 4
+        // Пока поток не подогнан под новый размер окна (до 0,25 с), окно целиком и по центру, а не обрезано с чёрным краем.
+        config.scalesToFit = true
+        config.preservesAspectRatio = true
         return config
     }
 

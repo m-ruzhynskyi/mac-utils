@@ -149,8 +149,10 @@ public struct PointerSession: Sendable {
         case .warp:
             // Пауза перед возвратом: программа должна разобрать нажатие, пока она активна. Иначе (768c91b, 14.11) нажатие
             // доходило до уже неактивного Claude, и он через 0,1–1 с активировал себя сам.
-            return [.hideCursor, .activateTarget, .warp(target), .postHID(down), .postHID(up), .warp(cursor), .showCursor,
-                    .wait(Self.clickSettle), .returnFocus]
+            // Движение и пауза перед нажатием: кнопки «при наведении» (крестик у вложения) появляются под курсором раньше,
+            // чем придёт нажатие, — иначе нажатие попадает в то, что под ними.
+            return [.hideCursor, .activateTarget, .warp(target), .postHID(Self.mouse(.moved, target, 0, flags, 0)), .wait(Self.hoverSettle),
+                    .postHID(down), .postHID(up), .warp(cursor), .showCursor, .wait(Self.clickSettle), .returnFocus]
         }
     }
 
@@ -192,6 +194,8 @@ public struct PointerSession: Sendable {
     /// После активации ИИ, прежде чем слать ⌘-сочетание или нажатие протягивания: окно программы становится ключевым
     /// чуть позже, чем сама программа — активной.
     public static let activationSettle: TimeInterval = 0.03
+    /// Наведение перед нажатием: программа успевает показать кнопку «при наведении».
+    public static let hoverSettle: TimeInterval = 0.04
     /// Сколько ждать после щелчка (курсор уже на зеркале), прежде чем вернуть активность программе пользователя.
     public static let clickSettle: TimeInterval = 0.05
 

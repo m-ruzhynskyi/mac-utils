@@ -97,6 +97,22 @@ public final class HiddenScreenEngine {
     private var stream: WindowStream?
     private var mirrorTarget: (pid: pid_t, windowID: CGWindowID)?
     private var resizeWork: DispatchWorkItem?
+    /// Размер окна (pt), под который настроен поток зеркала.
+    private var streamSize: CGSize?
+    /// Фактическая рамка окна в зеркале (CGWindowList, обновляется каждым опросом): от неё считаются все переводы координат
+    /// — щелчок, протягивание, наведение, прокрутка.
+    private var targetFrameCache: CGRect?
+    /// Движок сам меняет размер зеркала под окно — это не пользователь тянет зеркало.
+    private var fittingMirror = false
+    /// Курсор «заглянул» в окно (наведение): точка на скрытом дисплее, куда он поставлен; nil — курсор на своём месте.
+    private var peekPoint: CGPoint?
+    private var peekWork: DispatchWorkItem?
+    /// Пока курсор «заглянул»: проверка 30 раз в секунду, не сдвинули ли мышь (если движение не дошло до наблюдателя).
+    private var peekTimer: Timer?
+    private var lastMirrorMove: TimeInterval = 0
+    private var peekCount = 0
+    /// Была ли программа ИИ спрятана до включения (pid → isHidden): на выходе — как было.
+    private var wasHidden: [pid_t: Bool] = [:]
 
     private var steps: [PointerStep] = []
     private var runningSteps = false
@@ -198,8 +214,9 @@ public final class HiddenScreenEngine {
             Log.hiddenScreen.error("раскладка: \(String(describing: error), privacy: .public)")
         }
         phase = .on
-        Log.hiddenScreen.info("enable: дисплей \(id) \(String(describing: self.hidden), privacy: .public); активная программа — по \(Activator.readsWindowServer ? "WindowServer" : "NSWorkspace", privacy: .public); наведение \(self.options.hover ? "да" : "нет", privacy: .public)")
+        Log.hiddenScreen.info("enable: дисплей \(id) \(String(describing: self.hidden), privacy: .public); активная программа — по \(Activator.readsWindowServer ? "WindowServer" : "NSWorkspace", privacy: .public); наведение \(self.options.hover.rawValue, privacy: .public)")
         attachObservers()
+        for app in runningTargets { wasHidden[app.processIdentifier] = app.isHidden }
         let center = NSWorkspace.shared.notificationCenter
         workspaceTokens.append(center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             let activated = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
@@ -364,8 +381,10 @@ public final class HiddenScreenEngine {
         }
         guard phase == .on else { return }
         let restored = restoreWindows(of: options.apps)
+        let visibility = visibilityPlan()
         tearDown(hiding: false)
-        Log.hiddenScreen.info("disable: окон возвращено \(restored.moved), не сдвинулось \(restored.failed)")
+        applyVisibility(visibility)
+        Log.hiddenScreen.info("disable: окон возвращено \(restored.moved), не сдвинулось \(restored.failed); показаны снова \(visibility.unhide.count), спрятаны \(visibility.hide.count)")
     }
 
     /// Выход Mac Utils: сначала спрятать программы (иначе macOS перенесёт их окна на настоящий экран — в демонстрацию),
@@ -376,11 +395,27 @@ public final class HiddenScreenEngine {
         // Окна спрятанных программ — на прежние места, пока дисплей ещё есть: иначе (643b753) ChatGPT остался на
         // (1710, 1111), а macOS переставляет окна спрятанной программы только при показе. AX двигает и их.
         let restored = restoreWindows(of: options.apps)
-        tearDown(hiding: true)
-        Log.hiddenScreen.info("shutdown: программы спрятаны, окон возвращено \(restored.moved), не сдвинулось \(restored.failed), дисплей снят")
+        let visibility = visibilityPlan()
+        // Программы уже спрятаны и окна на местах — помощнику прятать ещё раз незачем (иначе он спрятал бы их после
+        // нашего показа ниже).
+        tearDown(hiding: false)
+        applyVisibility(visibility)
+        Log.hiddenScreen.info("shutdown: окон возвращено \(restored.moved), не сдвинулось \(restored.failed), дисплей снят; показаны снова \(visibility.unhide.count), спрятаны \(visibility.hide.count)")
+    }
+
+    /// Какие программы ИИ показать и какие спрятать, чтобы стало как до включения.
+    private func visibilityPlan() -> (unhide: [pid_t], hide: [pid_t]) {
+        let now = Dictionary(runningTargets.map { ($0.processIdentifier, $0.isHidden) }, uniquingKeysWith: { $1 })
+        return VisibilityRestore.plan(wasHidden: wasHidden, isHidden: now)
+    }
+
+    private func applyVisibility(_ plan: (unhide: [pid_t], hide: [pid_t])) {
+        plan.unhide.forEach { NSRunningApplication(processIdentifier: $0)?.unhide() }
+        plan.hide.forEach { NSRunningApplication(processIdentifier: $0)?.hide() }
     }
 
     private func tearDown(hiding: Bool) {
+        endPeek(reason: "выключение")
         endHandoffNow()
         setMirrorFocused(false, reason: "выключение")
         pressTap?.stop()
@@ -394,6 +429,8 @@ public final class HiddenScreenEngine {
         let stream = self.stream
         self.stream = nil
         mirrorTarget = nil
+        streamSize = nil
+        targetFrameCache = nil
         mirroredApp = nil
         Task { await stream?.stop() }
         if clipboard.isActive { clipboard.restore() }
@@ -403,6 +440,7 @@ public final class HiddenScreenEngine {
         displayID = kCGNullDirectDisplay
         hidden = .null
         remembered.removeAll()
+        wasHidden.removeAll()
         reportedLeaks.removeAll()
         mirrorWindow?.orderOut(nil)
         mirrorShown = false
@@ -481,6 +519,7 @@ public final class HiddenScreenEngine {
         }
         refreshStatuses(windows: windows)
         rescueMirrorIfHidden()
+        refitMirror()
         checkFocus(reason: "опрос")
     }
 
@@ -502,8 +541,10 @@ public final class HiddenScreenEngine {
     // MARK: Курсор не заходит на скрытый дисплей сам
 
     private func startCursorGuard() {
-        let handler: (NSEvent) -> Void = { [weak self] _ in
-            MainActor.assumeIsolated { self?.guardCursor() }
+        let handler: (NSEvent) -> Void = { [weak self] event in
+            let own = event.cgEvent?.getIntegerValueField(.eventSourceUserData) == SyntheticEventFactory.marker
+            let location = event.cgEvent?.location
+            MainActor.assumeIsolated { self?.guardCursor(ownEvent: own, location: location) }
         }
         if let global = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved], handler: handler) { cursorMonitors.append(global) }
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved], handler: { event in handler(event); return event }) {
@@ -516,7 +557,13 @@ public final class HiddenScreenEngine {
         cursorMonitors.removeAll()
     }
 
-    private func guardCursor() {
+    private func guardCursor(ownEvent: Bool = false, location: CGPoint? = nil) {
+        if let peekPoint {
+            if HoverPeek.endsPeek(isOwnEvent: ownEvent, location: location ?? pointer.location, peekPoint: peekPoint) {
+                endPeek(reason: "движение")
+            }
+            return
+        }
         guard session.handoff == nil, !runningSteps,
               displayID != kCGNullDirectDisplay, let back = HiddenScreenGeometry.pullBack(pointer.location, hidden: hidden,
                                                                     physical: HiddenDisplay.physicalDisplays(excluding: displayID))
@@ -533,14 +580,18 @@ public final class HiddenScreenEngine {
         let pid = running.processIdentifier
         let windows = mover.windows(pids: [pid])
         guard let target = HiddenWindowRules.mirrorCandidate(windows: windows, app: app, hidden: hidden) else { return }
+        endPeek(reason: "другое окно")
         await stream?.stop()
         session.cancelPress()
         let viewSize = mirrorView.bounds.size
         var frame = target.frame
+        var requested = "—"
         if viewSize.width > 10, viewSize.height > 10,
            let element = mover.element(for: target.id, pid: pid, known: windows) {
             let size = MirrorMapping.targetSize(forMirror: viewSize, hidden: hidden)
-            if mover.resize(element, to: size) { frame.size = size }
+            requested = "\(Int(size.width))×\(Int(size.height))"
+            // Код AX «успех» ничего не значит: окно может не дать себя растянуть (быстрый чат Claude — не выше 535 pt).
+            frame = resizeTarget(element, to: size) ?? frame
         }
         let stream = WindowStream { [weak self] surface in
             self?.lastSurface = surface
@@ -552,9 +603,12 @@ public final class HiddenScreenEngine {
         }
         try await stream.start(windowID: target.id, pixelSize: pixelSize(frame.size))
         self.stream = stream
+        streamSize = frame.size
+        targetFrameCache = frame
         mirrorTarget = (pid, target.id)
         mirroredApp = app
-        Log.hiddenScreen.info("зеркало: \(app.name, privacy: .public) окно \(target.id) \(String(describing: frame), privacy: .public)")
+        Log.hiddenScreen.info("зеркало: \(app.name, privacy: .public) окно \(target.id) фактически \(String(describing: frame), privacy: .public), просили \(requested, privacy: .public)")
+        fitMirror(to: frame.size, reason: "новое окно")
         onChange?()
     }
 
@@ -562,6 +616,8 @@ public final class HiddenScreenEngine {
         let stream = self.stream
         self.stream = nil
         mirrorTarget = nil
+        streamSize = nil
+        targetFrameCache = nil
         mirroredApp = nil
         await stream?.stop()
         onChange?()
@@ -571,6 +627,8 @@ public final class HiddenScreenEngine {
         guard let app = mirroredApp else { return }
         stream = nil
         mirrorTarget = nil
+        streamSize = nil
+        targetFrameCache = nil
         mirroredApp = nil
         onChange?()
         // Окно закрыли — показать следующее окно той же программы, если есть.
@@ -584,7 +642,57 @@ public final class HiddenScreenEngine {
 
     private var targetFrame: CGRect? {
         guard let mirrorTarget else { return nil }
-        return mover.windows(pids: [mirrorTarget.pid]).first { $0.id == mirrorTarget.windowID }?.frame
+        if let targetFrameCache { return targetFrameCache }
+        let frame = mover.windows(pids: [mirrorTarget.pid]).first { $0.id == mirrorTarget.windowID }?.frame
+        targetFrameCache = frame
+        return frame
+    }
+
+    /// Изменить размер окна ИИ (не больше скрытого дисплея), вернуть внутрь дисплея, если вылезло; фактическая рамка (AX).
+    private func resizeTarget(_ element: AXUIElement, to size: CGSize) -> CGRect? {
+        mover.resize(element, to: MirrorFit.clamp(size, to: hidden.size))
+        if let frame = mover.frame(of: element), !hidden.contains(frame) {
+            mover.move(element, to: HiddenWindowRules.placement(of: frame, from: hidden, into: hidden))
+        }
+        return mover.frame(of: element)
+    }
+
+    /// Окно ИИ сменило размер не по нашей просьбе (или отказалось меняться, или переключилась вкладка) — поток и зеркало
+    /// под фактическую рамку. Из опроса `sweep`, пока зеркало не тянут и курсор не передан программе.
+    private func refitMirror() {
+        guard let mirrorTarget, stream != nil, session.handoff == nil, peekPoint == nil,
+              !(mirrorView.window?.inLiveResize ?? false) else { return }
+        guard let actual = lastWindows.first(where: { $0.id == mirrorTarget.windowID })?.frame else { return }
+        targetFrameCache = actual
+        guard MirrorFit.differs(streamSize, actual.size) else { return }
+        var size = actual.size
+        if MirrorFit.differs(MirrorFit.clamp(size, to: hidden.size), size),
+           let element = mover.element(for: mirrorTarget.windowID, pid: mirrorTarget.pid, known: lastWindows),
+           let frame = resizeTarget(element, to: size) {
+            // Окно больше скрытого дисплея — ужать.
+            size = frame.size
+            targetFrameCache = frame
+        }
+        Log.hiddenScreen.info("зеркало: окно \(mirrorTarget.windowID) теперь \(Int(size.width))×\(Int(size.height)) (поток был \(self.streamSize.map { "\(Int($0.width))×\(Int($0.height))" } ?? "—", privacy: .public)) — поток и зеркало подогнаны")
+        streamSize = size
+        let stream = self.stream
+        let pixels = pixelSize(size)
+        Task { await stream?.resize(pixelSize: pixels) }
+        fitMirror(to: size, reason: "окно сменило размер")
+    }
+
+    /// Размер вида зеркала — под окно (1:1, если помещается на экране; иначе уменьшенное с теми же пропорциями).
+    private func fitMirror(to size: CGSize, reason: String) {
+        guard let window = mirrorView.window, !window.inLiveResize, let screen = window.screen else { return }
+        let current = mirrorView.bounds.size
+        let chrome = CGSize(width: window.frame.width - current.width, height: window.frame.height - current.height)
+        let available = CGSize(width: screen.visibleFrame.width - chrome.width, height: screen.visibleFrame.height - chrome.height)
+        let view = MirrorFit.viewSize(window: size, available: available)
+        guard MirrorFit.differs(current, view) else { return }
+        fittingMirror = true
+        window.setFrame(MirrorFit.mirrorFrame(current: window.frame, chrome: chrome, view: view, visible: screen.visibleFrame), display: true)
+        fittingMirror = false
+        Log.hiddenScreen.info("зеркало: размер \(Int(current.width))×\(Int(current.height)) → \(Int(self.mirrorView.bounds.width))×\(Int(self.mirrorView.bounds.height)) под окно \(Int(size.width))×\(Int(size.height)) (\(reason, privacy: .public))")
     }
 
     private var mapping: MirrorMapping? {
@@ -593,6 +701,7 @@ public final class HiddenScreenEngine {
 
     /// Пользователь тянет зеркало — через 0,1 с после последнего изменения меняем размер настоящего окна и кадра.
     private func mirrorResized(_ size: CGSize) {
+        guard !fittingMirror else { return }
         resizeWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated { self?.applyMirrorSize(size) }
@@ -606,14 +715,18 @@ public final class HiddenScreenEngine {
         let windows = mover.windows(pids: [mirrorTarget.pid])
         guard let element = mover.element(for: mirrorTarget.windowID, pid: mirrorTarget.pid, known: windows) else { return }
         let targetSize = MirrorMapping.targetSize(forMirror: size, hidden: hidden)
-        mover.resize(element, to: targetSize)
-        // Окно у правого или нижнего края скрытого дисплея после увеличения может вылезти — вернуть внутрь.
-        if let frame = mover.frame(of: element), !hidden.contains(frame) {
-            mover.move(element, to: HiddenWindowRules.placement(of: frame, from: hidden, into: hidden))
-        }
+        // Окно у правого или нижнего края скрытого дисплея после увеличения может вылезти — `resizeTarget` вернёт внутрь.
+        // Поток — под фактический размер: окно могло не дать себя растянуть.
+        guard let frame = resizeTarget(element, to: targetSize) else { return }
+        targetFrameCache = frame
+        streamSize = frame.size
         let stream = self.stream
-        let pixels = pixelSize(targetSize)
+        let pixels = pixelSize(frame.size)
         Task { await stream?.resize(pixelSize: pixels) }
+        if MirrorFit.differs(frame.size, targetSize) {
+            Log.hiddenScreen.info("зеркало: окно не стало \(Int(targetSize.width))×\(Int(targetSize.height)), фактически \(Int(frame.width))×\(Int(frame.height))")
+            fitMirror(to: frame.size, reason: "окно отказалось менять размер")
+        }
     }
 
     /// Рамка вида зеркала в глобальных координатах Quartz (куда возвращать курсор).
@@ -635,10 +748,15 @@ public final class HiddenScreenEngine {
         guard session.handoff == nil else { return }
         switch input {
         case let .moved(point):
-            hover(at: point, mapping: mapping, windowNumber: mirrorTarget.windowID, pid: mirrorTarget.pid)
+            switch options.hover {
+            case .pid: hover(at: point, mapping: mapping, windowNumber: mirrorTarget.windowID, pid: mirrorTarget.pid)
+            case .peek: schedulePeek()
+            case .off: break
+            }
             return
         case .exited:
-            guard options.hover, !runningSteps, steps.isEmpty else { return }
+            peekWork?.cancel()
+            guard options.hover == .pid, !runningSteps, steps.isEmpty else { return }
             postHover(session.hoverExit(mapping: mapping, windowNumber: mirrorTarget.windowID), pid: mirrorTarget.pid)
             return
         default:
@@ -661,8 +779,69 @@ public final class HiddenScreenEngine {
     }
 
     /// Наведение — сразу (`postToPid`), мимо очереди шагов; пока шаги идут (щелчок, ⌘-сочетание), не шлём.
+    // MARK: Наведение «заглядыванием»
+
+    /// Мышь двинулась над зеркалом: через `HoverPeek.dwell` покоя — заглянуть.
+    private func schedulePeek() {
+        lastMirrorMove = ProcessInfo.processInfo.systemUptime
+        peekWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.startPeek() }
+        }
+        peekWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + HoverPeek.dwell, execute: work)
+    }
+
+    /// Настоящий курсор — в ту же точку окна на скрытом дисплее (Chromium подсвечивает только под настоящим курсором);
+    /// в зеркале на его месте курсор-подсказка. Программу не активируем.
+    private func startPeek() {
+        guard peekPoint == nil, phase == .on, mirrorShown, options.hover == .peek, session.state == .idle,
+              !runningSteps, steps.isEmpty, !pressIntercepted, let mapping, let rect = mirrorRect,
+              let window = mirrorView.window else { return }
+        let cursor = pointer.location
+        let view = CGPoint(x: cursor.x - rect.minX, y: cursor.y - rect.minY)
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        let onTop = NSWindow.windowNumber(at: HiddenScreenGeometry.cocoa(fromQuartz: cursor, primaryHeight: primaryHeight),
+                                          belowWindowWithWindowNumber: 0) == window.windowNumber
+        guard let exact = mapping.toTarget(view),
+              HoverPeek.shouldStart(idle: true, overContent: rect.contains(cursor) && onTop,
+                                    lastMove: lastMirrorMove, now: ProcessInfo.processInfo.systemUptime) else { return }
+        let target = CGPoint(x: exact.x.rounded(), y: exact.y.rounded())
+        mirrorView.showHandoffCursor(at: view)
+        pointer.warp(to: target)
+        pointer.post(SyntheticEvent(kind: .moved, location: target))
+        peekPoint = target
+        peekTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let point = self.peekPoint,
+                      HoverPeek.endsPeek(isOwnEvent: false, location: self.pointer.location, peekPoint: point) else { return }
+                self.endPeek(reason: "движение")
+            }
+        }
+        peekCount += 1
+        if HoverLog.shouldLog(count: peekCount, exit: false) || peekCount % 10 == 0 {
+            Log.hiddenScreen.info("наведение: курсор у окна (\(Int(target.x - mapping.target.minX)), \(Int(target.y - mapping.target.minY))) после покоя \(Int(HoverPeek.dwell * 1000)) мс, №\(self.peekCount)")
+        }
+    }
+
+    /// Курсор назад на зеркало — в точку картинки, где он сейчас у окна (рука «продолжает» движение).
+    private func endPeek(reason: String) {
+        guard peekPoint != nil else { return }
+        peekPoint = nil
+        peekWork?.cancel()
+        peekTimer?.invalidate()
+        peekTimer = nil
+        mirrorView.showHandoffCursor(at: nil)
+        guard let mapping, let rect = mirrorRect else { return }
+        let back = PointerSession.returnPoint(pointer.location, mapping: mapping, mirrorRect: rect)
+        pointer.warp(to: back)
+        if peekCount == 1 || peekCount % 10 == 0 {
+            Log.hiddenScreen.info("наведение: курсор назад на зеркало (\(reason, privacy: .public))")
+        }
+    }
+
     private func hover(at point: CGPoint, mapping: MirrorMapping, windowNumber: CGWindowID, pid: pid_t) {
-        guard options.hover, !runningSteps, steps.isEmpty, !pressIntercepted else { return }
+        guard options.hover == .pid, !runningSteps, steps.isEmpty, !pressIntercepted else { return }
         postHover(session.hover(at: point, mapping: mapping, windowNumber: windowNumber), pid: pid)
     }
 
@@ -878,7 +1057,12 @@ public final class HiddenScreenEngine {
             pressIntercepted = false
             return false
         }
-        let location = event.location
+        var location = event.location
+        if peekPoint != nil, type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown {
+            // Нажатие, пока курсор «заглянул» в окно: курсор назад, а нажатие — как по зеркалу в той же точке картинки.
+            endPeek(reason: "нажатие")
+            if mapping.target.contains(location) { location = PointerSession.returnPoint(location, mapping: mapping, mirrorRect: rect) }
+        }
         let view = CGPoint(x: location.x - rect.minX, y: location.y - rect.minY)
         // Окно сверху — в точке самого события, а не там, где курсор сейчас (`NSEvent.mouseLocation`): нажатие без
         // движения перед ним (инструмент проверки, планшет) приходит раньше, чем курсор туда переедет (643b753:
@@ -917,7 +1101,8 @@ public final class HiddenScreenEngine {
             pressIntercepted = true
             upBeforeLive = false
             let clicks = Int(event.getIntegerValueField(.mouseEventClickState))
-            Log.hiddenScreen.debug("перехват: нажатие (\(Int(view.x)), \(Int(view.y))), щелчков \(clicks)")
+            let local = mapping.toTarget(view).map { "(\(Int($0.x - mapping.target.minX)), \(Int($0.y - mapping.target.minY)))" } ?? "—"
+            Log.hiddenScreen.debug("перехват: нажатие (\(Int(view.x)), \(Int(view.y))) зеркала → в окне \(local, privacy: .public), щелчков \(clicks)")
             run(session.down(.left, at: view, clicks: clicks, flags: event.flags, mapping: mapping,
                              windowNumber: target.windowID, cursor: location))
             return true
@@ -1062,6 +1247,7 @@ extension HiddenScreenEngine {
     /// Показать зеркало (включив скрытый экран, если он выключен) или спрятать его.
     public func setMirrorShown(_ shown: Bool) {
         guard shown else {
+            endPeek(reason: "зеркало спрятано")
             mirrorRequested = false
             mirrorWindow?.orderOut(nil)
             mirrorShown = false
@@ -1149,10 +1335,12 @@ extension HiddenScreenEngine {
             for item in plan {
                 let element = candidates[item.index].element
                 let frame = candidates[item.index].frame
+                // Размер — пока окно на скрытом дисплее (там места хватает), потом место; не доехало — ещё раз (как при переносе).
+                mover.resize(element, to: item.size)
                 mover.move(element, to: item.origin)
-                if !HiddenWindowRules.arrived(mover.frame(of: element), at: item.origin) {
-                    // Как при переносе: на другом дисплее macOS может подрезать размер — размер, потом ещё раз позиция.
-                    mover.resize(element, to: frame.size)
+                if !HiddenWindowRules.arrived(mover.frame(of: element), at: item.origin)
+                    || MirrorFit.differs(mover.frame(of: element)?.size, item.size) {
+                    mover.resize(element, to: item.size)
                     mover.move(element, to: item.origin)
                 }
                 let now = mover.frame(of: element)
@@ -1160,7 +1348,7 @@ extension HiddenScreenEngine {
                 if ok { moved += 1 } else { failed += 1 }
                 if let id = candidates[item.index].windowID { remembered[id] = nil }
                 let result = ok ? "ок" : "НЕ сдвинулось, сейчас \(now.map(WindowMover.text) ?? "—")"
-                Log.hiddenScreen.info("возврат окна \(app.bundleIdentifier ?? "?", privacy: .public) \(candidates[item.index].windowID.map(String.init) ?? "?", privacy: .public): \(WindowMover.text(frame), privacy: .public) → \(Int(item.origin.x)),\(Int(item.origin.y)) \(result, privacy: .public)")
+                Log.hiddenScreen.info("возврат окна \(app.bundleIdentifier ?? "?", privacy: .public) \(candidates[item.index].windowID.map(String.init) ?? "?", privacy: .public): \(WindowMover.text(frame), privacy: .public) → \(Int(item.origin.x)),\(Int(item.origin.y)) \(Int(item.size.width))×\(Int(item.size.height)) \(result, privacy: .public)")
             }
         }
         return (moved, failed)

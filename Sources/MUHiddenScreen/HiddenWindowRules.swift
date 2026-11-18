@@ -92,13 +92,14 @@ public enum HiddenWindowRules {
 
     /// Какие окна AX вернуть со скрытого дисплея и куда: каждое, что хоть немного на нём (по номеру — запомненное место).
     public static func restorePlan(windows: [(windowID: CGWindowID?, frame: CGRect)], remembered: [CGWindowID: CGRect],
-                                   hidden: CGRect, physical: [CGRect]) -> [(index: Int, origin: CGPoint)] {
+                                   hidden: CGRect, physical: [CGRect]) -> [(index: Int, origin: CGPoint, size: CGSize)] {
         guard !hidden.isNull else { return [] }
         return windows.enumerated().compactMap { index, window in
+            let before = window.windowID.flatMap { remembered[$0] }
             guard window.frame.intersects(hidden),
-                  let origin = restoreOrigin(remembered: window.windowID.flatMap { remembered[$0] }, current: window.frame,
-                                             hidden: hidden, physical: physical) else { return nil }
-            return (index, origin)
+                  let origin = restoreOrigin(remembered: before, current: window.frame, hidden: hidden, physical: physical) else { return nil }
+            // Размер — тоже прежний: зеркало подгоняло окно под себя (029aed9: Claude 736×447 остался 900×535).
+            return (index, origin, before?.size ?? window.frame.size)
         }
     }
 

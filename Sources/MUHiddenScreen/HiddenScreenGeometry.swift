@@ -108,3 +108,35 @@ public struct MirrorMapping: Equatable, Sendable {
         CGSize(width: min(viewSize.width, hidden.width), height: min(viewSize.height, hidden.height))
     }
 }
+
+/// Поток и зеркало — по фактической рамке окна, а не по той, что просили. HSCR-39: быстрый чат Claude не растягивается
+/// выше 535 pt, а движок считал его 900×700 (код AX «успех»): поток 900×700 с окном вверху и чёрным низом, а щелчки и
+/// наведение считались от настоящей рамки по центру — промах на (700 − 535) / 2.
+public enum MirrorFit {
+    /// Размеры расходятся больше чем на 1 pt (или прежнего нет) — подогнать заново.
+    public static func differs(_ old: CGSize?, _ new: CGSize) -> Bool {
+        guard let old else { return true }
+        return abs(old.width - new.width) > 1 || abs(old.height - new.height) > 1
+    }
+
+    /// Окно не больше скрытого дисплея.
+    public static func clamp(_ size: CGSize, to display: CGSize) -> CGSize {
+        CGSize(width: min(size.width, display.width), height: min(size.height, display.height))
+    }
+
+    /// Вид зеркала: окно 1:1; не помещается в `available` — уменьшенное с теми же пропорциями (без полей).
+    public static func viewSize(window: CGSize, available: CGSize) -> CGSize {
+        guard window.width > 0, window.height > 0, available.width > 0, available.height > 0 else { return window }
+        let scale = min(1, available.width / window.width, available.height / window.height)
+        return CGSize(width: (window.width * scale).rounded(.down), height: (window.height * scale).rounded(.down))
+    }
+
+    /// Новая рамка окна-зеркала (AppKit): левый верхний угол на месте, вид — `view`, всё остальное окно (заголовок) — `chrome`;
+    /// целиком в видимой части экрана.
+    public static func mirrorFrame(current: CGRect, chrome: CGSize, view: CGSize, visible: CGRect) -> CGRect {
+        let width = view.width + chrome.width, height = view.height + chrome.height
+        let x = min(max(current.minX, visible.minX), max(visible.maxX - width, visible.minX))
+        let y = min(max(current.maxY - height, visible.minY), max(visible.maxY - height, visible.minY))
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+}

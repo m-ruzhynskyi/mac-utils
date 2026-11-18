@@ -168,3 +168,46 @@ enum MissedPressLog {
         return "\(name), pid \(pid), слой \(layer)"
     }
 }
+
+/// Как наведение над зеркалом доходит до окна ИИ.
+/// 029aed9 (18.11): `mouseMoved` через `postToPid` доходил с верной точкой в окне, но подсветки не было — Chromium
+/// подсвечивает, только если настоящий курсор над его окном (сверяет окно под `NSEvent.mouseLocation`).
+public enum HoverMode: String, Sendable, CaseIterable {
+    /// Курсор отдыхает над зеркалом `HoverPeek.dwell` — настоящий курсор уходит в ту же точку окна на скрытом дисплее
+    /// (в зеркале на его месте рисуется курсор-подсказка, на основном экране он не прыгает), первое движение — назад.
+    case peek
+    /// Только `postToPid` (для сравнения; подсветки в Claude и ChatGPT нет).
+    case pid
+    case off
+}
+
+/// «Заглянуть» курсором в окно: когда.
+public enum HoverPeek {
+    public static let dwell: TimeInterval = 0.3
+
+    /// Мышь ничем не занята, курсор над картинкой окна в зеркале и не двигался `dwell`.
+    public static func shouldStart(idle: Bool, overContent: Bool, lastMove: TimeInterval, now: TimeInterval) -> Bool {
+        idle && overContent && now - lastMove >= dwell - 0.01
+    }
+
+    /// Движение мыши заканчивает «заглядывание» — кроме нашего собственного события (метка) и события ровно в точке,
+    /// куда мы курсор поставили.
+    public static func endsPeek(isOwnEvent: Bool, location: CGPoint, peekPoint: CGPoint) -> Bool {
+        // Порог 1 pt: после переноса курсора его положение может отличаться от цели на доли точки.
+        !isOwnEvent && hypot(location.x - peekPoint.x, location.y - peekPoint.y) >= 1
+    }
+}
+
+/// Видимость программ ИИ на выходе — как до включения (029aed9: Claude был виден, после выхода остался спрятан).
+public enum VisibilityRestore {
+    /// `wasHidden` — запомненное при включении (запущенные позже — видимы); `isHidden` — сейчас.
+    public static func plan(wasHidden: [pid_t: Bool], isHidden: [pid_t: Bool]) -> (unhide: [pid_t], hide: [pid_t]) {
+        var unhide: [pid_t] = [], hide: [pid_t] = []
+        for (pid, hidden) in isHidden.sorted(by: { $0.key < $1.key }) {
+            let before = wasHidden[pid] ?? false
+            if hidden, !before { unhide.append(pid) }
+            if !hidden, before { hide.append(pid) }
+        }
+        return (unhide, hide)
+    }
+}

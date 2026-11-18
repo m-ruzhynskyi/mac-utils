@@ -17,6 +17,7 @@ final class PointerSessionTests: XCTestCase {
         let target = CGPoint(x: 2200, y: 1100)
         XCTAssertEqual(steps, [
             .hideCursor, .activateTarget, .warp(target),
+            .postHID(SyntheticEvent(kind: .moved, location: target)), .wait(PointerSession.hoverSettle),
             .postHID(SyntheticEvent(kind: .leftDown, location: target, clicks: 1)),
             .postHID(SyntheticEvent(kind: .leftUp, location: target, clicks: 1)),
             .warp(cursor), .showCursor, .wait(PointerSession.clickSettle), .returnFocus,
@@ -28,7 +29,7 @@ final class PointerSessionTests: XCTestCase {
         var session = PointerSession()
         _ = session.down(.left, at: CGPoint(x: 10, y: 10), clicks: 2, flags: .maskShift, mapping: mapping, windowNumber: 7, cursor: cursor)
         let posts = session.up(mapping: mapping, windowNumber: 7).compactMap { step -> SyntheticEvent? in
-            if case let .postHID(event) = step { return event }
+            if case let .postHID(event) = step, event.kind != .moved { return event }
             return nil
         }
         XCTAssertEqual(posts.map(\.clicks), [2, 2])

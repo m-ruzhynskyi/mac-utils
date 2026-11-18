@@ -93,8 +93,10 @@ final class FocusRulesTests: XCTestCase {
     }
 
     func testHoverArgument() {
-        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug"], storedBundleIDs: nil)?.hover, true)
-        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-hover=off"], storedBundleIDs: nil)?.hover, false)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug"], storedBundleIDs: nil)?.hover, .peek)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-hover=off"], storedBundleIDs: nil)?.hover, .off)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-hover=pid"], storedBundleIDs: nil)?.hover, .pid)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-hover=on"], storedBundleIDs: nil)?.hover, .peek)
     }
 
     func testActivationModeArgument() {
@@ -147,5 +149,31 @@ final class KeyboardFocusTests: XCTestCase {
         echo.note(600, at: 20)
         XCTAssertFalse(echo.consume(600, at: 21.5), "через секунду — не эхо")
         XCTAssertFalse(echo.consume(700, at: 20))
+    }
+}
+
+/// HSCR-39: наведение через postToPid доходило, подсветки не было; на выходе Claude остался спрятан и не того размера.
+final class HoverPeekAndExitTests: XCTestCase {
+    func testPeekAfterRestOnlyWhenMouseIsFree() {
+        XCTAssertFalse(HoverPeek.shouldStart(idle: true, overContent: true, lastMove: 10, now: 10.1), "ещё двигается")
+        XCTAssertTrue(HoverPeek.shouldStart(idle: true, overContent: true, lastMove: 10, now: 10 + HoverPeek.dwell))
+        XCTAssertFalse(HoverPeek.shouldStart(idle: false, overContent: true, lastMove: 10, now: 11), "кнопка нажата или передача")
+        XCTAssertFalse(HoverPeek.shouldStart(idle: true, overContent: false, lastMove: 10, now: 11), "поля зеркала или окно поверх")
+    }
+
+    func testPeekEndsOnRealMovementOnly() {
+        let point = CGPoint(x: 2615, y: 1449)
+        XCTAssertFalse(HoverPeek.endsPeek(isOwnEvent: true, location: CGPoint(x: 2700, y: 1500), peekPoint: point), "наше движение")
+        XCTAssertFalse(HoverPeek.endsPeek(isOwnEvent: false, location: point, peekPoint: point), "движение ровно в точку заглядывания")
+        XCTAssertFalse(HoverPeek.endsPeek(isOwnEvent: false, location: CGPoint(x: 2615.4, y: 1449.3), peekPoint: point), "доли точки после переноса")
+        XCTAssertTrue(HoverPeek.endsPeek(isOwnEvent: false, location: CGPoint(x: 2617, y: 1449), peekPoint: point))
+    }
+
+    func testVisibilityAsBeforeEnable() {
+        // Claude (1) был виден, ChatGPT (2) спрятан; программа 3 запущена во время работы (не запомнена).
+        let plan = VisibilityRestore.plan(wasHidden: [1: false, 2: true], isHidden: [1: true, 2: true, 3: true])
+        XCTAssertEqual(plan.unhide, [1, 3], "Claude — показать снова; запущенная позже — видима")
+        XCTAssertEqual(plan.hide, [])
+        XCTAssertEqual(VisibilityRestore.plan(wasHidden: [2: true], isHidden: [2: false]).hide, [2], "выключение без выхода — спрятать, как было")
     }
 }

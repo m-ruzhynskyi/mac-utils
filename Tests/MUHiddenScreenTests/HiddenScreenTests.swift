@@ -241,6 +241,8 @@ final class RestorePlanTests: XCTestCase {
             remembered: [20858: CGRect(x: 0, y: 39, width: 1280, height: 820)], hidden: hidden, physical: physical)
         XCTAssertEqual(plan.map(\.index), [0, 1, 2], "окно на настоящем экране не трогаем")
         XCTAssertEqual(plan[1].origin, CGPoint(x: 0, y: 39), "ChatGPT — туда, где был до переноса")
+        XCTAssertEqual(plan[1].size, CGSize(width: 1280, height: 820), "и прежнего размера")
+        XCTAssertEqual(plan[0].size, CGSize(width: 900, height: 700), "не запомнено — размер не трогаем")
         XCTAssertTrue(physical[0].contains(plan[0].origin), "не запомнено — на настоящий экран")
         XCTAssertTrue(physical[0].contains(plan[2].origin), "без номера — на настоящий экран")
     }
@@ -248,5 +250,63 @@ final class RestorePlanTests: XCTestCase {
     func testNothingWithoutHiddenDisplay() {
         XCTAssertTrue(HiddenWindowRules.restorePlan(windows: [(1, CGRect(x: 0, y: 0, width: 10, height: 10))], remembered: [:],
                                                     hidden: .null, physical: physical).isEmpty)
+    }
+}
+
+/// HSCR-39: быстрый чат Claude отказался стать 900×700 (остался 900×535) — низ зеркала чёрный, наведение и щелчок
+/// в одну точку зеркала давали разные точки окна (разница 83 = (700 − 535) / 2).
+final class MirrorFitTests: XCTestCase {
+    let requested = CGSize(width: 900, height: 700)
+    let refused = CGRect(x: 2165, y: 1437, width: 900, height: 535)
+    let visible = CGRect(x: -1920, y: 0, width: 1920, height: 1050)
+
+    func testRefusedResizeIsNoticed() {
+        XCTAssertTrue(MirrorFit.differs(requested, refused.size), "поток был настроен на просьбу, а не на окно")
+        XCTAssertFalse(MirrorFit.differs(CGSize(width: 900, height: 535), CGSize(width: 900.5, height: 534.6)), "доли точки — не повод")
+        XCTAssertTrue(MirrorFit.differs(nil, refused.size))
+    }
+
+    func testMirrorFollowsActualWindowWithoutMargins() {
+        let view = MirrorFit.viewSize(window: refused.size, available: CGSize(width: 1920, height: 1022))
+        XCTAssertEqual(view, CGSize(width: 900, height: 535), "1:1 под фактическое окно — чёрного низа нет")
+        let mapping = MirrorMapping(viewSize: view, target: refused)
+        XCTAssertEqual(mapping.contentRect, CGRect(origin: .zero, size: view), "картинка во весь вид, без полей")
+    }
+
+    func testHoverAndClickUseTheSamePointOfTheWindow() {
+        let mapping = MirrorMapping(viewSize: MirrorFit.viewSize(window: refused.size, available: visible.size), target: refused)
+        let point = CGPoint(x: 450, y: 12)
+        var session = PointerSession()
+        guard case let .postToPid(moved) = session.hover(at: point, mapping: mapping, windowNumber: 8567).first else {
+            return XCTFail("наведение")
+        }
+        _ = session.down(.left, at: point, clicks: 1, flags: [], mapping: mapping, windowNumber: 8567, cursor: .zero)
+        let click = session.up(mapping: mapping, windowNumber: 8567).compactMap { step -> CGPoint? in
+            if case let .postHID(event) = step, event.kind == .leftDown { return event.location }
+            return nil
+        }
+        XCTAssertEqual(click, [moved.location!], "одна и та же рамка — одна и та же точка окна")
+        XCTAssertEqual(moved.location, CGPoint(x: 2615, y: 1449))
+        let mirrorRect = CGRect(x: -1018, y: 232, width: 900, height: 535)
+        XCTAssertEqual(PointerSession.dragLocation(CGPoint(x: -568, y: 244), hidden: CGRect(x: 1710, y: 1072, width: 1440, height: 900),
+                                                   mirrorRect: mirrorRect, mapping: mapping), moved.location, "и протягивание")
+    }
+
+    func testWindowLargerThanScreenIsScaledKeepingProportions() {
+        let view = MirrorFit.viewSize(window: CGSize(width: 1440, height: 900), available: CGSize(width: 1200, height: 1000))
+        XCTAssertEqual(view, CGSize(width: 1200, height: 750))
+        XCTAssertEqual(MirrorFit.clamp(CGSize(width: 1600, height: 758), to: CGSize(width: 1440, height: 900)), CGSize(width: 1440, height: 758),
+                       "окно больше скрытого дисплея — ужать")
+    }
+
+    func testMirrorFrameKeepsTopLeftAndStaysOnScreen() {
+        let current = CGRect(x: -1018, y: 120, width: 900, height: 756)   // вид 900×728 + заголовок 28
+        let frame = MirrorFit.mirrorFrame(current: current, chrome: CGSize(width: 0, height: 28),
+                                          view: CGSize(width: 900, height: 535), visible: visible)
+        XCTAssertEqual(frame, CGRect(x: -1018, y: 313, width: 900, height: 563), "левый верхний угол на месте")
+        let edge = MirrorFit.mirrorFrame(current: CGRect(x: -100, y: 0, width: 400, height: 300), chrome: .zero,
+                                         view: CGSize(width: 1135, height: 758), visible: visible)
+        XCTAssertEqual(edge.maxX, visible.maxX, "не вылезает за экран")
+        XCTAssertGreaterThanOrEqual(edge.minY, visible.minY)
     }
 }
