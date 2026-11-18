@@ -1,3 +1,4 @@
+import CoreML
 import XCTest
 @testable import MUGaze
 
@@ -275,5 +276,41 @@ final class GazeV2Tests: XCTestCase {
             o = c.step(time: Double(i) / 30, face: FaceInput(headYaw: 0, headPitch: 0, eyes: [EyeInput(frame: fr, iris: fr.center)]))
         }
         XCTAssertGreaterThanOrEqual(o!.edits[0].shift.y, -s.limits.maxLift * 20 - 1e-9)
+    }
+}
+
+/// Универсальная сборка: на x86_64 нет `Float16`, fp16-выход моделей переводится вручную (GAZE-36).
+final class GazeModelOutputTests: XCTestCase {
+    func testHalfToFloatKnownValues() {
+        XCTAssertEqual(ModelOutput.halfToFloat(0x3C00), 1)
+        XCTAssertEqual(ModelOutput.halfToFloat(0xC000), -2)
+        XCTAssertEqual(ModelOutput.halfToFloat(0x3555), 0.333251953125)
+        XCTAssertEqual(ModelOutput.halfToFloat(0x7BFF), 65504)
+        XCTAssertEqual(ModelOutput.halfToFloat(0x0001), 0x1p-24, "наименьшее субнормальное")
+        XCTAssertEqual(ModelOutput.halfToFloat(0x0400), 0x1p-14, "наименьшее нормальное")
+        XCTAssertEqual(ModelOutput.halfToFloat(0x8000).sign, .minus, "-0")
+        XCTAssertEqual(ModelOutput.halfToFloat(0x7C00), .infinity)
+        XCTAssertEqual(ModelOutput.halfToFloat(0xFC00), -.infinity)
+        XCTAssertTrue(ModelOutput.halfToFloat(0x7E00).isNaN)
+    }
+
+    #if arch(arm64)
+    func testHalfToFloatMatchesFloat16ForEveryBitPattern() {
+        for bits in UInt16.min...UInt16.max {
+            let expected = Float(Float16(bitPattern: bits)), got = ModelOutput.halfToFloat(bits)
+            if expected.isNaN { XCTAssertTrue(got.isNaN, "\(bits)"); continue }
+            XCTAssertEqual(got.bitPattern, expected.bitPattern, "\(bits)")
+        }
+    }
+    #endif
+
+    func testReadsFloat16AndFloat32Arrays() throws {
+        let half = try MLMultiArray(shape: [3], dataType: .float16)
+        let raw = half.dataPointer.assumingMemoryBound(to: UInt16.self)
+        raw[0] = 0x3C00; raw[1] = 0xB800; raw[2] = 0x4500
+        XCTAssertEqual((0..<3).map { ModelOutput.float(half, $0) }, [1, -0.5, 5])
+        let single = try MLMultiArray(shape: [2], dataType: .float32)
+        single[0] = 1.25; single[1] = -3
+        XCTAssertEqual((0..<2).map { ModelOutput.float(single, $0) }, [1.25, -3])
     }
 }

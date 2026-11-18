@@ -60,8 +60,7 @@ final class IrisModel {
         func value(_ arr: MLMultiArray, _ k: Int, _ i: Int, _ j: Int) -> Double {
             let st = arr.strides.map(\.intValue)
             let idx = k * st[0] + i * st[1] + j * st[2]
-            return arr.dataType == .float16 ? Double(arr.dataPointer.assumingMemoryBound(to: Float16.self)[idx])
-                : Double(arr.dataPointer.assumingMemoryBound(to: Float32.self)[idx])
+            return Double(ModelOutput.float(arr, idx))
         }
         var result: [EyeShape?] = []
         for k in 0..<2 {

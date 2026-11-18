@@ -64,8 +64,5 @@ final class FaceMeshModel {
         }
     }
 
-    private static func read(_ arr: MLMultiArray, _ idx: Int) -> Float {
-        arr.dataType == .float16 ? Float(arr.dataPointer.assumingMemoryBound(to: Float16.self)[idx])
-            : arr.dataPointer.assumingMemoryBound(to: Float32.self)[idx]
-    }
+    private static func read(_ arr: MLMultiArray, _ idx: Int) -> Float { ModelOutput.float(arr, idx) }
 }
