@@ -58,6 +58,14 @@ public enum HiddenWindowRules {
     /// Слой всплывающих меню (`kCGPopUpMenuWindowLevel`): такие окна AX не двигает — их можно только закрыть.
     public static let popupLayer = 101
 
+    /// Окно программы — то, что переносится и показывается в зеркале: видимое, не служебное (≥ 4 pt), уровень ниже меню.
+    /// Один источник правды для переноса, счёта окон и выбора окна зеркала. 928c284 (18.11): быстрый чат Claude после
+    /// перезапуска Claude — на уровне −1; перенос его брал (`< popupLayer`), а счёт и зеркало — только уровень 0:
+    /// «Claude: 0 окон», зеркало пустое.
+    public static func isAppWindow(_ window: HiddenWindowInfo) -> Bool {
+        window.alpha > 0 && window.frame.width >= minimumSide && window.frame.height >= minimumSide && window.layer < popupLayer
+    }
+
     /// Что сделать с окнами скрываемых программ, чтобы на настоящих дисплеях от них не осталось ни пикселя.
     /// Обычные и плавающие окна (слой < 101: окна, панели быстрого ввода, Sparkle) переносятся через AX;
     /// меню и подсказки (слой ≥ 101) — утечка.
@@ -76,10 +84,9 @@ public enum HiddenWindowRules {
         windows.contains { $0.pid == pid && $0.layer >= popupLayer && hidden.intersects($0.frame) && $0.alpha > 0 }
     }
 
-    /// Сколько обычных окон программы на скрытом дисплее (для меню и настроек: «2 окна на скрытом экране»).
+    /// Сколько окон программы на скрытом дисплее (для меню и настроек: «2 окна на скрытом экране») — те же, что переносятся.
     public static func hiddenWindowCount(windows: [HiddenWindowInfo], app: HiddenApp, hidden: CGRect) -> Int {
-        windows.filter { app.matches(bundleID: $0.bundleID) && $0.layer == 0 && hidden.intersects($0.frame)
-            && $0.alpha > 0 && $0.frame.width >= minimumSide && $0.frame.height >= minimumSide }.count
+        windows.filter { app.matches(bundleID: $0.bundleID) && isAppWindow($0) && hidden.intersects($0.frame) }.count
     }
 
     /// Куда вернуть окно при выключении: туда, где оно было до переноса, если тот дисплей ещё есть;
@@ -120,7 +127,7 @@ public enum HiddenWindowRules {
     /// Сопоставляем окно AX с окнами из `CGWindowListCopyWindowInfo` той же программы по рамке (слой 0, допуск 1 pt).
     public static func windowID(forAXFrame frame: CGRect, pid: pid_t, in windows: [HiddenWindowInfo]) -> CGWindowID? {
         let candidates = windows.filter {
-            $0.pid == pid && $0.layer == 0
+            $0.pid == pid && isAppWindow($0)
                 && abs($0.frame.minX - frame.minX) <= 1 && abs($0.frame.minY - frame.minY) <= 1
                 && abs($0.frame.width - frame.width) <= 1 && abs($0.frame.height - frame.height) <= 1
         }
@@ -153,8 +160,9 @@ public enum HiddenWindowRules {
 
     /// Какое окно показывать в зеркале: самое большое обычное окно программы на скрытом дисплее.
     public static func mirrorCandidate(windows: [HiddenWindowInfo], app: HiddenApp, hidden: CGRect) -> HiddenWindowInfo? {
+        // Обычные окна (уровень 0) — раньше панелей; среди них — самое большое.
         windows
-            .filter { app.matches(bundleID: $0.bundleID) && $0.layer == 0 && hidden.intersects($0.frame) && $0.alpha > 0 }
-            .max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+            .filter { app.matches(bundleID: $0.bundleID) && isAppWindow($0) && hidden.intersects($0.frame) }
+            .max { ($0.layer == 0 ? 1 : 0, $0.frame.width * $0.frame.height) < ($1.layer == 0 ? 1 : 0, $1.frame.width * $1.frame.height) }
     }
 }

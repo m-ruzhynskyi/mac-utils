@@ -310,3 +310,68 @@ final class MirrorFitTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(edge.minY, visible.minY)
     }
 }
+
+/// 928c284 (18.11): быстрый чат Claude после перезапуска — уровень −1. Перенесён, но «Claude: 0 окон», зеркало пустое.
+final class WindowLayerTests: XCTestCase {
+    let hidden = CGRect(x: 1710, y: 1072, width: 1440, height: 900)
+    let physical = [CGRect(x: 0, y: 0, width: 1710, height: 1112)]
+
+    func window(_ id: CGWindowID, _ frame: CGRect, layer: Int, bundle: String = "com.anthropic.claudefordesktop", alpha: CGFloat = 1) -> HiddenWindowInfo {
+        HiddenWindowInfo(id: id, pid: 27390, bundleID: bundle, frame: frame, layer: layer, alpha: alpha)
+    }
+
+    func testAppWindowIsOneRuleForAllLayersBelowMenus() {
+        XCTAssertTrue(HiddenWindowRules.isAppWindow(window(1, CGRect(x: 0, y: 0, width: 736, height: 447), layer: -1)))
+        XCTAssertTrue(HiddenWindowRules.isAppWindow(window(2, CGRect(x: 0, y: 0, width: 736, height: 447), layer: 0)))
+        XCTAssertTrue(HiddenWindowRules.isAppWindow(window(3, CGRect(x: 0, y: 0, width: 400, height: 80), layer: 3)), "плавающая панель")
+        XCTAssertFalse(HiddenWindowRules.isAppWindow(window(4, CGRect(x: 0, y: 0, width: 200, height: 300), layer: HiddenWindowRules.popupLayer)), "меню")
+        XCTAssertFalse(HiddenWindowRules.isAppWindow(window(5, CGRect(x: 0, y: 0, width: 736, height: 447), layer: 0, alpha: 0)))
+        XCTAssertFalse(HiddenWindowRules.isAppWindow(window(6, CGRect(x: 0, y: 0, width: 1, height: 1), layer: 0)), "служебное 1×1")
+    }
+
+    func testEveryMovedWindowIsCountedAndMirrorable() {
+        let onScreen = [window(15338, CGRect(x: 455, y: 365, width: 736, height: 447), layer: -1),
+                        window(7, CGRect(x: 100, y: 100, width: 300, height: 60), layer: 3),
+                        window(8, CGRect(x: 100, y: 100, width: 200, height: 300), layer: 101)]
+        let plan = HiddenWindowRules.plan(windows: onScreen, apps: [.claude], hidden: hidden, physical: physical)
+        var landed: [HiddenWindowInfo] = []
+        for action in plan {
+            guard case let .move(id, origin) = action, var moved = onScreen.first(where: { $0.id == id }) else { continue }
+            moved.frame.origin = origin
+            landed.append(moved)
+        }
+        XCTAssertEqual(landed.map(\.id), [15338, 7], "меню — утечка, остальное переносится")
+        XCTAssertEqual(HiddenWindowRules.hiddenWindowCount(windows: landed, app: .claude, hidden: hidden), landed.count,
+                       "сколько перенесено — столько и окон у программы")
+        XCTAssertEqual(HiddenWindowRules.mirrorCandidate(windows: [landed[0]], app: .claude, hidden: hidden)?.id, 15338,
+                       "окно уровня −1 — в зеркало")
+        XCTAssertEqual(HiddenWindowRules.windowID(forAXFrame: landed[0].frame, pid: 27390, in: landed), 15338, "и AX находит его номер")
+    }
+
+    func testMirrorPrefersNormalWindowOverBiggerPanel() {
+        let normal = window(1, CGRect(x: 1800, y: 1100, width: 600, height: 400), layer: 0)
+        let panel = window(2, CGRect(x: 1800, y: 1100, width: 900, height: 700), layer: -1)
+        XCTAssertEqual(HiddenWindowRules.mirrorCandidate(windows: [panel, normal], app: .claude, hidden: hidden)?.id, 1)
+    }
+}
+
+final class MirrorChoiceTests: XCTestCase {
+    func testSelectedWithoutWindowsSwitchesToAppWithWindows() {
+        XCTAssertEqual(MirrorChoice.app(selected: .claude, windows: [(.claude, 0), (.chatGPT, 1)]), .chatGPT)
+        XCTAssertEqual(MirrorChoice.app(selected: .claude, windows: [(.claude, 1), (.chatGPT, 1)]), .claude, "у выбранной есть окна — она")
+        XCTAssertEqual(MirrorChoice.app(selected: nil, windows: [(.claude, 0), (.chatGPT, 2)]), .chatGPT)
+        XCTAssertNil(MirrorChoice.app(selected: .claude, windows: [(.claude, 0), (.chatGPT, 0)]), "ни у кого — ждать")
+    }
+
+    func testRetryIsThrottled() {
+        XCTAssertTrue(MirrorChoice.shouldTry(.chatGPT, last: nil, now: 0))
+        XCTAssertFalse(MirrorChoice.shouldTry(.chatGPT, last: (.chatGPT, 10), now: 11))
+        XCTAssertTrue(MirrorChoice.shouldTry(.chatGPT, last: (.chatGPT, 10), now: 12))
+        XCTAssertTrue(MirrorChoice.shouldTry(.chatGPT, last: (.claude, 10), now: 10.1), "другая программа — сразу")
+    }
+
+    func testEmptyMirrorNeverActivatesMacUtils() {
+        XCTAssertEqual(EmptyMirrorClick.policy(hasTitleBar: false), .passThrough, "интерфейс: щелчок проходит насквозь")
+        XCTAssertEqual(EmptyMirrorClick.policy(hasTitleBar: true), .swallow, "отладка: по картинке поглощается, заголовок работает")
+    }
+}
