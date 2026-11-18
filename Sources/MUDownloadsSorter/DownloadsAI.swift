@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import PDFKit
+import MUAIBackend
 import MUCore
 
 package enum DownloadsAI {
@@ -12,9 +13,9 @@ package enum DownloadsAI {
         Куда их класть? Выбери подходящую существующую папку или придумай новую — одно-два английских слова.
         Ответь JSON: {"folder": "...", "why": "кратко по-русски"}
         """
-        let json = try await Ollama.generateJSON(prompt)
+        let json = try await AI.generateJSON(prompt, quick: true)
         guard let folder = (json["folder"] as? String).flatMap({ AIParsing.fileName(from: $0, maxLength: 40) }) else {
-            throw Ollama.Failure(errorDescription: "Модель не предложила папку")
+            throw AIFailure(.failed, provider: nil, message: "ИИ не предложил папку")
         }
         return folder
     }
@@ -50,9 +51,8 @@ package final class DocumentTagger: ObservableObject {
     private var working = false
 
     package func enqueue(_ url: URL) {
-        guard Ollama.isOn(Pref.aiDownloadsTags), !queue.contains(url) else { return }
+        guard AI.isOn(Pref.aiDownloadsTags), !queue.contains(url) else { return }
         queue.append(url)
-        BackgroundAIQueue.shared.enter()
         pending = queue.count + (working ? 1 : 0)
         next()
     }
@@ -85,7 +85,6 @@ package final class DocumentTagger: ObservableObject {
                 Self.setComment(comment, for: url)
                 tagged += 1
             }
-            BackgroundAIQueue.shared.leave()
             working = false
             pending = queue.count
             next()
@@ -95,8 +94,8 @@ package final class DocumentTagger: ObservableObject {
     /// «📋 Spec — notch app for AI agents».
     package nonisolated static func describe(_ url: URL) async throws -> String? {
         let ext = url.pathExtension.lowercased()
-        // Сначала — работает ли Ollama; иначе файл читали бы зря.
-        guard await Ollama.isReachable() else { return nil }
+        // Сначала — подключён ли ИИ; иначе файл читали бы зря.
+        guard await AI.isReady() else { return nil }
         let text = await Task.detached(priority: .utility) { () -> String in
             if textExtensions.contains(ext) { return extractText(url, limit: 1200) }
             if imageExtensions.contains(ext),
@@ -116,7 +115,7 @@ package final class DocumentTagger: ObservableObject {
         2) Summary — 1 to 3 English words, the most specific name (product, company, project), no type word, no period.
         Answer JSON: {"type": "...", "summary": "..."}
         """
-        let json = try await Ollama.generateJSON(prompt, maxTokens: 60, background: true)
+        let json = try await AI.generateJSON(prompt, quick: true)
         let type = (json["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         var summary = (json["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // Только латиница и не длиннее 3 слов; иначе — без описания.

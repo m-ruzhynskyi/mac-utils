@@ -73,7 +73,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .wellbeing: return "Перерывы и тёплый экран"
         case .meetings: return "Записи встреч"
         case .gaze: return "Взгляд в камеру"
-        case .ai: return "ИИ (Ollama)"
+        case .ai: return "ИИ"
         case .uninstaller: return "Удаление программ"
         case .monitor: return "Монитор системы"
         case .tasks: return "Диспетчер задач"

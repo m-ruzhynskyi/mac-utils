@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import PDFKit
+import MUAIBackend
 import MUCore
 import MUDesign
 
@@ -17,7 +18,7 @@ package enum ShelfGrouper {
         \(list)
         Ответь JSON: {"groups": [{"title": "...", "files": [1, 2]}]}
         """
-        let json = try await Ollama.generateJSON(prompt)
+        let json = try await AI.generateJSON(prompt, quick: true)
         var used = Set<Int>()
         var groups: [ShelfGroup] = []
         for entry in json["groups"] as? [[String: Any]] ?? [] {

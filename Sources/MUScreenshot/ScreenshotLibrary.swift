@@ -2,6 +2,7 @@ import AVFoundation
 import AppKit
 import SwiftUI
 import Vision
+import MUAIBackend
 import MUCore
 import MUDesign
 import MUDownloadsSorter
@@ -211,9 +212,9 @@ package final class ScreenshotLibrary: ObservableObject {
         }
     }
 
-    /// Умное имя по распознанному тексту (локальная модель); файл переименовывается.
+    /// Умное имя по распознанному тексту (ИИ); файл переименовывается.
     package func nameWithAI(_ path: String, text: String, app: String) {
-        guard Ollama.isOn(Pref.aiShotNames), text.count >= 12 else { return }
+        guard AI.isOn(Pref.aiShotNames), text.count >= 12 else { return }
         Task {
             guard let name = try? await ShotNamer.name(for: text, app: app),
                   let index = records.firstIndex(where: { $0.path == path }),
