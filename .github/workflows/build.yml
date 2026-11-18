@@ -171,15 +171,12 @@ jobs:
       - name: Build tests (for the cache)
         if: ${{ github.event_name != 'pull_request' }}
         run: swift build --build-tests
-      # Ad-hoc сборка без секретов: ловит поломки build.sh и подписи. В PR — под текущую архитектуру;
-      # при push и ручном запуске — универсальная, как в релизе: её результат кладётся в кэш и ускоряет релиз.
+      # Ad-hoc сборка без секретов: ловит поломки build.sh и подписи. Везде (PR, push, релиз) — одна и та же сборка arm64
+      # (только Apple Silicon); при push результат кладётся в кэш и ускоряет релиз.
       - name: Build app (ad-hoc)
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            env -u SIGN_IDENTITY ./build.sh
-          else
-            env -u SIGN_IDENTITY ./build.sh --universal
-          fi
+          env -u SIGN_IDENTITY ./build.sh
+          ./scripts/check-arm64-only.sh "build/Mac Utils.app"
           codesign --verify --deep --strict "build/Mac Utils.app"
           # Значки документов: все .icns в бандле, каждый CFBundleTypeIconFile/UTTypeIconFile указывает на файл.
           ./scripts/check-doc-icons.sh "build/Mac Utils.app"
@@ -189,7 +186,7 @@ jobs:
           done
       - name: Trim build cache
         if: ${{ success() && github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.no_cache) }}
-        run: rm -rf .build/index-build .build/arm64-apple-macosx/release .build/x86_64-apple-macosx/release
+        run: rm -rf .build/index-build .build/arm64-apple-macosx/release
       - name: Save build cache
         if: ${{ success() && github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.no_cache) }}
         uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
@@ -328,7 +325,9 @@ jobs:
       - name: Build app
         env:
           MU_RELEASE: "1"
-        run: ./build.sh --universal
+        run: |
+          ./build.sh
+          ./scripts/check-arm64-only.sh "build/Mac Utils.app"
 
       - name: Version
         run: |
