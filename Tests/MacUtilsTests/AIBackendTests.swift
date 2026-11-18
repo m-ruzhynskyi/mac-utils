@@ -539,6 +539,10 @@ final class AIBackendTests: XCTestCase {
     }
 
     func testDefaultsAreCodexWithoutFallback() {
+        // Регистрация живёт до конца процесса: без возврата все настройки приложения (редактор, «Документ»…) достались бы
+        // следующим тестам шарда — в CI после этого теста падала лента «Документа» (DocRibbonTests).
+        let previous = UserDefaults.standard.volatileDomain(forName: UserDefaults.registrationDomain)
+        defer { UserDefaults.standard.setVolatileDomain(previous, forName: UserDefaults.registrationDomain) }
         Pref.register()
         let registered = UserDefaults.standard.volatileDomain(forName: UserDefaults.registrationDomain)
         XCTAssertEqual(registered[Pref.aiProvider] as? String, "codex")
@@ -551,6 +555,13 @@ final class AIBackendTests: XCTestCase {
         for key in Pref.aiBackgroundKeys { XCTAssertEqual(registered[key] as? Bool, false, key) }
         XCTAssertNil(registered["aiModel"])
         XCTAssertNil(registered["aiURL"])
+    }
+
+    func testRegistrationDoesNotLeakToOtherTests() {
+        let before = UserDefaults.standard.volatileDomain(forName: UserDefaults.registrationDomain)
+        testDefaultsAreCodexWithoutFallback()
+        let after = UserDefaults.standard.volatileDomain(forName: UserDefaults.registrationDomain)
+        XCTAssertEqual(NSDictionary(dictionary: after), NSDictionary(dictionary: before), "регистрация возвращена как была")
     }
 
     func testBackgroundAIChoiceFromOllamaTimesIsForgottenOnce() throws {
