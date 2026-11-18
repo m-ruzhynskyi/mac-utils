@@ -26,6 +26,7 @@ import MUScreenshot
 import MUVideoPlayer
 import MUTextEditor
 import MUHiddenScreen
+import MUGaze
 
 /// Приложение живёт без иконки в Dock и в строке меню (LSUIElement).
 /// Окно настроек открывается при повторном запуске приложения
@@ -66,6 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         RemoteConnectionsCenter.addPanelTabOnce()
         MainMenu.install()
         lastTrusted = Permissions.accessibility
+        // «Взгляд в камеру»: окно отладки — только ключом запуска (`open -n … --args --gaze-debug`).
+        if CommandLine.arguments.contains(GazeDebugWindowController.launchArgument) {
+            DispatchQueue.main.async { GazeDebugWindowController.shared.show() }
+        }
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(defaultsChanged),
@@ -326,6 +331,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppSwitcher.shared.shutdown()
         // Сначала спрятать Claude/ChatGPT, потом снять скрытый дисплей — иначе их окна выпадут на основной экран.
         hiddenScreenDebug?.stop()
+        // Камера закрывается, сервер Syphon уходит из списка OBS.
+        GazeService.shared.shutdown()
     }
 
     @objc private func defaultsChanged() {

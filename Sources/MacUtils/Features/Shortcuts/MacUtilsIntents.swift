@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import MUAIBackend
 import MUCore
 import MUAI
 import MUDownloadsSorter
@@ -348,18 +349,18 @@ struct MeetingIntent: AppIntent {
 
 struct FixSelectedTextIntent: AppIntent {
     static let title: LocalizedStringResource = "Исправить выделенный текст"
-    static let description = IntentDescription("Исправить ошибки в выделенном тексте любой программы локальной ИИ-моделью (⌃⌥E).")
+    static let description = IntentDescription("Исправить ошибки в выделенном тексте любой программы с помощью ИИ — ChatGPT или Claude (⌃⌥E).")
     @MainActor func perform() async throws -> some IntentResult { run(.fixText) }
 }
 
 struct FixTextIntent: AppIntent {
     static let title: LocalizedStringResource = "Исправить текст"
-    static let description = IntentDescription("Исправить ошибки в тексте локальной ИИ-моделью (Ollama) и вернуть исправленный текст.")
+    static let description = IntentDescription("Исправить ошибки в тексте с помощью ИИ (ChatGPT или Claude) и вернуть исправленный текст.")
     @Parameter(title: "Текст") var text: String
     static var parameterSummary: some ParameterSummary { Summary("Исправить \(\.$text)") }
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         do {
-            let answer = try await Ollama.generate(text, system: TextFixer.system, temperature: 0)
+            let answer = try await AI.generate(text, system: TextFixer.system, timeout: TextFixer.timeout(for: text))
             return .result(value: AIParsing.keepingEdges(of: text, AIParsing.cleanedText(answer)))
         } catch {
             throw ShortcutError(message: error.localizedDescription)

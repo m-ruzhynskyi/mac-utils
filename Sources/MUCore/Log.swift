@@ -14,4 +14,6 @@ package enum Log {
     package static let hiddenScreen = Logger(subsystem: "com.mruzhynskyi.macutils", category: "hidden-screen")
     /// Видеоплеер: только коды и числа, без путей и имён файлов.
     package static let player = Logger(subsystem: "com.mruzhynskyi.macutils", category: "player")
+    /// «Взгляд в камеру»: только числа и состояния, без кадров.
+    package static let gaze = Logger(subsystem: "com.mruzhynskyi.macutils", category: "gaze")
 }

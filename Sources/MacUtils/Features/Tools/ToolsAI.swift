@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import PDFKit
+import MUAIBackend
 import MUCore
 import MUAudio
 import MUTextEditor
@@ -50,7 +51,7 @@ final class ProcessExplainer: ObservableObject {
             "what": "1–2 предложения", "safe": "да" | "осторожно" | "нет", "why": "1 предложение"}
             """
             do {
-                let json = try await Ollama.generateJSON(prompt)
+                let json = try await AI.generateJSON(prompt)
                 let info = Info(category: json["category"] as? String ?? "Неизвестно",
                                 what: json["what"] as? String ?? "",
                                 safe: (json["safe"] as? String ?? "осторожно").lowercased(),
@@ -79,7 +80,7 @@ final class ProcessExplainer: ObservableObject {
                 Ответь JSON: {"имя процесса": "категория", ...}
                 """
                 do {
-                    let json = try await Ollama.generateJSON(prompt)
+                    let json = try await AI.generateJSON(prompt, quick: true)
                     for (name, value) in json {
                         if let category = value as? String, chunk.contains(name) { categories[name] = category }
                     }
@@ -162,7 +163,7 @@ final class CleanupAdvisor: ObservableObject {
                 Ответь JSON: {"verdict": "safe", "reason": "до 8 слов по-русски, про ЭТУ папку"}
                 """
                 do {
-                    let json = try await Ollama.generateJSON(prompt, maxTokens: 60)
+                    let json = try await AI.generateJSON(prompt, quick: true)
                     if let verdict = Verdict(rawValue: (json["verdict"] as? String ?? "").lowercased()) {
                         advice[item.url] = Advice(verdict: verdict, reason: json["reason"] as? String ?? "")
                     }

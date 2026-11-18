@@ -500,8 +500,7 @@ package final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuIt
 
     package func showFind(replace: Bool) {
         guard let tab = workspace.current else { return }
-        // Поиск и замена работают по исходнику — в «Код» (место переносится).
-        if tab.mode == .document { tab.setMode(.code) }
+        // В «Документе» поиск идёт по видимому тексту страниц (S2), в «Коде» — по исходнику.
         if workspace.findMode == nil { workspace.search.prepare(from: tab) }
         workspace.findMode = replace || workspace.findMode == true
         workspace.search.refresh()
@@ -699,6 +698,9 @@ package final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuIt
         case #selector(editorToggleInvisibles(_:)):
             item.state = workspace.showsInvisibles ? .on : .off
             return tab != nil
+        case #selector(editorToggleSpelling(_:)):
+            item.state = UserDefaults.standard.bool(forKey: Pref.docSpelling) ? .on : .off
+            return tab?.mode == .document
         case #selector(editorToggleAutocorrect(_:)):
             item.state = UserDefaults.standard.bool(forKey: Pref.docAutocorrect) ? .on : .off
             return tab?.mode == .document
@@ -758,6 +760,11 @@ package final class EditorWindowController: NSObject, NSWindowDelegate, NSMenuIt
     @objc package func editorToggleDocument(_ sender: Any?) { if let tab { tab.setMode(tab.mode == .document ? .code : .document) } }
     @objc package func editorShowCode(_ sender: Any?) { tab?.setMode(.code) }
     @objc package func editorToggleInvisibles(_ sender: Any?) { workspace.showsInvisibles.toggle() }
+    @objc package func editorToggleSpelling(_ sender: Any?) {
+        let on = !UserDefaults.standard.bool(forKey: Pref.docSpelling)
+        UserDefaults.standard.set(on, forKey: Pref.docSpelling)
+        for tab in workspace.tabs { if on { tab.documentController?.spelling.schedule(after: 0) } else { tab.documentController?.spelling.clear() } }
+    }
     @objc package func editorToggleAutocorrect(_ sender: Any?) {
         UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: Pref.docAutocorrect), forKey: Pref.docAutocorrect)
     }

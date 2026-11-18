@@ -42,6 +42,7 @@ extension EditorTab {
             }
         }
         EditorViewModes.remember(newMode, for: document.url)
+        onSearchInvalidated?()  // совпадения поиска считаются заново: в «Коде» — по исходнику, в «Документе» — по видимому тексту
         onEdit?()
     }
 

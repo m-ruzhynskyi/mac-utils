@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MUAIBackend
 import MUCore
 import MUDesign
 import MUWellbeing
@@ -297,7 +298,7 @@ private struct AIFixRow: View {
         Task {
             defer { fixing = false }
             do {
-                let answer = try await Ollama.generate(text, system: TextFixer.system, temperature: 0)
+                let answer = try await AI.generate(text, system: TextFixer.system, timeout: TextFixer.timeout(for: text))
                 let fixed = AIParsing.keepingEdges(of: text, AIParsing.cleanedText(answer))
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(fixed, forType: .string)
@@ -521,24 +522,16 @@ private struct MeetingsPanel: View {
 }
 
 private struct AIPanel: View {
-    @ObservedObject private var ollama = Ollama.shared
+    @ObservedObject private var status = AIStatus.shared
+    @AppStorage(Pref.aiProvider) private var provider = AIProvider.standard.rawValue
 
     var body: some View {
-        QuickGroup("ИИ (Ollama)") {
-            switch ollama.status {
-            case .ready:
-                FeatureStatusRow(tone: .success, label: "Готово", detail: "Модель готова: \(Ollama.model)")
-            case .noServer:
-                FeatureStatusRow(tone: .warning, label: "Нужен запуск", detail: "Ollama не запущена",
-                                 actions: [StatusAction(title: "Запустить") { ollama.launchServer() }])
-            case .noModel:
-                FeatureStatusRow(tone: .warning, label: "Нет модели", detail: "Модель не скачана")
-            default:
-                FeatureStatusRow(tone: .neutral, label: "Проверяю…")
-            }
+        let selected = AIProvider(stored: provider)
+        QuickGroup("ИИ") {
+            AIConnectionRow(provider: selected, connection: status.state(selected))
             AIFixRow()
         }
-        .onAppear { ollama.refresh() }
+        .onAppear { status.refreshIfStale() }
     }
 }
 

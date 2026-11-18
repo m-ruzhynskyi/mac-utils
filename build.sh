@@ -1,7 +1,6 @@
 #!/bin/bash
 # Собирает "Mac Utils.app" в ./build.
-#   ./build.sh             — сборка под текущую архитектуру
-#   ./build.sh --universal — универсальная сборка (arm64 + x86_64, нужен Xcode)
+#   ./build.sh             — сборка (только arm64: Mac Utils работает только на Apple Silicon, M1 и новее)
 #   ./build.sh --install   — сборка, копирование в /Applications и запуск
 #   MU_RELEASE=1 ./build.sh — релизная версия и канал release (только CI, чистое дерево)
 #
@@ -13,14 +12,15 @@ cd "$(dirname "$0")"
 APP_NAME="Mac Utils"
 EXECUTABLE="MacUtils"
 INSTALL=0
-ARCH_ARGS=()
 for arg in "$@"; do
     case "$arg" in
         --install)   INSTALL=1 ;;
-        --universal) ARCH_ARGS=(--arch arm64 --arch x86_64) ;;
+        --universal) echo "--universal больше нет: Mac Utils собирается только под arm64 (Apple Silicon), Intel не поддерживается" >&2; exit 1 ;;
         *) echo "Неизвестный параметр: $arg" >&2; exit 1 ;;
     esac
 done
+# Только Apple Silicon: сборка — под архитектуру этого Mac, и она должна быть arm64.
+[[ "$(uname -m)" == arm64 ]] || { echo "Сборка только на Apple Silicon (arm64), а здесь $(uname -m)" >&2; exit 1; }
 
 # Версию считаем до сборки: ошибка (грязное дерево в release, неверная линия) не должна тратить время на компиляцию.
 VERSION_OUT="$(./scripts/version.sh)" || exit 1
@@ -32,8 +32,8 @@ V_COMMIT="$(version_field COMMIT)"; V_SINCE="$(version_field SINCE)"
 # Константы для метаданных App Intents (действия в «Командах») — scripts/appintents-metadata.sh.
 INTENT_FLAGS=()
 while IFS= read -r flag; do INTENT_FLAGS+=("$flag"); done < <(./scripts/appintents-metadata.sh flags)
-swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} "${INTENT_FLAGS[@]}"
-BIN_DIR="$(swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} "${INTENT_FLAGS[@]}" --show-bin-path)"
+swift build -c release "${INTENT_FLAGS[@]}"
+BIN_DIR="$(swift build -c release "${INTENT_FLAGS[@]}" --show-bin-path)"
 
 APP="build/$APP_NAME.app"
 rm -rf "$APP"
@@ -62,12 +62,14 @@ swift scripts/make-doc-icons.swift "$APP/Contents/Resources"
 ./scripts/check-doc-icons.sh "$APP"
 # Шрифты интерфейса (Manrope, JetBrains Mono — SIL OFL 1.1) с лицензиями; регистрируются при запуске (DSFonts).
 cp -R Resources/Fonts "$APP/Contents/Resources/Fonts"
+# Модель точек глаза для «Взгляда в камеру» (MediaPipe Iris, Apache-2.0); компилируется при первом включении.
+cp -R Resources/Models "$APP/Contents/Resources/Models"
 
 # Действия Mac Utils в «Командах» и фразы Siri: Contents/Resources/Metadata.appintents (до подписи).
 ./scripts/appintents-metadata.sh extract "$APP"
 
 # Помощник «Сейчас играет» (грузится в системный perl — см. Helpers/NowPlaying.m).
-clang -fobjc-arc -dynamiclib -arch arm64 -arch x86_64 -mmacosx-version-min=14.0 \
+clang -fobjc-arc -dynamiclib -arch arm64 -mmacosx-version-min=14.0 \
     -framework Foundation -framework AppKit Helpers/NowPlaying.m \
     -o "$APP/Contents/Resources/MUNowPlaying.dylib"
 

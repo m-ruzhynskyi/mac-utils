@@ -37,7 +37,7 @@ import XCTest
 final class UISnapshotTests: XCTestCase {
     private static let skippedSections: [SettingsSection: String] = [
         .share: "при появлении проверяет relay по сети (probeRelay)",
-        .ai: "при появлении опрашивает локальную Ollama (HTTP)",
+        .ai: "при появлении запускает codex и claude (проверка входа); вместо этого есть settings-ai-demo",
         .music: "подключается к системному плееру (MediaRemote)",
         .shots: "показывает личные снимки пользователя (ScreenshotLibrary.shared); вместо этого есть shots-demo",
         .cleanup: "сканирует ~/Downloads, ~/.Trash и кэши (возможен запрос TCC)",
@@ -94,6 +94,7 @@ final class UISnapshotTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: size.width, height: size.height),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none  // показ/закрытие без анимации: вне экрана она не кончается и навсегда занимает поток GCD
         window.appearance = appearance
         window.contentView = host
         window.orderBack(nil)

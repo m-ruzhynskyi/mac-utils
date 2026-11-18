@@ -37,6 +37,31 @@ package enum DocLineMetrics {
         return result
     }
 
+    /// Свойства глифов вертикального текста ячейки (`docVerticalText`): управляющие — TextKit не рисует их и не даёт им места
+    /// (действие по умолчанию — без продвижения); место и рисование у этого текста свои (`DocCellBlock`). `nil` — такого текста нет.
+    /// Через `NSLayoutManager.setGlyphs`, а не делегат: делегат `shouldGenerateGlyphs`/`shouldUse` сам по себе менял раскладку
+    /// остальных форм (f175: p95 сдвига 0,97 → 75,9 pt). Пустые глифы (`.null`) `NSTextTable` раскладывал иначе (f019: +9,7 pt).
+    package static func verticalProperties(_ storage: NSTextStorage, properties props: UnsafePointer<NSLayoutManager.GlyphProperty>,
+                                           characterIndexes: UnsafePointer<Int>, count: Int) -> [NSLayoutManager.GlyphProperty]? {
+        guard count > 0 else { return nil }
+        let first = characterIndexes[0], last = characterIndexes[count - 1]
+        guard first <= last, last < storage.length else { return nil }
+        var any = false
+        storage.enumerateAttribute(.docVerticalText, in: NSRange(location: first, length: last - first + 1)) { value, _, stop in
+            if value != nil { any = true; stop.pointee = true }
+        }
+        guard any else { return nil }
+        let text = storage.string as NSString
+        var properties = Array(UnsafeBufferPointer(start: props, count: count))
+        for index in 0..<count {
+            let character = characterIndexes[index]
+            guard storage.attribute(.docVerticalText, at: character, effectiveRange: nil) != nil else { continue }
+            let unit = text.character(at: character)
+            if unit != 0x0A, unit != 0x0D, unit != 0x2029 { properties[index] = .controlCharacter }
+        }
+        return properties
+    }
+
     /// Защита от бесконечной перекладки: typesetter снова и снова кладёт уже уложенные строки (абзац в `NSTextBlock`
     /// на краю последнего контейнера), а раскладка контейнера не завершается. После `loopLimit` возвратов без
     /// завершения такие строки — нулевой высоты: блок помещается, раскладка идёт дальше (вид этого места хуже, но
