@@ -250,9 +250,10 @@ package enum Pref {
     }
 
     /// Фоновые ИИ-функции: сами, без действия человека, отправляют содержимое в ChatGPT (Codex) или Claude —
-    /// текст каждого снимка экрана, начало каждого скачанного файла, файлы на полке. По умолчанию выключены:
-    /// включаются только явно, на странице «ИИ». Ручные (исправление текста, панель) — включены.
-    package static let aiBackgroundKeys = [aiShotNames, aiDownloadsTags, aiShelf]
+    /// текст каждого снимка экрана, начало каждого скачанного файла, файлы на полке, расшифровку каждой встречи.
+    /// По умолчанию выключены: включаются только явно, на странице «ИИ» (отчёты — и на странице «Встречи»).
+    /// Ручные (исправление текста, панель, кнопка «Сделать отчёт» у встречи) — включены.
+    package static let aiBackgroundKeys = [aiShotNames, aiDownloadsTags, aiShelf, meetingsReport]
     /// Отметка: переход с локальной модели на облачные сервисы уже сделан (фоновые функции сброшены один раз).
     package static let aiCloudMigrated = "aiCloudMigrated"
 
@@ -359,7 +360,7 @@ package enum Pref {
             meetingsMicrophone: true,
             meetingsLanguage: "auto",
             meetingsEngine: "whisper",
-            meetingsReport: true,
+            meetingsReport: false,
             layoutFix: true,
             layoutFixSwitchSource: false,
             autoUpdate: true,

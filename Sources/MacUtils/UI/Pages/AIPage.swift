@@ -22,7 +22,7 @@ struct AIPage: View {
     @AppStorage(Pref.aiTasks) private var tasks = true
     @AppStorage(Pref.aiCleanup) private var cleanup = true
     @AppStorage(Pref.aiShelf) private var shelf = false
-    @AppStorage(Pref.meetingsReport) private var meetings = true
+    @AppStorage(Pref.meetingsReport) private var meetings = false
     @ObservedObject private var status = AIStatus.shared
     @ObservedObject private var tagger = DocumentTagger.shared
     /// Демо для снимков интерфейса: не запускает codex и claude, состояния готовые.
@@ -76,7 +76,7 @@ struct AIPage: View {
                           systemImage: "externaldrive.badge.minus", isOn: $cleanup)
                 ToggleRow("Группы на полке", subtitle: "Файлы на полке группируются по смыслу. Имена файлов уходят в \(selected.title).",
                           systemImage: "tray.full", isOn: $shelf)
-                ToggleRow("Отчёты о встречах", subtitle: "Итог, решения и задачи по расшифровке созвона.",
+                ToggleRow("Отчёты о встречах", subtitle: "Итог, решения и задачи по расшифровке созвона. После каждой записи вся расшифровка уходит в \(selected.title).",
                           systemImage: "waveform.badge.mic", isOn: $meetings)
             }
             .disabled(!enabled)

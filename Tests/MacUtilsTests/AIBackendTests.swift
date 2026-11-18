@@ -120,7 +120,11 @@ final class AIBackendTests: XCTestCase {
 
     func testCodexArgumentsDisableTools() {
         let args = CodexCLI.arguments(request: AIRequest(prompt: "x", images: [URL(fileURLWithPath: "/tmp/a.png")]), workspace: workspace)
-        for feature in ["shell_tool", "view_image", "computer_use", "browser_use", "plugins", "apps"] {
+        let expected = ["shell_tool", "view_image", "computer_use", "browser_use", "plugins", "apps",
+                        "multi_agent", "browser_use_external", "browser_use_full_cdp_access", "in_app_local_automation",
+                        "code_mode_host", "image_generation", "hooks", "skill_mcp_dependency_install"]
+        XCTAssertEqual(Set(CodexCLI.disabledFeatures), Set(expected))
+        for feature in expected {
             let pairs = zip(args, args.dropFirst()).filter { $0.0 == "--disable" && $0.1 == feature }
             XCTAssertEqual(pairs.count, 1, feature)
         }
@@ -130,13 +134,17 @@ final class AIBackendTests: XCTestCase {
     }
 
     func testCodexToolItemsAreRecognisedAndOtherItemsAreSignsOfLife() {
-        for kind in ["command_execution", "file_change", "mcp_tool_call", "collab_tool_call", "local_shell_call"] {
+        // Белый список: всё, кроме ответа, рассуждения, списка шагов и ошибки, — инструмент, в том числе незнакомые типы.
+        for kind in ["command_execution", "file_change", "mcp_tool_call", "collab_tool_call", "local_shell_call", "patch_apply",
+                     "web_search", "image_generation", "browser_action", "some_future_item"] {
             XCTAssertEqual(CodexCLI.parse(#"{"type":"item.started","item":{"id":"i","type":"\#(kind)"}}"#), .tool(kind), kind)
             XCTAssertEqual(CodexCLI.parse(#"{"type":"item.completed","item":{"id":"i","type":"\#(kind)"}}"#), .tool(kind), kind)
         }
         XCTAssertEqual(CodexCLI.parse(#"{"type":"item.started","item":{"id":"i","type":"reasoning"}}"#), .progress)
         XCTAssertEqual(CodexCLI.parse(#"{"type":"item.updated","item":{"id":"i","type":"todo_list"}}"#), .progress)
         XCTAssertEqual(CodexCLI.parse(#"{"type":"item.started","item":{"id":"i","type":"agent_message","text":""}}"#), .progress)
+        XCTAssertEqual(CodexCLI.parse(#"{"type":"item.completed","item":{"id":"i","type":"error","message":"x"}}"#), .progress)
+        XCTAssertEqual(CodexCLI.parse(#"{"type":"item.completed","item":{"id":"i","type":"assistant_message","text":"ок"}}"#), .message("ок"))
         XCTAssertNil(CodexCLI.parse(#"{"type":"turn.started"}"#), "начало хода — не признак жизни: приходит до связи с сервером")
         XCTAssertNil(CodexCLI.parse(#"{"type":"thread.started","thread_id":"x"}"#))
     }
@@ -180,6 +188,33 @@ final class AIBackendTests: XCTestCase {
         }
         XCTAssertLessThan(Date().timeIntervalSince(started), 10, "не ждём конца команды")
         // SIGTERM — сразу; потомок, родившийся в момент остановки, добивает SIGKILL группе через 2 с.
+        var alive = true
+        for _ in 0..<40 where alive {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            alive = processExists(marker)
+        }
+        XCTAssertFalse(alive, "процесс codex и его потомки убиты")
+    }
+
+    func testCodexEngineStopsOnUnknownItemType() async throws {
+        let marker = "mu-ai-web-\(UUID().uuidString.prefix(8))"
+        let script = try fakeCodex("""
+        echo '{"type":"turn.started"}'
+        echo '{"type":"item.started","item":{"id":"0","type":"reasoning","text":""}}'
+        echo '{"type":"item.started","item":{"id":"1","type":"web_search","query":"secret"}}'
+        /bin/sh -c 'sleep 30; :' \(marker)
+        echo '{"type":"item.completed","item":{"id":"2","type":"agent_message","text":"по найденному"}}'
+        echo '{"type":"turn.completed","usage":{}}'
+        """)
+        let started = Date()
+        do {
+            _ = try await CLIEngine(.codex, executable: script.path).generate(AIRequest(prompt: "x", timeout: 60))
+            XCTFail("незнакомый элемент — не ответ: должен быть отброшен")
+        } catch let failure as AIFailure {
+            XCTAssertEqual(failure.provider, .codex)
+            XCTAssertTrue(failure.message.contains("web_search"), failure.message)
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 10, "остановка сразу, без конца команды")
         var alive = true
         for _ in 0..<40 where alive {
             try await Task.sleep(nanoseconds: 100_000_000)
@@ -512,7 +547,7 @@ final class AIBackendTests: XCTestCase {
         for key in [Pref.ai, Pref.aiFixText, Pref.aiShotSearch, Pref.aiDownloads, Pref.aiTasks, Pref.aiCleanup] {
             XCTAssertEqual(registered[key] as? Bool, true, key)
         }
-        XCTAssertEqual(Set(Pref.aiBackgroundKeys), [Pref.aiShotNames, Pref.aiDownloadsTags, Pref.aiShelf])
+        XCTAssertEqual(Set(Pref.aiBackgroundKeys), [Pref.aiShotNames, Pref.aiDownloadsTags, Pref.aiShelf, Pref.meetingsReport])
         for key in Pref.aiBackgroundKeys { XCTAssertEqual(registered[key] as? Bool, false, key) }
         XCTAssertNil(registered["aiModel"])
         XCTAssertNil(registered["aiURL"])
@@ -522,7 +557,7 @@ final class AIBackendTests: XCTestCase {
         let name = "mac-utils.ai-cloud-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
-        defaults.register(defaults: [Pref.aiShotNames: false, Pref.aiDownloadsTags: false, Pref.aiShelf: false])
+        defaults.register(defaults: [Pref.aiShotNames: false, Pref.aiDownloadsTags: false, Pref.aiShelf: false, Pref.meetingsReport: false])
         for key in Pref.aiBackgroundKeys { defaults.set(true, forKey: key) }
         defaults.set(false, forKey: Pref.aiFixText)
         XCTAssertEqual(Set(Pref.resetBackgroundAIAfterCloudMove(in: defaults)), Set(Pref.aiBackgroundKeys))
@@ -540,6 +575,23 @@ final class AIBackendTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: name) }
         XCTAssertEqual(Pref.resetBackgroundAIAfterCloudMove(in: defaults), [], "новый пользователь: сбрасывать нечего")
         XCTAssertTrue(defaults.bool(forKey: Pref.aiCloudMigrated))
+    }
+
+    func testMeetingReportIsBackgroundButManualRequestStillMakesIt() throws {
+        let name = "mac-utils.meeting-report-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.register(defaults: [Pref.ai: true, Pref.meetingsReport: false])
+        XCTAssertFalse(MeetingRecorder.wantsReport(manual: false, in: defaults), "после записи — без отчёта, пока не включат")
+        XCTAssertTrue(MeetingRecorder.wantsReport(manual: true, in: defaults), "кнопка «Сделать отчёт» работает и так")
+        defaults.set(true, forKey: Pref.meetingsReport)
+        XCTAssertTrue(MeetingRecorder.wantsReport(manual: false, in: defaults))
+        defaults.set(false, forKey: Pref.ai)
+        XCTAssertFalse(MeetingRecorder.wantsReport(manual: true, in: defaults), "ИИ выключен — отчёта нет и по кнопке")
+        // Включённые отчёты времён Ollama сбрасываются вместе с остальными фоновыми функциями — один раз.
+        defaults.set(true, forKey: Pref.ai)
+        XCTAssertEqual(Pref.resetBackgroundAIAfterCloudMove(in: defaults), [Pref.meetingsReport])
+        XCTAssertFalse(MeetingRecorder.wantsReport(manual: false, in: defaults))
     }
 
     // MARK: - Процесс: таймаут, отмена, потомки (только /bin/sh, cat, sleep)

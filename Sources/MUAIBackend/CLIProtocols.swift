@@ -84,10 +84,17 @@ private func jsonLine(_ line: String) -> [String: Any]? {
 
 /// `codex exec` (Codex CLI 0.16x): аргументы и разбор `--json` (JSONL-события).
 package enum CodexCLI {
-    /// Инструменты, которые выключаются: команды shell, просмотр картинок с диска, управление компьютером и браузером,
-    /// плагины и приложения. Ответ — только текст: песочница «только чтение» не мешает читать `$HOME`.
-    /// Имена проверены по `codex features list` (0.162.1); неизвестное имя codex не принимает («Unknown feature flag»).
-    package static let disabledFeatures = ["shell_tool", "view_image", "computer_use", "browser_use", "plugins", "apps"]
+    /// Инструменты, которые выключаются: команды shell, просмотр картинок с диска, управление компьютером и браузером
+    /// (в том числе внешним и через CDP), автоматизация Mac, подагенты, исполнение кода, генерация картинок, хуки,
+    /// установка зависимостей навыков, плагины и приложения. Ответ — только текст: песочница «только чтение» не мешает
+    /// читать `$HOME`. Имена проверены по `codex --disable … features list` (0.162.1): каждое становится `false`;
+    /// неизвестное имя codex не принимает («Unknown feature flag»). `unified_exec` так не выключается (остаётся `true`) —
+    /// от него защищает остановка на любом элементе, кроме ответа (`isTool`).
+    package static let disabledFeatures = [
+        "shell_tool", "view_image", "computer_use", "browser_use", "plugins", "apps",
+        "multi_agent", "browser_use_external", "browser_use_full_cdp_access", "in_app_local_automation",
+        "code_mode_host", "image_generation", "hooks", "skill_mcp_dependency_install",
+    ]
 
     /// Аргументы: без сохранения сессии, без git-проверки, песочница «только чтение», рабочая папка — пустая,
     /// без инструментов (`--disable`), пользовательский config.toml и правила не читаются (вход — из CODEX_HOME).
@@ -111,10 +118,12 @@ package enum CodexCLI {
         return Data("\(system)\n\n---\n\n\(request.prompt)".utf8)
     }
 
-    /// Элементы-инструменты: команда, правка файла, вызов MCP и подобные (`*_tool_call`).
-    package static func isTool(_ kind: String) -> Bool {
-        ["command_execution", "file_change", "local_shell_call", "patch_apply"].contains(kind) || kind.hasSuffix("tool_call")
-    }
+    /// Элементы, которые не действуют: ответ, рассуждение, список шагов, ошибка. Всё остальное — инструмент.
+    package static let textItems: Set<String> = ["agent_message", "assistant_message", "reasoning", "todo_list", "error"]
+
+    /// Элемент-инструмент — белым списком: всё, что не `textItems` (команда, правка файла, MCP, веб-поиск, браузер
+    /// и типы, которых ещё нет в этой версии codex). Ответ должен быть только текстом, поэтому незнакомое — тоже стоп.
+    package static func isTool(_ kind: String) -> Bool { !textItems.contains(kind) }
 
     /// Строка `--json` → событие. Неизвестные события и не-JSON (предупреждения) — nil.
     /// `item.*` — признак жизни (`.progress`): у codex нет потоковых кусков, первый текст приходит вместе с готовым

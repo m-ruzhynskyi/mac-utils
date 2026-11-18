@@ -105,7 +105,14 @@ package final class MeetingRecorder: NSObject, ObservableObject {
     private var wakeObserver: NSObjectProtocol?
 
     // Очередь расшифровки и фоновые «активности» (сохранение записи, подготовка звука).
-    private struct Job: Equatable { let folder: URL; let reportOnly: Bool }
+    /// `manual` — человек сам попросил (кнопка, ссылка): отчёт делается, даже если «Отчёты о встречах» (фоновая
+    /// функция) выключены. Очередь сравнивает встречи без него, а на диск он не пишется: после перезапуска — как автоматически.
+    private struct Job: Equatable {
+        let folder: URL
+        let reportOnly: Bool
+        var manual = false
+        static func == (a: Job, b: Job) -> Bool { a.folder == b.folder && a.reportOnly == b.reportOnly }
+    }
     private struct Queued { let job: Job; let waiter: CheckedContinuation<Void, Never>? }
     private var queue: [Queued] = []
     private var currentJob: Job?
@@ -497,8 +504,9 @@ package final class MeetingRecorder: NSObject, ObservableObject {
     // MARK: - Очередь расшифровки и отчёта
 
     /// reportOnly — расшифровка уже есть, заново делаем только отчёт. Возвращается, когда эта встреча обработана.
+    /// Вызывается по действию человека (кнопки на странице «Встречи», ссылки macutils://meeting-…): отчёт — всегда, если ИИ включён.
     package func process(_ meeting: Meeting, reportOnly: Bool = false) async {
-        let job = Job(folder: meeting.folder, reportOnly: reportOnly)
+        let job = Job(folder: meeting.folder, reportOnly: reportOnly, manual: true)
         guard !isQueued(job) else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             enqueue(job, waiter: continuation)
@@ -580,7 +588,7 @@ package final class MeetingRecorder: NSObject, ObservableObject {
             // На пару фраз отчёт не нужен — модель начнёт выдумывать.
             let words = transcript.split(whereSeparator: \.isWhitespace).count
             if words < 40 { try? FileManager.default.removeItem(at: meeting.report) }
-            if AI.isOn(Pref.meetingsReport), words >= 40 {
+            if Self.wantsReport(manual: job.manual), words >= 40 {
                 setStep("Готовлю отчёт…")
                 let report = try await Self.report(for: transcript)
                 try ("# Встреча \(meeting.title)\n\n" + report).write(to: meeting.report, atomically: true, encoding: .utf8)
@@ -619,6 +627,12 @@ package final class MeetingRecorder: NSObject, ObservableObject {
     """
 
     /// Отчёт одним запросом: у ChatGPT и Claude длинный контекст, расшифровка встречи помещается целиком.
+    /// Делать ли отчёт: ИИ включён и либо человек попросил сам, либо включены «Отчёты о встречах» — фоновая функция
+    /// (после записи вся расшифровка сама уходит в ChatGPT или Claude), по умолчанию выключена.
+    package nonisolated static func wantsReport(manual: Bool, in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: Pref.ai) && (manual || defaults.bool(forKey: Pref.meetingsReport))
+    }
+
     package nonisolated static func report(for transcript: String) async throws -> String {
         try await AI.generate(transcript, system: reportSystem, timeout: reportTimeout(for: transcript), long: true)
     }
