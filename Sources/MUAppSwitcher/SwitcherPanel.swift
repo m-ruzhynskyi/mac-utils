@@ -21,6 +21,9 @@ package final class SwitcherPanelController {
                                   width: size.width, height: size.height),
                            display: true)
         }
+        // Пока скрытый экран включён, панель не видна в демонстрации экрана (как зеркало): переключать программы можно
+        // незаметно для зрителей.
+        panel.sharingType = HiddenScreenShared.isActive ? .none : .readOnly
         panel.orderFrontRegardlessOnScreen()
     }
 

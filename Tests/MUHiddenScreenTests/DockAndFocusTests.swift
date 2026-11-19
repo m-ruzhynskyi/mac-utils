@@ -218,3 +218,70 @@ final class AXFieldNearTests: XCTestCase {
         XCTAssertNil(AXClickTarget.nearestField(point, candidates: [("AXGroup", field, true), ("AXTextArea", field, false)]))
     }
 }
+
+/// HSCR-47: Dock по намеренному жесту, замер perf, режим дерева AX.
+final class PerfAndDwellTests: XCTestCase {
+    func testDockNeedsHalfSecondOfPushing() {
+        var dwell = DockEdgeDwell()
+        XCTAssertEqual(dwell.decide(atEdge: true, distance: 1, now: 10), .clamp, "случайное касание — Dock не выезжает")
+        XCTAssertEqual(dwell.decide(atEdge: true, distance: 1, now: 10.2), .clamp)
+        XCTAssertEqual(dwell.decide(atEdge: true, distance: 1, now: 10.4), .clamp)
+        XCTAssertEqual(dwell.decide(atEdge: true, distance: 1, now: 10.55), .pass(justReleased: true), "полсекунды нажима — пропускаем")
+        XCTAssertEqual(dwell.decide(atEdge: true, distance: 1, now: 10.6), .pass(justReleased: false))
+        XCTAssertEqual(dwell.decide(atEdge: false, distance: 30, now: 11), .pass(justReleased: false), "у Dock (≤ 40 pt) — не мешаем")
+        XCTAssertEqual(dwell.decide(atEdge: false, distance: 300, now: 12), .clamp, "ушёл от края — сторож снова держит")
+        XCTAssertEqual(dwell.decide(atEdge: true, distance: 1, now: 13), .clamp)
+    }
+
+    func testPauseInPushingRestarts() {
+        var dwell = DockEdgeDwell()
+        _ = dwell.decide(atEdge: true, distance: 1, now: 0)
+        _ = dwell.decide(atEdge: true, distance: 1, now: 0.2)
+        XCTAssertEqual(dwell.decide(atEdge: true, distance: 1, now: 0.9), .clamp, "перерыв 0,7 с — отсчёт заново")
+        XCTAssertEqual(dwell.decide(atEdge: true, distance: 1, now: 1.2), .clamp)
+        XCTAssertEqual(dwell.decide(atEdge: true, distance: 1, now: 1.45), .pass(justReleased: true), "0,55 с от нового начала")
+    }
+
+    func testDistanceToDockEdge() {
+        let main = CGRect(x: 0, y: 0, width: 1710, height: 1112)
+        XCTAssertEqual(DockEdgeGuard.distance(CGPoint(x: 10, y: 1100), edge: .bottom, displays: [main]), 12)
+        XCTAssertEqual(DockEdgeGuard.distance(CGPoint(x: 10, y: 100), edge: .left, displays: [main]), 10)
+        XCTAssertEqual(DockEdgeGuard.distance(CGPoint(x: -10, y: 100), edge: .left, displays: [main]), .greatestFiniteMagnitude)
+    }
+
+    func testPercentileAndLine() {
+        XCTAssertNil(PerfSample.percentile([], 0.5))
+        XCTAssertEqual(PerfSample.percentile([5, 1, 3, 2, 4], 0.5), 3)
+        XCTAssertEqual(PerfSample.percentile(Array(1...100).map(Double.init), 0.95), 95)
+        let sample = PerfSample(seconds: 10, streamFrames: 580, shownFrames: 575, frameAges: [10, 12, 14, 40], guardDurations: [3, 4, 5],
+                                cpu: [("Mac Utils", 12.4), ("Claude", 40)], framePixels: CGSize(width: 1800, height: 1400),
+                                displayPoints: CGSize(width: 1440, height: 900))
+        XCTAssertEqual(sample.line(phase: "как есть"),
+                       "perf как есть: поток 58 к/с, показано 58 к/с, возраст кадра p50 12 мс p95 40 мс, сторож 0 выз/с p50 4 мкс p95 5 мкс, CPU Mac Utils 12%, Claude 40%; кадр 1800×1400 px, дисплей 1440×900 pt")
+    }
+
+    func testAXTreeModeFlag() {
+        XCTAssertEqual(HiddenScreenOptions().axTree, .click, "дерево страницы — только к щелчку, потом выключается")
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-ax=off"], storedBundleIDs: nil)?.axTree, .off)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-ax=show"], storedBundleIDs: nil)?.axTree, .show)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-ax=bad"], storedBundleIDs: nil)?.axTree, .click)
+    }
+
+    func testScrollLoadVerdict() {
+        XCTAssertEqual(PerfLoad.scrollVerdict(framesDuringScroll: 3),
+                       "прокрутке нечего двигать (кадров за прокрутку 3) — фаза недоказательна", "короткий чат — честно в журнал")
+        XCTAssertNil(PerfLoad.scrollVerdict(framesDuringScroll: 450))
+    }
+
+    @MainActor
+    func testScrollLoadShape() {
+        XCTAssertEqual(PerfLoad.scrollSeconds, 5, "5 с вверх и 5 с вниз")
+        XCTAssertEqual(PerfLoad.rate, 60, "~60 событий/с, как колесо трекпада")
+        XCTAssertGreaterThan(PerfLoad.moveSeconds, 0, "и отдельно движение курсора — наведение и сторож")
+    }
+
+    func testProcessFamilyIncludesSelf() {
+        XCTAssertEqual(PerfMeter.family(getpid()).first, getpid())
+        XCTAssertNotNil(PerfMeter.cpuSeconds(getpid()))
+    }
+}
