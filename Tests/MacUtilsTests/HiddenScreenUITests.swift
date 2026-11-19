@@ -89,6 +89,11 @@ final class PreCallRulesTests: XCTestCase {
         XCTAssertEqual(autohide.level, .attention)
         XCTAssertEqual(autohide.title, "Dock выезжает у края экрана")
         XCTAssertEqual(PreCallRules.dock(autohide: nil, away: .disabled).level, .attention)
+        // Основной экран закрыт, а у внешнего монитора край свободен — заголовок не обещает «в звонке» (ревью 1111).
+        let partial = PreCallRules.dock(autohide: true, away: .partial(exposed: 1))
+        XCTAssertEqual(partial.level, .attention)
+        XCTAssertEqual(partial.title, "На других мониторах Dock выезжает")
+        XCTAssertTrue(partial.detail.contains("основной экран"))
         let blocked = PreCallRules.dock(autohide: true, away: .unavailable(DockAway.occupiedReason))
         XCTAssertEqual(blocked.level, .attention)
         XCTAssertTrue(blocked.detail.hasPrefix(DockAway.occupiedReason))

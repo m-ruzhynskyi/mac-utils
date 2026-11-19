@@ -121,6 +121,10 @@ package enum PreCallRules {
             return PreCallCheck(id: "dock", level: .ok, title: "Dock не выезжает в звонке",
                                 detail: "Пока скрытый экран включён, Dock убран с основного экрана. Значков Claude и ChatGPT не видно",
                                 action: nil)
+        case let .partial(exposed):
+            return PreCallCheck(id: "dock", level: .attention, title: "На других мониторах Dock выезжает",
+                                detail: "С основного экрана Dock убран, а у других мониторов (\(exposed)) край Dock свободен — там видны значки Claude и ChatGPT. Показывайте в звонке основной экран или окно",
+                                action: nil)
         case let .unavailable(reason):
             return PreCallCheck(id: "dock", level: .attention, title: "Dock может выехать в звонке",
                                 detail: "\(reason). В Dock видны значки Claude и ChatGPT: не подводите курсор к краю с Dock или показывайте в звонке окно, а не весь экран",

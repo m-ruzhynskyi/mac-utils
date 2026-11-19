@@ -220,6 +220,10 @@ public enum MirrorChoice {
         return windows.first(where: { $0.count > 0 })?.app
     }
 
+    /// Чью программу искать первой: последний выбор (человека в полоске или автовыбора) важнее последнего удачного
+    /// показа — иначе после закрытия окна зеркало вернулось бы к прежней программе, а не к выбранной (ревью 1111).
+    public static func preferred(lastChoice: HiddenApp?, shown: HiddenApp?) -> HiddenApp? { lastChoice ?? shown }
+
     /// Повторная попытка показать ту же программу — не чаще.
     public static let retry: TimeInterval = 2
 
@@ -227,6 +231,37 @@ public enum MirrorChoice {
         guard let last, last.app == app else { return true }
         return now - last.at >= retry
     }
+}
+
+/// Сколько раз автовыбор пробует показать одну программу, если показ не удаётся (окно есть, а поток не стартует):
+/// `limit` попыток подряд, потом пауза `pause` (одна строка в журнал), потом снова. Удача или другая программа — заново.
+public struct MirrorRetry: Equatable, Sendable {
+    public static let limit = 3
+    public static let pause: TimeInterval = 30
+
+    public private(set) var app: HiddenApp?
+    public private(set) var attempts = 0
+    public private(set) var pausedUntil: TimeInterval = 0
+
+    public init() {}
+
+    /// `allow` — пробовать сейчас; `pauseStarted` — пауза началась только что (записать в журнал).
+    public mutating func next(_ app: HiddenApp, now: TimeInterval) -> (allow: Bool, pauseStarted: Bool) {
+        if app != self.app {
+            self = MirrorRetry()
+            self.app = app
+        }
+        if now < pausedUntil { return (false, false) }
+        if attempts >= Self.limit {
+            attempts = 0
+            pausedUntil = now + Self.pause
+            return (false, true)
+        }
+        attempts += 1
+        return (true, false)
+    }
+
+    public mutating func reset() { self = MirrorRetry() }
 }
 
 /// Щелчок по пустому зеркалу (окна в нём нет): не делать Mac Utils активной — у неё нет строки меню, macOS показала бы
@@ -238,6 +273,13 @@ public enum EmptyMirrorClick: Equatable, Sendable {
     case swallow
 
     public static func policy(hasTitleBar: Bool) -> EmptyMirrorClick { hasTitleBar ? .swallow : .passThrough }
+
+    /// Нажатия, которые пустое отладочное зеркало поглощает, и их отпускания (у средней кнопки тоже — ревью 1111).
+    public static let presses: [CGEventType] = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+    public static let releases: [CGEventType] = [.leftMouseUp, .rightMouseUp, .otherMouseUp]
+    /// Перехват нажатий над зеркалом слушает их все и протягивание левой кнопкой.
+    public static let tapTypes: [CGEventType] = [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown, .rightMouseUp,
+                                                 .otherMouseDown, .otherMouseUp]
 }
 
 /// Журнал щелчка по зеркалу (HSCR-43): какая программа была активной до щелчка, какие становились активными в течение

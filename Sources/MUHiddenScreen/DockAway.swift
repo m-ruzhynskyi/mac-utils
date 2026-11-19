@@ -29,6 +29,8 @@ public enum DockAway {
     public enum Readiness: Equatable, Sendable {
         case disabled
         case ready
+        /// Основной экран закрыт, но у `exposed` других мониторов край Dock свободен — там Dock выезжает.
+        case partial(exposed: Int)
         case unavailable(String)
     }
 
@@ -77,6 +79,37 @@ public enum DockAway {
         case .bottom: return hidden.minY == main.maxY && hidden.minX <= main.minX && hidden.maxX >= main.maxX
         case .left: return hidden.maxX == main.minX && hidden.minY <= main.minY && hidden.maxY >= main.maxY
         case .right: return hidden.minX == main.maxX && hidden.minY <= main.minY && hidden.maxY >= main.maxY
+        }
+    }
+
+    /// Другие мониторы, у которых край Dock свободен хотя бы частично: при отдельных пространствах Dock выезжает и там
+    /// (HSCR-44, ревью 1111). Соседи — основной экран, остальные мониторы и скрытый дисплей на месте `hidden`.
+    /// Одно пространство на все дисплеи — Dock только на основном, других нет.
+    public static func exposedDisplays(edge: DockEdge, spansDisplays: Bool, main: CGRect, others: [CGRect], hidden: CGRect?) -> [CGRect] {
+        guard !spansDisplays else { return [] }
+        return others.filter { display in
+            let neighbours = ([main] + others + [hidden].compactMap { $0 }).filter { $0 != display }
+            let covered = neighbours.reduce(CGFloat(0)) { $0 + edgeOverlap(of: display, edge: edge, with: $1) }
+            return covered < edgeLength(display, edge: edge) - 1
+        }
+    }
+
+    private static func edgeLength(_ rect: CGRect, edge: DockEdge) -> CGFloat {
+        edge == .bottom ? rect.width : rect.height
+    }
+
+    /// Сколько края `edge` у `display` закрывает `other` (вплотную по ту сторону края).
+    private static func edgeOverlap(of display: CGRect, edge: DockEdge, with other: CGRect) -> CGFloat {
+        switch edge {
+        case .bottom:
+            guard other.minY == display.maxY else { return 0 }
+            return max(0, min(display.maxX, other.maxX) - max(display.minX, other.minX))
+        case .left:
+            guard other.maxX == display.minX else { return 0 }
+            return max(0, min(display.maxY, other.maxY) - max(display.minY, other.minY))
+        case .right:
+            guard other.minX == display.maxX else { return 0 }
+            return max(0, min(display.maxY, other.maxY) - max(display.minY, other.minY))
         }
     }
 
@@ -133,9 +166,12 @@ public enum DockAway {
         let mainID = CGMainDisplayID()
         let main = CGDisplayBounds(mainID)
         let others = physicalDisplays().filter { $0 != mainID }.map(CGDisplayBounds)
-        switch plan(edge: settings.edge, spansDisplays: settings.spansDisplays, main: main, others: others,
-                    size: displaySize(base: base, main: main)) {
-        case .place: return .ready
+        let size = displaySize(base: base, main: main)
+        switch plan(edge: settings.edge, spansDisplays: settings.spansDisplays, main: main, others: others, size: size) {
+        case let .place(origin):
+            let exposed = exposedDisplays(edge: settings.edge, spansDisplays: settings.spansDisplays, main: main, others: others,
+                                          hidden: CGRect(origin: origin, size: size))
+            return exposed.isEmpty ? .ready : .partial(exposed: exposed.count)
         case let .unavailable(reason): return .unavailable(reason)
         }
     }
