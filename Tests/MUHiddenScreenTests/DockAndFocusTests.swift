@@ -15,53 +15,45 @@ final class DockAwayTests: XCTestCase {
         XCTAssertEqual(DockEdge(orientation: "weird"), .bottom)
     }
 
-    func testDisplayIsAtLeastMainScreen() {
-        XCTAssertEqual(DockAway.displaySize(base: CGSize(width: 1440, height: 900), main: main), CGSize(width: 1710, height: 1112))
-        XCTAssertEqual(DockAway.displaySize(base: CGSize(width: 2560, height: 1440), main: main), CGSize(width: 2560, height: 1440))
-        XCTAssertEqual(DockAway.displaySize(base: CGSize(width: 1440, height: 900), main: .null), CGSize(width: 1440, height: 900))
+    func testReadinessNeedsAutohide() {
+        XCTAssertEqual(DockAway.readiness(enabled: true, autohide: true), .ready)
+        XCTAssertEqual(DockAway.readiness(enabled: true, autohide: false), .unavailable(DockAway.noAutohideReason),
+                       "без автоскрытия Dock виден всегда — сторож края не поможет")
+        XCTAssertEqual(DockAway.readiness(enabled: true, autohide: nil), .unavailable(DockAway.noAutohideReason))
+        XCTAssertEqual(DockAway.readiness(enabled: false, autohide: true), .disabled)
     }
 
-    func testBottomDockGoesUnderMainScreen() {
-        let size = CGSize(width: 1710, height: 1112)
-        let plan = DockAway.plan(edge: .bottom, spansDisplays: false, main: main, others: [], size: size)
-        XCTAssertEqual(plan, .place(CGPoint(x: 0, y: 1112)))
-        XCTAssertTrue(DockAway.covers(edge: .bottom, hidden: CGRect(origin: CGPoint(x: 0, y: 1112), size: size), main: main))
-        // Дисплей уже: край закрыт не весь — Dock мог бы выехать в незакрытой части.
-        XCTAssertEqual(DockAway.plan(edge: .bottom, spansDisplays: false, main: main, others: [], size: CGSize(width: 1440, height: 1112)),
-                       .unavailable(DockAway.tooSmallReason))
-        XCTAssertFalse(DockAway.covers(edge: .bottom, hidden: CGRect(x: 100, y: 1112, width: 1710, height: 900), main: main))
-        XCTAssertFalse(DockAway.covers(edge: .bottom, hidden: CGRect(x: 1710, y: 1072, width: 1710, height: 1112), main: main),
-                       "за углом край Dock свободен")
+    func testCursorStaysOffBottomDockEdge() {
+        // Основной экран и скрытый дисплей за углом (нижние 40 pt правого края).
+        let hidden = CGRect(x: 1710, y: 1072, width: 1440, height: 900)
+        let displays = [main]
+        XCTAssertEqual(DockEdgeGuard.clamp(CGPoint(x: 800, y: 1111), edge: .bottom, displays: displays, neighbours: displays + [hidden]),
+                       CGPoint(x: 800, y: 1112 - DockEdgeGuard.margin), "у нижнего края — назад на 3 pt: Dock не выезжает")
+        XCTAssertNil(DockEdgeGuard.clamp(CGPoint(x: 800, y: 1000), edge: .bottom, displays: displays, neighbours: displays + [hidden]))
+        XCTAssertNil(DockEdgeGuard.clamp(CGPoint(x: 800, y: 1109), edge: .bottom, displays: displays, neighbours: displays + [hidden]),
+                     "уже в 3 pt от края — не трогаем")
     }
 
-    func testSideDocks() {
-        let size = CGSize(width: 1710, height: 1112)
-        XCTAssertEqual(DockAway.plan(edge: .left, spansDisplays: false, main: main, others: [], size: size), .place(CGPoint(x: -1710, y: 0)))
-        XCTAssertEqual(DockAway.plan(edge: .right, spansDisplays: false, main: main, others: [], size: size), .place(CGPoint(x: 1710, y: 0)))
-        XCTAssertTrue(DockAway.covers(edge: .right, hidden: CGRect(x: 1710, y: 0, width: 1710, height: 1112), main: main))
-        XCTAssertTrue(DockAway.covers(edge: .left, hidden: CGRect(x: -1710, y: -10, width: 1710, height: 1200), main: main))
+    func testSidesAndOtherMonitors() {
+        let sidecar = CGRect(x: -1135, y: 106, width: 1135, height: 789)
+        let displays = [main, sidecar]
+        // Низ Sidecar тоже свободен — и там курсор не доходит до края (HSCR-44: «на других мониторах Dock выезжает»).
+        XCTAssertEqual(DockEdgeGuard.clamp(CGPoint(x: -500, y: 894), edge: .bottom, displays: displays, neighbours: displays),
+                       CGPoint(x: -500, y: 895 - DockEdgeGuard.margin))
+        // Dock слева: левый край основного экрана граничит с Sidecar (106…895) — там курсор проходит на Sidecar.
+        XCTAssertNil(DockEdgeGuard.clamp(CGPoint(x: 0.5, y: 500), edge: .left, displays: displays, neighbours: displays))
+        XCTAssertEqual(DockEdgeGuard.clamp(CGPoint(x: 0.5, y: 1000), edge: .left, displays: displays, neighbours: displays),
+                       CGPoint(x: DockEdgeGuard.margin, y: 1000), "ниже Sidecar край основного экрана свободен")
+        XCTAssertEqual(DockEdgeGuard.clamp(CGPoint(x: 1709, y: 500), edge: .right, displays: [main], neighbours: [main]),
+                       CGPoint(x: 1710 - DockEdgeGuard.margin, y: 500))
     }
 
-    func testUnavailableCasesAreHonest() {
-        let size = CGSize(width: 1710, height: 1112)
-        XCTAssertEqual(DockAway.plan(edge: .bottom, spansDisplays: true, main: main, others: [], size: size),
-                       .unavailable(DockAway.spansDisplaysReason), "одно пространство на все дисплеи: Dock всегда на основном")
-        let below = CGRect(x: 200, y: 1112, width: 1920, height: 1080)
-        XCTAssertEqual(DockAway.plan(edge: .bottom, spansDisplays: false, main: main, others: [below], size: size),
-                       .unavailable(DockAway.occupiedReason))
-        // Монитор справа не мешает нижнему краю.
-        let right = CGRect(x: 1710, y: 0, width: 1920, height: 1080)
-        XCTAssertEqual(DockAway.plan(edge: .bottom, spansDisplays: false, main: main, others: [right], size: size),
-                       .place(CGPoint(x: 0, y: 1112)))
-        XCTAssertEqual(DockAway.plan(edge: .right, spansDisplays: false, main: main, others: [right], size: size),
-                       .unavailable(DockAway.occupiedReason))
-    }
-
-    func testDockOnHiddenDisplay() {
-        let hidden = CGRect(x: 1710, y: 1072, width: 1710, height: 1112)
-        XCTAssertTrue(DockAway.dockOn(hidden, dockFrames: [CGRect(x: 2000, y: 2100, width: 900, height: 80)]))
-        XCTAssertFalse(DockAway.dockOn(hidden, dockFrames: [CGRect(x: 400, y: 1030, width: 900, height: 80)]))
-        XCTAssertFalse(DockAway.dockOn(hidden, dockFrames: []), "Dock спрятан — не знаем, дисплей не трогаем")
+    func testFreeSegments() {
+        let below = CGRect(x: 200, y: 1112, width: 600, height: 400)
+        XCTAssertEqual(DockEdgeGuard.freeSegments(main, edge: .bottom, neighbours: [main, below]), [0...200, 800...1710])
+        XCTAssertEqual(DockEdgeGuard.freeSegments(main, edge: .bottom, neighbours: [CGRect(x: -100, y: 1112, width: 2000, height: 10)]), [],
+                       "край целиком закрыт соседом — Dock там не выедет, курсор не держим")
+        XCTAssertEqual(DockEdgeGuard.freeSegments(main, edge: .bottom, neighbours: []), [0...1710])
     }
 
     func testOptionsFlags() {
@@ -103,16 +95,19 @@ final class MirrorLevelAndClickTests: XCTestCase {
         var session = PointerSession()
         XCTAssertEqual(session.clickMode, .background)
         _ = session.down(.left, at: CGPoint(x: 100, y: 50), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor)
-        let steps = session.up(mapping: mapping, windowNumber: 7)
+        let planned = session.up(mapping: mapping, windowNumber: 7)
         let target = CGPoint(x: 2200, y: 1100)
         let origin = CGPoint(x: 2000, y: 1000)
-        XCTAssertEqual(steps, [
+        let events: [PointerStep] = [
             .hideCursor, .warp(target),
             .postHID(SyntheticEvent(kind: .moved, location: target)), .wait(PointerSession.hoverSettle),
             .postToPid(SyntheticEvent(kind: .leftDown, location: target, clicks: 1, windowNumber: 7, windowOrigin: origin)),
             .postToPid(SyntheticEvent(kind: .leftUp, location: target, clicks: 1, windowNumber: 7, windowOrigin: origin)),
             .wait(PointerSession.backgroundSettle), .warp(cursor), .showCursor,
-        ])
+        ]
+        XCTAssertEqual(planned, [.accessibilityClick(target, fallback: events)],
+                       "обычный щелчок — сначала через AX (фокус в поле, «нажать»), события — запасной путь")
+        let steps = events
         XCTAssertFalse(steps.contains(.activateTarget), "ИИ не активируется — программа пользователя не мигает")
         XCTAssertFalse(steps.contains(.returnFocus))
         XCTAssertFalse(steps.contains { if case let .postHID(event) = $0 { return event.kind == .leftDown || event.kind == .leftUp }; return false },
@@ -160,5 +155,44 @@ final class MirrorLevelAndClickTests: XCTestCase {
                        "щелчок: активная до com.apple.finder, во время [+12 мс com.anthropic.claudefordesktop, +96 мс com.apple.finder], после com.apple.finder — мигание (смен 2); путь warp")
         let stuck = ClickTrace(path: "background", before: "com.apple.finder", started: 0)
         XCTAssertTrue(stuck.line(after: "com.anthropic.claudefordesktop").contains("мигание"), "активной осталась другая — тоже смена")
+    }
+}
+
+final class AXClickTests: XCTestCase {
+    func testOnlyPlainSingleClicks() {
+        XCTAssertTrue(AXClickTarget.applies(clicks: 1, flags: []))
+        XCTAssertTrue(AXClickTarget.applies(clicks: 1, flags: .maskNonCoalesced), "служебные флаги не мешают")
+        XCTAssertFalse(AXClickTarget.applies(clicks: 2, flags: []), "двойной — выделить слово, событиями")
+        XCTAssertFalse(AXClickTarget.applies(clicks: 1, flags: .maskCommand), "⌘-щелчок по ссылке — событиями")
+    }
+
+    func testDoubleClickSkipsAX() {
+        let mapping = MirrorMapping(viewSize: CGSize(width: 400, height: 300), target: CGRect(x: 2000, y: 1000, width: 800, height: 600))
+        var session = PointerSession()
+        _ = session.down(.left, at: CGPoint(x: 10, y: 10), clicks: 2, flags: [], mapping: mapping, windowNumber: 7, cursor: .zero)
+        XCTAssertFalse(session.up(mapping: mapping, windowNumber: 7).contains { if case .accessibilityClick = $0 { return true }; return false })
+    }
+
+    func testFocusesTextFieldUpTheChain() {
+        // Claude: щелчок в абзац внутри поля ввода (contenteditable) → AXTextArea выше по цепочке.
+        let chain = [AXClickTarget.Node(role: "AXStaticText"), AXClickTarget.Node(role: "AXGroup", actions: ["AXPress"]),
+                     AXClickTarget.Node(role: "AXTextArea", focusSettable: true), AXClickTarget.Node(role: "AXWebArea")]
+        XCTAssertEqual(AXClickTarget.choose(chain)?.index, 2)
+        XCTAssertEqual(AXClickTarget.choose(chain)?.action, .focus)
+    }
+
+    func testPressesButtonsAndLinks() {
+        let button = [AXClickTarget.Node(role: "AXImage"), AXClickTarget.Node(role: "AXButton", actions: ["AXPress", "AXShowMenu"])]
+        XCTAssertEqual(AXClickTarget.choose(button)?.action, .press)
+        XCTAssertEqual(AXClickTarget.choose([AXClickTarget.Node(role: "AXLink", actions: ["AXPress"])])?.action, .press)
+        XCTAssertNil(AXClickTarget.choose([AXClickTarget.Node(role: "AXButton")]), "без AXPress не нажать")
+    }
+
+    func testPlainTextFallsBackToEvents() {
+        // Щелчок по тексту ответа: до веб-страницы ничего управляемого — событиями (выделение, курсор в тексте).
+        let chain = [AXClickTarget.Node(role: "AXStaticText"), AXClickTarget.Node(role: "AXGroup", actions: ["AXPress"]),
+                     AXClickTarget.Node(role: "AXWebArea"), AXClickTarget.Node(role: "AXTextArea", focusSettable: true)]
+        XCTAssertNil(AXClickTarget.choose(chain), "выше веб-страницы не поднимаемся")
+        XCTAssertNil(AXClickTarget.choose([AXClickTarget.Node(role: "AXTextArea", focusSettable: false)]), "поле, которому нельзя дать фокус")
     }
 }

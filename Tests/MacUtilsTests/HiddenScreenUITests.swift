@@ -81,23 +81,20 @@ final class HiddenScreenRulesTests: XCTestCase {
 
 final class PreCallRulesTests: XCTestCase {
     func testDock() {
-        // Скрытый экран убирает Dock с основного экрана — «ок» и без автоскрытия.
-        XCTAssertEqual(PreCallRules.dock(autohide: false, away: .ready).level, .ok)
+        // Сторож края Dock включён и автоскрытие есть — «ок».
+        XCTAssertEqual(PreCallRules.dock(autohide: true, away: .ready).level, .ok)
         XCTAssertEqual(PreCallRules.dock(autohide: true, away: .ready).title, "Dock не выезжает в звонке")
         // Автоскрытие само по себе не «ок»: Dock выезжает у края, значки ИИ видны (HSCR-43).
         let autohide = PreCallRules.dock(autohide: true, away: .disabled)
         XCTAssertEqual(autohide.level, .attention)
         XCTAssertEqual(autohide.title, "Dock выезжает у края экрана")
         XCTAssertEqual(PreCallRules.dock(autohide: nil, away: .disabled).level, .attention)
-        // Основной экран закрыт, а у внешнего монитора край свободен — заголовок не обещает «в звонке» (ревью 1111).
-        let partial = PreCallRules.dock(autohide: true, away: .partial(exposed: 1))
-        XCTAssertEqual(partial.level, .attention)
-        XCTAssertEqual(partial.title, "На других мониторах Dock выезжает")
-        XCTAssertTrue(partial.detail.contains("основной экран"))
-        let blocked = PreCallRules.dock(autohide: true, away: .unavailable(DockAway.occupiedReason))
+        // Без автоскрытия сторож края не поможет — честно «внимание» (HSCR-45).
+        let blocked = PreCallRules.dock(autohide: false, away: DockAway.readiness(enabled: true, autohide: false))
         XCTAssertEqual(blocked.level, .attention)
-        XCTAssertTrue(blocked.detail.hasPrefix(DockAway.occupiedReason))
-        XCTAssertTrue(blocked.detail.contains("окно, а не весь экран"))
+        XCTAssertEqual(blocked.title, "Dock виден в звонке")
+        XCTAssertTrue(blocked.detail.hasPrefix(DockAway.noAutohideReason))
+        XCTAssertTrue(PreCallRules.dock(autohide: true, away: .ready).detail.contains("ни на одном мониторе"))
         XCTAssertEqual(PreCallRules.all(dockAutohide: true, dockAway: .disabled, notifications: .off(apps: []), output: .external,
                                         mainDisplayName: nil).first?.level, .attention)
     }

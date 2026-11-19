@@ -47,6 +47,22 @@ public struct LayoutAttempt: Equatable, Sendable, CustomStringConvertible {
     }
 }
 
+/// Одна попытка раскладки: способ, удалась ли, сколько шла (затемнение системы — ~0,4–0,5 с, это и есть мигание).
+public struct LayoutRecord: Equatable, Sendable {
+    public var attempt: LayoutAttempt
+    public var ok: Bool
+    public var duration: TimeInterval
+
+    public init(attempt: LayoutAttempt, ok: Bool, duration: TimeInterval) {
+        self.attempt = attempt
+        self.ok = ok
+        self.duration = duration
+    }
+
+    /// Экран мигнул: удалась раскладка с затемнением или перестройка шла заметно долго.
+    public var flickered: Bool { ok && (attempt.fade != .none || duration > 0.1) }
+}
+
 /// На каком шаге macOS отказала и с каким кодом (`CGError`).
 public struct LayoutFailure: Error, Equatable, Sendable, CustomStringConvertible {
     public enum Step: String, Equatable, Sendable {
@@ -72,6 +88,13 @@ public struct LayoutFailure: Error, Equatable, Sendable, CustomStringConvertible
 enum HiddenScreenLayout {
     /// Способ, который сработал в этом запуске.
     static var working: LayoutAttempt?
+    /// Все попытки (для самопроверки мигания; забирает `takeHistory`).
+    private static var history: [LayoutRecord] = []
+
+    static func takeHistory() -> [LayoutRecord] {
+        defer { history.removeAll() }
+        return history
+    }
 
     struct Result {
         var rect: CGRect
@@ -88,14 +111,17 @@ enum HiddenScreenLayout {
         var attempt: LayoutAttempt? = LayoutAttempt.order(preferred: working).first
         while let current = attempt {
             tried.append(current)
+            let started = ProcessInfo.processInfo.systemUptime
             do {
                 try apply(id, origin: origin, attempt: current)
+                history.append(LayoutRecord(attempt: current, ok: true, duration: ProcessInfo.processInfo.systemUptime - started))
                 working = current
                 if !failures.isEmpty || current.fade != .none {
                     Log.hiddenScreen.info("раскладка: сработал способ «\(current.description, privacy: .public)»")
                 }
                 return Result(rect: CGDisplayBounds(id), attempt: current, failures: failures)
             } catch let failure as LayoutFailure {
+                history.append(LayoutRecord(attempt: current, ok: false, duration: ProcessInfo.processInfo.systemUptime - started))
                 failures.append((current, failure))
                 Log.hiddenScreen.error("раскладка: «\(current.description, privacy: .public)» — отказ на \(failure.description, privacy: .public); \(layoutText(), privacy: .public)")
                 attempt = LayoutAttempt.next(after: failure, tried: tried, preferred: working)

@@ -42,12 +42,11 @@ final class LayoutAttemptTests: XCTestCase {
         XCTAssertEqual(LayoutAttempt(.none, .app).description, "без затемнения, пока жива Mac Utils")
     }
 
-    @MainActor
-    func testPreCallIsHonestWhenMacOSRefused() {
-        defer { DockAway.runtimeFailure = nil }
-        DockAway.runtimeFailure = "macOS не дала поставить скрытый экран к краю Dock (CGCompleteDisplayConfiguration: 1006)"
-        XCTAssertEqual(DockAway.readiness(enabled: true), .unavailable(DockAway.runtimeFailure!))
-        XCTAssertEqual(DockAway.readiness(enabled: false), .disabled)
+    func testFlickerIsFadeOrLongLayout() {
+        XCTAssertTrue(LayoutRecord(attempt: LayoutAttempt(.system), ok: true, duration: 0.465).flickered, "19.11: затемнение системы 465 мс")
+        XCTAssertFalse(LayoutRecord(attempt: LayoutAttempt(.none), ok: true, duration: 0.01).flickered)
+        XCTAssertTrue(LayoutRecord(attempt: LayoutAttempt(.none), ok: true, duration: 0.3).flickered, "долгая перестройка — тоже мигание")
+        XCTAssertFalse(LayoutRecord(attempt: LayoutAttempt(.system), ok: false, duration: 0.001).flickered, "отказ — экран не трогали")
     }
 }
 
@@ -69,9 +68,14 @@ final class SelfTestTests: XCTestCase {
     }
 
     func testFlickerVerdict() {
-        XCTAssertEqual(DisplayChange.verdict(physical: []), "физические дисплеи перестраивались: нет (событий нет)")
-        XCTAssertEqual(DisplayChange.verdict(physical: [(1, 4096)]), "физические дисплеи перестраивались: нет (только раскладка: 1 форма рабочего стола)")
-        XCTAssertEqual(DisplayChange.verdict(physical: [(1, 4096), (1, 8)]), "физические дисплеи перестраивались: да (1 режим)")
+        XCTAssertEqual(DisplayChange.verdict(physical: [], layouts: []), "мигание: нет (раскладки не было; событий дисплеев нет)",
+                       "тёплый дисплей: вкл/выкл без раскладки")
+        XCTAssertEqual(DisplayChange.verdict(physical: [(1, 1), (1, 4096)], layouts: []),
+                       "мигание: нет (раскладки не было; у дисплеев только начало, форма рабочего стола)")
+        // 19.11 (test13): флаги только «форма рабочего стола», а раскладка шла с затемнением системы — это мигание.
+        XCTAssertEqual(DisplayChange.verdict(physical: [(1, 4096)], layouts: [LayoutRecord(attempt: LayoutAttempt(.system), ok: true, duration: 0.465)]),
+                       "мигание: да (раскладка «затемнение системы, на сеанс» 465 мс)")
+        XCTAssertEqual(DisplayChange.verdict(physical: [(1, 8)], layouts: []), "мигание: да (дисплей 1: режим)")
     }
 
     func testFocusLine() {

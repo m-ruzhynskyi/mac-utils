@@ -113,21 +113,18 @@ package struct PreCallCheck: Identifiable, Equatable {
 package enum PreCallRules {
     // MARK: Dock
 
-    /// `autohide` из `com.apple.dock` (nil — ключа нет, Dock не прячется) и `away` — уберёт ли скрытый экран Dock
-    /// с основного экрана. Автоскрытие само по себе не «ок»: Dock выезжает у края, и значки ИИ видны в звонке (HSCR-43).
+    /// `autohide` из `com.apple.dock` (nil — ключа нет, Dock не прячется) и `away` — не даст ли скрытый экран Dock выехать
+    /// (курсор не доходит до края с Dock на всех мониторах, HSCR-45). Автоскрытие само по себе не «ок»: Dock выезжает
+    /// у края, и значки ИИ видны в звонке.
     package static func dock(autohide: Bool?, away: DockAway.Readiness) -> PreCallCheck {
         switch away {
         case .ready:
             return PreCallCheck(id: "dock", level: .ok, title: "Dock не выезжает в звонке",
-                                detail: "Пока скрытый экран включён, Dock убран с основного экрана. Значков Claude и ChatGPT не видно",
-                                action: nil)
-        case let .partial(exposed):
-            return PreCallCheck(id: "dock", level: .attention, title: "На других мониторах Dock выезжает",
-                                detail: "С основного экрана Dock убран, а у других мониторов (\(exposed)) край Dock свободен — там видны значки Claude и ChatGPT. Показывайте в звонке основной экран или окно",
+                                detail: "Пока скрытый экран включён, курсор не доходит до края с Dock ни на одном мониторе. Значков Claude и ChatGPT не видно",
                                 action: nil)
         case let .unavailable(reason):
-            return PreCallCheck(id: "dock", level: .attention, title: "Dock может выехать в звонке",
-                                detail: "\(reason). В Dock видны значки Claude и ChatGPT: не подводите курсор к краю с Dock или показывайте в звонке окно, а не весь экран",
+            return PreCallCheck(id: "dock", level: .attention, title: "Dock виден в звонке",
+                                detail: "\(reason). В Dock видны значки Claude и ChatGPT",
                                 action: nil)
         case .disabled:
             if autohide == true {

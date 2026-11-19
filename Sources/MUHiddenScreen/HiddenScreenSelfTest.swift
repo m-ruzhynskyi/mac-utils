@@ -18,14 +18,17 @@ public enum DisplayChange {
 
     public static func isRebuild(_ flags: UInt32) -> Bool { flags & rebuild != 0 }
 
-    /// Итог для набора событий настоящих дисплеев.
-    public static func verdict(physical: [(CGDirectDisplayID, UInt32)]) -> String {
+    /// Итог шага: мигание = раскладка с затемнением (или долгая, > 0,1 с) либо перестройка настоящего дисплея (HSCR-45:
+    /// затемнение системы флагом перестройки не отмечается — прежний итог «нет» вводил в заблуждение).
+    public static func verdict(physical: [(CGDirectDisplayID, UInt32)], layouts: [LayoutRecord]) -> String {
         let rebuilt = physical.filter { isRebuild($0.1) }
-        if rebuilt.isEmpty {
-            return physical.isEmpty ? "физические дисплеи перестраивались: нет (событий нет)"
-                : "физические дисплеи перестраивались: нет (только раскладка: \(physical.map { "\($0.0) \(describe($0.1))" }.joined(separator: "; ")))"
-        }
-        return "физические дисплеи перестраивались: да (\(rebuilt.map { "\($0.0) \(describe($0.1))" }.joined(separator: "; ")))"
+        let faded = layouts.filter(\.flickered)
+        var reasons: [String] = faded.map { "раскладка «\($0.attempt.description)» \(Int(($0.duration * 1000).rounded())) мс" }
+        reasons += rebuilt.map { "дисплей \($0.0): \(describe($0.1))" }
+        if !reasons.isEmpty { return "мигание: да (\(reasons.joined(separator: "; ")))" }
+        let layoutText = layouts.isEmpty ? "раскладки не было" : "раскладка без затемнения"
+        let physicalText = physical.isEmpty ? "событий дисплеев нет" : "у дисплеев только \(Set(physical.map { describe($0.1) }).sorted().joined(separator: ", "))"
+        return "мигание: нет (\(layoutText); \(physicalText))"
     }
 }
 
@@ -111,6 +114,7 @@ final class HiddenScreenSelfTest {
         }
 
         monitor.start()
+        _ = HiddenScreenLayout.takeHistory()
         for cycle in 1...3 {
             _ = monitor.take()
             engine.disable()
@@ -138,7 +142,7 @@ final class HiddenScreenSelfTest {
         for event in events {
             log("самопроверка мигания, \(step): дисплей \(event.0) (\(isHidden(event.0) ? "скрытый" : "физический")) флаги \(event.1) — \(DisplayChange.describe(event.1))")
         }
-        log("самопроверка мигания, \(step): \(DisplayChange.verdict(physical: physical)); скрытый дисплей: \(hidden.isEmpty ? "без событий" : hidden.map { DisplayChange.describe($0.1) }.joined(separator: "; "))")
+        log("самопроверка мигания, \(step): \(DisplayChange.verdict(physical: physical, layouts: HiddenScreenLayout.takeHistory())); скрытый дисплей: \(hidden.isEmpty ? "без событий" : hidden.map { DisplayChange.describe($0.1) }.joined(separator: "; "))")
     }
 
     private func click(_ status: HiddenScreenEngine.AppStatus) async {
@@ -149,9 +153,9 @@ final class HiddenScreenSelfTest {
             return
         }
         await sleep(1)
-        // Chromium (Claude, ChatGPT) отдаёт дерево веб-страницы в AX только по просьбе.
+        // Chromium (Claude, ChatGPT) отдаёт дерево веб-страницы в AX только по просьбе (движок просит при показе в зеркале).
+        engine.requestAccessibility(target.pid)
         let app = AXWindowSource.application(target.pid)
-        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         await sleep(1)
         guard let field = SelfTestAX.inputField(pid: target.pid, window: target.frame) else {
             log("самопроверка щелчка: \(name) — поле ввода через AX не найдено (окно \(target.frame))")
@@ -159,7 +163,14 @@ final class HiddenScreenSelfTest {
         }
         let before = SelfTestAX.isFocused(field.element, app: app)
         let point = CGPoint(x: field.frame.midX, y: field.frame.midY)
-        if let problem = engine.selfTestPress(atTarget: point) {
+        // Зеркало может быть на миг перекрыто (окно-проба самопроверки скрытия) — ждём до 3 с.
+        var problem: String? = engine.selfTestPress(atTarget: point)
+        for _ in 0..<6 where problem?.hasPrefix("зеркало перекрыто") == true {
+            log("самопроверка щелчка: \(name) — \(problem ?? ""), жду")
+            await sleep(0.5)
+            problem = engine.selfTestPress(atTarget: point)
+        }
+        if let problem {
             log("самопроверка щелчка: \(name) — \(problem)")
             return
         }

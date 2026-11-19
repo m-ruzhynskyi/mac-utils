@@ -61,7 +61,7 @@ package enum PreCallProbe {
 
     @MainActor
     package static func run(bundleIDs: [String] = HiddenScreenRules.defaultApps.map(\.bundleID)) -> [PreCallCheck] {
-        PreCallRules.all(dockAutohide: dockAutohide(), dockAway: DockAway.readiness(), notifications: notifications(bundleIDs: bundleIDs),
+        PreCallRules.all(dockAutohide: dockAutohide(), dockAway: DockAway.readiness(enabled: DockAway.isEnabled, autohide: dockAutohide()), notifications: notifications(bundleIDs: bundleIDs),
                          output: outputKind(), mainDisplayName: mainDisplayName())
     }
 }

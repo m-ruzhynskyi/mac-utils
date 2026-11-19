@@ -16,12 +16,12 @@ public struct HiddenScreenOptions: Equatable, Sendable {
     public var hover: HoverMode = .peek
     /// Пометки «временное» во временном буфере вставки (`--hs-clip-marks=off` — без них).
     public var clipboardMarks = true
-    /// Размер скрытого дисплея в точках (HiDPI ×2); фактический — не меньше основного экрана (`DockAway.displaySize`).
+    /// Размер скрытого дисплея в точках (HiDPI ×2).
     public var displaySize: CGSize
-    /// Скрытый дисплей закрывает край Dock основного экрана (`--hs-dock=away|keep`); вместе с настройкой
+    /// Пока включено, курсор не доходит до края с Dock (`DockEdgeGuard`, `--hs-dock=away|keep`); вместе с настройкой
     /// `DockAway.enabledKey` (обе — да).
     public var dockAway = true
-    /// При выключении дисплей не снимается, а уходит за угол и ждёт следующего включения (`--hs-warm=on|off`):
+    /// При выключении дисплей не снимается и ждёт следующего включения на месте (`--hs-warm=on|off`):
     /// снятие и создание дисплея перестраивают раскладку — экран мигает.
     public var keepWarm = true
     /// `--hs-selftest` (только с `--hidden-screen-debug`): самопроверка для менеджера и выход (`HiddenScreenSelfTest`).

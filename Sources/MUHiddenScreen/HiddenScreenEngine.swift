@@ -79,10 +79,8 @@ public final class HiddenScreenEngine {
     /// Тёплый дисплей (HSCR-43): выключено, но дисплей не снят — стоит за углом и ждёт следующего включения.
     /// Создание и снятие дисплея перестраивают раскладку, а это мигание экрана.
     private var warm: (host: DisplayHosting, id: CGDirectDisplayID)?
-    /// Скрытый дисплей закрывает край Dock основного экрана (так поставлен при включении).
-    private var dockAwayApplied = false
-    /// Что просили при последней раскладке (смена настройки во время работы переставляет дисплей).
-    private var dockAwayWanted = false
+    /// Край Dock, у которого курсор не пускается к краю (`DockEdgeGuard`), пока включено; nil — сторож выключен.
+    private var dockGuardEdge: DockEdge?
     /// Щелчок по зеркалу: смены активной программы за 1 с после него (для журнала «щелчок: активная до …»).
     private var clickTrace: ClickTrace?
     private var clickTraceWork: DispatchWorkItem?
@@ -96,7 +94,7 @@ public final class HiddenScreenEngine {
     /// Повторы показа одной программы автовыбором.
     private var mirrorRetry = MirrorRetry()
     /// Итог раскладки для Dock одной строкой (самопроверка).
-    private(set) var dockSummary = "раскладки ещё не было"
+    private(set) var dockSummary = "ещё не включали"
     /// Зеркало попросили показать, пока дисплей ещё создаётся.
     private var mirrorRequested = false
     /// Только для отладки: дисплей в процессе Mac Utils, без помощника (`--hs-helper=off`).
@@ -198,13 +196,24 @@ public final class HiddenScreenEngine {
             host = reused.host
             reused.host.update(apps: hiddenBundleIDs)
             Log.hiddenScreen.info("дисплей \(reused.id) тёплый — включение без создания дисплея")
-            finishEnable(displayID: reused.id)
+            finishEnable(displayID: reused.id, fresh: false)
             return
         }
         open(host: useHelper ? HelperDisplayHost() : InProcessDisplayHost())
     }
 
     private var wantsDockAway: Bool { options.dockAway && DockAway.isEnabled }
+
+    /// Сторож края Dock: включить или выключить по настройке (и сразу — при её смене во время работы).
+    private func updateDockGuard() {
+        let edge: DockEdge? = phase == .on && wantsDockAway ? DockAway.edge() : nil
+        guard edge != dockGuardEdge else { return }
+        dockGuardEdge = edge
+        let displays = HiddenDisplay.physicalDisplays(excluding: displayID).count
+        dockSummary = edge.map { "сторож края Dock: край \($0.rawValue), дисплеев \(displays); курсор не ближе \(Int(DockEdgeGuard.margin)) pt к краю — Dock с автоскрытием не выезжает" }
+            ?? "убирать Dock выключено"
+        Log.hiddenScreen.info("Dock: \(self.dockSummary, privacy: .public)")
+    }
 
     /// Тёплый дисплей, если он ещё есть (macOS могла снять его сама).
     private func takeWarm() -> (host: DisplayHosting, id: CGDirectDisplayID)? {
@@ -231,22 +240,14 @@ public final class HiddenScreenEngine {
         Log.hiddenScreen.info("тёплый дисплей \(warm.id) снят: \(reason, privacy: .public)")
     }
 
-    /// Выключение без снятия дисплея: помощнику — пустой список (при падении Mac Utils ничего не прячет), дисплей — за угол
-    /// без затемнения, курсор по-прежнему не пускаем.
+    /// Выключение без снятия дисплея: помощнику — пустой список (при падении Mac Utils ничего не прячет). Дисплей
+    /// не двигается — он и так за углом (HSCR-45: любая перестановка здесь — затемнение системы, мигание). Курсор
+    /// на дисплей по-прежнему не пускаем.
     private func park(host: DisplayHosting, id: CGDirectDisplayID) {
         host.update(apps: [])
-        ownLayoutChangeAt = ProcessInfo.processInfo.systemUptime
-        let corner = HiddenScreenLayout.cornerOrigin(id)
-        let placed = HiddenScreenLayout.place(id, origin: corner)
         warm = (host, id)
-        guard placed.rect.origin == corner || !dockAwayApplied else {
-            // За угол не ушёл и стоит у края Dock — Dock остался бы недоступен: дисплей снимаем.
-            releaseWarm(reason: "за угол не переставить — Dock остался бы на скрытом дисплее")
-            return
-        }
         watchWarm(id)
-        Log.hiddenScreen.info("дисплей \(id) оставлен тёплым за углом \(String(describing: placed.rect), privacy: .public), раскладка: \(placed.attempt?.description ?? "не менялась", privacy: .public)")
-        if dockAwayApplied { checkDock(after: 0.6, context: "выключение") }
+        Log.hiddenScreen.info("дисплей \(id) оставлен тёплым \(String(describing: CGDisplayBounds(id)), privacy: .public) — без перестановки")
     }
 
     // MARK: Тёплый дисплей: смена мониторов, запуск ИИ, простой
@@ -315,90 +316,33 @@ public final class HiddenScreenEngine {
         releaseWarm(reason: "\(reason): на нём окна (\(names)) — macOS вернёт их на экран")
     }
 
-    /// Скрытый дисплей — вплотную к краю Dock основного экрана (если включено и можно) или за угол. Без затемнения.
-    private func arrange(_ id: CGDirectDisplayID) -> CGRect {
-        dockAwayWanted = wantsDockAway
-        var origin = HiddenScreenLayout.cornerOrigin(id)
-        var dock: DockEdge?
-        if dockAwayWanted {
-            let settings = DockAway.dockSettings()
-            let main = CGDisplayBounds(CGMainDisplayID())
-            let others = HiddenDisplay.physicalDisplays(excluding: id).filter { $0 != main }
-            switch DockAway.plan(edge: settings.edge, spansDisplays: settings.spansDisplays, main: main, others: others,
-                                 size: CGDisplayBounds(id).size) {
-            case let .place(point):
-                origin = point
-                dock = settings.edge
-            case let .unavailable(reason):
-                Log.hiddenScreen.info("Dock: \(reason, privacy: .public) — дисплей за углом, Dock может выехать в звонке")
-            }
-        }
+    /// Новый дисплей — за угол, один раз за его жизнь. Перестановка может пройти только с затемнением системы
+    /// (HSCR-45: 1006 на всё остальное) — тогда мигнёт один раз, при создании; тёплый дисплей больше не двигается.
+    private func placeAtCorner(_ id: CGDirectDisplayID) -> CGRect {
         ownLayoutChangeAt = ProcessInfo.processInfo.systemUptime
-        let placed = HiddenScreenLayout.place(id, origin: origin)
-        let rect = placed.rect
-        let failure = placed.failures.last.map { "\($0.1.description)" }
+        let placed = HiddenScreenLayout.place(id, origin: HiddenScreenLayout.cornerOrigin(id))
         if placed.attempt == nil, !placed.failures.isEmpty {
-            Log.hiddenScreen.error("раскладка: все способы отказали — дисплей остался в \(String(describing: rect), privacy: .public)")
+            Log.hiddenScreen.error("раскладка: все способы отказали — дисплей остался в \(String(describing: placed.rect), privacy: .public)")
         }
-        if let dock {
-            let main = CGDisplayBounds(CGMainDisplayID())
-            dockAwayApplied = DockAway.covers(edge: dock, hidden: rect, main: main)
-            let exposed = DockAway.exposedDisplays(edge: dock, spansDisplays: false, main: main,
-                                                   others: HiddenDisplay.physicalDisplays(excluding: id).filter { $0 != main }, hidden: rect)
-            if !exposed.isEmpty {
-                Log.hiddenScreen.info("Dock: у других мониторов край свободен (\(exposed.map { String(describing: $0) }.joined(separator: ", "), privacy: .public)) — там Dock выезжает")
-            }
-            Log.hiddenScreen.info("Dock: край \(dock.rawValue, privacy: .public) основного экрана \(self.dockAwayApplied ? "закрыт скрытым дисплеем — Dock не выезжает на основном" : "НЕ закрыт: macOS поставила дисплей иначе", privacy: .public)")
-            // «Перед звонком» честно: macOS не дала закрыть край (HSCR-44, 4c).
-            DockAway.runtimeFailure = dockAwayApplied ? nil
-                : "macOS не дала поставить скрытый экран к краю Dock (\(failure ?? "дисплей встал иначе"))"
-            dockSummary = dockAwayApplied ? "край \(dock.rawValue) закрыт (\(placed.attempt?.description ?? "уже стоял"))"
-                : "край \(dock.rawValue) НЕ закрыт (\(failure ?? "дисплей встал иначе")), дисплей \(rect)"
-            if !exposed.isEmpty { dockSummary += "; у других мониторов край свободен: \(exposed.count)" }
-        } else {
-            dockAwayApplied = false
-            dockSummary = dockAwayWanted ? "убрать нельзя (см. строку «Dock: …»)" : "убирать выключено"
-        }
-        Log.hiddenScreen.info("раскладка: дисплей \(id) \(dock == nil ? "за углом" : "у края Dock", privacy: .public) \(String(describing: rect), privacy: .public), способ: \(placed.attempt?.description ?? "—", privacy: .public); \(HiddenScreenLayout.layoutText(), privacy: .public)")
-        return rect
+        Log.hiddenScreen.info("раскладка: дисплей \(id) за углом \(String(describing: placed.rect), privacy: .public), способ: \(placed.attempt?.description ?? "—", privacy: .public); \(HiddenScreenLayout.layoutText(), privacy: .public)")
+        return placed.rect
     }
 
-    /// Где Dock (окна уровня Dock на экране). После выключения Dock, оставшийся на тёплом дисплее, сам не вернётся
-    /// (без автоскрытия его не было бы видно вовсе) — тогда дисплей снимается.
-    private func checkDock(after delay: TimeInterval, context: String) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let frames = DockAway.dockFrames()
-                let id = self.displayID != kCGNullDirectDisplay ? self.displayID : self.warm?.id ?? kCGNullDirectDisplay
-                let onHidden = id != kCGNullDirectDisplay && DockAway.dockOn(CGDisplayBounds(id), dockFrames: frames)
-                let where_ = frames.isEmpty ? "не на экране (спрятан)" : frames.map { String(describing: $0) }.joined(separator: ", ")
-                Log.hiddenScreen.info("Dock (\(context, privacy: .public)): \(where_, privacy: .public); на скрытом дисплее: \(onHidden ? "да" : "нет", privacy: .public)")
-                if self.phase != .on, onHidden {
-                    self.releaseWarm(reason: "Dock остался на скрытом дисплее — снимаю, Dock вернётся на экран")
-                }
-            }
-        }
-    }
-
-    /// Настройка «Убирать Dock» сменилась во время работы — переставить дисплей (окна едут вместе с ним).
     private func defaultsChanged() {
         applyLevel()
-        guard phase == .on, displayID != kCGNullDirectDisplay, wantsDockAway != dockAwayWanted else { return }
-        hidden = arrange(displayID)
-        sweep()
+        updateDockGuard()
     }
 
     private func open(host: DisplayHosting) {
         self.host = host
         let started = ProcessInfo.processInfo.systemUptime
         ownLayoutChangeAt = ProcessInfo.processInfo.systemUptime
-        host.open(size: DockAway.displaySize(base: options.displaySize, main: CGDisplayBounds(CGMainDisplayID())), apps: hiddenBundleIDs, onReady: { [weak self, weak host] result in
+        host.open(size: options.displaySize, apps: hiddenBundleIDs, onReady: { [weak self, weak host] result in
             guard let self, let host, self.host === host, self.phase == .starting else { return }
             switch result {
             case let .success(id):
                 Log.hiddenScreen.info("дисплей \(id) создан (\(host.name, privacy: .public)) за \(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) мс")
-                self.finishEnable(displayID: id)
+                self.finishEnable(displayID: id, fresh: true)
             case let .failure(error):
                 Log.hiddenScreen.error("дисплей (\(host.name, privacy: .public)): \(String(describing: error), privacy: .public)")
                 host.close(hiding: false)
@@ -423,11 +367,12 @@ public final class HiddenScreenEngine {
         })
     }
 
-    private func finishEnable(displayID id: CGDirectDisplayID) {
+    private func finishEnable(displayID id: CGDirectDisplayID, fresh: Bool) {
         displayID = id
-        // Не отодвинулся (ошибка раскладки) — работать можно, курсор сторожит `guardCursor`.
-        hidden = arrange(id)
+        // Не отодвинулся (ошибка раскладки) — работать можно, курсор сторожит `guardCursor`. Тёплый — уже на месте.
+        hidden = fresh ? placeAtCorner(id) : CGDisplayBounds(id)
         phase = .on
+        updateDockGuard()
         Log.hiddenScreen.info("enable: дисплей \(id) \(String(describing: self.hidden), privacy: .public); активная программа — по \(Activator.readsWindowServer ? "WindowServer" : "NSWorkspace", privacy: .public); наведение \(self.options.hover.rawValue, privacy: .public)")
         attachObservers()
         for app in runningTargets { wasHidden[app.processIdentifier] = app.isHidden }
@@ -454,7 +399,6 @@ public final class HiddenScreenEngine {
         defaultsToken = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.defaultsChanged() }
         }
-        if dockAwayApplied { checkDock(after: 1, context: "включение") }
         onChange?()
         // Окна ИИ уже на скрытом дисплее, но активной могла остаться программа ИИ — её строка меню на основном экране выдаёт.
         noteActivated(NSWorkspace.shared.frontmostApplication)
@@ -680,7 +624,7 @@ public final class HiddenScreenEngine {
         host = nil
         displayID = kCGNullDirectDisplay
         hidden = .null
-        dockAwayApplied = false
+        dockGuardEdge = nil
         finishClickTrace()
         remembered.removeAll()
         wasHidden.removeAll()
@@ -814,11 +758,17 @@ public final class HiddenScreenEngine {
         // Включено — свой дисплей; выключено, но дисплей тёплый — он.
         let guarded: (id: CGDirectDisplayID, rect: CGRect)? = displayID != kCGNullDirectDisplay ? (displayID, hidden)
             : warm.map { ($0.id, CGDisplayBounds($0.id)) }
-        guard session.handoff == nil, !runningSteps, let guarded,
-              let back = HiddenScreenGeometry.pullBack(pointer.location, hidden: guarded.rect,
-                                                       physical: HiddenDisplay.physicalDisplays(excluding: guarded.id))
-        else { return }
-        pointer.warp(to: back)
+        guard session.handoff == nil, !runningSteps, let guarded else { return }
+        let physical = HiddenDisplay.physicalDisplays(excluding: guarded.id)
+        let now = pointer.location
+        var target = HiddenScreenGeometry.pullBack(now, hidden: guarded.rect, physical: physical) ?? now
+        // Пока включено — и не к краю с Dock (Dock с автоскрытием не выезжает ни на одном мониторе).
+        if let edge = dockGuardEdge,
+           let clamped = DockEdgeGuard.clamp(target, edge: edge, displays: physical, neighbours: physical + [guarded.rect]) {
+            target = clamped
+        }
+        guard target != now else { return }
+        pointer.warp(to: target)
     }
 
     // MARK: Зеркало
@@ -860,6 +810,7 @@ public final class HiddenScreenEngine {
         targetFrameCache = frame
         mirrorTarget = (pid, target.id)
         mirrorRetry.reset()
+        requestAccessibility(pid)
         mirroredApp = app
         Log.hiddenScreen.info("зеркало: \(app.name, privacy: .public) окно \(target.id) фактически \(String(describing: frame), privacy: .public), просили \(requested, privacy: .public)")
         fitMirror(to: frame.size, reason: "новое окно")
@@ -1211,6 +1162,16 @@ public final class HiddenScreenEngine {
         case let .postToPid(event):
             guard let pid else { return }
             keys.post([event], to: pid)
+        case let .accessibilityClick(point, fallback):
+            guard let pid else { return }
+            let result = accessibilityClick(at: point, pid: pid)
+            if let done = result.done {
+                clickTrace?.path = "\(options.clickMode.rawValue): AX \(done)"
+                Log.hiddenScreen.info("щелчок через AX: \(done, privacy: .public) в (\(Int(point.x)), \(Int(point.y)))")
+            } else {
+                Log.hiddenScreen.info("щелчок через AX: \(result.why, privacy: .public) — событиями в процесс")
+                steps.insert(contentsOf: fallback, at: 0)
+            }
         case let .beginHandoff(kind):
             beginHandoff(kind)
         case .endHandoff:
@@ -1422,6 +1383,52 @@ public final class HiddenScreenEngine {
         }
     }
 
+    // MARK: Щелчок через AX (HSCR-45)
+
+    /// Программы, у которых уже попросили дерево доступности (Chromium/Electron отдают веб-страницу в AX только так).
+    private var accessibilityRequested: Set<pid_t> = []
+
+    func requestAccessibility(_ pid: pid_t) {
+        guard accessibilityRequested.insert(pid).inserted else { return }
+        let result = AXUIElementSetAttributeValue(AXWindowSource.application(pid), "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        Log.hiddenScreen.info("AX: pid \(pid) — дерево страницы попрошено (AXManualAccessibility, код \(result.rawValue))")
+    }
+
+    /// Элемент под точкой и его предки → фокус в поле или «нажать». `done` — что сделано; иначе `why` — почему нет.
+    private func accessibilityClick(at point: CGPoint, pid: pid_t) -> (done: String?, why: String) {
+        requestAccessibility(pid)
+        let app = AXWindowSource.application(pid)
+        var hit: AXUIElement?
+        let error = AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit)
+        guard error == .success, var element = hit else { return (nil, "элемента под точкой нет (код \(error.rawValue))") }
+        var nodes: [AXClickTarget.Node] = []
+        var elements: [AXUIElement] = []
+        for _ in 0..<AXClickTarget.depth {
+            let role = AXWindowSource.string(element, kAXRoleAttribute) ?? "?"
+            var names: CFArray?
+            let actions = AXUIElementCopyActionNames(element, &names) == .success ? (names as? [String] ?? []) : []
+            var settable: DarwinBoolean = false
+            let focusable = AXUIElementIsAttributeSettable(element, kAXFocusedAttribute as CFString, &settable) == .success && settable.boolValue
+            nodes.append(AXClickTarget.Node(role: role, actions: actions, focusSettable: focusable))
+            elements.append(element)
+            var parent: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success, let parent,
+                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
+            element = parent as! AXUIElement
+        }
+        let chain = nodes.map(\.role).joined(separator: " ← ")
+        guard let choice = AXClickTarget.choose(nodes) else { return (nil, "под точкой \(chain)") }
+        let target = elements[choice.index]
+        let role = nodes[choice.index].role
+        let status: AXError
+        switch choice.action {
+        case .focus: status = AXUIElementSetAttributeValue(target, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        case .press: status = AXUIElementPerformAction(target, kAXPressAction as CFString)
+        }
+        guard status == .success else { return (nil, "\(choice.action.rawValue) \(role) не вышло (код \(status.rawValue)), цепочка \(chain)") }
+        return ("\(choice.action.rawValue) \(role)", chain)
+    }
+
     // MARK: Самопроверка (`--hs-selftest`)
 
     /// Окно в зеркале: процесс и фактическая рамка (Quartz).
@@ -1448,6 +1455,12 @@ public final class HiddenScreenEngine {
         }
         down.setIntegerValueField(.mouseEventClickState, value: 1)
         up.setIntegerValueField(.mouseEventClickState, value: 1)
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        let top = NSWindow.windowNumber(at: HiddenScreenGeometry.cocoa(fromQuartz: global, primaryHeight: primaryHeight), belowWindowWithWindowNumber: 0)
+        if let window = mirrorWindow, top != window.windowNumber {
+            let title = NSApp.window(withWindowNumber: top).map { "«\($0.title)» \(type(of: $0))" } ?? "чужое"
+            return "зеркало перекрыто окном \(top) (\(title)) в (\(Int(global.x)), \(Int(global.y)))"
+        }
         guard intercept(.leftMouseDown, down) else {
             return "нажатие в (\(Int(global.x)), \(Int(global.y))) не перехвачено — над этой точкой не картинка зеркала"
         }

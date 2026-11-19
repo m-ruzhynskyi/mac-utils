@@ -292,7 +292,8 @@ public struct ClickTrace: Equatable, Sendable {
 
     public static let window: TimeInterval = 1.0
 
-    public let path: String
+    /// Путь щелчка (режим; после щелчка через AX — что именно сделано).
+    public var path: String
     public let before: String
     public let started: TimeInterval
     public private(set) var changes: [Change] = []
@@ -317,5 +318,47 @@ public struct ClickTrace: Equatable, Sendable {
             : changes.map { "+\(Int(((($0.at - started) * 1000)).rounded())) мс \($0.bundle)" }.joined(separator: ", ")
         let verdict = blinked || after != before ? "мигание (смен \(changes.count))" : "без смены активной"
         return "щелчок: активная до \(before), во время [\(during)], после \(after) — \(verdict); путь \(path)"
+    }
+}
+
+/// Что сделать щелчком через AX с элементом под точкой (HSCR-45). `nodes` — элемент и его предки (сначала сам элемент).
+public enum AXClickTarget {
+    public struct Node: Equatable, Sendable {
+        public var role: String
+        public var actions: [String]
+        /// `AXFocused` можно установить.
+        public var focusSettable: Bool
+
+        public init(role: String, actions: [String] = [], focusSettable: Bool = false) {
+            self.role = role
+            self.actions = actions
+            self.focusSettable = focusSettable
+        }
+    }
+
+    public enum Action: String, Equatable, Sendable {
+        case focus = "фокус"
+        case press = "нажать"
+    }
+
+    public static let textRoles: Set<String> = ["AXTextArea", "AXTextField", "AXComboBox", "AXSearchField"]
+    public static let pressRoles: Set<String> = ["AXButton", "AXLink", "AXCheckBox", "AXRadioButton", "AXMenuButton",
+                                                 "AXPopUpButton", "AXDisclosureTriangle", "AXTab", "AXSwitch"]
+    /// Выше них не поднимаемся: щелчок пришёлся не в элемент управления.
+    public static let stopRoles: Set<String> = ["AXWebArea", "AXWindow", "AXApplication", "AXScrollArea", "AXSheet"]
+    public static let depth = 8
+
+    /// Только обычный одиночный щелчок без клавиш: двойной (выделить слово) и с клавишами (⌘-щелчок по ссылке) — событиями.
+    public static func applies(clicks: Int, flags: CGEventFlags) -> Bool {
+        clicks <= 1 && flags.intersection([.maskCommand, .maskShift, .maskAlternate, .maskControl]).isEmpty
+    }
+
+    public static func choose(_ nodes: [Node]) -> (index: Int, action: Action)? {
+        for (index, node) in nodes.prefix(depth).enumerated() {
+            if stopRoles.contains(node.role) { return nil }
+            if textRoles.contains(node.role), node.focusSettable { return (index, .focus) }
+            if pressRoles.contains(node.role), node.actions.contains("AXPress") { return (index, .press) }
+        }
+        return nil
     }
 }

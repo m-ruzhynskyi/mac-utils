@@ -49,7 +49,7 @@ struct HiddenScreenPage: View {
             GroupLabel("Перед звонком")
             ListCard {
                 ToggleRow("Убирать Dock с экрана в звонке",
-                          subtitle: "Пока скрытый экран включён, Dock не выезжает на основном экране: в нём видны значки ИИ",
+                          subtitle: "Пока скрытый экран включён, курсор не доходит до края с Dock — Dock со значками ИИ не выезжает. Нужно автоскрытие Dock",
                           systemImage: "dock.rectangle", isOn: $dockAway)
                 ForEach(checks) { check in
                     FeatureStatusRow(tone: check.level == .ok ? .success : .warning, label: check.title, detail: check.detail,

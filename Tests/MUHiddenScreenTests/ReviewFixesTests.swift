@@ -55,33 +55,13 @@ final class ReviewFixesTests: XCTestCase {
         XCTAssertEqual(retry.attempts, 1)
     }
 
-    // MARK: Dock на других мониторах
+    // MARK: Dock на других мониторах — теперь сторож края на всех мониторах (HSCR-45)
 
-    func testOtherMonitorWithFreeDockEdgeIsExposed() {
+    func testEveryMonitorDockEdgeIsGuarded() {
         let right = CGRect(x: 1710, y: 0, width: 1920, height: 1080)
-        let exposed = DockAway.exposedDisplays(edge: .bottom, spansDisplays: false, main: main, others: [right], hidden: hiddenUnderMain)
-        XCTAssertEqual(exposed, [right], "низ внешнего монитора свободен — там Dock выезжает")
-    }
-
-    func testOtherMonitorAboveMainIsNotExposed() {
-        // Монитор над основным: его нижний край целиком закрыт основным экраном.
-        let above = CGRect(x: 0, y: -1112, width: 1710, height: 1112)
-        XCTAssertEqual(DockAway.exposedDisplays(edge: .bottom, spansDisplays: false, main: main, others: [above], hidden: hiddenUnderMain), [])
-        // Шире основного — края по бокам свободны.
-        let wide = CGRect(x: -200, y: -1440, width: 2560, height: 1440)
-        XCTAssertEqual(DockAway.exposedDisplays(edge: .bottom, spansDisplays: false, main: main, others: [wide], hidden: hiddenUnderMain), [wide])
-        // Одно пространство на все дисплеи — Dock только на основном.
-        let right = CGRect(x: 1710, y: 0, width: 1920, height: 1080)
-        XCTAssertEqual(DockAway.exposedDisplays(edge: .bottom, spansDisplays: true, main: main, others: [right], hidden: nil), [])
-    }
-
-    func testSideDockOnOtherMonitor() {
-        let left = CGRect(x: -1920, y: 0, width: 1920, height: 1080)
-        let hiddenRight = CGRect(x: 1710, y: 0, width: 1710, height: 1112)
-        // Dock справа: у левого монитора правый край закрыт основным экраном лишь на 1080 из 1080 — закрыт.
-        XCTAssertEqual(DockAway.exposedDisplays(edge: .right, spansDisplays: false, main: main, others: [left], hidden: hiddenRight), [])
-        // Dock слева: левый край левого монитора свободен.
-        XCTAssertEqual(DockAway.exposedDisplays(edge: .left, spansDisplays: false, main: main, others: [left], hidden: nil), [left])
+        let displays = [main, right]
+        XCTAssertNotNil(DockEdgeGuard.clamp(CGPoint(x: 2500, y: 1079.5), edge: .bottom, displays: displays, neighbours: displays))
+        XCTAssertNotNil(DockEdgeGuard.clamp(CGPoint(x: 900, y: 1111.5), edge: .bottom, displays: displays, neighbours: displays))
     }
 
     // MARK: Тёплый дисплей

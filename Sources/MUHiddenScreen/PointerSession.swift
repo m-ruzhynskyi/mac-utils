@@ -3,10 +3,11 @@ import Foundation
 
 /// Как щелчок из зеркала попадает в программу.
 public enum ClickMode: String, Sendable, CaseIterable {
-    /// Без активации (по умолчанию, HSCR-43): настоящий курсор на миг переносится в точку окна на скрытом дисплее
-    /// (Chromium сверяет окно под курсором), движение — через HID, нажатие и отпускание — `postToPid` прямо в процесс
-    /// с точкой в окне. WindowServer нажатия не видит и программу не активирует: строка меню и заголовок окна
-    /// программы пользователя не мигают в демонстрации.
+    /// Без активации (по умолчанию). Обычный щелчок сначала через AX (HSCR-45): элемент под точкой — поле ввода получает
+    /// фокус, кнопка или ссылка — «нажать»; программа не активируется, строка меню и заголовок окна программы
+    /// пользователя не мигают. 19.11 события `postToPid` фокус в поле ChatGPT не ставили (Electron в неактивном окне
+    /// не принимает «первое нажатие»). Если AX ничего не нашёл (двойной щелчок, щелчок с клавишами, просто текст) —
+    /// курсор на миг над окном на скрытом дисплее, движение через HID, нажатие и отпускание — `postToPid` с точкой в окне.
     case background
     /// Настоящий курсор на миг переносится на скрытый дисплей, нажатие — через HID; программа ИИ на это время
     /// становится активной, потом активность возвращается (до HSCR-43 — по умолчанию; видно как мигание фокуса).
@@ -69,6 +70,8 @@ public enum PointerStep: Equatable, Sendable {
     /// Событие на уровне HID (`.cghidEventTap`): WindowServer сам находит окно под курсором.
     case postHID(SyntheticEvent)
     case postToPid(SyntheticEvent)
+    /// Щелчок через AX в точке окна (Quartz): фокус в поле или «нажать» кнопку/ссылку; не вышло — шаги `fallback`.
+    indirect case accessibilityClick(CGPoint, fallback: [PointerStep])
     case beginHandoff(HandoffKind)
     case endHandoff(HandoffKind)
     /// Пауза: программа должна разобрать события, пока она ещё активна.
@@ -157,8 +160,9 @@ public struct PointerSession: Sendable {
             let press = SyntheticEvent(kind: .leftDown, location: target, clicks: clicks, flags: flags, windowNumber: windowNumber, windowOrigin: origin)
             let release = SyntheticEvent(kind: .leftUp, location: target, clicks: clicks, flags: flags, windowNumber: windowNumber, windowOrigin: origin)
             // Курсор остаётся над окном, пока программа разбирает нажатие (события в процесс идут через её очередь).
-            return [.hideCursor, .warp(target), .postHID(Self.mouse(.moved, target, 0, flags, 0)), .wait(Self.hoverSettle),
-                    .postToPid(press), .postToPid(release), .wait(Self.backgroundSettle), .warp(cursor), .showCursor]
+            let events: [PointerStep] = [.hideCursor, .warp(target), .postHID(Self.mouse(.moved, target, 0, flags, 0)), .wait(Self.hoverSettle),
+                                         .postToPid(press), .postToPid(release), .wait(Self.backgroundSettle), .warp(cursor), .showCursor]
+            return AXClickTarget.applies(clicks: clicks, flags: flags) ? [.accessibilityClick(target, fallback: events)] : events
         case .warp:
             // Пауза перед возвратом: программа должна разобрать нажатие, пока она активна. Иначе (768c91b, 14.11) нажатие
             // доходило до уже неактивного Claude, и он через 0,1–1 с активировал себя сам.
