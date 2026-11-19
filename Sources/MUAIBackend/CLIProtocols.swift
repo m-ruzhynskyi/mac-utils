@@ -188,9 +188,9 @@ package enum CodexCLI {
         return names.count == list.count ? names : nil
     }
 
-    /// Быстрые модели для подсказчика по порядку (замер менеджера, холодный `exec`, effort low: gpt-6.2-sol 3,8–4,8 с,
-    /// gpt-6-luna 4,3–4,4 с). Берётся первая, что есть в каталоге этого codex и видна в списке; нет ни одной — nil (как в codex).
-    package static let fastModelPreference = ["gpt-6.2-sol", "gpt-6-luna"]
+    /// Быстрые модели для подсказчика по порядку. Замер менеджера на 1c6da07 (тёплый, effort low, первое слово, медиана):
+    /// gpt-6-luna 7,3 с, gpt-6.2-sol 10,4 с. Берётся первая, что есть в каталоге этого codex и видна в списке; нет — nil.
+    package static let fastModelPreference = ["gpt-6-luna", "gpt-6.2-sol"]
 
     /// Видимые модели из `codex debug models` (каталог без запросов к модели): `{"models":[{"slug","visibility",…}]}`.
     package static func listedModels(catalogJSON: String) -> [String] {

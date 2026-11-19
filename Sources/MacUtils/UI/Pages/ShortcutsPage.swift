@@ -32,7 +32,7 @@ struct ShortcutsLinksSheet: View {
                         GroupLabel(group)
                         ListCard {
                             ForEach(AppAction.catalog.filter { $0.group == group }) { item in
-                                Row(item.title, subtitle: "«\(item.shortcut)» · \(item.link)") {
+                                Row(item.title, subtitle: item.shortcut.isEmpty ? item.link : "«\(item.shortcut)» · \(item.link)") {
                                     Button {
                                         NSPasteboard.general.clearContents()
                                         NSPasteboard.general.setString(item.link, forType: .string)

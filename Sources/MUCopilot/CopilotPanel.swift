@@ -24,7 +24,7 @@ struct CopilotPanelView: View {
     private var strip: some View {
         HStack(spacing: DS.Space.s) {
             Circle().fill(session.isOn ? Color.dsAccLine : Color.dsMute).frame(width: 7, height: 7).accessibilityHidden(true)
-            Text(session.isAnswering ? "Думаю…" : session.error ?? (session.isOn ? "Слушаю · вопросов нет" : "Выключено"))
+            Text(CopilotPanelRules.stripText(isOn: session.isOn, isAnswering: session.isAnswering, error: session.error))
                 .font(DS.Font.caption).foregroundStyle(session.error == nil ? Color.dsMute : DS.Tone.danger.text)
             Spacer(minLength: 0)
             Pill(.success, "не видно в звонке")

@@ -338,8 +338,11 @@ final class CopilotEvalStubTests: XCTestCase {
     func testFastCodexModelFromCatalog() {
         let catalog = #"{"models":[{"slug":"gpt-6.2-astra","visibility":"list"},{"slug":"gpt-6.2-sol","visibility":"hide"},{"slug":"gpt-6-luna","visibility":"list"}]}"#
         XCTAssertEqual(CodexCLI.listedModels(catalogJSON: catalog), ["gpt-6.2-astra", "gpt-6-luna"])
-        XCTAssertEqual(CodexCLI.fastModel(listed: CodexCLI.listedModels(catalogJSON: catalog)), "gpt-6-luna", "скрытая не берётся")
-        XCTAssertEqual(CodexCLI.fastModel(listed: ["gpt-6.2-sol", "gpt-6-luna"]), "gpt-6.2-sol")
+        XCTAssertEqual(CodexCLI.fastModel(listed: CodexCLI.listedModels(catalogJSON: catalog)), "gpt-6-luna")
+        let hiddenLuna = #"{"models":[{"slug":"gpt-6-luna","visibility":"hide"},{"slug":"gpt-6.2-sol","visibility":"list"}]}"#
+        XCTAssertEqual(CodexCLI.fastModel(listed: CodexCLI.listedModels(catalogJSON: hiddenLuna)), "gpt-6.2-sol", "скрытая не берётся")
+        XCTAssertEqual(CodexCLI.fastModel(listed: ["gpt-6.2-sol", "gpt-6-luna"]), "gpt-6-luna", "COPILOT-39: luna быстрее sol на замере")
+        XCTAssertEqual(CodexCLI.fastModel(listed: ["gpt-6.2-astra", "gpt-6.2-sol"]), "gpt-6.2-sol", "luna нет — sol")
         XCTAssertNil(CodexCLI.fastModel(listed: ["gpt-6.2-astra"]), "нет быстрой — как в codex")
         XCTAssertEqual(CodexCLI.listedModels(catalogJSON: "мусор"), [])
     }

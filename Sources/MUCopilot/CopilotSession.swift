@@ -133,6 +133,9 @@ package final class CopilotSession: ObservableObject {
 
     package var isOn: Bool { phase == .listening }
 
+    /// Дождаться прогрева, начатого включением (самопроверка `--copilot-selftest`: вопрос — уже на тёплый процесс).
+    package func waitForWarmUp() async { await lifecycle?.value }
+
     // MARK: Включение — только вручную (⌥⇧M или меню Mac Utils)
 
     package func toggle() { isOn ? stop() : start() }
@@ -396,6 +399,12 @@ package enum CopilotPanelRules {
     package static func shouldCollapse(expandedAt: Date?, now: Date, isAnswering: Bool, holdingOption: Bool) -> Bool {
         guard let expandedAt, !isAnswering, !holdingOption else { return false }
         return now.timeIntervalSince(expandedAt) >= collapseSeconds
+    }
+
+    /// Текст полоски. «Думаю…» — сразу, как ушёл вопрос, и пока не пришло первое слово: Codex молчит 5–10 с, пока рассуждает.
+    package static func stripText(isOn: Bool, isAnswering: Bool, error: String?) -> String {
+        if isAnswering { return "Думаю…" }
+        return error ?? (isOn ? "Слушаю · вопросов нет" : "Выключено")
     }
 
     /// Мышь проходит сквозь панель, пока не держат ⌥.

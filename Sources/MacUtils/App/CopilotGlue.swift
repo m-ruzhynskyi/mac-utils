@@ -13,7 +13,8 @@ final class CopilotGlue {
     static let shared = CopilotGlue()
 
     var ai: CopilotAIClient = BackendCopilotAI()
-    var listener: CopilotListening = LiveCopilotListener()
+    /// В самопроверке (`--copilot-selftest`) — беззвучный источник: микрофон и звук звонка не открываются, вопрос подаёт сама проверка.
+    var listener: CopilotListening = CopilotSelfTest.options(CommandLine.arguments) == nil ? LiveCopilotListener() : SilentCopilotListener()
 
     private(set) lazy var session = CopilotSession(ai: ai, listener: listener)
 
@@ -89,6 +90,13 @@ final class CopilotGlue {
     }
 
     func shutdown() { session.stop(); panel?.hide() }
+
+    /// Свойства панели для самопроверки: видна ли в демонстрации и может ли забрать фокус.
+    var panelFacts: String {
+        guard let panel else { return "панели нет" }
+        let sharing = panel.sharingType == .none ? "none" : "\(panel.sharingType.rawValue)"
+        return "sharingType \(sharing), canBecomeKey \(panel.canBecomeKey), видна \(panel.isVisible), мышь сквозь \(panel.ignoresMouseEvents)"
+    }
 
     private func syncPanel() {
         if session.isOn, !panelHidden {

@@ -72,6 +72,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains(GazeDebugWindowController.launchArgument) {
             DispatchQueue.main.async { GazeDebugWindowController.shared.show() }
         }
+        // Подсказчик: самопроверка — только ключом запуска (`open -n … --args --copilot-selftest`), после запуска остального.
+        if let selfTest = CopilotSelfTest.options(CommandLine.arguments) {
+            DispatchQueue.main.async { Task { @MainActor in await CopilotSelfTest.run(selfTest) } }
+        }
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(defaultsChanged),

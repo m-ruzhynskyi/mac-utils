@@ -26,6 +26,8 @@ struct CopilotPage: View {
     @ObservedObject private var session = CopilotGlue.shared.session
     /// Демо для снимков интерфейса: не запускает codex и claude и не читает разрешения, состояния готовые.
     var demo = false
+    /// Сервис для снимков (в демо); nil — со страницы «ИИ».
+    var demoProvider: AIProvider?
 
     var body: some View {
         // Главный переключатель — не сохранённая настройка, а текущее состояние: включает только человек, после перезапуска выключено.
@@ -38,8 +40,7 @@ struct CopilotPage: View {
                 if let error = session.error {
                     FeatureStatusRow(tone: .danger, label: "Не включился", detail: error)
                 }
-                Row("Отвечает: \(provider.title)", subtitle: "Тот же ИИ, что у всех функций Mac Utils: выбор один — на странице «ИИ»",
-                    systemImage: "sparkles") {
+                Row("Отвечает: \(provider.title)", subtitle: Self.serviceSubtitle(provider), systemImage: "sparkles") {
                     Button("Изменить") { SettingsWindowController.shared.show(section: .ai) }
                         .buttonStyle(.graphite(.secondary, size: .compact))
                 }
@@ -102,7 +103,16 @@ struct CopilotPage: View {
         .onAppear { if !demo { aiStatus.refreshIfStale(); permissions.refresh() } }
     }
 
-    private var provider: AIProvider { AIProvider(stored: aiProvider) }
+    private var provider: AIProvider { demoProvider ?? AIProvider(stored: aiProvider) }
+
+    /// Серым под «Отвечает: …». У Codex — честно о скорости (замер на настоящих сервисах: первое слово у Codex 7–10 с,
+    /// у Claude ~0,6 с). Отдельного выбора сервиса у подсказчика нет: только подсказка, где он меняется.
+    static func serviceSubtitle(_ provider: AIProvider) -> String {
+        switch provider {
+        case .codex: return "Codex начинает ответ за 5–10 с. Claude — меньше чем за секунду: сервис меняется на странице «ИИ»."
+        case .claude: return "Тот же ИИ, что у всех функций Mac Utils: выбор один — на странице «ИИ»"
+        }
+    }
 
     /// Состояние читается без системных окон: `AIStatus` (проверка входа в CLI) и `PermissionsModel` (только статус).
     private var readiness: [CopilotReadiness.Item] {
