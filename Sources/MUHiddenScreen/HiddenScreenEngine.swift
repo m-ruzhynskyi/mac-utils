@@ -1593,6 +1593,9 @@ public final class HiddenScreenEngine {
         return (mirrorTarget.pid, frame)
     }
 
+    /// Рамка картинки зеркала (Quartz, глобально) — куда наводить и крутить колесо в замере.
+    var selfTestMirrorRect: CGRect? { mirrorRect }
+
     /// Процесс-помощник (держит дисплей) — для замера процессора.
     var selfTestHelperPID: pid_t? { host?.pid }
 

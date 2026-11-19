@@ -112,6 +112,9 @@ final class PerfMeter {
         if pts > 0, now >= pts { ages.append((now - pts) * 1000) }
     }
 
+    /// Кадров потока с начала замера (сколько сдвинула прокрутка).
+    var streamFramesSoFar: Int { streamFrames }
+
     func guardCall(_ microseconds: Double) {
         guard active else { return }
         guards.append(microseconds)

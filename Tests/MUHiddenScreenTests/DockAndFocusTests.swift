@@ -267,6 +267,19 @@ final class PerfAndDwellTests: XCTestCase {
         XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-ax=bad"], storedBundleIDs: nil)?.axTree, .click)
     }
 
+    func testScrollLoadVerdict() {
+        XCTAssertEqual(PerfLoad.scrollVerdict(framesDuringScroll: 3),
+                       "прокрутке нечего двигать (кадров за прокрутку 3) — фаза недоказательна", "короткий чат — честно в журнал")
+        XCTAssertNil(PerfLoad.scrollVerdict(framesDuringScroll: 450))
+    }
+
+    @MainActor
+    func testScrollLoadShape() {
+        XCTAssertEqual(PerfLoad.scrollSeconds, 5, "5 с вверх и 5 с вниз")
+        XCTAssertEqual(PerfLoad.rate, 60, "~60 событий/с, как колесо трекпада")
+        XCTAssertGreaterThan(PerfLoad.moveSeconds, 0, "и отдельно движение курсора — наведение и сторож")
+    }
+
     func testProcessFamilyIncludesSelf() {
         XCTAssertEqual(PerfMeter.family(getpid()).first, getpid())
         XCTAssertNotNil(PerfMeter.cpuSeconds(getpid()))

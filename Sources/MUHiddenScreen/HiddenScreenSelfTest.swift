@@ -135,9 +135,16 @@ final class HiddenScreenSelfTest {
     /// Раздел perf (HSCR-47): по 10 с при текущих настройках и при каждом ключе из подозреваемых — по одному журналу
     /// видно, что из нового тормозит. Во время замера прокручивайте колесом над зеркалом и печатайте в поле.
     private func performance() async {
-        if let status = engine.statuses.first(where: { $0.isRunning && $0.hiddenWindows > 0 }) {
+        // Нагрузку в замере создаёт сама Mac Utils — у менеджера нет прав на синтетические события (HSCR-47, 23:30).
+        // Мерим на Claude (у него поток ответа и дерево страницы), иначе — на первой программе с окнами.
+        let running = engine.statuses.filter { $0.isRunning && $0.hiddenWindows > 0 }
+        if let status = running.first(where: { $0.app == .claude }) ?? running.first {
             engine.selectApp(status.bundleID)
             _ = await wait(8, { engine.mirroredApp == status.app && engine.selfTestTarget != nil })
+        }
+        guard let app = engine.mirroredApp, engine.selfTestMirrorRect != nil else {
+            log("perf: зеркало ничего не показывает — замер пропущен")
+            return
         }
         let base = engine.options
         let phases: [(String, (inout HiddenScreenOptions) -> Void)] = [
@@ -148,19 +155,28 @@ final class HiddenScreenSelfTest {
             ("--hs-ax=off", { $0.axTree = .off }),
             ("--hs-ax=show (дерево страницы включено всё время, как в 1.11.1)", { $0.axTree = .show }),
         ]
-        log("perf: \(phases.count) фаз по \(Int(Self.perfPhase)) с — прокручивайте колесом над зеркалом, печатайте в поле, двигайте мышью")
+        log("perf: \(phases.count) фаз на \(app.name): в каждой — прокрутка колесом над зеркалом \(Int(PerfLoad.scrollSeconds)) с вверх и \(Int(PerfLoad.scrollSeconds)) с вниз (\(Int(PerfLoad.rate)) событий/с, как от мыши), затем \(Int(PerfLoad.moveSeconds)) с движения курсора над зеркалом; ничего не набирается и не нажимается. Мышь не трогать")
+        let origin = CGEvent(source: nil)?.location
         for (name, change) in phases {
             var options = base
             change(&options)
             engine.options = options
             if options.axTree == .show, let pid = engine.selfTestTarget?.pid { engine.requestAccessibility(pid) }
             await sleep(1)
+            guard let mirror = engine.selfTestMirrorRect else { break }
             engine.perf.start(view: engine.mirrorView, processes: processes())
-            log("perf: фаза «\(name)» — \(Int(Self.perfPhase)) с")
-            await sleep(Self.perfPhase)
+            log("perf: фаза «\(name)»")
+            let scrolled = await PerfLoad.scroll(over: mirror)
+            let scrollFrames = engine.perf.streamFramesSoFar
+            let moved = await PerfLoad.move(over: engine.selfTestMirrorRect ?? mirror)
             let sizes = engine.selfTestSizes
-            log(engine.perf.stop(framePixels: sizes.frame, displayPoints: sizes.display).line(phase: name))
+            let sample = engine.perf.stop(framePixels: sizes.frame, displayPoints: sizes.display)
+            log(sample.line(phase: name) + "; нагрузка: прокрутка \(scrolled) событий, движение \(moved)")
+            if let note = PerfLoad.scrollVerdict(framesDuringScroll: scrollFrames) { log("perf: фаза «\(name)» — \(note)") }
+            // Пусть передача курсора закончится, прежде чем менять настройки.
+            await sleep(1)
         }
+        if let origin { PerfLoad.post(.mouseMoved, at: origin) }
         engine.options = base
         engine.releaseAllAccessibility()
     }
@@ -303,5 +319,62 @@ enum SelfTestAX {
     /// Фокус в поле — та же проверка, что у щелчка через AX.
     static func isFocused(_ field: AXUIElement, app: AXUIElement) -> Bool {
         HiddenScreenEngine.axFocused(field, app: app)
+    }
+}
+
+/// Нагрузка для замера perf: события как от мыши (HID, без пометки Mac Utils) — их разбирает тот же путь, что и
+/// настоящие: колесо над зеркалом → передача курсора → прокрутка в окне ИИ; движение → наведение и сторож курсора.
+@MainActor
+enum PerfLoad {
+    static let scrollSeconds: Double = 5
+    static let moveSeconds: Double = 3
+    static let rate: Double = 60
+    /// Сдвиг за событие, точки (плавная прокрутка трекпада — десятки точек за событие).
+    static let scrollStep: Int32 = 24
+    /// Кадров за 10 с прокрутки меньше — значит, двигать было нечего (короткий чат).
+    static let minScrollFrames = 20
+
+    static func post(_ type: CGEventType, at point: CGPoint) {
+        CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+    }
+
+    /// Вверх, потом вниз (чат обычно стоит внизу — сначала вниз двигать было бы нечего). Возвращает число событий.
+    static func scroll(over mirror: CGRect) async -> Int {
+        post(.mouseMoved, at: CGPoint(x: mirror.midX, y: mirror.midY))
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        var count = 0
+        for direction: Int32 in [1, -1] {
+            let end = ProcessInfo.processInfo.systemUptime + scrollSeconds
+            while ProcessInfo.processInfo.systemUptime < end {
+                if let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: direction * scrollStep, wheel2: 0, wheel3: 0) {
+                    event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                    event.post(tap: .cghidEventTap)
+                    count += 1
+                }
+                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 / rate))
+            }
+        }
+        return count
+    }
+
+    /// Курсор по кругу над картинкой зеркала (наведение и сторож курсора), без нажатий. Возвращает число событий.
+    static func move(over mirror: CGRect) async -> Int {
+        let radius = min(mirror.width, mirror.height) / 4
+        let center = CGPoint(x: mirror.midX, y: mirror.midY)
+        let start = ProcessInfo.processInfo.systemUptime
+        var count = 0
+        while ProcessInfo.processInfo.systemUptime - start < moveSeconds {
+            let angle = (ProcessInfo.processInfo.systemUptime - start) * 2 * .pi
+            post(.mouseMoved, at: CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle)))
+            count += 1
+            try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 / rate))
+        }
+        return count
+    }
+
+    /// Прокрутка ничего не сдвинула — фаза не доказательна.
+    nonisolated static func scrollVerdict(framesDuringScroll: Int) -> String? {
+        framesDuringScroll < minScrollFrames
+            ? "прокрутке нечего двигать (кадров за прокрутку \(framesDuringScroll)) — фаза недоказательна" : nil
     }
 }
