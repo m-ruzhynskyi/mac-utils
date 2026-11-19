@@ -189,7 +189,7 @@ final class CopilotReviewFixesTests: XCTestCase {
     /// Подставной codex: `mcp list` — по `mcp`, `app-server` — отмечает запуск в `started` и отвечает на initialize.
     private func fakeCodex(mcp: String, started: String, exitAfterInit: Bool = false) throws -> String {
         try script("codex", """
-        if [ "$1" = mcp ]; then \(mcp); exit 0; fi
+        if printf '%s ' "$@" | grep -q 'mcp list'; then \(mcp); exit 0; fi
         touch '\(started)'
         while IFS= read -r line; do
           id=$(printf '%s' "$line" | sed -n 's/^{"id":\\([0-9][0-9]*\\),.*/\\1/p')

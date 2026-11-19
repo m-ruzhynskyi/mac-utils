@@ -77,7 +77,7 @@ final class CopilotLifecycleTests: XCTestCase {
     /// Подставной `codex app-server`: отвечает на initialize. `pause` — задержка перед ответом.
     private func fakeCodex(pause: Double) throws -> String {
         try script("codex", """
-        if [ "$1" = mcp ]; then echo '[]'; exit 0; fi
+        if printf '%s ' "$@" | grep -q 'mcp list'; then echo '[]'; exit 0; fi
         while IFS= read -r line; do
           id=$(printf '%s' "$line" | sed -n 's/.*"id":\\([0-9][0-9]*\\).*/\\1/p')
           if [ -n "$id" ]; then sleep \(pause); printf '{"id":%s,"result":{}}\\n' "$id"; fi
@@ -111,7 +111,7 @@ final class CopilotLifecycleTests: XCTestCase {
     func testCodexToolItemStopsServer() async throws {
         let args = folder.appendingPathComponent("args.txt").path
         let codex = try script("codex", """
-        if [ "$1" = mcp ]; then echo '[{"name":"github"}]'; exit 0; fi
+        if printf '%s ' "$@" | grep -q 'mcp list'; then echo '[{"name":"github"}]'; exit 0; fi
         echo "$@" > '\(args)'
         while IFS= read -r line; do
           id=$(printf '%s' "$line" | sed -n 's/^{"id":\\([0-9][0-9]*\\),.*/\\1/p')

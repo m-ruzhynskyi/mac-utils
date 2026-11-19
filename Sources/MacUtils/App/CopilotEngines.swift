@@ -89,8 +89,22 @@ final class WarmCopilotAI: CopilotAIClient, @unchecked Sendable {
     private var codex: CodexWarmHost?
     private var info: ClaudeWarmHost.Info?
 
+    private var path: String?
+    /// Тёплый Codex не запустится до выключения подсказчика (нестандартный config.toml, имя MCP, конфиг отвергнут):
+    /// вопросы сразу идут разовым запуском, а не повторяют неудачный старт.
+    private var codexBlocked: String?
+
+    /// Постоянные причины: от повтора они не пройдут.
+    static func isLasting(_ category: String) -> Bool {
+        category == "startup-config-nonstandard" || category == "mcp-name-unsupported" || category.hasSuffix("-mcp-config")
+    }
+
     /// Как прошёл последний вопрос Claude (холодный процесс или тёплый, который по счёту) — для разбора хвостов.
     var lastInfo: ClaudeWarmHost.Info? { lock.lock(); defer { lock.unlock() }; return info }
+
+    /// Каким путём ушёл последний вопрос: «да» (тёплый) или «нет (<категория>)» — для самопроверки и журнала.
+    var lastPath: String? { lock.withLock { path } }
+    private func note(path value: String) { lock.withLock { path = value } }
 
     /// Своя программа вместо найденной (прогон `copilot-eval.sh stub` на подставных codex и claude).
     private let executableOverride: String?
@@ -127,19 +141,37 @@ final class WarmCopilotAI: CopilotAIClient, @unchecked Sendable {
         switch provider {
         // Прогреваем ту сессию, куда пойдёт вопрос: быстрая модель или основная — по настройке «Быстрые модели».
         case .claude: await claudeHost(system: system, profile: CopilotPrefs.load().fastModels ? .fast : .main, executable: executable).warmUp()
-        case .codex: try? await codexHost(executable: executable).warmUp()
+        case .codex:
+            let host = codexHost(executable: executable)
+            do {
+                try await host.warmUp()
+                // Ветка под первый вопрос — заранее: `thread/start` ~1,5–2 с.
+                let profile: CopilotAIProfile = CopilotPrefs.load().fastModels ? .fast : .main
+                let model = await CopilotModels.resolved(.codex, profile, executable: executable)
+                await host.prepareThread(system: Self.codexSystem(system), model: model)
+            } catch {
+                let category = WarmFailure.category(of: error)
+                if Self.isLasting(category) { lock.withLock { codexBlocked = category } }
+                Log.ai.info("Подсказчик: тёплый Codex не запустился: \(category, privacy: .public) (\(error.localizedDescription, privacy: .private))")
+            }
         }
     }
 
+    /// Системный текст тёплого Codex (так же — у заранее открытой ветки: ключ должен совпасть).
+    static func codexSystem(_ system: String) -> String { [system, AIRequest.textOnly].joined(separator: "\n") }
+
     func shutdown() async {
-        lock.lock(); let hosts = Array(claude.values); claude = [:]; let codex = self.codex; self.codex = nil; lock.unlock()
+        lock.lock(); let hosts = Array(claude.values); claude = [:]; let codex = self.codex; self.codex = nil; codexBlocked = nil; lock.unlock()
         for h in hosts { await h.shutdown() }
         await codex?.shutdown()
     }
 
     func stream(prompt: String, system: String, images: [Data], profile: CopilotAIProfile) -> AsyncThrowingStream<String, Error> {
         let cold = ColdCopilotAI(provider: provider, executable: executableOverride)
-        guard images.isEmpty else { return cold.stream(prompt: prompt, system: system, images: images, profile: profile) }
+        guard images.isEmpty else {
+            note(path: "нет (снимок экрана)")
+            return cold.stream(prompt: prompt, system: system, images: images, profile: profile)
+        }
         return AsyncThrowingStream { continuation in
             let task = Task { [self] in
                 var started = false
@@ -154,20 +186,26 @@ final class WarmCopilotAI: CopilotAIClient, @unchecked Sendable {
                             Log.ai.info("Подсказчик: Claude \(i.cold ? "холодный старт" : "тёплая сессия", privacy: .public), вопрос №\(i.usesBefore + 1, privacy: .public)")
                         }
                     case .codex:
+                        if let blocked = lock.withLock({ codexBlocked }) { throw WarmFailure("Codex: тёплый путь недоступен", category: blocked) }
                         let model = await CopilotModels.resolved(.codex, profile, executable: executable)
                         Log.ai.info("Подсказчик: Codex, модель \(model ?? "как в config.toml", privacy: .public), effort \(CopilotModels.effort(profile) ?? "как в codex", privacy: .public)")
                         let stream = try await codexHost(executable: executable).ask(
-                            prompt: prompt, system: [system, AIRequest.textOnly].joined(separator: "\n"),
+                            prompt: prompt, system: Self.codexSystem(system),
                             model: model, effort: CopilotModels.effort(profile))
                         for try await piece in stream { started = true; continuation.yield(piece) }
                     }
+                    note(path: "да")
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: CancellationError())
                 } catch {
                     guard !started, !Task.isCancelled else { continuation.finish(throwing: error); return }
-                    // Тёплый путь не сработал, ответа ещё не было: один холодный запуск.
-                    Log.ai.info("Подсказчик: тёплый процесс не ответил (\(error.localizedDescription, privacy: .private)), холодный запуск")
+                    // Тёплый путь не сработал, ответа ещё не было: один холодный запуск. Категория — без содержимого (`.public`),
+                    // текст ошибки может нести вывод CLI — `.private`.
+                    let category = WarmFailure.category(of: error)
+                    if provider == .codex, Self.isLasting(category) { lock.withLock { codexBlocked = category } }
+                    note(path: "нет (\(category))")
+                    Log.ai.info("Подсказчик: тёплый процесс не ответил: \(category, privacy: .public) (\(error.localizedDescription, privacy: .private)), холодный запуск")
                     do {
                         for try await piece in cold.stream(prompt: prompt, system: system, images: [], profile: profile) { continuation.yield(piece) }
                         continuation.finish()

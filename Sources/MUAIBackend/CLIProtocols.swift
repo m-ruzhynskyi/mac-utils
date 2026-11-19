@@ -175,6 +175,24 @@ package enum CodexCLI {
         return URL(fileURLWithPath: home).appendingPathComponent("config.toml")
     }
 
+    /// `codex mcp list --json` с теми же `--disable` и `-c`, что у app-server: в списке только серверы, которые он поднял бы.
+    package static var mcpListArguments: [String] {
+        disabledFeatures.flatMap { ["--disable", $0] } + userConfigOverrides.flatMap { ["-c", $0] } + ["mcp", "list", "--json"]
+    }
+
+    /// Включённые MCP-серверы из `codex mcp list --json` (выключенные и так не стартуют, а встроенные выключенные
+    /// по имени не адресуются). Не массив JSON — nil.
+    package static func enabledMCPServers(listJSON: String) -> [String]? {
+        guard let start = listJSON.firstIndex(of: "["),
+              let list = (try? JSONSerialization.jsonObject(with: Data(listJSON[start...].utf8))) as? [[String: Any]] else { return nil }
+        var names: [String] = []
+        for entry in list {
+            guard let name = entry["name"] as? String else { return nil }
+            if entry["enabled"] as? Bool != false { names.append(name) }
+        }
+        return names
+    }
+
     static func isPlainKey(_ name: String) -> Bool {
         !name.isEmpty && name.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_") }
     }

@@ -5,8 +5,11 @@
 delay="${MU_STUB_DELAY:-0.2}"
 say='Скажите: начну с плана запроса, потом индекс.'
 points='\n- EXPLAIN ANALYZE покажет полный проход\n- составной индекс по дате и статусу\n'
+# `mcp list` идёт с флагами впереди (`codex --disable … -c … mcp list --json`).
+case " $* " in
+  *" mcp list "*) echo '[]'; exit 0 ;;
+esac
 case "$1 $2" in
-  "mcp list") echo '[]'; exit 0 ;;
   "debug models") echo '{"models":[{"slug":"gpt-6.2-astra","visibility":"list"},{"slug":"gpt-6.2-sol","visibility":"list"}]}'; exit 0 ;;
 esac
 # MU_STUB_LOG — куда записать аргументы и полученные строки (проверка, что модель и effort доходят до codex).

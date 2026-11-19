@@ -85,9 +85,23 @@ package final class LineReader: @unchecked Sendable {
     package func next() async -> String? { await iterator.next() }
 }
 
+/// Сбой тёплого пути. `category` — без содержимого (можно в журнал `.public`), текст — может нести вывод CLI (`.private`).
 package struct WarmFailure: LocalizedError {
     package let errorDescription: String?
-    package init(_ text: String) { errorDescription = text }
+    package let category: String
+    package init(_ text: String, category: String = "other") { errorDescription = text; self.category = category }
+
+    /// Категория любой ошибки тёплого пути: `mcp-list-failed`, `startup-config-nonstandard`, `process-exited(1)`,
+    /// `rpc-error(-32600)`, `timeout`, `tool-item`, `cancelled`, `ai-<вид>`…
+    package static func category(of error: Error) -> String {
+        if let warm = error as? WarmFailure { return warm.category }
+        if error is CancellationError { return "cancelled" }
+        if let failure = error as? AIFailure {
+            if failure.message.contains("попытался выполнить действие") { return "tool-item" }
+            return "ai-\(failure.kind)"
+        }
+        return "other"
+    }
 }
 
 // MARK: Claude
@@ -191,7 +205,7 @@ package actor ClaudeWarmHost {
         var cold = true
         if let spare { self.spare = nil; next = await spare.value; cold = false }
         if next?.process.isRunning != true { next = await makeSession(); cold = true }
-        guard let next else { throw WarmFailure("Claude: процесс не запустился") }
+        guard let next else { throw WarmFailure("Claude: процесс не запустился", category: "process-start-failed") }
         // Пока ждали, мог прийти `shutdown()` или другой вопрос завёл свою сессию: эту не теряем.
         if Task.isCancelled { next.process.terminate(); throw CancellationError() }
         current?.process.terminate()
@@ -204,7 +218,7 @@ package actor ClaudeWarmHost {
         let usesBefore = uses
         let (session, cold, startup) = try await session()
         lastInfo = Info(cold: cold, usesBefore: usesBefore, startupSeconds: startup)
-        guard let message = WarmProtocol.claudeUserMessage(prompt) else { throw WarmFailure("Claude: не удалось собрать запрос") }
+        guard let message = WarmProtocol.claudeUserMessage(prompt) else { throw WarmFailure("Claude: не удалось собрать запрос", category: "bad-request") }
         busy = true
         session.process.write(message)
         var answer = AIAnswer()
@@ -215,7 +229,8 @@ package actor ClaudeWarmHost {
                 if Task.isCancelled { drop(session); throw CancellationError() }
                 let tail = session.process.stderrTail
                 drop(session)
-                throw WarmFailure(tail.isEmpty ? "Claude: процесс завершился" : "Claude: \(tail.trimmingCharacters(in: .whitespacesAndNewlines))")
+                throw WarmFailure(tail.isEmpty ? "Claude: процесс завершился" : "Claude: \(tail.trimmingCharacters(in: .whitespacesAndNewlines))",
+                                  category: "process-exited")
             }
             guard let event = ClaudeCLI.parse(line) else { continue }
             if let piece = answer.consume(event) { yield(piece) }
@@ -245,15 +260,27 @@ package actor ClaudeWarmHost {
 
 // MARK: Codex
 
-/// `codex app-server`: один процесс, JSON-RPC по stdio. На вопрос — новая одноразовая ветка (`thread/start`, `ephemeral`),
-/// ход (`turn/start`) с нужным `effort`; куски — `item/agentMessage/delta`. Несколько вопросов одновременно (гибрид) — разные ветки.
+/// `codex app-server`: один процесс, JSON-RPC по stdio. На вопрос — своя одноразовая ветка (`thread/start`, `ephemeral`) и ход
+/// (`turn/start`) с нужными моделью и `effort`; куски — `item/agentMessage/delta`. Ветка под следующий вопрос открывается
+/// заранее (`prepareThread`): `thread/start` занимает ~1,5–2 с, вопрос их не ждёт. Отмена вопроса — `turn/interrupt`.
 package actor CodexWarmHost {
+    /// Ответ сервера на запрос.
+    struct Reply {
+        var threadID: String?
+        var turnID: String?
+        var error: String?
+        var code: Int?
+    }
+
     private let executable: String
     private var process: WarmProcess?
     private var reader: Task<Void, Never>?
     private var nextID = 1
-    private var pending: [Int: CheckedContinuation<(threadID: String?, error: String?), Never>] = [:]
+    private var pending: [Int: CheckedContinuation<Reply, Never>] = [:]
     private var turns: [String: AsyncThrowingStream<String, Error>.Continuation] = [:]
+    /// Заранее открытые ветки: ключ — модель и системный текст (у каждого языка свой).
+    private var spareThreads: [String: String] = [:]
+    private var preparing: Set<String> = []
     private var ready = false
     /// Идущий запуск: второй вопрос (гибрид) ждёт его, а не убивает и не запускает свой.
     private var starting: Task<Void, Error>?
@@ -266,10 +293,10 @@ package actor CodexWarmHost {
 
     private func send(_ data: Data) { process?.write(data) }
 
-    private func request(_ make: (Int) -> Data) async -> (threadID: String?, error: String?) {
+    private func request(_ make: (Int) -> Data) async -> Reply {
         // Процесса уже нет (остановлен инструментом другой половины гибрида, упал): ответа не будет — ошибка сразу,
         // вопрос уходит холодным запуском, а не ждёт 45-секундного сторожа.
-        guard let process, process.isRunning else { return (nil, "процесс Codex не запущен") }
+        guard let process, process.isRunning else { return Reply(error: "процесс Codex не запущен") }
         let id = nextID; nextID += 1
         return await withCheckedContinuation { continuation in
             pending[id] = continuation
@@ -296,21 +323,27 @@ package actor CodexWarmHost {
         let config = CodexCLI.userConfigURL(environment: environment)
         let redirects = (try? String(contentsOf: config, encoding: .utf8)).map(CodexCLI.configRedirects) ?? []
         guard redirects.isEmpty else {
-            throw WarmFailure("Codex: в config.toml свой адрес сервиса (\(redirects.joined(separator: ", "))) — тёплый процесс не используется, вопрос пойдёт обычным запуском")
+            throw WarmFailure("Codex: в config.toml свой адрес сервиса (\(redirects.joined(separator: ", "))) — тёплый процесс не используется, вопрос пойдёт обычным запуском",
+                              category: "startup-config-nonstandard")
         }
-        // MCP-серверы из config.toml выключаются по именам. Список не получен (код ≠ 0, таймаут, не JSON) — тёплого нет.
-        let list = CLICommand(executable: URL(fileURLWithPath: executable), arguments: ["mcp", "list", "--json"],
+        // MCP-серверы выключаются по именам. Список — с теми же `--disable` и `-c`, что у app-server: иначе в нём серверы
+        // плагинов и встроенные (`codex_app`, `cua_repl`…), которых нет в config.toml, а `-c mcp_servers.<имя>.enabled=false`
+        // для такого имени создаёт запись без транспорта — app-server не стартует («invalid transport», COPILOT-40).
+        // Выключаются только включённые. Список не получен (код ≠ 0, таймаут, не JSON) — тёплого нет.
+        let list = CLICommand(executable: URL(fileURLWithPath: executable), arguments: CodexCLI.mcpListArguments,
                               environment: environment, directory: AIWorkspace.directory)
         let output = try? await CLIProcess.run(list, timeout: Self.mcpListSeconds)
-        let servers = output.flatMap { $0.status == 0 ? CodexCLI.mcpServerNames(listJSON: $0.stdout) : nil }
+        let servers = output.flatMap { $0.status == 0 ? CodexCLI.enabledMCPServers(listJSON: $0.stdout) : nil }
         guard epoch == startedEpoch else { throw CancellationError() }
         guard let arguments = CodexCLI.appServerArguments(mcpServers: servers) else {
-            throw WarmFailure(servers == nil ? "Codex: не удалось получить список MCP-серверов — вопрос пойдёт обычным запуском"
-                                             : "Codex: MCP-сервер с таким именем не выключить в тёплом процессе — вопрос пойдёт обычным запуском")
+            throw servers == nil
+                ? WarmFailure("Codex: не удалось получить список MCP-серверов — вопрос пойдёт обычным запуском", category: "mcp-list-failed")
+                : WarmFailure("Codex: MCP-сервер с таким именем не выключить в тёплом процессе — вопрос пойдёт обычным запуском",
+                              category: "mcp-name-unsupported")
         }
         let process = WarmProcess(executable: executable, arguments: arguments, environment: environment,
                                   directory: AIWorkspace.directory)
-        try process.start()
+        do { try process.start() } catch { throw WarmFailure("Codex: \(error.localizedDescription)", category: "process-start-failed") }
         self.process = process
         let lines = process.lines
         reader = Task { [weak self] in
@@ -319,7 +352,17 @@ package actor CodexWarmHost {
         }
         let result = await request { WarmProtocol.codexInitialize(id: $0) }
         guard epoch == startedEpoch else { throw CancellationError() }
-        if let error = result.error { stopProcess(); throw WarmFailure("Codex: \(error)") }
+        if let error = result.error {
+            // Процесс закрылся на старте (не принял конфиг, …): код выхода — в категорию, вывод — только в текст.
+            let deadline = Date().addingTimeInterval(1)
+            while process.isRunning, Date() < deadline { try? await Task.sleep(nanoseconds: 20_000_000) }
+            let exited = !process.isRunning
+            let tail = process.stderrTail
+            stopProcess()
+            let category = exited ? "process-exited(\(process.process.terminationStatus))\(tail.contains("mcp_servers") ? "-mcp-config" : "")"
+                                  : "rpc-error(\(result.code.map(String.init) ?? "?"))"
+            throw WarmFailure("Codex: \(tail.isEmpty ? error : tail)", category: category)
+        }
         send(WarmProtocol.codexInitialized())
         ready = true
     }
@@ -334,21 +377,23 @@ package actor CodexWarmHost {
         reader?.cancel(); reader = nil
         process?.terminate(); process = nil
         ready = false
+        spareThreads = [:]
+        preparing = []
         processEnded()
     }
 
     private func processEnded() {
         let tail = process?.stderrTail ?? ""
-        for (_, c) in pending { c.resume(returning: (nil, tail.isEmpty ? "процесс Codex завершился" : tail)) }
+        for (_, c) in pending { c.resume(returning: Reply(error: tail.isEmpty ? "процесс Codex завершился" : tail)) }
         pending = [:]
-        for (_, c) in turns { c.finish(throwing: WarmFailure("Codex: процесс завершился")) }
+        for (_, c) in turns { c.finish(throwing: WarmFailure("Codex: процесс завершился", category: "process-exited")) }
         turns = [:]
     }
 
     private func handle(_ line: String) {
         switch WarmProtocol.parseCodex(line) {
-        case .response(let id, let threadID, let error):
-            pending.removeValue(forKey: id)?.resume(returning: (threadID, error))
+        case .response(let id, let threadID, let error, let code, let turnID):
+            pending.removeValue(forKey: id)?.resume(returning: Reply(threadID: threadID, turnID: turnID, error: error, code: code))
         case .delta(let thread, let text):
             if let thread { turns[thread]?.yield(text) }
         case .completed(let thread, let failed, let message):
@@ -374,10 +419,36 @@ package actor CodexWarmHost {
         }
     }
 
+    private static func threadKey(system: String, model: String?) -> String { (model ?? "") + "\u{1}" + system }
+
+    /// Открыть ветку под следующий вопрос заранее (при прогреве и после каждого вопроса). Ошибка не страшна: вопрос откроет свою.
+    package func prepareThread(system: String, model: String?) async {
+        let key = Self.threadKey(system: system, model: model)
+        guard ready, spareThreads[key] == nil, !preparing.contains(key) else { return }
+        preparing.insert(key)
+        let startedEpoch = epoch
+        let reply = await request { WarmProtocol.codexThreadStart(id: $0, system: system, cwd: AIWorkspace.directory.path, model: model) }
+        preparing.remove(key)
+        guard epoch == startedEpoch, ready, let thread = reply.threadID else { return }
+        spareThreads[key] = thread
+    }
+
+    /// Есть ли заранее открытая ветка (для проверок).
+    package func hasSpareThread(system: String, model: String?) -> Bool { spareThreads[Self.threadKey(system: system, model: model)] != nil }
+
     package func ask(prompt: String, system: String, model: String?, effort: String?) async throws -> AsyncThrowingStream<String, Error> {
         try await warmUp()
-        let started = await request { WarmProtocol.codexThreadStart(id: $0, system: system, cwd: AIWorkspace.directory.path, model: model) }
-        guard let threadID = started.threadID else { throw WarmFailure("Codex: \(started.error ?? "ветка не создана")") }
+        let key = Self.threadKey(system: system, model: model)
+        let threadID: String
+        if let spare = spareThreads.removeValue(forKey: key) {
+            threadID = spare
+        } else {
+            let started = await request { WarmProtocol.codexThreadStart(id: $0, system: system, cwd: AIWorkspace.directory.path, model: model) }
+            guard let id = started.threadID else {
+                throw WarmFailure("Codex: \(started.error ?? "ветка не создана")", category: started.code.map { "rpc-error(\($0))" } ?? "no-thread")
+            }
+            threadID = id
+        }
         let (stream, continuation) = AsyncThrowingStream<String, Error>.makeStream()
         turns[threadID] = continuation
         let turn = await request { WarmProtocol.codexTurnStart(id: $0, threadID: threadID, text: prompt, effort: effort, model: model) }
@@ -385,9 +456,23 @@ package actor CodexWarmHost {
             turns.removeValue(forKey: threadID)
             throw AIFailure.from(.codex, output: error)
         }
+        // Отменили вопрос (человек договорил, новый вопрос) — ход останавливается и на сервере, а не дописывается впустую.
+        if let turnID = turn.turnID {
+            continuation.onTermination = { [weak self] termination in
+                guard case .cancelled = termination else { return }
+                Task { await self?.interrupt(threadID: threadID, turnID: turnID) }
+            }
+        }
+        // Ветка под следующий вопрос — пока идёт этот.
+        Task { await self.prepareThread(system: system, model: model) }
         return stream
     }
 
+    private func interrupt(threadID: String, turnID: String) async {
+        turns.removeValue(forKey: threadID)
+        guard ready else { return }
+        _ = await request { WarmProtocol.codexTurnInterrupt(id: $0, threadID: threadID, turnID: turnID) }
+    }
 }
 
 /// Протокол тёплых процессов: строки JSON, которые пишутся и читаются. Чистые функции без процессов.
@@ -433,12 +518,18 @@ package enum WarmProtocol {
         return line(["id": id, "method": "turn/start", "params": params])
     }
 
+    /// Остановить ход (`turn/interrupt`, поля по схеме app-server 0.170: `threadId`, `turnId`).
+    package static func codexTurnInterrupt(id: Int, threadID: String, turnID: String) -> Data {
+        line(["id": id, "method": "turn/interrupt", "params": ["threadId": threadID, "turnId": turnID]])
+    }
+
     package static func codexReject(id: Any) -> Data {
         line(["id": id, "error": ["code": -32601, "message": "не поддерживается подсказчиком"]])
     }
 
     package enum CodexMessage: Equatable {
-        case response(id: Int, threadID: String?, error: String?)
+        /// Ответ на запрос: ветка (`thread/start`), ход (`turn/start`), ошибка с кодом JSON-RPC.
+        case response(id: Int, threadID: String?, error: String?, code: Int? = nil, turnID: String? = nil)
         case delta(threadID: String?, text: String)
         case completed(threadID: String?, failed: Bool, message: String?)
         /// Начался элемент хода (`item/started`): тип — `ThreadItem.type` (agentMessage, commandExecution, mcpToolCall…).
@@ -477,9 +568,13 @@ package enum WarmProtocol {
             }
         }
         guard let id = json["id"] as? Int else { return .other }
-        if let error = json["error"] as? [String: Any] { return .response(id: id, threadID: nil, error: error["message"] as? String ?? "ошибка") }
-        let thread = (json["result"] as? [String: Any])?["thread"] as? [String: Any]
-        return .response(id: id, threadID: thread?["id"] as? String, error: nil)
+        if let error = json["error"] as? [String: Any] {
+            return .response(id: id, threadID: nil, error: error["message"] as? String ?? "ошибка", code: error["code"] as? Int)
+        }
+        let result = json["result"] as? [String: Any]
+        let thread = result?["thread"] as? [String: Any]
+        let turn = result?["turn"] as? [String: Any]
+        return .response(id: id, threadID: thread?["id"] as? String, error: nil, turnID: turn?["id"] as? String)
     }
 }
 

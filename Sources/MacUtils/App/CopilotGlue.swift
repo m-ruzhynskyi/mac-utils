@@ -230,6 +230,9 @@ final class CopilotWarmRegistry: @unchecked Sendable {
         return client
     }
 
+    /// Каким путём ушёл последний вопрос сервиса (самопроверка): «да», «нет (<категория>)», nil — вопросов не было.
+    func lastPath(_ provider: AIProvider) -> String? { lock.withLock { clients[provider] }?.lastPath }
+
     func shutdownAll() async {
         let all = lock.withLock { () -> [WarmCopilotAI] in let all = Array(clients.values); clients = [:]; return all }
         for c in all { await c.shutdown() }

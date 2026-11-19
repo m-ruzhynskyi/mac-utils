@@ -500,7 +500,7 @@ final class WarmProtocolTests: XCTestCase {
     func testCodexParsing() {
         XCTAssertEqual(WarmProtocol.parseCodex(#"{"id":2,"result":{"thread":{"id":"th1"}}}"#), .response(id: 2, threadID: "th1", error: nil))
         XCTAssertEqual(WarmProtocol.parseCodex(#"{"id":1,"result":{}}"#), .response(id: 1, threadID: nil, error: nil))
-        XCTAssertEqual(WarmProtocol.parseCodex(#"{"id":3,"error":{"code":-1,"message":"плохо"}}"#), .response(id: 3, threadID: nil, error: "плохо"))
+        XCTAssertEqual(WarmProtocol.parseCodex(#"{"id":3,"error":{"code":-1,"message":"плохо"}}"#), .response(id: 3, threadID: nil, error: "плохо", code: -1))
         XCTAssertEqual(WarmProtocol.parseCodex(#"{"method":"item/agentMessage/delta","params":{"delta":"Нач","itemId":"i","threadId":"th1","turnId":"t"}}"#),
                        .delta(threadID: "th1", text: "Нач"))
         XCTAssertEqual(WarmProtocol.parseCodex(#"{"method":"turn/completed","params":{"threadId":"th1","turn":{"status":"completed"}}}"#),

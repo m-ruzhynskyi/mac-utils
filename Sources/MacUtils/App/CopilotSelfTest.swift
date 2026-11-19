@@ -29,6 +29,12 @@ enum CopilotSelfTest {
         return Options(question: custom.flatMap { $0.isEmpty ? nil : $0 } ?? defaultQuestion)
     }
 
+    /// «да» | «нет (<категория>)»: категория — без содержимого (`mcp-list-failed`, `process-exited(1)-mcp-config`…).
+    static func warmPathLine(enabled: Bool, path: String?) -> String {
+        guard enabled else { return "нет (выключен в настройках)" }
+        return path ?? "нет (вопроса не было)"
+    }
+
     /// Строка про процессы подсказчика, оставшиеся после выключения.
     static func processesLine(_ processes: [(pid: pid_t, name: String)]) -> String {
         let list = processes.isEmpty ? "нет" : processes.map { "\($0.pid) \($0.name)" }.joined(separator: ", ")
@@ -72,6 +78,7 @@ enum CopilotSelfTest {
             log("\(provider.rawValue): первого слова нет\(session.isAnswering ? " за \(Int(answerTimeout)) с" : "")\(session.error.map { " — ошибка: \($0)" } ?? "")")
         }
         log("ответ: первая строка \(session.answer.say.count) знаков, пунктов \(session.answer.points.count)")
+        log("тёплый путь: \(warmPathLine(enabled: CopilotModels.warmEnabled(), path: CopilotWarmRegistry.shared.lastPath(provider)))")
         log("панель после ответа: \(glue.panelFacts)")
         log("активная программа до: \(before), после: \(frontmost())")
 
