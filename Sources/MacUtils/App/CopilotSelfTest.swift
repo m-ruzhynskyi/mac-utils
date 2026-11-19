@@ -85,7 +85,7 @@ enum CopilotSelfTest {
     @MainActor
     private static func finish() {
         log("конец")
-        NSApp.terminate(nil)
+        AppTermination.terminate()
     }
 
     @MainActor
