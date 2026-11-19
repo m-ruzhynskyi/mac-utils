@@ -46,7 +46,9 @@ public final class HiddenScreenEngine {
             session.clickMode = options.clickMode
             session.scrollMode = options.scrollMode
             clipboard.marksTransient = options.clipboardMarks
+            if options.axTree != oldValue.axTree, options.axTree != .show { releaseAllAccessibility() }
             guard phase == .on else { return }
+            updateDockGuard()
             attachObservers()
             sweep()
         }
@@ -81,6 +83,17 @@ public final class HiddenScreenEngine {
     private var warm: (host: DisplayHosting, id: CGDirectDisplayID)?
     /// Край Dock, у которого курсор не пускается к краю (`DockEdgeGuard`), пока включено; nil — сторож выключен.
     private var dockGuardEdge: DockEdge?
+    /// Намеренный жест «Dock»: курсор держат у края полсекунды — Dock выезжает (HSCR-47).
+    private var dockDwell = DockEdgeDwell()
+    /// Настоящие дисплеи (без скрытого) — для сторожа курсора; обновляются при смене дисплеев, а не на каждое движение.
+    private var guardDisplays: [CGRect] = []
+    private var screensToken: NSObjectProtocol?
+    /// Замер скорости зеркала (раздел perf самопроверки).
+    let perf = PerfMeter()
+    /// Когда последний раз нужен был щелчок через AX (pid → время): дерево страницы выключается после `axIdle` без щелчков.
+    private var accessibilityUsed: [pid_t: TimeInterval] = [:]
+    private var accessibilityTimer: Timer?
+    static let axIdle: TimeInterval = 10
     /// Щелчок по зеркалу: смены активной программы за 1 с после него (для журнала «щелчок: активная до …»).
     private var clickTrace: ClickTrace?
     private var clickTraceWork: DispatchWorkItem?
@@ -210,7 +223,7 @@ public final class HiddenScreenEngine {
         guard edge != dockGuardEdge else { return }
         dockGuardEdge = edge
         let displays = HiddenDisplay.physicalDisplays(excluding: displayID).count
-        dockSummary = edge.map { "сторож края Dock: край \($0.rawValue), дисплеев \(displays); курсор не ближе \(Int(DockEdgeGuard.margin)) pt к краю — Dock с автоскрытием не выезжает" }
+        dockSummary = edge.map { "сторож края Dock: край \($0.rawValue), дисплеев \(displays); курсор не ближе \(Int(DockEdgeGuard.margin)) pt к краю — Dock с автоскрытием не выезжает; задержать курсор у края \(DockEdgeDwell.hold) с — выезжает" }
             ?? "убирать Dock выключено"
         Log.hiddenScreen.info("Dock: \(self.dockSummary, privacy: .public)")
     }
@@ -372,6 +385,12 @@ public final class HiddenScreenEngine {
         // Не отодвинулся (ошибка раскладки) — работать можно, курсор сторожит `guardCursor`. Тёплый — уже на месте.
         hidden = fresh ? placeAtCorner(id) : CGDisplayBounds(id)
         phase = .on
+        HiddenScreenShared.update(active: true, bundleIDs: hiddenBundleIDs)
+        refreshGuardDisplays()
+        screensToken = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                                              object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshGuardDisplays() }
+        }
         updateDockGuard()
         Log.hiddenScreen.info("enable: дисплей \(id) \(String(describing: self.hidden), privacy: .public); активная программа — по \(Activator.readsWindowServer ? "WindowServer" : "NSWorkspace", privacy: .public); наведение \(self.options.hover.rawValue, privacy: .public)")
         attachObservers()
@@ -625,6 +644,11 @@ public final class HiddenScreenEngine {
         displayID = kCGNullDirectDisplay
         hidden = .null
         dockGuardEdge = nil
+        dockDwell = DockEdgeDwell()
+        HiddenScreenShared.update(active: false, bundleIDs: [])
+        if let screensToken { NotificationCenter.default.removeObserver(screensToken) }
+        screensToken = nil
+        releaseAllAccessibility()
         finishClickTrace()
         remembered.removeAll()
         wasHidden.removeAll()
@@ -748,7 +772,14 @@ public final class HiddenScreenEngine {
         cursorMonitors.removeAll()
     }
 
+    private func refreshGuardDisplays() {
+        let id = displayID != kCGNullDirectDisplay ? displayID : warm?.id ?? kCGNullDirectDisplay
+        guardDisplays = HiddenDisplay.physicalDisplays(excluding: id)
+    }
+
     private func guardCursor(ownEvent: Bool = false, location: CGPoint? = nil) {
+        let started = perf.active ? DispatchTime.now().uptimeNanoseconds : 0
+        defer { if perf.active { perf.guardCall(Double(DispatchTime.now().uptimeNanoseconds - started) / 1000) } }
         if let peekPoint {
             if HoverPeek.endsPeek(isOwnEvent: ownEvent, location: location ?? pointer.location, peekPoint: peekPoint) {
                 endPeek(reason: "движение")
@@ -756,16 +787,24 @@ public final class HiddenScreenEngine {
             return
         }
         // Включено — свой дисплей; выключено, но дисплей тёплый — он.
-        let guarded: (id: CGDirectDisplayID, rect: CGRect)? = displayID != kCGNullDirectDisplay ? (displayID, hidden)
-            : warm.map { ($0.id, CGDisplayBounds($0.id)) }
+        let guarded: CGRect? = displayID != kCGNullDirectDisplay ? hidden : warm.map { CGDisplayBounds($0.id) }
         guard session.handoff == nil, !runningSteps, let guarded else { return }
-        let physical = HiddenDisplay.physicalDisplays(excluding: guarded.id)
-        let now = pointer.location
-        var target = HiddenScreenGeometry.pullBack(now, hidden: guarded.rect, physical: physical) ?? now
-        // Пока включено — и не к краю с Dock (Dock с автоскрытием не выезжает ни на одном мониторе).
-        if let edge = dockGuardEdge,
-           let clamped = DockEdgeGuard.clamp(target, edge: edge, displays: physical, neighbours: physical + [guarded.rect]) {
-            target = clamped
+        // Точка — из самого события (без запроса положения курсора на каждое движение).
+        let now = location ?? pointer.location
+        if guardDisplays.isEmpty { refreshGuardDisplays() }
+        let physical = guardDisplays
+        var target = HiddenScreenGeometry.pullBack(now, hidden: guarded, physical: physical) ?? now
+        // Пока включено — и не к краю с Dock: Dock с автоскрытием не выезжает. Держат курсор у края полсекунды —
+        // пропускаем (намеренный жест, HSCR-47).
+        if let edge = dockGuardEdge {
+            let clamped = DockEdgeGuard.clamp(target, edge: edge, displays: physical, neighbours: physical + [guarded])
+            let distance = DockEdgeGuard.distance(target, edge: edge, displays: physical)
+            switch dockDwell.decide(atEdge: clamped != nil, distance: distance, now: ProcessInfo.processInfo.systemUptime) {
+            case .clamp:
+                if let clamped { target = clamped }
+            case let .pass(justReleased):
+                if justReleased { Log.hiddenScreen.info("Dock: курсор держали у края — пропускаю, Dock выезжает (виден в звонке)") }
+            }
         }
         guard target != now else { return }
         pointer.warp(to: target)
@@ -796,9 +835,10 @@ public final class HiddenScreenEngine {
             // Код AX «успех» ничего не значит: окно может не дать себя растянуть (быстрый чат Claude — не выше 535 pt).
             frame = resizeTarget(element, to: size) ?? frame
         }
-        let stream = WindowStream { [weak self] surface in
+        let stream = WindowStream { [weak self] surface, pts in
             self?.lastSurface = surface
             self?.mirrorView.show(surface: surface)
+            self?.perf.frame(pts: pts)
         }
         stream.onStop = { [weak self] error in
             Log.hiddenScreen.error("зеркало остановлено: \(String(describing: error), privacy: .public)")
@@ -810,7 +850,7 @@ public final class HiddenScreenEngine {
         targetFrameCache = frame
         mirrorTarget = (pid, target.id)
         mirrorRetry.reset()
-        requestAccessibility(pid)
+        if options.axTree == .show { _ = requestAccessibility(pid) }
         mirroredApp = app
         Log.hiddenScreen.info("зеркало: \(app.name, privacy: .public) окно \(target.id) фактически \(String(describing: frame), privacy: .public), просили \(requested, privacy: .public)")
         fitMirror(to: frame.size, reason: "новое окно")
@@ -1391,17 +1431,59 @@ public final class HiddenScreenEngine {
     /// Программы, у которых уже попросили дерево доступности (Chromium/Electron отдают веб-страницу в AX только так).
     private var accessibilityRequested: Set<pid_t> = []
 
-    func requestAccessibility(_ pid: pid_t) {
-        guard accessibilityRequested.insert(pid).inserted else { return }
+    /// Попросить дерево страницы. true — только что включено (дереву нужно время собраться).
+    @discardableResult
+    func requestAccessibility(_ pid: pid_t) -> Bool {
+        accessibilityUsed[pid] = ProcessInfo.processInfo.systemUptime
+        scheduleAccessibilityRelease()
+        guard accessibilityRequested.insert(pid).inserted else { return false }
         let result = AXUIElementSetAttributeValue(AXWindowSource.application(pid), "AXManualAccessibility" as CFString, kCFBooleanTrue)
         Log.hiddenScreen.info("AX: pid \(pid) — дерево страницы попрошено (AXManualAccessibility, код \(result.rawValue))")
+        return result == .success
+    }
+
+    /// Режим `click`: дерево страницы — только пока нужно щёлкать; без щелчков `axIdle` — выключить: у Chromium оно
+    /// пересчитывается на каждое изменение страницы (подозрение на лаги 1.11.1, HSCR-47).
+    private func scheduleAccessibilityRelease() {
+        guard options.axTree == .click, accessibilityTimer == nil else { return }
+        accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.releaseIdleAccessibility() }
+        }
+    }
+
+    private func releaseIdleAccessibility() {
+        let now = ProcessInfo.processInfo.systemUptime
+        for (pid, used) in accessibilityUsed where now - used >= Self.axIdle {
+            releaseAccessibility(pid, reason: "\(Int(Self.axIdle)) с без щелчков")
+        }
+        if accessibilityUsed.isEmpty {
+            accessibilityTimer?.invalidate()
+            accessibilityTimer = nil
+        }
+    }
+
+    private func releaseAccessibility(_ pid: pid_t, reason: String) {
+        accessibilityUsed[pid] = nil
+        guard accessibilityRequested.remove(pid) != nil else { return }
+        let result = AXUIElementSetAttributeValue(AXWindowSource.application(pid), "AXManualAccessibility" as CFString, kCFBooleanFalse)
+        Log.hiddenScreen.info("AX: pid \(pid) — дерево страницы выключено (\(reason, privacy: .public), код \(result.rawValue))")
+    }
+
+    func releaseAllAccessibility() {
+        for pid in Set(accessibilityRequested).union(accessibilityUsed.keys) { releaseAccessibility(pid, reason: "выключение") }
+        accessibilityTimer?.invalidate()
+        accessibilityTimer = nil
     }
 
     /// Элемент под точкой и его предки → фокус в поле или «нажать»; в предках поля нет — поле среди потомков рядом
     /// с точкой (ChatGPT, test15). Фокус проверяется: AX мог принять просьбу, но фокус не поставить.
     /// `done` — что сделано; иначе `why` — почему нет (тогда щелчок идёт путём `warp`).
     private func accessibilityClick(at point: CGPoint, pid: pid_t) async -> (done: String?, why: String) {
-        requestAccessibility(pid)
+        guard options.axTree != .off else { return (nil, "щелчок через AX выключен (--hs-ax=off)") }
+        if requestAccessibility(pid) {
+            // Дерево только что включено — Chromium собирает его не сразу.
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
         let app = AXWindowSource.application(pid)
         var hit: AXUIElement?
         let error = AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit)
@@ -1509,6 +1591,14 @@ public final class HiddenScreenEngine {
     var selfTestTarget: (pid: pid_t, frame: CGRect)? {
         guard let mirrorTarget, let frame = targetFrame else { return nil }
         return (mirrorTarget.pid, frame)
+    }
+
+    /// Процесс-помощник (держит дисплей) — для замера процессора.
+    var selfTestHelperPID: pid_t? { host?.pid }
+
+    /// Размер кадра потока (пиксели) и скрытого дисплея (точки) — для замера.
+    var selfTestSizes: (frame: CGSize?, display: CGSize?) {
+        (streamSize.map(pixelSize), hidden.isNull ? nil : hidden.size)
     }
 
     /// Скрытый дисплей (включённый или тёплый).

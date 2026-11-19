@@ -1,6 +1,7 @@
 import AppKit
 import CoreAudio
 import Foundation
+import MUCore
 
 /// Чтение системы для «Перед звонком». Только чтение: ничего не пишет и не показывает системных диалогов.
 package enum PreCallProbe {
@@ -61,7 +62,8 @@ package enum PreCallProbe {
 
     @MainActor
     package static func run(bundleIDs: [String] = HiddenScreenRules.defaultApps.map(\.bundleID)) -> [PreCallCheck] {
-        PreCallRules.all(dockAutohide: dockAutohide(), dockAway: DockAway.readiness(enabled: DockAway.isEnabled, autohide: dockAutohide()), notifications: notifications(bundleIDs: bundleIDs),
+        PreCallRules.all(dockAutohide: dockAutohide(), dockAway: DockAway.readiness(enabled: DockAway.isEnabled, autohide: dockAutohide()), switcherOn: UserDefaults.standard.bool(forKey: Pref.switcher),
+                         switcherCommandKey: UserDefaults.standard.string(forKey: Pref.switcherModifier) == "command", notifications: notifications(bundleIDs: bundleIDs),
                          output: outputKind(), mainDisplayName: mainDisplayName())
     }
 }

@@ -109,6 +109,8 @@ final class HiddenScreenSelfTest {
         await sleep(1.5)
         log("самопроверка Dock: \(engine.dockSummary)")
 
+        await performance()
+
         for status in engine.statuses where status.isRunning {
             await click(status)
         }
@@ -128,6 +130,51 @@ final class HiddenScreenSelfTest {
             report("вкл №\(cycle)")
         }
         monitor.stop()
+    }
+
+    /// Раздел perf (HSCR-47): по 10 с при текущих настройках и при каждом ключе из подозреваемых — по одному журналу
+    /// видно, что из нового тормозит. Во время замера прокручивайте колесом над зеркалом и печатайте в поле.
+    private func performance() async {
+        if let status = engine.statuses.first(where: { $0.isRunning && $0.hiddenWindows > 0 }) {
+            engine.selectApp(status.bundleID)
+            _ = await wait(8, { engine.mirroredApp == status.app && engine.selfTestTarget != nil })
+        }
+        let base = engine.options
+        let phases: [(String, (inout HiddenScreenOptions) -> Void)] = [
+            ("как есть (\(base.axTree.rawValue), dock \(base.dockAway ? "away" : "keep"), click \(base.clickMode.rawValue))", { _ in }),
+            ("--hs-dock=keep", { $0.dockAway = false }),
+            ("--hs-click=warp", { $0.clickMode = .warp }),
+            ("--hs-warm=off (влияет только на вкл/выкл)", { $0.keepWarm = false }),
+            ("--hs-ax=off", { $0.axTree = .off }),
+            ("--hs-ax=show (дерево страницы включено всё время, как в 1.11.1)", { $0.axTree = .show }),
+        ]
+        log("perf: \(phases.count) фаз по \(Int(Self.perfPhase)) с — прокручивайте колесом над зеркалом, печатайте в поле, двигайте мышью")
+        for (name, change) in phases {
+            var options = base
+            change(&options)
+            engine.options = options
+            if options.axTree == .show, let pid = engine.selfTestTarget?.pid { engine.requestAccessibility(pid) }
+            await sleep(1)
+            engine.perf.start(view: engine.mirrorView, processes: processes())
+            log("perf: фаза «\(name)» — \(Int(Self.perfPhase)) с")
+            await sleep(Self.perfPhase)
+            let sizes = engine.selfTestSizes
+            log(engine.perf.stop(framePixels: sizes.frame, displayPoints: sizes.display).line(phase: name))
+        }
+        engine.options = base
+        engine.releaseAllAccessibility()
+    }
+
+    static let perfPhase: Double = 10
+
+    /// Чей процессор считать: Mac Utils, помощник, программы ИИ с дочерними процессами (отрисовка Electron — в них).
+    private func processes() -> [(String, [pid_t])] {
+        var list: [(String, [pid_t])] = [("Mac Utils", [getpid()])]
+        if let helper = engine.selfTestHelperPID { list.append(("помощник", [helper])) }
+        for app in engine.runningTargets {
+            list.append((app.localizedName ?? app.bundleIdentifier ?? "?", PerfMeter.family(app.processIdentifier)))
+        }
+        return list
     }
 
     private func noteHidden() {

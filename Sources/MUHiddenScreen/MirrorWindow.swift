@@ -217,11 +217,12 @@ public final class MirrorView: NSView, NSDraggingSource {
 public final class WindowStream: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "macutils.hidden-screen.stream", qos: .userInteractive)
-    private let onFrame: (IOSurfaceRef) -> Void
+    /// Кадр и его время (часы хоста, с) — для замера возраста кадра.
+    private let onFrame: (IOSurfaceRef, Double) -> Void
     public var onStop: ((Error?) -> Void)?
     public private(set) var windowID: CGWindowID = 0
 
-    public init(onFrame: @escaping (IOSurfaceRef) -> Void) {
+    public init(onFrame: @escaping (IOSurfaceRef, Double) -> Void) {
         self.onFrame = onFrame
     }
 
@@ -269,7 +270,8 @@ public final class WindowStream: NSObject, SCStreamOutput, SCStreamDelegate {
               let pixelBuffer = sampleBuffer.imageBuffer,
               let surface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue() else { return }
         let onFrame = onFrame
-        DispatchQueue.main.async { onFrame(surface) }
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        DispatchQueue.main.async { onFrame(surface, pts.isFinite ? pts : 0) }
     }
 
     public func stream(_ stream: SCStream, didStopWithError error: Error) {

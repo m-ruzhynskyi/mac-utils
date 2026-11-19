@@ -60,7 +60,9 @@ package enum WindowList {
         let includeSelf = includeSelf ?? (NSApp.activationPolicy() == .regular)
         let ownPID = ownPID
         var apps = Dictionary(NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != ownPID }
+            // Программы, спрятанные «Скрытым экраном» (Claude, ChatGPT), пока он включён, — не показываем (HSCR-47).
+            .filter { $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != ownPID
+                && !HiddenScreenShared.hides($0.bundleIdentifier) }
             .map { app in
                 (app.processIdentifier, AppInfo(app: app, name: app.localizedName ?? app.bundleIdentifier ?? "?",
                                                  icon: app.icon ?? NSWorkspace.shared.icon(for: .application), isHidden: app.isHidden))
