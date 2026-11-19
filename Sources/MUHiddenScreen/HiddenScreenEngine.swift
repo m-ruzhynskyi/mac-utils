@@ -535,6 +535,7 @@ public final class HiddenScreenEngine {
         refreshStatuses(windows: windows)
         rescueMirrorIfHidden()
         refitMirror()
+        autoSelectMirror()
         checkFocus(reason: "опрос")
     }
 
@@ -594,7 +595,10 @@ public final class HiddenScreenEngine {
               let running = runningTargets.first(where: { app.matches(bundleID: $0.bundleIdentifier) }) else { return }
         let pid = running.processIdentifier
         let windows = mover.windows(pids: [pid])
-        guard let target = HiddenWindowRules.mirrorCandidate(windows: windows, app: app, hidden: hidden) else { return }
+        guard let target = HiddenWindowRules.mirrorCandidate(windows: windows, app: app, hidden: hidden) else {
+            Log.hiddenScreen.info("зеркало: у \(app.name, privacy: .public) нет окон на скрытом экране (окон программы \(windows.count): \(windows.map { "\($0.id) уровень \($0.layer)" }.joined(separator: ", "), privacy: .public))")
+            return
+        }
         endPeek(reason: "другое окно")
         await stream?.stop()
         session.cancelPress()
@@ -624,6 +628,7 @@ public final class HiddenScreenEngine {
         mirroredApp = app
         Log.hiddenScreen.info("зеркало: \(app.name, privacy: .public) окно \(target.id) фактически \(String(describing: frame), privacy: .public), просили \(requested, privacy: .public)")
         fitMirror(to: frame.size, reason: "новое окно")
+        updateMirrorClickThrough()
         onChange?()
     }
 
@@ -1067,6 +1072,7 @@ public final class HiddenScreenEngine {
     /// true — событие поглощено.
     private func intercept(_ type: CGEventType, _ event: CGEvent) -> Bool {
         if event.getIntegerValueField(.eventSourceUserData) == SyntheticEventFactory.marker { return false }
+        if let swallowed = interceptOnEmptyMirror(type, event) { return swallowed }
         guard phase == .on, mirrorShown, let window = mirrorWindow, window.isVisible,
               let target = mirrorTarget, let mapping, let rect = mirrorRect else {
             pressIntercepted = false
@@ -1150,6 +1156,54 @@ public final class HiddenScreenEngine {
         default:
             return false
         }
+    }
+
+    /// Нажатие ушло бы в окно-зеркало без картинки — оно сделало бы активной Mac Utils. nil — не наш случай.
+    private var emptyPressSwallowed = false
+
+    private func interceptOnEmptyMirror(_ type: CGEventType, _ event: CGEvent) -> Bool? {
+        switch type {
+        case .leftMouseUp, .rightMouseUp:
+            guard emptyPressSwallowed else { return nil }
+            emptyPressSwallowed = false
+            return true
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            guard phase == .on, mirrorShown, mirrorTarget == nil, let window = mirrorWindow, window.isVisible,
+                  EmptyMirrorClick.policy(hasTitleBar: mirrorHasTitleBar) == .swallow, let rect = mirrorRect,
+                  rect.contains(event.location) else { return nil }
+            let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+            guard NSWindow.windowNumber(at: HiddenScreenGeometry.cocoa(fromQuartz: event.location, primaryHeight: primaryHeight),
+                                        belowWindowWithWindowNumber: 0) == window.windowNumber else { return nil }
+            emptyPressSwallowed = true
+            Log.hiddenScreen.info("зеркало пустое — нажатие не отдаю окну зеркала (Mac Utils не станет активной)")
+            return true
+        default:
+            return nil
+        }
+    }
+
+    /// Пустое зеркало без рамки пропускает мышь насквозь; с картинкой — снова принимает.
+    private func updateMirrorClickThrough() {
+        guard let window = mirrorWindow else { return }
+        let through = mirrorTarget == nil && EmptyMirrorClick.policy(hasTitleBar: mirrorHasTitleBar) == .passThrough
+        if window.ignoresMouseEvents != through { window.ignoresMouseEvents = through }
+    }
+
+    /// Выбранная программа без окон (или зеркало ещё ничего не показывает) — показать программу с окнами.
+    private var lastMirrorAttempt: (app: HiddenApp, at: TimeInterval)?
+
+    private func autoSelectMirror() {
+        updateMirrorClickThrough()
+        guard phase == .on, mirrorShown, mirrorTarget == nil else { return }
+        let counts = statuses.map { (app: $0.app, count: $0.hiddenWindows) }
+        guard let app = MirrorChoice.app(selected: mirroredApp ?? lastMirrorAttempt?.app, windows: counts) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard MirrorChoice.shouldTry(app, last: lastMirrorAttempt, now: now) else { return }
+        if let previous = lastMirrorAttempt?.app, previous != app {
+            Log.hiddenScreen.info("зеркало: у \(previous.name, privacy: .public) окон нет — показываю \(app.name, privacy: .public)")
+        }
+        lastMirrorAttempt = (app, now)
+        show(app)
     }
 
     /// Протягивание у программы: каждое событие кнопки (физическое или инструмента проверки) поглощается и уходит заново
@@ -1288,6 +1342,7 @@ extension HiddenScreenEngine {
         rescueMirrorIfHidden()
         if isTarget(NSWorkspace.shared.frontmostApplication) { run([.returnFocus]) }
         installPressTap()
+        updateMirrorClickThrough()
         onChange?()
         let app = mirroredApp ?? statuses.first(where: { $0.hiddenWindows > 0 })?.app ?? statuses.first(where: \.isRunning)?.app
         if let app { show(app) }
@@ -1412,6 +1467,7 @@ extension HiddenScreenEngine {
 
     /// Запустить (спрятанной) или вернуть из «скрыть» программу, перенести её окна и показать в зеркале.
     func show(_ app: HiddenApp) {
+        lastMirrorAttempt = (app, ProcessInfo.processInfo.systemUptime)
         Task { @MainActor in
             if let running = NSWorkspace.shared.runningApplications.first(where: { app.matches(bundleID: $0.bundleIdentifier) }) {
                 if running.isHidden { revealOnHidden(running) }

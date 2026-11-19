@@ -210,3 +210,32 @@ public enum VisibilityRestore {
         return (sorted.filter { wasHidden[$0] != true }, sorted.filter { wasHidden[$0] == true })
     }
 }
+
+/// Что показывать в зеркале, если у выбранной программы окон на скрытом экране нет (928c284: выбран Claude с окном
+/// на уровне −1, «0 окон» — зеркало пустое).
+public enum MirrorChoice {
+    /// Выбранная, если у неё есть окна; иначе первая программа с окнами; ни у кого нет — nil (ждать).
+    public static func app(selected: HiddenApp?, windows: [(app: HiddenApp, count: Int)]) -> HiddenApp? {
+        if let selected, windows.contains(where: { $0.app == selected && $0.count > 0 }) { return selected }
+        return windows.first(where: { $0.count > 0 })?.app
+    }
+
+    /// Повторная попытка показать ту же программу — не чаще.
+    public static let retry: TimeInterval = 2
+
+    public static func shouldTry(_ app: HiddenApp, last: (app: HiddenApp, at: TimeInterval)?, now: TimeInterval) -> Bool {
+        guard let last, last.app == app else { return true }
+        return now - last.at >= retry
+    }
+}
+
+/// Щелчок по пустому зеркалу (окна в нём нет): не делать Mac Utils активной — у неё нет строки меню, macOS показала бы
+/// меню последней обычной программы.
+public enum EmptyMirrorClick: Equatable, Sendable {
+    /// Зеркало без рамки (интерфейс): окно пропускает мышь насквозь — щелчок достаётся тому, что под ним.
+    case passThrough
+    /// Отладочное окно с заголовком (там переключатель программ): нажатие по картинке поглощается, заголовок работает.
+    case swallow
+
+    public static func policy(hasTitleBar: Bool) -> EmptyMirrorClick { hasTitleBar ? .swallow : .passThrough }
+}
