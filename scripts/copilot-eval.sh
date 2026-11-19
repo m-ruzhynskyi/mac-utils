@@ -7,6 +7,8 @@
 #   scripts/copilot-eval.sh both                  оба сервиса, все 24 диалога, как в приложении
 #   scripts/copilot-eval.sh claude hybrid ru-0    только диалоги, id которых начинается с «ru-0»
 #   MU_COPILOT_REPEAT=2 scripts/copilot-eval.sh claude warm   два круга подряд в одной сессии
+#   MU_COPILOT_CODEX_MODEL=gpt-6-luna scripts/copilot-eval.sh codex   другая модель Codex (по умолчанию — быстрая из
+#     `codex debug models`: gpt-6.2-sol, иначе gpt-6-luna); какая пошла — строка «Модель Codex» в summary.md
 # Результат: .audit/copilot-eval/<бэкенд>-<режим>/summary.md и <id>.json; в конце — строки «Задержка …».
 set -e
 cd "$(dirname "$0")/.."
@@ -14,6 +16,7 @@ target="${1:?codex, claude, both или stub}"
 mode="${2:-warm-fast}"
 [ -n "$3" ] && export MU_COPILOT_ONLY="$3"
 [ -n "$MU_COPILOT_REPEAT" ] && export MU_COPILOT_REPEAT
+[ -n "$MU_COPILOT_CODEX_MODEL" ] && export MU_COPILOT_CODEX_MODEL
 export MU_COPILOT_MODE="$mode"
 out="$PWD/.audit/copilot-eval"
 lock="${MU_BUILD_LOCK:-$PWD/.audit/build.lock}"   # сборки — под общим замком репозитория

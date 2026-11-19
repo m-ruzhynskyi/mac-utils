@@ -15,6 +15,7 @@ final class AIServiceChoiceTests: XCTestCase {
     private var savedRouter: AIRouter!
     private var savedMakeClient: (@Sendable (AIProvider, Bool) -> CopilotAIClient)!
     private var saved: [(String, Any?)] = []
+    private var savedCatalog: (@Sendable (String?) async -> String?)!
     private let log = ProviderLog()
     private static let keys = [Pref.ai, Pref.aiProvider, Pref.aiFallback, CopilotModels.warm]
 
@@ -26,11 +27,15 @@ final class AIServiceChoiceTests: XCTestCase {
         d.set(true, forKey: Pref.ai)
         d.set(false, forKey: Pref.aiFallback)
         AI.router = AIRouter { [log] provider in RecordingEngine(provider: provider, log: log) }
+        // Каталог моделей codex не запрашивается: настоящий codex в этих тестах не запускается.
+        savedCatalog = CopilotModels.codexCatalog
+        CopilotModels.codexCatalog = { _ in nil }
     }
 
     override func tearDown() {
         AI.router = savedRouter
         BackendCopilotAI.makeClient = savedMakeClient
+        CopilotModels.codexCatalog = savedCatalog
         let d = UserDefaults.standard
         for (key, value) in saved { if let value { d.set(value, forKey: key) } else { d.removeObject(forKey: key) } }
     }

@@ -796,7 +796,7 @@ final class CopilotBackendRulesTests: XCTestCase {
     func testMCPServerNamesFromList() {
         XCTAssertEqual(CodexCLI.mcpServerNames(listJSON: #"[{"name":"demo","enabled":true},{"name":"gh"}]"#), ["demo", "gh"])
         XCTAssertEqual(CodexCLI.mcpServerNames(listJSON: "WARN: x\n[]"), [])
-        XCTAssertEqual(CodexCLI.mcpServerNames(listJSON: "No MCP servers configured"), [])
+        XCTAssertNil(CodexCLI.mcpServerNames(listJSON: "No MCP servers configured"), "не JSON — сбой списка (COPILOT-38)")
     }
 
     func testClaudeSessionHasSameSafetyAsOneShot() {

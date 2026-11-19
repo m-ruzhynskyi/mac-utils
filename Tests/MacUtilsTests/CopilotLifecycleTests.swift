@@ -8,14 +8,19 @@ import XCTest
 final class CopilotLifecycleTests: XCTestCase {
     private var folder: URL!
     private var marker = ""
+    private var savedCodexHome: String?
 
     override func setUpWithError() throws {
         marker = "mu-copilot-fake-\(UUID().uuidString.prefix(8))"
         folder = FileManager.default.temporaryDirectory.appendingPathComponent(marker, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // Тёплый Codex смотрит config.toml в CODEX_HOME: в тестах — пустая папка, а не настоящий ~/.codex.
+        savedCodexHome = ProcessInfo.processInfo.environment["CODEX_HOME"]
+        setenv("CODEX_HOME", folder.path, 1)
     }
 
     override func tearDownWithError() throws {
+        if let savedCodexHome { setenv("CODEX_HOME", savedCodexHome, 1) } else { unsetenv("CODEX_HOME") }
         killAll()
         try? FileManager.default.removeItem(at: folder)
     }
@@ -72,6 +77,7 @@ final class CopilotLifecycleTests: XCTestCase {
     /// Подставной `codex app-server`: отвечает на initialize. `pause` — задержка перед ответом.
     private func fakeCodex(pause: Double) throws -> String {
         try script("codex", """
+        if [ "$1" = mcp ]; then echo '[]'; exit 0; fi
         while IFS= read -r line; do
           id=$(printf '%s' "$line" | sed -n 's/.*"id":\\([0-9][0-9]*\\).*/\\1/p')
           if [ -n "$id" ]; then sleep \(pause); printf '{"id":%s,"result":{}}\\n' "$id"; fi

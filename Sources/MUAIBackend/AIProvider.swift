@@ -139,13 +139,17 @@ package struct AIRequest: Equatable, Sendable {
     package var timeout: TimeInterval
     /// Короткая задача (имя файла, категория): меньше рассуждений — быстрее ответ.
     package var quick: Bool
+    /// Своя модель (подсказчик: быстрая модель); nil — как в программе.
+    package var model: String?
 
-    package init(prompt: String, system: String? = nil, images: [URL] = [], timeout: TimeInterval = 120, quick: Bool = false) {
+    package init(prompt: String, system: String? = nil, images: [URL] = [], timeout: TimeInterval = 120, quick: Bool = false,
+                 model: String? = nil) {
         self.prompt = prompt
         self.system = system
         self.images = images
         self.timeout = timeout
         self.quick = quick
+        self.model = model
     }
 
     /// Системный текст по умолчанию: без него Claude Code берёт свой — для программирования.

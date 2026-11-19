@@ -103,6 +103,8 @@ package final class CopilotSession: ObservableObject {
     private let settings: () -> CopilotSettings
     private let now: () -> Date
     private let log: (String) -> Void
+    /// Ошибки ИИ и звука: в тексте бывает вывод CLI (а в нём — кусок ответа модели), поэтому в журнал — `.private`.
+    private let logError: (String) -> Void
     /// Замер «конец вопроса → первая строка» для статистики по сервисам (приложение пишет её и даёт совет).
     private let onLatency: (TimeInterval) -> Void
     private var task: Task<Void, Never>?
@@ -118,7 +120,9 @@ package final class CopilotSession: ObservableObject {
 
     package init(ai: CopilotAIClient, listener: CopilotListening, settings: @escaping () -> CopilotSettings = { CopilotPrefs.load() },
                  now: @escaping () -> Date = Date.init, log: @escaping (String) -> Void = { Log.ai.info("\($0, privacy: .public)") },
-                 onLatency: @escaping (TimeInterval) -> Void = { _ in }) {
+                 onLatency: @escaping (TimeInterval) -> Void = { _ in },
+                 logError: @escaping (String) -> Void = { Log.ai.error("\($0, privacy: .private)") }) {
+        self.logError = logError
         self.onLatency = onLatency
         self.ai = ai
         self.listener = listener
@@ -154,7 +158,7 @@ package final class CopilotSession: ObservableObject {
             log("Подсказчик: включён вручную")
         } catch {
             self.error = "Не удалось начать слушать: \(error.localizedDescription)"
-            log("Подсказчик: не включился — \(error.localizedDescription)")
+            logError("Подсказчик: не включился — \(error.localizedDescription)")
         }
     }
 
@@ -300,12 +304,16 @@ package final class CopilotSession: ObservableObject {
                                     try Task.checkCancellation()
                                     await self?.hybridPiece(part: part, piece: piece)
                                 }
+                                // Отменённую половину не доводим: её `finishSay`/`finishPoints` легли бы на новый ответ.
+                                try Task.checkCancellation()
                                 await self?.hybridDone(part: part)
                             }
                         }
                         try await group.waitForAll()
                     }
-                    if let self { self.finish(parsed: self.hybrid.parsed, previous: previousAnswer) }
+                    // Новый вопрос заменил этот: отменённая задача не трогает его ответ («Думаю…», раскрытие панели).
+                    guard let self, !Task.isCancelled else { return }
+                    self.finish(parsed: self.hybrid.parsed, previous: previousAnswer)
                 } else {
                     var raw = ""
                     let stream = ai.stream(prompt: prompt, system: CopilotPrompt.system(settings: settings), images: images, profile: profile)
@@ -314,14 +322,16 @@ package final class CopilotSession: ObservableObject {
                         raw += chunk
                         self.apply(CopilotPrompt.parse(raw))
                     }
-                    self?.finish(parsed: CopilotPrompt.parse(raw), previous: previousAnswer)
+                    // При отмене поток просто кончается, без ошибки: без этой проверки старый ответ «закончил» бы новый.
+                    guard let self, !Task.isCancelled else { return }
+                    self.finish(parsed: CopilotPrompt.parse(raw), previous: previousAnswer)
                 }
             } catch is CancellationError {
             } catch {
                 guard let self, !Task.isCancelled else { return }
                 self.isAnswering = false
                 self.error = error.localizedDescription
-                self.log("Подсказчик: ошибка ИИ — \(error.localizedDescription)")
+                self.logError("Подсказчик: ошибка ИИ — \(error.localizedDescription)")
             }
         }
     }

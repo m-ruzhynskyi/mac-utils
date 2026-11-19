@@ -202,22 +202,28 @@ struct BackendCopilotAI: CopilotAIClient {
     func shutdown() async { await CopilotWarmRegistry.shared.shutdownAll() }
 }
 
-/// Тёплые клиенты по сервисам: переключили Codex ↔ Claude — прежний останавливается при выключении подсказчика.
+/// Тёплые клиенты по сервисам. Сменили сервис на странице «ИИ» при включённом подсказчике — тёплый процесс прежнего
+/// закрывается при первом же обращении к новому, а не живёт до выключения подсказчика.
 final class CopilotWarmRegistry: @unchecked Sendable {
     static let shared = CopilotWarmRegistry()
     private let lock = NSLock()
     private var clients: [AIProvider: WarmCopilotAI] = [:]
 
     func client(_ provider: AIProvider) -> WarmCopilotAI {
-        lock.lock(); defer { lock.unlock() }
-        if let c = clients[provider] { return c }
-        let c = WarmCopilotAI(provider: provider)
-        clients[provider] = c
-        return c
+        let (client, stale): (WarmCopilotAI, [WarmCopilotAI]) = lock.withLock {
+            let stale = clients.filter { $0.key != provider }.map(\.value)
+            clients = clients.filter { $0.key == provider }
+            if let c = clients[provider] { return (c, stale) }
+            let c = WarmCopilotAI(provider: provider)
+            clients[provider] = c
+            return (c, stale)
+        }
+        if !stale.isEmpty { Task { for c in stale { await c.shutdown() } } }
+        return client
     }
 
     func shutdownAll() async {
-        lock.lock(); let all = Array(clients.values); lock.unlock()
+        let all = lock.withLock { () -> [WarmCopilotAI] in let all = Array(clients.values); clients = [:]; return all }
         for c in all { await c.shutdown() }
     }
 }

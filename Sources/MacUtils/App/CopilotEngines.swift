@@ -22,6 +22,26 @@ enum CopilotModels {
         }
     }
 
+    /// Модель для запроса подсказчика. Codex: `MU_COPILOT_CODEX_MODEL` (замер `copilot-eval.sh`) → своя настройка →
+    /// у быстрого профиля — быстрая из каталога codex (`codexCatalog`). Модель передаётся явно и в тёплый, и в разовый
+    /// путь: иначе тёплый `app-server` брал модель из config.toml пользователя, а разовый `exec` — модель по умолчанию.
+    static func resolved(_ provider: AIProvider, _ profile: CopilotAIProfile, executable: String?,
+                         environment: [String: String] = ProcessInfo.processInfo.environment,
+                         defaults: UserDefaults = .standard) async -> String? {
+        if provider == .codex, let forced = nonEmpty(environment["MU_COPILOT_CODEX_MODEL"]) { return forced }
+        if let own = model(provider, profile, defaults: defaults) { return own }
+        guard provider == .codex, profile == .fast else { return nil }
+        return await codexCatalog(executable)
+    }
+
+    /// Быстрая модель из каталога codex (`codex debug models`, без запросов к модели). Подменяется в тестах.
+    nonisolated(unsafe) static var codexCatalog: @Sendable (_ executable: String?) async -> String? = { executable in
+        var found = executable
+        if found == nil { found = await CLIEnvironment.shared.executable(for: .codex) }
+        guard let found else { return nil }
+        return await CodexModelCatalog.shared.fastModel(executable: found)
+    }
+
     /// Малое «размышление» у быстрого профиля: ответ подсказчику нужен сразу.
     static func effort(_ profile: CopilotAIProfile) -> String? { profile == .fast ? "low" : nil }
 
@@ -48,7 +68,9 @@ struct ColdCopilotAI: CopilotAIClient {
                         try data.write(to: url)
                         files.append(url)
                     }
-                    let request = AIRequest(prompt: prompt, system: system, images: files, timeout: BackendCopilotAI.timeout, quick: profile == .fast)
+                    let model = await CopilotModels.resolved(provider, profile, executable: executable)
+                    let request = AIRequest(prompt: prompt, system: system, images: files, timeout: BackendCopilotAI.timeout,
+                                            quick: profile == .fast, model: model)
                     let engine: any AIEngine = executable.map { CLIEngine(provider, executable: $0) } ?? AI.router.engine(provider)
                     for try await piece in engine.stream(request) { continuation.yield(piece) }
                     continuation.finish()
@@ -132,9 +154,11 @@ final class WarmCopilotAI: CopilotAIClient, @unchecked Sendable {
                             Log.ai.info("Подсказчик: Claude \(i.cold ? "холодный старт" : "тёплая сессия", privacy: .public), вопрос №\(i.usesBefore + 1, privacy: .public)")
                         }
                     case .codex:
+                        let model = await CopilotModels.resolved(.codex, profile, executable: executable)
+                        Log.ai.info("Подсказчик: Codex, модель \(model ?? "как в config.toml", privacy: .public), effort \(CopilotModels.effort(profile) ?? "как в codex", privacy: .public)")
                         let stream = try await codexHost(executable: executable).ask(
                             prompt: prompt, system: [system, AIRequest.textOnly].joined(separator: "\n"),
-                            model: CopilotModels.model(.codex, profile), effort: CopilotModels.effort(profile))
+                            model: model, effort: CopilotModels.effort(profile))
                         for try await piece in stream { started = true; continuation.yield(piece) }
                     }
                     continuation.finish()
@@ -143,7 +167,7 @@ final class WarmCopilotAI: CopilotAIClient, @unchecked Sendable {
                 } catch {
                     guard !started, !Task.isCancelled else { continuation.finish(throwing: error); return }
                     // Тёплый путь не сработал, ответа ещё не было: один холодный запуск.
-                    Log.ai.info("Подсказчик: тёплый процесс не ответил (\(error.localizedDescription, privacy: .public)), холодный запуск")
+                    Log.ai.info("Подсказчик: тёплый процесс не ответил (\(error.localizedDescription, privacy: .private)), холодный запуск")
                     do {
                         for try await piece in cold.stream(prompt: prompt, system: system, images: [], profile: profile) { continuation.yield(piece) }
                         continuation.finish()

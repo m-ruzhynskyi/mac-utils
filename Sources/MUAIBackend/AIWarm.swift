@@ -100,6 +100,8 @@ package actor ClaudeWarmHost {
     package static let recycleAfter = 6
     /// Короткий служебный запрос, чтобы прогреть сессию (ответ отбрасывается).
     package static let primePrompt = "Ответь одним словом: ок"
+    /// Сколько ждать ответа на прогрев.
+    nonisolated(unsafe) package static var primeSeconds: TimeInterval = 20
 
     /// Как прошёл последний вопрос: для замеров (холодный процесс — это и есть хвост).
     package struct Info: Equatable, Sendable {
@@ -144,9 +146,12 @@ package actor ClaudeWarmHost {
         guard let message = WarmProtocol.claudeUserMessage(Self.primePrompt) else { return session }
         process.write(message)
         var answer = AIAnswer()
-        // Прогрев не должен висеть: если ответа нет 20 с, сессию всё равно отдаём (вопрос сам проверит).
-        let deadline = Date().addingTimeInterval(20)
-        while !answer.finished, Date() < deadline {
+        // Прогрев не висит: молчит `primeSeconds` — процесс закрывается по таймеру (чтение тогда кончается), вопрос пойдёт
+        // на запасную или холодным запуском. Раньше срок проверялся только после очередной строки.
+        let seconds = Self.primeSeconds
+        let watchdog = Task { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); if !Task.isCancelled { process.terminate() } }
+        defer { watchdog.cancel() }
+        while !answer.finished {
             guard let line = await session.reader.next() else { process.terminate(); return nil }
             if let event = ClaudeCLI.parse(line) {
                 _ = answer.consume(event)
@@ -204,15 +209,17 @@ package actor ClaudeWarmHost {
         session.process.write(message)
         var answer = AIAnswer()
         while true {
-            if Task.isCancelled { shutdown(); throw CancellationError() }
+            if Task.isCancelled { drop(session); throw CancellationError() }
             guard let line = await session.reader.next() else {
+                // Отмена вопроса тоже кончает чтение (nil): это не сбой процесса.
+                if Task.isCancelled { drop(session); throw CancellationError() }
                 let tail = session.process.stderrTail
-                shutdown()
+                drop(session)
                 throw WarmFailure(tail.isEmpty ? "Claude: процесс завершился" : "Claude: \(tail.trimmingCharacters(in: .whitespacesAndNewlines))")
             }
             guard let event = ClaudeCLI.parse(line) else { continue }
             if let piece = answer.consume(event) { yield(piece) }
-            if case .failure(let message) = event { shutdown(); throw AIFailure.from(.claude, output: message) }
+            if case .failure(let message) = event { drop(session); throw AIFailure.from(.claude, output: message) }
             if answer.finished { break }
         }
         busy = false
@@ -224,6 +231,16 @@ package actor ClaudeWarmHost {
     }
 
     private func makeSpare() async -> Session? { await makeSession() }
+
+    /// Отменённый (или сорвавшийся) вопрос: закрывается только эта сессия — её поток не дочитан, события смешались бы.
+    /// Хост, эпоха и запасная остаются; запасная сразу готовится, чтобы следующий вопрос («человек договорил») шёл в тёплую.
+    private func drop(_ session: Session) {
+        session.process.terminate()
+        if current?.process === session.process { current = nil }
+        busy = false
+        uses = 0
+        if spare == nil { spare = Task { [self] in await self.makeSpare() } }
+    }
 }
 
 // MARK: Codex
@@ -244,9 +261,15 @@ package actor CodexWarmHost {
 
     package init(executable: String) { self.executable = executable }
 
+    /// Сколько ждать `codex mcp list --json` (тесты укорачивают).
+    nonisolated(unsafe) package static var mcpListSeconds: TimeInterval = 15
+
     private func send(_ data: Data) { process?.write(data) }
 
     private func request(_ make: (Int) -> Data) async -> (threadID: String?, error: String?) {
+        // Процесса уже нет (остановлен инструментом другой половины гибрида, упал): ответа не будет — ошибка сразу,
+        // вопрос уходит холодным запуском, а не ждёт 45-секундного сторожа.
+        guard let process, process.isRunning else { return (nil, "процесс Codex не запущен") }
         let id = nextID; nextID += 1
         return await withCheckedContinuation { continuation in
             pending[id] = continuation
@@ -269,13 +292,21 @@ package actor CodexWarmHost {
         stopProcess()
         let startedEpoch = epoch
         let environment = await CLIEnvironment.shared.environment(for: executable)
-        // MCP-серверы из config.toml пользователя выключаются по именам (у app-server нет `--ignore-user-config`).
+        // У app-server нет `--ignore-user-config`: свой адрес сервиса в config.toml не переопределить — тогда только `exec`.
+        let config = CodexCLI.userConfigURL(environment: environment)
+        let redirects = (try? String(contentsOf: config, encoding: .utf8)).map(CodexCLI.configRedirects) ?? []
+        guard redirects.isEmpty else {
+            throw WarmFailure("Codex: в config.toml свой адрес сервиса (\(redirects.joined(separator: ", "))) — тёплый процесс не используется, вопрос пойдёт обычным запуском")
+        }
+        // MCP-серверы из config.toml выключаются по именам. Список не получен (код ≠ 0, таймаут, не JSON) — тёплого нет.
         let list = CLICommand(executable: URL(fileURLWithPath: executable), arguments: ["mcp", "list", "--json"],
                               environment: environment, directory: AIWorkspace.directory)
-        let servers = CodexCLI.mcpServerNames(listJSON: (try? await CLIProcess.run(list, timeout: 15).stdout) ?? "")
+        let output = try? await CLIProcess.run(list, timeout: Self.mcpListSeconds)
+        let servers = output.flatMap { $0.status == 0 ? CodexCLI.mcpServerNames(listJSON: $0.stdout) : nil }
         guard epoch == startedEpoch else { throw CancellationError() }
         guard let arguments = CodexCLI.appServerArguments(mcpServers: servers) else {
-            throw WarmFailure("Codex: MCP-сервер с таким именем не выключить в тёплом процессе — вопрос пойдёт обычным запуском")
+            throw WarmFailure(servers == nil ? "Codex: не удалось получить список MCP-серверов — вопрос пойдёт обычным запуском"
+                                             : "Codex: MCP-сервер с таким именем не выключить в тёплом процессе — вопрос пойдёт обычным запуском")
         }
         let process = WarmProcess(executable: executable, arguments: arguments, environment: environment,
                                   directory: AIWorkspace.directory)
@@ -397,6 +428,8 @@ package enum WarmProtocol {
         var params: [String: Any] = ["threadId": threadID, "input": [["type": "text", "text": text, "text_elements": [Any]()]]]
         if let effort, !effort.isEmpty { params["effort"] = effort }
         if let model, !model.isEmpty { params["model"] = model }
+        // Сводка рассуждений подсказчику не нужна (не показывается): «none» по схеме app-server 0.170.
+        params["summary"] = "none"
         return line(["id": id, "method": "turn/start", "params": params])
     }
 
@@ -447,5 +480,26 @@ package enum WarmProtocol {
         if let error = json["error"] as? [String: Any] { return .response(id: id, threadID: nil, error: error["message"] as? String ?? "ошибка") }
         let thread = (json["result"] as? [String: Any])?["thread"] as? [String: Any]
         return .response(id: id, threadID: thread?["id"] as? String, error: nil)
+    }
+}
+
+// MARK: - Каталог моделей Codex
+
+/// Быстрая модель Codex для подсказчика: из `codex debug models` (каталог этой версии codex, без запросов к модели),
+/// один раз за запуск. Без неё тёплый `app-server` брал бы модель из config.toml пользователя (у него нет
+/// `--ignore-user-config`), а холодный `exec` — модель codex по умолчанию: тёплый путь оказывался медленнее холодного.
+package actor CodexModelCatalog {
+    package static let shared = CodexModelCatalog()
+    private var fast: [String: String?] = [:]
+
+    package func fastModel(executable: String) async -> String? {
+        if let cached = fast[executable] { return cached }
+        let command = CLICommand(executable: URL(fileURLWithPath: executable), arguments: ["debug", "models"],
+                                 environment: await CLIEnvironment.shared.environment(for: executable), directory: AIWorkspace.directory)
+        let output = try? await CLIProcess.run(command, timeout: 10)
+        let model = output.flatMap { $0.status == 0 ? CodexCLI.fastModel(listed: CodexCLI.listedModels(catalogJSON: $0.stdout)) : nil }
+        fast[executable] = .some(model)
+        Log.ai.info("codex: быстрая модель подсказчика — \(model ?? "как в codex", privacy: .public)")
+        return model
     }
 }

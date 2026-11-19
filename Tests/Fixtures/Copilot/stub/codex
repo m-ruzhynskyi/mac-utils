@@ -1,13 +1,16 @@
 #!/bin/sh
 # Заглушка codex для scripts/copilot-eval.sh stub и тестов: настоящий codex не запускается, запросов нет.
 # app-server — JSON-RPC по строкам (initialize, thread/start, turn/start → куски item/agentMessage/delta и turn/completed);
-# exec --json — один готовый ответ; mcp list --json — пусто. Задержка до первого куска — MU_STUB_DELAY (с).
+# exec --json — один готовый ответ; mcp list --json — пусто; debug models — маленький каталог. Задержка до первого куска — MU_STUB_DELAY (с).
 delay="${MU_STUB_DELAY:-0.2}"
 say='Скажите: начну с плана запроса, потом индекс.'
 points='\n- EXPLAIN ANALYZE покажет полный проход\n- составной индекс по дате и статусу\n'
 case "$1 $2" in
   "mcp list") echo '[]'; exit 0 ;;
+  "debug models") echo '{"models":[{"slug":"gpt-6.2-astra","visibility":"list"},{"slug":"gpt-6.2-sol","visibility":"list"}]}'; exit 0 ;;
 esac
+# MU_STUB_LOG — куда записать аргументы и полученные строки (проверка, что модель и effort доходят до codex).
+[ -n "$MU_STUB_LOG" ] && echo "args: $*" >> "$MU_STUB_LOG"
 if [ "$1" = "exec" ]; then
   cat >/dev/null
   sleep "$delay"
@@ -18,6 +21,7 @@ fi
 [ "$1" = "app-server" ] || { echo "заглушка codex: $*" >&2; exit 2; }
 # Методы ищутся с «*» вместо «/»: JSONSerialization пишет «thread\/start».
 while IFS= read -r line; do
+  [ -n "$MU_STUB_LOG" ] && printf '%s\n' "$line" >> "$MU_STUB_LOG"
   id=$(printf '%s' "$line" | sed -n 's/^{"id":\([0-9][0-9]*\),.*/\1/p')
   case "$line" in
     *'"method":"initialize"'*) printf '{"id":%s,"result":{"userAgent":"stub"}}\n' "$id" ;;

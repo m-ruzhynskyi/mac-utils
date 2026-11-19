@@ -150,6 +150,10 @@ final class CopilotEvalRunTests: XCTestCase {
             }
             startup = Date().timeIntervalSince(t)
         }
+        // Какая модель Codex пойдёт в запросы (MU_COPILOT_CODEX_MODEL → своя настройка → быстрая из каталога codex).
+        let codexModel = backend == "codex"
+            ? await CopilotModels.resolved(.codex, fast || mode == "hybrid" ? .fast : .main, executable: stub?.appendingPathComponent("codex").path)
+            : nil
         var results: [Result] = []
         for round in 1...max(1, rounds) { for d in dialogs {
             let now = Date()
@@ -197,7 +201,8 @@ final class CopilotEvalRunTests: XCTestCase {
             try encoder.encode(result).write(to: out.appendingPathComponent("\(result.id).json"))
         } }
         await ai.shutdown()
-        try summary(results, backend: backend, mode: mode, startup: startup, stub: stub != nil)
+        try summary(results, backend: backend, mode: mode, startup: startup, stub: stub != nil,
+                    model: backend == "codex" ? (codexModel ?? "как в codex (config.toml для тёплого)") : nil)
             .write(to: out.appendingPathComponent("summary.md"), atomically: true, encoding: .utf8)
         return results
     }
@@ -236,12 +241,13 @@ final class CopilotEvalRunTests: XCTestCase {
                       name, mode, p.median, p.p90, words.count, LatencyMeter.target)
     }
 
-    private static func summary(_ r: [Result], backend: String, mode: String, startup: Double?, stub: Bool) -> String {
+    private static func summary(_ r: [Result], backend: String, mode: String, startup: Double?, stub: Bool, model: String?) -> String {
         let asked = r.filter { $0.error == nil && $0.grade.sayLength > 0 }
         let rawLong = asked.filter { $0.grade.rawTooLong }.count
         let passed = r.filter { $0.grade.passed && $0.error == nil }.count
         var s = "# Подсказчик: \(backend), режим \(mode)\(stub ? " — ЗАГЛУШКА (без запросов, проверка замера)" : "")\n\n"
         s += latencyLine(r, backend: backend, mode: mode, stub: stub) + "\n\n"
+        if let model { s += "Модель Codex: \(model) (другая — `MU_COPILOT_CODEX_MODEL=<модель> scripts/copilot-eval.sh codex`).\n\n" }
         s += "Автопроверка: \(passed) из \(r.count) (первая строка — после обрезки в показе, ≤ \(CopilotPrompt.maxSayLength) знаков).\nСырых первых строк длиннее \(CopilotPrompt.maxSayLength) знаков или \(CopilotPrompt.maxSayWords) слов: \(rawLong) из \(asked.count) (в показе режутся, но модель стоит поправить).\n\n"
         s += "- конец вопроса → первое слово, с (цель ≤ \(Int(LatencyMeter.target))): \(stat(asked.compactMap(\.firstWord)))\n"
         s += "- до первого куска, с: \(stat(asked.compactMap(\.firstChunk)))\n"
@@ -268,14 +274,20 @@ final class CopilotEvalRunTests: XCTestCase {
 /// Настоящие программы не запускаются, запросов нет.
 final class CopilotEvalStubTests: XCTestCase {
     private var out: URL!
+    private var savedCodexHome: String?
 
     override func setUpWithError() throws {
         out = FileManager.default.temporaryDirectory.appendingPathComponent("mu-copilot-eval-\(UUID().uuidString.prefix(8))", isDirectory: true)
         setenv("MU_STUB_DELAY", "0.05", 1)
+        // Тёплый Codex смотрит config.toml в CODEX_HOME: в тестах — пустая папка, а не настоящий ~/.codex.
+        savedCodexHome = ProcessInfo.processInfo.environment["CODEX_HOME"]
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        setenv("CODEX_HOME", out.path, 1)
     }
 
     override func tearDownWithError() throws {
         unsetenv("MU_STUB_DELAY")
+        if let savedCodexHome { setenv("CODEX_HOME", savedCodexHome, 1) } else { unsetenv("CODEX_HOME") }
         try? FileManager.default.removeItem(at: out)
     }
 
@@ -292,6 +304,44 @@ final class CopilotEvalStubTests: XCTestCase {
                 XCTAssertTrue(summary.contains("p90"))
             }
         }
+    }
+
+    /// Модель и effort доходят до codex: тёплый — в `turn/start` (поля по схеме app-server 0.170), разовый — `--model`.
+    func testCodexGetsFastModelAndEffortOnBothPaths() async throws {
+        let log = out.appendingPathComponent("stub.log")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        setenv("MU_STUB_LOG", log.path, 1)
+        defer { unsetenv("MU_STUB_LOG") }
+        for mode in ["warm-fast", "cold-fast"] {
+            try? FileManager.default.removeItem(at: log)
+            try await CopilotEvalRunTests.run(backend: "codex", mode: mode, only: "ru-01", out: out, stub: CopilotEvalRunTests.stubDirectory)
+            let text = try String(contentsOf: log, encoding: .utf8)
+            if mode == "warm-fast" {
+                let turn = try XCTUnwrap(text.split(separator: "\n").first { $0.contains(#""method":"turn\/start""#) }, text)
+                XCTAssertTrue(turn.contains(#""model":"gpt-6.2-sol""#), String(turn))
+                XCTAssertTrue(turn.contains(#""effort":"low""#), String(turn))
+                XCTAssertTrue(turn.contains(#""summary":"none""#), String(turn))
+                XCTAssertTrue(text.contains(#"model_provider="openai""#), "тёплый запущен с переопределениями config.toml")
+            } else {
+                XCTAssertTrue(text.contains("--model gpt-6.2-sol"), text)
+                XCTAssertTrue(text.contains("--ignore-user-config"), text)
+            }
+        }
+        let summary = try String(contentsOf: out.appendingPathComponent("codex-cold-fast/summary.md"), encoding: .utf8)
+        XCTAssertTrue(summary.contains("Модель Codex: gpt-6.2-sol"), summary)
+        setenv("MU_COPILOT_CODEX_MODEL", "gpt-6-luna", 1)
+        defer { unsetenv("MU_COPILOT_CODEX_MODEL") }
+        let forced = await CopilotModels.resolved(.codex, .fast, executable: nil)
+        XCTAssertEqual(forced, "gpt-6-luna")
+    }
+
+    func testFastCodexModelFromCatalog() {
+        let catalog = #"{"models":[{"slug":"gpt-6.2-astra","visibility":"list"},{"slug":"gpt-6.2-sol","visibility":"hide"},{"slug":"gpt-6-luna","visibility":"list"}]}"#
+        XCTAssertEqual(CodexCLI.listedModels(catalogJSON: catalog), ["gpt-6.2-astra", "gpt-6-luna"])
+        XCTAssertEqual(CodexCLI.fastModel(listed: CodexCLI.listedModels(catalogJSON: catalog)), "gpt-6-luna", "скрытая не берётся")
+        XCTAssertEqual(CodexCLI.fastModel(listed: ["gpt-6.2-sol", "gpt-6-luna"]), "gpt-6.2-sol")
+        XCTAssertNil(CodexCLI.fastModel(listed: ["gpt-6.2-astra"]), "нет быстрой — как в codex")
+        XCTAssertEqual(CodexCLI.listedModels(catalogJSON: "мусор"), [])
     }
 
     func testPercentiles() throws {
