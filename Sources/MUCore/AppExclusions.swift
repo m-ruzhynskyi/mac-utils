@@ -35,17 +35,23 @@ package final class AppExclusions: AppListStore {
     private var frontBundleID: String?
     private var observer: Any?
 
-    private init() {
-        list = Self.load()
-        frontBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        recompute()
+    private convenience init() {
+        self.init(list: Self.load(), frontBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, observeActivation: true)
+    }
+
+    /// Начальное состояние — без уведомления. Иначе (1.11.0, CRASH-EXCL) при запуске с AnyDesk или Parallels на переднем
+    /// плане уведомление уходило синхронно, пока `shared` ещё создаётся; подписчик (`AppSwitcher.exclusionChanged`)
+    /// обращался к `shared` — повторный вход в `dispatch_once`, падение. Подписчики читают `isFrontExcluded` сами,
+    /// когда включаются (`sync`).
+    package init(list: [String], frontBundleID: String?, observeActivation: Bool) {
+        self.list = list
+        self.frontBundleID = frontBundleID
+        isFrontExcluded = Self.matches(frontBundleID, in: list)
+        guard observeActivation else { return }
         observer = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            MainActor.assumeIsolated {
-                self?.frontBundleID = app?.bundleIdentifier
-                self?.recompute()
-            }
+            MainActor.assumeIsolated { self?.frontChanged(to: app?.bundleIdentifier) }
         }
     }
 
@@ -75,6 +81,12 @@ package final class AppExclusions: AppListStore {
     // MARK: - Состояние
 
     package func isExcluded(_ bundleID: String?) -> Bool { Self.matches(bundleID, in: list) }
+
+    /// Передний план сменился (из наблюдателя активации; для тестов — напрямую).
+    package func frontChanged(to bundleID: String?) {
+        frontBundleID = bundleID
+        recompute()
+    }
 
     private func recompute() {
         let now = Self.matches(frontBundleID, in: list)

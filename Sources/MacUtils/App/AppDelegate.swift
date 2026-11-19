@@ -4,6 +4,7 @@ import MUCore
 import MUDesign
 import MUCutPaste
 import MUWinKeys
+import MUCopilot
 import MUFocus
 import MUSmoothScroll
 import MUAppSwitcher
@@ -70,6 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // «Взгляд в камеру»: окно отладки — только ключом запуска (`open -n … --args --gaze-debug`).
         if CommandLine.arguments.contains(GazeDebugWindowController.launchArgument) {
             DispatchQueue.main.async { GazeDebugWindowController.shared.show() }
+        }
+        // Подсказчик: самопроверка — только ключом запуска (`open -n … --args --copilot-selftest`), после запуска остального.
+        if let selfTest = CopilotSelfTest.options(CommandLine.arguments) {
+            DispatchQueue.main.async { Task { @MainActor in await CopilotSelfTest.run(selfTest) } }
         }
 
         NotificationCenter.default.addObserver(
@@ -325,6 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Плеер: место запоминается и при выходе с открытым окном.
         for controller in PlayerWindowController.windows { controller.model.savePosition() }
+        CopilotGlue.shared.shutdown()
         HiddenScreenEngine.shared.shutdown()
         WarmScreen.shared.shutdown()
         KeepAwake.shared.shutdown()
@@ -367,6 +373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func syncFeatures() {
         FinderCutPaste.shared.sync()
         WinKeys.shared.sync()
+        CopilotGlue.shared.registerHotKeys()
         HiddenScreenUI.controller = HiddenScreenEngine.shared
         HiddenScreenGlue.shared.sync()
         SmoothScroll.shared.sync()

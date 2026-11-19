@@ -32,7 +32,7 @@ struct AIPage: View {
         SettingsPage(.ai, isOn: $enabled, toggleLabel: "ИИ-функции") {
             GroupLabel("Сервис")
             ListCard {
-                Row("ИИ для всех функций", subtitle: "Через программу на этом Mac, под вашим аккаунтом.", systemImage: "sparkles") {
+                Row("ИИ для всех функций", subtitle: "Через программу на этом Mac, под вашим аккаунтом. Подсказчик на встрече отвечает тем же сервисом.", systemImage: "sparkles") {
                     Segmented(selection: providerBinding,
                               options: AIProvider.allCases.map { (value: $0, title: $0.title) })
                 }

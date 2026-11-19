@@ -3,7 +3,14 @@ import Foundation
 
 /// Как щелчок из зеркала попадает в программу.
 public enum ClickMode: String, Sendable, CaseIterable {
-    /// Настоящий курсор на миг переносится на скрытый дисплей, нажатие — через HID (по умолчанию).
+    /// Без активации, где можно (по умолчанию). Обычный щелчок сначала через AX (HSCR-45/46): поле ввода под точкой
+    /// или рядом с ней получает фокус, кнопка или ссылка — «нажать»; программа не активируется, строка меню и заголовок
+    /// окна программы пользователя не мигают. Не вышло (AX не нашёл элемент, не дал фокус), двойной щелчок, щелчок
+    /// с клавишами — путь `warp`, как в 1.11.0: с кратким миганием фокуса, но щелчок доходит. События `postToPid`
+    /// в неактивное окно Electron (Claude, ChatGPT) не принимает — «первое нажатие» без активации (19.11, test13/test15).
+    case background
+    /// Настоящий курсор на миг переносится на скрытый дисплей, нажатие — через HID; программа ИИ на это время
+    /// становится активной, потом активность возвращается (до HSCR-43 — по умолчанию; видно как мигание фокуса).
     case warp
     /// `postToPid` с номером окна в полях 91/92. На Mac пользователя (13.11) не работает ни в Claude, ни в ChatGPT — для опытов.
     case pid
@@ -63,6 +70,8 @@ public enum PointerStep: Equatable, Sendable {
     /// Событие на уровне HID (`.cghidEventTap`): WindowServer сам находит окно под курсором.
     case postHID(SyntheticEvent)
     case postToPid(SyntheticEvent)
+    /// Щелчок через AX в точке окна (Quartz): фокус в поле или «нажать» кнопку/ссылку; не вышло — шаги `fallback`.
+    indirect case accessibilityClick(CGPoint, fallback: [PointerStep])
     case beginHandoff(HandoffKind)
     case endHandoff(HandoffKind)
     /// Пауза: программа должна разобрать события, пока она ещё активна.
@@ -93,7 +102,7 @@ public struct PointerSession: Sendable {
     /// Куда последним ушло наведение (точка на скрытом дисплее): одинаковые движения не повторяются.
     public private(set) var lastHover: CGPoint?
 
-    public init(clickMode: ClickMode = .warp, scrollMode: ScrollMode = .handoff) {
+    public init(clickMode: ClickMode = .background, scrollMode: ScrollMode = .handoff) {
         self.clickMode = clickMode
         self.scrollMode = scrollMode
     }
@@ -115,7 +124,7 @@ public struct PointerSession: Sendable {
         case (.right, .pid):
             return [.postToPid(Self.mouse(.rightDown, target, clicks, flags, windowNumber)),
                     .postToPid(Self.mouse(.rightUp, target, clicks, flags, windowNumber))]
-        case (.right, .warp):
+        case (.right, .warp), (.right, .background):
             // Меню открывается по нажатию и живёт в своём цикле: курсор остаётся на скрытом дисплее, пока меню не закроется.
             state = .handoff(.menu, activated: true)
             return [.activateTarget, .warp(target),
@@ -126,7 +135,7 @@ public struct PointerSession: Sendable {
     }
 
     public mutating func dragged(to point: CGPoint, mapping: MirrorMapping) -> [PointerStep] {
-        guard case let .pressed(down, target, clicks, flags, _) = state, clickMode == .warp,
+        guard case let .pressed(down, target, clicks, flags, _) = state, clickMode != .pid,
               hypot(point.x - down.x, point.y - down.y) >= dragThreshold else { return [] }
         let now = mapping.toTarget(Self.clamp(point, to: mapping.contentRect)) ?? target
         state = .handoff(.drag, activated: true)
@@ -143,16 +152,20 @@ public struct PointerSession: Sendable {
         state = .idle
         let down = Self.mouse(.leftDown, target, clicks, flags, clickMode == .pid ? windowNumber : 0)
         let up = Self.mouse(.leftUp, target, clicks, flags, clickMode == .pid ? windowNumber : 0)
+        // Пауза перед возвратом: программа должна разобрать нажатие, пока она активна. Иначе (768c91b, 14.11) нажатие
+        // доходило до уже неактивного Claude, и он через 0,1–1 с активировал себя сам.
+        // Движение и пауза перед нажатием: кнопки «при наведении» (крестик у вложения) появляются под курсором раньше,
+        // чем придёт нажатие, — иначе нажатие попадает в то, что под ними.
+        let warpSteps: [PointerStep] = [.hideCursor, .activateTarget, .warp(target), .postHID(Self.mouse(.moved, target, 0, flags, 0)),
+                                        .wait(Self.hoverSettle), .postHID(down), .postHID(up), .warp(cursor), .showCursor,
+                                        .wait(Self.clickSettle), .returnFocus]
         switch clickMode {
         case .pid:
             return [.postToPid(down), .postToPid(up)]
+        case .background:
+            return AXClickTarget.applies(clicks: clicks, flags: flags) ? [.accessibilityClick(target, fallback: warpSteps)] : warpSteps
         case .warp:
-            // Пауза перед возвратом: программа должна разобрать нажатие, пока она активна. Иначе (768c91b, 14.11) нажатие
-            // доходило до уже неактивного Claude, и он через 0,1–1 с активировал себя сам.
-            // Движение и пауза перед нажатием: кнопки «при наведении» (крестик у вложения) появляются под курсором раньше,
-            // чем придёт нажатие, — иначе нажатие попадает в то, что под ними.
-            return [.hideCursor, .activateTarget, .warp(target), .postHID(Self.mouse(.moved, target, 0, flags, 0)), .wait(Self.hoverSettle),
-                    .postHID(down), .postHID(up), .warp(cursor), .showCursor, .wait(Self.clickSettle), .returnFocus]
+            return warpSteps
         }
     }
 

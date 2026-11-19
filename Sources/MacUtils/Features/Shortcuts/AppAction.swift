@@ -14,6 +14,7 @@ import MUDownloadsSorter
 import MUDropShelf
 import MUAnnotate
 import MUScreenShare
+import MUCopilot
 import MUHiddenScreen
 import MUScreenshot
 import MUVideoPlayer
@@ -96,6 +97,7 @@ enum AppAction: Equatable {
     case player, playerOpen(path: String), playerTogglePlay, playerContinue
     case remoteConnections
     case hiddenScreenToggle, hiddenScreenWindow
+    case copilotToggle, copilotAnswer, copilotScreen, copilotPanel
     case dollarsRemove(path: String, skipFirst: Int?)
     case dollarsFind(path: String)
     case convertEncoding(path: String, TextEncoding, from: TextEncoding?)
@@ -123,6 +125,10 @@ enum AppAction: Equatable {
         case .textEditor: self = .editor(path: nil)
         case .videoPlayer: self = .player
         case .remoteConnections: self = .remoteConnections
+        case .copilot: self = .copilotToggle
+        case .copilotAnswer: self = .copilotAnswer
+        case .copilotScreen: self = .copilotScreen
+        case .copilotPanel: self = .copilotPanel
         case .hiddenScreen: self = .hiddenScreenToggle
         case .hiddenScreenWindow: self = .hiddenScreenWindow
         }
@@ -183,6 +189,10 @@ enum AppAction: Equatable {
         case .viewerMonitor(let n): ShareViewer.shared.requestDisplay(n)
         case .player: PlayerWindowController.show()
         case .remoteConnections: RemotePaletteController.shared.toggle()
+        case .copilotToggle: CopilotGlue.shared.toggle()
+        case .copilotAnswer: CopilotGlue.shared.answer()
+        case .copilotScreen: CopilotGlue.shared.lookAtScreen()
+        case .copilotPanel: CopilotGlue.shared.togglePanel()
         case .hiddenScreenToggle:
             let c = HiddenScreenUI.controller
             c.setEnabled(!c.state.isEnabled)
@@ -224,6 +234,7 @@ enum AppAction: Equatable {
     /// Идёт ли трансляция / запись встречи сейчас (тесты подменяют): переключатель на включённом выключает, и вопрос не нужен.
     @MainActor static var sharingNow: () -> Bool = { ScreenShare.shared.isLive }
     @MainActor static var recordingNow: () -> Bool = { if case .recording = MeetingRecorder.shared.state { return true } else { return false } }
+    @MainActor static var copilotOnNow: () -> Bool = { CopilotGlue.shared.session.isOn }
 
     /// Подтверждение для действий, пришедших по ссылке; тесты подменяют (иначе — вопрос в окне).
     @MainActor static var linkConfirmer: ((_ title: String, _ detail: String) -> Bool)?
@@ -243,6 +254,14 @@ enum AppAction: Equatable {
             return ("Начать запись встречи?", "Ссылка macutils:// просит включить запись звука встречи.")
         case .watch:
             return ("Смотреть чужую трансляцию?", "Ссылка macutils:// просит подключиться зрителем к трансляции.")
+        // Подсказчик слушает микрофон и звук звонка — как запись встречи: включение по ссылке только после ответа, выключение — без вопроса.
+        case .copilotToggle:
+            if Self.copilotOnNow() { return nil }
+            return ("Включить подсказчика на встрече?", "Ссылка macutils:// просит включить подсказчика: он начнёт слушать звук звонка и микрофон.")
+        // Снимок экрана уходит в ИИ (ChatGPT или Claude) — только после ответа.
+        case .copilotScreen:
+            guard Self.copilotOnNow() else { return nil }
+            return ("Отправить снимок экрана в ИИ?", "Ссылка macutils:// просит снять экран под курсором и отправить снимок подсказчику.")
         case .playerOpen(let path):
             return ("Открыть файл в плеере?", "Ссылка macutils:// просит открыть файл:\n\(Self.fileURL(path).path)")
         default: return nil
@@ -371,6 +390,10 @@ extension AppAction {
             let from = value("from")
             if let from, TextEncoding(rawValue: from) == nil { return nil }
             self = .convertEncoding(path: path, to, from: from.flatMap(TextEncoding.init(rawValue:)))
+        case "copilot": self = .copilotToggle
+        case "copilot-answer": self = .copilotAnswer
+        case "copilot-screen": self = .copilotScreen
+        case "copilot-panel": self = .copilotPanel
         case "line-endings":
             guard let path = value("path"), !path.isEmpty, let to = value("to").flatMap(LineEnding.init(rawValue:)) else { return nil }
             self = .convertLineEndings(path: path, to)
@@ -422,6 +445,10 @@ extension AppAction {
         AppActionInfo(group: "Встречи", title: "Запись встречи: начать или остановить", link: "macutils://meeting", shortcut: "Запись встречи"),
         AppActionInfo(group: "Встречи", title: "Начать запись встречи", link: "macutils://meeting-start", shortcut: "Запись встречи"),
         AppActionInfo(group: "Встречи", title: "Остановить запись встречи", link: "macutils://meeting-stop", shortcut: "Запись встречи"),
+        AppActionInfo(group: "Встречи", title: "Подсказчик на встрече: включить или выключить", link: "macutils://copilot", shortcut: ""),
+        AppActionInfo(group: "Встречи", title: "Подсказчик: ответить на последний вопрос", link: "macutils://copilot-answer", shortcut: ""),
+        AppActionInfo(group: "Встречи", title: "Подсказчик: посмотреть экран и подсказать", link: "macutils://copilot-screen", shortcut: ""),
+        AppActionInfo(group: "Встречи", title: "Подсказчик: показать или спрятать панель", link: "macutils://copilot-panel", shortcut: ""),
         AppActionInfo(group: "Текст", title: "Исправить выделенный текст (ИИ)", link: "macutils://fix-text", shortcut: "Исправить текст"),
         AppActionInfo(group: "Текст", title: "Исправить раскладку", link: "macutils://layout-fix", shortcut: "Исправить раскладку"),
         AppActionInfo(group: "Здоровье", title: "Перерыв сейчас", link: "macutils://break", shortcut: "Перерыв"),

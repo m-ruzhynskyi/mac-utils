@@ -1,0 +1,27 @@
+{
+  "id": "ru-06-python-gil",
+  "language": "ru",
+  "kind": "interview",
+  "about": "Backend-разработчик, 6 лет, Python и PostgreSQL, немного Go. Собеседование на Senior Backend.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Скажите, что такое GIL в Python и как он влияет на многопоточность?",
+      "secondsAgo": 40
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "GIL",
+  "keywordGroups": [
+    [
+      "gil",
+      "глобальн"
+    ],
+    [
+      "процесс",
+      "multiprocessing",
+      "asyncio",
+      "поток"
+    ]
+  ]
+}

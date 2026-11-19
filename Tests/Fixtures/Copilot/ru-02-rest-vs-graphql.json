@@ -1,0 +1,36 @@
+{
+  "id": "ru-02-rest-vs-graphql",
+  "language": "ru",
+  "kind": "interview",
+  "about": "Backend-разработчик, 6 лет, Python и PostgreSQL, немного Go. Собеседование на Senior Backend.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Вы упоминали, что делали публичное API.",
+      "secondsAgo": 60
+    },
+    {
+      "speaker": "other",
+      "text": "В чём, на ваш взгляд, разница между REST и GraphQL и когда вы бы выбрали каждый?",
+      "secondsAgo": 40
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "REST vs GraphQL",
+  "keywordGroups": [
+    [
+      "rest"
+    ],
+    [
+      "graphql"
+    ],
+    [
+      "кэш",
+      "запрос",
+      "поля",
+      "версии",
+      "over",
+      "лишн"
+    ]
+  ]
+}

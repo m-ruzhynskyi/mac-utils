@@ -2,7 +2,7 @@ import Foundation
 import MUCore
 
 package enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, hotKeys, exclusions, panel, music, share, hiddenScreen, focus, textInput, cutPaste, winKeys, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
+    case general, hotKeys, exclusions, panel, music, share, hiddenScreen, copilot, focus, textInput, cutPaste, winKeys, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
          annotate, wellbeing, meetings, gaze, ai,
          uninstaller, monitor, tasks, cleanup, shots, textEditor, videoPlayer, remote
 
@@ -21,6 +21,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .remote: return "Удалённые"
         case .cutPaste: return "Вырезать"
         case .winKeys: return "Ctrl"
+        case .copilot: return "Подсказчик"
         case .hiddenScreen: return "Скрытый"
         case .smoothScroll: return "Прокрутка"
         case .switcher: return "Переключатель"
@@ -60,6 +61,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .focus: return "Фокус"
         case .cutPaste: return "Вырезать и вставить"
         case .winKeys: return "Клавиши Windows"
+        case .copilot: return "Подсказчик на встрече"
         case .hiddenScreen: return "Скрытый экран"
         case .smoothScroll: return "Плавная прокрутка"
         case .switcher: return "Переключатель приложений"
@@ -99,6 +101,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .focus: return "scope"
         case .cutPaste: return "scissors"
         case .winKeys: return "keyboard"
+        case .copilot: return "text.bubble"
         case .hiddenScreen: return "eye.slash"
         case .smoothScroll: return "computermouse"
         case .switcher: return "rectangle.on.rectangle"

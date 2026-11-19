@@ -45,10 +45,10 @@ package struct CLIEngine: AIEngine {
         let input: Data
         switch provider {
         case .codex:
-            arguments = CodexCLI.arguments(request: request, workspace: workspace.path)
+            arguments = CodexCLI.arguments(request: request, workspace: workspace.path, model: request.model)
             input = CodexCLI.input(request: request)
         case .claude:
-            arguments = ClaudeCLI.arguments(request: request)
+            arguments = ClaudeCLI.arguments(request: request, model: request.model)
             input = try ClaudeCLI.input(request: request)
         }
         let command = CLICommand(executable: URL(fileURLWithPath: executable), arguments: arguments, stdin: input,

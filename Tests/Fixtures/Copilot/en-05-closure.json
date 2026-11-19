@@ -1,0 +1,29 @@
+{
+  "id": "en-05-closure",
+  "language": "en",
+  "kind": "interview",
+  "about": "Backend-разработчик, 6 лет, Python и PostgreSQL, немного Go. Собеседование на Senior Backend.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Okay, a quick technical one. What is a closure in JavaScript, and where have you used one?",
+      "secondsAgo": 30
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "JS closure",
+  "keywordGroups": [
+    [
+      "closure",
+      "scope",
+      "lexical"
+    ],
+    [
+      "function",
+      "variable",
+      "callback",
+      "private",
+      "state"
+    ]
+  ]
+}

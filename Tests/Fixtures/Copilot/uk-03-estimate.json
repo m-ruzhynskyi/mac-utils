@@ -1,0 +1,33 @@
+{
+  "id": "uk-03-estimate",
+  "language": "uk",
+  "kind": "work",
+  "about": "Тимлід, спринт 14, команда з п'яти людей.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Дякую за статус.",
+      "secondsAgo": 50
+    },
+    {
+      "speaker": "other",
+      "text": "А скільки часу вам потрібно, щоб закрити інтеграцію з банком?",
+      "secondsAgo": 20
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "оцінка інтеграції",
+  "keywordGroups": [
+    [
+      "оцін",
+      "днів",
+      "дні",
+      "тиж",
+      "годин"
+    ],
+    [
+      "банк",
+      "інтеграц"
+    ]
+  ]
+}

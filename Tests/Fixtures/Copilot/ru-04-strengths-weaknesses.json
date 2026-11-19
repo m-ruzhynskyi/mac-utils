@@ -1,0 +1,28 @@
+{
+  "id": "ru-04-strengths-weaknesses",
+  "language": "ru",
+  "kind": "interview",
+  "about": "QA-инженер, 5 лет: ручное и автотесты (Python, pytest, Selenium), API-тесты, CI в GitLab. Собеседование на позицию Senior QA.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Давайте про вас.",
+      "secondsAgo": 50
+    },
+    {
+      "speaker": "other",
+      "text": "Назовите ваши сильные и слабые стороны.",
+      "secondsAgo": 35
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "сильные и слабые стороны",
+  "keywordGroups": [
+    [
+      "сильн"
+    ],
+    [
+      "слаб"
+    ]
+  ]
+}

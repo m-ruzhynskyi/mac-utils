@@ -1,0 +1,29 @@
+{
+  "id": "en-02-conflict",
+  "language": "en",
+  "kind": "interview",
+  "about": "Engineering manager, 7 years, teams of 8-12, remote.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Tell me about a time you disagreed with a teammate. What did you do?",
+      "secondsAgo": 30
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "behavioural: disagreement",
+  "keywordGroups": [
+    [
+      "disagree",
+      "conflict",
+      "perspective"
+    ],
+    [
+      "result",
+      "outcome",
+      "listen",
+      "data",
+      "decision"
+    ]
+  ]
+}

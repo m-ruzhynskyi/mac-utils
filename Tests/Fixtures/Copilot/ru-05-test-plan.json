@@ -1,0 +1,34 @@
+{
+  "id": "ru-05-test-plan",
+  "language": "ru",
+  "kind": "interview",
+  "about": "QA-инженер, 5 лет: ручное и автотесты (Python, pytest, Selenium), API-тесты, CI в GitLab. Собеседование на позицию Senior QA.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "У нас скоро релиз мобильного приложения с новой оплатой.",
+      "secondsAgo": 90
+    },
+    {
+      "speaker": "other",
+      "text": "С чего бы вы начали тестирование этой функции и что бы вошло в тест-план?",
+      "secondsAgo": 60
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "тест-план для оплаты",
+  "keywordGroups": [
+    [
+      "оплат",
+      "платёж",
+      "платеж"
+    ],
+    [
+      "риск",
+      "приоритет",
+      "негатив",
+      "границ",
+      "регресс"
+    ]
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "uk-06-no-question",
+  "language": "uk",
+  "kind": "negative",
+  "about": "Розробник на нараді.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Усім доброго ранку, починаємо.",
+      "secondsAgo": 30
+    },
+    {
+      "speaker": "other",
+      "text": "Сьогодні у нас три пункти: реліз, інцидент та планування.",
+      "secondsAgo": 15
+    }
+  ],
+  "expectQuestion": false,
+  "questionGist": "запитання немає",
+  "keywordGroups": []
+}

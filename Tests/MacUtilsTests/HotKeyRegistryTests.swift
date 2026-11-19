@@ -28,6 +28,7 @@ final class HotKeyRegistryTests: XCTestCase {
             .dropShelf: "⌃⌥D", .annotate: "⌃⌥A", .windowPin: "⌃⌥P (З)", .fixText: "⌃⌥E", .meeting: "⌃⌥M",
             .focus: "⌃⌥F", .qr: "⌃⌥Q", .appVolume: "⌃⌥V", .layoutFix: "⌘] (Ъ)", .textEditor: "⌃⌥⌘E",
             .videoPlayer: "⌃⌥⌘P (З)", .remoteConnections: "⌃⌥⌘A",
+            .copilot: "⌥⇧M", .copilotAnswer: "⌥⇧A", .copilotScreen: "⌥⇧S", .copilotPanel: "⌥⇧P (З)",
             .hiddenScreen: "⌥⇧H", .hiddenScreenWindow: "⌥Пробел",
         ]
         for action in HotKeyAction.allCases {
