@@ -1637,7 +1637,7 @@ extension HiddenScreenEngine {
     /// Щелчок по зеркалу обычного уровня поднимает его над другими окнами — без активации Mac Utils.
     private func raiseMirror() {
         guard let window = mirrorWindow, window.level == .normal else { return }
-        window.orderFrontRegardless()
+        window.orderFrontRegardlessOnScreen("Скрытый экран: зеркало поднято щелчком")
     }
 
     /// Запустить (спрятанной) или вернуть из «скрыть» программу, перенести её окна и показать в зеркале.
