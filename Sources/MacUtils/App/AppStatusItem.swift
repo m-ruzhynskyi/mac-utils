@@ -4,6 +4,7 @@ import MUCore
 import MUDesign
 import MUWellbeing
 import MUScreenshot
+import MUHiddenScreen
 
 /// Значок Mac Utils в строке меню: клик — панель «Инструменты» со вкладками
 /// прямо под значком (настройки и выход — в её шапке). Можно выключить в настройках.
@@ -84,6 +85,11 @@ final class AppStatusItem: NSObject {
         let copilot = menu.addItem(withTitle: "Подсказчик на встрече", action: #selector(toggleCopilot), keyEquivalent: "")
         copilot.target = self
         copilot.state = CopilotGlue.shared.session.isOn ? .on : .off
+        // Подпись сочетания, как у «Скрытого экрана»: само ⌥⇧M глобальное и зарегистрировано отдельно.
+        if let key = HiddenScreenMenuBuilder.keyEquivalent(HotKeyRegistry.combo(for: .copilot)) {
+            copilot.keyEquivalent = key.character
+            copilot.keyEquivalentModifierMask = key.mask
+        }
         menu.addItem(.separator())
         let open = menu.addItem(withTitle: "Открыть панель", action: #selector(openPanel), keyEquivalent: "")
         open.target = self

@@ -298,8 +298,7 @@ private struct AIFixRow: View {
         Task {
             defer { fixing = false }
             do {
-                let answer = try await AI.generate(text, system: TextFixer.system, timeout: TextFixer.timeout(for: text))
-                let fixed = AIParsing.keepingEdges(of: text, AIParsing.cleanedText(answer))
+                let fixed = try await TextFixer.correct(text)
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(fixed, forType: .string)
                 note = fixed == text ? "Ошибок не найдено" : "Исправленный текст в буфере — вставьте ⌘V"

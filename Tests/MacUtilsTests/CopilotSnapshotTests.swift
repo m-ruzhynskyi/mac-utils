@@ -88,6 +88,6 @@ final class CopilotSnapshotTests: XCTestCase {
         try await Task.sleep(nanoseconds: 300_000_000)
         try both("copilot-expanded", size: NSSize(width: 560, height: 170)) { CopilotPanelView(session: session, placement: .underCamera).padding(6) }
         try both("copilot-side", size: NSSize(width: 320, height: 240)) { CopilotPanelView(session: session, placement: .side).padding(6) }
-        try both("copilot-page", size: NSSize(width: 760, height: 1300)) { CopilotPage() }
+        try both("copilot-page", size: NSSize(width: 760, height: 1300)) { CopilotPage(demo: true) }
     }
 }

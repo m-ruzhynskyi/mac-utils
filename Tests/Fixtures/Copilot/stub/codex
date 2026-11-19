@@ -1,0 +1,34 @@
+#!/bin/sh
+# Заглушка codex для scripts/copilot-eval.sh stub и тестов: настоящий codex не запускается, запросов нет.
+# app-server — JSON-RPC по строкам (initialize, thread/start, turn/start → куски item/agentMessage/delta и turn/completed);
+# exec --json — один готовый ответ; mcp list --json — пусто. Задержка до первого куска — MU_STUB_DELAY (с).
+delay="${MU_STUB_DELAY:-0.2}"
+say='Скажите: начну с плана запроса, потом индекс.'
+points='\n- EXPLAIN ANALYZE покажет полный проход\n- составной индекс по дате и статусу\n'
+case "$1 $2" in
+  "mcp list") echo '[]'; exit 0 ;;
+esac
+if [ "$1" = "exec" ]; then
+  cat >/dev/null
+  sleep "$delay"
+  printf '{"type":"item.completed","item":{"type":"agent_message","text":"%s%s"}}\n' "$say" "$points"
+  printf '{"type":"turn.completed"}\n'
+  exit 0
+fi
+[ "$1" = "app-server" ] || { echo "заглушка codex: $*" >&2; exit 2; }
+# Методы ищутся с «*» вместо «/»: JSONSerialization пишет «thread\/start».
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/^{"id":\([0-9][0-9]*\),.*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"id":%s,"result":{"userAgent":"stub"}}\n' "$id" ;;
+    *'"method":"thread'*'start"'*) printf '{"id":%s,"result":{"thread":{"id":"th%s"}}}\n' "$id" "$id" ;;
+    *'"method":"turn'*'start"'*)
+      th=$(printf '%s' "$line" | sed -n 's/.*"threadId":"\([^"]*\)".*/\1/p')
+      printf '{"id":%s,"result":{"turn":{"id":"tu%s","status":"inProgress"}}}\n' "$id" "$id"
+      sleep "$delay"
+      printf '{"method":"item/started","params":{"threadId":"%s","item":{"type":"agentMessage","id":"m%s"}}}\n' "$th" "$id"
+      printf '{"method":"item/agentMessage/delta","params":{"threadId":"%s","delta":"%s"}}\n' "$th" "$say"
+      printf '{"method":"item/agentMessage/delta","params":{"threadId":"%s","delta":"%s"}}\n' "$th" "$points"
+      printf '{"method":"turn/completed","params":{"threadId":"%s","turn":{"status":"completed"}}}\n' "$th" ;;
+  esac
+done

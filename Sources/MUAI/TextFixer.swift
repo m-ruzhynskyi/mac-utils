@@ -82,7 +82,7 @@ package final class TextFixer {
     /// Номер уведомления «Исправляю…»: убираем только его, не чужое (например, прогресс GIF).
     private var fixToast: Int?
 
-    package static let system = """
+    package nonisolated static let system = """
     Ты корректор. Исправь орфографию, опечатки, пунктуацию и грамматику в тексте пользователя. \
     Сохрани язык, смысл, стиль, регистр, разметку и переносы строк. Ничего не добавляй и не объясняй. \
     Не переписывай удачные места и не меняй слова, в которых нет ошибки. \
@@ -92,6 +92,12 @@ package final class TextFixer {
     """
 
     /// Сколько ждать ответа: программе нужно несколько секунд на запуск, длинному тексту — на ответ.
+    /// Исправленный текст через выбранный на странице «ИИ» сервис — одно место для ⌃⌥E, быстрой панели и «Команд».
+    package nonisolated static func correct(_ text: String) async throws -> String {
+        let answer = try await AI.generate(text, system: system, timeout: timeout(for: text))
+        return AIParsing.keepingEdges(of: text, AIParsing.cleanedText(answer))
+    }
+
     package nonisolated static func timeout(for text: String) -> TimeInterval {
         min(300, 60 + Double(text.count) / 40)
     }
@@ -145,9 +151,8 @@ package final class TextFixer {
                                    action: Toast.Action(title: "Отмена") { TextFixer.shared.cancel() }, sticky: true)
             fixToast = toast
             do {
-                let answer = try await AI.generate(text, system: Self.system, timeout: Self.timeout(for: text))
+                let fixed = try await Self.correct(text)
                 try Task.checkCancellation()
-                let fixed = AIParsing.keepingEdges(of: text, AIParsing.cleanedText(answer))
                 guard !fixed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { Toast.dismiss(token: toast); return }
                 if fixed == text {
                     Toast.show("Ошибок не найдено", symbol: "checkmark.circle.fill")

@@ -1,0 +1,15 @@
+#!/bin/sh
+# Заглушка claude -p для scripts/copilot-eval.sh stub и тестов: настоящий claude не запускается, запросов нет.
+# --input-format stream-json (тёплая сессия) — ответ на каждую строку ввода; иначе — один ответ на весь stdin.
+# Задержка до первого куска — MU_STUB_DELAY (с).
+delay="${MU_STUB_DELAY:-0.2}"
+answer() {
+  sleep "$delay"
+  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Скажите: начну с плана запроса, потом индекс."}}}'
+  printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"\n- EXPLAIN ANALYZE покажет полный проход\n- составной индекс по дате и статусу\n"}}}'
+  printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"ок"}'
+}
+case " $* " in
+  *" --input-format stream-json "*) while IFS= read -r line; do answer; done ;;
+  *) cat >/dev/null; answer ;;
+esac

@@ -112,6 +112,37 @@ package enum CodexCLI {
         return arguments
     }
 
+    /// `codex app-server` (тёплый процесс подсказчика): те же выключенные инструменты, что у `exec`. У app-server нет
+    /// `--ignore-user-config`, поэтому MCP-серверы из config.toml выключаются по именам (`-c mcp_servers.<имя>.enabled=false`;
+    /// `-c mcp_servers={}` их не убирает — таблицы сливаются; проверено `codex mcp list` на 0.162.1).
+    /// Имя, которое так не записать (точка, кавычки, пробел: codex не понимает ключ в кавычках), — nil: тёплого Codex нет,
+    /// вопрос идёт через `codex exec --ignore-user-config`. Песочница «только чтение» и «не спрашивать» — ещё и в каждой ветке.
+    package static func appServerArguments(mcpServers: [String]) -> [String]? {
+        guard mcpServers.allSatisfy(isPlainKey) else { return nil }
+        var arguments = ["app-server"]
+        arguments += disabledFeatures.flatMap { ["--disable", $0] }
+        arguments += ["-c", #"sandbox_mode="read-only""#, "-c", #"approval_policy="never""#]
+        arguments += mcpServers.flatMap { ["-c", "mcp_servers.\($0).enabled=false"] }
+        return arguments
+    }
+
+    static func isPlainKey(_ name: String) -> Bool {
+        !name.isEmpty && name.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_") }
+    }
+
+    /// Имена MCP-серверов из `codex mcp list --json` (массив объектов с `name`). Не JSON — пусто.
+    package static func mcpServerNames(listJSON: String) -> [String] {
+        guard let start = listJSON.firstIndex(of: "["),
+              let list = (try? JSONSerialization.jsonObject(with: Data(listJSON[start...].utf8))) as? [[String: Any]] else { return [] }
+        return list.compactMap { $0["name"] as? String }
+    }
+
+    /// Элементы `codex app-server` (v2, `ThreadItem.type`), которые не действуют: сообщения, рассуждение, план, сжатие
+    /// истории. Всё остальное (команда, правка файла, MCP, веб-поиск, картинка, подагент…) — инструмент, ход останавливается.
+    package static let appServerTextItems: Set<String> = ["userMessage", "agentMessage", "reasoning", "plan", "contextCompaction"]
+
+    package static func isAppServerTool(_ kind: String) -> Bool { !appServerTextItems.contains(kind) }
+
     /// У `codex exec` нет системного текста: он идёт в начале запроса, отделённый от данных.
     package static func input(request: AIRequest) -> Data {
         let system = [request.system ?? AIRequest.defaultSystem, AIRequest.textOnly].joined(separator: "\n")
@@ -165,13 +196,23 @@ package enum ClaudeCLI {
     package static func arguments(request: AIRequest, model: String? = nil) -> [String] {
         var arguments = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
         if !request.images.isEmpty { arguments += ["--input-format", "stream-json"] }
-        arguments += ["--tools", "", "--strict-mcp-config", "--safe-mode", "--disable-slash-commands",
-                      "--no-session-persistence",
-                      "--system-prompt", [request.system ?? AIRequest.defaultSystem, AIRequest.textOnly].joined(separator: "\n")]
+        arguments += safety + ["--system-prompt", [request.system ?? AIRequest.defaultSystem, AIRequest.textOnly].joined(separator: "\n")]
         if request.quick { arguments += ["--effort", "low"] }
         if let model, !model.isEmpty { arguments += ["--model", model] }
         return arguments
     }
+
+    /// Живая сессия (тёплый процесс подсказчика): те же запреты, что у `arguments`, вопросы — строками stream-json на stdin.
+    package static func sessionArguments(system: String, model: String?, effort: String?) -> [String] {
+        var arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+        arguments += safety + ["--system-prompt", [system, AIRequest.textOnly].joined(separator: "\n")]
+        if let effort, !effort.isEmpty { arguments += ["--effort", effort] }
+        if let model, !model.isEmpty { arguments += ["--model", model] }
+        return arguments
+    }
+
+    /// Без инструментов, MCP, хуков, плагинов, CLAUDE.md, команд и сохранения сессии.
+    package static let safety = ["--tools", "", "--strict-mcp-config", "--safe-mode", "--disable-slash-commands", "--no-session-persistence"]
 
     /// Картинки, которые берёт API: тип по расширению.
     package static func mediaType(for url: URL) -> String? {

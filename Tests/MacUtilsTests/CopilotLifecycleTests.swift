@@ -100,6 +100,40 @@ final class CopilotLifecycleTests: XCTestCase {
         XCTAssertEqual(count(), 0)
     }
 
+    /// Модель взялась за инструмент: ход отклоняется, `codex app-server` со всеми потомками останавливается сразу,
+    /// до результата команды (его `sleep 30` не доживает). Запуск — с запретами и выключенными MCP-серверами пользователя.
+    func testCodexToolItemStopsServer() async throws {
+        let args = folder.appendingPathComponent("args.txt").path
+        let codex = try script("codex", """
+        if [ "$1" = mcp ]; then echo '[{"name":"github"}]'; exit 0; fi
+        echo "$@" > '\(args)'
+        while IFS= read -r line; do
+          id=$(printf '%s' "$line" | sed -n 's/^{"id":\\([0-9][0-9]*\\),.*/\\1/p')
+          case "$line" in
+            *'"method":"turn'*) printf '{"id":%s,"result":{}}\\n' "$id"
+              printf '{"method":"item/started","params":{"threadId":"th1","item":{"type":"commandExecution","id":"c"}}}\\n'
+              sleep 30 ;;
+            *'"method":"thread'*) printf '{"id":%s,"result":{"thread":{"id":"th1"}}}\\n' "$id" ;;
+            *) [ -n "$id" ] && printf '{"id":%s,"result":{}}\\n' "$id" ;;
+          esac
+        done
+        """)
+        let host = CodexWarmHost(executable: codex)
+        let stream = try await host.ask(prompt: "вопрос", system: "s", model: nil, effort: "low")
+        do {
+            for try await _ in stream {}
+            XCTFail("ход с инструментом не должен дойти до ответа")
+        } catch let failure as AIFailure {
+            XCTAssertEqual(failure, AIFailure.toolUse(.codex, kind: "commandExecution"))
+        }
+        try await waitFor { self.count() == 0 }
+        XCTAssertEqual(count(), 0, "процесс и его sleep остановлены")
+        let launched = try String(contentsOfFile: args, encoding: .utf8)
+        XCTAssertTrue(launched.contains("--disable shell_tool"), launched)
+        XCTAssertTrue(launched.contains("mcp_servers.github.enabled=false"), launched)
+        await host.shutdown()
+    }
+
     // MARK: Процесс
 
     func testWritingToExitedProcessDoesNotRaiseSIGPIPE() async throws {

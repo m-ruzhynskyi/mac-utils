@@ -17,11 +17,15 @@ struct CopilotPage: View {
     @AppStorage(CopilotPrefs.fastModels) private var fastModels = true
     @AppStorage(CopilotPrefs.hybrid) private var hybrid = false
     @AppStorage(CopilotModels.warm) private var warm = true
-    @AppStorage(CopilotProviderChoice.key) private var providerChoice = CopilotProviderChoice.system.rawValue
+    @AppStorage(Pref.ai) private var aiEnabled = true
+    @AppStorage(Pref.aiProvider) private var aiProvider = AIProvider.standard.rawValue
     @ObservedObject private var aiStatus = AIStatus.shared
+    @ObservedObject private var permissions = PermissionsModel.shared
     @AppStorage(CopilotPrefs.screenID) private var screenID = ""
     @State private var screens = CopilotGlue.screens()
     @ObservedObject private var session = CopilotGlue.shared.session
+    /// Демо для снимков интерфейса: не запускает codex и claude и не читает разрешения, состояния готовые.
+    var demo = false
 
     var body: some View {
         // Главный переключатель — не сохранённая настройка, а текущее состояние: включает только человек, после перезапуска выключено.
@@ -34,7 +38,21 @@ struct CopilotPage: View {
                 if let error = session.error {
                     FeatureStatusRow(tone: .danger, label: "Не включился", detail: error)
                 }
-                ToggleRow("Реагировать на паузу", subtitle: "Не ждать, пока расшифровка закончит фразу: пауза 0,7 с — и ответ уже готовится. Быстрее на 1–2 с, иногда ловит начало фразы",
+                Row("Отвечает: \(provider.title)", subtitle: "Тот же ИИ, что у всех функций Mac Utils: выбор один — на странице «ИИ»",
+                    systemImage: "sparkles") {
+                    Button("Изменить") { SettingsWindowController.shared.show(section: .ai) }
+                        .buttonStyle(.graphite(.secondary, size: .compact))
+                }
+            }
+            GroupLabel("Что нужно для работы")
+            ListCard {
+                ForEach(readiness) { item in
+                    FeatureStatusRow(tone: item.tone, label: item.label, detail: item.detail, actions: actions(item.fix))
+                }
+            }
+            GroupLabel("Скорость")
+            ListCard {
+                ToggleRow("Реагировать на паузу", subtitle: "Не ждать, пока расшифровка закончит фразу: пауза 0,7 с (после «?» — 0,35 с), и ответ уже готовится. Быстрее на 1–2 с, иногда ловит начало фразы",
                           systemImage: "timer", isOn: $reactToPauses)
                 ToggleRow("Быстрые модели", subtitle: "Малое «размышление» и быстрая модель: первая строка за пару секунд. Выключено — основные модели, ответы подробнее и медленнее",
                           systemImage: "hare", isOn: $fastModels)
@@ -53,21 +71,6 @@ struct CopilotPage: View {
                     Row("Экран для панели", subtitle: ScreenChoice.note(screens, preferred: screenID) ?? "iPad (Sidecar) или второй монитор; на основном ничего не появится",
                         systemImage: "ipad.landscape") {
                         Segmented(selection: $screenID, options: [("", "Первый не основной")] + screens.filter { !$0.isMain }.map { ($0.id, $0.name) })
-                    }
-                }
-                Row("Кто отвечает", subtitle: "Свой выбор для подсказчика: ответ нужен за пару секунд, а лучшая скорость — у Claude",
-                    systemImage: "sparkles") {
-                    Segmented(selection: $providerChoice, options: CopilotProviderChoice.allCases.map { ($0.rawValue, $0.title) })
-                }
-                if let advice = ProviderAdvice.suggest(effective: CopilotGlue.effectiveProvider().rawValue, stats: LatencyStats.load(),
-                                                       claudeConnected: aiStatus.state(.claude).isReady) {
-                    Row(advice.text, subtitle: advice.isPrior ? "Выбор остаётся как в Mac Utils, пока вы не переключите" : "По вашим последним ответам",
-                        systemImage: "bolt.horizontal") {
-                        Button("Переключить на Claude · быстрый") {
-                            providerChoice = CopilotProviderChoice.claude.rawValue
-                            fastModels = true
-                        }
-                            .buttonStyle(.graphite(.primary, size: .compact))
                     }
                 }
                 Row("Язык встречи", systemImage: "globe") {
@@ -96,6 +99,37 @@ struct CopilotPage: View {
             }
             Footnote("Собеседников слышно из звука программы звонка, вас — из микрофона; расшифровка идёт на самом Mac. Выключен — микрофон и звук звонка не слушаются вообще.")
         }
-        .onAppear { aiStatus.refreshIfStale() }
+        .onAppear { if !demo { aiStatus.refreshIfStale(); permissions.refresh() } }
+    }
+
+    private var provider: AIProvider { AIProvider(stored: aiProvider) }
+
+    /// Состояние читается без системных окон: `AIStatus` (проверка входа в CLI) и `PermissionsModel` (только статус).
+    private var readiness: [CopilotReadiness.Item] {
+        if demo {
+            return CopilotReadiness.items(service: provider.title, ai: .connected, microphone: .notAsked, screenAudio: false, speechSupported: true)
+        }
+        let ai: CopilotReadiness.AIState
+        if !aiEnabled { ai = .off } else {
+            switch aiStatus.state(provider) {
+            case .unknown, .checking: ai = .checking
+            case .connected: ai = .connected
+            case .notFound: ai = .notFound
+            case .notLoggedIn: ai = .notLoggedIn
+            case .problem(let message): ai = .problem(message)
+            }
+        }
+        return CopilotReadiness.items(service: provider.title, ai: ai, microphone: permissions.microphone,
+                                      screenAudio: permissions.screenRecording,
+                                      speechSupported: ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)))
+    }
+
+    /// Кнопки только открывают нужное место: разрешения Mac спрашивает сам при первом включении.
+    private func actions(_ fix: CopilotReadiness.Item.Fix?) -> [StatusAction] {
+        switch fix {
+        case .aiPage: return [StatusAction(title: "Страница «ИИ»") { SettingsWindowController.shared.show(section: .ai) }]
+        case .microphone: return [StatusAction(title: "Открыть настройки") { Permissions.open(.microphone) }]
+        case .screenRecording, nil: return []
+        }
     }
 }

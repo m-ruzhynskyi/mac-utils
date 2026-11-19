@@ -11,11 +11,14 @@ package protocol CopilotAIClient: Sendable {
     func warmUp(system: String) async
     /// Остановить тёплые процессы (при выключении подсказчика).
     func shutdown() async
+    /// Какой сервис отвечает (codex / claude) — для строки задержки в журнале.
+    var service: String { get }
 }
 
 extension CopilotAIClient {
     package func warmUp(system: String) async {}
     package func shutdown() async {}
+    package var service: String { "ИИ" }
 }
 
 package enum CopilotAIProfile: String, Equatable, Sendable { case main, fast }
@@ -37,17 +40,36 @@ extension CopilotListening {
     package var onActivity: (@MainActor () -> Void)? { get { nil } set {} }
 }
 
-/// Измеряет задержку «конец вопроса → первая строка ответа».
+/// Измеряет задержку «конец вопроса → первое слово ответа на экране».
+/// Конец вопроса — когда законченная фраза пришла в подсказчик (после паузы расшифровки); отдельно — от конца речи.
 package struct LatencyMeter: Equatable {
-    /// Цель: от конца вопроса до первой строки (без учёта расшифровки).
-    package static let target: TimeInterval = 2.5
+    /// Цель: первые слова за 1–2 с после конца вопроса.
+    package static let target: TimeInterval = 2.0
     package private(set) var questionAt: Date?
+    /// Когда собеседник замолчал (по расшифровке); nil — неизвестно (свой вопрос, «Короче», снимок экрана).
+    package private(set) var speechEndedAt: Date?
     package private(set) var firstLineAt: Date?
     package private(set) var lineCompleteAt: Date?
 
     package init() {}
 
-    package mutating func questionEnded(at date: Date) { questionAt = date; firstLineAt = nil; lineCompleteAt = nil }
+    package mutating func questionEnded(at date: Date, speechEnded: Date? = nil) {
+        questionAt = date; speechEndedAt = speechEnded; firstLineAt = nil; lineCompleteAt = nil
+    }
+    /// От конца речи до первого слова: то, что человек ощущает как паузу.
+    package var speechSeconds: TimeInterval? {
+        guard let s = speechEndedAt, let f = firstLineAt else { return nil }
+        return f.timeIntervalSince(s)
+    }
+    /// Строка журнала по сервису. `copilot-eval.sh` и живая проверка ищут её по «конец вопроса → первое слово».
+    package func logLine(service: String) -> String? {
+        guard let s = seconds else { return nil }
+        var line = String(format: "Подсказчик · %@: конец вопроса → первое слово %.1f с", service, s)
+        if let speech = speechSeconds, speech > s { line += String(format: " (от конца речи %.1f с)", speech) }
+        if let full = lineCompleteSeconds { line += String(format: ", первая строка целиком %.1f с", full) }
+        if !withinTarget { line += String(format: " — дольше цели %.0f с", Self.target) }
+        return line
+    }
     package mutating func firstLine(at date: Date) { if firstLineAt == nil { firstLineAt = date } }
     /// Первая строка пришла целиком (за ней перевод строки или конец ответа).
     package mutating func lineComplete(at date: Date) { if lineCompleteAt == nil { lineCompleteAt = date } }
@@ -254,7 +276,7 @@ package final class CopilotSession: ObservableObject {
         task?.cancel()
         if let q = questionUtterance { question = q.text; answeredQuestionID = q.id }
         let started = now()
-        meter.questionEnded(at: questionUtterance?.at ?? started)
+        meter.questionEnded(at: questionUtterance?.at ?? started, speechEnded: questionUtterance?.ended)
         let settings = settings()
         let prompt = CopilotPrompt.user(settings: settings, utterances: transcript, now: started, mode: mode,
                                         previous: mode == .shorter ? answer : nil)
@@ -348,8 +370,7 @@ package final class CopilotSession: ObservableObject {
         if let s = meter.seconds {
             lastLatency = s
             onLatency(meter.lineCompleteSeconds ?? s)
-            let complete = meter.lineCompleteSeconds.map { String(format: ", первая строка целиком через %.1f с", $0) } ?? ""
-            log(String(format: "Подсказчик: первый кусок через %.1f с%@%@", s, complete, meter.withinTarget ? "" : " (дольше цели 2,5 с)"))
+            if let line = meter.logLine(service: ai.service) { log(line) }
         }
         expandedAt = now()
     }

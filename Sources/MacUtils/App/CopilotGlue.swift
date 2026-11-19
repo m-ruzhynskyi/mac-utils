@@ -7,34 +7,16 @@ import MUCopilot
 import MUAIBackend
 
 /// Подсказчик в приложении: сочетания, панель, снимок экрана. Включается только вручную; включённость не сохраняется.
-/// Звук и расшифровка — `LiveCopilotListener`; ИИ — `BackendCopilotAI` (Codex или Claude по выбору на странице «ИИ»).
+/// Звук и расшифровка — `LiveCopilotListener`; ИИ — `BackendCopilotAI`: сервис со страницы «ИИ», своего выбора у подсказчика нет.
 @MainActor
 final class CopilotGlue {
     static let shared = CopilotGlue()
 
-    /// Подставляются, когда готовы `feature/ai-backend` и расшифровка (`MUMeetings`).
     var ai: CopilotAIClient = BackendCopilotAI()
     var listener: CopilotListening = LiveCopilotListener()
 
-    private(set) lazy var session = CopilotSession(ai: ai, listener: listener, onLatency: { seconds in
-        CopilotGlue.recordLatency(seconds)
-    })
+    private(set) lazy var session = CopilotSession(ai: ai, listener: listener)
 
-    /// Сервис подсказчика: свой выбор или тот, что в Mac Utils.
-    nonisolated static func effectiveProvider(choice: CopilotProviderChoice = CopilotProviderChoice.load(), system: AIProvider = AI.provider) -> AIProvider {
-        switch choice {
-        case .system: return system
-        case .claude: return .claude
-        case .codex: return .codex
-        }
-    }
-
-    /// Замер «до первой строки» по сервису: из него складывается совет «Claude отвечает быстрее».
-    nonisolated static func recordLatency(_ seconds: TimeInterval) {
-        var stats = LatencyStats.load()
-        stats.add(seconds, provider: effectiveProvider().rawValue)
-        stats.save()
-    }
     private var panel: CopilotPanel?
     private var panelHidden = false
     private var phaseWatch: AnyCancellable?
@@ -189,26 +171,32 @@ final class UnavailableCopilotListener: CopilotListening {
     func stop() {}
 }
 
-/// Подсказчик через общий бэкенд ИИ: сервис по выбору подсказчика («Как в Mac Utils» — Codex по умолчанию, или Claude / ChatGPT). Тёплый процесс (по умолчанию) или
-/// запуск на каждый вопрос; быстрые модели у профиля `.fast`. Запасной сервис из страницы «ИИ» здесь не используется:
-/// подсказке нужен ответ сейчас, а не через 20 с.
+/// Подсказчик через общий бэкенд ИИ: сервис — тот, что выбран на странице «ИИ» (`AI.provider`), как у всех функций Mac Utils.
+/// Тёплый процесс (по умолчанию) или запуск на каждый вопрос; быстрые модели у профиля `.fast`. Запасной сервис со страницы
+/// «ИИ» здесь не используется: подсказке нужен ответ сейчас, а не через 20 с, и вопрос не уходит в сервис, который не выбран.
 struct BackendCopilotAI: CopilotAIClient {
     static let timeout: TimeInterval = 45
 
-    private var provider: AIProvider { CopilotGlue.effectiveProvider() }
+    /// Клиент для сервиса: тёплый или разовый. Подменяется в тестах (заглушка бэкенда).
+    nonisolated(unsafe) static var makeClient: @Sendable (AIProvider, _ warm: Bool) -> CopilotAIClient = { provider, warm in
+        warm ? CopilotWarmRegistry.shared.client(provider) : ColdCopilotAI(provider: provider)
+    }
+
+    /// Кто отвечает: выбор на странице «ИИ».
+    static var provider: AIProvider { AI.provider }
+
+    var service: String { Self.provider.rawValue }
 
     func stream(prompt: String, system: String, images: [Data], profile: CopilotAIProfile) -> AsyncThrowingStream<String, Error> {
         guard AI.enabled else {
             return AsyncThrowingStream { $0.finish(throwing: CopilotError.notConnected("ИИ выключен: включите его на странице «ИИ»")) }
         }
-        let provider = self.provider
-        let client: CopilotAIClient = CopilotModels.warmEnabled() ? CopilotWarmRegistry.shared.client(provider) : ColdCopilotAI(provider: provider)
-        return client.stream(prompt: prompt, system: system, images: images, profile: profile)
+        return Self.makeClient(Self.provider, CopilotModels.warmEnabled()).stream(prompt: prompt, system: system, images: images, profile: profile)
     }
 
     func warmUp(system: String) async {
         guard AI.enabled, CopilotModels.warmEnabled() else { return }
-        await CopilotWarmRegistry.shared.client(provider).warmUp(system: system)
+        await Self.makeClient(Self.provider, true).warmUp(system: system)
     }
 
     func shutdown() async { await CopilotWarmRegistry.shared.shutdownAll() }

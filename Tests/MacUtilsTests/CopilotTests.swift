@@ -165,7 +165,7 @@ final class CopilotSessionTests: XCTestCase {
         XCTAssertFalse(session.isAnswering)
         XCTAssertNotNil(session.expandedAt)
         XCTAssertNotNil(session.lastLatency)
-        XCTAssertTrue(logs.contains { $0.contains("первый кусок через") })
+        XCTAssertTrue(logs.contains { $0.contains("конец вопроса → первое слово") })
     }
 
     func testAutoAnswerOffWaitsForHotKey() async {
@@ -226,9 +226,9 @@ final class CopilotSessionTests: XCTestCase {
         var m = LatencyMeter()
         let t = Date()
         m.questionEnded(at: t)
-        m.firstLine(at: t.addingTimeInterval(2.5))
+        m.firstLine(at: t.addingTimeInterval(2.0))
         m.firstLine(at: t.addingTimeInterval(9))
-        XCTAssertEqual(m.seconds, 2.5)
+        XCTAssertEqual(m.seconds, 2.0)
         XCTAssertTrue(m.withinTarget)
         m.questionEnded(at: t)
         m.firstLine(at: t.addingTimeInterval(5))
@@ -570,7 +570,7 @@ final class CopilotSpeedRulesTests: XCTestCase {
     }
 
     func testMeterTargetAndLineComplete() {
-        XCTAssertEqual(LatencyMeter.target, 2.5)
+        XCTAssertEqual(LatencyMeter.target, 2.0)
         var m = LatencyMeter()
         let t = Date()
         m.questionEnded(at: t)
@@ -775,83 +775,87 @@ final class CopilotStrictnessTests: XCTestCase {
     }
 }
 
-final class ProviderAdviceTests: XCTestCase {
-    private func stats(codex: [Double] = [], claude: [Double] = []) -> LatencyStats {
-        var s = LatencyStats()
-        codex.forEach { s.add($0, provider: "codex") }
-        claude.forEach { s.add($0, provider: "claude") }
-        return s
-    }
-
-    func testPriorAdviceBeforeAnyMeasurements() {
-        let a = ProviderAdvice.suggest(effective: "codex", stats: LatencyStats(), claudeConnected: true)
-        XCTAssertEqual(a?.provider, "claude")
-        XCTAssertEqual(a?.isPrior, true)
-        XCTAssertTrue(a?.text.contains("Claude · быстрый") == true)
-        XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: LatencyStats(), claudeConnected: false), "Claude не подключён — совета нет")
-        XCTAssertNil(ProviderAdvice.suggest(effective: "claude", stats: LatencyStats(), claudeConnected: true))
-    }
-
-    func testPromptsHaveShortExamplesInThreeLanguages() {
-        for part in [CopilotPrompt.Part.full, .sayOnly] {
-            let s = CopilotPrompt.system(settings: CopilotSettings(), part: part)
-            XCTAssertTrue(s.contains("до 15 слов"))
-            XCTAssertTrue(s.contains("Начну с плана запроса"))
-            XCTAssertTrue(s.contains("Я б почав з плану запиту"))
-            XCTAssertTrue(s.contains("I'd start with the query plan"))
+/// COPILOT-37: тёплый Codex с теми же запретами, что разовый; остановка на инструменте; строки задержки; первый запуск.
+final class CopilotBackendRulesTests: XCTestCase {
+    func testAppServerHasSameDisabledToolsAndTurnsOffUserMCPServers() throws {
+        let args = try XCTUnwrap(CodexCLI.appServerArguments(mcpServers: ["github", "my-db_2"]))
+        XCTAssertEqual(args.first, "app-server")
+        for feature in CodexCLI.disabledFeatures {
+            XCTAssertTrue(zip(args, args.dropFirst()).contains { $0 == "--disable" && $1 == feature }, feature)
         }
-        XCTAssertFalse(CopilotPrompt.system(settings: CopilotSettings(), part: .pointsOnly).contains("до 15 слов"))
+        XCTAssertTrue(args.contains(#"sandbox_mode="read-only""#))
+        XCTAssertTrue(args.contains(#"approval_policy="never""#))
+        XCTAssertTrue(args.contains("mcp_servers.github.enabled=false"))
+        XCTAssertTrue(args.contains("mcp_servers.my-db_2.enabled=false"))
+        // Имя, которое не записать ключом `-c` (codex не понимает его в кавычках), — тёплого Codex нет.
+        XCTAssertNil(CodexCLI.appServerArguments(mcpServers: ["my.server"]))
+        XCTAssertNil(CodexCLI.appServerArguments(mcpServers: ["a b"]))
+        XCTAssertNotNil(CodexCLI.appServerArguments(mcpServers: []))
     }
 
-    func testExampleLinesAreShortEnough() {
-        for line in ["Начну с плана запроса, потом посмотрю индексы и проверю на реальных данных.",
-                     "Я б почав з плану запиту, потім перевірив індекси й реальні дані.",
-                     "I'd start with the query plan, then check the indexes and test on real data."] {
-            XCTAssertLessThanOrEqual(line.split(separator: " ").count, 15)
-            XCTAssertLessThanOrEqual(line.count, CopilotPrompt.maxSayLength)
+    func testMCPServerNamesFromList() {
+        XCTAssertEqual(CodexCLI.mcpServerNames(listJSON: #"[{"name":"demo","enabled":true},{"name":"gh"}]"#), ["demo", "gh"])
+        XCTAssertEqual(CodexCLI.mcpServerNames(listJSON: "WARN: x\n[]"), [])
+        XCTAssertEqual(CodexCLI.mcpServerNames(listJSON: "No MCP servers configured"), [])
+    }
+
+    func testClaudeSessionHasSameSafetyAsOneShot() {
+        let session = ClaudeCLI.sessionArguments(system: "s", model: "haiku", effort: "low")
+        let oneShot = ClaudeCLI.arguments(request: AIRequest(prompt: "p", system: "s"))
+        for flag in ClaudeCLI.safety where !flag.isEmpty { XCTAssertTrue(session.contains(flag) && oneShot.contains(flag), flag) }
+        XCTAssertEqual(session.firstIndex(of: "--tools").map { session[$0 + 1] }, "")
+        XCTAssertTrue(session.contains("--input-format"))
+        XCTAssertEqual(session.firstIndex(of: "--model").map { session[$0 + 1] }, "haiku")
+        XCTAssertEqual(session.firstIndex(of: "--effort").map { session[$0 + 1] }, "low")
+    }
+
+    func testAppServerToolItemsAreWhitelisted() {
+        for kind in ["userMessage", "agentMessage", "reasoning", "plan", "contextCompaction"] { XCTAssertFalse(CodexCLI.isAppServerTool(kind), kind) }
+        for kind in ["commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall", "webSearch", "imageView", "collabAgentToolCall", "новый"] {
+            XCTAssertTrue(CodexCLI.isAppServerTool(kind), kind)
         }
+        XCTAssertEqual(WarmProtocol.parseCodex(#"{"method":"item/started","params":{"threadId":"th1","item":{"type":"commandExecution","id":"i"}}}"#),
+                       .itemStarted(threadID: "th1", type: "commandExecution"))
     }
 
-    func testAdviceWhenCodexSlowAndClaudeConnected() {
-        let a = ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5, 4.4]), claudeConnected: true)
-        XCTAssertEqual(a?.provider, "claude")
-        XCTAssertTrue(a?.text.contains("Claude отвечает быстрее") == true)
+    func testLatencyLogLineNamesServiceAndSpeechEnd() throws {
+        var m = LatencyMeter()
+        let t = Date()
+        m.questionEnded(at: t, speechEnded: t.addingTimeInterval(-0.8))
+        m.firstLine(at: t.addingTimeInterval(1.2))
+        m.lineComplete(at: t.addingTimeInterval(1.9))
+        let line = try XCTUnwrap(m.logLine(service: "claude"))
+        XCTAssertTrue(line.hasPrefix("Подсказчик · claude: конец вопроса → первое слово 1.2 с"), line)
+        XCTAssertTrue(line.contains("от конца речи 2.0 с"), line)
+        XCTAssertTrue(line.contains("первая строка целиком 1.9 с"), line)
+        XCTAssertFalse(line.contains("дольше цели"))
+        m.questionEnded(at: t)
+        m.firstLine(at: t.addingTimeInterval(3))
+        XCTAssertTrue(try XCTUnwrap(m.logLine(service: "codex")).contains("дольше цели 2 с"))
     }
 
-    func testNoAdviceCases() {
-        XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5, 4.4]), claudeConnected: false), "Claude не подключён")
-        XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [2, 2.5, 2.2]), claudeConnected: true), "Codex быстрее 3 с")
-        XCTAssertEqual(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5]), claudeConnected: true)?.isPrior, true, "мало замеров — совет по известным цифрам")
-        XCTAssertNil(ProviderAdvice.suggest(effective: "claude", stats: stats(claude: [5, 5, 5]), claudeConnected: true), "уже Claude")
-        XCTAssertNil(ProviderAdvice.suggest(effective: "codex", stats: stats(codex: [4, 5, 4.4], claude: [6, 6, 6]), claudeConnected: true), "у Claude не лучше")
+    func testExplicitQuestionSettlesSooner() {
+        var s = VolatileSettler()
+        let t = Date()
+        s.volatile("как бы вы это ускорили?", at: t)
+        XCTAssertNil(s.tick(at: t.addingTimeInterval(0.3)))
+        XCTAssertEqual(s.tick(at: t.addingTimeInterval(0.36)), "как бы вы это ускорили?", "после «?» — 0,35 с, не 0,7")
+        var plain = VolatileSettler()
+        plain.volatile("как бы вы это ускорили", at: t)
+        XCTAssertNil(plain.tick(at: t.addingTimeInterval(0.5)))
+        XCTAssertNotNil(plain.tick(at: t.addingTimeInterval(0.71)))
     }
 
-    func testStatsWindowAndMean() {
-        var s = LatencyStats()
-        for i in 1...15 { s.add(Double(i), provider: "codex") }
-        XCTAssertEqual(s.samples["codex"]?.count, LatencyStats.window)
-        XCTAssertEqual(try XCTUnwrap(s.mean("codex")).seconds, 10.5, accuracy: 0.001)
-        XCTAssertNil(s.mean("claude"))
-    }
-
-    func testStatsAreStored() {
-        let d = CopilotTestDefaults.make("copilot-stats-")
-        var s = LatencyStats(); s.add(3.2, provider: "codex"); s.save(d)
-        XCTAssertEqual(LatencyStats.load(d).mean("codex")?.count, 1)
-    }
-
-    func testChoiceDefaultsToSystemAndPersists() {
-        let d = CopilotTestDefaults.make("copilot-provider-")
-        XCTAssertEqual(CopilotProviderChoice.load(d), .system)
-        d.set("claude", forKey: CopilotProviderChoice.key)
-        XCTAssertEqual(CopilotProviderChoice.load(d), .claude)
-        XCTAssertEqual(CopilotProviderChoice.allCases.map(\.title), ["Как в Mac Utils", "Claude", "ChatGPT"])
-    }
-
-    func testEffectiveProvider() {
-        XCTAssertEqual(CopilotGlue.effectiveProvider(choice: .system, system: .codex), .codex)
-        XCTAssertEqual(CopilotGlue.effectiveProvider(choice: .system, system: .claude), .claude)
-        XCTAssertEqual(CopilotGlue.effectiveProvider(choice: .claude, system: .codex), .claude)
-        XCTAssertEqual(CopilotGlue.effectiveProvider(choice: .codex, system: .claude), .codex)
+    func testReadinessForFirstRun() {
+        let ready = CopilotReadiness.items(service: "Claude", ai: .connected, microphone: .granted, screenAudio: true, speechSupported: true)
+        XCTAssertTrue(CopilotReadiness.ready(ready))
+        XCTAssertEqual(ready.map(\.label), ["Claude подключён", "Микрофон разрешён", "Звук звонка разрешён"])
+        let first = CopilotReadiness.items(service: "ChatGPT (Codex)", ai: .notLoggedIn, microphone: .notAsked, screenAudio: false, speechSupported: false)
+        XCTAssertFalse(CopilotReadiness.ready(first))
+        XCTAssertEqual(first.map(\.id), ["ai", "mic", "audio", "speech"])
+        XCTAssertEqual(first[0].fix, .aiPage)
+        XCTAssertTrue(first[1].detail?.contains("спросит") == true, "микрофон спросит сам Mac — страница его не вызывает")
+        XCTAssertEqual(CopilotReadiness.items(service: "Claude", ai: .off, microphone: .denied, screenAudio: true, speechSupported: true).map(\.fix),
+                       [.aiPage, .microphone, nil])
     }
 }

@@ -7,6 +7,8 @@ import Foundation
 package struct VolatileSettler: Equatable {
     /// Сколько текст должен не меняться, чтобы считать фразу законченной (0,7 с по задаче).
     package static let defaultPause: TimeInterval = 0.7
+    /// Явный вопрос (расшифровка уже поставила «?»): ждать вдвое меньше — фраза закончена, ответ нужен сразу.
+    package static let questionPause: TimeInterval = 0.35
 
     package var pause: TimeInterval
     private var words: [String] = []
@@ -32,7 +34,7 @@ package struct VolatileSettler: Equatable {
 
     /// Вызывать часто (например, каждые 0,2 с). Возвращает новые слова, если пауза выдержана.
     package mutating func tick(at date: Date) -> String? {
-        guard let changedAt, words.count > emitted, date.timeIntervalSince(changedAt) >= pause else { return nil }
+        guard let changedAt, words.count > emitted, date.timeIntervalSince(changedAt) >= requiredPause else { return nil }
         let piece = words[emitted...].joined(separator: " ")
         emitted = words.count
         lastSpan = SpeechSpan(start: pieceStart ?? changedAt, end: changedAt)
@@ -51,6 +53,9 @@ package struct VolatileSettler: Equatable {
         guard final.count > emitted else { return nil }
         return final[emitted...].joined(separator: " ")
     }
+
+    /// Пауза для текущего текста: короче, если он кончается знаком вопроса.
+    var requiredPause: TimeInterval { words.last?.hasSuffix("?") == true ? min(pause, Self.questionPause) : pause }
 
     /// Сколько слов фразы уже отдано (для проверок).
     package var emittedWords: Int { emitted }

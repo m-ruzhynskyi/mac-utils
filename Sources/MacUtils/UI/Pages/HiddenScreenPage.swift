@@ -42,6 +42,15 @@ struct HiddenScreenPage: View {
                 HiddenScreenKeyRow(action: .hiddenScreenWindow, title: "Показать или спрятать окно ИИ")
                 ToggleRow("Окно ИИ поверх всех окон", subtitle: "Не закрывается другими программами, пока вы в звонке",
                           systemImage: "square.3.layers.3d.top.filled", isOn: $alwaysOnTop)
+                // Связь с подсказчиком: его панели тоже нет в демонстрации.
+                Row("Подсказчик на встрече", subtitle: "Слушает звонок и подсказывает ответы в панели, которой тоже нет в демонстрации",
+                    systemImage: SettingsSection.copilot.symbol) {
+                    HStack(spacing: DS.Space.s) {
+                        Keycap(action: .copilot)
+                        Button("Открыть") { SettingsWindowController.shared.show(section: .copilot) }
+                            .buttonStyle(.graphite(.secondary, size: .compact))
+                    }
+                }
             }
             GroupLabel("Перед звонком")
             ListCard {
