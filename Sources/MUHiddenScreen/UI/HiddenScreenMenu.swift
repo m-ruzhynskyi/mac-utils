@@ -60,7 +60,7 @@ package final class HiddenScreenMenuBuilder: NSObject {
     }
 
     /// Только для подписи в меню: само сочетание глобальное и зарегистрировано отдельно.
-    static func keyEquivalent(_ key: LayoutHotKey) -> (character: String, mask: NSEvent.ModifierFlags)? {
+    package static func keyEquivalent(_ key: LayoutHotKey) -> (character: String, mask: NSEvent.ModifierFlags)? {
         var mask: NSEvent.ModifierFlags = []
         if key.modifiers & 0x0100 != 0 { mask.insert(.command) }
         if key.modifiers & 0x0200 != 0 { mask.insert(.shift) }

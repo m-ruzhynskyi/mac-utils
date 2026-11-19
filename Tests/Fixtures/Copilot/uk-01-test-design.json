@@ -1,0 +1,33 @@
+{
+  "id": "uk-01-test-design",
+  "language": "uk",
+  "kind": "interview",
+  "about": "QA-инженер, 5 лет: ручне и автотесты (Python, pytest, Selenium), API-тесты, CI в GitLab. Собеседование на позицию Senior QA.",
+  "utterances": [
+    {
+      "speaker": "other",
+      "text": "Добре. Переходимо до практичного завдання.",
+      "secondsAgo": 70
+    },
+    {
+      "speaker": "other",
+      "text": "Як би ви протестували форму реєстрації з полями пошта, пароль і телефон?",
+      "secondsAgo": 50
+    }
+  ],
+  "expectQuestion": true,
+  "questionGist": "тест-дизайн форми",
+  "keywordGroups": [
+    [
+      "клас",
+      "еквівалент",
+      "межов",
+      "границ"
+    ],
+    [
+      "пошт",
+      "парол",
+      "валід"
+    ]
+  ]
+}

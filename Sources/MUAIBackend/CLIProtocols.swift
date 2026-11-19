@@ -112,6 +112,120 @@ package enum CodexCLI {
         return arguments
     }
 
+    /// `codex app-server` (тёплый процесс подсказчика). У app-server нет `--ignore-user-config` (есть у `exec`), поэтому
+    /// всё из config.toml пользователя, что уводит вопрос не туда, переопределяется явно (`userConfigOverrides`), MCP-серверы
+    /// выключаются по именам (`-c mcp_servers.<имя>.enabled=false`; `-c mcp_servers={}` их не убирает — таблицы сливаются),
+    /// а то, что так не переопределить (свой адрес сервиса), проверяет `configRedirects`: тогда тёплого Codex нет.
+    /// nil — тёплого Codex нет, вопрос идёт через `codex exec --ignore-user-config`: список MCP не получен (`mcpServers == nil`)
+    /// или имя не записать ключом `-c` (точка, кавычки, пробел: имя в кавычках codex не понимает).
+    package static func appServerArguments(mcpServers: [String]?) -> [String]? {
+        guard let mcpServers, mcpServers.allSatisfy(isPlainKey) else { return nil }
+        var arguments = ["app-server"]
+        arguments += disabledFeatures.flatMap { ["--disable", $0] }
+        arguments += userConfigOverrides.flatMap { ["-c", $0] }
+        arguments += mcpServers.flatMap { ["-c", "mcp_servers.\($0).enabled=false"] }
+        return arguments
+    }
+
+    /// Ключи config.toml, которые у тёплого процесса задаются явно (поверх файла пользователя). Имена сверены
+    /// `codex app-server --strict-config --print-startup-config` (0.170.0, без запросов): неизвестный ключ там — ошибка.
+    /// - `model_provider` — только OpenAI (не Ollama/`oss` и не свой провайдер);
+    /// - `notify` — никакой внешней программе ход (то есть вопрос с расшифровкой) не передаётся;
+    /// - `web_search` / `tools.web_search` — без поиска в сети;
+    /// - `otel.*`, `analytics` — без отправки телеметрии с текстом запроса; `history` — история не пишется;
+    /// - песочница «только чтение» и «ничего не спрашивать» (ещё и в каждой ветке `thread/start`).
+    /// `profile` в config.toml эта версия codex не принимает (только `--profile`, а его нет).
+    package static let userConfigOverrides = [
+        #"model_provider="openai""#, "notify=[]", #"web_search="disabled""#, "tools.web_search=false",
+        #"otel.exporter="none""#, #"otel.trace_exporter="none""#, #"otel.metrics_exporter="none""#, "otel.log_user_prompt=false",
+        "analytics.enabled=false", #"history.persistence="none""#,
+        #"sandbox_mode="read-only""#, #"approval_policy="never""#,
+    ]
+
+    /// Ключи config.toml, которые `-c` не обезвредить: свой адрес сервиса или свой провайдер. Есть хоть один — тёплого
+    /// Codex нет (вопрос пойдёт через `exec`, который файл не читает). Смотрятся только имена ключей, значения не читаются.
+    package static let redirectKeys: Set<String> = ["openai_base_url", "chatgpt_base_url", "model_providers"]
+
+    /// Какие из `redirectKeys` есть в тексте config.toml: ключ верхнего уровня, `[model_providers…]` или `model_providers.x = …`.
+    package static func configRedirects(toml: String) -> [String] {
+        var found: [String] = []
+        var table = ""
+        for raw in toml.split(whereSeparator: \.isNewline) {
+            let line = raw.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init)?
+                .trimmingCharacters(in: .whitespaces) ?? ""
+            guard !line.isEmpty else { continue }
+            if line.hasPrefix("[") {
+                table = line.trimmingCharacters(in: CharacterSet(charactersIn: "[] ")).replacingOccurrences(of: "\"", with: "")
+                let root = String(table.split(separator: ".").first ?? "")
+                if redirectKeys.contains(root), !found.contains(root) { found.append(root) }
+                continue
+            }
+            guard table.isEmpty, let eq = line.firstIndex(of: "=") else { continue }
+            let key = line[..<eq].trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\"", with: "")
+            let root = String(key.split(separator: ".").first ?? "")
+            if redirectKeys.contains(root), !found.contains(root) { found.append(root) }
+        }
+        return found
+    }
+
+    /// Где codex берёт config.toml: `$CODEX_HOME/config.toml`, иначе `~/.codex/config.toml`.
+    package static func userConfigURL(environment: [String: String]) -> URL {
+        let home = environment["CODEX_HOME"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? (environment["HOME"] ?? NSHomeDirectory()) + "/.codex"
+        return URL(fileURLWithPath: home).appendingPathComponent("config.toml")
+    }
+
+    /// `codex mcp list --json` с теми же `--disable` и `-c`, что у app-server: в списке только серверы, которые он поднял бы.
+    package static var mcpListArguments: [String] {
+        disabledFeatures.flatMap { ["--disable", $0] } + userConfigOverrides.flatMap { ["-c", $0] } + ["mcp", "list", "--json"]
+    }
+
+    /// Включённые MCP-серверы из `codex mcp list --json` (выключенные и так не стартуют, а встроенные выключенные
+    /// по имени не адресуются). Не массив JSON — nil.
+    package static func enabledMCPServers(listJSON: String) -> [String]? {
+        guard let start = listJSON.firstIndex(of: "["),
+              let list = (try? JSONSerialization.jsonObject(with: Data(listJSON[start...].utf8))) as? [[String: Any]] else { return nil }
+        var names: [String] = []
+        for entry in list {
+            guard let name = entry["name"] as? String else { return nil }
+            if entry["enabled"] as? Bool != false { names.append(name) }
+        }
+        return names
+    }
+
+    static func isPlainKey(_ name: String) -> Bool {
+        !name.isEmpty && name.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_") }
+    }
+
+    /// Имена MCP-серверов из `codex mcp list --json` (массив объектов с `name`). Не массив JSON — nil (сбой списка:
+    /// тогда тёплого Codex нет, а не «поднять все серверы из конфига»).
+    package static func mcpServerNames(listJSON: String) -> [String]? {
+        guard let start = listJSON.firstIndex(of: "["),
+              let list = (try? JSONSerialization.jsonObject(with: Data(listJSON[start...].utf8))) as? [[String: Any]] else { return nil }
+        let names = list.compactMap { $0["name"] as? String }
+        return names.count == list.count ? names : nil
+    }
+
+    /// Быстрые модели для подсказчика по порядку. Замер менеджера на 1c6da07 (тёплый, effort low, первое слово, медиана):
+    /// gpt-6-luna 7,3 с, gpt-6.2-sol 10,4 с. Берётся первая, что есть в каталоге этого codex и видна в списке; нет — nil.
+    package static let fastModelPreference = ["gpt-6-luna", "gpt-6.2-sol"]
+
+    /// Видимые модели из `codex debug models` (каталог без запросов к модели): `{"models":[{"slug","visibility",…}]}`.
+    package static func listedModels(catalogJSON: String) -> [String] {
+        guard let start = catalogJSON.firstIndex(of: "{"),
+              let json = (try? JSONSerialization.jsonObject(with: Data(catalogJSON[start...].utf8))) as? [String: Any],
+              let models = json["models"] as? [[String: Any]] else { return [] }
+        return models.filter { ($0["visibility"] as? String ?? "list") == "list" }.compactMap { $0["slug"] as? String }
+    }
+
+    package static func fastModel(listed: [String]) -> String? { fastModelPreference.first { listed.contains($0) } }
+
+    /// Элементы `codex app-server` (v2, `ThreadItem.type`), которые не действуют: сообщения, рассуждение, план, сжатие
+    /// истории. Всё остальное (команда, правка файла, MCP, веб-поиск, картинка, подагент…) — инструмент, ход останавливается.
+    package static let appServerTextItems: Set<String> = ["userMessage", "agentMessage", "reasoning", "plan", "contextCompaction"]
+
+    package static func isAppServerTool(_ kind: String) -> Bool { !appServerTextItems.contains(kind) }
+
     /// У `codex exec` нет системного текста: он идёт в начале запроса, отделённый от данных.
     package static func input(request: AIRequest) -> Data {
         let system = [request.system ?? AIRequest.defaultSystem, AIRequest.textOnly].joined(separator: "\n")
@@ -165,13 +279,23 @@ package enum ClaudeCLI {
     package static func arguments(request: AIRequest, model: String? = nil) -> [String] {
         var arguments = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
         if !request.images.isEmpty { arguments += ["--input-format", "stream-json"] }
-        arguments += ["--tools", "", "--strict-mcp-config", "--safe-mode", "--disable-slash-commands",
-                      "--no-session-persistence",
-                      "--system-prompt", [request.system ?? AIRequest.defaultSystem, AIRequest.textOnly].joined(separator: "\n")]
+        arguments += safety + ["--system-prompt", [request.system ?? AIRequest.defaultSystem, AIRequest.textOnly].joined(separator: "\n")]
         if request.quick { arguments += ["--effort", "low"] }
         if let model, !model.isEmpty { arguments += ["--model", model] }
         return arguments
     }
+
+    /// Живая сессия (тёплый процесс подсказчика): те же запреты, что у `arguments`, вопросы — строками stream-json на stdin.
+    package static func sessionArguments(system: String, model: String?, effort: String?) -> [String] {
+        var arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+        arguments += safety + ["--system-prompt", [system, AIRequest.textOnly].joined(separator: "\n")]
+        if let effort, !effort.isEmpty { arguments += ["--effort", effort] }
+        if let model, !model.isEmpty { arguments += ["--model", model] }
+        return arguments
+    }
+
+    /// Без инструментов, MCP, хуков, плагинов, CLAUDE.md, команд и сохранения сессии.
+    package static let safety = ["--tools", "", "--strict-mcp-config", "--safe-mode", "--disable-slash-commands", "--no-session-persistence"]
 
     /// Картинки, которые берёт API: тип по расширению.
     package static func mediaType(for url: URL) -> String? {
