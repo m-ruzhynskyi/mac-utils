@@ -145,6 +145,18 @@ final class HiddenScreenSelfTest {
         log("самопроверка мигания, \(step): \(DisplayChange.verdict(physical: physical, layouts: HiddenScreenLayout.takeHistory())); скрытый дисплей: \(hidden.isEmpty ? "без событий" : hidden.map { DisplayChange.describe($0.1) }.joined(separator: "; "))")
     }
 
+    /// Увести фокус с поля: на первую кнопку или ссылку окна, иначе `AXFocused = false`. Возвращает «фокус всё ещё в поле».
+    private func unfocus(_ field: AXUIElement, app: AXUIElement, pid: pid_t, window: CGRect) async -> Bool {
+        if let other = SelfTestAX.focusableControl(pid: pid, window: window) {
+            AXUIElementSetAttributeValue(other, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            await sleep(0.3)
+            if !SelfTestAX.isFocused(field, app: app) { return false }
+        }
+        AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanFalse)
+        await sleep(0.3)
+        return SelfTestAX.isFocused(field, app: app)
+    }
+
     private func click(_ status: HiddenScreenEngine.AppStatus) async {
         let name = status.app.name
         engine.selectApp(status.bundleID)
@@ -161,7 +173,12 @@ final class HiddenScreenSelfTest {
             log("самопроверка щелчка: \(name) — поле ввода через AX не найдено (окно \(target.frame))")
             return
         }
-        let before = SelfTestAX.isFocused(field.element, app: app)
+        var before = SelfTestAX.isFocused(field.element, app: app)
+        if before {
+            // Чтобы проверка доказывала: снять фокус с поля — на кнопку окна, иначе просто «не в фокусе» (HSCR-46).
+            before = await unfocus(field.element, app: app, pid: target.pid, window: target.frame)
+            log("самопроверка щелчка: \(name) — фокус снят с поля перед щелчком: \(before ? "нет" : "да")")
+        }
         let point = CGPoint(x: field.frame.midX, y: field.frame.midY)
         // Зеркало может быть на миг перекрыто (окно-проба самопроверки скрытия) — ждём до 3 с.
         var problem: String? = engine.selfTestPress(atTarget: point)
@@ -180,17 +197,40 @@ final class HiddenScreenSelfTest {
     }
 }
 
-/// Поиск поля ввода и проверка фокуса через AX (только чтение).
+/// Поиск поля ввода и проверка фокуса через AX.
+@MainActor
 enum SelfTestAX {
     static let roles: Set<String> = ["AXTextArea", "AXTextField", "AXComboBox"]
 
-    /// Поле ввода в окне с рамкой `window`: самое нижнее (поле сообщения у Claude и ChatGPT внизу), затем самое большое.
-    static func inputField(pid: pid_t, window: CGRect) -> (element: AXUIElement, frame: CGRect, role: String)? {
+    /// Кнопка или ссылка окна, которой можно дать фокус (увести фокус с поля перед проверкой щелчка).
+    static func focusableControl(pid: pid_t, window: CGRect) -> AXUIElement? {
+        guard let root = windowElement(pid: pid, window: window) else { return nil }
+        var queue: [AXUIElement] = [root]
+        var visited = 0
+        while !queue.isEmpty, visited < 4000 {
+            let element = queue.removeFirst()
+            visited += 1
+            let node = HiddenScreenEngine.axNode(element)
+            if ["AXButton", "AXLink"].contains(node.role), node.focusSettable { return element }
+            var children: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success {
+                queue += AXWindowSource.elements(children)
+            }
+        }
+        return nil
+    }
+
+    static func windowElement(pid: pid_t, window: CGRect) -> AXUIElement? {
         let windows = AXWindowSource.windows(pid: pid).elements
-        guard let root = windows.first(where: { element in
+        return windows.first(where: { element in
             guard let frame = AXGeometry.read(element).frame else { return false }
             return abs(frame.minX - window.minX) < 4 && abs(frame.minY - window.minY) < 4
-        }) ?? windows.first else { return nil }
+        }) ?? windows.first
+    }
+
+    /// Поле ввода в окне с рамкой `window`: самое нижнее (поле сообщения у Claude и ChatGPT внизу), затем самое большое.
+    static func inputField(pid: pid_t, window: CGRect) -> (element: AXUIElement, frame: CGRect, role: String)? {
+        guard let root = windowElement(pid: pid, window: window) else { return nil }
         var queue: [(AXUIElement, Int)] = [(root, 0)]
         var visited = 0
         var best: (element: AXUIElement, frame: CGRect, role: String)?
@@ -213,23 +253,8 @@ enum SelfTestAX {
         return best
     }
 
-    /// Фокус в поле: у самого поля `AXFocused`, или фокусный элемент программы — поле или внутри него.
+    /// Фокус в поле — та же проверка, что у щелчка через AX.
     static func isFocused(_ field: AXUIElement, app: AXUIElement) -> Bool {
-        var value: CFTypeRef?
-        if AXUIElementCopyAttributeValue(field, kAXFocusedAttribute as CFString, &value) == .success, (value as? Bool) == true {
-            return true
-        }
-        var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success, let focused,
-              CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
-        var element = focused as! AXUIElement
-        for _ in 0..<20 {
-            if CFEqual(element, field) { return true }
-            var parent: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success, let parent,
-                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { return false }
-            element = parent as! AXUIElement
-        }
-        return false
+        HiddenScreenEngine.axFocused(field, app: app)
     }
 }

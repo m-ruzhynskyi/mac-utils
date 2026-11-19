@@ -3,11 +3,11 @@ import Foundation
 
 /// Как щелчок из зеркала попадает в программу.
 public enum ClickMode: String, Sendable, CaseIterable {
-    /// Без активации (по умолчанию). Обычный щелчок сначала через AX (HSCR-45): элемент под точкой — поле ввода получает
-    /// фокус, кнопка или ссылка — «нажать»; программа не активируется, строка меню и заголовок окна программы
-    /// пользователя не мигают. 19.11 события `postToPid` фокус в поле ChatGPT не ставили (Electron в неактивном окне
-    /// не принимает «первое нажатие»). Если AX ничего не нашёл (двойной щелчок, щелчок с клавишами, просто текст) —
-    /// курсор на миг над окном на скрытом дисплее, движение через HID, нажатие и отпускание — `postToPid` с точкой в окне.
+    /// Без активации, где можно (по умолчанию). Обычный щелчок сначала через AX (HSCR-45/46): поле ввода под точкой
+    /// или рядом с ней получает фокус, кнопка или ссылка — «нажать»; программа не активируется, строка меню и заголовок
+    /// окна программы пользователя не мигают. Не вышло (AX не нашёл элемент, не дал фокус), двойной щелчок, щелчок
+    /// с клавишами — путь `warp`, как в 1.11.0: с кратким миганием фокуса, но щелчок доходит. События `postToPid`
+    /// в неактивное окно Electron (Claude, ChatGPT) не принимает — «первое нажатие» без активации (19.11, test13/test15).
     case background
     /// Настоящий курсор на миг переносится на скрытый дисплей, нажатие — через HID; программа ИИ на это время
     /// становится активной, потом активность возвращается (до HSCR-43 — по умолчанию; видно как мигание фокуса).
@@ -152,24 +152,20 @@ public struct PointerSession: Sendable {
         state = .idle
         let down = Self.mouse(.leftDown, target, clicks, flags, clickMode == .pid ? windowNumber : 0)
         let up = Self.mouse(.leftUp, target, clicks, flags, clickMode == .pid ? windowNumber : 0)
+        // Пауза перед возвратом: программа должна разобрать нажатие, пока она активна. Иначе (768c91b, 14.11) нажатие
+        // доходило до уже неактивного Claude, и он через 0,1–1 с активировал себя сам.
+        // Движение и пауза перед нажатием: кнопки «при наведении» (крестик у вложения) появляются под курсором раньше,
+        // чем придёт нажатие, — иначе нажатие попадает в то, что под ними.
+        let warpSteps: [PointerStep] = [.hideCursor, .activateTarget, .warp(target), .postHID(Self.mouse(.moved, target, 0, flags, 0)),
+                                        .wait(Self.hoverSettle), .postHID(down), .postHID(up), .warp(cursor), .showCursor,
+                                        .wait(Self.clickSettle), .returnFocus]
         switch clickMode {
         case .pid:
             return [.postToPid(down), .postToPid(up)]
         case .background:
-            let origin = mapping.target.origin
-            let press = SyntheticEvent(kind: .leftDown, location: target, clicks: clicks, flags: flags, windowNumber: windowNumber, windowOrigin: origin)
-            let release = SyntheticEvent(kind: .leftUp, location: target, clicks: clicks, flags: flags, windowNumber: windowNumber, windowOrigin: origin)
-            // Курсор остаётся над окном, пока программа разбирает нажатие (события в процесс идут через её очередь).
-            let events: [PointerStep] = [.hideCursor, .warp(target), .postHID(Self.mouse(.moved, target, 0, flags, 0)), .wait(Self.hoverSettle),
-                                         .postToPid(press), .postToPid(release), .wait(Self.backgroundSettle), .warp(cursor), .showCursor]
-            return AXClickTarget.applies(clicks: clicks, flags: flags) ? [.accessibilityClick(target, fallback: events)] : events
+            return AXClickTarget.applies(clicks: clicks, flags: flags) ? [.accessibilityClick(target, fallback: warpSteps)] : warpSteps
         case .warp:
-            // Пауза перед возвратом: программа должна разобрать нажатие, пока она активна. Иначе (768c91b, 14.11) нажатие
-            // доходило до уже неактивного Claude, и он через 0,1–1 с активировал себя сам.
-            // Движение и пауза перед нажатием: кнопки «при наведении» (крестик у вложения) появляются под курсором раньше,
-            // чем придёт нажатие, — иначе нажатие попадает в то, что под ними.
-            return [.hideCursor, .activateTarget, .warp(target), .postHID(Self.mouse(.moved, target, 0, flags, 0)), .wait(Self.hoverSettle),
-                    .postHID(down), .postHID(up), .warp(cursor), .showCursor, .wait(Self.clickSettle), .returnFocus]
+            return warpSteps
         }
     }
 
@@ -213,8 +209,6 @@ public struct PointerSession: Sendable {
     public static let activationSettle: TimeInterval = 0.03
     /// Наведение перед нажатием: программа успевает показать кнопку «при наведении».
     public static let hoverSettle: TimeInterval = 0.04
-    /// Щелчок без активации: сколько курсор ждёт над окном, пока программа разберёт нажатие из своей очереди.
-    public static let backgroundSettle: TimeInterval = 0.05
     /// Сколько ждать после щелчка (курсор уже на зеркале), прежде чем вернуть активность программе пользователя.
     public static let clickSettle: TimeInterval = 0.05
 

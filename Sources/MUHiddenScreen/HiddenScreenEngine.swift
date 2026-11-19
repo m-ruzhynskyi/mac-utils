@@ -1164,12 +1164,15 @@ public final class HiddenScreenEngine {
             keys.post([event], to: pid)
         case let .accessibilityClick(point, fallback):
             guard let pid else { return }
-            let result = accessibilityClick(at: point, pid: pid)
+            let result = await accessibilityClick(at: point, pid: pid)
             if let done = result.done {
                 clickTrace?.path = "\(options.clickMode.rawValue): AX \(done)"
                 Log.hiddenScreen.info("щелчок через AX: \(done, privacy: .public) в (\(Int(point.x)), \(Int(point.y)))")
             } else {
-                Log.hiddenScreen.info("щелчок через AX: \(result.why, privacy: .public) — событиями в процесс")
+                // Не хуже 1.11.0: щелчок доходит прежним путём, с кратким миганием фокуса.
+                let name = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
+                clickTrace?.path = "\(options.clickMode.rawValue) → warp"
+                Log.hiddenScreen.info("\(name, privacy: .public): щелчок через warp — AX: \(result.why, privacy: .public)")
                 steps.insert(contentsOf: fallback, at: 0)
             }
         case let .beginHandoff(kind):
@@ -1394,8 +1397,10 @@ public final class HiddenScreenEngine {
         Log.hiddenScreen.info("AX: pid \(pid) — дерево страницы попрошено (AXManualAccessibility, код \(result.rawValue))")
     }
 
-    /// Элемент под точкой и его предки → фокус в поле или «нажать». `done` — что сделано; иначе `why` — почему нет.
-    private func accessibilityClick(at point: CGPoint, pid: pid_t) -> (done: String?, why: String) {
+    /// Элемент под точкой и его предки → фокус в поле или «нажать»; в предках поля нет — поле среди потомков рядом
+    /// с точкой (ChatGPT, test15). Фокус проверяется: AX мог принять просьбу, но фокус не поставить.
+    /// `done` — что сделано; иначе `why` — почему нет (тогда щелчок идёт путём `warp`).
+    private func accessibilityClick(at point: CGPoint, pid: pid_t) async -> (done: String?, why: String) {
         requestAccessibility(pid)
         let app = AXWindowSource.application(pid)
         var hit: AXUIElement?
@@ -1404,29 +1409,98 @@ public final class HiddenScreenEngine {
         var nodes: [AXClickTarget.Node] = []
         var elements: [AXUIElement] = []
         for _ in 0..<AXClickTarget.depth {
-            let role = AXWindowSource.string(element, kAXRoleAttribute) ?? "?"
-            var names: CFArray?
-            let actions = AXUIElementCopyActionNames(element, &names) == .success ? (names as? [String] ?? []) : []
-            var settable: DarwinBoolean = false
-            let focusable = AXUIElementIsAttributeSettable(element, kAXFocusedAttribute as CFString, &settable) == .success && settable.boolValue
-            nodes.append(AXClickTarget.Node(role: role, actions: actions, focusSettable: focusable))
+            nodes.append(Self.axNode(element))
             elements.append(element)
-            var parent: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success, let parent,
-                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
-            element = parent as! AXUIElement
+            guard let parent = Self.axParent(element) else { break }
+            element = parent
         }
         let chain = nodes.map(\.role).joined(separator: " ← ")
-        guard let choice = AXClickTarget.choose(nodes) else { return (nil, "под точкой \(chain)") }
-        let target = elements[choice.index]
-        let role = nodes[choice.index].role
-        let status: AXError
-        switch choice.action {
-        case .focus: status = AXUIElementSetAttributeValue(target, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        case .press: status = AXUIElementPerformAction(target, kAXPressAction as CFString)
+        var target: (element: AXUIElement, role: String, action: AXClickTarget.Action)?
+        if let choice = AXClickTarget.choose(nodes) {
+            target = (elements[choice.index], nodes[choice.index].role, choice.action)
+        } else {
+            // Поиск вниз — от элемента под точкой и от предков до веб-страницы включительно.
+            let stop = nodes.firstIndex { AXClickTarget.stopRoles.contains($0.role) }.map { $0 + 1 } ?? elements.count
+            if let field = Self.fieldNear(point, roots: Array(elements.prefix(stop))) {
+                target = (field.element, field.role, .focus)
+            }
         }
-        guard status == .success else { return (nil, "\(choice.action.rawValue) \(role) не вышло (код \(status.rawValue)), цепочка \(chain)") }
-        return ("\(choice.action.rawValue) \(role)", chain)
+        guard let target else { return (nil, "под точкой \(chain), поля рядом нет") }
+        switch target.action {
+        case .press:
+            let status = AXUIElementPerformAction(target.element, kAXPressAction as CFString)
+            guard status == .success else { return (nil, "нажать \(target.role) не вышло (код \(status.rawValue))") }
+            return ("нажать \(target.role)", chain)
+        case .focus:
+            let status = AXUIElementSetAttributeValue(target.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            guard status == .success else { return (nil, "фокус \(target.role) не вышел (код \(status.rawValue))") }
+            // Chromium ставит фокус не сразу (через процесс страницы) — проверка до 0,3 с.
+            for delay in [0.05, 0.1, 0.15] {
+                if Self.axFocused(target.element, app: app) { return ("фокус \(target.role)", chain) }
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+            return Self.axFocused(target.element, app: app) ? ("фокус \(target.role)", chain)
+                : (nil, "не дал фокус \(target.role) (цепочка \(chain))")
+        }
+    }
+
+    static func axNode(_ element: AXUIElement) -> AXClickTarget.Node {
+        let role = AXWindowSource.string(element, kAXRoleAttribute) ?? "?"
+        var names: CFArray?
+        let actions = AXUIElementCopyActionNames(element, &names) == .success ? (names as? [String] ?? []) : []
+        var settable: DarwinBoolean = false
+        let focusable = AXUIElementIsAttributeSettable(element, kAXFocusedAttribute as CFString, &settable) == .success && settable.boolValue
+        return AXClickTarget.Node(role: role, actions: actions, focusSettable: focusable)
+    }
+
+    static func axParent(_ element: AXUIElement) -> AXUIElement? {
+        var parent: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success, let parent,
+              CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
+        return (parent as! AXUIElement)
+    }
+
+    /// Поле ввода среди потомков `roots` рядом с точкой. Спускаемся только в элементы, чья рамка рядом с точкой
+    /// (или без рамки), не больше 3000 элементов.
+    static func fieldNear(_ point: CGPoint, roots: [AXUIElement]) -> (element: AXUIElement, role: String)? {
+        var queue = roots
+        var seen = 0
+        var candidates: [(element: AXUIElement, role: String, frame: CGRect, focusSettable: Bool)] = []
+        let reach = AXClickTarget.fieldTolerance
+        while !queue.isEmpty, seen < 3000 {
+            let element = queue.removeFirst()
+            seen += 1
+            let frame = AXGeometry.read(element).frame
+            if let frame, !frame.insetBy(dx: -reach, dy: -reach).contains(point), seen > roots.count { continue }
+            let role = AXWindowSource.string(element, kAXRoleAttribute) ?? "?"
+            if AXClickTarget.textRoles.contains(role), let frame {
+                var settable: DarwinBoolean = false
+                let focusable = AXUIElementIsAttributeSettable(element, kAXFocusedAttribute as CFString, &settable) == .success && settable.boolValue
+                candidates.append((element, role, frame, focusable))
+            }
+            var children: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success {
+                queue += AXWindowSource.elements(children)
+            }
+        }
+        guard let index = AXClickTarget.nearestField(point, candidates: candidates.map { ($0.role, $0.frame, $0.focusSettable) }) else { return nil }
+        return (candidates[index].element, candidates[index].role)
+    }
+
+    /// Фокус в элементе: у него `AXFocused`, или фокусный элемент программы — он или внутри него.
+    static func axFocused(_ field: AXUIElement, app: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        if AXUIElementCopyAttributeValue(field, kAXFocusedAttribute as CFString, &value) == .success, (value as? Bool) == true { return true }
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success, let focused,
+              CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
+        var element: AXUIElement? = (focused as! AXUIElement)
+        for _ in 0..<20 {
+            guard let current = element else { return false }
+            if CFEqual(current, field) { return true }
+            element = axParent(current)
+        }
+        return false
     }
 
     // MARK: Самопроверка (`--hs-selftest`)

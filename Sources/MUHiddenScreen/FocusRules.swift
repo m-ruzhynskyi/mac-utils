@@ -353,6 +353,27 @@ public enum AXClickTarget {
         clicks <= 1 && flags.intersection([.maskCommand, .maskShift, .maskAlternate, .maskControl]).isEmpty
     }
 
+    /// Насколько поле может быть в стороне от точки щелчка (рамки в AX и в зеркале расходятся на пиксели).
+    public static let fieldTolerance: CGFloat = 10
+
+    /// Поле под точкой не нашлось в цепочке предков (ChatGPT: поверх поля — группа, test15) — поле среди потомков,
+    /// чья рамка содержит точку или в пределах `fieldTolerance`: ближайшее, при равенстве — меньшее.
+    public static func nearestField(_ point: CGPoint, candidates: [(role: String, frame: CGRect, focusSettable: Bool)]) -> Int? {
+        var best: (index: Int, distance: CGFloat, area: CGFloat)?
+        for (index, candidate) in candidates.enumerated()
+        where textRoles.contains(candidate.role) && candidate.focusSettable && candidate.frame.width > 0 && candidate.frame.height > 0 {
+            let dx = max(candidate.frame.minX - point.x, 0, point.x - candidate.frame.maxX)
+            let dy = max(candidate.frame.minY - point.y, 0, point.y - candidate.frame.maxY)
+            let distance = hypot(dx, dy)
+            guard distance <= fieldTolerance else { continue }
+            let area = candidate.frame.width * candidate.frame.height
+            if best == nil || distance < best!.distance || (distance == best!.distance && area < best!.area) {
+                best = (index, distance, area)
+            }
+        }
+        return best?.index
+    }
+
     public static func choose(_ nodes: [Node]) -> (index: Int, action: Action)? {
         for (index, node) in nodes.prefix(depth).enumerated() {
             if stopRoles.contains(node.role) { return nil }

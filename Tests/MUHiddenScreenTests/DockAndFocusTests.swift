@@ -91,40 +91,32 @@ final class MirrorLevelAndClickTests: XCTestCase {
         XCTAssertTrue(MirrorLevel.onTop)
     }
 
-    func testBackgroundClickNeverActivates() {
+    func testBackgroundClickTriesAXThenWarp() {
         var session = PointerSession()
         XCTAssertEqual(session.clickMode, .background)
         _ = session.down(.left, at: CGPoint(x: 100, y: 50), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor)
         let planned = session.up(mapping: mapping, windowNumber: 7)
         let target = CGPoint(x: 2200, y: 1100)
-        let origin = CGPoint(x: 2000, y: 1000)
-        let events: [PointerStep] = [
-            .hideCursor, .warp(target),
-            .postHID(SyntheticEvent(kind: .moved, location: target)), .wait(PointerSession.hoverSettle),
-            .postToPid(SyntheticEvent(kind: .leftDown, location: target, clicks: 1, windowNumber: 7, windowOrigin: origin)),
-            .postToPid(SyntheticEvent(kind: .leftUp, location: target, clicks: 1, windowNumber: 7, windowOrigin: origin)),
-            .wait(PointerSession.backgroundSettle), .warp(cursor), .showCursor,
-        ]
-        XCTAssertEqual(planned, [.accessibilityClick(target, fallback: events)],
-                       "обычный щелчок — сначала через AX (фокус в поле, «нажать»), события — запасной путь")
-        let steps = events
-        XCTAssertFalse(steps.contains(.activateTarget), "ИИ не активируется — программа пользователя не мигает")
-        XCTAssertFalse(steps.contains(.returnFocus))
-        XCTAssertFalse(steps.contains { if case let .postHID(event) = $0 { return event.kind == .leftDown || event.kind == .leftUp }; return false },
-                       "нажатие через HID активировало бы программу (WindowServer)")
+        var warp = PointerSession(clickMode: .warp)
+        _ = warp.down(.left, at: CGPoint(x: 100, y: 50), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor)
+        let warpSteps = warp.up(mapping: mapping, windowNumber: 7)
+        XCTAssertEqual(planned, [.accessibilityClick(target, fallback: warpSteps)],
+                       "сначала через AX (без активации); не вышло — как в 1.11.0, путь warp (HSCR-46)")
+        XCTAssertTrue(warpSteps.contains(.activateTarget), "запасной путь доходит наверняка — с активацией")
         XCTAssertEqual(session.state, .idle)
     }
 
-    func testBackgroundDoubleClickKeepsCount() {
+    func testBackgroundDoubleClickGoesWarpWithCount() {
         var session = PointerSession()
         _ = session.down(.left, at: CGPoint(x: 10, y: 10), clicks: 2, flags: .maskShift, mapping: mapping, windowNumber: 9, cursor: cursor)
-        let posts = session.up(mapping: mapping, windowNumber: 9).compactMap { step -> SyntheticEvent? in
-            if case let .postToPid(event) = step { return event }
+        let steps = session.up(mapping: mapping, windowNumber: 9)
+        XCTAssertFalse(steps.contains { if case .accessibilityClick = $0 { return true }; return false })
+        let posts = steps.compactMap { step -> SyntheticEvent? in
+            if case let .postHID(event) = step, event.kind != .moved { return event }
             return nil
         }
-        XCTAssertEqual(posts.map(\.clicks), [2, 2])
+        XCTAssertEqual(posts.map(\.clicks), [2, 2], "двойной щелчок (выделить слово) — событиями HID пути warp")
         XCTAssertEqual(posts.map(\.flags), [.maskShift, .maskShift])
-        XCTAssertTrue(posts.allSatisfy { $0.windowNumber == 9 && $0.windowOrigin != nil })
     }
 
     func testBackgroundDragAndMenuStillHandOff() {
@@ -194,5 +186,35 @@ final class AXClickTests: XCTestCase {
                      AXClickTarget.Node(role: "AXWebArea"), AXClickTarget.Node(role: "AXTextArea", focusSettable: true)]
         XCTAssertNil(AXClickTarget.choose(chain), "выше веб-страницы не поднимаемся")
         XCTAssertNil(AXClickTarget.choose([AXClickTarget.Node(role: "AXTextArea", focusSettable: false)]), "поле, которому нельзя дать фокус")
+    }
+}
+
+final class AXFieldNearTests: XCTestCase {
+    let field = CGRect(x: 2218, y: 1793, width: 375, height: 36)
+
+    func testFieldUnderGroupIsFound() {
+        // ChatGPT (test15): под точкой — AXGroup, поле — среди потомков, точка в его рамке.
+        let point = CGPoint(x: field.midX, y: field.midY)
+        let candidates: [(role: String, frame: CGRect, focusSettable: Bool)] = [
+            ("AXTextArea", CGRect(x: 2218, y: 900, width: 375, height: 36), true),
+            ("AXTextArea", field, true),
+        ]
+        XCTAssertEqual(AXClickTarget.nearestField(point, candidates: candidates), 1)
+    }
+
+    func testToleranceAndSmallerWins() {
+        let near = CGPoint(x: field.midX, y: field.maxY + 8)
+        XCTAssertEqual(AXClickTarget.nearestField(near, candidates: [("AXTextArea", field, true)]), 0, "в пределах 10 pt — годится")
+        let far = CGPoint(x: field.midX, y: field.maxY + 30)
+        XCTAssertNil(AXClickTarget.nearestField(far, candidates: [("AXTextArea", field, true)]))
+        let big = CGRect(x: 2000, y: 1700, width: 900, height: 300)
+        let point = CGPoint(x: field.midX, y: field.midY)
+        XCTAssertEqual(AXClickTarget.nearestField(point, candidates: [("AXTextArea", big, true), ("AXTextField", field, true)]), 1,
+                       "оба содержат точку — меньшее")
+    }
+
+    func testOnlyFocusableTextRoles() {
+        let point = CGPoint(x: field.midX, y: field.midY)
+        XCTAssertNil(AXClickTarget.nearestField(point, candidates: [("AXGroup", field, true), ("AXTextArea", field, false)]))
     }
 }
