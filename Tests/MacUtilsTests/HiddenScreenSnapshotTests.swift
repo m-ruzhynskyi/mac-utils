@@ -97,6 +97,7 @@ private struct MenuPreview: View {
                 case .header(let t): Text(t.uppercased()).font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
                 case .toggle(let t, let on, let key): line(t, check: on, key: key)
                 case .showWindow(let t, let key, _): line(t, check: false, key: key)
+                case .alwaysOnTop(let on): line("Окно ИИ поверх всех окон", check: on, key: nil)
                 case .app(_, let name, let on): line(name, check: on, key: nil).padding(.leading, 12)
                 case .addApp: line("Добавить программу…", check: false, key: nil).padding(.leading, 12)
                 case .returnAll: line("Вернуть все окна на экран", check: false, key: nil)

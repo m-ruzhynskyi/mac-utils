@@ -61,8 +61,8 @@ package final class MirrorStripPanel: NSPanel {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 480, height: Self.height),
                    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         sharingType = .none
-        level = .floating
-        isFloatingPanel = true
+        // Уровень — как у зеркала (обычное окно или «поверх всех»), ставится при `attach`.
+        level = .normal
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         isOpaque = false
@@ -88,6 +88,7 @@ package final class MirrorStripPanel: NSPanel {
         }
         guard let window else { orderOut(nil); return }
         setFrame(Self.frame(above: window.frame), display: true)
+        level = window.level
         if parent !== window { window.addChildWindow(self, ordered: .above) }
     }
 

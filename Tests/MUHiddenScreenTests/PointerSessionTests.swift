@@ -10,7 +10,7 @@ final class PointerSessionTests: XCTestCase {
     let cursor = CGPoint(x: 300, y: 200)
 
     func testLeftClickWarpsClicksAndReturnsInOnePass() {
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         XCTAssertEqual(session.down(.left, at: CGPoint(x: 100, y: 50), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor), [],
                        "по нажатию ничего: ещё не ясно, щелчок это или перетаскивание")
         let steps = session.up(mapping: mapping, windowNumber: 7)
@@ -26,7 +26,7 @@ final class PointerSessionTests: XCTestCase {
     }
 
     func testDoubleClickKeepsClickCount() {
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         _ = session.down(.left, at: CGPoint(x: 10, y: 10), clicks: 2, flags: .maskShift, mapping: mapping, windowNumber: 7, cursor: cursor)
         let posts = session.up(mapping: mapping, windowNumber: 7).compactMap { step -> SyntheticEvent? in
             if case let .postHID(event) = step, event.kind != .moved { return event }
@@ -39,20 +39,20 @@ final class PointerSessionTests: XCTestCase {
 
     func testClickOnLetterboxIsIgnored() {
         let wide = MirrorMapping(viewSize: CGSize(width: 600, height: 300), target: CGRect(x: 0, y: 0, width: 800, height: 600))
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         XCTAssertEqual(session.down(.left, at: CGPoint(x: 20, y: 100), clicks: 1, flags: [], mapping: wide, windowNumber: 1, cursor: cursor), [])
         XCTAssertEqual(session.up(mapping: wide, windowNumber: 1), [])
     }
 
     func testSmallMovementIsStillAClick() {
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         _ = session.down(.left, at: CGPoint(x: 100, y: 50), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor)
         XCTAssertEqual(session.dragged(to: CGPoint(x: 101, y: 51), mapping: mapping), [])
         XCTAssertEqual(session.up(mapping: mapping, windowNumber: 7).first, .hideCursor)
     }
 
     func testDragHandsTheCursorOverUntilButtonUp() {
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         _ = session.down(.left, at: CGPoint(x: 100, y: 50), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor)
         let steps = session.dragged(to: CGPoint(x: 110, y: 50), mapping: mapping)
         XCTAssertEqual(steps, [
@@ -73,7 +73,7 @@ final class PointerSessionTests: XCTestCase {
     }
 
     func testRightClickOpensMenuAndWaits() {
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         let steps = session.down(.right, at: CGPoint(x: 200, y: 150), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor)
         XCTAssertEqual(steps.first, .activateTarget)
         XCTAssertEqual(steps.last, .beginHandoff(.menu))
@@ -82,7 +82,7 @@ final class PointerSessionTests: XCTestCase {
     }
 
     func testScrollHandoffDoesNotActivate() {
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         let steps = session.scroll(dx: 0, dy: -4, precise: true, at: CGPoint(x: 10, y: 10), mapping: mapping, windowNumber: 7)
         XCTAssertEqual(steps, [.warp(CGPoint(x: 2020, y: 1020)),
                                .postHID(SyntheticEvent(kind: .scroll(dx: 0, dy: -8, pixels: true), location: CGPoint(x: 2020, y: 1020))),
@@ -128,7 +128,7 @@ final class PointerSessionTests: XCTestCase {
     }
 
     func testHoverPostsMovesWithoutActivationAndDeduplicates() {
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         XCTAssertEqual(session.hover(at: CGPoint(x: 100, y: 50), mapping: mapping, windowNumber: 7),
                        [.postToPid(SyntheticEvent(kind: .moved, location: CGPoint(x: 2200, y: 1100), windowNumber: 7,
                                                   windowOrigin: CGPoint(x: 2000, y: 1000)))],
@@ -160,7 +160,7 @@ final class PointerSessionTests: XCTestCase {
     }
 
     func testHoverIsSilentWhileMouseIsBusy() {
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         _ = session.down(.left, at: CGPoint(x: 100, y: 50), clicks: 1, flags: [], mapping: mapping, windowNumber: 7, cursor: cursor)
         XCTAssertEqual(session.hover(at: CGPoint(x: 120, y: 60), mapping: mapping, windowNumber: 7), [], "кнопка нажата")
         _ = session.dragged(to: CGPoint(x: 130, y: 60), mapping: mapping)
@@ -169,7 +169,7 @@ final class PointerSessionTests: XCTestCase {
 
     func testHoverOverMirrorMarginActsAsExit() {
         let wide = MirrorMapping(viewSize: CGSize(width: 600, height: 300), target: CGRect(x: 2000, y: 1000, width: 800, height: 600))
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         _ = session.hover(at: CGPoint(x: 300, y: 150), mapping: wide, windowNumber: 7)
         XCTAssertEqual(session.hover(at: CGPoint(x: 10, y: 150), mapping: wide, windowNumber: 7).count, 1, "поле сбоку — снять наведение")
         XCTAssertNil(session.lastHover)
@@ -295,20 +295,20 @@ final class ShortcutTests: XCTestCase {
     let paste = PasteKeystroke.events()
 
     func testActiveModeActivatesWaitsAndReturns() {
-        let steps = PointerSession().shortcut(paste, mode: .active)
+        let steps = PointerSession(clickMode: .warp).shortcut(paste, mode: .active)
         XCTAssertEqual(steps, [.activateTarget, .wait(PointerSession.activationSettle), .postToPid(paste[0]), .postToPid(paste[1]),
                                .wait(PointerSession.shortcutSettle), .returnFocus],
                        "643b753: ⌘C/⌘V уходили, когда Claude ещё не получил активацию — пауза после неё")
     }
 
     func testHIDAndInactiveModes() {
-        XCTAssertEqual(PointerSession().shortcut(paste, mode: .hid).filter { if case .postHID = $0 { return true }; return false }.count, 2)
-        XCTAssertEqual(PointerSession().shortcut(paste, mode: .inactive), [.postToPid(paste[0]), .postToPid(paste[1])])
-        XCTAssertEqual(PointerSession().shortcut([], mode: .active), [])
+        XCTAssertEqual(PointerSession(clickMode: .warp).shortcut(paste, mode: .hid).filter { if case .postHID = $0 { return true }; return false }.count, 2)
+        XCTAssertEqual(PointerSession(clickMode: .warp).shortcut(paste, mode: .inactive), [.postToPid(paste[0]), .postToPid(paste[1])])
+        XCTAssertEqual(PointerSession(clickMode: .warp).shortcut([], mode: .active), [])
     }
 
     func testDuringHandoffProgramIsAlreadyActive() {
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         let mapping = MirrorMapping(viewSize: CGSize(width: 400, height: 300), target: CGRect(x: 0, y: 0, width: 400, height: 300))
         _ = session.down(.right, at: CGPoint(x: 10, y: 10), clicks: 1, flags: [], mapping: mapping, windowNumber: 1, cursor: .zero)
         XCTAssertEqual(session.shortcut(paste, mode: .active), [.postToPid(paste[0]), .postToPid(paste[1])])

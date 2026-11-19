@@ -55,6 +55,8 @@ final class HiddenScreenRulesTests: XCTestCase {
         XCTAssertTrue(menu.contains(.showWindow(title: "Спрятать окно ИИ", key: "⌥Space", enabled: true)))
         XCTAssertTrue(menu.contains(.app(bundleID: "com.openai.chat", name: "ChatGPT", on: true)))
         XCTAssertTrue(menu.contains(.addApp))
+        XCTAssertTrue(menu.contains(.alwaysOnTop(on: false)), "«поверх всех окон» по умолчанию выключено")
+        XCTAssertTrue(HiddenScreenRules.menu(.demo, toggleKey: "x", windowKey: "y", onTop: true).contains(.alwaysOnTop(on: true)))
         var off = HiddenScreenState()
         off.apps = HiddenScreenState.demo.apps.map { var a = $0; a.windowCount = 0; return a }
         let offMenu = HiddenScreenRules.menu(off, toggleKey: "x", windowKey: "y")
@@ -79,9 +81,22 @@ final class HiddenScreenRulesTests: XCTestCase {
 
 final class PreCallRulesTests: XCTestCase {
     func testDock() {
-        XCTAssertEqual(PreCallRules.dock(autohide: true).level, .ok)
-        XCTAssertEqual(PreCallRules.dock(autohide: false).level, .attention)
-        XCTAssertEqual(PreCallRules.dock(autohide: nil).level, .attention)
+        // Сторож края Dock включён и автоскрытие есть — «ок».
+        XCTAssertEqual(PreCallRules.dock(autohide: true, away: .ready).level, .ok)
+        XCTAssertEqual(PreCallRules.dock(autohide: true, away: .ready).title, "Dock не выезжает в звонке")
+        // Автоскрытие само по себе не «ок»: Dock выезжает у края, значки ИИ видны (HSCR-43).
+        let autohide = PreCallRules.dock(autohide: true, away: .disabled)
+        XCTAssertEqual(autohide.level, .attention)
+        XCTAssertEqual(autohide.title, "Dock выезжает у края экрана")
+        XCTAssertEqual(PreCallRules.dock(autohide: nil, away: .disabled).level, .attention)
+        // Без автоскрытия сторож края не поможет — честно «внимание» (HSCR-45).
+        let blocked = PreCallRules.dock(autohide: false, away: DockAway.readiness(enabled: true, autohide: false))
+        XCTAssertEqual(blocked.level, .attention)
+        XCTAssertEqual(blocked.title, "Dock виден в звонке")
+        XCTAssertTrue(blocked.detail.hasPrefix(DockAway.noAutohideReason))
+        XCTAssertTrue(PreCallRules.dock(autohide: true, away: .ready).detail.contains("ни на одном мониторе"))
+        XCTAssertEqual(PreCallRules.all(dockAutohide: true, dockAway: .disabled, notifications: .off(apps: []), output: .external,
+                                        mainDisplayName: nil).first?.level, .attention)
     }
 
     func testNotifications() {

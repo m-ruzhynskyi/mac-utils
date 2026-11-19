@@ -7,12 +7,17 @@ public final class WindowMover {
     public init() {}
 
     /// Видимые окна программ с этими pid (`kCGWindowListOptionOnScreenOnly` — окна всех дисплеев, включая скрытый).
-    public func windows(pids: Set<pid_t>) -> [HiddenWindowInfo] {
+    /// Окна всех программ на экране (без рабочего стола) — проверка тёплого дисплея.
+    public func allWindows() -> [HiddenWindowInfo] { windows(only: nil) }
+
+    public func windows(pids: Set<pid_t>) -> [HiddenWindowInfo] { windows(only: pids) }
+
+    private func windows(only pids: Set<pid_t>?) -> [HiddenWindowInfo] {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
         return list.compactMap { info in
-            guard let pid = info[kCGWindowOwnerPID as String] as? pid_t, pids.contains(pid),
+            guard let pid = info[kCGWindowOwnerPID as String] as? pid_t, pids?.contains(pid) ?? true,
                   let id = info[kCGWindowNumber as String] as? CGWindowID,
                   let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
                   let frame = CGRect(dictionaryRepresentation: boundsDict) else { return nil }

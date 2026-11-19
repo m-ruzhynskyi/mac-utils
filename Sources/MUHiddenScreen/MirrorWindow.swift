@@ -277,3 +277,13 @@ public final class WindowStream: NSObject, SCStreamOutput, SCStreamDelegate {
         DispatchQueue.main.async { onStop?(error) }
     }
 }
+
+/// Уровень зеркала (HSCR-43): обычное окно по умолчанию, «поверх всех окон» — только если пользователь включил.
+public enum MirrorLevel {
+    /// Ключ настройки «Окно ИИ поверх всех окон» (страница скрытого экрана и пункт меню; по умолчанию — нет).
+    public static let onTopKey = "hiddenScreenAlwaysOnTop"
+
+    public static var onTop: Bool { UserDefaults.standard.object(forKey: onTopKey) as? Bool ?? false }
+
+    public static func level(onTop: Bool) -> NSWindow.Level { onTop ? .floating : .normal }
+}

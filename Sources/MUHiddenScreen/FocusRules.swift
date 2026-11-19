@@ -220,6 +220,10 @@ public enum MirrorChoice {
         return windows.first(where: { $0.count > 0 })?.app
     }
 
+    /// Чью программу искать первой: последний выбор (человека в полоске или автовыбора) важнее последнего удачного
+    /// показа — иначе после закрытия окна зеркало вернулось бы к прежней программе, а не к выбранной (ревью 1111).
+    public static func preferred(lastChoice: HiddenApp?, shown: HiddenApp?) -> HiddenApp? { lastChoice ?? shown }
+
     /// Повторная попытка показать ту же программу — не чаще.
     public static let retry: TimeInterval = 2
 
@@ -227,6 +231,37 @@ public enum MirrorChoice {
         guard let last, last.app == app else { return true }
         return now - last.at >= retry
     }
+}
+
+/// Сколько раз автовыбор пробует показать одну программу, если показ не удаётся (окно есть, а поток не стартует):
+/// `limit` попыток подряд, потом пауза `pause` (одна строка в журнал), потом снова. Удача или другая программа — заново.
+public struct MirrorRetry: Equatable, Sendable {
+    public static let limit = 3
+    public static let pause: TimeInterval = 30
+
+    public private(set) var app: HiddenApp?
+    public private(set) var attempts = 0
+    public private(set) var pausedUntil: TimeInterval = 0
+
+    public init() {}
+
+    /// `allow` — пробовать сейчас; `pauseStarted` — пауза началась только что (записать в журнал).
+    public mutating func next(_ app: HiddenApp, now: TimeInterval) -> (allow: Bool, pauseStarted: Bool) {
+        if app != self.app {
+            self = MirrorRetry()
+            self.app = app
+        }
+        if now < pausedUntil { return (false, false) }
+        if attempts >= Self.limit {
+            attempts = 0
+            pausedUntil = now + Self.pause
+            return (false, true)
+        }
+        attempts += 1
+        return (true, false)
+    }
+
+    public mutating func reset() { self = MirrorRetry() }
 }
 
 /// Щелчок по пустому зеркалу (окна в нём нет): не делать Mac Utils активной — у неё нет строки меню, macOS показала бы
@@ -238,4 +273,113 @@ public enum EmptyMirrorClick: Equatable, Sendable {
     case swallow
 
     public static func policy(hasTitleBar: Bool) -> EmptyMirrorClick { hasTitleBar ? .swallow : .passThrough }
+
+    /// Нажатия, которые пустое отладочное зеркало поглощает, и их отпускания (у средней кнопки тоже — ревью 1111).
+    public static let presses: [CGEventType] = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+    public static let releases: [CGEventType] = [.leftMouseUp, .rightMouseUp, .otherMouseUp]
+    /// Перехват нажатий над зеркалом слушает их все и протягивание левой кнопкой.
+    public static let tapTypes: [CGEventType] = [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown, .rightMouseUp,
+                                                 .otherMouseDown, .otherMouseUp]
+}
+
+/// Журнал щелчка по зеркалу (HSCR-43): какая программа была активной до щелчка, какие становились активными в течение
+/// `window` после него и какая активна в конце. Смена во время щелчка — это и есть «мигание» в демонстрации.
+public struct ClickTrace: Equatable, Sendable {
+    public struct Change: Equatable, Sendable {
+        public var bundle: String
+        public var at: TimeInterval
+    }
+
+    public static let window: TimeInterval = 1.0
+
+    /// Путь щелчка (режим; после щелчка через AX — что именно сделано).
+    public var path: String
+    public let before: String
+    public let started: TimeInterval
+    public private(set) var changes: [Change] = []
+
+    public init(path: String, before: String, started: TimeInterval) {
+        self.path = path
+        self.before = before
+        self.started = started
+    }
+
+    public mutating func note(_ bundle: String, at time: TimeInterval) {
+        guard time - started <= Self.window else { return }
+        changes.append(Change(bundle: bundle, at: time))
+    }
+
+    /// Активная программа менялась (хоть раз стала другой, даже если потом вернулась).
+    public var blinked: Bool { changes.contains { $0.bundle != before } }
+
+    /// «щелчок: активная до X, во время [+12 мс Y, +95 мс X], после X — мигание (смен 2); путь background».
+    public func line(after: String) -> String {
+        let during = changes.isEmpty ? "—"
+            : changes.map { "+\(Int(((($0.at - started) * 1000)).rounded())) мс \($0.bundle)" }.joined(separator: ", ")
+        let verdict = blinked || after != before ? "мигание (смен \(changes.count))" : "без смены активной"
+        return "щелчок: активная до \(before), во время [\(during)], после \(after) — \(verdict); путь \(path)"
+    }
+}
+
+/// Что сделать щелчком через AX с элементом под точкой (HSCR-45). `nodes` — элемент и его предки (сначала сам элемент).
+public enum AXClickTarget {
+    public struct Node: Equatable, Sendable {
+        public var role: String
+        public var actions: [String]
+        /// `AXFocused` можно установить.
+        public var focusSettable: Bool
+
+        public init(role: String, actions: [String] = [], focusSettable: Bool = false) {
+            self.role = role
+            self.actions = actions
+            self.focusSettable = focusSettable
+        }
+    }
+
+    public enum Action: String, Equatable, Sendable {
+        case focus = "фокус"
+        case press = "нажать"
+    }
+
+    public static let textRoles: Set<String> = ["AXTextArea", "AXTextField", "AXComboBox", "AXSearchField"]
+    public static let pressRoles: Set<String> = ["AXButton", "AXLink", "AXCheckBox", "AXRadioButton", "AXMenuButton",
+                                                 "AXPopUpButton", "AXDisclosureTriangle", "AXTab", "AXSwitch"]
+    /// Выше них не поднимаемся: щелчок пришёлся не в элемент управления.
+    public static let stopRoles: Set<String> = ["AXWebArea", "AXWindow", "AXApplication", "AXScrollArea", "AXSheet"]
+    public static let depth = 8
+
+    /// Только обычный одиночный щелчок без клавиш: двойной (выделить слово) и с клавишами (⌘-щелчок по ссылке) — событиями.
+    public static func applies(clicks: Int, flags: CGEventFlags) -> Bool {
+        clicks <= 1 && flags.intersection([.maskCommand, .maskShift, .maskAlternate, .maskControl]).isEmpty
+    }
+
+    /// Насколько поле может быть в стороне от точки щелчка (рамки в AX и в зеркале расходятся на пиксели).
+    public static let fieldTolerance: CGFloat = 10
+
+    /// Поле под точкой не нашлось в цепочке предков (ChatGPT: поверх поля — группа, test15) — поле среди потомков,
+    /// чья рамка содержит точку или в пределах `fieldTolerance`: ближайшее, при равенстве — меньшее.
+    public static func nearestField(_ point: CGPoint, candidates: [(role: String, frame: CGRect, focusSettable: Bool)]) -> Int? {
+        var best: (index: Int, distance: CGFloat, area: CGFloat)?
+        for (index, candidate) in candidates.enumerated()
+        where textRoles.contains(candidate.role) && candidate.focusSettable && candidate.frame.width > 0 && candidate.frame.height > 0 {
+            let dx = max(candidate.frame.minX - point.x, 0, point.x - candidate.frame.maxX)
+            let dy = max(candidate.frame.minY - point.y, 0, point.y - candidate.frame.maxY)
+            let distance = hypot(dx, dy)
+            guard distance <= fieldTolerance else { continue }
+            let area = candidate.frame.width * candidate.frame.height
+            if best == nil || distance < best!.distance || (distance == best!.distance && area < best!.area) {
+                best = (index, distance, area)
+            }
+        }
+        return best?.index
+    }
+
+    public static func choose(_ nodes: [Node]) -> (index: Int, action: Action)? {
+        for (index, node) in nodes.prefix(depth).enumerated() {
+            if stopRoles.contains(node.role) { return nil }
+            if textRoles.contains(node.role), node.focusSettable { return (index, .focus) }
+            if pressRoles.contains(node.role), node.actions.contains("AXPress") { return (index, .press) }
+        }
+        return nil
+    }
 }
