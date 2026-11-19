@@ -72,6 +72,8 @@ package enum HiddenScreenRules {
         case header(String)
         case toggle(title: String, on: Bool, key: String)
         case showWindow(title: String, key: String, enabled: Bool)
+        /// «Окно ИИ поверх всех окон» (по умолчанию выключено).
+        case alwaysOnTop(on: Bool)
         case app(bundleID: String, name: String, on: Bool)
         case addApp
         case returnAll(enabled: Bool)
@@ -79,11 +81,12 @@ package enum HiddenScreenRules {
     }
 
     /// Раздел «Скрытый экран» в меню Mac Utils. `toggleKey`/`windowKey` — подписи сочетаний (⌥⇧H, ⌥Space).
-    package static func menu(_ state: HiddenScreenState, toggleKey: String, windowKey: String) -> [MenuEntry] {
+    package static func menu(_ state: HiddenScreenState, toggleKey: String, windowKey: String, onTop: Bool = false) -> [MenuEntry] {
         var list: [MenuEntry] = [
             .header("Скрытый экран"),
             .toggle(title: "Скрытый экран включён", on: state.isEnabled, key: toggleKey),
             .showWindow(title: state.mirrorShown ? "Спрятать окно ИИ" : "Показать окно ИИ", key: windowKey, enabled: state.isEnabled),
+            .alwaysOnTop(on: onTop),
             .separator,
         ]
         list += state.apps.map { .app(bundleID: $0.bundleID, name: $0.name, on: true) }
@@ -110,14 +113,27 @@ package struct PreCallCheck: Identifiable, Equatable {
 package enum PreCallRules {
     // MARK: Dock
 
-    /// `autohide` из `com.apple.dock`: nil — ключа нет (значит, Dock не прячется).
-    package static func dock(autohide: Bool?) -> PreCallCheck {
-        if autohide == true {
-            return PreCallCheck(id: "dock", level: .ok, title: "Dock прячется сам",
-                                detail: "Иначе в нём видны значки Claude и ChatGPT", action: nil)
+    /// `autohide` из `com.apple.dock` (nil — ключа нет, Dock не прячется) и `away` — уберёт ли скрытый экран Dock
+    /// с основного экрана. Автоскрытие само по себе не «ок»: Dock выезжает у края, и значки ИИ видны в звонке (HSCR-43).
+    package static func dock(autohide: Bool?, away: DockAway.Readiness) -> PreCallCheck {
+        switch away {
+        case .ready:
+            return PreCallCheck(id: "dock", level: .ok, title: "Dock не выезжает в звонке",
+                                detail: "Пока скрытый экран включён, Dock убран с основного экрана. Значков Claude и ChatGPT не видно",
+                                action: nil)
+        case let .unavailable(reason):
+            return PreCallCheck(id: "dock", level: .attention, title: "Dock может выехать в звонке",
+                                detail: "\(reason). В Dock видны значки Claude и ChatGPT: не подводите курсор к краю с Dock или показывайте в звонке окно, а не весь экран",
+                                action: nil)
+        case .disabled:
+            if autohide == true {
+                return PreCallCheck(id: "dock", level: .attention, title: "Dock выезжает у края экрана",
+                                    detail: "В нём видны значки Claude и ChatGPT. Включите «Убирать Dock с экрана в звонке» или показывайте в звонке окно",
+                                    action: nil)
+            }
+            return PreCallCheck(id: "dock", level: .attention, title: "Dock виден",
+                                detail: "В нём видны значки Claude и ChatGPT. Включите «Убирать Dock с экрана в звонке»", action: nil)
         }
-        return PreCallCheck(id: "dock", level: .attention, title: "Dock виден",
-                            detail: "В нём видны значки Claude и ChatGPT. Включите автоскрытие Dock (⌥⌘D)", action: nil)
     }
 
     // MARK: Уведомления
@@ -190,9 +206,9 @@ package enum PreCallRules {
     }
 
     /// Все проверки по порядку из макета.
-    package static func all(dockAutohide: Bool?, notifications: NotificationsState, output: OutputKind,
-                            mainDisplayName: String?) -> [PreCallCheck] {
-        [dock(autohide: dockAutohide), self.notifications(notifications), headphones(output), shareHint(mainDisplayName: mainDisplayName)]
+    package static func all(dockAutohide: Bool?, dockAway: DockAway.Readiness = .ready, notifications: NotificationsState,
+                            output: OutputKind, mainDisplayName: String?) -> [PreCallCheck] {
+        [dock(autohide: dockAutohide, away: dockAway), self.notifications(notifications), headphones(output), shareHint(mainDisplayName: mainDisplayName)]
     }
 
     /// Все ли проверки пройдены (подсказка про экран не считается).

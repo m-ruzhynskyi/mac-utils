@@ -5,6 +5,8 @@ import Foundation
 package enum HiddenScreenUI {
     package static var controller: HiddenScreenControlling = StubHiddenScreenController(HiddenScreenState())
 
-    /// Включённость «Окна ИИ поверх всех окон» хранит интерфейс (движок читает тот же ключ).
-    package static let alwaysOnTopKey = "hiddenScreenAlwaysOnTop"
+    /// Включённость «Окна ИИ поверх всех окон» хранит интерфейс (движок читает тот же ключ; по умолчанию — нет).
+    package static let alwaysOnTopKey = MirrorLevel.onTopKey
+    /// «Убирать Dock с экрана в звонке» (по умолчанию — да).
+    package static let dockAwayKey = DockAway.enabledKey
 }

@@ -9,7 +9,8 @@ import MUHiddenScreen
 
 struct HiddenScreenPage: View {
     @StateObject private var store: HiddenScreenStore
-    @AppStorage(HiddenScreenUI.alwaysOnTopKey) private var alwaysOnTop = true
+    @AppStorage(HiddenScreenUI.alwaysOnTopKey) private var alwaysOnTop = false
+    @AppStorage(HiddenScreenUI.dockAwayKey) private var dockAway = true
     @State private var checks: [PreCallCheck]
 
     /// `controller` и `checks` задаются для снимков и тестов; в приложении — живой движок и чтение системы.
@@ -40,11 +41,16 @@ struct HiddenScreenPage: View {
             ListCard {
                 HiddenScreenKeyRow(action: .hiddenScreen, title: "Включить и выключить")
                 HiddenScreenKeyRow(action: .hiddenScreenWindow, title: "Показать или спрятать окно ИИ")
-                ToggleRow("Окно ИИ поверх всех окон", subtitle: "Не закрывается другими программами, пока вы в звонке",
+                ToggleRow("Окно ИИ поверх всех окон",
+                          subtitle: alwaysOnTop ? "Не закрывается другими программами, пока вы в звонке"
+                              : "Обычное окно: другие окна его перекрывают, щелчок по нему поднимает",
                           systemImage: "square.3.layers.3d.top.filled", isOn: $alwaysOnTop)
             }
             GroupLabel("Перед звонком")
             ListCard {
+                ToggleRow("Убирать Dock с экрана в звонке",
+                          subtitle: "Пока скрытый экран включён, Dock не выезжает на основном экране: в нём видны значки ИИ",
+                          systemImage: "dock.rectangle", isOn: $dockAway)
                 ForEach(checks) { check in
                     FeatureStatusRow(tone: check.level == .ok ? .success : .warning, label: check.title, detail: check.detail,
                                      actions: check.action.map { act in [StatusAction(title: "Открыть настройки") { HiddenScreenSettingsLinks.open(act) }] } ?? [])
@@ -53,6 +59,7 @@ struct HiddenScreenPage: View {
             Footnote("Выключили скрытый экран — окна Claude и ChatGPT возвращаются на ваш экран туда, где были.")
         }
         .onAppear { checks = checks.isEmpty ? PreCallProbe.run() : checks }
+        .onChange(of: dockAway) { _, _ in checks = PreCallProbe.run() }
     }
 }
 

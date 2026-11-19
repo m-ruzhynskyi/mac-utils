@@ -3,7 +3,13 @@ import Foundation
 
 /// Как щелчок из зеркала попадает в программу.
 public enum ClickMode: String, Sendable, CaseIterable {
-    /// Настоящий курсор на миг переносится на скрытый дисплей, нажатие — через HID (по умолчанию).
+    /// Без активации (по умолчанию, HSCR-43): настоящий курсор на миг переносится в точку окна на скрытом дисплее
+    /// (Chromium сверяет окно под курсором), движение — через HID, нажатие и отпускание — `postToPid` прямо в процесс
+    /// с точкой в окне. WindowServer нажатия не видит и программу не активирует: строка меню и заголовок окна
+    /// программы пользователя не мигают в демонстрации.
+    case background
+    /// Настоящий курсор на миг переносится на скрытый дисплей, нажатие — через HID; программа ИИ на это время
+    /// становится активной, потом активность возвращается (до HSCR-43 — по умолчанию; видно как мигание фокуса).
     case warp
     /// `postToPid` с номером окна в полях 91/92. На Mac пользователя (13.11) не работает ни в Claude, ни в ChatGPT — для опытов.
     case pid
@@ -93,7 +99,7 @@ public struct PointerSession: Sendable {
     /// Куда последним ушло наведение (точка на скрытом дисплее): одинаковые движения не повторяются.
     public private(set) var lastHover: CGPoint?
 
-    public init(clickMode: ClickMode = .warp, scrollMode: ScrollMode = .handoff) {
+    public init(clickMode: ClickMode = .background, scrollMode: ScrollMode = .handoff) {
         self.clickMode = clickMode
         self.scrollMode = scrollMode
     }
@@ -115,7 +121,7 @@ public struct PointerSession: Sendable {
         case (.right, .pid):
             return [.postToPid(Self.mouse(.rightDown, target, clicks, flags, windowNumber)),
                     .postToPid(Self.mouse(.rightUp, target, clicks, flags, windowNumber))]
-        case (.right, .warp):
+        case (.right, .warp), (.right, .background):
             // Меню открывается по нажатию и живёт в своём цикле: курсор остаётся на скрытом дисплее, пока меню не закроется.
             state = .handoff(.menu, activated: true)
             return [.activateTarget, .warp(target),
@@ -126,7 +132,7 @@ public struct PointerSession: Sendable {
     }
 
     public mutating func dragged(to point: CGPoint, mapping: MirrorMapping) -> [PointerStep] {
-        guard case let .pressed(down, target, clicks, flags, _) = state, clickMode == .warp,
+        guard case let .pressed(down, target, clicks, flags, _) = state, clickMode != .pid,
               hypot(point.x - down.x, point.y - down.y) >= dragThreshold else { return [] }
         let now = mapping.toTarget(Self.clamp(point, to: mapping.contentRect)) ?? target
         state = .handoff(.drag, activated: true)
@@ -146,6 +152,13 @@ public struct PointerSession: Sendable {
         switch clickMode {
         case .pid:
             return [.postToPid(down), .postToPid(up)]
+        case .background:
+            let origin = mapping.target.origin
+            let press = SyntheticEvent(kind: .leftDown, location: target, clicks: clicks, flags: flags, windowNumber: windowNumber, windowOrigin: origin)
+            let release = SyntheticEvent(kind: .leftUp, location: target, clicks: clicks, flags: flags, windowNumber: windowNumber, windowOrigin: origin)
+            // Курсор остаётся над окном, пока программа разбирает нажатие (события в процесс идут через её очередь).
+            return [.hideCursor, .warp(target), .postHID(Self.mouse(.moved, target, 0, flags, 0)), .wait(Self.hoverSettle),
+                    .postToPid(press), .postToPid(release), .wait(Self.backgroundSettle), .warp(cursor), .showCursor]
         case .warp:
             // Пауза перед возвратом: программа должна разобрать нажатие, пока она активна. Иначе (768c91b, 14.11) нажатие
             // доходило до уже неактивного Claude, и он через 0,1–1 с активировал себя сам.
@@ -196,6 +209,8 @@ public struct PointerSession: Sendable {
     public static let activationSettle: TimeInterval = 0.03
     /// Наведение перед нажатием: программа успевает показать кнопку «при наведении».
     public static let hoverSettle: TimeInterval = 0.04
+    /// Щелчок без активации: сколько курсор ждёт над окном, пока программа разберёт нажатие из своей очереди.
+    public static let backgroundSettle: TimeInterval = 0.05
     /// Сколько ждать после щелчка (курсор уже на зеркале), прежде чем вернуть активность программе пользователя.
     public static let clickSettle: TimeInterval = 0.05
 

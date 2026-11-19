@@ -239,3 +239,41 @@ public enum EmptyMirrorClick: Equatable, Sendable {
 
     public static func policy(hasTitleBar: Bool) -> EmptyMirrorClick { hasTitleBar ? .swallow : .passThrough }
 }
+
+/// Журнал щелчка по зеркалу (HSCR-43): какая программа была активной до щелчка, какие становились активными в течение
+/// `window` после него и какая активна в конце. Смена во время щелчка — это и есть «мигание» в демонстрации.
+public struct ClickTrace: Equatable, Sendable {
+    public struct Change: Equatable, Sendable {
+        public var bundle: String
+        public var at: TimeInterval
+    }
+
+    public static let window: TimeInterval = 1.0
+
+    public let path: String
+    public let before: String
+    public let started: TimeInterval
+    public private(set) var changes: [Change] = []
+
+    public init(path: String, before: String, started: TimeInterval) {
+        self.path = path
+        self.before = before
+        self.started = started
+    }
+
+    public mutating func note(_ bundle: String, at time: TimeInterval) {
+        guard time - started <= Self.window else { return }
+        changes.append(Change(bundle: bundle, at: time))
+    }
+
+    /// Активная программа менялась (хоть раз стала другой, даже если потом вернулась).
+    public var blinked: Bool { changes.contains { $0.bundle != before } }
+
+    /// «щелчок: активная до X, во время [+12 мс Y, +95 мс X], после X — мигание (смен 2); путь background».
+    public func line(after: String) -> String {
+        let during = changes.isEmpty ? "—"
+            : changes.map { "+\(Int(((($0.at - started) * 1000)).rounded())) мс \($0.bundle)" }.joined(separator: ", ")
+        let verdict = blinked || after != before ? "мигание (смен \(changes.count))" : "без смены активной"
+        return "щелчок: активная до \(before), во время [\(during)], после \(after) — \(verdict); путь \(path)"
+    }
+}

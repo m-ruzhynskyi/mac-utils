@@ -276,7 +276,7 @@ final class MirrorFitTests: XCTestCase {
     func testHoverAndClickUseTheSamePointOfTheWindow() {
         let mapping = MirrorMapping(viewSize: MirrorFit.viewSize(window: refused.size, available: visible.size), target: refused)
         let point = CGPoint(x: 450, y: 12)
-        var session = PointerSession()
+        var session = PointerSession(clickMode: .warp)
         guard case let .postToPid(moved) = session.hover(at: point, mapping: mapping, windowNumber: 8567).first else {
             return XCTFail("наведение")
         }

@@ -16,7 +16,7 @@ package final class HiddenScreenMenuBuilder: NSObject {
 
     package func items(toggleKey: LayoutHotKey, windowKey: LayoutHotKey) -> [NSMenuItem] {
         let state = controller.state
-        return HiddenScreenRules.menu(state, toggleKey: toggleKey.title, windowKey: windowKey.title).map { entry in
+        return HiddenScreenRules.menu(state, toggleKey: toggleKey.title, windowKey: windowKey.title, onTop: MirrorLevel.onTop).map { entry in
             switch entry {
             case .separator: return .separator()
             case .header(let title):
@@ -30,6 +30,10 @@ package final class HiddenScreenMenuBuilder: NSObject {
             case .showWindow(let title, _, let enabled):
                 let item = make(title, #selector(toggleWindow), key: windowKey)
                 item.isEnabled = enabled
+                return item
+            case .alwaysOnTop(let on):
+                let item = make("Окно ИИ поверх всех окон", #selector(toggleOnTop), key: nil)
+                item.state = on ? .on : .off
                 return item
             case .app(let id, let name, let on):
                 let item = make(name, #selector(removeApp(_:)), key: nil)
@@ -75,6 +79,8 @@ package final class HiddenScreenMenuBuilder: NSObject {
 
     @objc private func toggle() { controller.setEnabled(!controller.state.isEnabled) }
     @objc private func toggleWindow() { controller.setMirrorShown(!controller.state.mirrorShown) }
+    /// Движок следит за этим ключом и сразу меняет уровень зеркала и полоски.
+    @objc private func toggleOnTop() { UserDefaults.standard.set(!MirrorLevel.onTop, forKey: MirrorLevel.onTopKey) }
     @objc private func removeApp(_ sender: NSMenuItem) {
         if let id = sender.representedObject as? String { controller.removeApp(id) }
     }

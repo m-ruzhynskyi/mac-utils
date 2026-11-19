@@ -16,13 +16,19 @@ public struct HiddenScreenOptions: Equatable, Sendable {
     public var hover: HoverMode = .peek
     /// Пометки «временное» во временном буфере вставки (`--hs-clip-marks=off` — без них).
     public var clipboardMarks = true
-    /// Размер скрытого дисплея в точках (HiDPI ×2).
+    /// Размер скрытого дисплея в точках (HiDPI ×2); фактический — не меньше основного экрана (`DockAway.displaySize`).
     public var displaySize: CGSize
+    /// Скрытый дисплей закрывает край Dock основного экрана (`--hs-dock=away|keep`); вместе с настройкой
+    /// `DockAway.enabledKey` (обе — да).
+    public var dockAway = true
+    /// При выключении дисплей не снимается, а уходит за угол и ждёт следующего включения (`--hs-warm=on|off`):
+    /// снятие и создание дисплея перестраивают раскладку — экран мигает.
+    public var keepWarm = true
 
     public static let defaultApps: [HiddenApp] = [.claude, .chatGPT]
     public static let defaultDisplaySize = CGSize(width: 1440, height: 900)
 
-    public init(apps: [HiddenApp] = HiddenScreenOptions.defaultApps, clickMode: ClickMode = .warp,
+    public init(apps: [HiddenApp] = HiddenScreenOptions.defaultApps, clickMode: ClickMode = .background,
                 scrollMode: ScrollMode = .handoff, displaySize: CGSize = HiddenScreenOptions.defaultDisplaySize) {
         self.apps = apps
         self.clickMode = clickMode
@@ -43,8 +49,8 @@ public struct HiddenScreenOptions: Equatable, Sendable {
         return result
     }
 
-    /// Ключ отладочного запуска: `open -a "Mac Utils" --args --hidden-screen-debug [--hs-apps=id,id] [--hs-click=warp|pid]
-    /// [--hs-scroll=handoff|pid] [--hs-keys=active|hid|inactive] [--hs-press=tap|mirror] [--hs-helper=on|off] [--hs-clip-marks=on|off] [--hs-hover=peek|pid|off] [--hs-activate=auto|public|skylight] [--hs-ax-dump] [--hs-size=1440x900]`.
+    /// Ключ отладочного запуска: `open -a "Mac Utils" --args --hidden-screen-debug [--hs-apps=id,id] [--hs-click=background|warp|pid]
+    /// [--hs-scroll=handoff|pid] [--hs-keys=active|hid|inactive] [--hs-press=tap|mirror] [--hs-helper=on|off] [--hs-clip-marks=on|off] [--hs-hover=peek|pid|off] [--hs-activate=auto|public|skylight] [--hs-dock=away|keep] [--hs-warm=on|off] [--hs-ax-dump] [--hs-size=1440x900]`.
     /// Без ключа — nil (обычный запуск). Ссылкой `macutils://` не включается.
     public static let debugFlag = "--hidden-screen-debug"
 
@@ -69,6 +75,10 @@ public struct HiddenScreenOptions: Equatable, Sendable {
                 if let mode = ActivationMode(rawValue: parts[1]) { options.activationMode = mode }
             case "--hs-hover":
                 options.hover = parts[1] == "on" ? .peek : HoverMode(rawValue: parts[1]) ?? options.hover
+            case "--hs-dock":
+                if parts[1] == "keep" { options.dockAway = false } else if parts[1] == "away" { options.dockAway = true }
+            case "--hs-warm":
+                if parts[1] == "off" { options.keepWarm = false } else if parts[1] == "on" { options.keepWarm = true }
             case "--hs-clip-marks":
                 options.clipboardMarks = parts[1] != "off"
             case "--hs-helper":

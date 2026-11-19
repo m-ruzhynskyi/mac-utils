@@ -45,6 +45,9 @@ public final class HiddenDisplay {
         case settingsRejected
     }
 
+    /// Производитель «MU» в описании дисплея: по нему скрытый дисплей узнаётся среди активных.
+    public static let vendorID: UInt32 = 0x4D55
+
     public let pointSize: CGSize
     public let hiDPI: Bool
     private var display: VirtualDisplayAPI?
@@ -76,7 +79,7 @@ public final class HiddenDisplay {
         descriptor.maxPixelsHigh = UInt32(pointSize.height * scale)
         // ~110 точек на дюйм: macOS считает дисплей обычным, а не телевизором.
         descriptor.sizeInMillimeters = CGSize(width: pointSize.width / 110 * 25.4, height: pointSize.height / 110 * 25.4)
-        descriptor.vendorID = 0x4D55   // «MU»
+        descriptor.vendorID = Self.vendorID   // «MU»
         descriptor.productID = 0x4853  // «HS»
         descriptor.serialNum = 1
         descriptor.terminationHandler = { _, _ in onTerminate() }
@@ -94,6 +97,16 @@ public final class HiddenDisplay {
     /// Убрать дисплей. Окна, которые на нём остались, macOS перенесёт на настоящий экран — прятать программы до вызова.
     public func close() {
         display = nil
+    }
+
+    /// Дисплей ещё в списке активных (тёплый дисплей мог снять сам macOS).
+    public static func isActive(_ id: CGDirectDisplayID) -> Bool {
+        guard id != kCGNullDirectDisplay else { return false }
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return false }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return false }
+        return ids.prefix(Int(count)).contains(id)
     }
 
     public static func physicalDisplays(excluding hidden: CGDirectDisplayID) -> [CGRect] {
