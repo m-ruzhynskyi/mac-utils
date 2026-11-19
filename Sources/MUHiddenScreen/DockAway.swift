@@ -37,6 +37,9 @@ public enum DockAway {
     /// Ключ настройки «Убирать Dock с экрана в звонке» (по умолчанию — да).
     public static let enabledKey = "hiddenScreenDockAway"
 
+    /// Последняя раскладка в этом запуске не закрыла край Dock (macOS отказала) — «Перед звонком» говорит об этом.
+    @MainActor public static var runtimeFailure: String?
+
     public static var isEnabled: Bool { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
 
     public static let spansDisplaysReason = "Dock всегда на основном экране: выключены отдельные пространства Spaces на дисплеях (Рабочий стол и Dock → Mission Control)"
@@ -159,9 +162,11 @@ public enum DockAway {
     }
 
     /// Для «Перед звонком»: сработает ли при текущей раскладке.
+    @MainActor
     public static func readiness(enabled: Bool = DockAway.isEnabled,
                                  base: CGSize = HiddenScreenOptions.defaultDisplaySize) -> Readiness {
         guard enabled else { return .disabled }
+        if let runtimeFailure { return .unavailable(runtimeFailure) }
         let settings = dockSettings()
         let mainID = CGMainDisplayID()
         let main = CGDisplayBounds(mainID)

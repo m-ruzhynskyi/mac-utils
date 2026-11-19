@@ -95,6 +95,8 @@ public final class HiddenScreenEngine {
     private var ownLayoutChangeAt: TimeInterval = 0
     /// Повторы показа одной программы автовыбором.
     private var mirrorRetry = MirrorRetry()
+    /// Итог раскладки для Dock одной строкой (самопроверка).
+    private(set) var dockSummary = "раскладки ещё не было"
     /// Зеркало попросили показать, пока дисплей ещё создаётся.
     private var mirrorRequested = false
     /// Только для отладки: дисплей в процессе Mac Utils, без помощника (`--hs-helper=off`).
@@ -233,17 +235,17 @@ public final class HiddenScreenEngine {
     /// без затемнения, курсор по-прежнему не пускаем.
     private func park(host: DisplayHosting, id: CGDirectDisplayID) {
         host.update(apps: [])
-        let rect: CGRect
         ownLayoutChangeAt = ProcessInfo.processInfo.systemUptime
-        do {
-            rect = try HiddenScreenLayout.place(id, origin: HiddenScreenLayout.cornerOrigin(id))
-        } catch {
-            rect = CGDisplayBounds(id)
-            Log.hiddenScreen.error("раскладка (за угол): \(String(describing: error), privacy: .public)")
-        }
+        let corner = HiddenScreenLayout.cornerOrigin(id)
+        let placed = HiddenScreenLayout.place(id, origin: corner)
         warm = (host, id)
+        guard placed.rect.origin == corner || !dockAwayApplied else {
+            // За угол не ушёл и стоит у края Dock — Dock остался бы недоступен: дисплей снимаем.
+            releaseWarm(reason: "за угол не переставить — Dock остался бы на скрытом дисплее")
+            return
+        }
         watchWarm(id)
-        Log.hiddenScreen.info("дисплей \(id) оставлен тёплым за углом \(String(describing: rect), privacy: .public), раскладка без затемнения")
+        Log.hiddenScreen.info("дисплей \(id) оставлен тёплым за углом \(String(describing: placed.rect), privacy: .public), раскладка: \(placed.attempt?.description ?? "не менялась", privacy: .public)")
         if dockAwayApplied { checkDock(after: 0.6, context: "выключение") }
     }
 
@@ -331,12 +333,12 @@ public final class HiddenScreenEngine {
                 Log.hiddenScreen.info("Dock: \(reason, privacy: .public) — дисплей за углом, Dock может выехать в звонке")
             }
         }
-        var rect = CGDisplayBounds(id)
         ownLayoutChangeAt = ProcessInfo.processInfo.systemUptime
-        do {
-            rect = try HiddenScreenLayout.place(id, origin: origin)
-        } catch {
-            Log.hiddenScreen.error("раскладка: \(String(describing: error), privacy: .public)")
+        let placed = HiddenScreenLayout.place(id, origin: origin)
+        let rect = placed.rect
+        let failure = placed.failures.last.map { "\($0.1.description)" }
+        if placed.attempt == nil, !placed.failures.isEmpty {
+            Log.hiddenScreen.error("раскладка: все способы отказали — дисплей остался в \(String(describing: rect), privacy: .public)")
         }
         if let dock {
             let main = CGDisplayBounds(CGMainDisplayID())
@@ -347,10 +349,17 @@ public final class HiddenScreenEngine {
                 Log.hiddenScreen.info("Dock: у других мониторов край свободен (\(exposed.map { String(describing: $0) }.joined(separator: ", "), privacy: .public)) — там Dock выезжает")
             }
             Log.hiddenScreen.info("Dock: край \(dock.rawValue, privacy: .public) основного экрана \(self.dockAwayApplied ? "закрыт скрытым дисплеем — Dock не выезжает на основном" : "НЕ закрыт: macOS поставила дисплей иначе", privacy: .public)")
+            // «Перед звонком» честно: macOS не дала закрыть край (HSCR-44, 4c).
+            DockAway.runtimeFailure = dockAwayApplied ? nil
+                : "macOS не дала поставить скрытый экран к краю Dock (\(failure ?? "дисплей встал иначе"))"
+            dockSummary = dockAwayApplied ? "край \(dock.rawValue) закрыт (\(placed.attempt?.description ?? "уже стоял"))"
+                : "край \(dock.rawValue) НЕ закрыт (\(failure ?? "дисплей встал иначе")), дисплей \(rect)"
+            if !exposed.isEmpty { dockSummary += "; у других мониторов край свободен: \(exposed.count)" }
         } else {
             dockAwayApplied = false
+            dockSummary = dockAwayWanted ? "убрать нельзя (см. строку «Dock: …»)" : "убирать выключено"
         }
-        Log.hiddenScreen.info("раскладка без затемнения: дисплей \(id) \(dock == nil ? "за углом" : "у края Dock", privacy: .public) \(String(describing: rect), privacy: .public)")
+        Log.hiddenScreen.info("раскладка: дисплей \(id) \(dock == nil ? "за углом" : "у края Dock", privacy: .public) \(String(describing: rect), privacy: .public), способ: \(placed.attempt?.description ?? "—", privacy: .public); \(HiddenScreenLayout.layoutText(), privacy: .public)")
         return rect
     }
 
@@ -1411,6 +1420,39 @@ public final class HiddenScreenEngine {
         default:
             return false
         }
+    }
+
+    // MARK: Самопроверка (`--hs-selftest`)
+
+    /// Окно в зеркале: процесс и фактическая рамка (Quartz).
+    var selfTestTarget: (pid: pid_t, frame: CGRect)? {
+        guard let mirrorTarget, let frame = targetFrame else { return nil }
+        return (mirrorTarget.pid, frame)
+    }
+
+    /// Скрытый дисплей (включённый или тёплый).
+    var selfTestDisplayID: CGDirectDisplayID? {
+        displayID != kCGNullDirectDisplay ? displayID : warm?.id
+    }
+
+    /// Нажатие и отпускание в точке окна — тем же путём, что от мыши над зеркалом: события создаются, но никуда
+    /// не отправляются — их получает только перехват нажатий. nil — нажатие принято, иначе — почему нет.
+    func selfTestPress(atTarget point: CGPoint) -> String? {
+        guard let mapping, let rect = mirrorRect else { return "зеркала нет" }
+        raiseMirror()
+        let view = mapping.toView(point)
+        let global = CGPoint(x: rect.minX + view.x, y: rect.minY + view.y)
+        guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: global, mouseButton: .left),
+              let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: global, mouseButton: .left) else {
+            return "событие не создано"
+        }
+        down.setIntegerValueField(.mouseEventClickState, value: 1)
+        up.setIntegerValueField(.mouseEventClickState, value: 1)
+        guard intercept(.leftMouseDown, down) else {
+            return "нажатие в (\(Int(global.x)), \(Int(global.y))) не перехвачено — над этой точкой не картинка зеркала"
+        }
+        _ = intercept(.leftMouseUp, up)
+        return nil
     }
 
     /// Нажатие ушло бы в окно-зеркало без картинки — оно сделало бы активной Mac Utils. nil — не наш случай.

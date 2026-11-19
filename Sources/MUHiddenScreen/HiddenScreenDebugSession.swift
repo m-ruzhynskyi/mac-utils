@@ -11,6 +11,7 @@ public final class HiddenScreenDebugSession {
     public let engine: HiddenScreenEngine
     private let picker = NSSegmentedControl()
     private var signalSources: [DispatchSourceSignal] = []
+    private var selfTest: HiddenScreenSelfTest?
 
     public static func startIfRequested(arguments: [String] = CommandLine.arguments,
                                         defaults: UserDefaults = .standard) -> HiddenScreenDebugSession? {
@@ -30,7 +31,7 @@ public final class HiddenScreenDebugSession {
     }
 
     private func start() {
-        Log.hiddenScreen.info("отладка: программы \(self.engine.options.apps.map(\.name).joined(separator: ", "), privacy: .public), щелчок \(self.engine.options.clickMode.rawValue, privacy: .public), нажатие \(self.engine.options.pressMode.rawValue, privacy: .public), прокрутка \(self.engine.options.scrollMode.rawValue, privacy: .public), ⌘-сочетания \(self.engine.options.keyMode.rawValue, privacy: .public), помощник \(self.engine.options.useHelper ? "да" : "нет", privacy: .public), Dock убирать \(self.engine.options.dockAway ? "да" : "нет", privacy: .public), тёплый дисплей \(self.engine.options.keepWarm ? "да" : "нет", privacy: .public)")
+        Log.hiddenScreen.info("отладка: программы \(self.engine.options.apps.map(\.name).joined(separator: ", "), privacy: .public), щелчок \(self.engine.options.clickMode.rawValue, privacy: .public), нажатие \(self.engine.options.pressMode.rawValue, privacy: .public), прокрутка \(self.engine.options.scrollMode.rawValue, privacy: .public), ⌘-сочетания \(self.engine.options.keyMode.rawValue, privacy: .public), помощник \(self.engine.options.useHelper ? "да" : "нет", privacy: .public), Dock убирать \(self.engine.options.dockAway ? "да" : "нет", privacy: .public), тёплый дисплей \(self.engine.options.keepWarm ? "да" : "нет", privacy: .public)\(self.engine.options.selfTest ? ", самопроверка" : "", privacy: .public)")
         engine.onLeak = { leak in Log.hiddenScreen.error("отладка: утечка \(String(describing: leak), privacy: .public)") }
         let previous = engine.onChange
         engine.onChange = { [weak self] in
@@ -42,6 +43,15 @@ public final class HiddenScreenDebugSession {
         // Дисплей создаёт помощник — зеркало появится, когда он ответит (`changed` добавит переключатель).
         engine.setMirrorShown(true)
         changed()
+        if engine.options.selfTest {
+            // Выход — как по SIGTERM: окна и видимость возвращаются, дисплей снимается.
+            let test = HiddenScreenSelfTest(engine: engine) { [weak self] in
+                self?.stop()
+                exit(0)
+            }
+            selfTest = test
+            test.run()
+        }
     }
 
     private var accessoryAdded = false

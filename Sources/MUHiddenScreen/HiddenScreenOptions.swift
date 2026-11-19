@@ -24,6 +24,8 @@ public struct HiddenScreenOptions: Equatable, Sendable {
     /// При выключении дисплей не снимается, а уходит за угол и ждёт следующего включения (`--hs-warm=on|off`):
     /// снятие и создание дисплея перестраивают раскладку — экран мигает.
     public var keepWarm = true
+    /// `--hs-selftest` (только с `--hidden-screen-debug`): самопроверка для менеджера и выход (`HiddenScreenSelfTest`).
+    public var selfTest = false
 
     public static let defaultApps: [HiddenApp] = [.claude, .chatGPT]
     public static let defaultDisplaySize = CGSize(width: 1440, height: 900)
@@ -50,13 +52,15 @@ public struct HiddenScreenOptions: Equatable, Sendable {
     }
 
     /// Ключ отладочного запуска: `open -a "Mac Utils" --args --hidden-screen-debug [--hs-apps=id,id] [--hs-click=background|warp|pid]
-    /// [--hs-scroll=handoff|pid] [--hs-keys=active|hid|inactive] [--hs-press=tap|mirror] [--hs-helper=on|off] [--hs-clip-marks=on|off] [--hs-hover=peek|pid|off] [--hs-activate=auto|public|skylight] [--hs-dock=away|keep] [--hs-warm=on|off] [--hs-ax-dump] [--hs-size=1440x900]`.
+    /// [--hs-scroll=handoff|pid] [--hs-keys=active|hid|inactive] [--hs-press=tap|mirror] [--hs-helper=on|off] [--hs-clip-marks=on|off] [--hs-hover=peek|pid|off] [--hs-activate=auto|public|skylight] [--hs-dock=away|keep] [--hs-warm=on|off] [--hs-selftest] [--hs-ax-dump] [--hs-size=1440x900]`.
     /// Без ключа — nil (обычный запуск). Ссылкой `macutils://` не включается.
     public static let debugFlag = "--hidden-screen-debug"
+    public static let selfTestFlag = "--hs-selftest"
 
     public static func debug(arguments: [String], storedBundleIDs: [String]?) -> HiddenScreenOptions? {
         guard arguments.contains(debugFlag) else { return nil }
         var options = HiddenScreenOptions(apps: apps(fromBundleIDs: storedBundleIDs))
+        options.selfTest = arguments.contains(selfTestFlag)
         for argument in arguments {
             let parts = argument.split(separator: "=", maxSplits: 1).map(String.init)
             guard parts.count == 2 else { continue }
