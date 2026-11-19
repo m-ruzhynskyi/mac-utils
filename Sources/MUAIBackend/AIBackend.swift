@@ -7,15 +7,24 @@ import MUCore
 /// codex или claude: найти программу, запустить с аргументами, разобрать поток. Таймаут и отмена убивают процесс.
 package struct CLIEngine: AIEngine {
     package let provider: AIProvider
+    /// Своя программа вместо найденной (тесты: подставной codex на /bin/sh).
+    private let executable: String?
 
-    package init(_ provider: AIProvider) { self.provider = provider }
+    package init(_ provider: AIProvider, executable: String? = nil) {
+        self.provider = provider
+        self.executable = executable
+    }
 
     package func stream(_ request: AIRequest) -> AsyncThrowingStream<String, Error> {
-        let provider = provider
+        stream(request, alive: {})
+    }
+
+    package func stream(_ request: AIRequest, alive: @escaping @Sendable () -> Void) -> AsyncThrowingStream<String, Error> {
+        let provider = provider, executable = executable
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await Self.run(provider, request) { continuation.yield($0) }
+                    try await Self.run(provider, executable, request, alive: alive) { continuation.yield($0) }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: Task.isCancelled ? CancellationError() : error)
@@ -25,8 +34,11 @@ package struct CLIEngine: AIEngine {
         }
     }
 
-    private static func run(_ provider: AIProvider, _ request: AIRequest, yield: (String) -> Void) async throws {
-        guard let executable = await CLIEnvironment.shared.executable(for: provider) else { throw AIFailure.notFound(provider) }
+    private static func run(_ provider: AIProvider, _ override: String?, _ request: AIRequest,
+                            alive: @Sendable () -> Void, yield: (String) -> Void) async throws {
+        var found = override
+        if found == nil { found = await CLIEnvironment.shared.executable(for: provider) }
+        guard let executable = found else { throw AIFailure.notFound(provider) }
         let environment = await CLIEnvironment.shared.environment(for: executable)
         let workspace = AIWorkspace.directory
         let arguments: [String]
@@ -42,11 +54,23 @@ package struct CLIEngine: AIEngine {
         let command = CLICommand(executable: URL(fileURLWithPath: executable), arguments: arguments, stdin: input,
                                  environment: environment, directory: workspace)
         let parse: (String) -> AIEvent? = provider == .codex ? CodexCLI.parse : ClaudeCLI.parse
-        var answer = AIAnswer()
+        var answer = AIAnswer(lastMessageOnly: provider == .codex)
         let started = Date()
+        let process = CLIProcess.open(command, timeout: request.timeout)
+        // Досрочный выход (ошибка хода, инструмент) — процесс со всеми потомками останавливается сразу.
+        defer { process.stop() }
         do {
-            for try await line in CLIProcess.lines(command, timeout: request.timeout) {
+            for try await line in process.lines {
                 guard let event = parse(line) else { continue }
+                switch event {
+                case .progress: alive()
+                // Выход из цикла останавливает чтение, и процесс убивается вместе с потомками — до того,
+                // как вывод команды уйдёт модели.
+                case .tool(let kind):
+                    Log.ai.error("\(provider.rawValue, privacy: .public): модель взялась за инструмент \(kind, privacy: .public), остановлено")
+                    throw AIFailure.toolUse(provider, kind: kind)
+                default: break
+                }
                 if let piece = answer.consume(event) { yield(piece) }
                 if case .failure = event { break }
             }
@@ -63,6 +87,7 @@ package struct CLIEngine: AIEngine {
         }
         try Task.checkCancellation()
         if let failure = answer.failure { throw AIFailure.from(provider, output: failure) }
+        if let piece = answer.flush() { yield(piece) }
         guard !answer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw answer.lastNotice.map { AIFailure.from(provider, output: $0) } ?? AIFailure.empty(provider)
         }
@@ -103,13 +128,15 @@ package struct AIRouter: Sendable {
     }
 
     /// Ответ первого сервиса по порядку. Ко следующему переходим, если предыдущий ничего не ответил:
-    /// ошибка (не найден, не вошли, сбой) или — при `firstPieceWithin` — ни одного куска за столько секунд.
+    /// ошибка (не найден, не вошли, сбой) или — при `firstPieceWithin` — за столько секунд ни куска, ни признака
+    /// жизни (`alive`: codex прислал `item.*`, значит модель работает, просто отдаст ответ целиком в конце).
     /// Если ответ уже начался, ошибка отдаётся как есть: два ответа не смешиваются.
+    /// Если не ответил ни один — ошибки всех в одном тексте (`AIFailure.combined`).
     package func stream(_ request: AIRequest, order: [AIProvider],
                         firstPieceWithin: TimeInterval?) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                var lastError: Error = AIFailure(.failed, provider: nil, message: "ИИ не выбран")
+                var failures: [AIFailure] = []
                 for (index, provider) in order.enumerated() {
                     let isLast = index == order.count - 1
                     let started = StartedFlag()
@@ -123,15 +150,17 @@ package struct AIRouter: Sendable {
                             continuation.finish(throwing: CancellationError())
                             return
                         }
-                        if started.value || isLast {
+                        if started.value {
                             continuation.finish(throwing: error)
                             return
                         }
+                        failures.append(error as? AIFailure
+                            ?? AIFailure(.failed, provider: provider, message: "\(provider.title): \(error.localizedDescription)"))
+                        if isLast { break }
                         Log.ai.info("\(provider.rawValue, privacy: .public) не ответил, пробую \(order[index + 1].rawValue, privacy: .public)")
-                        lastError = error
                     }
                 }
-                continuation.finish(throwing: lastError)
+                continuation.finish(throwing: AIFailure.combined(failures))
             }
             continuation.onTermination = { _ in task.cancel() }
         }
@@ -142,7 +171,7 @@ package struct AIRouter: Sendable {
                                 started: StartedFlag, yield: @escaping @Sendable (String) -> Void) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
-                for try await piece in engine.stream(request) {
+                for try await piece in engine.stream(request, alive: { started.markAlive() }) {
                     started.set()
                     yield(piece)
                 }
@@ -151,7 +180,7 @@ package struct AIRouter: Sendable {
             if let deadline {
                 group.addTask {
                     try await Task.sleep(nanoseconds: UInt64(max(0, deadline) * 1_000_000_000))
-                    if !started.value { throw AIFailure.timeout(engine.provider, seconds: deadline) }
+                    if !started.alive { throw AIFailure.timeout(engine.provider, seconds: deadline) }
                     try await Task.sleep(nanoseconds: .max / 2) // ответ идёт — ждём, пока чтение не закончится
                 }
             }
@@ -162,14 +191,18 @@ package struct AIRouter: Sendable {
     }
 }
 
-/// «Ответ уже начался» — общий для задачи чтения и таймера.
+/// «Ответ уже начался» (`value`: пришёл кусок) и «модель работает» (`alive`: кусок или признак жизни) —
+/// общие для задачи чтения и таймера.
 package final class StartedFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var started = false
+    private var working = false
 
     package init() {}
     package var value: Bool { lock.withLock { started } }
+    package var alive: Bool { lock.withLock { started || working } }
     package func set() { lock.withLock { started = true } }
+    package func markAlive() { lock.withLock { working = true } }
 }
 
 // MARK: - Для функций Mac Utils

@@ -80,6 +80,7 @@ final class AppStatusItem: NSObject {
             off.indentationLevel = 1
         }
         menu.addItem(.separator())
+        HiddenScreenGlue.shared.menuItems().forEach { menu.addItem($0) }
         let copilot = menu.addItem(withTitle: "Подсказчик на встрече", action: #selector(toggleCopilot), keyEquivalent: "")
         copilot.target = self
         copilot.state = CopilotGlue.shared.session.isOn ? .on : .off

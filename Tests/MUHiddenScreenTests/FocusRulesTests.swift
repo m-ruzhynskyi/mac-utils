@@ -1,0 +1,187 @@
+import CoreGraphics
+@testable import MUHiddenScreen
+import XCTest
+
+/// Экран для зеркала и возврат фокуса (14.11: зеркало открылось на скрытом дисплее, активным остался ChatGPT).
+final class FocusRulesTests: XCTestCase {
+    // Как на Mac пользователя: основной 1710×1112 (AppKit: начало слева снизу), скрытый — справа, ниже.
+    let main = FocusRules.Screen(id: 1, frame: CGRect(x: 0, y: 0, width: 1710, height: 1112),
+                                 visibleFrame: CGRect(x: 0, y: 0, width: 1710, height: 1075))
+    let hidden = FocusRules.Screen(id: 18, frame: CGRect(x: 1710, y: -860, width: 1440, height: 900),
+                                   visibleFrame: CGRect(x: 1710, y: -860, width: 1440, height: 900))
+    let external = FocusRules.Screen(id: 3, frame: CGRect(x: -1920, y: 0, width: 1920, height: 1080),
+                                     visibleFrame: CGRect(x: -1920, y: 0, width: 1920, height: 1050))
+
+    func testMirrorNeverGoesToHiddenDisplay() {
+        // Курсор на скрытом дисплее (или NSScreen.main указывает туда) — всё равно основной.
+        XCTAssertEqual(FocusRules.mirrorScreen([hidden, main], hidden: 18, mouse: CGPoint(x: 2000, y: -500))?.id, 1)
+        XCTAssertEqual(FocusRules.mirrorScreen([main, hidden, external], hidden: 18, mouse: CGPoint(x: -100, y: 500))?.id, 3,
+                       "экран с курсором")
+        XCTAssertEqual(FocusRules.mirrorScreen([main, hidden], hidden: 18, mouse: CGPoint(x: 400, y: 300))?.id, 1)
+        XCTAssertNil(FocusRules.mirrorScreen([hidden], hidden: 18, mouse: .zero))
+    }
+
+    func testCenteredFitsVisibleFrame() {
+        XCTAssertEqual(FocusRules.centered(CGSize(width: 900, height: 700), in: main.visibleFrame),
+                       CGRect(x: 405, y: 188, width: 900, height: 700))
+        XCTAssertEqual(FocusRules.centered(CGSize(width: 3000, height: 2000), in: main.visibleFrame), main.visibleFrame)
+    }
+
+    func testRescueWhenMirrorTouchesHidden() {
+        XCTAssertTrue(FocusRules.needsRescue(mirror: CGRect(x: 1980, y: -700, width: 900, height: 700), hiddenCocoa: hidden.frame))
+        XCTAssertFalse(FocusRules.needsRescue(mirror: CGRect(x: 405, y: 188, width: 900, height: 700), hiddenCocoa: hidden.frame))
+        XCTAssertFalse(FocusRules.needsRescue(mirror: .zero, hiddenCocoa: .null))
+    }
+
+    func testReclaimOnlyWhenNotOurOwnStep() {
+        XCTAssertTrue(FocusRules.shouldReclaim(activatedIsTarget: true, mirrorShown: true, handoff: nil, stepsRunning: false))
+        XCTAssertFalse(FocusRules.shouldReclaim(activatedIsTarget: true, mirrorShown: true, handoff: nil, stepsRunning: true),
+                       "наш щелчок сам активирует ИИ на миллисекунды")
+        XCTAssertFalse(FocusRules.shouldReclaim(activatedIsTarget: true, mirrorShown: true, handoff: .drag, stepsRunning: false),
+                       "курсор у программы — протягивание или меню")
+        XCTAssertFalse(FocusRules.shouldReclaim(activatedIsTarget: false, mirrorShown: true, handoff: nil, stepsRunning: false))
+        XCTAssertFalse(FocusRules.shouldReclaim(activatedIsTarget: true, mirrorShown: false, handoff: nil, stepsRunning: false))
+    }
+
+    // 768c91b (14.11): Claude активировал себя сам через 0,1–1 с после щелчка, уведомление гасилось как эхо нашей активации.
+    func testAISelfActivationIsReclaimedEvenRightAfterOurClick() {
+        XCTAssertEqual(FocusRules.reaction(isTarget: true, isSelf: false, isEcho: false, stepsRunning: false, mirrorShown: true, handoff: nil),
+                       .reclaim)
+        XCTAssertEqual(FocusRules.reaction(isTarget: true, isSelf: false, isEcho: true, stepsRunning: false, mirrorShown: true, handoff: nil),
+                       .reclaim, "эхо для ИИ не в счёт")
+        XCTAssertEqual(FocusRules.reaction(isTarget: true, isSelf: false, isEcho: false, stepsRunning: true, mirrorShown: true, handoff: nil),
+                       .ignore, "наш щелчок ещё идёт")
+        XCTAssertEqual(FocusRules.reaction(isTarget: true, isSelf: false, isEcho: false, stepsRunning: false, mirrorShown: true, handoff: .menu),
+                       .ignore, "меню открыто")
+    }
+
+    func testUserSwitchVersusOurReturn() {
+        XCTAssertEqual(FocusRules.reaction(isTarget: false, isSelf: false, isEcho: false, stepsRunning: false, mirrorShown: true, handoff: nil),
+                       .userSwitched)
+        XCTAssertEqual(FocusRules.reaction(isTarget: false, isSelf: false, isEcho: true, stepsRunning: false, mirrorShown: true, handoff: nil),
+                       .ignore, "наш возврат в Finder — фокус зеркала не снимать")
+        XCTAssertEqual(FocusRules.reaction(isTarget: false, isSelf: true, isEcho: false, stepsRunning: false, mirrorShown: true, handoff: nil),
+                       .ignore)
+        XCTAssertEqual(FocusRules.reaction(isTarget: false, isSelf: false, isEcho: false, stepsRunning: true, mirrorShown: true, handoff: nil),
+                       .ignore)
+    }
+
+    // 643b753: WindowServer называл Claude активным через 4–8 мс, сама программа — позже; ⌘C/⌘V терялись.
+    func testActivationNeedsBothWindowServerAndProgram() {
+        XCTAssertFalse(FocusRules.activated(windowServer: 36492, workspace: 412, pid: 36492), "программа ещё не знает")
+        XCTAssertFalse(FocusRules.activated(windowServer: 412, workspace: 36492, pid: 36492))
+        XCTAssertTrue(FocusRules.activated(windowServer: 36492, workspace: 36492, pid: 36492))
+        XCTAssertFalse(FocusRules.activated(windowServer: nil, workspace: nil, pid: 1))
+    }
+
+    // 643b753: первые щелчки без движения перед ними — окно сверху искали там, где курсор был раньше.
+    func testQuartzToCocoaPoint() {
+        XCTAssertEqual(HiddenScreenGeometry.cocoa(fromQuartz: CGPoint(x: 734, y: 579), primaryHeight: 1112), CGPoint(x: 734, y: 533))
+        XCTAssertEqual(HiddenScreenGeometry.cocoa(fromQuartz: CGPoint(x: 0, y: 0), primaryHeight: 1112), CGPoint(x: 0, y: 1112))
+    }
+
+    func testRechecksCoverLateSelfActivation() {
+        XCTAssertLessThanOrEqual(FocusRules.recheckDelays.first ?? 1, 0.15, "первая проверка — раньше, чем пользователь начнёт печатать")
+        XCTAssertGreaterThanOrEqual(FocusRules.recheckDelays.last ?? 0, 1.0, "14.11 Claude активировался до 1 с спустя")
+    }
+
+    func testReclaimLimiterBacksOff() {
+        var limiter = ReclaimLimiter()
+        for index in 0..<ReclaimLimiter.maximum { XCTAssertTrue(limiter.allow(at: Double(index) * 0.1)) }
+        XCTAssertFalse(limiter.allow(at: 0.7), "не бороться бесконечно")
+        XCTAssertTrue(limiter.allow(at: 3.05), "окно прошло")
+    }
+
+    func testHoverArgument() {
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug"], storedBundleIDs: nil)?.hover, .peek)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-hover=off"], storedBundleIDs: nil)?.hover, .off)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-hover=pid"], storedBundleIDs: nil)?.hover, .pid)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-hover=on"], storedBundleIDs: nil)?.hover, .peek)
+    }
+
+    func testActivationModeArgument() {
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug", "--hs-activate=skylight"], storedBundleIDs: nil)?.activationMode, .skylight)
+        XCTAssertEqual(HiddenScreenOptions.debug(arguments: ["--hidden-screen-debug"], storedBundleIDs: nil)?.activationMode, .auto)
+    }
+}
+
+/// Строка меню не должна показывать ИИ (14.11): активность — программе пользователя, клавиши — через перехват.
+final class KeyboardFocusTests: XCTestCase {
+    func testKeysGoToMirrorOnlyWhenFocused() {
+        XCTAssertEqual(FocusRules.keyDecision(code: 0, flags: [], mirrorFocused: false, handoff: nil), .pass)
+        XCTAssertEqual(FocusRules.keyDecision(code: 0, flags: [], mirrorFocused: true, handoff: nil), .forward)
+        XCTAssertEqual(FocusRules.keyDecision(code: MirrorKeys.v, flags: .maskCommand, mirrorFocused: true, handoff: nil), .forward)
+        XCTAssertEqual(FocusRules.keyDecision(code: 0, flags: [], mirrorFocused: true, handoff: .menu), .pass,
+                       "меню открыто — программа активна, стрелки и Return идут ей напрямую")
+    }
+
+    func testReservedShortcutsNeverReachZoomOrAI() {
+        for code in [MirrorKeys.q, MirrorKeys.w, MirrorKeys.h, MirrorKeys.m, MirrorKeys.comma] {
+            XCTAssertEqual(FocusRules.keyDecision(code: code, flags: .maskCommand, mirrorFocused: true, handoff: nil), .drop, "код \(code)")
+        }
+        XCTAssertEqual(FocusRules.keyDecision(code: MirrorKeys.tab, flags: .maskCommand, mirrorFocused: true, handoff: nil), .pass, "⌘Tab — системе")
+    }
+
+    func testWinKeysRewrite() {
+        let v = MirrorKeys.winKeysRewrite(code: MirrorKeys.v, flags: .maskControl, enabled: true, disabled: [])
+        XCTAssertEqual(v.code, MirrorKeys.v)
+        XCTAssertEqual(v.flags, .maskCommand)
+        let y = MirrorKeys.winKeysRewrite(code: 16, flags: .maskControl, enabled: true, disabled: [])   // kVK_ANSI_Y → ⇧⌘Z
+        XCTAssertEqual(y.code, 6)
+        XCTAssertEqual(y.flags, [.maskCommand, .maskShift])
+        XCTAssertEqual(MirrorKeys.winKeysRewrite(code: MirrorKeys.v, flags: .maskControl, enabled: false, disabled: []).flags, .maskControl)
+        XCTAssertEqual(MirrorKeys.winKeysRewrite(code: MirrorKeys.v, flags: .maskControl, enabled: true, disabled: ["v"]).flags, .maskControl)
+        XCTAssertEqual(MirrorKeys.winKeysRewrite(code: 5, flags: .maskControl, enabled: true, disabled: []).flags, .maskControl, "Ctrl+G не трогаем")
+    }
+
+    func testUserAppIsNeitherAINorSelfNorLoginWindow() {
+        XCTAssertTrue(FocusRules.isUserApp(isRegular: true, isTarget: false, isSelf: false, bundleID: "us.zoom.xos"))
+        XCTAssertFalse(FocusRules.isUserApp(isRegular: true, isTarget: true, isSelf: false, bundleID: "com.openai.codex"))
+        XCTAssertFalse(FocusRules.isUserApp(isRegular: false, isTarget: false, isSelf: true, bundleID: "com.mruzhynskyi.macutils"))
+        XCTAssertFalse(FocusRules.isUserApp(isRegular: true, isTarget: false, isSelf: false, bundleID: "com.apple.loginwindow"))
+    }
+
+    func testOwnActivationEchoIsIgnoredOnce() {
+        var echo = ActivationEcho()
+        echo.note(500, at: 10)
+        XCTAssertTrue(echo.consume(500, at: 10.3), "наш возврат в Zoom — не переключение пользователя")
+        XCTAssertFalse(echo.consume(500, at: 10.4), "второй раз — уже пользователь")
+        echo.note(600, at: 20)
+        XCTAssertFalse(echo.consume(600, at: 21.5), "через секунду — не эхо")
+        XCTAssertFalse(echo.consume(700, at: 20))
+    }
+}
+
+/// HSCR-39: наведение через postToPid доходило, подсветки не было; на выходе Claude остался спрятан и не того размера.
+final class HoverPeekAndExitTests: XCTestCase {
+    func testPeekAfterRestOnlyWhenMouseIsFree() {
+        XCTAssertFalse(HoverPeek.shouldStart(idle: true, overContent: true, lastMove: 10, now: 10.1), "ещё двигается")
+        XCTAssertTrue(HoverPeek.shouldStart(idle: true, overContent: true, lastMove: 10, now: 10 + HoverPeek.dwell))
+        XCTAssertFalse(HoverPeek.shouldStart(idle: false, overContent: true, lastMove: 10, now: 11), "кнопка нажата или передача")
+        XCTAssertFalse(HoverPeek.shouldStart(idle: true, overContent: false, lastMove: 10, now: 11), "поля зеркала или окно поверх")
+    }
+
+    func testPeekEndsOnRealMovementOnly() {
+        let point = CGPoint(x: 2615, y: 1449)
+        XCTAssertFalse(HoverPeek.endsPeek(isOwnEvent: true, location: CGPoint(x: 2700, y: 1500), peekPoint: point), "наше движение")
+        XCTAssertFalse(HoverPeek.endsPeek(isOwnEvent: false, location: point, peekPoint: point), "движение ровно в точку заглядывания")
+        XCTAssertFalse(HoverPeek.endsPeek(isOwnEvent: false, location: CGPoint(x: 2615.4, y: 1449.3), peekPoint: point), "доли точки после переноса")
+        XCTAssertTrue(HoverPeek.endsPeek(isOwnEvent: false, location: CGPoint(x: 2617, y: 1449), peekPoint: point))
+    }
+
+    func testVisibilityAsBeforeEnable() {
+        // Claude (1) был виден, ChatGPT (2) спрятан; программа 3 запущена во время работы (не запомнена).
+        let plan = VisibilityRestore.plan(wasHidden: [1: false, 2: true], running: [3, 2, 1])
+        XCTAssertEqual(plan.unhide, [1, 3], "Claude — показать; запущенная позже — видима")
+        XCTAssertEqual(plan.hide, [2], "спрятанная до включения — спрятать")
+    }
+
+    // deedf02: Claude видим до запуска, после выхода спрятан — план читал isHidden сразу после асинхронного hide().
+    func testPlanDoesNotDependOnCurrentHiddenState() {
+        // Как на Mac 18.11: оба видимы до включения (Claude — быстрый чат, ChatGPT — `open -g`).
+        let plan = VisibilityRestore.plan(wasHidden: [27390: false, 40010: false], running: [40010, 27390])
+        XCTAssertEqual(plan.unhide, [27390, 40010], "показать обоих, как бы ни отвечал isHidden в эту миллисекунду")
+        XCTAssertEqual(plan.hide, [])
+        XCTAssertEqual(VisibilityRestore.plan(wasHidden: [:], running: []).unhide, [])
+    }
+}

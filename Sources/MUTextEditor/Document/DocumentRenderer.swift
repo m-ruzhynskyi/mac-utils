@@ -8,6 +8,8 @@ extension NSAttributedString.Key {
     package static let docPara = NSAttributedString.Key("MacUtilsDocPara")
     /// Служебный абзац «\f\n» перед таблицей, которая начинается с новой страницы: высоты у него нет.
     package static let docBreakLine = NSAttributedString.Key("MacUtilsDocBreakLine")
+    /// Текст ячейки с вертикальным направлением (`\cltxbtlr`/`\cltxtbrl`): глифов в строках нет, его рисует `DocCellBlock` повёрнутым.
+    package static let docVerticalText = NSAttributedString.Key("MacUtilsDocVerticalText")
 }
 
 /// Свойства символа в показанном тексте: что в файле (`fontName` — исходное имя) и чем показано.
@@ -539,6 +541,7 @@ package final class DocRenderer {
             }
             attributes[.paragraphStyle] = style
             attributes[.docPara] = paraInfo
+            if let flow = plan.place?.def.textFlow, flow != .rows { attributes[.docVerticalText] = true }
             if number < plan.breakUnits {
                 // «\f» перед абзацем — строка без высоты: внизу полной страницы она не уходит на следующую.
                 attributes[.font] = font(family: "Times New Roman", size: 1, bold: false, italic: false)
@@ -870,6 +873,10 @@ package final class DocRenderer {
             let tableWidth = (grid.last ?? 0) - (grid.first ?? 0)
             for (rowIndex, row) in table.rows.enumerated() {
                 let exactHeight = table.nested ? nestedRowHeight(row, story: story, model: model) : nil
+                let heightSpoiled = Self.mergeSpoilsHeight(table, row: rowIndex) { start, cell, width in
+                    CGFloat(table.rows[start].padTop + table.rows[start].padBottom) / 20
+                        + self.textHeight(table.rows[start].paragraphs[safe: cell] ?? [], width: width, story: story, model: model)
+                }
                 var left = row.left
                 var cellIndex = 0
                 while cellIndex < row.cells.count {
@@ -906,7 +913,7 @@ package final class DocRenderer {
                     for offset in 0..<span {
                         var placed = place
                         if let parent { placed.outer = parent.outer + [parent] }
-                        placed.rowMerged = row.cells.contains { $0.verticalMergeFirst || $0.verticalMerged }
+                        placed.rowMerged = heightSpoiled
                         let ref = RTFCellRef(table: ordinal, row: rowIndex, cell: cellIndex)
                         placed.holdsNested = story.tables.contains { $0.parent == ref }
                         if placed.holdsNested {
@@ -979,6 +986,40 @@ package final class DocRenderer {
         return height + textHeight(own, width: width, story: story, model: model)
     }
 
+    /// `\trrh` строки нельзя задать (`NSTextTable` сверх высот строк добавит высоту объединённой ячейки — f005, f085, f144):
+    /// в строке начинается вертикальное объединение или продолжается такое, текст которого не помещается в `\trrh` его строк.
+    /// Строка-продолжение с помещающимся текстом — с `\trrh`, как у Word (f161: строка 13,35 pt была 12,43).
+    private static func mergeSpoilsHeight(_ table: RTFTable, row index: Int, text: (_ start: Int, _ cell: Int, _ width: CGFloat) -> CGFloat) -> Bool {
+        let row = table.rows[index]
+        if row.cells.contains(where: \.verticalMergeFirst) { return true }
+        var left = row.left
+        for cell in row.cells {
+            defer { left = max(cell.right, left) }
+            guard cell.verticalMerged else { continue }
+            let right = max(cell.right, left)
+            var start = index
+            while start > 0, Self.cell(in: table.rows[start], left: left, right: right)?.verticalMergeFirst != true { start -= 1 }
+            var end = index
+            while end + 1 < table.rows.count, Self.cell(in: table.rows[end + 1], left: left, right: right)?.verticalMerged == true { end += 1 }
+            guard let first = Self.cellIndex(in: table.rows[start], left: left, right: right),
+                  table.rows[start...end].allSatisfy({ $0.height > 0 }) else { return true }
+            let margins = table.rows[start].margins(table.rows[start].cells[first])
+            let width = CGFloat(right - left - margins.left - margins.right) / 20
+            let rows = table.rows[start...end].reduce(CGFloat(0)) { $0 + CGFloat($1.height) / 20 }
+            if text(start, first, width) > rows { return true }
+        }
+        return false
+    }
+
+    private static func cellIndex(in row: RTFRow, left: Int, right: Int) -> Int? {
+        var edge = row.left
+        for (index, cell) in row.cells.enumerated() {
+            if edge == left, cell.right == right { return index }
+            edge = max(cell.right, edge)
+        }
+        return nil
+    }
+
     private static func cell(in row: RTFRow, left: Int, right: Int) -> RTFCellDef? {
         var edge = row.left
         for cell in row.cells {
@@ -1003,7 +1044,7 @@ package final class DocRenderer {
         if let cached = tables[place.table] {
             table = cached
         } else {
-            table = NSTextTable()
+            table = DocTextTable()
             table.numberOfColumns = place.columns
             table.layoutAlgorithm = .fixedLayoutAlgorithm
             // Вложенная таблица со слиянием рамок у `NSTextTable` встаёт на полпункта ниже верха ячейки, и строка внешней таблицы
@@ -1073,6 +1114,15 @@ package final class DocRenderer {
         // Высоту текста для своего выравнивания `DocCellBlock` оценивает без блоков: вложенная таблица в такой оценке — столбик
         // строк, и сдвиг выходил больше, чем у Word (f078: +12,9 pt на строку); для неё — оценка по строкам вложенной.
         block.contentHeight = place.nestedContent
+        block.holdsNested = place.holdsNested
+        block.textFlow = cell.textFlow
+        if cell.textFlow != .rows {
+            // Вертикальный текст рисует сам блок (`drawVertical`), выравнивание — его: строки без глифов по центру объединённой ячейки
+            // `NSTextTable` растил бы строку на сдвиг (f019: +9,7 pt).
+            block.crossAlignment = cell.verticalAlign == .center ? 0.5 : cell.verticalAlign == .bottom ? 1 : 0
+            block.verticalAlignment = .topAlignment
+            block.ownAlignment = 0
+        }
         if block.rowHeight != 0, cell.verticalAlign != .top {
             block.ownAlignment = cell.verticalAlign == .center ? 0.5 : 1
             block.verticalAlignment = .topAlignment
@@ -1137,6 +1187,21 @@ package final class DocRenderer {
 /// `NSTextBlock` заняла бы место в ширине столбца, и текст ячейки стал бы уже, чем в Word. Вертикальные линии — по точным
 /// краям `\cellx` (рамка `NSTextTable` — в целых пунктах), серединой на краю; толщина и края — на сетке Word
 /// 1/300 дюйма (0,24 pt) от левого края листа, как в его PDF.
+/// Таблица документа: помнит строку, которую кладёт `DocCellBlock.boundsRect`.
+package final class DocTextTable: NSTextTable {
+    package struct Pass {
+        package var row: Int
+        package var column: Int
+        package var container: ObjectIdentifier
+        package var top: CGFloat
+        package var bottom: CGFloat
+        /// Запись `NSTextTable` о высоте строки сделана в этом же контейнере.
+        package var trusted: Bool
+    }
+
+    package var pass: Pass?
+}
+
 package final class DocCellBlock: NSTextTableBlock {
     package struct Line {
         package var edge: NSRectEdge
@@ -1155,6 +1220,13 @@ package final class DocCellBlock: NSTextTableBlock {
     package var ownAlignment: CGFloat = 0
     /// Высота содержимого, если её посчитали заранее (ячейка со вложенной таблицей), пункты.
     package var contentHeight: CGFloat?
+    /// В ячейке вложенная таблица: высоту содержимого для выравнивания меряет раскладкой (`nestedHeight`).
+    package var holdsNested = false
+    /// Направление текста ячейки: вертикальный текст растит строку на длину самого длинного абзаца и рисуется повёрнутым.
+    package var textFlow = RTFCellDef.TextFlow.rows
+    /// Выравнивание вертикального текста поперёк (0 — к началу столбцов, 0,5 — по центру, 1 — к концу).
+    package var crossAlignment: CGFloat = 0
+    private var measured: (range: NSRange, width: CGFloat, height: CGFloat)?
     /// Полосы рамок сверху и снизу, пункты: у Word рамка ячейки занимает место в высоте строки.
     package var band: (top: CGFloat, bottom: CGFloat) = (0, 0)
 
@@ -1165,9 +1237,17 @@ package final class DocCellBlock: NSTextTableBlock {
         if ownAlignment > 0, rowHeight != 0, let storage = textContainer.layoutManager?.textStorage, charRange.length > 0,
            NSMaxRange(charRange) <= storage.length {
             let inner = abs(rowHeight) - width(for: .padding, edge: .minY) - width(for: .padding, edge: .maxY)
-            let content = contentHeight ?? MainActor.assumeIsolated { Self.height(of: storage.attributedSubstring(from: charRange), width: layout.width) }
+            let content = MainActor.assumeIsolated { () -> CGFloat in
+                let text = storage.attributedSubstring(from: charRange)
+                guard holdsNested else { return contentHeight ?? Self.height(of: text, width: layout.width) }
+                if let measured, measured.range == charRange, measured.width == layout.width { return measured.height }
+                let height = Self.nestedHeight(of: text, width: layout.width, outer: self)
+                measured = (charRange, layout.width, height)
+                return height
+            }
             shift = max(0, (inner - content) * ownAlignment)
         }
+        layoutStart = (ObjectIdentifier(textContainer), layout.minY)
         layout.origin.y += shift + band.top
         appliedShift = shift + band.top
         return layout
@@ -1176,6 +1256,9 @@ package final class DocCellBlock: NSTextTableBlock {
     /// Сдвиг текста при последней раскладке: рамка ячейки — от верха строки, а не от текста (от рамки предыдущей
     /// ячейки `NSTextTable` отсчитывает верх строки для следующих).
     private var appliedShift: CGFloat = 0
+    /// Верх раскладки ячейки (без сдвига) при последней раскладке и её контейнер: верх строки — от него, а не от первой строки
+    /// текста (в ячейке со вложенной таблицей текст ниже на её отступ — f078: +1,08 pt на ячейку, строка внешней таблицы выше `\trrh`).
+    private var layoutStart: (container: ObjectIdentifier, y: CGFloat)?
 
 
     /// Высота текста ячейки: те же абзацы без блока таблицы, в ширину текста ячейки, высота строк — как в документе
@@ -1188,7 +1271,7 @@ package final class DocCellBlock: NSTextTableBlock {
             plain.addAttribute(.paragraphStyle, value: style, range: range)
         }
         let storage = NSTextStorage(attributedString: plain)
-        let manager = NSLayoutManager()
+        let manager = DocLayoutManager()
         manager.delegate = DocLineMetricsDelegate.shared
         storage.addLayoutManager(manager)
         let container = NSTextContainer(size: NSSize(width: max(1, width), height: 100_000))
@@ -1203,21 +1286,209 @@ package final class DocCellBlock: NSTextTableBlock {
         return bottom
     }
 
+    /// Высота содержимого ячейки со вложенной таблицей, как её выравнивает Word: те же абзацы без блока этой ячейки (вложенные
+    /// блоки остаются), в ширину её текста; пустой абзац конца ячейки сразу после вложенной таблицы — не в счёт (f077/f078:
+    /// с ним и с оценкой вложенной по `\trrh` текст стоял на 2,4–3,5 pt выше Word).
+    @MainActor private static func nestedHeight(of text: NSAttributedString, width: CGFloat, outer: NSTextBlock) -> CGFloat {
+        let plain = NSMutableAttributedString(attributedString: text)
+        plain.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: plain.length)) { value, range, _ in
+            guard let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle else { return }
+            style.textBlocks = style.textBlocks.filter { $0 !== outer }
+            plain.addAttribute(.paragraphStyle, value: style, range: range)
+        }
+        let string = plain.string as NSString
+        let last = string.paragraphRange(for: NSRange(location: max(0, plain.length - 1), length: 0))
+        if last.location > 0, string.substring(with: last).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           (plain.attribute(.paragraphStyle, at: last.location, effectiveRange: nil) as? NSParagraphStyle)?.textBlocks.isEmpty == true,
+           (plain.attribute(.paragraphStyle, at: last.location - 1, effectiveRange: nil) as? NSParagraphStyle)?.textBlocks.isEmpty == false {
+            plain.deleteCharacters(in: last)
+        }
+        let storage = NSTextStorage(attributedString: plain)
+        let manager = DocLayoutManager()
+        manager.delegate = DocLineMetricsDelegate.shared
+        storage.addLayoutManager(manager)
+        let container = NSTextContainer(size: NSSize(width: max(1, width), height: 100_000))
+        container.lineFragmentPadding = 0
+        manager.addTextContainer(container)
+        manager.ensureLayout(for: container)
+        var bottom: CGFloat = 0
+        var seen = Set<ObjectIdentifier>()
+        manager.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs)) { rect, _, _, glyphs, _ in
+            bottom = max(bottom, rect.maxY)
+            let character = manager.characterIndexForGlyph(at: glyphs.location)
+            for block in (storage.attribute(.paragraphStyle, at: character, effectiveRange: nil) as? NSParagraphStyle)?.textBlocks ?? []
+            where seen.insert(ObjectIdentifier(block)).inserted {
+                bottom = max(bottom, manager.boundsRect(for: block, glyphRange: glyphs).maxY)
+            }
+        }
+        return bottom
+    }
+
+    private var flowCache: (range: NSRange, length: Int, extent: CGFloat)?
+
+    /// Длина самого длинного слова вертикального текста, пункты: строку оно растит, абзацы же переносятся по её высоте (как у Word).
+    private func verticalExtent(_ storage: NSTextStorage?, charRange: NSRange) -> CGFloat {
+        guard let storage, charRange.length > 0, NSMaxRange(charRange) <= storage.length else { return 0 }
+        if let flowCache, flowCache.range == charRange, flowCache.length == storage.length { return flowCache.extent }
+        var extent: CGFloat = 0
+        for paragraph in Self.verticalParagraphs(storage, charRange: charRange) {
+            for word in Self.words(paragraph.text) { extent = max(extent, ceil(paragraph.text.attributedSubstring(from: word).size().width)) }
+        }
+        flowCache = (charRange, storage.length, extent)
+        return extent
+    }
+
+    /// Слова абзаца (диапазоны без пробелов).
+    private static func words(_ text: NSAttributedString) -> [NSRange] {
+        let string = text.string as NSString
+        var result: [NSRange] = []
+        var start: Int?
+        for index in 0...string.length {
+            let space = index == string.length || CharacterSet.whitespaces.contains(UnicodeScalar(string.character(at: index)) ?? " ")
+            if space, let begin = start { result.append(NSRange(location: begin, length: index - begin)); start = nil }
+            if !space, start == nil { start = index }
+        }
+        return result
+    }
+
+    /// Строки абзаца не длиннее `limit`: перенос по словам (слово длиннее — своей строкой).
+    private static func wrap(_ text: NSAttributedString, limit: CGFloat) -> [NSAttributedString] {
+        let words = words(text)
+        guard !words.isEmpty else { return [text] }
+        var lines: [NSAttributedString] = []
+        var begin = words[0].location, end = NSMaxRange(words[0])
+        for word in words.dropFirst() {
+            let candidate = NSRange(location: begin, length: NSMaxRange(word) - begin)
+            if text.attributedSubstring(from: candidate).size().width <= limit + 0.01 {
+                end = NSMaxRange(word)
+            } else {
+                lines.append(text.attributedSubstring(from: NSRange(location: begin, length: end - begin)))
+                begin = word.location
+                end = NSMaxRange(word)
+            }
+        }
+        lines.append(text.attributedSubstring(from: NSRange(location: begin, length: end - begin)))
+        return lines
+    }
+
+    /// Абзацы ячейки без знака конца абзаца и без стиля абзаца (блоки таблиц) — для замера и рисования повёрнутыми.
+    private static func verticalParagraphs(_ storage: NSTextStorage, charRange: NSRange) -> [(text: NSAttributedString, range: NSRange)] {
+        let text = storage.string as NSString
+        var result: [(text: NSAttributedString, range: NSRange)] = []
+        var location = charRange.location
+        while location < NSMaxRange(charRange) {
+            let paragraph = NSIntersectionRange(text.paragraphRange(for: NSRange(location: location, length: 0)), charRange)
+            guard paragraph.length > 0 else { break }
+            var body = paragraph
+            while body.length > 0, [0x0A, 0x0D, 0x2029].contains(text.character(at: NSMaxRange(body) - 1)) { body.length -= 1 }
+            let piece = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: body))
+            let all = NSRange(location: 0, length: piece.length)
+            piece.removeAttribute(.paragraphStyle, range: all)
+            piece.removeAttribute(.attachment, range: all)
+            result.append((piece, body))
+            location = NSMaxRange(paragraph)
+        }
+        return result
+    }
+
+    /// Вертикальный текст: абзацы — столбцами, `\cltxbtlr` снизу вверх (первый абзац слева), `\cltxtbrl` сверху вниз (первый справа);
+    /// вдоль — по выравниванию абзаца, поперёк — по выравниванию ячейки (верх — к началу столбцов).
+    @MainActor private func drawVertical(_ storage: NSTextStorage, charRange: NSRange, left: CGFloat, right: CGFloat, top: CGFloat, bottom: CGFloat) {
+        let padTop = width(for: .padding, edge: .minY), padBottom = width(for: .padding, edge: .maxY)
+        let along = bottom - top - padTop - padBottom
+        var paragraphs: [NSAttributedString] = [], alignments: [NSTextAlignment] = []
+        for item in Self.verticalParagraphs(storage, charRange: charRange) {
+            let alignment = (storage.attribute(.paragraphStyle, at: item.range.location, effectiveRange: nil) as? NSParagraphStyle)?.alignment ?? .left
+            for line in Self.wrap(item.text, limit: along) {
+                paragraphs.append(line)
+                alignments.append(alignment)
+            }
+        }
+        guard !paragraphs.isEmpty else { return }
+        let thickness = paragraphs.map { piece -> CGFloat in
+            guard piece.length > 0, let font = piece.attribute(.font, at: 0, effectiveRange: nil) as? NSFont else { return 0 }
+            let metrics = DocLineMetrics.metrics(font)
+            return metrics.above + metrics.below
+        }
+        let total = thickness.reduce(0, +)
+        let up = textFlow == .bottomToTop
+        let across = right - left
+        let lead: CGFloat
+        lead = (across - total) * crossAlignment
+        var offset = max(0, lead)
+        for (index, piece) in paragraphs.enumerated() {
+            let length = piece.size().width
+            let slack = max(0, along - length)
+            let start: CGFloat
+            switch alignments[index] {
+            case .center: start = slack / 2
+            case .right: start = slack
+            default: start = 0
+            }
+            NSGraphicsContext.saveGraphicsState()
+            let transform = NSAffineTransform()
+            if up {
+                transform.translateX(by: left + offset, yBy: bottom - padBottom - start)
+                transform.rotate(byDegrees: -90)
+            } else {
+                transform.translateX(by: right - offset, yBy: top + padTop + start)
+                transform.rotate(byDegrees: 90)
+            }
+            transform.concat()
+            piece.draw(at: .zero)
+            NSGraphicsContext.restoreGraphicsState()
+            offset += thickness[index]
+        }
+    }
+
     /// Высота ячейки по `\trrh`: `NSTextTable` берёт высоту строки из рамок ячеек, а `minimumHeight` блока не учитывает.
     /// «Точно», когда текст не помещается: Word его обрезает, у нас он наехал бы на следующую строку — тогда по тексту.
     package override func boundsRect(forContentRect contentRect: NSRect, in rect: NSRect, textContainer: NSTextContainer,
                              characterRange charRange: NSRange) -> NSRect {
         var bounds = super.boundsRect(forContentRect: contentRect, in: rect, textContainer: textContainer, characterRange: charRange)
+        let flowExtent: CGFloat = textFlow == .rows ? 0
+            : verticalExtent(textContainer.layoutManager?.textStorage, charRange: charRange) + width(for: .padding, edge: .minY) + width(for: .padding, edge: .maxY)
+        if rowSpan > 1 {
+            // Объединённая по вертикали ячейка: высоту на её строки делит `NSTextTable`, своя высота текста здесь ни при чём.
+            let natural = max(bounds.height, flowExtent)
+            bounds.size.height = natural
+            bounds.origin.y -= appliedShift
+            bounds.size.height += appliedShift + band.bottom
+            if rowHeight != 0 { bounds.size.height = max(natural, abs(rowHeight)) + band.top + band.bottom }
+            return bounds
+        }
         // `super` уже растянул ячейку до высоты строки по предыдущим ячейкам, а в ней их полосы рамок: своя высота —
         // от своего текста, иначе каждая следующая ячейка строки выше на полосу (f157: +0,96 pt на строку в 5 столбцов).
-        let own = contentRect.maxY + width(for: .padding, edge: .maxY) + width(for: .border, edge: .maxY)
-            + width(for: .margin, edge: .maxY) - bounds.minY
-        let row = bounds.maxY
+        let insetTop = width(for: .padding, edge: .minY) + width(for: .border, edge: .minY) + width(for: .margin, edge: .minY)
+        if let start = layoutStart, start.container == ObjectIdentifier(textContainer), start.y + appliedShift <= contentRect.minY + 0.01 {
+            bounds.origin.y = min(bounds.minY, start.y + appliedShift - insetTop)
+        }
+        let own = max(flowExtent, contentRect.maxY + width(for: .padding, edge: .maxY) + width(for: .border, edge: .maxY)
+            + width(for: .margin, edge: .maxY) - bounds.minY)
+        var row = bounds.maxY
         bounds.origin.y -= appliedShift
-        bounds.size.height = max(row - bounds.minY, own + appliedShift + band.bottom)
+        let top = bounds.minY
         // Строка с `\trrh` — как у Word: большее из содержимого и `\trrh`, плюс полосы рамок. Сдвиг выравнивания по оценке
         // высоты строку не растит (оценка бывает чуть меньше настоящей — f078: +1,9 pt на строку).
-        if rowHeight != 0 { bounds.size.height = max(row - bounds.minY, max(own, abs(rowHeight)) + band.top + band.bottom) }
+        let ownBottom = top + (rowHeight != 0 ? max(own, abs(rowHeight)) + band.top + band.bottom : own + appliedShift + band.bottom)
+        if let table = table as? DocTextTable {
+            // Строку, которую сначала попробовали положить внизу страницы, `NSTextTable` переносит на следующую, но помнит её
+            // низ с прошлой страницы и тянет до него ячейки на новой (f161: ячейка 803 pt). Первой строке таблицы в контейнере
+            // эта запись не нужна: высота строки — из её ячеек, уже положенных здесь.
+            let container = ObjectIdentifier(textContainer)
+            let previous = table.pass
+            let sameRow = previous.map { $0.row == startingRow && $0.column < startingColumn && $0.container == container && abs($0.top - top) < 0.5 } ?? false
+            let trusted = sameRow ? previous?.trusted == true : previous?.container == container
+            if !trusted {
+                // Без записи `NSTextTable` — точная высота блока (строка вложенной таблицы) остаётся.
+                let declared = value(for: .height)
+                let insetBottom = width(for: .padding, edge: .maxY) + width(for: .border, edge: .maxY) + width(for: .margin, edge: .maxY)
+                row = max(sameRow ? previous?.bottom ?? top : top, declared > 0 ? top + insetTop + declared + insetBottom : top)
+            }
+            table.pass = DocTextTable.Pass(row: startingRow, column: startingColumn, container: container, top: top,
+                                           bottom: max(row, ownBottom), trusted: trusted)
+        }
+        bounds.size.height = max(row, ownBottom) - top
         return bounds
     }
 
@@ -1256,6 +1527,18 @@ package final class DocCellBlock: NSTextTableBlock {
             }
             line.color.setFill()
             snap.rect(rect).fill()
+        }
+        if textFlow != .rows, let storage = layoutManager.textStorage {
+            // Поперёк текста — между краями текста ячейки (первая строка ячейки: её ширина — ширина текста).
+            var content = (left: left, right: right)
+            if glyphs.length > 0 {
+                let line = layoutManager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+                let shift = frameRect.minX - layoutManager.boundsRect(for: self, glyphRange: glyphs).minX
+                content = (line.minX + shift, line.maxX + shift)
+            }
+            MainActor.assumeIsolated {
+                drawVertical(storage, charRange: charRange, left: content.left, right: content.right, top: top, bottom: bottom)
+            }
         }
     }
 

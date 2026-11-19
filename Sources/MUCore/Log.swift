@@ -10,6 +10,10 @@ package enum Log {
     package static let uninstall = Logger(subsystem: "com.mruzhynskyi.macutils", category: "uninstall")
     package static let ai = Logger(subsystem: "com.mruzhynskyi.macutils", category: "ai")
     package static let audio = Logger(subsystem: "com.mruzhynskyi.macutils", category: "audio")
+    /// «Скрытый экран»: перенос окон, зеркало, передача курсора. Без содержимого окон и буфера.
+    package static let hiddenScreen = Logger(subsystem: "com.mruzhynskyi.macutils", category: "hidden-screen")
     /// Видеоплеер: только коды и числа, без путей и имён файлов.
     package static let player = Logger(subsystem: "com.mruzhynskyi.macutils", category: "player")
+    /// «Взгляд в камеру»: только числа и состояния, без кадров.
+    package static let gaze = Logger(subsystem: "com.mruzhynskyi.macutils", category: "gaze")
 }

@@ -29,6 +29,7 @@ final class HotKeyRegistryTests: XCTestCase {
             .focus: "⌃⌥F", .qr: "⌃⌥Q", .appVolume: "⌃⌥V", .layoutFix: "⌘] (Ъ)", .textEditor: "⌃⌥⌘E",
             .videoPlayer: "⌃⌥⌘P (З)", .remoteConnections: "⌃⌥⌘A",
             .copilot: "⌥⇧M", .copilotAnswer: "⌥⇧A", .copilotScreen: "⌥⇧S", .copilotPanel: "⌥⇧P (З)",
+            .hiddenScreen: "⌥⇧H", .hiddenScreenWindow: "⌥Пробел",
         ]
         for action in HotKeyAction.allCases {
             XCTAssertEqual(HotKeyRegistry.combo(for: action, defaults: defaults).title, expected[action], action.rawValue)

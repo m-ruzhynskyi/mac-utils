@@ -10,7 +10,7 @@ import MUTextEditor
 /// а `HotKeyCenter` подставляет то, что пользователь выбрал в настройках (`HotKeyRegistry.resolve`).
 enum HotKeyAction: String, CaseIterable, Identifiable {
     case settings, tools, screenshot, screenshotOCR, dropShelf, annotate, windowPin, fixText, meeting, focus, qr,
-         appVolume, layoutFix, textEditor, videoPlayer, remoteConnections, copilot, copilotAnswer, copilotScreen, copilotPanel
+         appVolume, layoutFix, textEditor, videoPlayer, remoteConnections, hiddenScreen, hiddenScreenWindow, copilot, copilotAnswer, copilotScreen, copilotPanel
 
     var id: String { rawValue }
 
@@ -36,6 +36,8 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .copilotAnswer: return HotKeyID.copilotAnswer
         case .copilotScreen: return HotKeyID.copilotScreen
         case .copilotPanel: return HotKeyID.copilotPanel
+        case .hiddenScreen: return HotKeyID.hiddenScreen
+        case .hiddenScreenWindow: return HotKeyID.hiddenScreenWindow
         }
     }
 
@@ -61,6 +63,8 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .copilotAnswer: return "Подсказчик: ответить на вопрос"
         case .copilotScreen: return "Подсказчик: посмотреть экран"
         case .copilotPanel: return "Подсказчик: показать или спрятать панель"
+        case .hiddenScreen: return "Скрытый экран: включить и выключить"
+        case .hiddenScreenWindow: return "Скрытый экран: показать окно ИИ"
         }
     }
 
@@ -82,6 +86,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .videoPlayer: return .videoPlayer
         case .remoteConnections: return .remote
         case .copilot, .copilotAnswer, .copilotScreen, .copilotPanel: return .copilot
+        case .hiddenScreen, .hiddenScreenWindow: return .hiddenScreen
         }
     }
 
@@ -111,6 +116,8 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .copilotAnswer: return LayoutHotKey(keyCode: kVK_ANSI_A, modifiers: optionKey | shiftKey)
         case .copilotScreen: return LayoutHotKey(keyCode: kVK_ANSI_S, modifiers: optionKey | shiftKey)
         case .copilotPanel: return LayoutHotKey(keyCode: kVK_ANSI_P, modifiers: optionKey | shiftKey)
+        case .hiddenScreen: return LayoutHotKey(keyCode: kVK_ANSI_H, modifiers: optionKey | shiftKey)
+        case .hiddenScreenWindow: return LayoutHotKey(keyCode: kVK_Space, modifiers: optionKey)
         }
     }
 

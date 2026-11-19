@@ -33,7 +33,7 @@ enum DocDemo {
     static var expertReport: String {
         let pard = #"\pard\plain \ltrpar"#
         let font = #"\f0\fs24"#
-        var s = #"{\rtf1\ansi\ansicpg1251\uc1\deff0\deftab708{\fonttbl{\f0\froman\fcharset204\fprq2 Times New Roman;}{\f1\fswiss\fcharset204\fprq2 Arial;}{\f2\fswiss\fcharset0\fprq2 Calibri;}}"# + "\r\n"
+        var s = #"{\rtf1\ansi\ansicpg1251\uc1\deff0\deflang1049\deftab708{\fonttbl{\f0\froman\fcharset204\fprq2 Times New Roman;}{\f1\fswiss\fcharset204\fprq2 Arial;}{\f2\fswiss\fcharset0\fprq2 Calibri;}}"# + "\r\n"
         s += #"{\colortbl;\red0\green0\blue0;\red226\green232\blue240;\red192\green0\blue0;}"# + "\r\n"
         s += #"{\info{\title Demo}}\paperw11906\paperh16838\margl1701\margr850\margt1134\margb1134"# + "\r\n"
         s += #"\sectd\headery567\footery567{\headerr "# + pard + #"\brdrb\brdrs\brdrw6\brsp20 \tqr\tx9355 {\f1\fs16 "# + rtf("ООО «Демо-Лаб» · отдел экспертиз") + #"\tab "#
@@ -143,6 +143,10 @@ final class DocViewTests: XCTestCase {
         document.layoutManager.ensureLayout(for: document.layoutManager.textContainers.last!)
         settle()
         XCTAssertEqual(document.pageCount, 2, "второй раздел — с новой страницы")
+        // Демо-форма русская: `\deflang1049`, как пишет Word, — в строке состояния «русский», а не запасной английский.
+        document.textViews.first?.setSelectedRange(NSRange(location: (document.storage.string as NSString).range(of: "Демоград").location, length: 0))
+        settle(0.1)
+        XCTAssertEqual(document.languageName, "русский")
         let first = try XCTUnwrap(document.pagesView.pages.first)
         XCTAssertEqual(first.frame.size, NSSize(width: 11906.0 / 20, height: 16838.0 / 20), "A4 из \\paperw/\\paperh")
         XCTAssertEqual(first.bodyRect.minX, 1701.0 / 20)

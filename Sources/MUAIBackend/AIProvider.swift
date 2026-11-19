@@ -94,9 +94,27 @@ package struct AIFailure: LocalizedError, Equatable, Sendable {
         AIFailure(.empty, provider: provider, message: "\(provider.title) вернул пустой ответ")
     }
 
+    /// Модель взялась за инструмент (команду, файл), хотя ответ должен быть только текстом: процесс остановлен.
+    package static func toolUse(_ provider: AIProvider, kind: String) -> AIFailure {
+        AIFailure(.failed, provider: provider,
+                  message: "\(provider.title) попытался выполнить действие на Mac (\(kind)) — остановлено, ответ не использован. Повторите запрос.")
+    }
+
+    /// Ошибки обоих сервисов (выбранного и запасного) — одним текстом, чтобы первая не терялась за второй.
+    /// Вид — от первого (выбранного): по нему интерфейс решает, что подсказать.
+    package static func combined(_ failures: [AIFailure]) -> AIFailure {
+        guard let first = failures.first else { return AIFailure(.failed, provider: nil, message: "ИИ не выбран") }
+        guard failures.count > 1 else { return first }
+        return AIFailure(first.kind, provider: first.provider, message: failures.map(\.message).joined(separator: " · "))
+    }
+
     /// Ошибка из вывода программы: вход в аккаунт узнаём по тексту, остальное — как есть (коротко).
     package static func from(_ provider: AIProvider, output: String) -> AIFailure {
         if mentionsLogin(output) { return .notLoggedIn(provider) }
+        // Старый codex не знает выключаемую функцию (`--disable …`): без неё инструменты не выключить — просим обновить.
+        if provider == .codex, output.lowercased().contains("unknown feature flag") {
+            return AIFailure(.failed, provider: provider, message: "\(provider.title): версия устарела — обновите в Терминале: codex update")
+        }
         let line = output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
             .last { !$0.isEmpty } ?? ""
         let text = line.isEmpty ? "ошибка без описания" : String(line.prefix(300))
@@ -143,9 +161,16 @@ package protocol AIEngine: Sendable {
     var provider: AIProvider { get }
     /// Куски ответа по мере появления; ошибка — `AIFailure` или `CancellationError`.
     func stream(_ request: AIRequest) -> AsyncThrowingStream<String, Error>
+    /// То же, плюс `alive` — модель уже работает, хотя текста ещё нет (codex отдаёт ответ целиком в конце).
+    /// По нему `AIRouter` не уходит к запасному сервису по таймеру первого куска.
+    func stream(_ request: AIRequest, alive: @escaping @Sendable () -> Void) -> AsyncThrowingStream<String, Error>
 }
 
 extension AIEngine {
+    package func stream(_ request: AIRequest, alive: @escaping @Sendable () -> Void) -> AsyncThrowingStream<String, Error> {
+        stream(request)
+    }
+
     package func stream(prompt: String, system: String?, images: [URL], timeout: TimeInterval) -> AsyncThrowingStream<String, Error> {
         stream(AIRequest(prompt: prompt, system: system, images: images, timeout: timeout))
     }

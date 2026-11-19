@@ -46,3 +46,43 @@ package enum DocLanguage {
         return title
     }
 }
+
+extension DocLanguage {
+    /// Места смены языка внутри `[start, end)`: первый элемент — язык в `start`, дальше — каждое `\langN` (с учётом групп и `\plain`).
+    /// Для орфографии: абзац режется на куски, каждый проверяется своим словарём.
+    package static func changes(from start: Int, to end: Int, in source: NSString) -> [(location: Int, lcid: Int)] {
+        let fallback = documentDefault(in: source)
+        let begin = max(0, min(start, source.length)), stop = max(begin, min(end, source.length))
+        var current = fallback
+        var stack: [Int] = []
+        var result: [(location: Int, lcid: Int)] = []
+        var pending = true  // язык в начале ещё не записан
+        for token in RTFLexer.tokens(source, in: NSRange(location: begin, length: stop - begin)) {
+            let before = current
+            switch token.kind {
+            case .open: stack.append(current)
+            case .close: current = stack.popLast() ?? current
+            case .word:
+                if token.name == "lang", let number = token.number, number != 1024 { current = number }
+                if token.name == "plain" { current = fallback }
+            default: break
+            }
+            if current != before {
+                if pending, token.range.location >= begin { result.append((begin, before)); pending = false }
+                result.append((token.range.location, current))
+            }
+        }
+        if pending { result.append((begin, current)) }
+        return result
+    }
+
+    /// Код словаря `NSSpellChecker` по идентификатору языка Windows: русский, украинский, английский — остальное не проверяем.
+    package static func spellingCode(lcid: Int) -> String? {
+        switch lcid & 0x3FF {
+        case 0x19: return "ru"
+        case 0x22: return "uk"
+        case 0x09: return lcid == 2057 ? "en_GB" : "en_US"
+        default: return nil
+        }
+    }
+}

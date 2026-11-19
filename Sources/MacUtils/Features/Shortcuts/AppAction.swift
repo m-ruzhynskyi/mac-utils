@@ -15,6 +15,7 @@ import MUDropShelf
 import MUAnnotate
 import MUScreenShare
 import MUCopilot
+import MUHiddenScreen
 import MUScreenshot
 import MUVideoPlayer
 import MUTextEditor
@@ -95,6 +96,7 @@ enum AppAction: Equatable {
     case viewerMonitor(Int)
     case player, playerOpen(path: String), playerTogglePlay, playerContinue
     case remoteConnections
+    case hiddenScreenToggle, hiddenScreenWindow
     case copilotToggle, copilotAnswer, copilotScreen, copilotPanel
     case dollarsRemove(path: String, skipFirst: Int?)
     case dollarsFind(path: String)
@@ -127,6 +129,8 @@ enum AppAction: Equatable {
         case .copilotAnswer: self = .copilotAnswer
         case .copilotScreen: self = .copilotScreen
         case .copilotPanel: self = .copilotPanel
+        case .hiddenScreen: self = .hiddenScreenToggle
+        case .hiddenScreenWindow: self = .hiddenScreenWindow
         }
     }
 
@@ -189,6 +193,12 @@ enum AppAction: Equatable {
         case .copilotAnswer: CopilotGlue.shared.answer()
         case .copilotScreen: CopilotGlue.shared.lookAtScreen()
         case .copilotPanel: CopilotGlue.shared.togglePanel()
+        case .hiddenScreenToggle:
+            let c = HiddenScreenUI.controller
+            c.setEnabled(!c.state.isEnabled)
+        case .hiddenScreenWindow:
+            let c = HiddenScreenUI.controller
+            c.setMirrorShown(!c.state.mirrorShown)
         case .playerOpen(let path): PlayerWindowController.open([Self.fileURL(path)])
         case .playerTogglePlay:
             if let controller = PlayerWindowController.current { controller.model.togglePlay() } else { PlayerWindowController.show() }

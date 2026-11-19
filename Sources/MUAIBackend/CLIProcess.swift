@@ -40,17 +40,28 @@ package enum CLIProcess {
     /// Строки stdout по мере появления. Ненулевой код выхода, таймаут, отмена — `CLIExit`.
     /// Остановка чтения (отмена задачи) убивает процесс.
     package static func lines(_ command: CLICommand, timeout: TimeInterval) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            let runner = Runner(command: command, timeout: timeout,
-                                onLine: { continuation.yield($0) },
-                                onFinish: { exit in
-                                    if let exit { continuation.finish(throwing: exit) } else { continuation.finish() }
-                                })
+        open(command, timeout: timeout).lines
+    }
+
+    /// Строки и явная остановка. Выход из цикла чтения (`break`, `throw`) сам процесс не останавливает —
+    /// остановка только по отмене задачи, поэтому читающий досрочно зовёт `stop` (после конца процесса — ничего не делает).
+    package static func open(_ command: CLICommand, timeout: TimeInterval)
+        -> (lines: AsyncThrowingStream<String, Error>, stop: @Sendable () -> Void) {
+        var runner: Runner?
+        let lines = AsyncThrowingStream<String, Error> { continuation in
+            let created = Runner(command: command, timeout: timeout,
+                                 onLine: { continuation.yield($0) },
+                                 onFinish: { exit in
+                                     if let exit { continuation.finish(throwing: exit) } else { continuation.finish() }
+                                 })
             continuation.onTermination = { termination in
-                if case .cancelled = termination { runner.stop(.cancelled) }
+                if case .cancelled = termination { created.stop(.cancelled) }
             }
-            runner.start()
+            runner = created
+            created.start()
         }
+        let started = runner
+        return (lines, { started?.stop(.cancelled) })
     }
 
     /// Весь вывод сразу (для коротких проверок: `--version`, `login status`). Код выхода не считается ошибкой.
@@ -147,17 +158,23 @@ private final class Runner: @unchecked Sendable {
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in self?.stop(.timedOut) }
     }
 
-    /// Остановить: SIGTERM процессу и потомкам, через 2 с — SIGKILL оставшимся.
+    /// Остановить: SIGTERM группе процесса и потомкам, через 2 с — SIGKILL оставшимся.
     func stop(_ reason: CLIExit.Reason) {
+        // Причина — только если есть кого останавливать: процесс мог уже выйти и ждать конца вывода (до 2 с),
+        // и таймаут в это окно не должен превращать успешный ответ в «не ответил».
         let pid: pid_t? = lock.withLock {
-            guard !finished, stopReason == nil else { return nil }
+            guard !finished, stopReason == nil, process.isRunning else { return nil }
             stopReason = reason
-            return process.isRunning ? process.processIdentifier : nil
+            return process.processIdentifier
         }
         guard let pid else { return }
+        // Process запускает программу лидером своей группы (pgid = pid): сигнал группе достаёт и потомков,
+        // которых ещё не было в снимке дерева (породились в момент остановки). Дерево — для ушедших в свою группу.
         let tree = ProcessTree.descendants(of: pid) + [pid]
+        kill(-pid, SIGTERM)
         for child in tree { kill(child, SIGTERM) }
         DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if kill(-pid, 0) == 0 { kill(-pid, SIGKILL) }
             for child in tree where ProcessTree.isAlive(child) { kill(child, SIGKILL) }
         }
     }

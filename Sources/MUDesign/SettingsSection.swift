@@ -2,8 +2,8 @@ import Foundation
 import MUCore
 
 package enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, hotKeys, exclusions, panel, music, share, copilot, focus, textInput, cutPaste, winKeys, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
-         annotate, wellbeing, meetings, ai,
+    case general, hotKeys, exclusions, panel, music, share, hiddenScreen, copilot, focus, textInput, cutPaste, winKeys, smoothScroll, switcher, screenshot, windows, volume, layout, shelf, cheatSheet, downloads, qr,
+         annotate, wellbeing, meetings, gaze, ai,
          uninstaller, monitor, tasks, cleanup, shots, textEditor, videoPlayer, remote
 
     package var id: String { rawValue }
@@ -22,6 +22,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .cutPaste: return "Вырезать"
         case .winKeys: return "Ctrl"
         case .copilot: return "Подсказчик"
+        case .hiddenScreen: return "Скрытый"
         case .smoothScroll: return "Прокрутка"
         case .switcher: return "Переключатель"
         case .screenshot: return "Скриншоты"
@@ -35,6 +36,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .annotate: return "Рисование"
         case .wellbeing: return "Перерывы"
         case .meetings: return "Встречи"
+        case .gaze: return "Взгляд"
         case .ai: return "ИИ"
         case .general: return "Общие"
         case .hotKeys: return "Клавиши"
@@ -60,6 +62,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .cutPaste: return "Вырезать и вставить"
         case .winKeys: return "Клавиши Windows"
         case .copilot: return "Подсказчик на встрече"
+        case .hiddenScreen: return "Скрытый экран"
         case .smoothScroll: return "Плавная прокрутка"
         case .switcher: return "Переключатель приложений"
         case .screenshot: return "Снимки экрана"
@@ -73,6 +76,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .annotate: return "Рисование на экране"
         case .wellbeing: return "Перерывы и тёплый экран"
         case .meetings: return "Записи встреч"
+        case .gaze: return "Взгляд в камеру"
         case .ai: return "ИИ"
         case .uninstaller: return "Удаление программ"
         case .monitor: return "Монитор системы"
@@ -98,6 +102,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .cutPaste: return "scissors"
         case .winKeys: return "keyboard"
         case .copilot: return "text.bubble"
+        case .hiddenScreen: return "eye.slash"
         case .smoothScroll: return "computermouse"
         case .switcher: return "rectangle.on.rectangle"
         case .screenshot: return "camera.viewfinder"
@@ -111,6 +116,7 @@ package enum SettingsSection: String, CaseIterable, Identifiable {
         case .annotate: return "pencil.tip.crop.circle"
         case .wellbeing: return "sun.horizon"
         case .meetings: return "waveform.badge.mic"
+        case .gaze: return "eye"
         case .ai: return "sparkles"
         case .uninstaller: return "trash"
         case .monitor: return "gauge.with.dots.needle.67percent"

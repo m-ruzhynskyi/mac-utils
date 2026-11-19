@@ -155,19 +155,42 @@ let package = Package(
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUVideoPlayer"
         ),
+        // «Скрытый экран»: виртуальный дисплей для окон ИИ + окно-зеркало, которого нет в демонстрации экрана.
+        .target(
+            name: "MUHiddenScreen",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUHiddenScreen"
+        ),
         .target(
             name: "MUTextEditor",
             dependencies: ["MUCore", "MUDesign"],
             path: "Sources/MUTextEditor"
         ),
+        // «Взгляд в камеру»: поправка взгляда (MediaPipe Iris в Core ML) и свой сервер Syphon для OBS.
+        .target(
+            name: "MUGaze",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MUGaze"
+        ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUCopilot", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUAIBackend"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUCopilot", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUGaze", "MUAIBackend", "MUHiddenScreen"],
             path: "Sources/MacUtils"
+        ),
+        // Процесс-помощник «Скрытого экрана»: держит виртуальный дисплей и прячет программы ИИ, если Mac Utils упала.
+        .executableTarget(
+            name: "HiddenScreenHelper",
+            dependencies: ["MUHiddenScreen"],
+            path: "Sources/HiddenScreenHelper"
         ),
         .executableTarget(
             name: "ToolsLauncher",
             path: "Sources/ToolsLauncher"
+        ),
+        .testTarget(
+            name: "MUHiddenScreenTests",
+            dependencies: ["MUHiddenScreen"],
+            path: "Tests/MUHiddenScreenTests"
         ),
         .testTarget(
             name: "MURemoteConnectionsTests",
@@ -176,7 +199,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUCopilot", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUAIBackend"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUHiddenScreen", "MUCopilot", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUGaze", "MUAIBackend"],
             path: "Tests/MacUtilsTests"
         ),
     ]

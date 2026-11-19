@@ -23,4 +23,6 @@ package enum HotKeyID {
     package static let copilotAnswer: UInt32 = 41
     package static let copilotScreen: UInt32 = 42
     package static let copilotPanel: UInt32 = 43
+    package static let hiddenScreen: UInt32 = 37
+    package static let hiddenScreenWindow: UInt32 = 38
 }
