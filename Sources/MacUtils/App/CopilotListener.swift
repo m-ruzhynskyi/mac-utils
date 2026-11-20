@@ -22,8 +22,18 @@ final class LiveCopilotListener: NSObject, CopilotListening {
     private var task: Task<Void, Never>?
     private var generation = 0
 
+    var onListenFailure: (@MainActor (CopilotListenFailure) -> Void)?
+
+    /// Как идёт расшифровка (для самопроверки): путь, язык, установлена ли модель SpeechAnalyzer.
+    var transcription: (path: CopilotTranscriptionPath?, language: String, modelInstalled: Bool?)? {
+        system.map { ($0.path, $0.language, $0.modelInstalled) }
+    }
+    /// Открыты ли микрофон и звук звонка (самопроверка после выключения).
+    var isCapturing: Bool { microphone != nil || stream != nil }
+
     func start(language: String?, reactToPauses: Bool, onUtterance: @escaping @MainActor (Utterance) -> Void) throws {
-        guard #available(macOS 26.0, *) else { throw CopilotError.notConnected("Расшифровка на устройстве (нужна macOS 26)") }
+        // Микрофон уже запрещён — сразу понятная причина. Не спрошен — Mac спросит сам, когда человек включает подсказчика.
+        if Permissions.microphone == .denied { throw CopilotListenFailure.microphoneDenied }
         generation += 1
         let mine = generation
         let locale = Locale(identifier: CopilotLocale.identifier(for: language))
@@ -34,13 +44,19 @@ final class LiveCopilotListener: NSObject, CopilotListening {
             Task { @MainActor in onUtterance(Utterance(.me, text, spoke: span)) }
         }
         let activity: @Sendable () -> Void = { [weak self] in Task { @MainActor in self?.onActivity?() } }
+        let broke: @Sendable (CopilotListenFailure) -> Void = { [weak self] reason in Task { @MainActor in self?.fail(reason) } }
         system.onActivity = activity
         me.onActivity = activity
+        system.onFailure = broke
+        me.onFailure = broke
         self.system = system
         self.mine = me
-        // Всё долгое (модель, поток звука) — вне главного потока; ошибки приходят в `onFailure`.
+        // Всё долгое (разрешения, модель, поток звука) — вне главного потока; ошибки приходят в `onListenFailure`.
         task = Task { [weak self] in
             do {
+                if Permissions.microphone == .notAsked, !(await AVCaptureDevice.requestAccess(for: .audio)) {
+                    throw CopilotListenFailure.microphoneDenied
+                }
                 try await system.start()
                 guard self?.generation == mine, !Task.isCancelled else { return }
                 try await me.start()
@@ -48,7 +64,7 @@ final class LiveCopilotListener: NSObject, CopilotListening {
                 try await self.beginCapture(system: system, mine: me, token: mine)
             } catch {
                 guard let self, self.generation == mine, !Task.isCancelled else { return }
-                self.fail(error.localizedDescription)
+                self.fail(error as? CopilotListenFailure ?? .other(error.localizedDescription))
             }
         }
     }
@@ -56,7 +72,13 @@ final class LiveCopilotListener: NSObject, CopilotListening {
     /// `token` — номер включения. Между `await` подсказчик могли выключить (`stop()` увеличил `generation`): тогда всё,
     /// что успели открыть, закрывается здесь же — иначе микрофон и звук остались бы открыты при выключенном подсказчике.
     private func beginCapture(system: StreamingTranscriber, mine: StreamingTranscriber, token: Int) async throws {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        // Звук звонка — через «Запись экрана и системного звука»: нет доступа — понятная причина, а не текст ошибки системы.
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        } catch {
+            throw CGPreflightScreenCaptureAccess() ? error : CopilotListenFailure.screenAudioDenied
+        }
         guard generation == token else { return }
         guard let display = content.displays.first else { throw CopilotError.noDisplay }
         let ownPID = ProcessInfo.processInfo.processIdentifier
@@ -71,7 +93,7 @@ final class LiveCopilotListener: NSObject, CopilotListening {
         config.sampleRate = 48_000
         config.channelCount = 2
         let tap = SystemAudioTap(transcriber: system) { [weak self] message in
-            Task { @MainActor in self?.fail(message) }
+            Task { @MainActor in self?.fail(.other(message)) }
         }
         let stream = SCStream(filter: filter, configuration: config, delegate: tap)
         try stream.addStreamOutput(tap, type: .audio, sampleHandlerQueue: tap.queue)
@@ -113,9 +135,9 @@ final class LiveCopilotListener: NSObject, CopilotListening {
         mine = nil
     }
 
-    private func fail(_ message: String) {
+    private func fail(_ reason: CopilotListenFailure) {
         stop()
-        onFailure?(message)
+        if let onListenFailure { onListenFailure(reason) } else { onFailure?(reason.message) }
     }
 }
 
@@ -146,13 +168,19 @@ private final class SystemAudioTap: NSObject, SCStreamOutput, SCStreamDelegate, 
     }
 }
 
-/// Потоковая расшифровка на устройстве (SpeechAnalyzer, macOS 26): буферы звука → готовые фразы.
-/// Для языков, которых нет у SpeechTranscriber (русский, украинский), — DictationTranscriber, как в записи встреч.
+/// Потоковая расшифровка на устройстве: буферы звука → готовые фразы.
+/// - SpeechAnalyzer (macOS 26, сборка на SDK 26): SpeechTranscriber, а для языков, которых у него нет (русский, украинский), —
+///   DictationTranscriber, как в записи встреч. Модель только проверяется: скачивается по кнопке «Загрузить» (`downloadModel`).
+/// - Запасной путь: SFSpeechRecognizer только на устройстве (`requiresOnDeviceRecognition`, без облака) — если кода SpeechAnalyzer
+///   нет в сборке (так было в 1.11.1: SDK 15.5), его модель не скачана или он не знает язык.
+/// Выбор — `CopilotTranscriptionPath.choose`.
 final class StreamingTranscriber: @unchecked Sendable {
     private let locale: Locale
     private let onText: @Sendable (String, SpeechSpan?) -> Void
     /// Промежуточный текст изменился: кто-то говорит.
     var onActivity: (@Sendable () -> Void)?
+    /// Расшифровка сама остановилась (запасной путь не перезапускается).
+    var onFailure: (@Sendable (CopilotListenFailure) -> Void)?
     private let lock = NSLock()
     /// `AsyncStream<AnalyzerInput>.Continuation` (тип доступен с macOS 26, поэтому хранится как `Any`).
     private var typed: Any?
@@ -160,12 +188,23 @@ final class StreamingTranscriber: @unchecked Sendable {
     private var targetFormat: AVAudioFormat?
     private var finishBlock: (@Sendable () -> Void)?
     private var accepting = false
-    /// `finish()` уже вызван: запуск, который ещё шёл (скачивание модели, старт анализатора), сам всё закроет.
+    /// `finish()` уже вызван: запуск, который ещё шёл (старт анализатора), сам всё закроет.
     private var closed = false
 
     private let reactToPauses: Bool
     private var settler = VolatileSettler()
     private var ticker: Task<Void, Never>?
+
+    // Запасной путь (SFSpeechRecognizer).
+    private var recognizer: SFSpeechRecognizer?
+    private var sfRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var sfTask: SFSpeechRecognitionTask?
+    private var sfRestarts: [Date] = []
+
+    /// Выбранный путь после `start()`; язык — код (ru, uk, en…); модель SpeechAnalyzer установлена (nil — не проверялась).
+    private(set) var path: CopilotTranscriptionPath?
+    private(set) var modelInstalled: Bool?
+    var language: String { Self.languageCode(locale) }
 
     init(locale: Locale, reactToPauses: Bool, onText: @escaping @Sendable (String, SpeechSpan?) -> Void) {
         self.locale = locale
@@ -173,35 +212,78 @@ final class StreamingTranscriber: @unchecked Sendable {
         self.onText = onText
     }
 
-    /// SpeechAnalyzer — только в SDK macOS 26 (Swift 6.2+): на CI с SDK macOS 15 этот код не собирается, как и в записи встреч.
-    func start() async throws {
-        #if compiler(>=6.2)
-        if #available(macOS 26.0, *) { return try await startModern() }
-        #endif
-        throw CopilotError.notConnected("Расшифровка на устройстве (нужна macOS 26)")
-    }
+    static func languageCode(_ locale: Locale) -> String { locale.language.languageCode?.identifier ?? locale.identifier }
 
-    /// Модель расшифровки для языка уже установлена (проверка без скачивания: реплей не меняет систему).
-    static func modelInstalled(for locale: Locale) async -> Bool {
+    /// Код SpeechAnalyzer есть в этой сборке (SDK macOS 26, Swift 6.2+) и система — macOS 26+.
+    static var analyzerBuilt: Bool {
         #if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            if let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) {
-                let m = SpeechTranscriber(locale: supported, transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
-                return await AssetInventory.status(forModules: [m]) == .installed
-            }
-            if let supported = await DictationTranscriber.supportedLocale(equivalentTo: locale) {
-                let m = DictationTranscriber(locale: supported, contentHints: [], transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
-                return await AssetInventory.status(forModules: [m]) == .installed
-            }
-        }
+        if #available(macOS 26.0, *) { return true }
         #endif
         return false
     }
 
-    func append(_ buffer: AVAudioPCMBuffer) {
+    func start() async throws {
+        let model = await Self.modelState(for: locale)
+        modelInstalled = model.map { $0 == .installed }
+        let onDevice = SFSpeechRecognizer(locale: locale)?.supportsOnDeviceRecognition ?? false
+        switch CopilotTranscriptionPath.choose(analyzerBuilt: Self.analyzerBuilt, model: model, onDeviceSFSpeech: onDevice,
+                                               language: language) {
+        case .failure(let reason):
+            throw reason
+        case .success(let chosen):
+            path = chosen
+            Log.ai.info("Подсказчик: расшифровка — \(chosen.rawValue, privacy: .public), язык \(self.language, privacy: .public), модель \(model.map { "\($0)" } ?? "нет", privacy: .public)")
+            switch chosen {
+            case .speechAnalyzer:
+                #if compiler(>=6.2)
+                if #available(macOS 26.0, *) { try await startModern() }
+                #endif
+            case .sfSpeech:
+                try await startSFSpeech()
+            }
+        }
+    }
+
+    /// Состояние модели SpeechAnalyzer для языка (без скачивания). nil — SpeechAnalyzer в сборке нет или язык он не знает.
+    static func modelState(for locale: Locale) async -> CopilotTranscriptionPath.ModelState? {
         #if compiler(>=6.2)
-        if #available(macOS 26.0, *) { appendModern(buffer) }
+        if #available(macOS 26.0, *), let module = await module(for: locale, reactToPauses: false) {
+            switch await AssetInventory.status(forModules: [module]) {
+            case .installed: return .installed
+            case .downloading: return .downloading
+            case .supported: return .downloadable
+            default: return .unsupported
+            }
+        }
         #endif
+        return nil
+    }
+
+    /// Модель расшифровки для языка уже установлена (проверка без скачивания: реплей не меняет систему).
+    static func modelInstalled(for locale: Locale) async -> Bool { await modelState(for: locale) == .installed }
+
+    /// Скачать модель SpeechAnalyzer для языка — только по кнопке «Загрузить» (один раз, дальше всё на Mac).
+    static func downloadModel(for locale: Locale) async throws {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *), let module = await module(for: locale, reactToPauses: false) {
+            if let request = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
+                try await request.downloadAndInstall()
+            }
+            return
+        }
+        #endif
+        throw CopilotListenFailure.languageUnsupported(language: languageCode(locale))
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        switch path {
+        case .sfSpeech: appendSFSpeech(buffer)
+        case .speechAnalyzer:
+            #if compiler(>=6.2)
+            if #available(macOS 26.0, *) { appendModern(buffer) }
+            #endif
+        case nil: break
+        }
     }
 
     func finish() {
@@ -210,32 +292,48 @@ final class StreamingTranscriber: @unchecked Sendable {
         block?()
     }
 
-    // MARK: macOS 26
+    private func startTicker() -> Task<Void, Never> {
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                guard let self else { return }
+                self.tick()
+            }
+        }
+    }
+
+    // MARK: SpeechAnalyzer (macOS 26)
 
     #if compiler(>=6.2)
     @available(macOS 26.0, *)
-    private func startModern() async throws {
-        let module: any SpeechModule
-        let results: AsyncThrowingStream<(String, Bool), Error>
+    private static func module(for locale: Locale, reactToPauses: Bool) async -> (any SpeechModule)? {
         // С реакцией на паузу просим и промежуточный текст: он приходит раньше финала.
         let reporting: Set<SpeechTranscriber.ReportingOption> = reactToPauses ? [.volatileResults, .fastResults] : []
         let dictationReporting: Set<DictationTranscriber.ReportingOption> = reactToPauses ? [.volatileResults, .frequentFinalization] : []
         if let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) {
-            let m = SpeechTranscriber(locale: supported, transcriptionOptions: [], reportingOptions: reporting, attributeOptions: [])
-            module = m
+            return SpeechTranscriber(locale: supported, transcriptionOptions: [], reportingOptions: reporting, attributeOptions: [])
+        }
+        if let supported = await DictationTranscriber.supportedLocale(equivalentTo: locale) {
+            return DictationTranscriber(locale: supported, contentHints: [], transcriptionOptions: [.punctuation],
+                                        reportingOptions: dictationReporting, attributeOptions: [])
+        }
+        return nil
+    }
+
+    @available(macOS 26.0, *)
+    private func startModern() async throws {
+        guard let module = await Self.module(for: locale, reactToPauses: reactToPauses) else {
+            throw CopilotListenFailure.languageUnsupported(language: language)
+        }
+        let results: AsyncThrowingStream<(String, Bool), Error>
+        if let m = module as? SpeechTranscriber {
             results = Self.texts(m.results.map { (String($0.text.characters), $0.isFinal) })
-        } else if let supported = await DictationTranscriber.supportedLocale(equivalentTo: locale) {
-            let m = DictationTranscriber(locale: supported, contentHints: [], transcriptionOptions: [.punctuation],
-                                         reportingOptions: dictationReporting, attributeOptions: [])
-            module = m
+        } else if let m = module as? DictationTranscriber {
             results = Self.texts(m.results.map { (String($0.text.characters), $0.isFinal) })
         } else {
-            throw CopilotError.notConnected("Язык \(locale.identifier) для расшифровки")
+            throw CopilotListenFailure.languageUnsupported(language: language)
         }
-        // Языковая модель Apple скачивается один раз, дальше работает без сети.
-        if let request = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
-            try await request.downloadAndInstall()
-        }
+        // Модель не скачивается здесь: путь выбран только при установленной (`CopilotTranscriptionPath.choose`).
         let analyzer = SpeechAnalyzer(modules: [module])
         let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module])
         let (input, continuation) = AsyncStream<AnalyzerInput>.makeStream()
@@ -245,13 +343,7 @@ final class StreamingTranscriber: @unchecked Sendable {
                 for try await (text, isFinal) in results { self?.receive(text, isFinal: isFinal) }
             } catch {}
         }
-        let ticker: Task<Void, Never>? = reactToPauses ? Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 150_000_000)
-                guard let self else { return }
-                self.tick()
-            }
-        } : nil
+        let ticker: Task<Void, Never>? = reactToPauses ? startTicker() : nil
         lock.lock()
         if closed {
             // Подсказчик выключили, пока шёл запуск: ничего не оставляем работать.
@@ -290,8 +382,85 @@ final class StreamingTranscriber: @unchecked Sendable {
         lock.unlock()
         continuation.yield(AnalyzerInput(buffer: converted))
     }
-
     #endif
+
+    // MARK: Запасной путь: SFSpeechRecognizer на устройстве
+
+    /// Разрешение «Распознавание речи» спрашивается здесь — только когда человек сам включает подсказчика.
+    private func startSFSpeech() async throws {
+        var status = SFSpeechRecognizer.authorizationStatus()
+        if status == .notDetermined {
+            status = await withCheckedContinuation { c in SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) } }
+        }
+        guard status == .authorized else { throw CopilotListenFailure.speechDenied }
+        guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.supportsOnDeviceRecognition else {
+            throw CopilotListenFailure.languageUnsupported(language: language)
+        }
+        lock.lock()
+        if closed { lock.unlock(); return }
+        self.recognizer = recognizer
+        beginSFTask()
+        // Промежуточный текст SFSpeech накапливается за весь сеанс: новые слова отдаёт пауза (`VolatileSettler`) — всегда.
+        ticker = startTicker()
+        accepting = true
+        finishBlock = { [weak self] in self?.endSFSpeech() }
+        lock.unlock()
+    }
+
+    /// Новый сеанс распознавания (под `lock`). Сеанс кончается финалом или ошибкой (у SFSpeech есть предел длины) — тогда следующий.
+    private func beginSFTask() {
+        guard let recognizer else { return }
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.requiresOnDeviceRecognition = true
+        request.shouldReportPartialResults = true
+        request.addsPunctuation = true
+        sfRequest = request
+        converter = nil
+        targetFormat = request.nativeAudioFormat
+        sfTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            guard let self else { return }
+            if let result { self.receive(result.bestTranscription.formattedString, isFinal: result.isFinal, settle: true) }
+            if error != nil || result?.isFinal == true { self.restartSF(after: request, failed: error != nil) }
+        }
+    }
+
+    private func restartSF(after request: SFSpeechAudioBufferRecognitionRequest, failed: Bool) {
+        lock.lock()
+        guard accepting, !closed, request === sfRequest else { lock.unlock(); return }
+        request.endAudio()
+        let now = Date()
+        sfRestarts = sfRestarts.filter { now.timeIntervalSince($0) < 10 } + [now]
+        // Ошибка за ошибкой (нет модели, система отказала) — не крутимся, а говорим.
+        if failed, sfRestarts.count > 3 {
+            lock.unlock()
+            finish()
+            onFailure?(.other("Распознавание речи на Mac остановилось — включите подсказчика ещё раз"))
+            return
+        }
+        beginSFTask()
+        lock.unlock()
+    }
+
+    private func appendSFSpeech(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        guard accepting, let request = sfRequest else { lock.unlock(); return }
+        var converted = buffer
+        if let target = targetFormat, target != buffer.format {
+            if converter == nil || converter?.inputFormat != buffer.format { converter = AVAudioConverter(from: buffer.format, to: target) }
+            if let converter, let out = Self.convert(buffer, with: converter, to: target) { converted = out } else { lock.unlock(); return }
+        }
+        lock.unlock()
+        request.append(converted)
+    }
+
+    private func endSFSpeech() {
+        lock.lock()
+        let request = sfRequest, task = sfTask
+        sfRequest = nil; sfTask = nil; recognizer = nil
+        lock.unlock()
+        request?.endAudio()
+        task?.cancel()
+    }
 
     private static func convert(_ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
         let ratio = format.sampleRate / buffer.format.sampleRate
@@ -308,12 +477,12 @@ final class StreamingTranscriber: @unchecked Sendable {
         return status == .error || out.frameLength == 0 ? nil : out
     }
 
-    /// Текст от расшифровки: без реакции на паузу — только финалы; с ней — новые слова после паузы ≥ 0,7 с и остаток финала.
-    /// `date` — момент прихода текста; в реплее аудиофайлов время виртуальное.
-    func receive(_ text: String, isFinal: Bool, at date: Date = Date()) {
+    /// Текст от расшифровки: без реакции на паузу — только финалы; с ней (и всегда у SFSpeech, `settle`) — новые слова
+    /// после паузы ≥ 0,7 с и остаток финала. `date` — момент прихода текста; в реплее аудиофайлов время виртуальное.
+    func receive(_ text: String, isFinal: Bool, at date: Date = Date(), settle: Bool = false) {
         var out: String?
         var span: SpeechSpan?
-        if !reactToPauses {
+        if !reactToPauses, !settle {
             if isFinal { out = text }
         } else {
             lock.lock()

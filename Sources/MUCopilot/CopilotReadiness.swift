@@ -11,7 +11,7 @@ package enum CopilotReadiness {
     }
 
     package struct Item: Equatable, Identifiable {
-        package enum Fix: Equatable { case aiPage, microphone, screenRecording }
+        package enum Fix: Equatable { case aiPage, microphone, screenRecording, downloadModel(language: String) }
         package let id: String
         package let tone: DS.Tone
         package let label: String
@@ -19,8 +19,20 @@ package enum CopilotReadiness {
         package let fix: Fix?
     }
 
+    /// Расшифровка на Mac для языка встречи (проверка без скачивания и без системных окон).
+    package enum Transcription: Equatable {
+        /// Модель SpeechAnalyzer установлена.
+        case modelInstalled(language: String)
+        /// Модель не скачана; `fallback` — есть ли пока распознавание речи macOS на устройстве.
+        case modelMissing(language: String, fallback: Bool)
+        case downloading(language: String)
+        /// SpeechAnalyzer нет (macOS до 26) — только распознавание речи macOS на устройстве.
+        case fallbackOnly(language: String)
+        case unsupported(language: String)
+    }
+
     package static func items(service: String, ai: AIState, microphone: Permissions.Level, screenAudio: Bool,
-                              speechSupported: Bool) -> [Item] {
+                              transcription: Transcription? = nil) -> [Item] {
         var items: [Item] = []
         switch ai {
         case .off:
@@ -51,8 +63,25 @@ package enum CopilotReadiness {
                               detail: "Собеседников слышно через «Запись экрана и системного звука»: Mac спросит при первом включении. Сам экран не записывается",
                               fix: .screenRecording))
         }
-        if !speechSupported {
-            items.append(Item(id: "speech", tone: .warning, label: "Нужна macOS 26", detail: "Расшифровка звонка на Mac работает с macOS 26", fix: nil))
+        let name = CopilotListenFailure.languageName
+        switch transcription {
+        case .modelInstalled(let l):
+            items.append(Item(id: "speech", tone: .success, label: "Расшифровка на Mac: \(name(l))", detail: nil, fix: nil))
+        case .modelMissing(let l, let fallback):
+            items.append(Item(id: "speech", tone: fallback ? .neutral : .warning, label: "Модель распознавания: \(name(l))",
+                              detail: fallback ? "Не скачана — пока работает распознавание речи macOS. С моделью точнее; скачается один раз"
+                                               : "Не скачана — без неё подсказчик не услышит звонок. Скачается один раз, дальше всё на Mac",
+                              fix: .downloadModel(language: l)))
+        case .downloading(let l):
+            items.append(Item(id: "speech", tone: .neutral, label: "Модель распознавания: \(name(l))", detail: "Скачивается…", fix: nil))
+        case .fallbackOnly(let l):
+            items.append(Item(id: "speech", tone: .success, label: "Расшифровка на Mac: \(name(l))",
+                              detail: "Распознавание речи macOS на устройстве; Mac спросит разрешение при первом включении", fix: nil))
+        case .unsupported(let l):
+            items.append(Item(id: "speech", tone: .warning, label: "Язык не распознаётся: \(name(l))",
+                              detail: CopilotListenFailure.languageUnsupported(language: l).message, fix: nil))
+        case nil:
+            break
         }
         return items
     }

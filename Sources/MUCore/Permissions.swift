@@ -105,6 +105,7 @@ package enum Permissions {
         case automation = "Privacy_Automation"
         case microphone = "Privacy_Microphone"
         case camera = "Privacy_Camera"
+        case speechRecognition = "Privacy_SpeechRecognition"
     }
 
     package static func open(_ pane: Pane) {
