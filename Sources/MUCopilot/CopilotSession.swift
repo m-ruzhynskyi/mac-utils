@@ -34,10 +34,13 @@ package protocol CopilotListening: AnyObject {
     var onFailure: (@MainActor (String) -> Void)? { get set }
     /// Кто-то говорит (текст расшифровки изменился): пока говорят, незаконченный вопрос ждёт продолжения.
     var onActivity: (@MainActor () -> Void)? { get set }
+    /// То же, что `onFailure`, но с причиной (нет модели, нет доступа, язык): страница показывает её с действием.
+    var onListenFailure: (@MainActor (CopilotListenFailure) -> Void)? { get set }
 }
 
 extension CopilotListening {
     package var onActivity: (@MainActor () -> Void)? { get { nil } set {} }
+    package var onListenFailure: (@MainActor (CopilotListenFailure) -> Void)? { get { nil } set {} }
 }
 
 /// Измеряет задержку «конец вопроса → первое слово ответа на экране».
@@ -95,6 +98,8 @@ package final class CopilotSession: ObservableObject {
     @Published package private(set) var isAnswering = false
     @Published package private(set) var lastLatency: TimeInterval?
     @Published package private(set) var error: String?
+    /// Причина, почему не начал слушать (с действием для страницы); nil — нет или неизвестна.
+    @Published package private(set) var failure: CopilotListenFailure?
     /// Когда панель раскрылась (для автосворачивания через 20 с).
     @Published package private(set) var expandedAt: Date?
 
@@ -148,10 +153,17 @@ package final class CopilotSession: ObservableObject {
                 self.stop()
                 self.error = message
             }
+            listener.onListenFailure = { [weak self] reason in
+                guard let self else { return }
+                self.stop()
+                self.failure = reason
+                self.error = reason.message
+            }
             listener.onActivity = { [weak self] in self?.speechActivity() }
             try listener.start(language: settings().meetingLanguage, reactToPauses: settings().reactToPauses) { [weak self] in self?.feed($0) }
             phase = .listening
             error = nil
+            failure = nil
             let ai = self.ai, system = CopilotPrompt.system(settings: settings()), previous = lifecycle
             lifecycle = Task {
                 await previous?.value
@@ -159,6 +171,10 @@ package final class CopilotSession: ObservableObject {
                 await ai.warmUp(system: system)
             }
             log("Подсказчик: включён вручную")
+        } catch let reason as CopilotListenFailure {
+            failure = reason
+            self.error = reason.message
+            logError("Подсказчик: не включился — \(reason.message)")
         } catch {
             self.error = "Не удалось начать слушать: \(error.localizedDescription)"
             logError("Подсказчик: не включился — \(error.localizedDescription)")
