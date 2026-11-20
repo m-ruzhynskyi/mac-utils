@@ -46,9 +46,15 @@ final class StitcherScenarioTests: XCTestCase {
 
     /// Лог по секундам: строки одной формы, отличаются цифрами.
     private func log(from start: Int, count: Int) -> [String] {
-        (start..<(start + count)).map { i in
-            String(format: "2026-10-17 %02d:%02d:%02d.%03d  INFO  [worker-3] GET /api/v1/items 200 %dms",
-                   9 + i / 3600, (i / 60) % 60, i % 60, (i * 137) % 1000, 10 + (i * 31) % 90)
+        // Части — отдельными строками: Swift 6.3 (Xcode 26) не успевал вывести типы одного длинного выражения.
+        (start..<(start + count)).map { (i: Int) -> String in
+            let hour: Int = 9 + i / 3600
+            let minute: Int = (i / 60) % 60
+            let second: Int = i % 60
+            let millis: Int = (i * 137) % 1000
+            let took: Int = 10 + (i * 31) % 90
+            return String(format: "2026-10-17 %02d:%02d:%02d.%03d  INFO  [worker-3] GET /api/v1/items 200 %dms",
+                          hour, minute, second, millis, took)
         }
     }
 

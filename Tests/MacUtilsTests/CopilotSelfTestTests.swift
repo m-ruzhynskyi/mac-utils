@@ -19,6 +19,21 @@ final class CopilotSelfTestTests: XCTestCase {
                        "Почему REST, а не GraphQL?")
         XCTAssertEqual(CopilotSelfTest.options(["MacUtils", "--copilot-question=  ", "--copilot-selftest"])?.question, CopilotSelfTest.defaultQuestion)
         XCTAssertTrue(CopilotSelfTest.defaultQuestion.hasSuffix("?"))
+        XCTAssertEqual(CopilotSelfTest.options(["MacUtils", "--copilot-selftest"])?.mode, .answer)
+    }
+
+    /// COPILOT-41: `--copilot-selftest=audio` — настоящий источник звука, N секунд (3…300, по умолчанию 20).
+    func testAudioSelfTestFlag() {
+        let audio = CopilotSelfTest.options(["MacUtils", "--copilot-selftest=audio"])
+        XCTAssertEqual(audio?.mode, .audio)
+        XCTAssertEqual(audio?.seconds, 20)
+        XCTAssertEqual(CopilotSelfTest.options(["MacUtils", "--copilot-selftest=audio", "--copilot-seconds=45"])?.seconds, 45)
+        XCTAssertEqual(CopilotSelfTest.options(["MacUtils", "--copilot-selftest=audio", "--copilot-seconds=1"])?.seconds, 3)
+        XCTAssertEqual(CopilotSelfTest.options(["MacUtils", "--copilot-selftest=audio", "--copilot-seconds=abc"])?.seconds, 20)
+        XCTAssertFalse(CopilotSelfTest.usesSilentListener(["MacUtils", "--copilot-selftest=audio"]), "звук — настоящий источник")
+        XCTAssertTrue(CopilotSelfTest.usesSilentListener(["MacUtils", "--copilot-selftest"]), "ответ — без микрофона")
+        XCTAssertFalse(CopilotSelfTest.usesSilentListener(["MacUtils"]))
+        XCTAssertEqual(CopilotSelfTest.countsLine(other: 3, me: 1), "реплик собеседник: 3, вы: 1")
     }
 
     func testProcessesLine() {
@@ -87,7 +102,7 @@ final class CopilotSelfTestTests: XCTestCase {
 
     func testHonestCodexSpeedHintOnlyForCodex() {
         XCTAssertEqual(CopilotPage.serviceSubtitle(.codex),
-                       "Codex начинает ответ за 5–10 с. Claude — меньше чем за секунду: сервис меняется на странице «ИИ».")
-        XCTAssertFalse(CopilotPage.serviceSubtitle(.claude).contains("5–10"))
+                       "Codex начинает ответ примерно за 3–4 с. Claude — меньше чем за секунду: сервис меняется на странице «ИИ».")
+        XCTAssertFalse(CopilotPage.serviceSubtitle(.claude).contains("3–4"))
     }
 }

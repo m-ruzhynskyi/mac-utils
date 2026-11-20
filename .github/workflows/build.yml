@@ -94,7 +94,7 @@ jobs:
     # tested-tree пропущена (не push в main/development) или упала — outputs пустые, тесты идут.
     if: ${{ !cancelled() && needs.module-deps.result == 'success' && needs.tested-tree.outputs.tested != 'true' }}
     name: test-shard ${{ matrix.shard }}
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 35
     strategy:
       fail-fast: false
@@ -108,7 +108,12 @@ jobs:
           fetch-depth: 0
       - name: Toolchain
         id: toolchain
-        run: echo "id=$( (swift --version; xcodebuild -version) 2>&1 | shasum | cut -c1-12 )" >> "$GITHUB_OUTPUT"
+        # SDK macOS 26 обязателен: на SDK 15 код SpeechAnalyzer (`#if compiler(>=6.2)`) выпадает из сборки (COPILOT-41).
+        run: |
+          xcodebuild -version; swift --version; echo "SDK macOS $(xcrun --sdk macosx --show-sdk-version)"
+          sdk=$(xcrun --sdk macosx --show-sdk-version)
+          [[ "${sdk%%.*}" -ge 26 ]] || { echo "::error::SDK macOS $sdk — нужен 26+"; exit 1; }
+          echo "id=$( (swift --version; xcodebuild -version) 2>&1 | shasum | cut -c1-12 )" >> "$GITHUB_OUTPUT"
       - name: Restore build cache
         if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.no_cache) }}
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
@@ -140,7 +145,7 @@ jobs:
     needs: [tested-tree, module-deps]
     # При push в development работает и когда тесты переиспользованы: сборка кладёт кэш для следующих прогонов.
     if: ${{ !cancelled() && needs.module-deps.result == 'success' && (needs.tested-tree.outputs.tested != 'true' || github.ref == 'refs/heads/development') }}
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -155,7 +160,12 @@ jobs:
         run: npm test --prefix relay
       - name: Toolchain
         id: toolchain
-        run: echo "id=$( (swift --version; xcodebuild -version) 2>&1 | shasum | cut -c1-12 )" >> "$GITHUB_OUTPUT"
+        # SDK macOS 26 обязателен: на SDK 15 код SpeechAnalyzer (`#if compiler(>=6.2)`) выпадает из сборки (COPILOT-41).
+        run: |
+          xcodebuild -version; swift --version; echo "SDK macOS $(xcrun --sdk macosx --show-sdk-version)"
+          sdk=$(xcrun --sdk macosx --show-sdk-version)
+          [[ "${sdk%%.*}" -ge 26 ]] || { echo "::error::SDK macOS $sdk — нужен 26+"; exit 1; }
+          echo "id=$( (swift --version; xcodebuild -version) 2>&1 | shasum | cut -c1-12 )" >> "$GITHUB_OUTPUT"
       # PR кэш не использует: его сборка приложения идёт под одну архитектуру и ничего в кэш не кладёт.
       - name: Restore build cache
         if: ${{ github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.no_cache) }}
@@ -177,6 +187,7 @@ jobs:
         run: |
           env -u SIGN_IDENTITY ./build.sh
           ./scripts/check-arm64-only.sh "build/Mac Utils.app"
+          ./scripts/check-speech-analyzer.sh "build/Mac Utils.app"
           codesign --verify --deep --strict "build/Mac Utils.app"
           # Значки документов: все .icns в бандле, каждый CFBundleTypeIconFile/UTTypeIconFile указывает на файл.
           ./scripts/check-doc-icons.sh "build/Mac Utils.app"
@@ -255,7 +266,7 @@ jobs:
     needs: test
     # !cancelled() вместо неявного success(): иначе пропущенные шарды (тесты уже прошли в PR) пропустили бы и релиз.
     if: ${{ !cancelled() && needs.test.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     # Два push в main подряд не должны считать версию одновременно.
     concurrency:
@@ -310,7 +321,12 @@ jobs:
 
       - name: Toolchain
         id: toolchain
-        run: echo "id=$( (swift --version; xcodebuild -version) 2>&1 | shasum | cut -c1-12 )" >> "$GITHUB_OUTPUT"
+        # SDK macOS 26 обязателен: на SDK 15 код SpeechAnalyzer (`#if compiler(>=6.2)`) выпадает из сборки (COPILOT-41).
+        run: |
+          xcodebuild -version; swift --version; echo "SDK macOS $(xcrun --sdk macosx --show-sdk-version)"
+          sdk=$(xcrun --sdk macosx --show-sdk-version)
+          [[ "${sdk%%.*}" -ge 26 ]] || { echo "::error::SDK macOS $sdk — нужен 26+"; exit 1; }
+          echo "id=$( (swift --version; xcodebuild -version) 2>&1 | shasum | cut -c1-12 )" >> "$GITHUB_OUTPUT"
       # Кэш сохранён сборкой development при том же дереве: тогда универсальная сборка почти ничего не компилирует.
       - name: Restore build cache
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
@@ -328,6 +344,7 @@ jobs:
         run: |
           ./build.sh
           ./scripts/check-arm64-only.sh "build/Mac Utils.app"
+          ./scripts/check-speech-analyzer.sh "build/Mac Utils.app"
 
       - name: Version
         run: |

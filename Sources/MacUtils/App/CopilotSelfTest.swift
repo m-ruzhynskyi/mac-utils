@@ -10,8 +10,16 @@ import MUAIBackend
 /// не открываются), показывает панель и пишет в журнал (`Log.ai`, «Самопроверка подсказчика: …»): сервис, модель, прогрев,
 /// «конец вопроса → первое слово», свойства панели, активную программу до и после, процессы после выключения. Потом выход.
 /// Без ключа обычный запуск не меняется. Это настоящий запрос к ИИ — запускает только человек.
+///
+/// Звук (COPILOT-41): `--copilot-selftest=audio [--copilot-seconds=N]` — настоящий `LiveCopilotListener` (микрофон и звук
+/// звонка) слушает N секунд (по умолчанию 20), без ИИ и без панели. В журнал: путь расшифровки (SpeechAnalyzer | SFSpeech),
+/// язык, установлена ли модель, сколько реплик «собеседник» / «вы» (`.public`), первые 40 знаков каждой (`.private`), затем
+/// выключение и «микрофон и звук звонка после выключения», процессы. Системные запросы разрешений — как при включении вручную.
 enum CopilotSelfTest {
     static let flag = "--copilot-selftest"
+    static let audioFlag = "--copilot-selftest=audio"
+    static let secondsPrefix = "--copilot-seconds="
+    static let defaultSeconds: TimeInterval = 20
     static let questionPrefix = "--copilot-question="
     static let defaultQuestion = "Как ускорить отчёт по таблице на 40 млн строк?"
     /// Сколько ждать ответа и сколько — после выключения, прежде чем смотреть процессы.
@@ -19,15 +27,27 @@ enum CopilotSelfTest {
     static let afterOffSeconds: TimeInterval = 3
 
     struct Options: Equatable {
+        enum Mode: Equatable { case answer, audio }
+        var mode: Mode = .answer
         var question: String
+        var seconds: TimeInterval = CopilotSelfTest.defaultSeconds
     }
 
     static func options(_ arguments: [String]) -> Options? {
-        guard arguments.contains(flag) else { return nil }
+        let mode: Options.Mode
+        if arguments.contains(audioFlag) { mode = .audio } else if arguments.contains(flag) { mode = .answer } else { return nil }
         let custom = arguments.last { $0.hasPrefix(questionPrefix) }.map { String($0.dropFirst(questionPrefix.count)) }?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return Options(question: custom.flatMap { $0.isEmpty ? nil : $0 } ?? defaultQuestion)
+        let seconds = arguments.last { $0.hasPrefix(secondsPrefix) }.flatMap { TimeInterval($0.dropFirst(secondsPrefix.count)) }
+        return Options(mode: mode, question: custom.flatMap { $0.isEmpty ? nil : $0 } ?? defaultQuestion,
+                       seconds: min(max(seconds ?? defaultSeconds, 3), 300))
     }
+
+    /// Беззвучный источник — только в самопроверке ответа; в самопроверке звука — настоящий.
+    static func usesSilentListener(_ arguments: [String]) -> Bool { options(arguments)?.mode == .answer }
+
+    /// «Собеседник: 3, вы: 1».
+    static func countsLine(other: Int, me: Int) -> String { "реплик собеседник: \(other), вы: \(me)" }
 
     /// «да» | «нет (<категория>)»: категория — без содержимого (`mcp-list-failed`, `process-exited(1)-mcp-config`…).
     static func warmPathLine(enabled: Bool, path: String?) -> String {
@@ -45,6 +65,7 @@ enum CopilotSelfTest {
 
     @MainActor
     static func run(_ options: Options) async {
+        if options.mode == .audio { return await runAudio(seconds: options.seconds) }
         let glue = CopilotGlue.shared
         let session = glue.session
         let provider = AI.provider
@@ -84,6 +105,40 @@ enum CopilotSelfTest {
 
         glue.toggle()
         try? await Task.sleep(nanoseconds: UInt64(afterOffSeconds * 1_000_000_000))
+        let left = ProcessTree.descendants(of: getpid()).filter { $0 != getpid() }.map { (pid: $0, name: name(of: $0)) }
+        log(processesLine(left))
+        finish()
+    }
+
+    /// Звук: настоящие микрофон и звук звонка, без ИИ и без панели.
+    @MainActor
+    static func runAudio(seconds: TimeInterval) async {
+        let settings = CopilotPrefs.load()
+        let listener = LiveCopilotListener()
+        var other = 0, mine = 0
+        var stopped: String?
+        listener.onListenFailure = { reason in stopped = reason.message }
+        listener.onFailure = { message in stopped = message }
+        log("звук: слушаю \(Int(seconds)) с, язык встречи \(settings.meetingLanguage ?? "сам"), реакция на паузу \(settings.reactToPauses ? "да" : "нет")")
+        do {
+            try listener.start(language: settings.meetingLanguage, reactToPauses: settings.reactToPauses) { utterance in
+                if utterance.speaker == .other { other += 1 } else { mine += 1 }
+                let who = utterance.speaker == .other ? "собеседник" : "вы"
+                Log.ai.notice("Самопроверка подсказчика: \(who, privacy: .public): \(String(utterance.text.prefix(40)), privacy: .private)")
+            }
+        } catch {
+            stopped = (error as? CopilotListenFailure)?.message ?? error.localizedDescription
+        }
+        let deadline = Date().addingTimeInterval(seconds)
+        while stopped == nil, Date() < deadline { try? await Task.sleep(nanoseconds: 200_000_000) }
+        if let t = listener.transcription {
+            log("расшифровка: \(t.path?.rawValue ?? "не запустилась"), язык \(t.language), модель SpeechAnalyzer установлена: \(t.modelInstalled.map { $0 ? "да" : "нет" } ?? "нет в сборке")")
+        }
+        if let stopped { log("не слушает: \(stopped)") }
+        log(countsLine(other: other, me: mine))
+        listener.stop()
+        try? await Task.sleep(nanoseconds: UInt64(afterOffSeconds * 1_000_000_000))
+        log("микрофон и звук звонка после выключения: \(listener.isCapturing ? "открыты" : "закрыты")")
         let left = ProcessTree.descendants(of: getpid()).filter { $0 != getpid() }.map { (pid: $0, name: name(of: $0)) }
         log(processesLine(left))
         finish()

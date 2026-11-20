@@ -500,13 +500,19 @@ final class StitcherRealPageTests: XCTestCase {
     // MARK: - BLOCKER: похожие строки — ни одна не пропадает
 
     func testLogWithChangingTimestampsKeepsEveryLine() {
-        let lines = (0..<160).map { i -> String in
-            String(format: "2026-10-17 09:%02d:%02d.%03d  INFO  [worker-3] GET /api/v1/items 200 ", 41 + i / 60, i % 60, (i * 137) % 1000) + "\((10 + i * 31 % 90))ms"
+        // Части — отдельными строками: Swift 6.3 (Xcode 26) не успевал вывести типы одного длинного выражения.
+        let lines = (0..<160).map { (i: Int) -> String in
+            let minute: Int = 41 + i / 60
+            let second: Int = i % 60
+            let millis: Int = (i * 137) % 1000
+            let took: Int = 10 + i * 31 % 90
+            let head = String(format: "2026-10-17 09:%02d:%02d.%03d  INFO  [worker-3] GET /api/v1/items 200 ", minute, second, millis)
+            return head + "\(took)ms"
         }
         let page = textPage(width: 1400, lines: lines, font: mono)
         let offsets = steps(page, height: 1200, by: 300)
         let run = scroll(page, height: 1200, offsets: offsets)
-        XCTAssertFalse(run.results.contains(.lost), "\(run.results)")
+        XCTAssertFalse(run.results.contains(Stitcher.Result.lost), "\(run.results)")
         assertPage(run.stitcher.makeImage(), page, height: offsets.last! + 1200)   // 7643e21: 2120 из 12000
     }
 

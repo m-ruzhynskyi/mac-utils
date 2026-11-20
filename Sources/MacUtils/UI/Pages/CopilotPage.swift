@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Speech
 import MUCore
 import MUDesign
 import MUCopilot
@@ -26,6 +27,9 @@ struct CopilotPage: View {
     @ObservedObject private var session = CopilotGlue.shared.session
     /// Демо для снимков интерфейса: не запускает codex и claude и не читает разрешения, состояния готовые.
     var demo = false
+    @State private var transcription: CopilotReadiness.Transcription?
+    /// Язык, модель которого сейчас скачивается.
+    @State private var downloading: String?
     /// Сервис для снимков (в демо); nil — со страницы «ИИ».
     var demoProvider: AIProvider?
 
@@ -38,7 +42,7 @@ struct CopilotPage: View {
                     subtitle: "Клавишей или в меню Mac Utils. Сам по себе, даже во время звонка или демонстрации, он не слушает.",
                     systemImage: "hand.tap") { Keycap(action: .copilot) }
                 if let error = session.error {
-                    FeatureStatusRow(tone: .danger, label: "Не включился", detail: error)
+                    FeatureStatusRow(tone: .danger, label: "Не включился", detail: error, actions: failureActions(session.failure))
                 }
                 Row("Отвечает: \(provider.title)", subtitle: Self.serviceSubtitle(provider), systemImage: "sparkles") {
                     Button("Изменить") { SettingsWindowController.shared.show(section: .ai) }
@@ -100,7 +104,8 @@ struct CopilotPage: View {
             }
             Footnote("Собеседников слышно из звука программы звонка, вас — из микрофона; расшифровка идёт на самом Mac. Выключен — микрофон и звук звонка не слушаются вообще.")
         }
-        .onAppear { if !demo { aiStatus.refreshIfStale(); permissions.refresh() } }
+        .onAppear { if !demo { aiStatus.refreshIfStale(); permissions.refresh(); Task { await refreshTranscription() } } }
+        .onChange(of: meetingLanguage) { if !demo { Task { await refreshTranscription() } } }
     }
 
     private var provider: AIProvider { demoProvider ?? AIProvider(stored: aiProvider) }
@@ -109,7 +114,7 @@ struct CopilotPage: View {
     /// у Claude ~0,6 с). Отдельного выбора сервиса у подсказчика нет: только подсказка, где он меняется.
     static func serviceSubtitle(_ provider: AIProvider) -> String {
         switch provider {
-        case .codex: return "Codex начинает ответ за 5–10 с. Claude — меньше чем за секунду: сервис меняется на странице «ИИ»."
+        case .codex: return "Codex начинает ответ примерно за 3–4 с. Claude — меньше чем за секунду: сервис меняется на странице «ИИ»."
         case .claude: return "Тот же ИИ, что у всех функций Mac Utils: выбор один — на странице «ИИ»"
         }
     }
@@ -117,7 +122,8 @@ struct CopilotPage: View {
     /// Состояние читается без системных окон: `AIStatus` (проверка входа в CLI) и `PermissionsModel` (только статус).
     private var readiness: [CopilotReadiness.Item] {
         if demo {
-            return CopilotReadiness.items(service: provider.title, ai: .connected, microphone: .notAsked, screenAudio: false, speechSupported: true)
+            return CopilotReadiness.items(service: provider.title, ai: .connected, microphone: .notAsked, screenAudio: false,
+                                          transcription: .modelMissing(language: "ru", fallback: true))
         }
         let ai: CopilotReadiness.AIState
         if !aiEnabled { ai = .off } else {
@@ -131,7 +137,7 @@ struct CopilotPage: View {
         }
         return CopilotReadiness.items(service: provider.title, ai: ai, microphone: permissions.microphone,
                                       screenAudio: permissions.screenRecording,
-                                      speechSupported: ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)))
+                                      transcription: downloading.map { .downloading(language: $0) } ?? transcription)
     }
 
     /// Кнопки только открывают нужное место: разрешения Mac спрашивает сам при первом включении.
@@ -139,7 +145,50 @@ struct CopilotPage: View {
         switch fix {
         case .aiPage: return [StatusAction(title: "Страница «ИИ»") { SettingsWindowController.shared.show(section: .ai) }]
         case .microphone: return [StatusAction(title: "Открыть настройки") { Permissions.open(.microphone) }]
+        case .downloadModel(let language): return [StatusAction(title: "Загрузить") { download(language) }]
         case .screenRecording, nil: return []
+        }
+    }
+
+    /// Кнопка к причине, почему подсказчик не включился.
+    private func failureActions(_ failure: CopilotListenFailure?) -> [StatusAction] {
+        guard let action = failure?.action else { return [] }
+        let title = CopilotListenFailure.actionTitle(action)
+        switch action {
+        case .downloadModel(let language): return [StatusAction(title: title) { download(language) }]
+        case .openMicrophoneSettings: return [StatusAction(title: title) { Permissions.open(.microphone) }]
+        case .openScreenRecordingSettings: return [StatusAction(title: title) { Permissions.open(.screenRecording) }]
+        case .openSpeechSettings: return [StatusAction(title: title) { Permissions.open(.speechRecognition) }]
+        case .chooseLanguage: return []   // «Язык встречи» — ниже на этой странице
+        }
+    }
+
+    private var meetingLocale: Locale { Locale(identifier: CopilotLocale.identifier(for: meetingLanguage.isEmpty ? nil : meetingLanguage)) }
+
+    /// Состояние расшифровки для языка встречи: без скачивания и без системных окон (статус модели, умеет ли macOS на устройстве).
+    private func refreshTranscription() async {
+        let locale = meetingLocale
+        let language = StreamingTranscriber.languageCode(locale)
+        let model = await StreamingTranscriber.modelState(for: locale)
+        let fallback = SFSpeechRecognizer(locale: locale)?.supportsOnDeviceRecognition ?? false
+        switch model {
+        case .installed: transcription = .modelInstalled(language: language)
+        case .downloadable: transcription = .modelMissing(language: language, fallback: fallback)
+        case .downloading: transcription = .downloading(language: language)
+        case .unsupported, nil: transcription = fallback ? .fallbackOnly(language: language) : .unsupported(language: language)
+        }
+    }
+
+    /// Модель скачивается только по нажатию «Загрузить».
+    private func download(_ language: String) {
+        guard downloading == nil else { return }
+        downloading = language
+        Task { @MainActor in
+            do { try await StreamingTranscriber.downloadModel(for: meetingLocale) } catch {
+                Log.ai.error("Подсказчик: модель распознавания не скачалась: \(error.localizedDescription, privacy: .public)")
+            }
+            downloading = nil
+            await refreshTranscription()
         }
     }
 }

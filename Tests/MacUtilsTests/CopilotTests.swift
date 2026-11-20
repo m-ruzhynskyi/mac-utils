@@ -847,15 +847,18 @@ final class CopilotBackendRulesTests: XCTestCase {
     }
 
     func testReadinessForFirstRun() {
-        let ready = CopilotReadiness.items(service: "Claude", ai: .connected, microphone: .granted, screenAudio: true, speechSupported: true)
+        let ready = CopilotReadiness.items(service: "Claude", ai: .connected, microphone: .granted, screenAudio: true)
         XCTAssertTrue(CopilotReadiness.ready(ready))
         XCTAssertEqual(ready.map(\.label), ["Claude подключён", "Микрофон разрешён", "Звук звонка разрешён"])
-        let first = CopilotReadiness.items(service: "ChatGPT (Codex)", ai: .notLoggedIn, microphone: .notAsked, screenAudio: false, speechSupported: false)
+        let first = CopilotReadiness.items(service: "ChatGPT (Codex)", ai: .notLoggedIn, microphone: .notAsked, screenAudio: false,
+                                           transcription: .modelMissing(language: "ru", fallback: false))
         XCTAssertFalse(CopilotReadiness.ready(first))
         XCTAssertEqual(first.map(\.id), ["ai", "mic", "audio", "speech"])
         XCTAssertEqual(first[0].fix, .aiPage)
         XCTAssertTrue(first[1].detail?.contains("спросит") == true, "микрофон спросит сам Mac — страница его не вызывает")
-        XCTAssertEqual(CopilotReadiness.items(service: "Claude", ai: .off, microphone: .denied, screenAudio: true, speechSupported: true).map(\.fix),
+        XCTAssertEqual(first[3].fix, .downloadModel(language: "ru"), "модель — только по кнопке «Загрузить»")
+        XCTAssertEqual(first[3].tone, .warning, "без запасного пути подсказчик без модели не услышит")
+        XCTAssertEqual(CopilotReadiness.items(service: "Claude", ai: .off, microphone: .denied, screenAudio: true).map(\.fix),
                        [.aiPage, .microphone, nil])
     }
 }
