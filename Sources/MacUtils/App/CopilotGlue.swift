@@ -14,7 +14,7 @@ final class CopilotGlue {
 
     var ai: CopilotAIClient = BackendCopilotAI()
     /// В самопроверке (`--copilot-selftest`) — беззвучный источник: микрофон и звук звонка не открываются, вопрос подаёт сама проверка.
-    var listener: CopilotListening = CopilotSelfTest.options(CommandLine.arguments) == nil ? LiveCopilotListener() : SilentCopilotListener()
+    var listener: CopilotListening = CopilotSelfTest.usesSilentListener(CommandLine.arguments) ? SilentCopilotListener() : LiveCopilotListener()
 
     private(set) lazy var session = CopilotSession(ai: ai, listener: listener)
 
