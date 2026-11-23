@@ -68,6 +68,18 @@ final class WinKeysTests: XCTestCase {
         XCTAssertEqual(decide(.maskControl, type: .keyUp, excluded: true), .passThrough)
     }
 
+    /// MOON-1: Ctrl+C в окне Moonlight уходит на ПК как есть (Ctrl+C), а не как ⌘C → Win+C.
+    @MainActor
+    func testControlCInMoonlightPassesThrough() {
+        let moonlight = "com.moonlight-stream.Moonlight"
+        let excluded = AppExclusions.matches(moonlight, in: AppExclusions.defaultList)
+        XCTAssertTrue(excluded)
+        for key in [WinKeysRules.keyC, WinKeysRules.keyV, WinKeysRules.keyX] {
+            XCTAssertEqual(decide(.maskControl, key: key, app: moonlight, excluded: excluded), .passThrough)
+            XCTAssertEqual(decide(.maskControl, key: key, type: .keyUp, app: moonlight, excluded: excluded), .passThrough)
+        }
+    }
+
     func testSyntheticEventPassesThrough() {
         XCTAssertEqual(decide(.maskControl, synthetic: true), .passThrough)
     }
