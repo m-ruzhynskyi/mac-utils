@@ -24,8 +24,15 @@ package final class AppExclusions: AppListStore {
         "com.vmware.", "org.virtualbox.app.VirtualBoxVM", "com.utmapp.UTM",
         "com.apple.ScreenSharing", "com.apple.RemoteDesktop", "com.microsoft.rdc.macos", "com.microsoft.rdc.mac",
         "com.teamviewer.TeamViewer", "com.anydesk.anydesk", "com.philandro.anydesk", "tv.parsec.www",
+        // Moonlight (стрим ПК через Sunshine): иначе «Клавиши Windows» превращали Ctrl+C в ⌘C, и на ПК уходило Win+C (MOON-1).
+        "com.moonlight-stream.Moonlight",
         "com.p5sys.jump.", "com.citrix.", "com.realvnc.", "com.nomachine.",
     ]
+
+    /// Записи, добавленные в умолчания после выпуска. У кого список уже сохранён (ключ `excludedApps` есть), они
+    /// добавляются один раз; удалил запись потом — второй раз она не возвращается (`addedLaterKey` помнит добавленные).
+    package static let addedLater: [String] = ["com.moonlight-stream.Moonlight"]
+    package static let addedLaterKey = "excludedAppsAddedLater"
 
     /// Сохранённый список; ключа нет — значения по умолчанию.
     @Published package private(set) var list: [String]
@@ -74,8 +81,28 @@ package final class AppExclusions: AppListStore {
         return list + [trimmed]
     }
 
+    /// Сохранённый список (с разовой миграцией `addedLater`); ключа нет — значения по умолчанию.
     package static func load(defaults: UserDefaults = .standard) -> [String] {
-        (defaults.array(forKey: defaultsKey) as? [String]) ?? defaultList
+        let saved = defaults.array(forKey: defaultsKey) as? [String]
+        let applied = defaults.stringArray(forKey: addedLaterKey) ?? []
+        let migrated = migrate(saved: saved, applied: applied)
+        if migrated.applied != applied { defaults.set(migrated.applied, forKey: addedLaterKey) }
+        if let list = migrated.saved {
+            defaults.set(list, forKey: defaultsKey)
+            return list
+        }
+        return saved ?? defaultList
+    }
+
+    /// Разовое добавление новых умолчаний. `saved` — сохранённый список (nil — ключа нет: действуют умолчания, новое
+    /// в них уже есть), `applied` — записи, которые уже добавлялись. Возвращает список для сохранения (nil — не менять)
+    /// и новую отметку «уже добавлены».
+    package static func migrate(saved: [String]?, applied: [String]) -> (saved: [String]?, applied: [String]) {
+        let pending = addedLater.filter { entry in !applied.contains { $0.caseInsensitiveCompare(entry) == .orderedSame } }
+        guard !pending.isEmpty else { return (nil, applied) }
+        guard var list = saved else { return (nil, applied + pending) }
+        for entry in pending { list = adding(entry, to: list) }
+        return (list, applied + pending)
     }
 
     // MARK: - Состояние

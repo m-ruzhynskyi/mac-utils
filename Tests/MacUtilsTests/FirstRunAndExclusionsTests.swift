@@ -91,6 +91,47 @@ final class FirstRunAndExclusionsTests: XCTestCase {
         }
     }
 
+    // MARK: MOON-1 — Moonlight в исключениях
+
+    func testDefaultsCoverMoonlight() {
+        XCTAssertTrue(AppExclusions.matches("com.moonlight-stream.Moonlight", in: AppExclusions.defaultList))
+        XCTAssertTrue(AppExclusions.addedLater.allSatisfy { AppExclusions.matches($0, in: AppExclusions.defaultList) },
+                      "добавленное позже есть и в умолчаниях")
+    }
+
+    func testMigrationWithoutSavedList() {
+        // Ключа нет — действуют умолчания (Moonlight в них есть); отметка ставится, список не сохраняется.
+        let result = AppExclusions.migrate(saved: nil, applied: [])
+        XCTAssertNil(result.saved)
+        XCTAssertEqual(result.applied, ["com.moonlight-stream.Moonlight"])
+    }
+
+    func testMigrationAddsMoonlightToSavedListOnce() {
+        let result = AppExclusions.migrate(saved: ["com.mine.app"], applied: [])
+        XCTAssertEqual(result.saved, ["com.mine.app", "com.moonlight-stream.Moonlight"])
+        XCTAssertEqual(result.applied, ["com.moonlight-stream.Moonlight"])
+        let again = AppExclusions.migrate(saved: result.saved, applied: result.applied)
+        XCTAssertNil(again.saved, "второй раз — ничего")
+    }
+
+    func testMigrationRespectsRemovalAfterwards() {
+        // Пользователь удалил Moonlight после миграции — не возвращаем.
+        let result = AppExclusions.migrate(saved: ["com.mine.app"], applied: ["com.moonlight-stream.Moonlight"])
+        XCTAssertNil(result.saved)
+        XCTAssertEqual(result.applied, ["com.moonlight-stream.Moonlight"])
+    }
+
+    func testLoadMigratesSavedListOnceThroughDefaults() throws {
+        let name = "moon1-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(["com.mine.app"], forKey: AppExclusions.defaultsKey)
+        XCTAssertEqual(AppExclusions.load(defaults: defaults), ["com.mine.app", "com.moonlight-stream.Moonlight"])
+        XCTAssertEqual(defaults.stringArray(forKey: AppExclusions.defaultsKey), ["com.mine.app", "com.moonlight-stream.Moonlight"])
+        defaults.set(["com.mine.app"], forKey: AppExclusions.defaultsKey)
+        XCTAssertEqual(AppExclusions.load(defaults: defaults), ["com.mine.app"], "удалил — не возвращается")
+    }
+
     func testAddingTrimsAndDeduplicates() {
         XCTAssertEqual(AppExclusions.adding("  com.a.b  ", to: []), ["com.a.b"])
         XCTAssertEqual(AppExclusions.adding("COM.A.B", to: ["com.a.b"]), ["com.a.b"])
