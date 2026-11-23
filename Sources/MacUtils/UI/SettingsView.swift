@@ -271,6 +271,7 @@ struct SettingsSectionPage: View {
             case .shots: ScreenshotLibraryView(library: .shared, compact: compact).navigationTitle("Мои снимки")
             case .textEditor: TextEditorPage()
             case .videoPlayer: VideoPlayerPage()
+            case .pc: PCPage()
             case .remote:
                 // Вкладка панели — список компьютеров, окно настроек — параметры (m15).
                 if compact { RemoteConnectionsPanel() } else { RemoteSettingsPage() }

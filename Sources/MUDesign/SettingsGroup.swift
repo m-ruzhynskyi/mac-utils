@@ -28,7 +28,7 @@ package enum SettingsGroup: String, CaseIterable, Identifiable {
         case .capture: return [.screenshot, .shots, .annotate, .qr, .meetings, .copilot, .gaze]
         case .windowsInput: return [.switcher, .windows, .volume, .layout, .smoothScroll, .cutPaste, .winKeys, .textInput]
         case .filesSystem: return [.shelf, .downloads, .textEditor, .videoPlayer, .cheatSheet, .uninstaller, .cleanup, .monitor, .tasks]
-        case .more: return [.wellbeing, .focus, .music, .share, .hiddenScreen, .remote, .ai]
+        case .more: return [.wellbeing, .focus, .music, .share, .pc, .hiddenScreen, .remote, .ai]
         }
     }
 }
@@ -70,6 +70,7 @@ extension SettingsSection {
         case .textEditor: return "Вкладки, кодировки и знаки $ для .frm и других текстов"
         case .videoPlayer: return "Плейлист, субтитры, дорожки и запоминание места"
         case .remote: return "AnyDesk и TeamViewer из своей таблицы: ⌃⌥⌘A, набрали имя — Enter"
+        case .pc: return "Связь с Mac Utils Share на Windows-ПК напрямую через Tailscale"
         case .music, .share, .switcher, .wellbeing, .uninstaller, .monitor, .tasks, .cleanup, .shots: return ""
         }
     }

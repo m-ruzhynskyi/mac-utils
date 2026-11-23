@@ -1,0 +1,119 @@
+{
+  "comment": "MU Link v1: общие тестовые векторы Mac и Windows. Ключи только для тестов. Описание — docs/mu-link-protocol.md.",
+  "macSeed": "HCmiKeMEXUtI7yZcvqBitCeNXSlceyHE1DF73yUkHdw",
+  "macPub": "TsMaieuS8ZHIx-PuoQR2q_TxOvqCpuD8yfOAUhocr6w",
+  "pcSeed": "_VMo1ZA_i-gnGTMTp0b0zFxHFSB_6nDaxNQkwwrSw8s",
+  "pcPub": "krihszRtEtXQuZAgcm3C60rFCiq9HMfEtX5lCudbH7s",
+  "clientNonce": "HE3y1_MJTlMvM01FYxxfV3G1xGP8_cmxCY031ZHPQSk",
+  "serverNonce": "ItoEiTLFcotOnN6H7QZurOaB8ZQmQlNuV2ABrqrYaAg",
+  "code": "042917",
+  "serverMessage": "mu-link/1\nserver\nTsMaieuS8ZHIx-PuoQR2q_TxOvqCpuD8yfOAUhocr6w\nkrihszRtEtXQuZAgcm3C60rFCiq9HMfEtX5lCudbH7s\nHE3y1_MJTlMvM01FYxxfV3G1xGP8_cmxCY031ZHPQSk\nItoEiTLFcotOnN6H7QZurOaB8ZQmQlNuV2ABrqrYaAg",
+  "clientMessage": "mu-link/1\nclient\nTsMaieuS8ZHIx-PuoQR2q_TxOvqCpuD8yfOAUhocr6w\nkrihszRtEtXQuZAgcm3C60rFCiq9HMfEtX5lCudbH7s\nHE3y1_MJTlMvM01FYxxfV3G1xGP8_cmxCY031ZHPQSk\nItoEiTLFcotOnN6H7QZurOaB8ZQmQlNuV2ABrqrYaAg",
+  "serverSig": "SSH6eWrygeUTPQgOkromVzKcrR_FJgXwhXtLgyfMQL6tHZG5LiUU1kLbt8Ug4VfDPX8vct7VFOoQ5BQFOSGSDA",
+  "clientSig": "PSDgDUWiF2qs4nhMYdKvMQgEGhPM0nJ5Wj2Rt7RwJHSeSNnrMeFVdP2upB180NfbOq7tvhIAZzOkWiGiyJfqBg",
+  "pairMacMessage": "mu-link/1\npair-mac\nTsMaieuS8ZHIx-PuoQR2q_TxOvqCpuD8yfOAUhocr6w\nkrihszRtEtXQuZAgcm3C60rFCiq9HMfEtX5lCudbH7s\nHE3y1_MJTlMvM01FYxxfV3G1xGP8_cmxCY031ZHPQSk\nItoEiTLFcotOnN6H7QZurOaB8ZQmQlNuV2ABrqrYaAg",
+  "pairPcMessage": "mu-link/1\npair-pc\nTsMaieuS8ZHIx-PuoQR2q_TxOvqCpuD8yfOAUhocr6w\nkrihszRtEtXQuZAgcm3C60rFCiq9HMfEtX5lCudbH7s\nHE3y1_MJTlMvM01FYxxfV3G1xGP8_cmxCY031ZHPQSk\nItoEiTLFcotOnN6H7QZurOaB8ZQmQlNuV2ABrqrYaAg",
+  "pairMacProof": "BE_xMNItszeZXsnD4Mur1BuIvnrcouGzeTC7zW_io9w",
+  "pairPcProof": "YgH_r_kk-xFBqw-6ncHumPyWiaVtcngFpkCFsCp2QOI",
+  "frames": {
+    "helloMac": {
+      "v": 1,
+      "type": "hello",
+      "id": "h1",
+      "role": "mac",
+      "app": "Mac Utils",
+      "version": "1.0.0",
+      "name": "MacBook Air",
+      "caps": [],
+      "pub": "TsMaieuS8ZHIx-PuoQR2q_TxOvqCpuD8yfOAUhocr6w",
+      "nonce": "HE3y1_MJTlMvM01FYxxfV3G1xGP8_cmxCY031ZHPQSk"
+    },
+    "helloPc": {
+      "v": 1,
+      "type": "hello",
+      "id": "h2",
+      "role": "pc",
+      "app": "Mac Utils Share",
+      "version": "1.3.0",
+      "name": "DESKTOP-KYIV",
+      "caps": [],
+      "pub": "krihszRtEtXQuZAgcm3C60rFCiq9HMfEtX5lCudbH7s",
+      "nonce": "ItoEiTLFcotOnN6H7QZurOaB8ZQmQlNuV2ABrqrYaAg",
+      "paired": false,
+      "sig": "SSH6eWrygeUTPQgOkromVzKcrR_FJgXwhXtLgyfMQL6tHZG5LiUU1kLbt8Ug4VfDPX8vct7VFOoQ5BQFOSGSDA"
+    },
+    "pair": {
+      "v": 1,
+      "type": "pair",
+      "id": "p1",
+      "proof": "BE_xMNItszeZXsnD4Mur1BuIvnrcouGzeTC7zW_io9w",
+      "sig": "PSDgDUWiF2qs4nhMYdKvMQgEGhPM0nJ5Wj2Rt7RwJHSeSNnrMeFVdP2upB180NfbOq7tvhIAZzOkWiGiyJfqBg"
+    },
+    "paired": {
+      "v": 1,
+      "type": "paired",
+      "id": "p2",
+      "proof": "YgH_r_kk-xFBqw-6ncHumPyWiaVtcngFpkCFsCp2QOI"
+    },
+    "auth": {
+      "v": 1,
+      "type": "auth",
+      "id": "a1",
+      "sig": "PSDgDUWiF2qs4nhMYdKvMQgEGhPM0nJ5Wj2Rt7RwJHSeSNnrMeFVdP2upB180NfbOq7tvhIAZzOkWiGiyJfqBg"
+    },
+    "ready": {
+      "v": 1,
+      "type": "ready",
+      "id": "r1"
+    },
+    "ping": {
+      "v": 1,
+      "type": "ping",
+      "id": "k7",
+      "t": 1763900000000
+    },
+    "pong": {
+      "v": 1,
+      "type": "pong",
+      "id": "k7",
+      "t": 1763900000000
+    },
+    "status": {
+      "v": 1,
+      "type": "status",
+      "id": "s1",
+      "name": "DESKTOP-KYIV",
+      "os": "Windows 10.0.26100",
+      "uptime": 11520,
+      "app": "Mac Utils Share",
+      "version": "1.3.0",
+      "power": {
+        "source": "unknown",
+        "percent": null,
+        "minutesLeft": null
+      }
+    },
+    "error": {
+      "v": 1,
+      "type": "error",
+      "id": "e1",
+      "code": "bad-code",
+      "message": "Неверный код",
+      "attemptsLeft": 3
+    },
+    "future": {
+      "v": 2,
+      "type": "clipboard",
+      "id": "f1",
+      "items": [
+        {
+          "kind": "text",
+          "text": "привет"
+        }
+      ],
+      "extra": {
+        "nested": true
+      }
+    }
+  }
+}

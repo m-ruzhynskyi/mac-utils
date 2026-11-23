@@ -167,6 +167,12 @@ let package = Package(
             path: "Sources/MUTextEditor"
         ),
         // «Взгляд в камеру»: поправка взгляда (MediaPipe Iris в Core ML) и свой сервер Syphon для OBS.
+        // MU Link: прямой канал Mac Utils ↔ Mac Utils Share на ПК через Tailscale (docs/mu-link-protocol.md). Mac только подключается.
+        .target(
+            name: "MULink",
+            dependencies: ["MUCore", "MUDesign"],
+            path: "Sources/MULink"
+        ),
         .target(
             name: "MUGaze",
             dependencies: ["MUCore", "MUDesign"],
@@ -174,7 +180,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "MacUtils",
-            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUCopilot", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUGaze", "MUAIBackend", "MUHiddenScreen"],
+            dependencies: ["MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUCopilot", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUGaze", "MULink", "MUAIBackend", "MUHiddenScreen"],
             path: "Sources/MacUtils"
         ),
         // Процесс-помощник «Скрытого экрана»: держит виртуальный дисплей и прячет программы ИИ, если Mac Utils упала.
@@ -199,7 +205,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacUtilsTests",
-            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUHiddenScreen", "MUCopilot", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUGaze", "MUAIBackend"],
+            dependencies: ["MacUtils", "MUCore", "MUDesign", "MUCutPaste", "MUWinKeys", "MUHiddenScreen", "MUCopilot", "MUFocus", "MUSmoothScroll", "MUAppSwitcher", "MUUninstaller", "MUMusic", "MUWellbeing", "MUAppInputSource", "MUMeetings", "MUQR", "MUUpdate", "MUAudio", "MULayoutFix", "MUAppVolume", "MUWindowSnap", "MUAI", "MUDownloadsSorter", "MUDropShelf", "MURemoteConnections", "MUCheatSheet", "MUAnnotate", "MUScreenShare", "MUScreenshot", "MUVideoPlayer", "MUTextEditor", "MUGaze", "MULink", "MUAIBackend"],
             path: "Tests/MacUtilsTests"
         ),
     ]

@@ -224,6 +224,13 @@ package final class ShareIdentity: @unchecked Sendable {
         sign(Self.acceptMessage(roomId: roomId, viewerPub: viewerPub, rid: rid))
     }
 
+    /// Подпись MU Link (канал Mac ↔ ПК, `docs/mu-link-protocol.md`). Только строки с доменом `mu-link/1`:
+    /// подпись канала нельзя выдать за подпись share v2, и наоборот. Другие строки не подписываются (пустая строка).
+    package func sign(link message: String) -> String {
+        guard message.hasPrefix("mu-link/1\n") else { return "" }
+        return sign(message)
+    }
+
     private func sign(_ message: String) -> String {
         // Ed25519 детерминирован, ошибок подписи у CryptoKit для этого вызова нет.
         let signature = (try? key().signature(for: Data(message.utf8))) ?? Data()

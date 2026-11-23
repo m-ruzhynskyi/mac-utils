@@ -16,4 +16,6 @@ package enum Log {
     package static let player = Logger(subsystem: "com.mruzhynskyi.macutils", category: "player")
     /// «Взгляд в камеру»: только числа и состояния, без кадров.
     package static let gaze = Logger(subsystem: "com.mruzhynskyi.macutils", category: "gaze")
+    /// MU Link (канал Mac ↔ ПК): шаги, коды ошибок, отклик. Без ключей, кодов сопряжения и содержимого.
+    package static let link = Logger(subsystem: "com.mruzhynskyi.macutils", category: "link")
 }
