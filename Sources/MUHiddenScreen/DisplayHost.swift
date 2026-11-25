@@ -6,6 +6,8 @@ import MUCore
 @MainActor
 protocol DisplayHosting: AnyObject {
     var name: String { get }
+    /// Процесс, который держит дисплей (помощник), — для замера процессора; nil — сама Mac Utils.
+    var pid: pid_t? { get }
     /// `onReady` — один раз: номер дисплея или ошибка. `onLost` — дисплей пропал позже (помощник упал, система сняла дисплей).
     func open(size: CGSize, apps: [String], onReady: @escaping (Result<CGDirectDisplayID, Error>) -> Void, onLost: @escaping () -> Void)
     func update(apps: [String])
@@ -33,6 +35,7 @@ enum DisplayHostError: Error, CustomStringConvertible {
 @MainActor
 final class InProcessDisplayHost: DisplayHosting {
     let name = "в процессе Mac Utils"
+    var pid: pid_t? { nil }
     private var display: HiddenDisplay?
 
     func open(size: CGSize, apps: [String], onReady: @escaping (Result<CGDirectDisplayID, Error>) -> Void, onLost: @escaping () -> Void) {
@@ -60,6 +63,7 @@ final class InProcessDisplayHost: DisplayHosting {
 @MainActor
 final class HelperDisplayHost: DisplayHosting {
     let name = "процесс-помощник"
+    var pid: pid_t? { process?.processIdentifier }
     private var process: Process?
     private var input: FileHandle?
     private var buffer = LineBuffer()

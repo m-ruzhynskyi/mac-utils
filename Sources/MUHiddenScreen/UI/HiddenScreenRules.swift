@@ -119,8 +119,8 @@ package enum PreCallRules {
     package static func dock(autohide: Bool?, away: DockAway.Readiness) -> PreCallCheck {
         switch away {
         case .ready:
-            return PreCallCheck(id: "dock", level: .ok, title: "Dock не выезжает в звонке",
-                                detail: "Пока скрытый экран включён, курсор не доходит до края с Dock ни на одном мониторе. Значков Claude и ChatGPT не видно",
+            return PreCallCheck(id: "dock", level: .ok, title: "Dock не выезжает случайно",
+                                detail: "Пока скрытый экран включён, Dock выезжает, только если задержать курсор у края на полсекунды — тогда значки Claude и ChatGPT в звонке видны",
                                 action: nil)
         case let .unavailable(reason):
             return PreCallCheck(id: "dock", level: .attention, title: "Dock виден в звонке",
@@ -198,6 +198,23 @@ package enum PreCallRules {
         }
     }
 
+    // MARK: Как переключаться (HSCR-47)
+
+    /// Одна строка: чем переключать программы, пока скрытый экран включён, и что из этого видно в звонке.
+    /// `commandKey` — переключатель Mac Utils заменяет системный ⌘Tab (иначе он на ⌥Tab).
+    package static func switching(switcherOn: Bool, commandKey: Bool = false) -> PreCallCheck {
+        let key = commandKey ? "⌘Tab" : "⌥Tab"
+        let others = commandKey ? "Dock показывает их значки" : "Системный ⌘Tab и Dock показывают их значки"
+        if switcherOn {
+            return PreCallCheck(id: "switch", level: .ok, title: "Как переключаться: \(key)",
+                                detail: "Переключатель Mac Utils в звонке не виден, Claude и ChatGPT в нём скрыты. \(others)",
+                                action: nil)
+        }
+        return PreCallCheck(id: "switch", level: .attention, title: "Как переключаться: включите переключатель окон",
+                            detail: "Переключатель Mac Utils (\(key)) в звонке не виден и прячет Claude и ChatGPT. \(others)",
+                            action: nil)
+    }
+
     // MARK: Экран в звонке
 
     package static func shareHint(mainDisplayName: String?) -> PreCallCheck {
@@ -207,9 +224,11 @@ package enum PreCallRules {
     }
 
     /// Все проверки по порядку из макета.
-    package static func all(dockAutohide: Bool?, dockAway: DockAway.Readiness = .ready, notifications: NotificationsState,
-                            output: OutputKind, mainDisplayName: String?) -> [PreCallCheck] {
-        [dock(autohide: dockAutohide, away: dockAway), self.notifications(notifications), headphones(output), shareHint(mainDisplayName: mainDisplayName)]
+    package static func all(dockAutohide: Bool?, dockAway: DockAway.Readiness = .ready, switcherOn: Bool = true,
+                            switcherCommandKey: Bool = false, notifications: NotificationsState, output: OutputKind,
+                            mainDisplayName: String?) -> [PreCallCheck] {
+        [dock(autohide: dockAutohide, away: dockAway), switching(switcherOn: switcherOn, commandKey: switcherCommandKey), self.notifications(notifications),
+         headphones(output), shareHint(mainDisplayName: mainDisplayName)]
     }
 
     /// Все ли проверки пройдены (подсказка про экран не считается).

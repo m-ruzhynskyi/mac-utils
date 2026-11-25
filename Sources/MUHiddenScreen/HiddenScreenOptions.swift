@@ -24,6 +24,10 @@ public struct HiddenScreenOptions: Equatable, Sendable {
     /// При выключении дисплей не снимается и ждёт следующего включения на месте (`--hs-warm=on|off`):
     /// снятие и создание дисплея перестраивают раскладку — экран мигает.
     public var keepWarm = true
+    /// Дерево страницы в AX у Chromium-программ для щелчка через AX (`--hs-ax=click|show|off`): включается к щелчку
+    /// и выключается через `axIdle` без щелчков (по умолчанию) / с показа в зеркале и до выхода (1.11.1) / не включается
+    /// (щелчки — путём warp). Дерево у Chromium пересчитывается на каждое изменение страницы — это нагрузка (HSCR-47).
+    public var axTree: AXTreeMode = .click
     /// `--hs-selftest` (только с `--hidden-screen-debug`): самопроверка для менеджера и выход (`HiddenScreenSelfTest`).
     public var selfTest = false
 
@@ -52,7 +56,7 @@ public struct HiddenScreenOptions: Equatable, Sendable {
     }
 
     /// Ключ отладочного запуска: `open -a "Mac Utils" --args --hidden-screen-debug [--hs-apps=id,id] [--hs-click=background|warp|pid]
-    /// [--hs-scroll=handoff|pid] [--hs-keys=active|hid|inactive] [--hs-press=tap|mirror] [--hs-helper=on|off] [--hs-clip-marks=on|off] [--hs-hover=peek|pid|off] [--hs-activate=auto|public|skylight] [--hs-dock=away|keep] [--hs-warm=on|off] [--hs-selftest] [--hs-ax-dump] [--hs-size=1440x900]`.
+    /// [--hs-scroll=handoff|pid] [--hs-keys=active|hid|inactive] [--hs-press=tap|mirror] [--hs-helper=on|off] [--hs-clip-marks=on|off] [--hs-hover=peek|pid|off] [--hs-activate=auto|public|skylight] [--hs-dock=away|keep] [--hs-warm=on|off] [--hs-ax=click|show|off] [--hs-selftest] [--hs-ax-dump] [--hs-size=1440x900]`.
     /// Без ключа — nil (обычный запуск). Ссылкой `macutils://` не включается.
     public static let debugFlag = "--hidden-screen-debug"
     public static let selfTestFlag = "--hs-selftest"
@@ -83,6 +87,8 @@ public struct HiddenScreenOptions: Equatable, Sendable {
                 if parts[1] == "keep" { options.dockAway = false } else if parts[1] == "away" { options.dockAway = true }
             case "--hs-warm":
                 if parts[1] == "off" { options.keepWarm = false } else if parts[1] == "on" { options.keepWarm = true }
+            case "--hs-ax":
+                if let mode = AXTreeMode(rawValue: parts[1]) { options.axTree = mode }
             case "--hs-clip-marks":
                 options.clipboardMarks = parts[1] != "off"
             case "--hs-helper":
@@ -124,4 +130,11 @@ public enum ClipboardExport: Equatable, Sendable {
         formatter.dateFormat = "yyyy-MM-dd 'в' HH.mm.ss"
         return "Изображение \(formatter.string(from: date)).png"
     }
+}
+
+/// Когда просить у Chromium-программ дерево страницы в AX (щелчок через AX).
+public enum AXTreeMode: String, Sendable, CaseIterable {
+    case click
+    case show
+    case off
 }

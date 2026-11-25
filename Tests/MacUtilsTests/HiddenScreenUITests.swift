@@ -83,7 +83,7 @@ final class PreCallRulesTests: XCTestCase {
     func testDock() {
         // Сторож края Dock включён и автоскрытие есть — «ок».
         XCTAssertEqual(PreCallRules.dock(autohide: true, away: .ready).level, .ok)
-        XCTAssertEqual(PreCallRules.dock(autohide: true, away: .ready).title, "Dock не выезжает в звонке")
+        XCTAssertEqual(PreCallRules.dock(autohide: true, away: .ready).title, "Dock не выезжает случайно")
         // Автоскрытие само по себе не «ок»: Dock выезжает у края, значки ИИ видны (HSCR-43).
         let autohide = PreCallRules.dock(autohide: true, away: .disabled)
         XCTAssertEqual(autohide.level, .attention)
@@ -94,7 +94,8 @@ final class PreCallRulesTests: XCTestCase {
         XCTAssertEqual(blocked.level, .attention)
         XCTAssertEqual(blocked.title, "Dock виден в звонке")
         XCTAssertTrue(blocked.detail.hasPrefix(DockAway.noAutohideReason))
-        XCTAssertTrue(PreCallRules.dock(autohide: true, away: .ready).detail.contains("ни на одном мониторе"))
+        XCTAssertTrue(PreCallRules.dock(autohide: true, away: .ready).detail.contains("задержать курсор у края"),
+                      "честно: по жесту Dock выезжает и виден в звонке (HSCR-47)")
         XCTAssertEqual(PreCallRules.all(dockAutohide: true, dockAway: .disabled, notifications: .off(apps: []), output: .external,
                                         mainDisplayName: nil).first?.level, .attention)
     }
@@ -131,11 +132,22 @@ final class PreCallRulesTests: XCTestCase {
         XCTAssertEqual(PreCallRules.headphones(.unknown).level, .attention)
     }
 
+    func testSwitchingHint() {
+        let on = PreCallRules.switching(switcherOn: true)
+        XCTAssertEqual(on.level, .ok)
+        XCTAssertEqual(on.title, "Как переключаться: ⌥Tab")
+        XCTAssertTrue(on.detail.contains("в звонке не виден"))
+        XCTAssertTrue(on.detail.contains("Системный ⌘Tab и Dock показывают"))
+        XCTAssertEqual(PreCallRules.switching(switcherOn: true, commandKey: true).title, "Как переключаться: ⌘Tab")
+        XCTAssertFalse(PreCallRules.switching(switcherOn: true, commandKey: true).detail.contains("Системный ⌘Tab"))
+        XCTAssertEqual(PreCallRules.switching(switcherOn: false).level, .attention)
+    }
+
     func testShareHintAndAll() {
         XCTAssertEqual(PreCallRules.shareHint(mainDisplayName: "Встроенный дисплей").title, "В звонке показывайте экран «Встроенный дисплей»")
         XCTAssertEqual(PreCallRules.shareHint(mainDisplayName: nil).title, "В звонке показывайте экран основной")
         let ok = PreCallRules.all(dockAutohide: true, notifications: .off(apps: []), output: .external, mainDisplayName: "X")
-        XCTAssertEqual(ok.map(\.id), ["dock", "notifications", "headphones", "share"])
+        XCTAssertEqual(ok.map(\.id), ["dock", "switch", "notifications", "headphones", "share"])
         XCTAssertTrue(PreCallRules.allClear(ok))
         let bad = PreCallRules.all(dockAutohide: false, notifications: .unknown, output: .builtInSpeakers, mainDisplayName: nil)
         XCTAssertFalse(PreCallRules.allClear(bad))

@@ -74,6 +74,16 @@ public enum DockEdgeGuard {
         return free
     }
 
+    /// Сколько точек от курсора до края Dock дисплея, на котором он; не на дисплее — бесконечность.
+    public static func distance(_ point: CGPoint, edge: DockEdge, displays: [CGRect]) -> CGFloat {
+        guard let display = displays.first(where: { $0.contains(point) }) else { return .greatestFiniteMagnitude }
+        switch edge {
+        case .bottom: return display.maxY - point.y
+        case .left: return point.x - display.minX
+        case .right: return display.maxX - point.x
+        }
+    }
+
     /// Куда вернуть курсор, если он в полосе `margin` у свободного участка края Dock какого-то дисплея; иначе nil.
     /// `displays` — настоящие дисплеи, `neighbours` — они же и скрытый дисплей.
     public static func clamp(_ point: CGPoint, edge: DockEdge, displays: [CGRect], neighbours: [CGRect], margin: CGFloat = margin) -> CGPoint? {
@@ -91,5 +101,51 @@ public enum DockEdgeGuard {
             let limit = display.maxX - margin
             return point.x > limit ? CGPoint(x: limit, y: point.y) : nil
         }
+    }
+}
+
+/// Dock по намеренному жесту (HSCR-47): курсор, который упирается в край с Dock непрерывно `hold` секунд, сторож
+/// пропускает — Dock выезжает (и виден в демонстрации, пока выдвинут). Случайное касание края Dock не вызывает.
+/// Сторож снова держит край, когда курсор отойдёт от него больше чем на `rearm` точек.
+public struct DockEdgeDwell: Equatable, Sendable {
+    public static let hold: TimeInterval = 0.5
+    /// Перерыв между движениями у края дольше этого — нажим прервался, отсчёт заново.
+    public static let gap: TimeInterval = 0.3
+    public static let rearm: CGFloat = 40
+
+    public private(set) var pressingSince: TimeInterval?
+    public private(set) var lastPress: TimeInterval = 0
+    public private(set) var released = false
+
+    public init() {}
+
+    public enum Decision: Equatable, Sendable {
+        /// Вернуть курсор от края.
+        case clamp
+        /// Пропустить: Dock выезжает. `justReleased` — впервые за этот нажим (строка в журнал).
+        case pass(justReleased: Bool)
+    }
+
+    /// `atEdge` — курсор в полосе у свободного края (сторож вернул бы его); `distance` — сколько точек до края.
+    public mutating func decide(atEdge: Bool, distance: CGFloat, now: TimeInterval) -> Decision {
+        if released {
+            if distance > Self.rearm { self = DockEdgeDwell() }
+            return atEdge || distance <= Self.rearm ? .pass(justReleased: false) : .clamp
+        }
+        guard atEdge else {
+            if distance > Self.rearm { pressingSince = nil }
+            return .clamp
+        }
+        if let since = pressingSince, now - lastPress <= Self.gap {
+            lastPress = now
+            if now - since >= Self.hold {
+                released = true
+                return .pass(justReleased: true)
+            }
+        } else {
+            pressingSince = now
+            lastPress = now
+        }
+        return .clamp
     }
 }
